@@ -93,12 +93,26 @@ func TestHandlerCreatesVisionPlanSection(t *testing.T) {
 	h := NewHandler(&fakeHandlerService{createVisionSection: func(_ context.Context, _ pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
 		return VisionPlanSectionResponse{ID: "section-1", Name: input.Name, SectionType: input.SectionType}, nil
 	}})
-	req := memberRequest(http.MethodPost, "/api/cerebro/vision-plan/sections", `{"name":"Customer Promise","section_type":"structured","position":4}`)
+	req := memberRequest(http.MethodPost, "/api/cerebro/vision-plan/sections", `{"name":"Customer Promise","section_type":"structured","position":4,"page_id":"550e8400-e29b-41d4-a716-446655440000","column_index":1}`)
 	rec := httptest.NewRecorder()
 
 	h.CreateVisionPlanSection(rec, req)
 
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "Customer Promise") {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreatesVisionPlanPage(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createVisionPage: func(_ context.Context, _ pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+		return VisionPlanPageResponse{ID: "page-1", Name: input.Name, ColumnCount: input.ColumnCount}, nil
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/vision-plan/pages", `{"name":"Accountability","column_count":2,"position":2}`)
+	rec := httptest.NewRecorder()
+
+	h.CreateVisionPlanPage(rec, req)
+
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "Accountability") {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 }
@@ -293,6 +307,7 @@ type fakeHandlerService struct {
 	createPeriod        func(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
 	listVisionPlan      func(context.Context, pgtype.UUID) (VisionPlanResponse, error)
 	createVisionSection func(context.Context, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+	createVisionPage    func(context.Context, pgtype.UUID, VisionPlanPageInput) (VisionPlanPageResponse, error)
 }
 
 func (f *fakeHandlerService) GetMeeting(ctx context.Context, ws pgtype.UUID) (MeetingConfigResponse, error) {
@@ -325,6 +340,18 @@ func (f *fakeHandlerService) ListVisionPlan(ctx context.Context, ws pgtype.UUID)
 		return VisionPlanResponse{}, nil
 	}
 	return f.listVisionPlan(ctx, ws)
+}
+func (f *fakeHandlerService) CreateVisionPlanPage(ctx context.Context, ws pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if f.createVisionPage == nil {
+		return VisionPlanPageResponse{}, nil
+	}
+	return f.createVisionPage(ctx, ws, input)
+}
+func (f *fakeHandlerService) UpdateVisionPlanPage(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	return VisionPlanPageResponse{}, nil
+}
+func (f *fakeHandlerService) DeleteVisionPlanPage(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
 }
 func (f *fakeHandlerService) CreateVisionPlanSection(ctx context.Context, ws pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
 	if f.createVisionSection == nil {

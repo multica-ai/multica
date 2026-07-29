@@ -234,6 +234,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if msg.IsError {
 					finalStatus = "failed"
 					finalError = msg.ResultText
+					if finalError == "" { // CEREBRO-PATCH(agent-claude-result-subtype): FIR-4013 keep the CLI's terminal subtype (error_max_turns, …) instead of reporting an empty error the daemon turns into "claude execution failed".
+						finalError = claudeResultErrorFromSubtype(msg.Subtype)
+					}
 				}
 				closeStdin()
 			case "log":

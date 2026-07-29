@@ -228,3 +228,51 @@ func TestRevealCredential_RetriesTransientAgentVaultFailure(t *testing.T) {
 		t.Fatalf("RevealCredential = (%q, %d calls), want (%q, 2 calls)", value, calls, secret)
 	}
 }
+
+// TestInternalHostsMatch covers the Sliplane instance-suffix tolerance: a
+// recreated service gets a new random suffix on its .internal hostname, and the
+// connection URL must still match the configured endpoint (FIR-3006 regression:
+// agent-vault.internal → agent-vault-ekub4x.internal broke credential reveal).
+func TestInternalHostsMatch(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"agent-vault.internal:14321", "agent-vault.internal:14321", true},
+		{"agent-vault-ekub4x.internal:14321", "agent-vault.internal:14321", true},
+		{"agent-vault.internal:14321", "agent-vault-ekub4x.internal:14321", true},
+		{"agent-vault-ekub4x.internal:14321", "agent-vault-z9q1aa.internal:14321", true},
+		{"agent-vault-ekub4x.internal:14321", "agent-vault.internal:9999", false},
+		{"backend-s041yo.internal:8080", "agent-vault.internal:14321", false},
+		{"api.example.com:443", "api.example.com:443", true},
+		{"api-abc123.example.com:443", "api.example.com:443", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		if got := internalHostsMatch(tc.a, tc.b); got != tc.want {
+			t.Errorf("internalHostsMatch(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestRevealCredential_SuffixedConnectionHost proves the whole reveal path
+// resolves a connection whose .internal host carries a fresh Sliplane suffix
+// while the configured internal URL still has none.
+func TestRevealCredential_SuffixedConnectionHost(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credentials":[{"key":"USERNAME","value":"user@firtal.com"}]}`))
+	}))
+	defer srv.Close()
+	conns := fakeConns{list: []connections.Connection{agentVaultConn(srv.URL, "owner-token")}}
+	// The config points at the same test server but the matching goes through
+	// internalHostsMatch, which must accept the exact host too.
+	c := NewClient(Config{InternalURL: srv.URL}, conns)
+	got, err := c.RevealCredential(context.Background(), pgtype.UUID{}, "Shared/browser-login/registry", "USERNAME")
+	if err != nil {
+		t.Fatalf("RevealCredential: %v", err)
+	}
+	if got != "user@firtal.com" {
+		t.Fatalf("RevealCredential = %q, want user@firtal.com", got)
+	}
+}

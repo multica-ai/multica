@@ -212,22 +212,24 @@ func (h *Handler) InstallAllergenFormatter(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if result.RowsAffected() == 0 {
-		var version, status string
-		err = h.pool.QueryRow(r.Context(), `SELECT d.version,d.status FROM cerebro_app a
-			JOIN cerebro_app_deployment d ON d.app_id=a.id
-			WHERE a.id=$1 AND a.workspace_id=$2 ORDER BY d.updated_at DESC LIMIT 1`, appID, workspaceID).Scan(&version, &status)
-		if err != nil {
+		if err = tx.QueryRow(r.Context(), `SELECT id FROM cerebro_app
+			WHERE workspace_id=$1 AND slug='allergen-formatter' FOR UPDATE`, workspaceID).Scan(&appID); err != nil {
 			writeError(w, http.StatusConflict, "Allergen Formatter conflicts with an existing app")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"id": appID, "name": "Allergen Formatter", "version": version, "status": status})
-		return
+		var status string
+		err = tx.QueryRow(r.Context(), `SELECT status FROM cerebro_app_deployment
+			WHERE app_id=$1 AND version=$2`, appID, allergenFormatterVersion).Scan(&status)
+		if err == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"id": appID, "name": "Allergen Formatter", "version": allergenFormatterVersion, "status": status})
+			return
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to inspect Allergen Formatter")
+			return
+		}
 	}
-	if result.RowsAffected() != 1 {
-		writeError(w, 409, "Allergen Formatter is already installed")
-		return
-	}
-	_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version(app_id,version,content_snapshot,release_notes,created_by) VALUES($1,$2,$3,'Initial FIR-154 release',$4)`, appID, allergenFormatterVersion, allergenFormatterSnapshot, memberID)
+	_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version(app_id,version,content_snapshot,release_notes,created_by) VALUES($1,$2,$3,'Built-in Allergen Formatter release',$4)`, appID, allergenFormatterVersion, allergenFormatterSnapshot, memberID)
 	if err == nil {
 		err = StoreVersionBundle(r.Context(), tx, appID, allergenFormatterVersion, bundle)
 	}

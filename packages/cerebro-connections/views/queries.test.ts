@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ConnectionSchema, TestResultSchema } from "./queries";
+import {
+  CompanyBrainMigrationCensusSchema,
+  ConnectionSchema,
+  TestResultSchema,
+} from "./queries";
 
 const base = {
   id: "c1", workspace_id: "w1", name: "infisical-admin", display_name: "Infisical (admin)",
@@ -116,5 +120,52 @@ describe("TestResultSchema — scope suggestions", () => {
       arg: "data_source_id",
       options_source_tool: "data_sources_list",
     })]);
+  });
+});
+
+describe("CompanyBrainMigrationCensusSchema", () => {
+  const source = {
+    connection_id: "c1",
+    connection_name: "company-brain-commercial",
+    status: "verified",
+    claim: { write_source: "commercial", allowed_read_sources: ["commercial", "shared"] },
+  };
+
+  it("parses actor and automatic-run evidence", () => {
+    const parsed = CompanyBrainMigrationCensusSchema.parse({
+      generated_at: "2026-07-29T09:00:00Z",
+      actors: [{ agent_id: "a1", name: "Lone", status: "online", sources: [source] }],
+      automations: [{
+        automation_id: "p1",
+        title: "Daily brief",
+        status: "active",
+        assignee_type: "agent",
+        assignee_id: "a1",
+        trigger_kinds: ["schedule"],
+        sources: [source],
+      }],
+      connections: [source],
+    });
+    expect(parsed.automations[0]?.trigger_kinds).toEqual(["schedule"]);
+    expect(parsed.actors[0]?.sources[0]?.claim?.write_source).toBe("commercial");
+  });
+
+  it("rejects a malformed source identifier so callers can fall back safely", () => {
+    expect(CompanyBrainMigrationCensusSchema.safeParse({
+      generated_at: "2026-07-29T09:00:00Z",
+      actors: [],
+      automations: [],
+      connections: [{ ...source, connection_id: 42 }],
+    }).success).toBe(false);
+  });
+
+  it("downgrades an unknown verification status to unverifiable", () => {
+    const parsed = CompanyBrainMigrationCensusSchema.parse({
+      generated_at: "2026-07-29T09:00:00Z",
+      actors: [],
+      automations: [],
+      connections: [{ ...source, status: "new-server-status" }],
+    });
+    expect(parsed.connections[0]?.status).toBe("unverifiable");
   });
 });

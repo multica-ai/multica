@@ -127,7 +127,7 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 		// Multica's final-path assertion. App-specific failure tests override it.
 		return []byte("https://registry.firtal.com/authentication/api-keys/key-1/issues\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
-		return []byte("Dashboard\nAuthentication\nAPI Keys\nData Sources\nAPI Endpoints\nAI Models\nApps\nAPI Access\nSave\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
+		return []byte("Dashboard\nAuthentication\nAPI Keys\nGenerate New Key\nYour Registry API URL\nActors\nSystems\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
 		return []byte("[]\n"), nil
 	default:
@@ -348,16 +348,16 @@ func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	if target.Host() != "registry.firtal.com" || !target.AccessHeaders {
 		t.Fatalf("registry target = %q access=%v, want Access-gated public edge", target.Host(), target.AccessHeaders)
 	}
-	if target.NavigateLinkName != "API Keys" {
-		t.Fatalf("registry navigation = %q, want API Keys", target.NavigateLinkName)
+	if target.NavigatePath != "/authentication/api-keys" {
+		t.Fatalf("registry navigation = %q, want the direct api-keys route", target.NavigatePath)
 	}
-	if target.NavigateSelector != "tbody tr" || target.NavigateTabName != "Permissions" {
-		t.Fatalf("registry detail navigation = %q/%q", target.NavigateSelector, target.NavigateTabName)
+	if target.NavigateLinkName != "" || target.NavigateSelector != "" || target.NavigateTabName != "" {
+		t.Fatalf("registry must not click through the scrollable sidebar: %q/%q/%q", target.NavigateLinkName, target.NavigateSelector, target.NavigateTabName)
 	}
-	if target.ExpectedURLPart != "/authentication/api-keys/" {
+	if target.ExpectedURLPart != "/authentication/api-keys" {
 		t.Fatalf("registry expected URL = %q", target.ExpectedURLPart)
 	}
-	wantMarkers := []string{"Data Sources", "API Endpoints", "AI Models", "Apps", "API Access", "Save"}
+	wantMarkers := []string{"API Keys", "Generate New Key", "Your Registry API URL", "Actors", "Systems"}
 	if strings.Join(target.ExpectedText, "|") != strings.Join(wantMarkers, "|") {
 		t.Fatalf("registry markers = %v, want %v", target.ExpectedText, wantMarkers)
 	}
@@ -1043,19 +1043,20 @@ func TestTargetForResolvesWarehouseUnderItsBasePath(t *testing.T) {
 
 func TestTargetForResolvesRoleAwareDataCatalogChecks(t *testing.T) {
 	tests := []struct {
-		name        string
-		host        string
-		path        string
-		access      bool
-		idKey       string
-		secretKey   string
-		navigate    string
-		wantMarkers []string
+		name         string
+		host         string
+		path         string
+		access       bool
+		idKey        string
+		secretKey    string
+		navigate     string
+		navigatePath string
+		wantMarkers  []string
 	}{
 		{
 			name: "data-catalog", host: "atlas.firtal.com", path: "/",
 			access: true, idKey: "ADMIN_CF_ACCESS_CLIENT_ID", secretKey: "ADMIN_CF_ACCESS_CLIENT_SECRET",
-			navigate: "Permissions", wantMarkers: []string{"Permissions", "Roles", "Assignments"},
+			navigatePath: "/permissions", wantMarkers: []string{"Permissions", "Roles", "Assignments"},
 		},
 		{
 			name: "data-catalog-reader", host: "atlas.firtal.com", path: "/",
@@ -1091,6 +1092,9 @@ func TestTargetForResolvesRoleAwareDataCatalogChecks(t *testing.T) {
 			}
 			if target.NavigateLinkName != test.navigate {
 				t.Fatalf("navigate = %q, want %q", target.NavigateLinkName, test.navigate)
+			}
+			if target.NavigatePath != test.navigatePath {
+				t.Fatalf("navigate path = %q, want %q", target.NavigatePath, test.navigatePath)
 			}
 			if strings.Join(target.ExpectedText, "|") != strings.Join(test.wantMarkers, "|") {
 				t.Fatalf("markers = %v, want %v", target.ExpectedText, test.wantMarkers)

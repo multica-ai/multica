@@ -21,12 +21,14 @@ export interface OperatingPeriod { id: string; workspace_id: string; name: strin
 export interface OperatingPeriodList { periods: OperatingPeriod[] }
 export interface StrategyItem { id: string; workspace_id: string; kind: StrategyKind; title: string; description: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state: StrategyState; created_at: string; updated_at: string }
 export interface StrategyItemInput { kind: Exclude<StrategyKind, "unknown">; title: string; description?: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state?: Exclude<StrategyState, "unknown"> }
-export type VisionPlanSectionType = "list" | "structured" | "process";
+export type VisionPlanSectionType = "list" | "structured" | "process" | "goals";
 export interface VisionPlanGoalConnection { connection_id: string; goal_id: string }
+export interface VisionPlanObjectLink { connection_id: string; target_type: "project" | "issue"; target_id: string; title: string; identifier: string }
 export interface VisionPlanItem {
   id: string; workspace_id: string; section_id: string; title: string; description: string;
   part_label?: string; owner_type?: "member" | "agent"; owner_id?: string; owner_name?: string;
   position: number; state: "active" | "archived"; goal_connections: VisionPlanGoalConnection[];
+  links: VisionPlanObjectLink[];
   created_at: string; updated_at: string;
 }
 export interface VisionPlanItemInput {
@@ -35,13 +37,20 @@ export interface VisionPlanItemInput {
 }
 export interface VisionPlanSection {
   id: string; workspace_id: string; key: string; name: string; section_type: VisionPlanSectionType;
-  position: number; items: VisionPlanItem[]; created_at: string; updated_at: string;
+  position: number; page_id: string; column_index: number; items: VisionPlanItem[]; created_at: string; updated_at: string;
 }
-export interface VisionPlanSectionInput { name: string; section_type: VisionPlanSectionType; position: number }
-export interface VisionPlan { sections: VisionPlanSection[] }
+export interface VisionPlanSectionInput { name: string; section_type: VisionPlanSectionType; position: number; page_id: string; column_index: number }
+// A page is one arrangeable surface. Vision and Traction are seeded pages, so a
+// workspace can rename them, change their column count, or add pages of its own.
+export interface VisionPlanPage {
+  id: string; workspace_id: string; key: string; name: string;
+  column_count: number; position: number; created_at: string; updated_at: string;
+}
+export interface VisionPlanPageInput { name: string; column_count: number; position: number }
+export interface VisionPlan { pages: VisionPlanPage[]; sections: VisionPlanSection[] }
 export interface DerivedHealth { state: HealthState; reason: string; calculated_at: string }
 export interface RockProject { id: string; title: string; issue_count: number; done_issue_count: number }
-export interface RockIssue { id: string; identifier: string; title: string; status: string; project_id?: string; project_title?: string }
+export interface RockIssue { id: string; identifier: string; title: string; status: string; project_id?: string; project_title?: string; parent_id?: string }
 export interface RockCheckIn { id: string; confidence: number; reported_health: HealthState; note: string; created_by_type: string; created_by_id: string; created_at: string }
 export interface Rock {
   id: string; workspace_id: string; title: string; description?: string;
@@ -67,7 +76,7 @@ export interface ObjectConnectionList { connections: ObjectConnection[] }
 export type MeetingCadenceUnit = "manual" | "day" | "week" | "month" | "quarter";
 export type MeetingAgendaBinding = "none" | "scorecard" | "goals" | "issues_list";
 export interface MeetingAgendaSection { id: string; name: string; position: number; binding: MeetingAgendaBinding }
-export interface MeetingNoteType { id: string; name: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; enabled: boolean; current_note_id?: string }
+export interface MeetingNoteType { id: string; name: string; icon?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; enabled: boolean; current_note_id?: string; anchor_weekday?: number; anchor_week_of_month?: number; next_meeting_date?: string; upcoming_dates?: string[]; year_dates?: string[]; participants?: { type: "member" | "agent"; id: string }[] }
 export interface MeetingConfig { workspace_id: string; note_type_id?: string; note_type_name?: string; current_note_id?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; agenda: MeetingAgendaSection[]; available_note_types: MeetingNoteType[] }
 export interface MeetingConfigInput { note_type_id?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; agenda: MeetingAgendaSection[] }
 export interface OrgChartSeat { id: string; workspace_id: string; parent_id?: string; name: string; responsibilities: string[]; owner_type?: "member" | "agent"; owner_id?: string; owner_name?: string; vacant: boolean; position: number }

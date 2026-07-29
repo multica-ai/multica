@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/versioning"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // The stale-proposal / not-pending sentinels and their HTTP mapping moved to
@@ -19,6 +20,7 @@ var (
 	// errIncompatibleSystemPromptMode (FIR-3212) is a caller error, not a
 	// conflict: the proposal asks for a mode the agent's runtime cannot honour.
 	errIncompatibleSystemPromptMode = errors.New("incompatible system_prompt_mode")
+	errIncompatibleRuntimeSetting   = errors.New("incompatible runtime setting")
 )
 
 // approveAndMerge applies a pending change request in one transaction: lock the
@@ -55,20 +57,36 @@ func (h *Handler) approveAndMerge(r *http.Request, agent cerebrodb.Agent, cr cer
 	}
 
 	snap := DecodeSnapshot(locked.ProposedSnapshot)
+	provider := ""
+	if snap.RuntimeID != "" {
+		runtimeID, parseErr := util.ParseUUID(snap.RuntimeID)
+		if parseErr != nil {
+			return cerebrodb.AgentChangeRequest{}, fmt.Errorf("%w: invalid runtime_id", errIncompatibleRuntimeSetting)
+		}
+		provider, err = qtx.GetAgentContextRuntimeProvider(ctx, cerebrodb.GetAgentContextRuntimeProviderParams{
+			ID:          runtimeID,
+			WorkspaceID: fresh.WorkspaceID,
+		})
+		if err != nil {
+			return cerebrodb.AgentChangeRequest{}, fmt.Errorf("%w: runtime_id is not available in this workspace", errIncompatibleRuntimeSetting)
+		}
+	} else {
+		// Historical snapshots predate governed Engine selection. Keeping the
+		// field empty preserves the live Engine on rollback.
+		provider, _ = qtx.GetAgentProvider(ctx, agent.ID)
+	}
 	// FIR-3212: re-check the mode against the agent's CURRENT runtime, inside the
 	// tx. The create path already checked it, but an agent can be moved to another
 	// runtime between proposing and approving — so a combination that was valid at
 	// propose time can be impossible by the time it is rolled out. Without this,
 	// approval is exactly the path that ships a setting the runtime silently drops.
 	if mode, present := rawSystemPromptMode(snap); present {
-		provider, perr := qtx.GetAgentProvider(ctx, agent.ID)
-		if perr != nil {
-			// Unresolvable runtime is "no authoritative answer", never a rejection.
-			provider = ""
-		}
 		if verr := ValidateSystemPromptModeForProvider(provider, mode); verr != nil {
 			return cerebrodb.AgentChangeRequest{}, fmt.Errorf("%w: %s", errIncompatibleSystemPromptMode, verr)
 		}
+	}
+	if verr := ValidateSnapshotRuntimeSettings(provider, snap); verr != nil {
+		return cerebrodb.AgentChangeRequest{}, fmt.Errorf("%w: %s", errIncompatibleRuntimeSetting, verr)
 	}
 	if _, err := h.Svc.ApplySnapshotTx(ctx, qtx, agent.ID, snap, locked.ProposedVersion); err != nil {
 		return cerebrodb.AgentChangeRequest{}, err
@@ -101,7 +119,7 @@ func (h *Handler) approveAndMerge(r *http.Request, agent cerebrodb.Agent, cr cer
 func statusForMergeError(err error) int {
 	// FIR-3212: an incompatible mode is the caller's input being wrong, so it is
 	// a 400 — not the 409 the versioning sentinels mean, nor a 500.
-	if errors.Is(err, errIncompatibleSystemPromptMode) {
+	if errors.Is(err, errIncompatibleSystemPromptMode) || errors.Is(err, errIncompatibleRuntimeSetting) {
 		return http.StatusBadRequest
 	}
 	return versioning.StatusForMergeError(err)

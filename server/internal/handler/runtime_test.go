@@ -315,39 +315,38 @@ func TestListRuntimeUsageBucketsByViewerTimezone(t *testing.T) {
 	cutoffDate := cutoff.Format("2006-01-02")
 	extraDate := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
 
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1 AND provider = 'cutoff-test'`, runtimeID)
-	})
-
-	// Seed task_usage_hourly directly with one bucket per Shanghai calendar
-	// day. Pick 04:00 local (= 20:00 UTC the previous day) to catch
-	// off-by-one tz-cutoff bugs.
+	// Seed one measurement per Shanghai calendar day. Pick 04:00 local
+	// (= 20:00 UTC the previous day) to catch off-by-one tz-cutoff bugs.
+	// CEREBRO-PATCH(usage-canonical-ledger): FIR-3940 seed the ledger, not the dead rollup.
 	var agentID pgtype.UUID
 	if err := testPool.QueryRow(ctx, `
 		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY id LIMIT 1
 	`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("pick fixture agent: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage_hourly (
-			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
-			provider, model,
-			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
-		)
-		VALUES
-			(($1::date + interval '4 hours') AT TIME ZONE 'Asia/Shanghai', $3, $4, $5, NULL,
-				'cutoff-test', 'old-day',    111, 0, 0, 0, 1),
-			(($2::date + interval '4 hours') AT TIME ZONE 'Asia/Shanghai', $3, $4, $5, NULL,
-				'cutoff-test', 'cutoff-day', 222, 0, 0, 0, 1)
-		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
-			SET input_tokens = EXCLUDED.input_tokens,
-			    output_tokens = EXCLUDED.output_tokens,
-			    cache_read_tokens = EXCLUDED.cache_read_tokens,
-			    cache_write_tokens = EXCLUDED.cache_write_tokens,
-			    event_count = EXCLUDED.event_count
-	`, extraDate, cutoffDate, testWorkspaceID, runtimeID, agentID); err != nil {
-		t.Fatalf("seed hourly rows: %v", err)
+	seedDay := func(day, model string, tokens int64) {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, created_at)
+			VALUES ($1, $2, 'completed', now())
+			RETURNING id
+		`, agentID, runtimeID).Scan(&taskID); err != nil {
+			t.Fatalf("seed task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage (
+				task_id, provider, model,
+				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at
+			)
+			VALUES ($1, 'cutoff-test', $2, $3, 0, 0, 0,
+				($4::date + interval '4 hours') AT TIME ZONE 'Asia/Shanghai')
+		`, taskID, model, tokens, day); err != nil {
+			t.Fatalf("seed usage row: %v", err)
+		}
 	}
+	seedDay(extraDate, "old-day", 111)
+	seedDay(cutoffDate, "cutoff-day", 222)
 
 	resp, err := testHandler.listRuntimeUsage(ctx, parseUUID(runtimeID), "Asia/Shanghai", pgtype.Timestamptz{
 		Time:  cutoff,

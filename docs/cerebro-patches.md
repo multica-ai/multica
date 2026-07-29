@@ -22,6 +22,25 @@ documents one named patch + its rationale + the file location(s).
   winner the product names lost. A translated name cannot be searched or matched
   to an issue, which is the failure — not the style.
 
+## FIR-3924 — Company Brain migration census
+
+- `server/cmd/server/router.go` wires the Cerebro-owned, read-only
+  `GET /api/workspaces/{id}/connections/company-brain-migration-census` report.
+- **Why:** prior to consolidation, Company Brain source claims only existed behind
+  each legacy connection credential. The report invokes `whoami` server-side,
+  returns only `write_source` and `allowed_read_sources`, and attaches that
+  evidence to a non-offline agent or active automatic run only when the
+  existing connection policy allows the exact actor to call `whoami`; Ask and
+  Deny stay unverifiable. Each legacy Connection also carries the exact
+  per-tool Allow/Ask/Deny table for that actor, and legacy tool names are
+  extracted from agent and automatic-run configuration without returning the
+  surrounding text. It is default-off behind
+  `cerebro_company_brain_migration_census`, protected by the existing
+  `manage_connections` policy, and additionally requires the requesting
+  member's own effective `whoami` verdict before any stored credential is
+  invoked. It never returns auth configuration, client IDs, tokens, or raw
+  upstream error text.
+
 ## FIR-3876 — ACP tool-policy seam (hermes, kimi, kiro)
 
 - `server/pkg/agent/cerebro_acp_tool_policy.go` (fork-owned) resolves every ACP
@@ -351,6 +370,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `agent-firtal-local-call-usage-events` | server/pkg/agent/firtal_local.go (4-line hook plus return plumbing)<br>server/pkg/agent/firtal_local_usage_events_cerebro.go (new Cerebro sibling)<br>server/pkg/agent/firtal_local_test.go | small inline seam + new helper and test | FIR-3337 — preserve usage from every OpenAI-compatible response in the local tool loop as a separate delta event, including tool rounds and the forced final text round. Each HTTP completion is one model call; the response exposes input/output and prompt footprint but no provider call ID, context-window size, cache split, reasoning usage, or compaction, so events are `tokens_only`. Existing cumulative `Result.Usage` remains unchanged. |
 | `agent-remaining-call-usage-fallbacks` | server/pkg/agent/{openclaw,gemini,kimi,kiro,antigravity}.go (existing behavior; no production hook) | documentation only | FIR-3337 — current OpenClaw output exposes only final run-level usage; its `step_finish` parser is forward compatibility for events the supported CLI does not currently emit. Gemini reports one final stats object aggregated by model. Kimi and Kiro ACP expose final prompt usage/cumulative snapshots without internal call identity. Antigravity exposes no token usage. These adapters therefore keep their existing aggregate/empty fallback and emit no call events rather than inventing per-call precision. |
 | `model-usage-session-consumers` | server/internal/cerebro/sessions/{context_usage,context_timeline,usage_breakdown}.go<br>matching DB tests | Cerebro-zone consumer cutover | FIR-3337 — the issue session context bar, development curve, compaction count, and per-session/issue breakdown now read `model_usage_event` first. Runtime-reported context-window sizes and explicit compactions survive to the UI; each task falls back to legacy usage/footprint rows only when it has no canonical data, preventing double-counting during the forward-only transition. |
+| `usage-canonical-ledger` | server/pkg/db/queries/{task_usage,runtime_usage}.sql<br>server/internal/handler/{dashboard_test,runtime_test}.go fixtures<br>server/internal/handler/usage_canonical_cerebro_test.go (new) | 3 query repoints + 1 cutoff alignment + fixtures/tests | FIR-3940 — the last four usage read paths still on `task_usage_hourly` (`ListDashboardUsageDaily`, `ListDashboardUsageByAgent`, `ListRuntimeUsage`, plus the `ListRuntimeUsageByAgent` cutoff) were repointed at `model_usage_task_rollup`, finishing the FIR-3337 consumer cutover. The `rollup_task_usage_hourly` scheduler job ticks on schedule but returns `rows_affected=0`, so that table is empty in this deployment: `multica agent usage` and `multica runtime usage` returned `[]`, and the workspace Dashboard's cost/token cards and the runtimes `COST · 7D` column rendered as zero spend. Workspace and project attribution now come from `agent_task_queue → agent → issue`; day bucketing stays on `tu.created_at` (usage-observation time) so a run that crosses midnight lands on the day it burned the tokens, and `task_count` is a `COUNT(DISTINCT task_id)` instead of a sum over hourly buckets. Historical rows keep working through the view's `task_usage` fallback branch. |
 | `model-usage-task-rollup` / `model-usage-consumer-cutover-test` | server/migrations/9144_model_usage_task_rollup.{up,down}.sql<br>server/pkg/db/queries/{task_usage,runtime_usage}.sql<br>server/internal/cerebro/queries/{agent_pass,chat_message_cost,comment_cost,dashboard,tasks}.sql<br>server/internal/{cerebro/analytics,handler}/ consumer queries<br>matching migration and DB tests | compatibility view + consumer cutover | FIR-3337 — all active raw usage and cost consumers read one compatibility rollup. It uses canonical delta calls plus only the latest cumulative measurement per provider session, includes reasoning in output, and falls back to `task_usage` per `(task, provider, model)` when that exact model has no event. Mixed tasks therefore retain legacy-only models without double-counting canonical models. |
 | `model-usage-event-contract` / `model-usage-event-contract-test` | server/pkg/agent/model_usage_event.go<br>server/pkg/agent/model_usage_event_test.go<br>server/migrations/9143_model_usage_event_ledger.up.sql | contract + test + schema | FIR-3337 — define and validate the runtime-neutral call-level usage measurement shared by adapters, including a `reconciliation` source for authoritative provider totals that correct incomplete streamed deltas. |
 | `daemon-model-usage-event-client` | server/internal/daemon/client.go | 1 marker on the existing event-aware method | FIR-3337 — forward native usage events beside aggregate task usage. This adds the missing patch marker to the already-implemented branch change; behavior is unchanged. |
@@ -1785,6 +1805,8 @@ Approved through FIR-3411 Gate 0 and plan artifact `019f6fac-0134-7e34-b485-0cdf
 | Patch | Location | Reason |
 |---|---|---|
 | `brief-layer-modes` | `server/internal/daemon/execenv/execenv.go`; `runtime_config.go`; `server/internal/daemon/daemon.go` | Carry the two per-agent brief-layer modes (`workspace_brief_mode`, `tools_brief_mode`) from the agent's `runtime_config` into brief rendering: one guard call-site swaps in the identity-only brief, one call-site routes the tools section through the fold. All logic lives in the cerebro siblings `cerebro_brief_layers.go` (execenv) and `cerebro_brief_layer_modes.go` (daemon + agentoffice). |
+| `agent-runtime-profile` | `server/internal/daemon/session_mode_profile.go` (2 marked return lines; implementation in `cerebro_agent_runtime_profile.go`) | FIR-4000 — apply the agent's versioned `max_turns` and `timeout_minutes` after resolving the selected Plan/Build/Research/Review profile. Missing or invalid values inherit the profile, so every existing agent keeps its current limits; configured positive values become the final spend/time cap used by `ExecOptions`. |
+| `agent-configuration-single-home` | `packages/views/agents/components/agent-detail-inspector.tsx` (flag read + one guarded block) | FIR-4000 — when `cerebro_agent_setup_capabilities` is enabled, remove the inspector's direct Runtime/Model/Thinking/Speed writes because those controls now live in the versioned Instructions proposal flow. With the off-by-default flag disabled, the existing inspector remains byte-for-byte reachable. The control-first form and redesigned-page guard live in Cerebro packages. Per-agent Sandbox is deliberately absent: FIR-3820 retired that setting after the accepted FIR-3212 design; runtime-wide sandbox policy keeps its existing single home. |
 | `opencode-auto-flag` | `server/pkg/agent/opencode.go` | Keep the full-server verification executable on the managed runtime after the installed OpenCode CLI replaced `--dangerously-skip-permissions` with `--auto`; existing explicit question/plan denies remain in force. |
 
 Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fuld scope"), 2026-07-17. Standing FIR-3212 approval for marked patches recorded 2026-07-15.
@@ -2021,6 +2043,7 @@ A run that died and that nothing will retry was visible only under the Runs tab.
 | Patch | Location | Reason |
 |---|---|---|
 | `dead-failed-runs-routes` | `server/cmd/server/router.go` (2 marked lines) | Registers the two cerebro read endpoints — `GET /api/issues/{id}/failed-runs` (red bar) and `GET /api/inbox/failed-issue-tasks` (red pip). |
+| `dead-failed-runs-access` | `server/cmd/server/router.go` (2 marked lines) | Injects the per-issue access rule into the cerebro inbox handler. Both endpoints return issue content (failure reason, error text, machine name), and `server/internal/cerebro/inbox` cannot reach the unexported `loadIssueForUser` / `canAccessIssue`. The closures live in `server/internal/handler/dead_failed_runs_access_cerebro.go` (cerebro zone by filename), so the rule stays in one place instead of being copied and left to drift. See `docs/agents/permission-system.md`. |
 | `resume-failed-run` | `server/internal/service/task.go` (3 marked lines)<br>`server/internal/handler/task_lifecycle.go` (2 marked lines)<br>`server/cmd/server/rerun_session_test.go` (4 marked lines) | `RerunIssue` hard-coded `force_fresh_session=true`, which is right for "the output was bad" but wrong for "the machine died mid-run". A `resume` flag threads through to `enqueueRerunTask`; `resume=true` keeps the `(agent, issue)` session pointer so the agent continues the same conversation. Default stays `false`, so every existing caller — CLI included — is unchanged. |
 | `resume-failed-run-client` / `dead-failed-runs-client` | `packages/core/api/client.ts` (3 marked methods) | `rerunIssue` takes the optional `resume` flag; `listIssueFailedRuns` / `listWorkspaceFailedRuns` read the two new endpoints. Same shape as the existing cerebro client methods (`listIssueWakeups`). |
 | `agent-run-pip-failed` | `packages/views/common/agent-run-pip.tsx` (3 marked lines) | Adds a `failed` state rendering `bg-destructive`, alongside the existing `active` / `queued` / `sub` / `scheduled` states. `taskStatusToRunState` excludes it — the state is derived from the dead-run endpoint, never from a live task status. |
@@ -2095,3 +2118,40 @@ version history, Line history and search keep working exactly as before.
 | Patch | Location | Reason |
 |---|---|---|
 | `cerebro-note-collab` | `server/cmd/server/router.go` (3 marked lines) | Import, handler construction, and the `GET /api/cerebro/notes/{id}/collab` route. The route sits next to the terminal WS, outside the auth middleware, because a browser cannot set headers on a WebSocket upgrade — the handler authenticates itself from the auth cookie or a first-frame token, exactly like `terminal-ws-auth`. |
+
+# FIR-4013 — a run that hits its turn cap must say so, and no-Mode runs must not inherit one
+
+Two defects behind the `claude execution failed` message on the issue board.
+
+The Claude Code CLI ends a run it could not finish with a `result` message
+carrying `is_error: true`. For a turn-cap stop (`error_max_turns`) that message
+has no `result` text — the only field naming the cause is `subtype`, which
+`claude.go` parsed into the struct but never read on the failure path. The empty
+`Result.Error` then hit the daemon's generic
+`fmt.Sprintf("%s execution %s", provider, status)` fallback, producing
+`claude execution failed`: a string that matches no rule in
+`taskfailure.Classify`, lands in `agent_error.unknown`, and is the one bucket
+`failrouter` never retries. Production evidence: 5 runs carried that exact
+string, and 21 runs in 30 days reached the empty-error state behind it.
+
+Separately, `effectiveSessionModeProfile` fell through to `ProfileFor("")`,
+which `ProfileFor` maps to the **Build** defaults. Every run that never had a
+Mode recorded — issue assignment, wakeup, autopilot, promoted sub-issue, a
+mention in an unlabelled thread — silently inherited Build's 80-turn cap and
+120-minute timeout, neither of which is reachable from any interface. Core
+Multica sets no turn cap at all (`MaxTurns` has a single writer, added by this
+fork in FIR-3111) and no wall-clock cap by default
+(`DefaultAgentTimeout = 0`); a run is bounded by `MULTICA_AGENT_TIMEOUT` and the
+inactivity watchdogs. Measured on the 100 most recent Claude spawns: 54 carried
+`--max-turns 80` from this fallback, while the workspace's own published Build
+profile (199 turns) reached only the 8 runs that did carry a Mode.
+
+Everything else the Build fallback supplied was already gated on a valid Mode
+(`thinkingLevel` at `daemon.go`, and the whole MODE section of the runtime brief
+in `execenv/context.go`), so returning a zero profile changes exactly the two
+values above and nothing else.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-claude-result-subtype` | `server/pkg/agent/claude.go` (1 marked branch), `server/pkg/agent/cerebro_claude_result_subtype.go` (new) | When a failed `result` carries no text, render its `subtype` instead. Turns `claude execution failed` into `claude stopped: the run reached its maximum number of turns (error_max_turns)`. The wording is deliberately checked against `taskfailure.Classify` so it cannot trip a rule it does not belong to — it still classifies as `agent_error.unknown` until the taxonomy gains a turn-cap reason of its own. |
+| `session-mode-no-profile-fallback` | `server/internal/daemon/session_mode_profile.go` (1 marked line) | No Mode selected means no Mode profile. Removes the invisible 80-turn cap and 120-minute timeout from every run nobody labelled, restoring core Multica behaviour; runs that DO carry a Mode keep their published profile unchanged. |

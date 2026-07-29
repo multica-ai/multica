@@ -62,10 +62,32 @@ type StrategyItemInput struct {
 	State        string `json:"state,omitempty"`
 }
 
+// A page is one arrangeable surface in the Vision/Traction organiser. Vision
+// and Traction are seeded pages, not code — a workspace can rename them, change
+// how many columns they have, or add pages of its own.
+type VisionPlanPageInput struct {
+	Name        string `json:"name"`
+	ColumnCount int32  `json:"column_count"`
+	Position    int32  `json:"position"`
+}
+
+type VisionPlanPageResponse struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	ColumnCount int32  `json:"column_count"`
+	Position    int32  `json:"position"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type VisionPlanSectionInput struct {
 	Name        string `json:"name"`
 	SectionType string `json:"section_type"`
 	Position    int32  `json:"position"`
+	PageID      string `json:"page_id"`
+	ColumnIndex int32  `json:"column_index"`
 }
 
 type VisionPlanItemInput struct {
@@ -97,8 +119,19 @@ type VisionPlanItemResponse struct {
 	Position        int32                      `json:"position"`
 	State           string                     `json:"state"`
 	GoalConnections []VisionPlanGoalConnection `json:"goal_connections"`
+	Links           []VisionPlanObjectLink     `json:"links"`
 	CreatedAt       string                     `json:"created_at"`
 	UpdatedAt       string                     `json:"updated_at"`
+}
+
+// A Project or Issue coupled to a Vision/Traction item, carrying the label the
+// board renders so the client needs no second lookup.
+type VisionPlanObjectLink struct {
+	ConnectionID string `json:"connection_id"`
+	TargetType   string `json:"target_type"`
+	TargetID     string `json:"target_id"`
+	Title        string `json:"title"`
+	Identifier   string `json:"identifier,omitempty"`
 }
 
 type VisionPlanSectionResponse struct {
@@ -108,12 +141,15 @@ type VisionPlanSectionResponse struct {
 	Name        string                   `json:"name"`
 	SectionType string                   `json:"section_type"`
 	Position    int32                    `json:"position"`
+	PageID      string                   `json:"page_id"`
+	ColumnIndex int32                    `json:"column_index"`
 	Items       []VisionPlanItemResponse `json:"items"`
 	CreatedAt   string                   `json:"created_at"`
 	UpdatedAt   string                   `json:"updated_at"`
 }
 
 type VisionPlanResponse struct {
+	Pages    []VisionPlanPageResponse    `json:"pages"`
 	Sections []VisionPlanSectionResponse `json:"sections"`
 }
 
@@ -234,6 +270,7 @@ type RockIssue struct {
 	Status       string `json:"status"`
 	ProjectID    string `json:"project_id,omitempty"`
 	ProjectTitle string `json:"project_title,omitempty"`
+	ParentID     string `json:"parent_id,omitempty"`
 }
 
 type RockCheckInInput struct {
@@ -276,12 +313,30 @@ type MeetingAgendaSectionResponse struct {
 }
 
 type MeetingNoteTypeResponse struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	CadenceUnit   string `json:"cadence_unit"`
-	CadenceCount  int32  `json:"cadence_count"`
-	Enabled       bool   `json:"enabled"`
-	CurrentNoteID string `json:"current_note_id,omitempty"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Icon              string `json:"icon,omitempty"`
+	CadenceUnit       string `json:"cadence_unit"`
+	CadenceCount      int32  `json:"cadence_count"`
+	Enabled           bool   `json:"enabled"`
+	CurrentNoteID     string `json:"current_note_id,omitempty"`
+	AnchorWeekday     *int16 `json:"anchor_weekday,omitempty"`
+	AnchorWeekOfMonth *int16 `json:"anchor_week_of_month,omitempty"`
+	// NextMeetingDate is the next scheduled occurrence (yyyy-mm-dd), empty for
+	// manual types. UpcomingDates lists the next few occurrences for the planner.
+	NextMeetingDate string   `json:"next_meeting_date,omitempty"`
+	UpcomingDates   []string `json:"upcoming_dates,omitempty"`
+	// YearDates lists every occurrence within the next 12 months (capped) for
+	// the year-wheel overview.
+	YearDates []string `json:"year_dates,omitempty"`
+	// Participants are the people and agents who attend this cycle.
+	Participants []MeetingParticipant `json:"participants,omitempty"`
+}
+
+// MeetingParticipant is one attendee reference on a recurring note (a cycle).
+type MeetingParticipant struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
 }
 
 type MeetingConfigInput struct {

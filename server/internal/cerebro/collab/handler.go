@@ -33,6 +33,9 @@ type Access interface {
 	// room — they see other people's carets and text live — but their steps are
 	// refused, so read-only stays read-only.
 	CanEdit(ctx context.Context, noteID, userID string) (bool, error)
+	// LiveEnabled applies the effective workspace/member feature-flag
+	// precedence. The server enforces the flag; hiding the UI is not a gate.
+	LiveEnabled(ctx context.Context, noteID, userID string) (bool, error)
 }
 
 // Handler serves the live co-editing WebSocket for notes.
@@ -96,6 +99,12 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	// Cookie auth before the upgrade keeps the common browser path to a single
 	// round-trip; PAT clients authenticate in the first frame instead.
+	//
+	// Both paths go through authenticate(). This endpoint is registered outside
+	// the auth middleware (it authenticates itself, like the terminal WS), so
+	// the X-User-ID header here is whatever the caller typed — never a value the
+	// middleware stamped. Trusting it let any caller that reaches this route
+	// claim any user id and read or write their notes, so it is not read at all.
 	var userID string
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
 		uid, aerr := h.authenticate(r.Context(), cookie.Value)
@@ -104,8 +113,6 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		userID = uid
-	} else if hdr := r.Header.Get("X-User-ID"); hdr != "" {
-		userID = hdr
 	}
 
 	upgrader := websocket.Upgrader{CheckOrigin: h.CheckOrigin}
@@ -142,6 +149,11 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		h.writeNow(conn, encode(SimpleMessage{Type: MsgAuthError, Reason: "no access to this note"}))
 		return
 	}
+	liveEnabled, err := h.Access.LiveEnabled(r.Context(), noteID, userID)
+	if err != nil || !liveEnabled {
+		h.writeNow(conn, encode(SimpleMessage{Type: MsgAuthError, Reason: "live editing is disabled"}))
+		return
+	}
 	canEdit, err := h.Access.CanEdit(r.Context(), noteID, userID)
 	if err != nil {
 		canEdit = false
@@ -170,6 +182,11 @@ func (h *Handler) run(ctx context.Context, conn *websocket.Conn, noteID, userID,
 	}
 	if !created {
 		welcome.Snapshot = room.Snapshot()
+		if welcome.Snapshot != nil {
+			if since, serr := room.StepsSince(welcome.Snapshot.Version); serr == nil {
+				welcome.Steps = since
+			}
+		}
 	}
 	peer.Send(encode(welcome))
 
@@ -249,6 +266,10 @@ func (h *Handler) readPump(_ context.Context, conn *websocket.Conn, room *Room, 
 			}
 
 		case MsgSnapshot:
+			if !peer.CanEdit {
+				peer.Send(encode(SimpleMessage{Type: MsgError, Reason: "read-only: snapshots are refused"}))
+				continue
+			}
 			if len(msg.Doc) == 0 {
 				continue
 			}
@@ -344,7 +365,10 @@ func (h *Handler) displayName(ctx context.Context, userID string) string {
 		return ""
 	}
 	var name string
-	if err := h.DB.QueryRow(ctx, `SELECT COALESCE(name, email) FROM users WHERE id = $1`, userID).Scan(&name); err != nil {
+	// The table is "user" (singular, quoted — it is a reserved word). Querying
+	// a non-existent "users" errored on every join, so every caret and presence
+	// line rendered without a name.
+	if err := h.DB.QueryRow(ctx, `SELECT COALESCE(NULLIF(name, ''), email) FROM "user" WHERE id = $1`, userID).Scan(&name); err != nil {
 		return ""
 	}
 	return name

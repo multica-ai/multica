@@ -1,0 +1,69 @@
+---
+title: "Multica v1.21.0"
+description: "48 release bullets: 12 new, 29 fixed, 2 improved, plus 5 more."
+date: 2026-07-28
+---
+
+**Release summary:** 48 release bullets: 12 new, 29 fixed, 2 improved, plus 5 more.
+
+Changes since [v1.20.9](https://github.com/firtal-group/firtal-cerebro/compare/v1.20.9...v1.21.0) — bump: **minor**
+
+## New
+
+- Live co-editing in notes — engine + editor (FIR-1317) [#2771](https://github.com/firtal-group/firtal-cerebro/pull/2771)
+- Port approved upstream improvements (FIR-3013)
+- Move comments to a new thread instead of copying them [#2759](https://github.com/firtal-group/firtal-cerebro/pull/2759)
+- Make the heading the panel toggle and link the full plan (FIR-3659) [#2765](https://github.com/firtal-group/firtal-cerebro/pull/2765)
+- Live-refresh the Workpad plan on artifact events (FIR-3659) [#2761](https://github.com/firtal-group/firtal-cerebro/pull/2761)
+- Configure issue creation fields and DKK defaults CEREBRO-ALLOW-NO-PATCH
+- Add configurable table view
+- Add board grouping controls
+- Add settings and list surfaces
+- Add custom fields to issue forms
+- FIR-3447 port core client and realtime
+- FIR-3447 port schema and API
+
+## Fixed
+
+- Make an always-on-only skill proposal visible for review (FIR-3805) [#2778](https://github.com/firtal-group/firtal-cerebro/pull/2778)
+- Make live co-editing in notes actually work (FIR-1317) [#2776](https://github.com/firtal-group/firtal-cerebro/pull/2776)
+- Require target admin access (FIR-3820) [#2774](https://github.com/firtal-group/firtal-cerebro/pull/2774)
+- Surface task mandate drift (FIR-3830)
+- Report the current release version from the cloud image [#2770](https://github.com/firtal-group/firtal-cerebro/pull/2770)
+- Navigate finance verifier to cfo route [#2767](https://github.com/firtal-group/firtal-cerebro/pull/2767)
+- Probe the installed CLI for its permission flag (FIR-3945) [#2764](https://github.com/firtal-group/firtal-cerebro/pull/2764)
+- One row back when a snoozed message's reminder fires (FIR-3918) [#2757](https://github.com/firtal-group/firtal-cerebro/pull/2757)
+- Reserve task-bound Multica MCP identity (FIR-3847) [#2760](https://github.com/firtal-group/firtal-cerebro/pull/2760)
+- Pass custom args before the acp subcommand (FIR-3945) [#2763](https://github.com/firtal-group/firtal-cerebro/pull/2763)
+- Honor worktree database URL
+- Align API capabilities with task mandate
+- Preserve tool watchdog failure reason
+- Restore login text assertion
+- Close remaining policy gaps (FIR-3819)
+- Make external permissions read-only
+- Mark OpenCode permission hunk
+- Classify commands and make migration idempotent (FIR-3447)
+- Support custom fields in quick create
+- Route workspace-less users to workspace creation
+- Align local compiler with production
+- Align local validation with runtime CLIs
+- Close custom property delivery gaps
+- Update date builder test to use correct translation key
+- Classify POST /api/issues/query as read-only excluded
+- Inventory POST /api/issues/query as read-only\n\nThe custom-issue-fields work added POST /api/issues/query (body-transport\ntwin of GET /api/issues/). The HTTP permission-guard test flagged it as an\nuninventoried operation. It delegates to ListIssues and is read-only, so\ninventory it with an exempt reason mirroring POST /api/analytics/query.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) \<noreply@anthropic.com>
+- Complete table and creation parity
+- Include custom issue properties in fallback
+- Satisfy migration and permission gates
+
+## Improved
+
+- Add v1.20.10 release notes
+- Explain external policy rows
+
+## Other changes
+
+- FIR-3447: close custom issue fields release gates [#2777](https://github.com/firtal-group/firtal-cerebro/pull/2777)
+- Red failed-run bar on the issue and in the inbox, with Resume (FIR-3901) [#2756](https://github.com/firtal-group/firtal-cerebro/pull/2756)
+- FIR-2277: correct Runtime install and update guide [#1152](https://github.com/firtal-group/firtal-cerebro/pull/1152)
+- Make the Firtal AI Gateway a selectable provider in Hermes on the cloud runtime [#2752](https://github.com/firtal-group/firtal-cerebro/pull/2752)
+- FIR-3758 daemon: feature-flagged graceful drain on restart (Spor A)

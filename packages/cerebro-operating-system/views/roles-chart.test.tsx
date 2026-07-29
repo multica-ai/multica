@@ -85,4 +85,31 @@ describe("RolesChart", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit Leadership" }));
     expect(onEdit).toHaveBeenCalledWith("lead");
   });
+
+  it("keeps the + buttons hidden until the seat is hovered or focused", () => {
+    render(<RolesChart onEdit={vi.fn()} onInsert={vi.fn()} seats={[seat("lead", "Leadership")]} />);
+    // Present in the DOM for keyboard and tests, but hidden until group hover/focus.
+    const add = screen.getByRole("button", { name: "Add role above Leadership" });
+    expect(add.className).toContain("opacity-0");
+    expect(add.className).toContain("group-hover:opacity-100");
+  });
+
+  it("zooms the canvas in and out from the zoom rail", () => {
+    const { container } = render(<RolesChart onEdit={vi.fn()} seats={[seat("lead", "Leadership")]} />);
+    const canvas = container.querySelector<HTMLElement>("[aria-label='Role chart canvas'] > div");
+    expect(canvas?.style.transform).toBe("scale(1)");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(canvas?.style.transform).toBe("scale(1.15)");
+    fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
+    expect(canvas?.style.transform).toBe("scale(1)");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(canvas?.style.transform).toBe("scale(0.85)");
+  });
+
+  it("gives the canvas a scrollable, pannable viewport", () => {
+    render(<RolesChart onEdit={vi.fn()} seats={[seat("lead", "Leadership")]} />);
+    const viewport = screen.getByLabelText("Role chart canvas");
+    expect(viewport.className).toContain("overflow-auto");
+    expect(viewport.className).toContain("cursor-grab");
+  });
 });

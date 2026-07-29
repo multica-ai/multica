@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	notetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -233,8 +234,24 @@ func ValidateVisionPlanSectionInput(input VisionPlanSectionInput) error {
 	if strings.TrimSpace(input.Name) == "" {
 		return errors.New("name is required")
 	}
-	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" {
-		return errors.New("section_type must be list, structured, or process")
+	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" && input.SectionType != "goals" {
+		return errors.New("section_type must be list, structured, process, or goals")
+	}
+	if _, err := util.ParseUUID(input.PageID); err != nil {
+		return errors.New("page_id must be a UUID")
+	}
+	if input.ColumnIndex < 0 || input.ColumnIndex > 2 {
+		return errors.New("column_index must be between 0 and 2")
+	}
+	return nil
+}
+
+func ValidateVisionPlanPageInput(input VisionPlanPageInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if input.ColumnCount < 1 || input.ColumnCount > 3 {
+		return errors.New("column_count must be between 1 and 3")
 	}
 	return nil
 }
@@ -555,18 +572,65 @@ func (s *Service) meetingNoteTypes(ctx context.Context, workspaceID pgtype.UUID)
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	out := make([]MeetingNoteTypeResponse, 0, len(rows))
 	for _, row := range rows {
 		if !row.Enabled || row.CadenceUnit == "manual" {
 			continue
 		}
-		out = append(out, MeetingNoteTypeResponse{
-			ID: util.UUIDToString(row.ID), Name: row.Name,
+		item := MeetingNoteTypeResponse{
+			ID: util.UUIDToString(row.ID), Name: row.Name, Icon: row.Icon,
 			CadenceUnit: row.CadenceUnit, CadenceCount: row.CadenceCount, Enabled: row.Enabled,
-			CurrentNoteID: util.UUIDToString(row.RunningDocArtifactID),
-		})
+			CurrentNoteID: s.currentNoteLink(ctx, row),
+		}
+		if row.AnchorWeekday.Valid {
+			v := row.AnchorWeekday.Int16
+			item.AnchorWeekday = &v
+		}
+		if row.AnchorWeekOfMonth.Valid {
+			v := row.AnchorWeekOfMonth.Int16
+			item.AnchorWeekOfMonth = &v
+		}
+		upcoming := notetypes.Upcoming(row, now, 4)
+		dates := make([]string, 0, len(upcoming))
+		for _, d := range upcoming {
+			dates = append(dates, d.Format("2006-01-02"))
+		}
+		if len(dates) > 0 {
+			item.NextMeetingDate = dates[0]
+			item.UpcomingDates = dates
+		}
+		yearAhead := notetypes.UpcomingUntil(row, now, now.AddDate(1, 0, 0), 60)
+		year := make([]string, 0, len(yearAhead))
+		for _, d := range yearAhead {
+			year = append(year, d.Format("2006-01-02"))
+		}
+		if len(year) > 0 {
+			item.YearDates = year
+		}
+		if len(row.Participants) > 0 {
+			var refs []MeetingParticipant
+			if err := json.Unmarshal(row.Participants, &refs); err == nil {
+				item.Participants = refs
+			}
+		}
+		out = append(out, item)
 	}
 	return out, nil
+}
+
+// currentNoteLink resolves the note to open from the planner: the single
+// rolling document for running_doc types, otherwise the newest materialised
+// note for new_note types. Empty when the type has never materialised a note.
+func (s *Service) currentNoteLink(ctx context.Context, row cerebrodb.CerebroNoteType) string {
+	if row.RunningDocArtifactID.Valid {
+		return util.UUIDToString(row.RunningDocArtifactID)
+	}
+	id, err := s.queries.GetLatestNoteTypeArtifact(ctx, row.ID)
+	if err != nil || !id.Valid {
+		return ""
+	}
+	return util.UUIDToString(id)
 }
 
 func applyMeetingNoteType(response *MeetingConfigResponse, noteTypes []MeetingNoteTypeResponse) {
@@ -851,6 +915,22 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 	if err := s.queries.AssignLegacyVisionPlanItems(ctx, workspaceID); err != nil {
 		return VisionPlanResponse{}, err
 	}
+	if err := s.queries.EnsureDefaultVisionPlanPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureDefaultVisionPlanGoalsBlock(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignDefaultVisionPlanSectionPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignRemainingVisionPlanSectionPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	pageRows, err := s.queries.ListVisionPlanPages(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
 	sectionRows, err := s.queries.ListVisionPlanSections(ctx, workspaceID)
 	if err != nil {
 		return VisionPlanResponse{}, err
@@ -864,11 +944,24 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 		return VisionPlanResponse{}, err
 	}
 
+	linkRows, err := s.queries.ListVisionPlanObjectLinks(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+
 	connections := make(map[string][]VisionPlanGoalConnection)
 	for _, row := range connectionRows {
 		itemID := util.UUIDToString(row.StrategyItemID)
 		connections[itemID] = append(connections[itemID], VisionPlanGoalConnection{
 			ConnectionID: util.UUIDToString(row.ID), GoalID: util.UUIDToString(row.GoalID),
+		})
+	}
+	links := make(map[string][]VisionPlanObjectLink)
+	for _, row := range linkRows {
+		itemID := util.UUIDToString(row.StrategyItemID)
+		links[itemID] = append(links[itemID], VisionPlanObjectLink{
+			ConnectionID: util.UUIDToString(row.ID), TargetType: row.TargetType,
+			TargetID: util.UUIDToString(row.TargetID), Title: row.TargetTitle, Identifier: row.TargetIdentifier,
 		})
 	}
 	items := make(map[string][]VisionPlanItemResponse)
@@ -882,18 +975,68 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 		if response.GoalConnections == nil {
 			response.GoalConnections = []VisionPlanGoalConnection{}
 		}
+		response.Links = links[response.ID]
+		if response.Links == nil {
+			response.Links = []VisionPlanObjectLink{}
+		}
 		items[response.SectionID] = append(items[response.SectionID], response)
 	}
 	sections := make([]VisionPlanSectionResponse, 0, len(sectionRows))
 	for _, row := range sectionRows {
-		section := visionPlanSectionResponse(row)
+		section := visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.ColumnIndex, row.CreatedAt, row.UpdatedAt)
 		section.Items = items[section.ID]
 		if section.Items == nil {
 			section.Items = []VisionPlanItemResponse{}
 		}
 		sections = append(sections, section)
 	}
-	return VisionPlanResponse{Sections: sections}, nil
+	pages := make([]VisionPlanPageResponse, 0, len(pageRows))
+	for _, row := range pageRows {
+		pages = append(pages, visionPlanPageResponse(row))
+	}
+	return VisionPlanResponse{Pages: pages, Sections: sections}, nil
+}
+
+func (s *Service) CreateVisionPlanPage(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	if err := ValidateVisionPlanPageInput(input); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	row, err := s.queries.CreateVisionPlanPage(ctx, cerebrodb.CreateVisionPlanPageParams{
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), ColumnCount: input.ColumnCount, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	return visionPlanPageResponse(row), nil
+}
+
+func (s *Service) UpdateVisionPlanPage(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	if err := ValidateVisionPlanPageInput(input); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	row, err := s.queries.UpdateVisionPlanPage(ctx, cerebrodb.UpdateVisionPlanPageParams{
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), ColumnCount: input.ColumnCount, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	return visionPlanPageResponse(row), nil
+}
+
+// Deleting a page takes its blocks with it, so the last page is never removable
+// — a workspace always keeps somewhere to put a block.
+func (s *Service) DeleteVisionPlanPage(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	count, err := s.queries.DeleteVisionPlanPage(ctx, cerebrodb.DeleteVisionPlanPageParams{ID: id, WorkspaceID: workspaceID})
+	return count > 0, err
 }
 
 func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
@@ -903,13 +1046,18 @@ func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtyp
 	if err := ValidateVisionPlanSectionInput(input); err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
+	pageID, err := util.ParseUUID(input.PageID)
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
 	row, err := s.queries.CreateVisionPlanSection(ctx, cerebrodb.CreateVisionPlanSectionParams{
-		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType,
+		Position: input.Position, PageID: pageID, ColumnIndex: input.ColumnIndex,
 	})
 	if err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
-	return visionPlanSectionResponse(row), nil
+	return visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.ColumnIndex, row.CreatedAt, row.UpdatedAt), nil
 }
 
 func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
@@ -919,13 +1067,18 @@ func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id p
 	if err := ValidateVisionPlanSectionInput(input); err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
+	pageID, err := util.ParseUUID(input.PageID)
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
 	row, err := s.queries.UpdateVisionPlanSection(ctx, cerebrodb.UpdateVisionPlanSectionParams{
-		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType,
+		Position: input.Position, PageID: pageID, ColumnIndex: input.ColumnIndex,
 	})
 	if err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
-	return visionPlanSectionResponse(row), nil
+	return visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.ColumnIndex, row.CreatedAt, row.UpdatedAt), nil
 }
 
 func (s *Service) DeleteVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
@@ -1278,12 +1431,26 @@ func (s *Service) CreateConnection(ctx context.Context, workspaceID pgtype.UUID,
 	if err != nil {
 		return ObjectConnectionResponse{}, err
 	}
-	if input.SourceType == "strategy_item" && input.TargetType == "rock" {
-		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
-			return ObjectConnectionResponse{}, err
+	if input.SourceType == "strategy_item" {
+		switch input.TargetType {
+		case "rock", "project", "issue":
+			if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
 		}
-		if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
-			return ObjectConnectionResponse{}, err
+		switch input.TargetType {
+		case "rock":
+			if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
+		case "project":
+			if err := EnsureProjectInWorkspace(ctx, s.projects, params.TargetID, workspaceID); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
+		case "issue":
+			if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
 		}
 	}
 	row, err := s.queries.CreateObjectConnection(ctx, params)
@@ -1403,6 +1570,7 @@ func (s *Service) enrichRockResponse(ctx context.Context, workspaceID pgtype.UUI
 		rock.Issues = append(rock.Issues, RockIssue{
 			ID: util.UUIDToString(issue.ID), Identifier: issue.Identifier, Title: issue.Title,
 			Status: issue.Status, ProjectID: util.UUIDToString(issue.ProjectID), ProjectTitle: issue.ProjectTitle,
+			ParentID: util.UUIDToString(issue.ParentIssueID),
 		})
 	}
 	checkIns, err := s.queries.ListRockCheckIns(ctx, cerebrodb.ListRockCheckInsParams{WorkspaceID: workspaceID, RockID: rockID})
@@ -1485,11 +1653,20 @@ func strategyResponse(id, workspaceID pgtype.UUID, kind, title, description stri
 	}
 }
 
-func visionPlanSectionResponse(row cerebrodb.CerebroVisionPlanSection) VisionPlanSectionResponse {
+func visionPlanSectionResponse(id, workspaceID pgtype.UUID, key, name, sectionType string, position int32, pageID pgtype.UUID, columnIndex int32, createdAt, updatedAt pgtype.Timestamptz) VisionPlanSectionResponse {
 	return VisionPlanSectionResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID),
+		Key: key, Name: name, SectionType: sectionType, Position: position,
+		PageID: util.UUIDToString(pageID), ColumnIndex: columnIndex,
+		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
+	}
+}
+
+func visionPlanPageResponse(row cerebrodb.CerebroVisionPlanPage) VisionPlanPageResponse {
+	return VisionPlanPageResponse{
 		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
-		Key: row.Key, Name: row.Name, SectionType: row.SectionType, Position: row.Position,
-		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+		Key: row.Key, Name: row.Name, ColumnCount: row.ColumnCount, Position: row.Position,
+		CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
 	}
 }
 
@@ -1498,7 +1675,7 @@ func visionPlanItemResponse(id, workspaceID, sectionID pgtype.UUID, title, descr
 		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), SectionID: util.UUIDToString(sectionID),
 		Title: title, Description: description, PartLabel: partLabel,
 		OwnerType: ownerType.String, OwnerID: util.UUIDToString(ownerID), OwnerName: ownerName,
-		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{},
+		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{}, Links: []VisionPlanObjectLink{},
 		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }

@@ -68,15 +68,24 @@ export function CerebroAgentContextTab({
 
   return (
     <div className="space-y-5 p-4 md:p-6">
-      {runtimeSupportOn && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <AgentContextRuntimeSupportPanel agent={agent} />
-          <AgentContextEffectivePromptPanel agent={agent} />
-          <AgentContextSwapPanel agent={agent} runtimes={runtimes} />
-        </div>
-      )}
+      <AgentContextProposeDialog
+        agent={agent}
+        canReview={canManage}
+        controlFirst={runtimeSupportOn}
+      />
 
-      <AgentContextProposeDialog agent={agent} canReview={canManage} />
+      {runtimeSupportOn && (
+        <details className="rounded-xl border bg-card">
+          <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
+            Engine support, effective prompt and swap impact
+          </summary>
+          <div className="grid gap-4 border-t p-4 xl:grid-cols-2">
+            <AgentContextRuntimeSupportPanel agent={agent} />
+            <AgentContextEffectivePromptPanel agent={agent} />
+            <AgentContextSwapPanel agent={agent} runtimes={runtimes} />
+          </div>
+        </details>
+      )}
 
       <div className="my-1 h-px bg-border" />
 

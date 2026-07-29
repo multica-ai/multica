@@ -30,9 +30,11 @@ import {
 import type {
   CadenceUnit,
   NoteType,
+  NoteTypeParticipant,
   NoteTypeWriteInput,
   RecurrenceMode,
 } from "@multica/cerebro-artifacts/core";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 
 const DEFAULT_TEMPLATE = `## Business Review - {{måned}} {{år}}
 
@@ -87,11 +89,50 @@ const WEEKDAY_OPTIONS = Object.entries(WEEKDAY_LABELS).map(([value, label]) => (
   label,
 }));
 
-function cadenceBadge(unit: CadenceUnit, count: number, anchorWeekday?: number | null): string {
+// Ordinal week-of-month labels; -1 means the last occurrence in the month.
+const WEEK_OF_MONTH_LABELS: Record<number, string> = {
+  1: "First",
+  2: "Second",
+  3: "Third",
+  4: "Fourth",
+  5: "Fifth",
+  [-1]: "Last",
+};
+
+const WEEK_OF_MONTH_OPTIONS = [1, 2, 3, 4, 5, -1].map((value) => ({
+  value,
+  label: WEEK_OF_MONTH_LABELS[value] ?? String(value),
+}));
+
+// "the 3rd Monday" style fragment for a monthly week-of-month anchor.
+function monthlyWeekPhrase(weekOfMonth: number, anchorWeekday: number): string {
+  const ordinal = WEEK_OF_MONTH_LABELS[weekOfMonth] ?? "selected";
+  const weekday = WEEKDAY_LABELS[anchorWeekday] ?? "selected weekday";
+  return `the ${ordinal.toLowerCase()} ${weekday}`;
+}
+
+function hasMonthlyWeekAnchor(
+  unit: CadenceUnit,
+  anchorWeekday?: number | null,
+  weekOfMonth?: number | null,
+): boolean {
+  return unit === "month" && !!anchorWeekday && weekOfMonth != null;
+}
+
+function cadenceBadge(
+  unit: CadenceUnit,
+  count: number,
+  anchorWeekday?: number | null,
+  weekOfMonth?: number | null,
+): string {
   if (unit === "manual") return "Manual";
   if (unit === "week" && anchorWeekday) {
     const interval = count <= 1 ? "week" : `${count} weeks`;
     return `Every ${interval} on ${WEEKDAY_LABELS[anchorWeekday] ?? "selected weekday"}`;
+  }
+  if (hasMonthlyWeekAnchor(unit, anchorWeekday, weekOfMonth)) {
+    const interval = count <= 1 ? "month" : `${count} months`;
+    return `Every ${interval} on ${monthlyWeekPhrase(weekOfMonth as number, anchorWeekday as number)}`;
   }
   if (count <= 1) return `Every ${CADENCE_BADGE[unit]}`;
   return `Every ${count} ${CADENCE_BADGE[unit]}s`;
@@ -101,10 +142,14 @@ function cadenceHelperText(
   unit: CadenceUnit,
   count: number,
   anchorWeekday?: number | null,
+  weekOfMonth?: number | null,
 ): string {
   if (unit === "manual") return "Runs only when you click “Run now”.";
-  const badge = cadenceBadge(unit, count, anchorWeekday);
-  if (unit === "week" && anchorWeekday) {
+  const badge = cadenceBadge(unit, count, anchorWeekday, weekOfMonth);
+  if (
+    (unit === "week" && anchorWeekday) ||
+    hasMonthlyWeekAnchor(unit, anchorWeekday, weekOfMonth)
+  ) {
     return `Runs automatically ${badge.charAt(0).toLowerCase()}${badge.slice(1)}.`;
   }
   return `Runs automatically ${badge.toLowerCase()}.`;
@@ -123,7 +168,9 @@ interface DraftState {
   numbering_enabled: boolean;
   next_number: number;
   anchor_weekday: number | null;
+  anchor_week_of_month: number | null;
   author_codes: boolean;
+  participants: NoteTypeParticipant[];
 }
 
 function emptyDraft(): DraftState {
@@ -140,7 +187,9 @@ function emptyDraft(): DraftState {
     numbering_enabled: false,
     next_number: 1,
     anchor_weekday: null,
+    anchor_week_of_month: null,
     author_codes: false,
+    participants: [],
   };
 }
 
@@ -158,7 +207,9 @@ function draftFrom(nt: NoteType): DraftState {
     numbering_enabled: nt.numbering_enabled,
     next_number: nt.next_number,
     anchor_weekday: nt.anchor_weekday,
+    anchor_week_of_month: nt.anchor_week_of_month,
     author_codes: nt.author_codes,
+    participants: nt.participants ?? [],
   };
 }
 
@@ -186,6 +237,8 @@ export function NoteTypesPanel({
   const { data: folders } = useQuery(
     artifactFoldersOptions(wsId, { kind: "note" }),
   );
+  const { data: members } = useQuery(memberListOptions(wsId));
+  const { data: agents } = useQuery(agentListOptions(wsId));
   const create = useCreateNoteType();
   const update = useUpdateNoteType();
   const remove = useDeleteNoteType();
@@ -247,8 +300,14 @@ export function NoteTypesPanel({
       enabled: draft.enabled,
       numbering_enabled: draft.numbering_enabled,
       next_number: Math.max(1, draft.next_number),
-      anchor_weekday: draft.cadence_unit === "week" ? draft.anchor_weekday : null,
+      anchor_weekday:
+        draft.cadence_unit === "week" || draft.cadence_unit === "month"
+          ? draft.anchor_weekday
+          : null,
+      anchor_week_of_month:
+        draft.cadence_unit === "month" ? draft.anchor_week_of_month : null,
       author_codes: draft.author_codes,
+      participants: draft.participants,
     };
     if (draft.id) {
       await update.mutateAsync({ id: draft.id, data: payload });
@@ -264,6 +323,27 @@ export function NoteTypesPanel({
   // Editor view
   // -------------------------------------------------------------------------
   if (draft) {
+    const participantDraft = draft;
+    const memberList = members ?? [];
+    const agentList = agents ?? [];
+    const participantName = (participant: NoteTypeParticipant): string => {
+      const pool = participant.type === "agent" ? agentList : memberList;
+      return pool.find((entry) => entry.id === participant.id)?.name ?? "Unknown";
+    };
+    const participantKey = (participant: NoteTypeParticipant) => `${participant.type}:${participant.id}`;
+    const selectedKeys = new Set(participantDraft.participants.map(participantKey));
+    const participantOptions = [
+      ...memberList.map((member) => ({ value: `member:${member.id}`, label: member.name, group: "People" })),
+      ...agentList.map((agent) => ({ value: `agent:${agent.id}`, label: agent.name, group: "Agents" })),
+    ].filter((option) => !selectedKeys.has(option.value));
+    const addParticipant = (value: string | null) => {
+      const [type, id] = (value ?? "").split(":");
+      if ((type !== "member" && type !== "agent") || !id) return;
+      setDraft({ ...participantDraft, participants: [...participantDraft.participants, { type, id }] });
+    };
+    const removeParticipant = (participant: NoteTypeParticipant) => {
+      setDraft({ ...participantDraft, participants: participantDraft.participants.filter((entry) => participantKey(entry) !== participantKey(participant)) });
+    };
     return (
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
@@ -346,7 +426,12 @@ export function NoteTypesPanel({
                 setDraft({
                   ...draft,
                   cadence_unit: cadenceUnit,
-                  anchor_weekday: cadenceUnit === "week" ? draft.anchor_weekday : null,
+                  anchor_weekday:
+                    cadenceUnit === "week" || cadenceUnit === "month"
+                      ? draft.anchor_weekday
+                      : null,
+                  anchor_week_of_month:
+                    cadenceUnit === "month" ? draft.anchor_week_of_month : null,
                 });
               }}
             >
@@ -367,6 +452,7 @@ export function NoteTypesPanel({
               draft.cadence_unit,
               draft.cadence_count,
               draft.anchor_weekday,
+              draft.anchor_week_of_month,
             )}
           </p>
         </div>
@@ -404,6 +490,107 @@ export function NoteTypesPanel({
             </p>
           </div>
         )}
+
+        {draft.cadence_unit === "month" && (
+          <div className="flex flex-col gap-1.5">
+            <Label>Day of the month</Label>
+            <div className="flex items-center gap-2">
+              <Select
+                value={
+                  draft.anchor_week_of_month != null
+                    ? String(draft.anchor_week_of_month)
+                    : NO_ANCHOR_WEEKDAY
+                }
+                onValueChange={(v) =>
+                  setDraft({
+                    ...draft,
+                    anchor_week_of_month: v === NO_ANCHOR_WEEKDAY ? null : Number(v),
+                    // Selecting an ordinal needs a weekday; default to Monday.
+                    anchor_weekday:
+                      v === NO_ANCHOR_WEEKDAY ? null : (draft.anchor_weekday ?? 1),
+                  })
+                }
+              >
+                <SelectTrigger className="flex-1">
+                  <span>
+                    {draft.anchor_week_of_month != null
+                      ? WEEK_OF_MONTH_LABELS[draft.anchor_week_of_month]
+                      : "Same date each month"}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ANCHOR_WEEKDAY}>Same date each month</SelectItem>
+                  {WEEK_OF_MONTH_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={String(option.value)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={draft.anchor_weekday ? String(draft.anchor_weekday) : "1"}
+                disabled={draft.anchor_week_of_month == null}
+                onValueChange={(v) => setDraft({ ...draft, anchor_weekday: Number(v) })}
+              >
+                <SelectTrigger className="flex-1">
+                  <span>{WEEKDAY_LABELS[draft.anchor_weekday ?? 1]}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {WEEKDAY_OPTIONS.map((day) => (
+                    <SelectItem key={day.value} value={String(day.value)}>
+                      {day.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {draft.anchor_week_of_month != null && draft.anchor_weekday
+                ? `Runs on ${monthlyWeekPhrase(draft.anchor_week_of_month, draft.anchor_weekday)} of each month.`
+                : "Pick an ordinal (e.g. Third) and a weekday to run on the 3rd Monday of every month, or keep the same date each month."}
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <Label>Participants</Label>
+          {participantDraft.participants.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {participantDraft.participants.map((participant) => (
+                <Badge key={participantKey(participant)} variant="secondary" className="gap-1">
+                  {participantName(participant)}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${participantName(participant)}`}
+                    onClick={() => removeParticipant(participant)}
+                    className="ml-0.5 rounded-sm text-muted-foreground hover:text-foreground"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+          <Select value="" onValueChange={addParticipant}>
+            <SelectTrigger aria-label="Add participant">
+              <span className="text-muted-foreground">Add a person or agent…</span>
+            </SelectTrigger>
+            <SelectContent>
+              {participantOptions.length === 0 ? (
+                <SelectItem value="__none__" disabled>
+                  Everyone is already added
+                </SelectItem>
+              ) : (
+                participantOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">Who attends this cycle. They travel with every note it creates.</p>
+        </div>
 
         <div className="grid grid-cols-1 gap-3">
           <div className="flex flex-col gap-1.5">
@@ -560,7 +747,7 @@ export function NoteTypesPanel({
                 {MODE_LABELS[nt.recurrence_mode]}
               </Badge>
               <Badge variant="outline" className="text-[10px] font-normal">
-                {cadenceBadge(nt.cadence_unit, nt.cadence_count, nt.anchor_weekday)}
+                {cadenceBadge(nt.cadence_unit, nt.cadence_count, nt.anchor_weekday, nt.anchor_week_of_month)}
               </Badge>
               {nt.numbering_enabled && (
                 <Badge variant="outline" className="text-[10px] font-normal">

@@ -92,19 +92,23 @@ var fieldDelivery = map[string]struct {
 	execField agent.ExecOptionField
 }{
 	// The instructions ARE the system prompt (daemon.go builds it from them).
-	"instructions": {by: DeliveryEngine, execField: agent.FieldSystemPrompt},
-	// runtime_config carries system_prompt_mode — see
-	// daemon/cerebro_system_prompt_mode.go. It changes how the prompt is
-	// delivered, so the system-prompt entry governs it too.
-	"runtime_config": {by: DeliveryEngine, execField: agent.FieldSystemPrompt},
-	"model":          {by: DeliveryEngine, execField: agent.FieldModel},
-	"thinking_level": {by: DeliveryEngine, execField: agent.FieldThinkingLevel},
-	"mcp_config":     {by: DeliveryEngine, execField: agent.FieldMCPConfig},
-	"custom_args":    {by: DeliveryEngine, execField: agent.FieldCustomArgs},
+	"runtime_id":         {by: DeliveryMultica},
+	"instructions":       {by: DeliveryEngine, execField: agent.FieldSystemPrompt},
+	"system_prompt_mode": {by: DeliveryEngine, execField: agent.FieldSystemPrompt},
+	"model":              {by: DeliveryEngine, execField: agent.FieldModel},
+	"thinking_level":     {by: DeliveryEngine, execField: agent.FieldThinkingLevel},
+	"speed_mode":         {by: DeliveryEngine, execField: agent.FieldSpeedMode},
+	"max_turns":          {by: DeliveryEngine, execField: agent.FieldMaxTurns},
+	"timeout_minutes":    {by: DeliveryMultica},
+	"mcp_config":         {by: DeliveryEngine, execField: agent.FieldMCPConfig},
+	"custom_args":        {by: DeliveryEngine, execField: agent.FieldCustomArgs},
 
 	// Applied by Multica around the engine process, so they hold everywhere.
-	"skill_ids":       {by: DeliveryMultica},
-	"custom_env_keys": {by: DeliveryMultica},
+	"skill_ids":            {by: DeliveryMultica},
+	"custom_env_keys":      {by: DeliveryMultica},
+	"workspace_brief_mode": {by: DeliveryMultica},
+	"tools_brief_mode":     {by: DeliveryMultica},
+	"runtime_config":       {by: DeliveryMultica},
 
 	// A label on the agent. It reaches no run.
 	"description": {by: DeliveryNone},
@@ -114,7 +118,7 @@ var fieldDelivery = map[string]struct {
 // its system prompt. Only these warrant the prompt-delivery sentence — attaching
 // it to a model-only change would warn about semantics that approval leaves
 // untouched.
-var promptFields = []string{"instructions", "runtime_config"}
+var promptFields = []string{"instructions", "system_prompt_mode"}
 
 // ApprovalSnapshotFields lists every snapshot key this file can classify, sorted.
 // Exported so a test (and a caller enumerating the whole bundle) does not have to

@@ -11,8 +11,7 @@ import { rockToInput } from "../core/rock-input";
 import { goalTypesOptions, periodsOptions, rocksOptions, settingsOptions, strategyOptions, useSavePeriod, useSaveRock } from "../core/queries";
 import type { GoalType, OperatingPeriod, Rock, RockInput, Terminology } from "../core/types";
 import { HealthBadge, HealthScore } from "./health-score";
-import { RockDetail } from "./rock-detail";
-import { RockForm } from "./rock-form";
+import { RockEditor } from "./rock-editor";
 import { RocksTimeline } from "./rocks-timeline";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
 
@@ -198,14 +197,7 @@ export function RocksPage() {
         )}
 
         {openRock && (
-          <section aria-label={`Edit ${openRock.title}`} className="grid gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">{openRock.title}</h2>
-              <button type="button" aria-label="Close" onClick={() => setOpenRockId(undefined)} className="h-8 rounded-md border px-3 text-sm font-medium">Close</button>
-            </div>
-            <RockForm wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={openRock} onSaved={() => setOpenRockId(undefined)} onCancel={() => setOpenRockId(undefined)} />
-            <RockDetail wsId={wsId} rock={openRock} terminology={terminology} />
-          </section>
+          <RockEditor wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={openRock} onClose={() => setOpenRockId(undefined)} />
         )}
 
         <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-center text-sm text-muted-foreground"><strong className="text-foreground">Built on Multica</strong> — a {terminology.rock} can stand alone or connect to Projects and Issues.</footer>

@@ -707,6 +707,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Every list variant, including the early open_only branch, must resolve
+	// the caller before selecting rows so private and restricted issues never
+	// enter the response.
+	member, ok := h.resolveMemberFromRequest(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
 
 	// Parse optional filter params. Malformed UUIDs in filters return 400 —
 	// silently coercing them to a zero UUID would mask a client bug and let
@@ -828,6 +836,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:      wsUUID,
+			IsAdmin:          isWorkspaceAdmin(member),
+			UserID:           member.UserID,
 			Priority:         priorityFilter,
 			AssigneeID:       assigneeFilter,
 			AssigneeIds:      assigneeIdsFilter,
@@ -899,14 +909,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	var scheduledFilter pgtype.Bool
 	if r.URL.Query().Get("scheduled") == "true" {
 		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
-	}
-
-	// CEREBRO-PATCH(list-issues-access-context): the access/privacy predicate
-	// below needs the caller's role and user id.
-	member, ok := h.resolveMemberFromRequest(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
 	}
 
 	// Parse sort and direction params for dynamic ORDER BY.

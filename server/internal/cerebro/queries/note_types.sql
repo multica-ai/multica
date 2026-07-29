@@ -4,12 +4,14 @@
 INSERT INTO cerebro_note_type (
     workspace_id, name, icon, template_body, recurrence_mode,
     cadence_unit, cadence_count, target_folder_id, enabled, created_by,
-    numbering_enabled, next_number, anchor_weekday, author_codes
+    numbering_enabled, next_number, anchor_weekday, author_codes,
+    anchor_week_of_month, participants
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, sqlc.narg(target_folder_id), $8, $9,
-    $10, $11, sqlc.narg(anchor_weekday), $12
+    $10, $11, sqlc.narg(anchor_weekday), $12,
+    sqlc.narg(anchor_week_of_month), COALESCE(sqlc.narg(participants), '[]'::jsonb)
 )
 RETURNING *;
 
@@ -35,6 +37,8 @@ SET name = $2,
     next_number = $10,
     anchor_weekday = sqlc.narg(anchor_weekday),
     author_codes = $11,
+    anchor_week_of_month = sqlc.narg(anchor_week_of_month),
+    participants = COALESCE(sqlc.narg(participants), '[]'::jsonb),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -84,6 +88,15 @@ UPDATE artifact SET body = $2, updated_at = now() WHERE id = $1;
 -- name: FindArtifactByNoteTypePeriod :one
 SELECT id FROM artifact
 WHERE note_type_id = $1 AND period_key = $2;
+
+-- name: GetLatestNoteTypeArtifact :one
+-- Newest materialised note for a type — used to link the planner into the
+-- current period's note when a type has no single rolling document
+-- (new_note mode leaves running_doc_artifact_id NULL).
+SELECT id FROM artifact
+WHERE note_type_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: GetCerebroNoteTypesFlagForWorkspace :one
 -- Workspace-level value of the cerebro_note_types feature flag. pgx.ErrNoRows

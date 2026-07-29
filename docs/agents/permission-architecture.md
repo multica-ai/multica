@@ -281,7 +281,7 @@ Middleware defs in `server/internal/middleware/`; helpers `roleAllowed` (`handle
 | `RequireWorkspaceRole("owner","admin")` | `workspace.go:167` | group writes, role writes, auth-settings, status-model writes | hardcoded role |
 | `RequireWorkspaceMember` / `…FromURL` | `workspace.go:161/173` | the entire workspace-scoped API subtree | membership row |
 | `RequireUserScope` | `middleware/scope.go:85` | reject task-token actors | scope flag |
-| `AllowTaskScopeForIssue/Agent/Workspace` | `scope.go:98/116/137` | bind a task token to its issue/agent/workspace | token binding |
+| `AllowTaskScopeForIssue/Agent/Workspace` | `scope.go:98/116/137` | bind a task token to its issue/agent/workspace, including issue-property value writes and workspace property-catalog reads | verified task-token binding |
 | `RequireHumanActor` | `handler/actor_guards.go:96` | `/api/cloud-billing/*` (block machine actors) | `X-Actor-Source` header |
 | ~40 in-handler `roleAllowed` / `requireWorkspaceRole(...,"owner","admin")` | agent.go, squad.go, project_access.go, skill.go, runtime.go, runtime_tools_admin_cerebro.go, artifact.go, comment.go, … | per-action owner/admin gates and author-or-admin ownership compares | hardcoded role / ownership |
 | `sessionmode.Handler.requestContext(write=true)` | `cerebro/sessionmode/handler.go` | Settings-managed Mode drafts, Publish and Restore | workspace owner/admin and human actor only; reads remain member-visible |

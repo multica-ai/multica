@@ -1,24 +1,30 @@
-// FIR-3212 — the Production prompt tab on the agent detail page: the
-// byte-exact prompt a run actually read, captured by the daemon at claim
-// time. Everything shown here is recorded evidence — never a preview agent,
-// never a reconstruction. When there is no evidence the tab says so instead
-// of synthesizing one.
+// FIR-4000 — evidence-first Production prompt explorer.
+//
+// "This run" is byte-exact recorded evidence. Pending and Difference views
+// apply only the versioned proposal fields we can prove from the stored
+// snapshot, and say so explicitly; a new byte-exact prompt exists only after a
+// run is captured.
 
 "use client";
 
 import { useMemo, useState, type ComponentType, type ReactNode } from "react";
-import { FileCode2 } from "lucide-react";
+import { Check, Copy, FileCode2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent, AgentRuntime } from "@multica/core/types";
+import type {
+  Agent,
+  AgentContextChangeRequest,
+  AgentContextSnapshot,
+  AgentRuntime,
+} from "@multica/core/types";
+import { api } from "@multica/core/api";
 import { estimateTokensFromLength } from "@multica/cerebro-profile/core";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
-  listAgentPromptSnapshots,
   getAgentPromptSnapshot,
+  listAgentPromptSnapshots,
   type PromptSnapshot,
-  type PromptSnapshotLayer,
   type PromptSnapshotRef,
 } from "../api";
 
@@ -44,34 +50,31 @@ export function createAgentPromptSnapshotTabs(): AgentPromptSnapshotTabExtension
   ];
 }
 
+type ViewMode = "current" | "after_proposal" | "diff";
+
+export interface PromptPart {
+  id: "role" | "tools" | "skills" | "shared" | "case" | "controls";
+  label: string;
+  content: string;
+  delivery: string;
+  byteSize: number;
+  state?: string;
+}
+
 const listKey = (agentId: string) =>
   ["cerebro", "agent-prompt-snapshots", agentId] as const;
 const detailKey = (agentId: string, taskId: string) =>
   ["cerebro", "agent-prompt-snapshot", agentId, taskId] as const;
+const proposalsKey = (agentId: string) =>
+  ["cerebro", "agent-context", agentId, "change-requests"] as const;
 
-type ViewMode = "current" | "after_proposal" | "diff";
-
-const shortSha = (sha: string) => (sha ? sha.slice(0, 8) : "—");
-
-function formatBytes(n: number): string {
-  return `${n.toLocaleString("en-US")} bytes`;
-}
-
-// Bytes answer "how much was stored"; tokens answer "how much of the model's
-// context this run actually spent" — the question a reader of this tab has.
-// Estimated from the recorded byte count (the stored view is redacted, so its
-// text is not what was sent) and always rendered with a "~" so it never reads
-// as an exact count. Agent prompts are English (workspace rule).
-function formatTokens(bytes: number): string {
-  const { tokens } = estimateTokensFromLength(bytes, "en");
-  return `~${tokens.toLocaleString("en-US")} tokens`;
-}
+const shortSha = (sha: string) => (sha ? sha.slice(0, 10) : "—");
 
 function formatRunDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
+  const value = new Date(iso);
+  if (Number.isNaN(value.getTime())) return "—";
+  return value.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -79,24 +82,252 @@ function formatRunDate(iso: string | null | undefined): string {
   });
 }
 
-/** Human wording for how a layer physically reached the runtime. */
 function deliveryLabel(delivery: string): string {
   switch (delivery) {
     case "system_prompt":
-      return "native system prompt";
+      return "Native system prompt";
     case "workdir_file":
-      return "instruction file in the working directory";
+      return "Instruction file";
     case "user_prompt":
-      return "delivered as user text — no native system prompt on this runtime";
+      return "User message";
+    case "daemon":
+      return "Applied by Multica";
     default:
-      return delivery || "unknown delivery";
+      return delivery || "Not delivered";
   }
+}
+
+function runtimeConfig(
+  snapshot: AgentContextSnapshot | Agent,
+): Record<string, unknown> {
+  const value = snapshot.runtime_config;
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function settingText(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value !== "") return value;
+  if (typeof value === "number" && value > 0) return String(value);
+  return fallback;
+}
+
+function controlText(snapshot: AgentContextSnapshot | Agent): string {
+  const config = runtimeConfig(snapshot);
+  return [
+    `System prompt: ${settingText(config.system_prompt_mode, "Engine default")}`,
+    `Model: ${settingText(snapshot.model, "Engine default")}`,
+    `Thinking time: ${settingText(snapshot.thinking_level, "Engine default")}`,
+    `Speed: ${settingText(config.speed_mode, "Standard")}`,
+    `Stop after: ${settingText(config.max_turns, "Run mode default")}`,
+    `Give up after: ${settingText(config.timeout_minutes, "Run mode default")}`,
+  ].join("\n");
+}
+
+interface TextRange {
+  start: number;
+  end: number;
+  content: string;
+}
+
+function sectionRange(
+  content: string,
+  heading: RegExp,
+  nextHeading: RegExp,
+): TextRange | null {
+  const startMatch = heading.exec(content);
+  if (!startMatch || startMatch.index == null) return null;
+  const start = startMatch.index;
+  const tail = content.slice(start + startMatch[0].length);
+  const next = nextHeading.exec(tail);
+  const end =
+    next?.index == null
+      ? content.length
+      : start + startMatch[0].length + next.index;
+  return { start, end, content: content.slice(start, end).trim() };
+}
+
+function withoutRanges(content: string, ranges: Array<TextRange | null>): string {
+  const sorted = ranges
+    .filter((value): value is TextRange => value != null)
+    .sort((a, b) => b.start - a.start);
+  let result = content;
+  for (const range of sorted) {
+    result = `${result.slice(0, range.start)}${result.slice(range.end)}`;
+  }
+  return result.trim();
+}
+
+export function splitPromptParts(
+  snapshot: PromptSnapshot,
+  agent: Agent,
+): PromptPart[] {
+  const runtime =
+    snapshot.layers.find((layer) => layer.name === "runtime_brief") ??
+    snapshot.layers.find((layer) => layer.name === "agent_identity");
+  const task = snapshot.layers.find((layer) => layer.name === "task_prompt");
+  const content = runtime?.content_redacted ?? "";
+  const role = sectionRange(
+    content,
+    /^## Agent Identity\s*$/m,
+    /^##\s+/m,
+  );
+  const skills = sectionRange(
+    content,
+    /^## Agent Skills\s*$/m,
+    /^##\s+/m,
+  );
+  const tools = sectionRange(
+    content,
+    /^### Connections & MCP tools.*$/m,
+    /^(?:##|###)\s+/m,
+  );
+  const shared = withoutRanges(content, [role, skills, tools]);
+  const delivery = runtime?.delivery ?? "";
+
+  return [
+    {
+      id: "role",
+      label: "Role & instructions",
+      content: role?.content ?? "",
+      delivery,
+      byteSize: role?.content.length ?? 0,
+      state: role ? undefined : "Not present in this run",
+    },
+    {
+      id: "tools",
+      label: "Tools & connections",
+      content: tools?.content ?? "",
+      delivery,
+      byteSize: tools?.content.length ?? 0,
+      state: tools ? undefined : "Not present in this run",
+    },
+    {
+      id: "skills",
+      label: "Skills",
+      content: skills?.content ?? "",
+      delivery,
+      byteSize: skills?.content.length ?? 0,
+      state: skills ? undefined : "No skills included",
+    },
+    {
+      id: "shared",
+      label: "Shared brief",
+      content: shared,
+      delivery,
+      byteSize: shared.length,
+      state: shared ? undefined : "Skipped for this run",
+    },
+    {
+      id: "case",
+      label: "Case itself",
+      content: task?.content_redacted ?? "",
+      delivery: task?.delivery ?? "user_prompt",
+      byteSize: task?.byte_size ?? 0,
+      state: task ? undefined : "No case text recorded",
+    },
+    {
+      id: "controls",
+      label: "Run controls",
+      content: controlText(agent),
+      delivery: "daemon",
+      byteSize: 0,
+      state: "Runtime envelope — not prompt text",
+    },
+  ];
+}
+
+function applyPendingProposal(
+  current: PromptPart[],
+  agent: Agent,
+  proposal: AgentContextChangeRequest,
+): PromptPart[] {
+  const proposed = proposal.proposed_snapshot;
+  const config = runtimeConfig(proposed);
+  return current.map((part) => {
+    if (part.id === "role" && proposed.instructions !== agent.instructions) {
+      const replaced = part.content.includes(agent.instructions)
+        ? part.content.replace(agent.instructions, proposed.instructions)
+        : proposed.instructions;
+      return {
+        ...part,
+        content: replaced,
+        byteSize: replaced.length,
+        state: "Pending instructions applied",
+      };
+    }
+    if (part.id === "shared" && config.workspace_brief_mode === "off") {
+      return {
+        ...part,
+        content: "",
+        byteSize: 0,
+        state: "Skipped by pending change",
+      };
+    }
+    if (part.id === "tools" && config.tools_brief_mode === "summary") {
+      return {
+        ...part,
+        state: "Pending change will use the connection summary",
+      };
+    }
+    if (part.id === "role") {
+      const mode = config.system_prompt_mode;
+      return {
+        ...part,
+        delivery:
+          mode === "prepend"
+            ? "user_prompt"
+            : mode === "append" || mode === "replace"
+              ? "system_prompt"
+              : part.delivery,
+      };
+    }
+    if (part.id === "controls") {
+      const content = controlText(proposed);
+      return {
+        ...part,
+        content,
+        state: `Pending version ${proposal.proposed_version}`,
+      };
+    }
+    return part;
+  });
+}
+
+function diffContent(before: string, after: string): string {
+  if (before === after) return "No change";
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  const lines: string[] = [];
+  const max = Math.max(beforeLines.length, afterLines.length);
+  for (let index = 0; index < max; index += 1) {
+    if (beforeLines[index] === afterLines[index]) {
+      if (beforeLines[index] != null) lines.push(`  ${beforeLines[index]}`);
+      continue;
+    }
+    if (beforeLines[index] != null) lines.push(`- ${beforeLines[index]}`);
+    if (afterLines[index] != null) lines.push(`+ ${afterLines[index]}`);
+  }
+  return lines.join("\n");
+}
+
+function diffParts(current: PromptPart[], after: PromptPart[]): PromptPart[] {
+  return current.map((part, index) => {
+    const next = after[index] ?? part;
+    const content = diffContent(part.content, next.content);
+    return {
+      ...next,
+      content,
+      byteSize: content === "No change" ? 0 : content.length,
+      state: content === "No change" ? "Unchanged" : "Changed by pending proposal",
+    };
+  });
 }
 
 export function CerebroAgentPromptSnapshotTab({ agent }: { agent: Agent }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("current");
-  const [activeLayer, setActiveLayer] = useState<string | null>(null);
+  const [activePart, setActivePart] = useState<PromptPart["id"]>("role");
 
   const listQuery = useQuery({
     queryKey: listKey(agent.id),
@@ -104,10 +335,14 @@ export function CerebroAgentPromptSnapshotTab({ agent }: { agent: Agent }) {
     enabled: !!agent.id,
     retry: false,
   });
-
+  const proposalQuery = useQuery({
+    queryKey: proposalsKey(agent.id),
+    queryFn: () => api.listAgentContextChangeRequests(agent.id),
+    enabled: !!agent.id,
+    retry: false,
+  });
   const snapshots = listQuery.data ?? [];
   const effectiveTaskId = selectedTaskId ?? snapshots[0]?.task_id ?? null;
-
   const detailQuery = useQuery({
     queryKey: detailKey(agent.id, effectiveTaskId ?? ""),
     queryFn: () => getAgentPromptSnapshot(agent.id, effectiveTaskId ?? ""),
@@ -115,97 +350,96 @@ export function CerebroAgentPromptSnapshotTab({ agent }: { agent: Agent }) {
     retry: false,
   });
 
-  if (listQuery.isLoading) {
-    return <Skeleton className="h-48 w-full" />;
-  }
-
+  if (listQuery.isLoading) return <Skeleton className="h-72 w-full" />;
   if (listQuery.isError) {
     return (
       <p className="text-sm text-muted-foreground">
-        Prompt snapshots could not be loaded. The snapshot store may be
-        unavailable — try again, or check that the backend is reachable.
+        Prompt snapshots could not be loaded. Check that the snapshot store is
+        available and try again.
       </p>
     );
   }
-
   if (snapshots.length === 0) {
     return (
       <div className="space-y-2">
-        <h3 className="text-sm font-medium">Production prompt</h3>
+        <h3 className="text-base font-semibold">What {agent.name} actually read</h3>
         <p className="text-sm text-muted-foreground">
-          No prompt snapshots recorded for this agent yet. The daemon captures
-          the exact prompt each run reads when it claims a task; the first run
-          after this feature is enabled will appear here. Nothing is
-          reconstructed after the fact — only recorded evidence is shown.
+          No recorded run exists yet. The first run captures the exact prompt,
+          delivery path and redacted evidence here.
         </p>
       </div>
     );
   }
 
   const snapshot = detailQuery.data ?? null;
+  const pending =
+    proposalQuery.data?.find((request) => request.status === "pending") ?? null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-4 p-4 md:p-6">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h3 className="text-sm font-medium">Production prompt</h3>
-          <p className="text-xs text-muted-foreground">
-            What the agent actually read — byte for byte, as recorded in the
-            run.
+          <h3 className="text-lg font-semibold">
+            What {agent.name} actually read
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Recorded prompt evidence, split into understandable parts. Secrets
+            stay redacted.
           </p>
         </div>
-        <div className="flex items-center gap-1" role="group" aria-label="View">
-          <Button
-            size="sm"
-            variant={viewMode === "current" ? "secondary" : "ghost"}
-            onClick={() => setViewMode("current")}
-          >
-            Current
-          </Button>
-          <Button
-            size="sm"
-            variant={viewMode === "after_proposal" ? "secondary" : "ghost"}
-            onClick={() => setViewMode("after_proposal")}
-          >
-            After proposal
-          </Button>
-          <Button
-            size="sm"
-            variant={viewMode === "diff" ? "secondary" : "ghost"}
-            onClick={() => setViewMode("diff")}
-          >
-            Diff
-          </Button>
-        </div>
+        <RunSelector
+          snapshots={snapshots}
+          selectedTaskId={effectiveTaskId}
+          onSelect={(taskId) => {
+            setSelectedTaskId(taskId);
+            setActivePart("role");
+          }}
+        />
       </div>
 
-      <RunSelector
-        snapshots={snapshots}
-        selectedTaskId={effectiveTaskId}
-        onSelect={(taskId) => {
-          setSelectedTaskId(taskId);
-          setActiveLayer(null);
-        }}
-      />
+      <div
+        className="inline-flex rounded-lg border bg-muted/30 p-1"
+        role="group"
+        aria-label="Prompt comparison"
+      >
+        {(
+          [
+            ["current", "This run"],
+            ["after_proposal", "If pending change approved"],
+            ["diff", "Difference"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={viewMode === value ? "secondary" : "ghost"}
+            onClick={() => setViewMode(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
 
-      {viewMode !== "current" ? (
-        <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          Preview of a pending proposal is not available yet. The prompt shown
-          under Current is the recorded evidence from the run — a proposal
-          preview will be composed by the runtime, never reconstructed here.
-        </p>
+      {viewMode !== "current" && !pending ? (
+        <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
+          No pending configuration change exists, so there is nothing to
+          compare with this run.
+        </div>
       ) : detailQuery.isLoading ? (
-        <Skeleton className="h-64 w-full" />
-      ) : !snapshot ? (
-        <p className="text-sm text-muted-foreground">
-          This run&apos;s snapshot could not be loaded.
-        </p>
-      ) : (
-        <SnapshotView
+        <Skeleton className="h-96 w-full" />
+      ) : snapshot ? (
+        <PromptExplorer
           snapshot={snapshot}
-          activeLayer={activeLayer}
-          onSelectLayer={setActiveLayer}
+          agent={agent}
+          pending={pending}
+          viewMode={viewMode}
+          activePart={activePart}
+          onSelectPart={setActivePart}
         />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          This run&apos;s prompt snapshot could not be loaded.
+        </p>
       )}
     </div>
   );
@@ -221,22 +455,23 @@ function RunSelector({
   onSelect: (taskId: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="space-y-1">
       <label
         htmlFor="cerebro-prompt-snapshot-run"
-        className="text-xs text-muted-foreground"
+        className="text-xs font-medium"
       >
         Run
       </label>
       <select
         id="cerebro-prompt-snapshot-run"
-        className="h-8 rounded-md border bg-background px-2 text-xs"
+        className="h-9 min-w-72 rounded-md border bg-background px-3 text-xs"
         value={selectedTaskId ?? ""}
-        onChange={(e) => onSelect(e.target.value)}
+        onChange={(event) => onSelect(event.target.value)}
       >
-        {snapshots.map((s) => (
-          <option key={s.task_id} value={s.task_id}>
-            {formatRunDate(s.created_at)} · {s.provider} · {s.agent_context_version || "no version"}
+        {snapshots.map((snapshot) => (
+          <option key={snapshot.task_id} value={snapshot.task_id}>
+            {formatRunDate(snapshot.created_at)} · {snapshot.provider} ·{" "}
+            {snapshot.agent_context_version || "no version"}
           </option>
         ))}
       </select>
@@ -244,158 +479,175 @@ function RunSelector({
   );
 }
 
-function SnapshotView({
+function PromptExplorer({
   snapshot,
-  activeLayer,
-  onSelectLayer,
+  agent,
+  pending,
+  viewMode,
+  activePart,
+  onSelectPart,
 }: {
   snapshot: PromptSnapshot;
-  activeLayer: string | null;
-  onSelectLayer: (name: string | null) => void;
+  agent: Agent;
+  pending: AgentContextChangeRequest | null;
+  viewMode: ViewMode;
+  activePart: PromptPart["id"];
+  onSelectPart: (part: PromptPart["id"]) => void;
 }) {
-  const layers = snapshot.layers;
-  const visibleLayers = useMemo(
-    () =>
-      activeLayer ? layers.filter((l) => l.name === activeLayer) : layers,
-    [layers, activeLayer],
+  const current = useMemo(
+    () => splitPromptParts(snapshot, agent),
+    [snapshot, agent],
   );
-
-  // Continuous line numbering across layers, in recorded order.
-  const layerLineStarts = useMemo(() => {
-    const starts = new Map<string, number>();
-    let line = 1;
-    for (const l of layers) {
-      starts.set(l.name, line);
-      line += l.content_redacted.split("\n").length;
-    }
-    return starts;
-  }, [layers]);
+  const after = useMemo(
+    () => (pending ? applyPendingProposal(current, agent, pending) : current),
+    [current, agent, pending],
+  );
+  const parts =
+    viewMode === "current"
+      ? current
+      : viewMode === "after_proposal"
+        ? after
+        : diffParts(current, after);
+  const selected = (parts.find((part) => part.id === activePart) ?? parts[0])!;
+  const text = parts.map((part) => part.content).join("\n\n");
+  const { tokens } = estimateTokensFromLength(snapshot.total_bytes, "en");
+  const [copied, setCopied] = useState(false);
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span>{formatRunDate(snapshot.created_at)}</span>
-        <span className="font-mono" title={`Run ${snapshot.task_id}`}>
-          run {snapshot.task_id}
-        </span>
-        <span className="font-mono">
-          {snapshot.provider} {snapshot.runtime_version}
-        </span>
-        <Badge variant="outline">{snapshot.agent_context_version || "no version"}</Badge>
-        <span>
-          {formatBytes(snapshot.total_bytes)} · {formatTokens(snapshot.total_bytes)}
-        </span>
-        <span className="font-mono" title={snapshot.sha256_redacted}>
-          sha256 {shortSha(snapshot.sha256_redacted)}
-        </span>
-        <Badge variant="secondary">
-          Captured from the run — not reconstructed
-        </Badge>
+    <div className="space-y-4">
+      <div className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3 xl:grid-cols-6">
+        <Metric label="Characters" value={snapshot.total_bytes.toLocaleString("en-US")} />
+        <Metric label="Estimated tokens" value={`~${tokens.toLocaleString("en-US")} tokens`} />
+        <Metric label="Parts" value={String(parts.length)} />
+        <Metric label="Delivery" value={snapshot.system_prompt_mode || "Engine default"} />
+        <Metric label="Redaction" value={snapshot.redacted ? "Applied" : "Not needed"} />
+        <Metric label="Config" value={snapshot.agent_context_version || "Unversioned"} />
       </div>
 
-      {snapshot.redacted && (
-        <p className="text-xs text-muted-foreground">
-          Secrets were redacted before storage. Original prompt sha256{" "}
-          <span className="font-mono" title={snapshot.sha256_original}>
-            {shortSha(snapshot.sha256_original)}
-          </span>{" "}
-          (computed before redaction, recorded for provenance); the view below
-          hashes to{" "}
-          <span className="font-mono" title={snapshot.sha256_redacted}>
-            {shortSha(snapshot.sha256_redacted)}
-          </span>
-          .
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge variant="secondary">Captured from the run — not reconstructed</Badge>
+        <span className="font-mono">run {snapshot.task_id}</span>
+      </div>
+
+      {viewMode !== "current" && pending && (
+        <p className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-xs text-muted-foreground">
+          This view applies the stored pending configuration to recorded
+          evidence. The next run will create the byte-exact after snapshot.
         </p>
       )}
 
-      <div className="flex gap-4">
-        <nav className="w-56 shrink-0 space-y-1" aria-label="Layers in the file">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Layers
+      <div className="grid min-h-[34rem] overflow-hidden rounded-xl border lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <nav className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r" aria-label="Prompt parts">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Parts
           </p>
-          <button
-            type="button"
-            className={`block w-full rounded px-2 py-1 text-left text-xs ${
-              activeLayer === null ? "bg-muted font-medium" : "hover:bg-muted/50"
-            }`}
-            onClick={() => onSelectLayer(null)}
-          >
-            All layers
-          </button>
-          {layers.map((l) => (
-            <button
-              key={l.name}
-              type="button"
-              className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs ${
-                activeLayer === l.name
-                  ? "bg-muted font-medium"
-                  : "hover:bg-muted/50"
-              }`}
-              onClick={() => onSelectLayer(l.name)}
-            >
-              <span className="truncate">{l.name}</span>
-              <span className="shrink-0 text-muted-foreground">
-                {l.byte_size.toLocaleString("en-US")}
-              </span>
-            </button>
-          ))}
+          <div className="space-y-1">
+            {parts.map((part) => {
+              const partTokens = estimateTokensFromLength(
+                part.byteSize,
+                "en",
+              ).tokens;
+              return (
+                <button
+                  key={part.id}
+                  type="button"
+                  className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                    activePart === part.id
+                      ? "border-primary/30 bg-background shadow-sm"
+                      : "border-transparent hover:bg-background/70"
+                  }`}
+                  onClick={() => onSelectPart(part.id)}
+                >
+                  <span className="flex items-center justify-between gap-2 text-xs font-medium">
+                    <span>{part.label}</span>
+                    <span className="font-mono text-muted-foreground">
+                      {part.byteSize === 0 ? "0" : `~${partTokens}`}
+                    </span>
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {part.state ?? deliveryLabel(part.delivery)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </nav>
 
-        <div className="min-w-0 flex-1 space-y-4">
-          {visibleLayers.map((layer) => (
-            <LayerContent
-              key={layer.name}
-              layer={layer}
-              startLine={layerLineStarts.get(layer.name) ?? 1}
-            />
-          ))}
+        <div className="min-w-0">
+          <header className="flex flex-wrap items-center gap-2 border-b bg-muted/10 px-4 py-3">
+            <span className="text-sm font-semibold">{selected.label}</span>
+            <Badge variant="outline">{deliveryLabel(selected.delivery)}</Badge>
+            {snapshot.redacted && <Badge variant="secondary">Redacted</Badge>}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="ml-auto"
+              onClick={() => {
+                void navigator.clipboard.writeText(text).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {copied ? "Copied" : "Copy whole prompt"}
+            </Button>
+          </header>
+          <LineNumberedText content={selected.content} diff={viewMode === "diff"} />
+          <footer className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 font-mono text-xs text-muted-foreground">
+            <span title={snapshot.sha256_original}>
+              original {shortSha(snapshot.sha256_original)}
+            </span>
+            <span title={snapshot.sha256_redacted}>
+              view {shortSha(snapshot.sha256_redacted)}
+            </span>
+            <span>{snapshot.provider} {snapshot.runtime_version}</span>
+          </footer>
         </div>
       </div>
-
-      <p className="border-t pt-2 text-xs text-muted-foreground">
-        Config{" "}
-        <span className="font-medium">
-          {snapshot.agent_context_version || "(unversioned)"}
-        </span>{" "}
-        locks this prompt:{" "}
-        <span className="font-mono">sha256 {shortSha(snapshot.sha256_redacted)}</span>.
-        If any field changes, the next run gets a new sha — and a new version.
-      </p>
     </div>
   );
 }
 
-function LayerContent({
-  layer,
-  startLine,
+function LineNumberedText({
+  content,
+  diff,
 }: {
-  layer: PromptSnapshotLayer;
-  startLine: number;
+  content: string;
+  diff: boolean;
 }) {
-  const lines = layer.content_redacted.split("\n");
+  const lines = (content || "No content in this part.").split("\n");
   return (
-    <section aria-label={layer.name} className="rounded-md border">
-      <header className="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-3 py-1.5">
-        <span className="font-mono text-xs font-medium">{layer.name}</span>
-        <span className="text-[10px] text-muted-foreground">
-          {deliveryLabel(layer.delivery)}
-        </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">
-          {layer.byte_size.toLocaleString("en-US")} bytes
-        </span>
-      </header>
-      <pre className="overflow-x-auto p-0 text-xs leading-5">
-        <code>
-          {lines.map((text, i) => (
-            <span key={i} className="flex">
-              <span className="w-12 shrink-0 select-none border-r pr-2 text-right text-muted-foreground/60">
-                {startLine + i}
-              </span>
-              <span className="whitespace-pre-wrap pl-3">{text}</span>
+    <pre className="min-h-[28rem] overflow-x-auto bg-background p-0 text-xs leading-6">
+      <code>
+        {lines.map((line, index) => (
+          <span
+            key={`${index}-${line}`}
+            className={`flex ${
+              diff && line.startsWith("+ ")
+                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : diff && line.startsWith("- ")
+                  ? "bg-red-500/10 text-red-700 dark:text-red-300"
+                  : ""
+            }`}
+          >
+            <span className="w-14 shrink-0 select-none border-r pr-3 text-right text-muted-foreground/60">
+              {index + 1}
             </span>
-          ))}
-        </code>
-      </pre>
-    </section>
+            <span className="whitespace-pre-wrap px-4">{line}</span>
+          </span>
+        ))}
+      </code>
+    </pre>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-card px-3 py-2.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold">{value}</p>
+    </div>
   );
 }

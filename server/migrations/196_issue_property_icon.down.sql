@@ -1,2 +1,3 @@
 ALTER TABLE issue_property
-    DROP COLUMN icon;
+    -- CEREBRO-PATCH(issue-properties-release-gates): deployment recovery may retry this rollback.
+    DROP COLUMN IF EXISTS icon;

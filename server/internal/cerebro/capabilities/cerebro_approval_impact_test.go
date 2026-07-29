@@ -170,15 +170,25 @@ func TestApprovalImpactPromptDeliveryOnlyWhenPromptFieldsChange(t *testing.T) {
 	}
 }
 
-// runtime_config carries system_prompt_mode (cerebro_system_prompt_mode.go), so
-// changing it changes how the prompt is delivered — it belongs to the prompt.
-func TestApprovalImpactRuntimeConfigChangeReportsPromptDelivery(t *testing.T) {
-	impact := ApprovalImpactFor("claude", []string{"runtime_config"})
+// system_prompt_mode is its own labelled snapshot field, so a prompt delivery
+// change does not hide inside a generic runtime_config row.
+func TestApprovalImpactSystemPromptModeReportsPromptDelivery(t *testing.T) {
+	impact := ApprovalImpactFor("claude", []string{"system_prompt_mode"})
 	if impact.SystemPrompt == nil {
-		t.Fatal("runtime_config carries system_prompt_mode; prompt delivery must be reported")
+		t.Fatal("system_prompt_mode must report prompt delivery")
 	}
 	if impact.SystemPrompt.Delivery != PromptDeliveryNative {
 		t.Fatalf("delivery on claude = %q, want %q", impact.SystemPrompt.Delivery, PromptDeliveryNative)
+	}
+}
+
+func TestApprovalImpactClassifiesVersionedRuntimeSettings(t *testing.T) {
+	impact := ApprovalImpactFor("claude", []string{"runtime_id", "speed_mode", "max_turns", "timeout_minutes"})
+	for _, field := range []string{"runtime_id", "speed_mode", "max_turns", "timeout_minutes"} {
+		row := consequenceByField(t, impact, field)
+		if row.Consequence != ConsequenceTakesEffect {
+			t.Fatalf("%s consequence = %q, want %q", field, row.Consequence, ConsequenceTakesEffect)
+		}
 	}
 }
 

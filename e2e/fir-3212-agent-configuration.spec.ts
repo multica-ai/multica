@@ -102,6 +102,7 @@ async function seed(page: Page, flags: string[]): Promise<Seed> {
             jsonb_build_object(
               'instructions',    a.instructions,
               'description',     a.description,
+              'runtime_id',      a.runtime_id,
               'model',           a.model,
               'thinking_level',  a.thinking_level,
               'mcp_config',      a.mcp_config,
@@ -273,24 +274,31 @@ async function insertQualityRun(
 // ---------------------------------------------------------------------------
 // 1. Setup — edit the versioned instructions and approve them.
 // ---------------------------------------------------------------------------
-test("Setup: editing instructions and startup brief persists in the version a run pins", async ({
+test("Setup: control-first instructions and runtime settings persist in the version a run pins", async ({
   page,
 }) => {
-  const flags: string[] = [];
+  const flags = [FLAG_SETUP_CAPABILITIES];
   const s = await seed(page, flags);
   try {
     await openAgent(page, s);
-    await page.getByRole("button", { name: "Instructions" }).click();
+    await page.getByRole("button", { name: "Instructions", exact: true }).click();
 
     const instructions = page.getByRole("textbox", { name: "Instructions" });
     await expect(instructions).toHaveValue("Original instructions");
-    await expect(page.getByLabel("Workspace brief")).toHaveValue("");
+    await expect(page.getByLabel("Shared brief")).toHaveValue("");
     await expect(page.getByLabel("Tools list")).toHaveValue("");
+    await expect(page.getByLabel("Engine system prompt")).toHaveValue("");
+    await expect(page.getByLabel("Engine", { exact: true })).toHaveValue(
+      s.runtimeId,
+    );
+    await expect(page.getByLabel("Stop after")).toHaveValue("");
 
     // The title/rationale/buttons block only renders once the form is dirty.
     await instructions.fill("Tightened instructions for FIR-3212");
-    await page.getByLabel("Workspace brief").selectOption("off");
+    await page.getByLabel("Shared brief").selectOption("off");
     await page.getByLabel("Tools list").selectOption("summary");
+    await page.getByLabel("Engine system prompt").selectOption("replace");
+    await page.getByLabel("Stop after").fill("18");
     await page.getByLabel("Change title").fill("Tighten the instructions");
     await page.getByRole("button", { name: "Save & approve" }).click();
     await expect(page.getByText(/Change approved/)).toBeVisible();
@@ -301,21 +309,26 @@ test("Setup: editing instructions and startup brief persists in the version a ru
     await expect(page.getByRole("textbox", { name: "Instructions" })).toHaveValue(
       "Tightened instructions for FIR-3212",
     );
-    await expect(page.getByLabel("Workspace brief")).toHaveValue("off");
+    await expect(page.getByLabel("Shared brief")).toHaveValue("off");
     await expect(page.getByLabel("Tools list")).toHaveValue("summary");
+    await expect(page.getByLabel("Engine system prompt")).toHaveValue("replace");
+    await expect(page.getByLabel("Stop after")).toHaveValue("18");
 
     // What a run reads: the approved text is on the agent, the version is
     // bumped, and an immutable version row exists for a run to pin.
     const agentRow = (
       await s.database.query(
-        `SELECT instructions, context_version, runtime_config FROM agent WHERE id = $1`,
+        `SELECT instructions, context_version, runtime_id, runtime_config FROM agent WHERE id = $1`,
         [s.agentId],
       )
     ).rows[0];
     expect(agentRow.instructions).toBe("Tightened instructions for FIR-3212");
+    expect(agentRow.runtime_id).toBe(s.runtimeId);
     expect(agentRow.context_version).not.toBe("1.0.0");
     expect(agentRow.runtime_config.workspace_brief_mode).toBe("off");
     expect(agentRow.runtime_config.tools_brief_mode).toBe("summary");
+    expect(agentRow.runtime_config.system_prompt_mode).toBe("replace");
+    expect(agentRow.runtime_config.max_turns).toBe(18);
 
     const versionRow = (
       await s.database.query(
@@ -328,8 +341,11 @@ test("Setup: editing instructions and startup brief persists in the version a ru
     expect(versionRow.snapshot.instructions).toBe(
       "Tightened instructions for FIR-3212",
     );
+    expect(versionRow.snapshot.runtime_id).toBe(s.runtimeId);
     expect(versionRow.snapshot.runtime_config.workspace_brief_mode).toBe("off");
     expect(versionRow.snapshot.runtime_config.tools_brief_mode).toBe("summary");
+    expect(versionRow.snapshot.runtime_config.system_prompt_mode).toBe("replace");
+    expect(versionRow.snapshot.runtime_config.max_turns).toBe(18);
   } finally {
     await teardown(s, flags);
   }
@@ -347,6 +363,9 @@ test("Swap: selecting another engine reports what that engine changes", async ({
     await openAgent(page, s);
     await page.getByRole("button", { name: "Instructions" }).click();
 
+    await page
+      .getByText("Engine support, effective prompt and swap impact")
+      .click();
     await expect(page.getByText("Engine swap")).toBeVisible();
     const select = page.getByLabel("Compare with another engine");
 
@@ -405,6 +424,9 @@ test("Approval: a pending proposal shows its consequences and approving applies 
     await page
       .getByRole("textbox", { name: "Instructions" })
       .fill("Proposed instructions for FIR-3212");
+    await page
+      .getByLabel("Engine", { exact: true })
+      .selectOption(s.otherRuntimeId);
     await page.getByLabel("Change title").fill("Proposed change");
     await page.getByRole("button", { name: "Propose", exact: true }).click();
     await expect(page.getByText(/Change proposed/)).toBeVisible();
@@ -426,11 +448,15 @@ test("Approval: a pending proposal shows its consequences and approving applies 
     // Still pending means the agent is untouched.
     expect(
       (
-        await s.database.query(`SELECT instructions FROM agent WHERE id = $1`, [
-          s.agentId,
-        ])
-      ).rows[0].instructions,
-    ).toBe("Original instructions");
+        await s.database.query(
+          `SELECT instructions, runtime_id FROM agent WHERE id = $1`,
+          [s.agentId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      instructions: "Original instructions",
+      runtime_id: s.runtimeId,
+    });
 
     // Approving is a two-step confirm: the queue button opens a dialog that
     // carries the real Approve action (plus an optional comment).
@@ -458,11 +484,23 @@ test("Approval: a pending proposal shows its consequences and approving applies 
     expect(reviewed.reviewed_by).toBe(s.userId);
     expect(
       (
-        await s.database.query(`SELECT instructions FROM agent WHERE id = $1`, [
-          s.agentId,
-        ])
-      ).rows[0].instructions,
-    ).toBe("Proposed instructions for FIR-3212");
+        await s.database.query(
+          `SELECT instructions, runtime_id FROM agent WHERE id = $1`,
+          [s.agentId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      instructions: "Proposed instructions for FIR-3212",
+      runtime_id: s.otherRuntimeId,
+    });
+    const approvedSnapshot = (
+      await s.database.query(
+        `SELECT snapshot FROM agent_context_version
+          WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [s.agentId],
+      )
+    ).rows[0].snapshot;
+    expect(approvedSnapshot.runtime_id).toBe(s.otherRuntimeId);
   } finally {
     await teardown(s, flags);
   }
@@ -471,10 +509,10 @@ test("Approval: a pending proposal shows its consequences and approving applies 
 // ---------------------------------------------------------------------------
 // 4. Production prompt — the recorded evidence of what a run read.
 // ---------------------------------------------------------------------------
-test("Production prompt: a run's recorded prompt is shown and filterable by layer", async ({
+test("Production prompt: recorded parts and pending runtime differences stay visible", async ({
   page,
 }) => {
-  const flags = [FLAG_PRODUCTION_PROMPT];
+  const flags = [FLAG_SETUP_CAPABILITIES, FLAG_PRODUCTION_PROMPT];
   const s = await seed(page, flags);
   try {
     await openAgent(page, s);
@@ -482,7 +520,7 @@ test("Production prompt: a run's recorded prompt is shown and filterable by laye
 
     // Empty state before any run has recorded a prompt.
     await expect(
-      page.getByText(/No prompt snapshots recorded for this agent yet\./),
+      page.getByText(/No recorded run exists yet\./),
     ).toBeVisible();
 
     const olderTaskId = "3212a001-0000-4000-8000-000000000001";
@@ -495,12 +533,20 @@ test("Production prompt: a run's recorded prompt is shown and filterable by laye
       createdAt: "2026-07-16T08:00:00Z",
       layers: [
         {
-          name: "older-layer.md",
+          name: "runtime_brief",
           delivery: "system_prompt",
           byte_size: 120,
           sha256_original: "a".repeat(64),
           sha256_redacted: "a".repeat(64),
-          content_redacted: "Older run content",
+          content_redacted: "## Agent Identity\n\nOlder run content",
+        },
+        {
+          name: "task_prompt",
+          delivery: "user_prompt",
+          byte_size: 40,
+          sha256_original: "d".repeat(64),
+          sha256_redacted: "d".repeat(64),
+          content_redacted: "Older case content",
         },
       ],
     });
@@ -512,20 +558,21 @@ test("Production prompt: a run's recorded prompt is shown and filterable by laye
       createdAt: "2026-07-17T08:00:00Z",
       layers: [
         {
-          name: "CLAUDE.md",
+          name: "runtime_brief",
           delivery: "system_prompt",
           byte_size: 1024,
           sha256_original: "b".repeat(64),
           sha256_redacted: "b".repeat(64),
-          content_redacted: "System prompt layer content",
+          content_redacted:
+            "## Agent Identity\n\nOriginal instructions\n\n## Available Commands\n\nShared brief layer content\n\n### Connections & MCP tools\n\nTools layer content\n\n## Agent Skills\n\nSkill layer content",
         },
         {
-          name: "workspace-brief.md",
-          delivery: "workdir_file",
+          name: "task_prompt",
+          delivery: "user_prompt",
           byte_size: 1024,
           sha256_original: "c".repeat(64),
           sha256_redacted: "c".repeat(64),
-          content_redacted: "Workspace brief layer content",
+          content_redacted: "Case layer content",
         },
       ],
     });
@@ -538,28 +585,31 @@ test("Production prompt: a run's recorded prompt is shown and filterable by laye
       page.getByText("Captured from the run — not reconstructed"),
     ).toBeVisible();
 
-    // Both layers of the selected run are rendered.
-    await expect(page.getByText("System prompt layer content")).toBeVisible();
-    await expect(page.getByText("Workspace brief layer content")).toBeVisible();
-
-    // Drive the layer nav: filtering to one layer hides the other.
-    await page
-      .getByRole("navigation", { name: "Layers in the file" })
-      .getByRole("button", { name: /CLAUDE\.md/ })
-      .click();
-    await expect(page.getByText("System prompt layer content")).toBeVisible();
-    await expect(page.getByText("Workspace brief layer content")).toHaveCount(0);
+    // Drive the parts nav: recorded role, tools and case stay understandable.
+    await expect(page.getByText("Original instructions")).toBeVisible();
+    await page.getByRole("button", { name: /Tools & connections/ }).click();
+    await expect(page.getByText("Tools layer content")).toBeVisible();
+    await page.getByRole("button", { name: /Case itself/ }).click();
+    await expect(page.getByText("Case layer content")).toBeVisible();
 
     // Drive the run selector: switching runs shows that run's own evidence.
     await page.locator("#cerebro-prompt-snapshot-run").selectOption(olderTaskId);
     await expect(page.getByText("Older run content")).toBeVisible();
-    await expect(page.getByText("System prompt layer content")).toHaveCount(0);
+    await expect(page.getByText("Case layer content")).toHaveCount(0);
 
-    // The proposal preview is honest about not being available yet.
-    await page.getByRole("button", { name: "Diff" }).click();
-    await expect(
-      page.getByText(/Preview of a pending proposal is not available yet\./),
-    ).toBeVisible();
+    // Create a real pending proposal through the control-first surface.
+    await page.getByRole("button", { name: "Instructions", exact: true }).click();
+    await page.getByLabel("Engine system prompt").selectOption("replace");
+    await page.getByLabel("Stop after").fill("18");
+    await page.getByLabel("Change title").fill("Bound the next run");
+    await page.getByRole("button", { name: "Propose", exact: true }).click();
+    await expect(page.getByText(/Change proposed/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Production prompt" }).click();
+    await page.getByRole("button", { name: "Difference" }).click();
+    await page.getByRole("button", { name: /Run controls/ }).click();
+    await expect(page.getByText("+ System prompt: replace")).toBeVisible();
+    await expect(page.getByText("+ Stop after: 18")).toBeVisible();
 
     // Snapshots are immutable run evidence — the DB refuses any rewrite.
     await expect(

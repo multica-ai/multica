@@ -61,7 +61,22 @@ type Handler struct {
 	// Tasks enqueues the agent run when the owner accepts a
 	// private_agent_run_request (FIR-2385). nil disables only that endpoint.
 	Tasks *service.TaskService
+	// IssueAccess and VisibleIssues are the per-issue access rule, injected by
+	// the router from the upstream handler (FIR-3901). This package cannot
+	// reach loadIssueForUser / canAccessIssue, and a second copy of that rule
+	// here would drift the first time project access or issue privacy changes.
+	// Both are nil-safe at the call site and FAIL CLOSED when unset.
+	IssueAccess   IssueAccessGate
+	VisibleIssues VisibleIssuesFilter
 }
+
+// IssueAccessGate resolves one issue for the caller, or writes the error
+// response and returns ok=false. The returned UUID is the resolved issue id.
+type IssueAccessGate func(http.ResponseWriter, *http.Request, string) (pgtype.UUID, bool)
+
+// VisibleIssuesFilter narrows a set of issue ids to the ones the caller may
+// read, keyed by the issue's string UUID.
+type VisibleIssuesFilter func(*http.Request, []pgtype.UUID) map[string]bool
 
 // New constructs the handler. The router wires both query packages, the event
 // bus, and the task service in (bus may be nil in tests that don't exercise

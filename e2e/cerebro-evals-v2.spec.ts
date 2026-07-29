@@ -31,17 +31,13 @@ test.describe("FIR-3496 Evals v2 connections", () => {
     await page.goto("/e2e-workspace/workflows/evals");
     await expect(page.getByRole("heading", { name: "Evals" })).toBeVisible();
 
-    const addGate = page.getByRole("button", { name: "Add advisory gate" });
-    await expect(async () => {
-      await page.getByLabel("Eval", { exact: true }).selectOption(EVAL_ID);
-      await page.getByLabel("Issue workflow").selectOption(WORKFLOW_ID);
-      await page.getByLabel("Phase").selectOption("monitor");
-      await expect(page.getByLabel("Enforcement")).toHaveValue("warn");
-      await expect(addGate).toBeEnabled();
-    }).toPass();
+    await page.getByLabel("Eval").selectOption(EVAL_ID);
+    await page.getByLabel("Issue workflow").selectOption(WORKFLOW_ID);
+    await page.getByLabel("Phase").selectOption("monitor");
+    await page.getByLabel("Enforcement").selectOption("warn");
 
     const request = page.waitForRequest((candidate) => candidate.url().endsWith("/api/cerebro/evals/bindings") && candidate.method() === "POST");
-    await addGate.click();
+    await page.getByRole("button", { name: "Add advisory gate" }).click();
     expect((await request).postDataJSON()).toEqual({ workflow_id: WORKFLOW_ID, eval_id: EVAL_ID, phase: "monitor", blocking: false });
     await expect(page.getByText("monitor · Advisory", { exact: false })).toBeVisible();
   });
