@@ -99,10 +99,15 @@ spec:
                 - '[ "$(multica daemon status --output json | jq -r .status)" = "running" ]'
             initialDelaySeconds: 15
             periodSeconds: 15
-            # Default (1s) is tight for spawning two processes plus a loopback
-            # HTTP round-trip, especially under the CPU spikes an active
-            # session causes — avoid flapping an already-Ready pod on that.
-            timeoutSeconds: 5
+            # This is an exec probe: forking sh, multica, and jq costs real
+            # CPU-scheduling time on top of the check logic itself. Under the
+            # node-CPU contention this pod template's topologySpreadConstraint
+            # (above) targets, that fork/exec chain alone can burn several
+            # seconds before the daemon's own status logic ever runs — a
+            # too-tight timeout fails the probe on scheduling latency, not on
+            # the daemon actually being unready (AIPLAT-162). Kept comfortably
+            # under periodSeconds so a slow attempt can't overlap the next tick.
+            timeoutSeconds: 10
             failureThreshold: 3
       volumes:
         - name: secrets
@@ -111,6 +116,22 @@ spec:
             # Generous headroom over the handful of PEM keys this ever holds;
             # small enough to be a non-issue against the 2Gi pod memory limit.
             sizeLimit: 16Mi
+      # Every workspace is a separate Deployment (replicas: 1) sharing this same
+      # pod template, so the scheduler's request-based bin-packing (500m request
+      # vs 2 CPU limit — a 4x burst allowance) can and does stack several
+      # concurrently-booting pods from different workspaces onto the same node
+      # during a fleet-wide rollout, saturating its CPU and blowing every
+      # provider's version-detection timeout (AIPLAT-162). DoNotSchedule (not
+      # ScheduleAnyway) so this is an enforced spread, not just a preference —
+      # the cluster-autoscaler already has headroom to max_size=12 nodes and
+      # will scale up to satisfy it rather than stack pods.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentrunner
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
