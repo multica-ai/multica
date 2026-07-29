@@ -35,7 +35,7 @@ The daemon writes a *multica-managed* block into each task's
 `# END multica-managed` markers. Anything outside the markers is left
 untouched so users can still tune Codex behavior.
 
-Decision matrix (see [`server/internal/daemon/execenv/codex_sandbox.go`](../server/internal/daemon/execenv/codex_sandbox.go)):
+Decision matrix (see [`server/internal/daemon/execenv/codex_sandbox.go`](../../server/internal/daemon/execenv/codex_sandbox.go)):
 
 | Host OS   | Codex version                                    | Managed block emits                                                       |
 | --------- | ------------------------------------------------ | ------------------------------------------------------------------------- |

@@ -1,0 +1,30 @@
+{
+  "$comment": [
+    "The registry of governed repository documentation, checked by scripts/verify-docs.mjs.",
+    "Every Markdown file at the repository root or under docs/ (outside docs/decisions/)",
+    "must appear here, plus any other document we want held to a ceiling.",
+    "Values are word ceilings. Raise one only when the words genuinely need the space,",
+    "and justify the diff in the pull request. See docs/AGENTS.md."
+  ],
+  "documents": {
+    "AGENTS.md": 250,
+    "CLAUDE.md": 2500,
+    "CONTRIBUTING.md": 2400,
+    "README.md": 1700,
+    "README.zh-CN.md": 700,
+    "CLI_AND_DAEMON.md": 5500,
+    "CLI_INSTALL.md": 950,
+    "SELF_HOSTING.md": 3400,
+    "SELF_HOSTING_ADVANCED.md": 4600,
+    "SELF_HOSTING_AI.md": 400,
+    "docs/AGENTS.md": 1200,
+    "docs/analytics.md": 5000,
+    "docs/custom-runtimes.md": 500,
+    "docs/design.md": 3100,
+    "docs/feature-flags.md": 1600,
+    "docs/runbooks/codex-sandbox-troubleshooting.md": 800,
+    "docs/runbooks/codex-usage-cache-backfill.md": 500,
+    "apps/docs/AGENTS.md": 750,
+    "apps/mobile/CLAUDE.md": 7000
+  }
+}

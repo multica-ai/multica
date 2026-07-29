@@ -230,4 +230,4 @@ Adopted from Martin Fowler, ConfigCat and Octopus.
 - **Backend protection**: anything controlling access goes through the backend Service; the frontend flag is presentation only.
 - **No secrets in flags**: variant values are not Secrets Manager / KMS. Use those for tokens, keys, and passwords.
 
-See `docs/design.md` and `docs/timezone-architecture-rfc.md` for prior examples of how this pattern is used across the codebase.
+See [`docs/design.md`](design.md) for another example of how this pattern is used across the codebase.

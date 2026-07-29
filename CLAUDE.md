@@ -9,7 +9,7 @@ The source of truth for code naming, i18n glossary, and Chinese product voice is
 - `apps/docs/content/docs/developers/conventions.mdx`
 - `apps/docs/content/docs/developers/conventions.zh.mdx`
 
-Read it before editing translations in `packages/views/locales/`, naming routes/packages/files/DB columns/types, or writing Chinese UI/docs copy. Do not rely on `packages/views/locales/glossary.md`; it is only a redirect stub.
+Read it before editing translations in `packages/views/locales/`, naming routes/packages/files/DB columns/types, or writing Chinese UI/docs copy.
 
 ## Project Shape
 
@@ -226,6 +226,14 @@ make check
 ```
 
 Do not claim verification passed unless you ran it. If you skip checks because the change is docs-only or the user asked not to run them, say so.
+
+## Documentation
+
+`docs/AGENTS.md` is the documentation standard: it names the tier every document belongs to and the rules each one follows. Read it before adding a Markdown file or writing more than a paragraph into an existing one.
+
+- **Every non-trivial change adds or updates a decision record** under `docs/decisions/` in the same PR — the why, the alternatives, and the consequences. `docs/decisions/README.md` is the contract.
+- **Implementation status lives only in `docs/decisions/`**, carried by the `proposed/` / `implemented/` / `rejected/` folder a record sits in. No `Status:` headers, `Last updated:` lines, or phase checklists in any other document.
+- Run `pnpm docs:check` after touching documentation. It is part of `make check` and runs in CI.
 
 ## Commits and Releases
 

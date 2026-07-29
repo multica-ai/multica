@@ -87,6 +87,25 @@ jobs:
   # The split is weighted, not even: the test group is by far the heavier half
   # (~575 CPU-seconds vs ~250 for build + typecheck + lint), so it gets a
   # runner to itself and everything else shares the other one.
+
+  # The documentation standard (docs/AGENTS.md) is enforced here rather than
+  # inside the frontend job, because a docs-only pull request is exactly the
+  # case the `changes` filter excludes — and exactly the case this needs to
+  # check. It runs on every PR, needs no services, and finishes in seconds.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Verify documentation standard
+        run: node scripts/verify-docs.mjs
+
   frontend-build:
     needs: changes
     runs-on: ubuntu-latest

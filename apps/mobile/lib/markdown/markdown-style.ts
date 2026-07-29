@@ -11,8 +11,8 @@
  * style object whenever the theme flips.
  *
  * Sizing follows the mobile typography scale documented in
- * `apps/mobile/docs/markdown-renderer-research.md` → "Mobile typography
- * scale" (calibrated against Apple HIG; one tier below shadcn web defaults
+ * `docs/decisions/implemented/architecture/2026-05-09-mobile-markdown-rendering.md`
+ * (calibrated against Apple HIG; one tier below shadcn web defaults
  * because markdown headings inside an issue card are structural, not
  * screen titles). HIG values are encoded in `MD_FONT` / `MD_LINE` /
  * `MD_GAP` constants — these are NOT RNR tokens to replace; they are
@@ -25,7 +25,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 
 /**
  * Typography scale — Apple HIG-calibrated, one tier below shadcn web.
- * See `docs/markdown-renderer-research.md` "Mobile typography scale".
+ * See docs/decisions/implemented/architecture/2026-05-09-mobile-markdown-rendering.md.
  */
 const MD_FONT = {
   body: 14,
@@ -64,8 +64,7 @@ const MD_LINE = {
   // Slack / Telegram / Mattermost mobile all use background + mono with
   // no visible top-heavy issue, confirming this is enriched's bug, not
   // an RN+iOS structural limitation. See:
-  //   - docs/markdown-rendering-adr.md "Known limitations"
-  //   - docs/markdown-renderer-research.md decision log 2026-05-19
+  //   - docs/decisions/implemented/architecture/2026-05-09-mobile-markdown-rendering.md
   body: 24,
   // Heading lineHeights match each heading's fontSize × ~1.3. We MUST
   // pass these explicitly: enriched-markdown's heading defaults are
