@@ -15,6 +15,7 @@
 #   * hermes     — NousResearch/hermes-agent (installer)   @ HERMES_REF (+ HERMES_COMMIT verify)
 #   * gh         — GitHub CLI (apt; cli.github.com repo)   @ GH_CLI_VERSION
 #   * acli       — Atlassian CLI (apt; acli.atlassian.com) @ ACLI_VERSION
+#   * git-ai     — AI authorship tracking (git-ai-project/git-ai) @ GIT_AI_VERSION
 #   * uv / uvx   — astral-sh/uv (multi-arch image copy)   @ UV_VERSION
 #   * npx        — ships with npm (Node.js LTS install above)
 #
@@ -104,6 +105,12 @@ ARG GH_CLI_VERSION=
 # release from acli.atlassian.com/linux/deb). Pass a specific version at
 # build time only when you need to lock to a known-good release.
 ARG ACLI_VERSION=
+# Pin git-ai via GitHub Releases. Companion SHA args are the sha256sum of
+# the platform-specific binaries — build fails loud if they mismatch.
+# Bump all three together; use the SHA256SUMS file from the release assets.
+ARG GIT_AI_VERSION=v1.6.16
+ARG GIT_AI_SHA_AMD64=66b0bcd2765c509467b4ebd737de8fde669911f8fd7b6b5b28ed7ddbb002f2cf
+ARG GIT_AI_SHA_ARM64=583e245fc0cf84cfc3f8f87234582251dbcf86e81717c03364d6410c30ce6627
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -193,6 +200,25 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# git-ai — AI authorship tracking binary (static, no self-update path).
+# Maps dpkg arch to the release binary name, downloads, verifies SHA, installs.
+# The ~/.git-ai/bin/ layout (git + git-og symlinks, config.json) is created at
+# runtime by entrypoint.sh because ~/.git-ai lives on the work PVC.
+RUN arch=$(dpkg --print-architecture) \
+ && case "$arch" in \
+      amd64) ga_arch="x64";   expected_sha="${GIT_AI_SHA_AMD64}" ;; \
+      arm64) ga_arch="arm64"; expected_sha="${GIT_AI_SHA_ARM64}" ;; \
+      *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL \
+      "https://github.com/git-ai-project/git-ai/releases/download/${GIT_AI_VERSION}/git-ai-linux-${ga_arch}" \
+      -o /tmp/git-ai \
+ && actual_sha=$(sha256sum /tmp/git-ai | awk '{print $1}') \
+ && { [ "$actual_sha" = "$expected_sha" ] \
+      || { echo "git-ai SHA mismatch for $arch: expected $expected_sha got $actual_sha" >&2; exit 1; }; } \
+ && install -m 755 /tmp/git-ai /usr/local/bin/git-ai \
+ && rm /tmp/git-ai
+
 # uv / uvx are static binaries with no self-update path baked in here, so
 # they live in the shared root-owned toolchain dir (unlike multica, which
 # self-updates and gets its own agent-owned /opt/multica/bin below).
@@ -240,6 +266,11 @@ ENV PATH="/opt/multica/bin:${PATH}"
 ENV NPM_CONFIG_PREFIX=/home/agent/.npm-global
 ENV PATH="/home/agent/.npm-global/bin:${PATH}"
 
+# git-ai wraps git by symlinking ~/.git-ai/bin/git → git-ai. Prepend this dir
+# so `git` calls go through git-ai for AI attribution tracking. The symlinks
+# are created at runtime by entrypoint.sh (dir lives on the work PVC).
+ENV PATH="/home/agent/.git-ai/bin:${PATH}"
+
 # G2 LLM proxy defaults — route Anthropic + OpenAI through llmproxy.g2.com.
 # Per-CLI override surface (most authoritative one is seeded):
 #   claude / opencode / hermes — env vars (hermes consults PROVIDER_REGISTRY
@@ -276,6 +307,7 @@ RUN claude --version \
  && gh --version \
  && acli --version \
  && hermes --help >/dev/null \
+ && git-ai --version \
  && uvx --version \
  && npx --version
 
@@ -286,5 +318,5 @@ ENV HOME=/home/agent \
     MULTICA_WORKSPACES_ROOT=/home/agent/multica_workspaces
 
 LABEL org.opencontainers.image.source="https://github.com/g2crowd/agentfarm" \
-      org.opencontainers.image.description="Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli + uv/uvx + npx)" \
+      org.opencontainers.image.description="Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli + git-ai + uv/uvx + npx)" \
       org.opencontainers.image.licenses="UNLICENSED"

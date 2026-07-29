@@ -58,6 +58,11 @@ variable "GH_CLI_VERSION"      { default = "" }
 // at build time; pin (e.g. `1.3.18~stable`) for stricter reproducibility
 // once a known-good version is identified.
 variable "ACLI_VERSION"        { default = "" }
+// git-ai GitHub release tag + per-arch SHA256 checksums. Bump all three
+// together when upgrading; see SHA256SUMS in the release assets.
+variable "GIT_AI_VERSION"      { default = "v1.6.16" }
+variable "GIT_AI_SHA_AMD64"    { default = "66b0bcd2765c509467b4ebd737de8fde669911f8fd7b6b5b28ed7ddbb002f2cf" }
+variable "GIT_AI_SHA_ARM64"    { default = "583e245fc0cf84cfc3f8f87234582251dbcf86e81717c03364d6410c30ce6627" }
 // uv / uvx — copied from ghcr.io/astral-sh/uv:<UV_VERSION>. `latest`
 // takes whatever Astral ships at build time. Pin to a semver (e.g. `0.7.13`)
 // for prod bakes. Both /uv and /uvx are copied so `uv tool run` and the
@@ -98,13 +103,16 @@ target "default" {
     HERMES_COMMIT       = "${HERMES_COMMIT}"
     GH_CLI_VERSION      = "${GH_CLI_VERSION}"
     ACLI_VERSION        = "${ACLI_VERSION}"
+    GIT_AI_VERSION      = "${GIT_AI_VERSION}"
+    GIT_AI_SHA_AMD64    = "${GIT_AI_SHA_AMD64}"
+    GIT_AI_SHA_ARM64    = "${GIT_AI_SHA_ARM64}"
     UV_VERSION          = "${UV_VERSION}"
     UID                 = "${UID}"
     GID                 = "${GID}"
   }
   labels = {
     "org.opencontainers.image.source"      = "https://github.com/g2crowd/agentfarm"
-    "org.opencontainers.image.description" = "Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli + uv/uvx + npx)"
+    "org.opencontainers.image.description" = "Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli + git-ai + uv/uvx + npx)"
     "org.opencontainers.image.licenses"    = "UNLICENSED"
   }
   cache-from = ["type=gha,scope=agent-runtime-base"]

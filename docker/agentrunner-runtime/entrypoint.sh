@@ -189,5 +189,27 @@ mkdir -p "${HOME}/.agents/skills"
 cp -r "${HOME}/ai-enhancement-hub/skills/." "${HOME}/.agents/skills/"
 rm -rf "${HOME}/ai-enhancement-hub"
 
+# ── git-ai setup ──────────────────────────────────────────────────────────────
+# git-ai is baked into the image at /usr/local/bin/git-ai but its user config
+# dir (~/.git-ai/) lives on the work PVC, so setup must happen here at runtime.
+# Creates:
+#   ~/.git-ai/bin/git-ai  → /usr/local/bin/git-ai  (canonical user-path symlink)
+#   ~/.git-ai/bin/git     → /usr/local/bin/git-ai  (PATH-based git interception)
+#   ~/.git-ai/bin/git-og  → /usr/bin/git            (real git for git-ai internals)
+#   ~/.git-ai/config.json (git_path + feature_flags; skipped if already present)
+# Then registers Claude Code PreToolUse/PostToolUse hooks so agent commits are
+# attributed in refs/notes/ai. Idempotent across pod restarts.
+git_ai_bin="${HOME}/.git-ai/bin"
+mkdir -p "${git_ai_bin}"
+ln -sf /usr/local/bin/git-ai "${git_ai_bin}/git-ai" 2>/dev/null || true
+ln -sf /usr/local/bin/git-ai "${git_ai_bin}/git"    2>/dev/null || true
+ln -sf /usr/bin/git           "${git_ai_bin}/git-og" 2>/dev/null || true
+if [ ! -f "${HOME}/.git-ai/config.json" ]; then
+  printf '{\n  "git_path": "/usr/bin/git",\n  "feature_flags": {"async_mode": true}\n}\n' \
+    > "${HOME}/.git-ai/config.json"
+fi
+git-ai install-hooks 2>/dev/null \
+  || echo "entrypoint: WARNING git-ai install-hooks failed — AI attribution hooks may not be active" >&2
+
 # ── Run daemon in foreground ──────────────────────────────────────────────────
 exec multica daemon start --foreground --device-name "${DEVICE_NAME}"
