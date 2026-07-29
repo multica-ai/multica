@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  collapseDiffContext,
   stripShellWrapper,
   traceEventCopyText,
   traceEventDefaultExpanded,
+  traceEventDetail,
   traceEventHasDetail,
   traceEventKind,
   traceEventLabel,
   traceEventSummary,
   traceToolArgSummary,
+  unwrapToolOutput,
 } from "./trace-event-presenter";
 
 describe("traceEventKind / traceEventLabel", () => {
@@ -69,6 +72,16 @@ describe("traceEventSummary", () => {
     );
   });
 
+  it("unwraps a JSON-encoded result so the collapsed row shows no transport escaping", () => {
+    expect(
+      traceEventSummary({
+        type: "tool_result",
+        tool: "Bash",
+        output: '"target/release/deps/acceptance\\n 0 page faults\\n 0 swaps"',
+      }),
+    ).toBe("target/release/deps/acceptance 0 page faults 0 swaps");
+  });
+
   it("retains unknown events instead of dropping them", () => {
     expect(traceEventSummary({ type: "custom", content: "payload" })).toBe("payload");
   });
@@ -86,6 +99,12 @@ describe("traceEventCopyText", () => {
     expect(traceEventCopyText({ type: "text", content: "full\nagent\nreply" })).toBe(
       "[Agent] full\nagent\nreply",
     );
+  });
+
+  it("copies a result as the terminal output it was, not its transport encoding", () => {
+    expect(
+      traceEventCopyText({ type: "tool_result", tool: "Bash", output: '"line 1\\nline 2"' }),
+    ).toBe("[Bash] line 1\nline 2");
   });
 
   it("emits a bare label when the event has no body", () => {
@@ -114,5 +133,158 @@ describe("traceEventDefaultExpanded", () => {
   it("a row without detail never expands", () => {
     expect(traceEventDefaultExpanded({ type: "text" }, "expanded")).toBe(false);
     expect(traceEventHasDetail({ type: "tool_use", input: {} })).toBe(false);
+  });
+});
+
+describe("unwrapToolOutput", () => {
+  it("decodes the one JSON string layer a result arrives wrapped in", () => {
+    expect(unwrapToolOutput('"line one\\nline two"')).toBe("line one\nline two");
+    expect(unwrapToolOutput('"{\\n  \\"id\\": 1\\n}"')).toBe('{\n  "id": 1\n}');
+  });
+
+  it("leaves anything that is not a wrapped string untouched", () => {
+    expect(unwrapToolOutput("plain text")).toBe("plain text");
+    expect(unwrapToolOutput('{"id": 1}')).toBe('{"id": 1}');
+    // A quoted-looking body that is not valid JSON must survive verbatim.
+    expect(unwrapToolOutput('"unterminated')).toBe('"unterminated');
+    expect(unwrapToolOutput("")).toBe("");
+  });
+
+  it("decodes only one layer, so a JSON document stays a document", () => {
+    expect(unwrapToolOutput('"[1, 2]"')).toBe("[1, 2]");
+  });
+});
+
+describe("traceEventDetail", () => {
+  it("renders a replacement edit as a diff, keyed off input shape not tool name", () => {
+    // Provider-native names differ (Edit, patch_apply, str_replace...), so the
+    // shape of the input is what identifies an edit.
+    const detail = traceEventDetail({
+      type: "tool_use",
+      tool: "patch_apply",
+      input: {
+        file_path: "/repo/src/counter.rs",
+        old_string: "let a = 1;\nlet b = 2;",
+        new_string: "let a = 1;\nlet b = 3;\nlet c = 4;",
+      },
+    });
+    expect(detail.kind).toBe("diff");
+    if (detail.kind !== "diff") return;
+    expect(detail.path).toBe("/repo/src/counter.rs");
+    expect(detail.lines).toEqual([
+      { kind: "context", text: "let a = 1;" },
+      { kind: "remove", text: "let b = 2;" },
+      { kind: "add", text: "let b = 3;" },
+      { kind: "add", text: "let c = 4;" },
+    ]);
+  });
+
+  it("renders a whole-file write as plain content, not an all-additions diff", () => {
+    const detail = traceEventDetail({
+      type: "tool_use",
+      tool: "Write",
+      input: { file_path: "/repo/new.txt", content: "alpha\nbeta" },
+    });
+    expect(detail).toEqual({
+      kind: "file",
+      path: "/repo/new.txt",
+      text: "alpha\nbeta",
+      lineCount: 2,
+    });
+  });
+
+  it("still diffs an insertion whose old side is empty", () => {
+    // `content` marks a whole-file write; an empty old_string is an insertion
+    // into a file that already exists, so the diff gutter still carries meaning.
+    const detail = traceEventDetail({
+      type: "tool_use",
+      input: { file_path: "/f", old_string: "", new_string: "added" },
+    });
+    expect(detail.kind).toBe("diff");
+    if (detail.kind !== "diff") return;
+    expect(detail.lines).toEqual([{ kind: "add", text: "added" }]);
+  });
+
+  it("keeps a deletion visible when new_string is empty", () => {
+    const detail = traceEventDetail({
+      type: "tool_use",
+      input: { file_path: "/f", old_string: "gone", new_string: "" },
+    });
+    expect(detail.kind).toBe("diff");
+    if (detail.kind !== "diff") return;
+    expect(detail.lines).toEqual([{ kind: "remove", text: "gone" }]);
+  });
+
+  it("falls back to pretty JSON for a tool call that is not an edit", () => {
+    const detail = traceEventDetail({
+      type: "tool_use",
+      tool: "Bash",
+      input: { command: "ls -la" },
+    });
+    expect(detail.kind).toBe("text");
+    if (detail.kind !== "text") return;
+    expect(detail.text).toBe('{\n  "command": "ls -la"\n}');
+  });
+
+  it("unwraps a tool result so it reads as the terminal output it was", () => {
+    const detail = traceEventDetail({
+      type: "tool_result",
+      tool: "Bash",
+      output: '"total 0\\ndrwxr-xr-x  2 user  staff"',
+    });
+    expect(detail).toEqual({ kind: "text", text: "total 0\ndrwxr-xr-x  2 user  staff" });
+  });
+
+  it("uses content for prose events and never throws on an empty event", () => {
+    expect(traceEventDetail({ type: "text", content: "hello" })).toEqual({
+      kind: "text",
+      text: "hello",
+    });
+    expect(traceEventDetail({ type: "tool_use" })).toEqual({ kind: "text", text: "" });
+  });
+});
+
+describe("collapseDiffContext", () => {
+  const ctx = (n: number) => Array.from({ length: n }, (_, i) => ctxLine(`c${i}`));
+  function ctxLine(text: string) {
+    return { kind: "context" as const, text };
+  }
+
+  it("collapses a long unchanged stretch between two changes", () => {
+    const lines = [
+      { kind: "remove" as const, text: "old" },
+      ...ctx(10),
+      { kind: "add" as const, text: "new" },
+    ];
+    const out = collapseDiffContext(lines, 2);
+    expect(out.map((l) => l.kind)).toEqual([
+      "remove",
+      "context",
+      "context",
+      "gap",
+      "context",
+      "context",
+      "add",
+    ]);
+    expect(out[3]).toEqual({ kind: "gap", text: "", hidden: 6 });
+  });
+
+  it("drops leading and trailing context entirely — nothing faces a change there", () => {
+    const out = collapseDiffContext([...ctx(8), { kind: "add", text: "x" }, ...ctx(8)], 2);
+    expect(out.map((l) => l.kind)).toEqual(["gap", "context", "context", "add", "context", "context", "gap"]);
+    expect(out[0]?.hidden).toBe(6);
+  });
+
+  it("leaves a run alone when collapsing would not save a line", () => {
+    const lines = [{ kind: "remove" as const, text: "a" }, ...ctx(4), { kind: "add" as const, text: "b" }];
+    expect(collapseDiffContext(lines, 2)).toEqual(lines);
+  });
+
+  it("is a no-op for a diff with no context at all", () => {
+    const lines = [
+      { kind: "remove" as const, text: "a" },
+      { kind: "add" as const, text: "b" },
+    ];
+    expect(collapseDiffContext(lines)).toEqual(lines);
   });
 });

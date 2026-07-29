@@ -138,7 +138,9 @@ export function traceEventSummary(event: TraceEvent): string {
     case "tool_use":
       return traceToolArgSummary(event.input);
     case "tool_result":
-      return clip(collapseWhitespace(event.output), 200);
+      // Unwrap first: the collapsed row is the one people read without
+      // clicking, so it must not show transport escaping.
+      return clip(collapseWhitespace(unwrapToolOutput(event.output ?? "")), 200);
     default:
       return firstLine(event.content ?? event.output);
   }
@@ -158,7 +160,9 @@ export function traceEventCopyText(event: TraceEvent): string {
       body = event.input ? JSON.stringify(event.input, null, 2) : "";
       break;
     case "tool_result":
-      body = event.output ?? "";
+      // Match what the row displays, so copied evidence reads like the
+      // terminal output rather than its transport encoding.
+      body = unwrapToolOutput(event.output ?? "");
       break;
     default:
       body = event.content ?? "";
@@ -166,6 +170,204 @@ export function traceEventCopyText(event: TraceEvent): string {
   const date = event.created_at ? new Date(event.created_at) : null;
   const timestamp = date && !Number.isNaN(date.getTime()) ? `[${date.toISOString()}] ` : "";
   return body ? `${timestamp}[${label}] ${body}` : `${timestamp}[${label}]`;
+}
+
+/**
+ * Tool output is persisted JSON-encoded, so a result arrives as a quoted string
+ * whose newlines are escaped. Decode exactly one layer so it reads as the
+ * terminal output it was. Anything that is not a wrapped string — a bare JSON
+ * document, plain prose, a truncated body — is returned untouched.
+ */
+export function unwrapToolOutput(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length < 2 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return raw;
+  try {
+    const decoded: unknown = JSON.parse(trimmed);
+    return typeof decoded === "string" ? decoded : raw;
+  } catch {
+    return raw;
+  }
+}
+
+export type TraceDiffLineKind = "add" | "remove" | "context" | "gap";
+
+export interface TraceDiffLine {
+  kind: TraceDiffLineKind;
+  text: string;
+  /** Number of context lines a `gap` stands in for. Absent on other kinds. */
+  hidden?: number;
+}
+
+/**
+ * Expanded-row body. A replacement reads as a diff; a whole-file write reads as
+ * plain content, because nothing was compared — marking all of it `+` adds
+ * noise, not information. Everything else is text.
+ */
+export type TraceEventDetail =
+  | { kind: "diff"; path: string; lines: TraceDiffLine[] }
+  | { kind: "file"; path: string; text: string; lineCount: number }
+  | { kind: "text"; text: string };
+
+/** An empty body is zero lines, not one blank line — a pure deletion has no `+`. */
+function toLines(value: string): string[] {
+  return value.length === 0 ? [] : value.split("\n");
+}
+
+// Above this product the LCS table costs more than the readability is worth, so
+// the change degrades to a plain replacement block instead of a minimal diff.
+const MAX_DIFF_CELLS = 250_000;
+
+/** Minimal line diff. Removals precede additions inside a change block. */
+export function diffTraceLines(before: string[], after: string[]): TraceDiffLine[] {
+  const n = before.length;
+  const m = after.length;
+  const out: TraceDiffLine[] = [];
+
+  if (n * m > MAX_DIFF_CELLS) {
+    for (const text of before) out.push({ kind: "remove", text });
+    for (const text of after) out.push({ kind: "add", text });
+    return out;
+  }
+
+  // Flat (n+1) x (m+1) table: lcs[i][j] is the longest common subsequence of
+  // before[i:] and after[j:]. Typed-array cells stay `number` under
+  // noUncheckedIndexedAccess, and one allocation beats n+1 of them.
+  const width = m + 1;
+  const lcs = new Int32Array((n + 1) * width);
+  const at = (i: number, j: number): number => lcs[i * width + j] ?? 0;
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i * width + j] =
+        before[i] === after[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
+    }
+  }
+
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    const beforeLine = before[i] ?? "";
+    const afterLine = after[j] ?? "";
+    if (beforeLine === afterLine) {
+      out.push({ kind: "context", text: beforeLine });
+      i++;
+      j++;
+    } else if (at(i + 1, j) >= at(i, j + 1)) {
+      out.push({ kind: "remove", text: beforeLine });
+      i++;
+    } else {
+      out.push({ kind: "add", text: afterLine });
+      j++;
+    }
+  }
+  while (i < n) out.push({ kind: "remove", text: before[i++] ?? "" });
+  while (j < m) out.push({ kind: "add", text: after[j++] ?? "" });
+  return out;
+}
+
+/** Context lines kept either side of a change before a run is collapsed. */
+const DIFF_CONTEXT_LINES = 3;
+
+/**
+ * Collapse long unchanged stretches into a single `gap` row. A replacement can
+ * carry a large `old_string` for a one-line change; without this the change is
+ * buried in context that never moved. Runs short enough that collapsing would
+ * not save a line are left alone.
+ */
+export function collapseDiffContext(
+  lines: readonly TraceDiffLine[],
+  contextLines: number = DIFF_CONTEXT_LINES,
+): TraceDiffLine[] {
+  const out: TraceDiffLine[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (line === undefined) break;
+    if (line.kind !== "context") {
+      out.push(line);
+      index++;
+      continue;
+    }
+
+    let end = index;
+    while (end < lines.length && lines[end]?.kind === "context") end++;
+    const run = lines.slice(index, end);
+    // A leading/trailing run only needs context on the side facing a change.
+    const head = index === 0 ? 0 : contextLines;
+    const tail = end === lines.length ? 0 : contextLines;
+
+    if (run.length <= head + tail + 1) {
+      out.push(...run);
+    } else {
+      out.push(...run.slice(0, head));
+      out.push({ kind: "gap", text: "", hidden: run.length - head - tail });
+      out.push(...run.slice(run.length - tail));
+    }
+    index = end;
+  }
+  return out;
+}
+
+/**
+ * A file mutation is identified by the *shape* of its input, never by tool name:
+ * providers call this Edit, patch_apply, str_replace, write_file… and the
+ * presenter's contract is to keep provider-native names verbatim.
+ */
+type FileMutation =
+  | { mode: "replace"; path: string; before: string[]; after: string[] }
+  | { mode: "write"; path: string; content: string };
+
+function readFileMutation(input: Record<string, unknown>): FileMutation | null {
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  const path = str(input.file_path) ?? str(input.path);
+  if (path === null) return null;
+
+  const oldString = str(input.old_string);
+  const newString = str(input.new_string);
+  if (oldString !== null && newString !== null) {
+    return { mode: "replace", path, before: toLines(oldString), after: toLines(newString) };
+  }
+
+  // Keyed on `content`, not on "the before side is empty": an edit whose
+  // old_string is empty is an insertion into an existing file, which still
+  // reads best as a diff.
+  const content = str(input.content);
+  if (content !== null) return { mode: "write", path, content };
+
+  return null;
+}
+
+/**
+ * Structured body for the expanded row. Edits become a diff so a reviewer sees
+ * what changed rather than two escaped string literals; results are unwrapped;
+ * every other tool call falls back to pretty JSON.
+ */
+export function traceEventDetail(event: TraceEvent): TraceEventDetail {
+  switch (traceEventKind(event)) {
+    case "tool_use": {
+      if (!event.input) return { kind: "text", text: "" };
+      const mutation = readFileMutation(event.input);
+      if (mutation?.mode === "replace") {
+        return {
+          kind: "diff",
+          path: mutation.path,
+          lines: collapseDiffContext(diffTraceLines(mutation.before, mutation.after)),
+        };
+      }
+      if (mutation?.mode === "write") {
+        return {
+          kind: "file",
+          path: mutation.path,
+          text: mutation.content,
+          lineCount: toLines(mutation.content).length,
+        };
+      }
+      return { kind: "text", text: JSON.stringify(event.input, null, 2) };
+    }
+    case "tool_result":
+      return { kind: "text", text: unwrapToolOutput(event.output ?? "") };
+    default:
+      return { kind: "text", text: event.content ?? "" };
+  }
 }
 
 export function traceEventHasDetail(event: TraceEvent): boolean {

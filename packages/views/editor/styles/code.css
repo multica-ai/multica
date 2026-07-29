@@ -52,67 +52,69 @@ pre.rich-text-editor code {
   line-height: 1.6;
 }
 
-/* Syntax highlighting — lowlight (hljs) */
-.rich-text-editor .hljs-keyword,
-.rich-text-editor .hljs-selector-tag,
-.rich-text-editor .hljs-built_in { color: oklch(0.55 0.16 255); }
+/* Syntax highlighting — lowlight (hljs). Scoped to the editor surface and to
+   the task transcript, which highlights file bodies with the same engine so a
+   file reads identically in a comment and in an execution trace. */
+:is(.rich-text-editor, .transcript-code) .hljs-keyword,
+:is(.rich-text-editor, .transcript-code) .hljs-selector-tag,
+:is(.rich-text-editor, .transcript-code) .hljs-built_in { color: oklch(0.55 0.16 255); }
 
-.rich-text-editor .hljs-string,
-.rich-text-editor .hljs-addition { color: oklch(0.55 0.14 155); }
+:is(.rich-text-editor, .transcript-code) .hljs-string,
+:is(.rich-text-editor, .transcript-code) .hljs-addition { color: oklch(0.55 0.14 155); }
 
-.rich-text-editor .hljs-comment,
-.rich-text-editor .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+:is(.rich-text-editor, .transcript-code) .hljs-comment,
+:is(.rich-text-editor, .transcript-code) .hljs-quote { color: var(--muted-foreground); font-style: italic; }
 
-.rich-text-editor .hljs-number,
-.rich-text-editor .hljs-literal { color: oklch(0.58 0.16 30); }
+:is(.rich-text-editor, .transcript-code) .hljs-number,
+:is(.rich-text-editor, .transcript-code) .hljs-literal { color: oklch(0.58 0.16 30); }
 
-.rich-text-editor .hljs-title,
-.rich-text-editor .hljs-section,
-.rich-text-editor .hljs-title\.function_ { color: oklch(0.55 0.14 280); }
+:is(.rich-text-editor, .transcript-code) .hljs-title,
+:is(.rich-text-editor, .transcript-code) .hljs-section,
+:is(.rich-text-editor, .transcript-code) .hljs-title\.function_ { color: oklch(0.55 0.14 280); }
 
-.rich-text-editor .hljs-attr,
-.rich-text-editor .hljs-attribute { color: oklch(0.58 0.12 60); }
+:is(.rich-text-editor, .transcript-code) .hljs-attr,
+:is(.rich-text-editor, .transcript-code) .hljs-attribute { color: oklch(0.58 0.12 60); }
 
-.rich-text-editor .hljs-variable,
-.rich-text-editor .hljs-template-variable { color: oklch(0.58 0.14 20); }
+:is(.rich-text-editor, .transcript-code) .hljs-variable,
+:is(.rich-text-editor, .transcript-code) .hljs-template-variable { color: oklch(0.58 0.14 20); }
 
-.rich-text-editor .hljs-type,
-.rich-text-editor .hljs-title\.class_ { color: oklch(0.55 0.14 200); }
+:is(.rich-text-editor, .transcript-code) .hljs-type,
+:is(.rich-text-editor, .transcript-code) .hljs-title\.class_ { color: oklch(0.55 0.14 200); }
 
-.rich-text-editor .hljs-deletion { color: oklch(0.55 0.2 25); }
+:is(.rich-text-editor, .transcript-code) .hljs-deletion { color: oklch(0.55 0.2 25); }
 
-.rich-text-editor .hljs-meta { color: var(--muted-foreground); }
+:is(.rich-text-editor, .transcript-code) .hljs-meta { color: var(--muted-foreground); }
 
 /* XML / HTML — lowlight emits .hljs-tag for `<` `>` brackets and .hljs-name
    for the element name. Without these rules, HTML source renders mostly in
    the default text color and looks unhighlighted. */
-.rich-text-editor .hljs-tag { color: var(--muted-foreground); }
-.rich-text-editor .hljs-name { color: oklch(0.55 0.16 255); }
+:is(.rich-text-editor, .transcript-code) .hljs-tag { color: var(--muted-foreground); }
+:is(.rich-text-editor, .transcript-code) .hljs-name { color: oklch(0.55 0.16 255); }
 
 /* Dark mode overrides */
-.dark .rich-text-editor .hljs-keyword,
-.dark .rich-text-editor .hljs-selector-tag,
-.dark .rich-text-editor .hljs-built_in { color: oklch(0.7 0.14 255); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-keyword,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-selector-tag,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-built_in { color: oklch(0.7 0.14 255); }
 
-.dark .rich-text-editor .hljs-string,
-.dark .rich-text-editor .hljs-addition { color: oklch(0.7 0.14 155); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-string,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-addition { color: oklch(0.7 0.14 155); }
 
-.dark .rich-text-editor .hljs-number,
-.dark .rich-text-editor .hljs-literal { color: oklch(0.72 0.14 30); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-number,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-literal { color: oklch(0.72 0.14 30); }
 
-.dark .rich-text-editor .hljs-title,
-.dark .rich-text-editor .hljs-section,
-.dark .rich-text-editor .hljs-title\.function_ { color: oklch(0.72 0.12 280); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-title,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-section,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-title\.function_ { color: oklch(0.72 0.12 280); }
 
-.dark .rich-text-editor .hljs-attr,
-.dark .rich-text-editor .hljs-attribute { color: oklch(0.72 0.1 60); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-attr,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-attribute { color: oklch(0.72 0.1 60); }
 
-.dark .rich-text-editor .hljs-variable,
-.dark .rich-text-editor .hljs-template-variable { color: oklch(0.72 0.12 20); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-variable,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-template-variable { color: oklch(0.72 0.12 20); }
 
-.dark .rich-text-editor .hljs-type,
-.dark .rich-text-editor .hljs-title\.class_ { color: oklch(0.72 0.12 200); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-type,
+.dark :is(.rich-text-editor, .transcript-code) .hljs-title\.class_ { color: oklch(0.72 0.12 200); }
 
-.dark .rich-text-editor .hljs-deletion { color: oklch(0.7 0.18 25); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-deletion { color: oklch(0.7 0.18 25); }
 
-.dark .rich-text-editor .hljs-name { color: oklch(0.72 0.14 255); }
+.dark :is(.rich-text-editor, .transcript-code) .hljs-name { color: oklch(0.72 0.14 255); }
