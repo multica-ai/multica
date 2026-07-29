@@ -647,7 +647,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkspaceCopyHandler := cerebroworkspacecopy.NewHandler(pool, store)
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
-	cerebroCompanyBrainCensusHandler := cerebrocompanybraincensus.NewHandler(queries, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 read-only report uses the existing Connections store and agent policy surface.
+	cerebroCompanyBrainCensusHandler := cerebrocompanybraincensus.NewHandler(queries, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 report uses Connections, policy, and its default-off workspace flag.
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-api-connection-resolver): FIR-2388 shared api-connection tool resolver — one filter for the local MCP handler and the claim brief (cloud gateway builds its own from the same stores).
 	cerebroAPIConnResolver := cerebroruntime.NewAPIConnectionResolver(cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil)

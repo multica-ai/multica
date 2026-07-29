@@ -10,11 +10,17 @@ documents one named patch + its rationale + the file location(s).
 - **Why:** prior to consolidation, Company Brain source claims only existed behind
   each legacy connection credential. The report invokes `whoami` server-side,
   returns only `write_source` and `allowed_read_sources`, and attaches that
-  evidence to a non-offline agent only when the existing connection policy
-  allows that agent to call `whoami`; Ask and Deny stay unverifiable. It is
-  protected by the existing
-  `manage_connections` policy and never returns auth configuration, client IDs,
-  tokens, or raw upstream error text.
+  evidence to a non-offline agent or active automatic run only when the
+  existing connection policy allows the exact actor to call `whoami`; Ask and
+  Deny stay unverifiable. Each legacy Connection also carries the exact
+  per-tool Allow/Ask/Deny table for that actor, and legacy tool names are
+  extracted from agent and automatic-run configuration without returning the
+  surrounding text. It is default-off behind
+  `cerebro_company_brain_migration_census`, protected by the existing
+  `manage_connections` policy, and additionally requires the requesting
+  member's own effective `whoami` verdict before any stored credential is
+  invoked. It never returns auth configuration, client IDs, tokens, or raw
+  upstream error text.
 
 ## FIR-3876 — ACP tool-policy seam (hermes, kimi, kiro)
 

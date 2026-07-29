@@ -318,6 +318,8 @@ export type CerebroFlagKey =
   | "cerebro_interactive_terminal"
   // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
   | "cerebro_connections"
+  // FIR-3924: temporary read-only Company Brain migration census. Default OFF.
+  | "cerebro_company_brain_migration_census"
   // FIR-2273: expose api-type connection endpoints as agent-callable tools
   // (dispatched server-side so credentials stay on the backend). Default OFF.
   | "cerebro_api_connection_tools"
@@ -796,6 +798,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3108: ON by default — feature shipped and QA done. TECH-3209: switching
   // to true-default so admins don't lose access when personal/workspace override is cleared.
   cerebro_connections: true,
+  // FIR-3924: OFF until an admin explicitly opens the credential-backed
+  // migration diagnostic for a workspace.
+  cerebro_company_brain_migration_census: false,
   // FIR-2273: OFF by default — exposing api-type connection endpoints as agent
   // tools opens external endpoints (with server-side credentials) to agents, so
   // it stays opt-in per workspace. Matches the backend default.
@@ -1851,6 +1856,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+  },
+  {
+    key: "cerebro_company_brain_migration_census",
+    label: "Company Brain migration census",
+    group: "agents",
+    description:
+      "Enable the temporary read-only Company Brain identity and policy census for connection managers. Calls remain subject to the requesting member's connection-tool permissions. FIR-3924.",
   },
   // FIR-2273: surface api-type connection endpoints as agent-callable tools.
   {

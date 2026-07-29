@@ -1059,8 +1059,8 @@ var catalog = []Capability{
 		Key:           "manage_connections",
 		Title:         "Manage workspace connections",
 		Category:      CategoryConnections,
-		Description:   "Create, edit, or delete workspace API/MCP connections (external URLs and internal Sliplane paths).",
-		DescriptionZh: "创建、编辑或删除工作区 API/MCP 连接（外部 URL 和内部 Sliplane 路径）。",
+		Description:   "Create, test, edit, or delete workspace API/MCP connections, and inspect explicitly enabled credential-backed migration diagnostics.",
+		DescriptionZh: "创建、测试、编辑或删除工作区 API/MCP 连接，并查看已明确启用、由凭据支持的迁移诊断。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/mcp",
 			"POST /api/workspaces/{id}/connections",
