@@ -44,8 +44,15 @@ emit_token() {
 
 # Read stdin: git sends key=value lines terminated by a blank line.
 # With credential.useHttpPath=true, git includes path=owner/repo.git.
+#
+# `read` returns non-zero on EOF even when it populated $line with a final,
+# non-newline-terminated line — using `read ... && [ -n "$line" ]` as the loop
+# condition would short-circuit on that failure and drop the last line before
+# the case statement ever ran. The `|| [ -n "$line" ]` clause lets that final
+# populated line through the loop body once before the loop ends.
 owner="" repo=""
-while IFS= read -r line && [ -n "$line" ]; do
+while IFS= read -r line || [ -n "$line" ]; do
+  [ -n "$line" ] || break
   case "$line" in
     path=*) val="${line#path=}"; owner="${val%%/*}"; repo="${val#*/}"; repo="${repo%.git}" ;;
   esac

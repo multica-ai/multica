@@ -28,15 +28,21 @@ if [ -x "${REAL_GH}" ] \
 
   # Build credential helper input. Include path= when we have owner/repo;
   # the helper falls back to GITHUB_DEFAULT_ORG when path= is absent.
+  #
+  # Pipe printf directly into the credential helper rather than round-tripping
+  # through a $(...) capture — command substitution strips all trailing
+  # newlines, which used to drop the final path= line before the helper ever
+  # saw it (it silently fell back to GITHUB_DEFAULT_ORG for every repo outside
+  # that org).
   if [ -n "$owner" ] && [ -n "$repo_name" ] && [ "$owner" != "$repo_name" ]; then
-    cred_input=$(printf 'protocol=https\nhost=github.com\npath=%s/%s\n\n' "$owner" "$repo_name")
+    token=$(printf 'protocol=https\nhost=github.com\npath=%s/%s\n\n' "$owner" "$repo_name" \
+      | /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
+      | sed -n 's/^password=//p' || true)
   else
-    cred_input=$(printf 'protocol=https\nhost=github.com\n\n')
+    token=$(printf 'protocol=https\nhost=github.com\n\n' \
+      | /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
+      | sed -n 's/^password=//p' || true)
   fi
-
-  token=$(printf '%s' "$cred_input" \
-    | /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
-    | sed -n 's/^password=//p' || true)
 
   if [ -n "${token}" ]; then
     exec env GH_TOKEN="${token}" "${REAL_GH}" "$@"
