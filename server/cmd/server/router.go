@@ -603,6 +603,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// surface to a single line per cerebro inbox feature.
 	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
+	// CEREBRO-PATCH(dead-failed-runs-access): FIR-3901 — failed-run endpoints reuse the upstream per-issue access rule.
+	cerebroInboxHandler.IssueAccess = h.CerebroIssueAccessGate()
+	cerebroInboxHandler.VisibleIssues = h.CerebroVisibleIssuesFilter()
 	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries, bus, h.TaskService) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes + FIR-1621 send-to-agent dispatch.
 	// CEREBRO-PATCH(handler-chat-mute-wire): TECH-3352 — chat-snooze seam.
 	h.ChatMute = cerebroInboxHandler

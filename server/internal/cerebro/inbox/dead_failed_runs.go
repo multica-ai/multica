@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -97,13 +98,23 @@ func toDeadFailedResponse(t cerebrodb.DeadFailedTask) deadFailedRunResponse {
 
 // ListDeadFailedRunsForIssue handles GET /api/issues/{id}/failed-runs.
 // Drives the red failed bar at the top of an issue.
+//
+// The failure reason, the raw error text and the machine name are all issue
+// content, so this endpoint is gated exactly like GET /api/issues/{id}: the
+// injected gate resolves the id inside the caller's workspace and applies the
+// project-access / privacy / channel rule. Without it, knowing an issue's UUID
+// was enough to read its failure text from any workspace.
 func (h *Handler) ListDeadFailedRunsForIssue(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
 	}
-	issueID, err := util.ParseUUID(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+	if h.IssueAccess == nil {
+		// Fail closed: an unwired gate must not degrade to "everyone may read".
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	issueID, ok := h.IssueAccess(w, r, chi.URLParam(r, "id"))
+	if !ok {
 		return
 	}
 	rows, err := h.Cerebro.ListDeadFailedTasksForIssue(r.Context(), issueID)
@@ -116,6 +127,10 @@ func (h *Handler) ListDeadFailedRunsForIssue(w http.ResponseWriter, r *http.Requ
 
 // ListDeadFailedIssueTasks handles GET /api/inbox/failed-issue-tasks.
 // Drives the red pip on inbox rows.
+//
+// Workspace scoping alone is not enough here: a private issue, or one in a
+// project the member is not on, is inside the workspace but still not theirs
+// to read. The injected filter narrows the rows to what this member may see.
 func (h *Handler) ListDeadFailedIssueTasks(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
@@ -125,12 +140,28 @@ func (h *Handler) ListDeadFailedIssueTasks(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return
 	}
+	if h.VisibleIssues == nil {
+		// Fail closed, same reasoning as the per-issue endpoint above.
+		writeJSON(w, http.StatusOK, map[string]any{"runs": []deadFailedRunResponse{}})
+		return
+	}
 	rows, err := h.Cerebro.ListDeadFailedIssueTasksInWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list failed runs")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"runs": mapDeadFailed(rows)})
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, t := range rows {
+		ids = append(ids, t.IssueID)
+	}
+	allowed := h.VisibleIssues(r, ids)
+	visible := make([]cerebrodb.DeadFailedTask, 0, len(rows))
+	for _, t := range rows {
+		if allowed[util.UUIDToString(t.IssueID)] {
+			visible = append(visible, t)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": mapDeadFailed(visible)})
 }
 
 func mapDeadFailed(rows []cerebrodb.DeadFailedTask) []deadFailedRunResponse {
