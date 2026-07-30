@@ -271,6 +271,12 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// agentReregisterPending is set when refreshAgentVersions detected a CLI
+	// version change but at least one workspace's re-register call failed. The
+	// version cache has already moved on by then, so the next round would see no
+	// change; this flag is what makes it retry the register anyway.
+	agentReregisterPending atomic.Bool
+
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
 	//
@@ -357,12 +363,21 @@ type Daemon struct {
 	pendingWorkInflight map[string]struct{}  // runtime_id -> hint-driven heartbeat in flight
 	pendingWorkLastRun  map[string]time.Time // runtime_id -> when the last hint-driven heartbeat started
 
-	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
-	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
-	restartBinary string             // non-empty after a successful update; path to the new binary
-	updating      atomic.Bool        // prevents concurrent update attempts
-	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
-	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
+	cancelFunc context.CancelFunc // set by Run(); called by triggerRestart
+	rootCtx    context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
+	// restartMu guards restartBinary. Two goroutines can reach triggerRestart —
+	// the server-triggered handleUpdate and the autoUpdateLoop — and
+	// trySelfReload reads RestartBinary() from the latter to avoid racing the
+	// former into a second handoff.
+	restartMu     sync.Mutex
+	restartBinary string       // non-empty after a successful update; path to the new binary
+	updating      atomic.Bool  // prevents concurrent update attempts
+	activeTasks   atomic.Int64 // number of tasks currently in handleTask; exposed via /health
+	ready         atomic.Bool  // false until preflight completes; gates /health status (starting -> running)
+	// reloadPendingReason explains why a confirmed multica version change hasn't
+	// restarted the daemon yet (a task was running at the barrier check). Set
+	// and cleared by trySelfReload, read by /health. Diagnostic only.
+	reloadPendingReason atomic.Pointer[string]
 
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
@@ -493,6 +508,19 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+// agentVersionSnapshot copies the detected-version cache. refreshAgentVersions
+// takes it before re-probing, because the probe itself writes through
+// setAgentVersion — the snapshot is the only "what did we think before" it gets.
+func (d *Daemon) agentVersionSnapshot() map[string]string {
+	d.versionsMu.RLock()
+	defer d.versionsMu.RUnlock()
+	out := make(map[string]string, len(d.agentVersions))
+	for provider, version := range d.agentVersions {
+		out[provider] = version
+	}
+	return out
 }
 
 // healedAgent bundles a self-healed executable path with the CLI version
@@ -1257,6 +1285,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 // RestartBinary returns the path to the new binary if the daemon needs to restart
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
+	d.restartMu.Lock()
+	defer d.restartMu.Unlock()
 	return d.restartBinary
 }
 
@@ -3393,33 +3423,27 @@ func (d *Daemon) releaseClaimBarrier() {
 	d.pauseClaims = false
 }
 
-// triggerRestart initiates a graceful daemon restart after a successful CLI update.
-// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/multica)
-// so the restarted daemon picks up the new Cellar version automatically.
-// For non-brew installs, it resolves to the absolute path of the replaced binary.
-// The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
-func (d *Daemon) triggerRestart() {
-	newBin, err := resolveSelfExecutable()
+// triggerRestart initiates a graceful daemon restart into the binary at
+// restartTargetBinary(). The caller (cmd_daemon.go) checks RestartBinary() and
+// launches the new process.
+//
+// Returns false when the target path could not be resolved, so a caller holding
+// the claim barrier can release it instead of leaving the daemon paused for a
+// restart that will never happen. A restart already scheduled counts as success:
+// the process is going down either way.
+func (d *Daemon) triggerRestart() bool {
+	d.restartMu.Lock()
+	defer d.restartMu.Unlock()
+
+	if d.restartBinary != "" {
+		d.logger.Debug("daemon restart already scheduled", "new_binary", d.restartBinary)
+		return true
+	}
+
+	newBin, err := d.restartTargetBinary()
 	if err != nil {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
-		return
-	}
-	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
-	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
-	// must use the stable <brew-prefix>/bin/multica symlink instead.
-	if isBrewInstall() {
-		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
-			newBin = filepath.Join(brewPrefix, "bin", "multica")
-		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
-			newBin = filepath.Join(prefix, "bin", "multica")
-		} else {
-			d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
-				"executable", newBin)
-		}
-	} else {
-		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
-			newBin = resolved
-		}
+		return false
 	}
 
 	d.logger.Info("scheduling daemon restart", "new_binary", newBin)
@@ -3429,6 +3453,41 @@ func (d *Daemon) triggerRestart() {
 	if d.cancelFunc != nil {
 		d.cancelFunc()
 	}
+	return true
+}
+
+// restartTargetBinary resolves the path a restart would re-exec.
+//
+// For brew installs it keeps the stable symlink path (e.g.
+// /opt/homebrew/bin/multica) so the restarted daemon picks up the new Cellar
+// version automatically: on Linux os.Executable() reads /proc/self/exe, which
+// the kernel resolves to the Cellar path, and brew cleanup deletes that path
+// after an upgrade. For non-brew installs it resolves to the absolute path of
+// the replaced binary.
+//
+// Shared with trySelfReload, which must version-probe the same binary the
+// restart would run — probing os.Executable() directly would read the old
+// Cellar path under brew and miss the upgrade entirely.
+func (d *Daemon) restartTargetBinary() (string, error) {
+	newBin, err := resolveSelfExecutable()
+	if err != nil {
+		return "", err
+	}
+	if isBrewInstall() {
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			return filepath.Join(brewPrefix, "bin", "multica"), nil
+		}
+		if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			return filepath.Join(prefix, "bin", "multica"), nil
+		}
+		d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
+			"executable", newBin)
+		return newBin, nil
+	}
+	if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
+		newBin = resolved
+	}
+	return newBin, nil
 }
 
 // pollLoop runs the machine-level batch claim poller (MUL-4257): a single
