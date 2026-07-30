@@ -13,7 +13,7 @@ resources:
 
 images:
   - name: ghcr.io/g2crowd/applicationset-fs-plugin
-    newTag: "latest"
+    newTag: "1.1"
 
 patches:
   # Point the plugin's bearer-token ESO at the dev-server plugin token (sibling
