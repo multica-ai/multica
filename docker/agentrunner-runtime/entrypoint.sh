@@ -53,8 +53,23 @@ chmod 644 "${SSH_KEY}.pub" 2>/dev/null || true
 # fails with "HTTP 401: Missing Authentication header" (upstream issue
 # #42130). Seed config.yaml with the OpenAI-native provider — which does
 # read OPENAI_API_KEY — before Hermes gets a chance to self-create an empty
-# one. Skipped if a config already exists so a hand-customized provider
-# choice is never overwritten.
+# one.
+#
+# We also pin model.api_mode to codex_responses. All of our OpenAI-shaped
+# traffic (including hermes) is routed through our internal LiteLLM gateway
+# via OPENAI_BASE_URL, not api.openai.com directly. Hermes only force-selects
+# the Responses API wire protocol (hermes_cli.providers.host_mandated_api_mode)
+# for a literal api.openai.com hostname; any other host — including our
+# gateway — defaults to the chat_completions wire protocol. Reasoning models
+# (gpt-5.6-terra, gpt-5.5, ...) reject chat_completions requests that combine
+# function tools with reasoning_effort ("Function tools with reasoning_effort
+# are not supported ... use /v1/responses"), so every hermes call with tools
+# enabled 400s. Setting api_mode explicitly (read directly from model.api_mode
+# for api_key-auth providers, per hermes_cli.runtime_provider) makes hermes
+# speak Responses API regardless of hostname.
+#
+# Both keys are skipped if a config already exists so a hand-customized
+# provider/api_mode choice is never overwritten.
 hermes_config_dir="${HOME}/.hermes"
 hermes_config="${hermes_config_dir}/config.yaml"
 if [ ! -f "${hermes_config}" ]; then
@@ -62,6 +77,7 @@ if [ ! -f "${hermes_config}" ]; then
   cat > "${hermes_config}" <<'YAML'
 model:
   provider: openai-api
+  api_mode: codex_responses
 YAML
 fi
 
