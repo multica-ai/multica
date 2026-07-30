@@ -158,6 +158,7 @@ function urlTransform(url: string): string {
 // window or breaks out into the system browser — both lose thread context.
 // Use SPA push so the browser back-button restores scroll + tiptap draft via
 // the Next.js router cache, matching mobile-native patterns.
+// CEREBRO-PATCH(inbox-trigger-stable-scroll): allow bare issue identifiers to resolve without changing message height (FIR-4188).
 function IssueMentionLink({
   issueId,
   label,
@@ -179,6 +180,7 @@ function IssueMentionLink({
       target={opensInNewTab ? "_blank" : undefined}
       rel={opensInNewTab ? "noopener noreferrer" : undefined}
       // CEREBRO-PATCH(issue-chip-inline-link-wrap): inline (not inline-flex) so box-decoration-clone wraps across lines (JEH-1593)
+      // CEREBRO-PATCH(inbox-trigger-stable-scroll): preserve the unresolved identifier's inline text footprint (FIR-4188).
       className={
         identifierOnly
           ? "not-prose inline text-inherit underline decoration-dotted underline-offset-2"
@@ -200,6 +202,7 @@ function IssueMentionLink({
         else window.open(path, "_blank", "noopener,noreferrer");
       }}
     >
+      {/* CEREBRO-PATCH(inbox-trigger-stable-scroll): render resolved bare identifiers as text, not height-changing chips (FIR-4188). */}
       {identifierOnly ? (
         label
       ) : (
@@ -222,6 +225,7 @@ function IssueMentionLink({
  * it grew (FIR-4188).
  */
 function AutolinkedIssueMentionLink({ identifier }: { identifier: string }) {
+  // CEREBRO-PATCH(inbox-trigger-stable-scroll): keep async issue resolution from moving the Inbox target (FIR-4188).
   const issue = useResolveIssueIdentifier(identifier);
   if (!issue) return <>{identifier}</>;
   return <IssueMentionLink issueId={issue.id} label={identifier} identifierOnly />;

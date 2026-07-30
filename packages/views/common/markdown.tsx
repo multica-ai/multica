@@ -66,6 +66,7 @@ function ProjectMentionCard({ projectId }: { projectId: string }): React.ReactNo
  * (FIR-4188).
  */
 function AutolinkedIssueMention({ identifier }: { identifier: string }): React.ReactNode {
+  // CEREBRO-PATCH(inbox-trigger-stable-scroll): keep async issue resolution from changing message height (FIR-4188).
   const issue = useResolveIssueIdentifier(identifier);
   const p = useWorkspacePaths();
   if (!issue) return identifier;
