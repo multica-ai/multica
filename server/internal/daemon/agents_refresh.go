@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -21,6 +22,13 @@ var agentDiscoveryInterval = 2 * time.Minute
 // off, so a stuck provider cannot turn into a busy loop. Overridable for tests.
 var agentConvergeMaxBackoff = 30 * time.Minute
 
+// agentVersionRefreshInterval is how often a running daemon re-probes the
+// version of every agent CLI it already has registered, so an in-place upgrade
+// of codex/claude is picked up without a restart. A round is one `--version`
+// fork per installed CLI, fanned out and machine-level — it does not scale with
+// workspace count or runtime count. Overridable for tests.
+var agentVersionRefreshInterval = 5 * time.Minute
+
 // agentDiscoveryLoop keeps the registered runtime set converged on the agent
 // CLIs actually installed on this machine, so a CLI installed while the daemon
 // is running comes online without a restart (MUL-5439).
@@ -34,9 +42,16 @@ var agentConvergeMaxBackoff = 30 * time.Minute
 // still "missing" on the next tick and gets tried again. It also means a
 // provider rejected for being below the minimum version recovers on its own
 // after an in-place upgrade.
+//
+// A second, slower ticker keeps the versions of already-registered providers
+// fresh (refreshAgentVersions) — the converge half only ever looks at providers
+// that are *missing* a runtime, so without it an in-place CLI upgrade would stay
+// invisible until the daemon restarted.
 func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 	ticker := time.NewTicker(agentDiscoveryInterval)
 	defer ticker.Stop()
+	versionTicker := time.NewTicker(agentVersionRefreshInterval)
+	defer versionTicker.Stop()
 
 	var (
 		backoff   time.Duration
@@ -46,6 +61,8 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-versionTicker.C:
+			d.refreshAgentVersions(ctx)
 		case now := <-ticker.C:
 			gained := d.refreshAgentAvailability()
 			missing := d.providersMissingRuntimes()
@@ -160,6 +177,104 @@ func (d *Daemon) refreshAgentAvailability() []string {
 	d.agentsAvailable.Store(&merged)
 	d.logger.Info("agent CLI discovered after startup", "providers", gained)
 	return gained
+}
+
+// refreshAgentVersions re-probes every installed agent CLI and, when one now
+// reports a different version, refreshes the daemon's cached version and
+// re-registers the built-in runtimes so the server reports what is on disk.
+//
+// This is the agent-CLI counterpart to trySelfReload, and it deliberately does
+// NOT restart. What a user needs when codex or claude upgrades is that
+// subsequent tasks run the new CLI under the new version's rules — not that
+// Multica's availability tracks a third party's release cadence. An in-place
+// upgrade leaves the pinned path valid, so the new binary is already what
+// launches; the two things left stale are the cached version (which keys
+// version-sensitive policy such as the Codex sandbox, read back through
+// resolveAgentEntry) and the version the server displays. Both are refreshed
+// here with running tasks untouched.
+//
+// detectBuiltinRuntimes does the probing, which buys three properties for free:
+// probes fan out, a fast failure is retried (runtimeVersionProbeAttempts), and
+// the minimum-version gate still applies. A provider whose probe fails this
+// round keeps its previous version and is retried next round — a failed probe
+// never looks like a version change.
+//
+// Re-registration carries the whole built-in set because that is the shape the
+// register endpoint upserts, so one provider's upgrade re-sends its neighbours
+// too. That is safe rather than disruptive: the unchanged entries upsert
+// identically, and mergeBuiltinRegisterResponse swaps a server-side ID rotation
+// in place instead of accumulating a duplicate — the workspace still holds
+// exactly one runtime per provider, and no running task is touched.
+func (d *Daemon) refreshAgentVersions(ctx context.Context) {
+	// The converge half is about to re-probe and re-register this round anyway;
+	// doing it twice would just fork every CLI twice.
+	if len(d.providersMissingRuntimes()) > 0 {
+		return
+	}
+	before := d.agentVersionSnapshot()
+	if len(before) == 0 {
+		return
+	}
+
+	builtins := d.detectBuiltinRuntimes(ctx)
+	if len(builtins) == 0 {
+		return
+	}
+	var changes []string
+	for _, rt := range builtins {
+		prev, known := before[rt["type"]]
+		// An unknown or blank previous version means this provider has not
+		// registered a version yet; that is the converge path's job, not a change.
+		if !known || prev == "" || prev == rt["version"] {
+			continue
+		}
+		changes = append(changes, fmt.Sprintf("%s %s -> %s", rt["type"], prev, rt["version"]))
+	}
+	// A round whose register call failed is retried on the next one even though
+	// the version cache has already moved on, so a transient 5xx doesn't leave
+	// the server displaying a version the daemon stopped using.
+	if len(changes) == 0 && !d.agentReregisterPending.Load() {
+		return
+	}
+	if len(changes) > 0 {
+		sort.Strings(changes)
+		d.logger.Info("agent CLI version changed; refreshing registration without a restart", "changes", changes)
+	}
+	d.agentReregisterPending.Store(!d.reregisterBuiltins(ctx, builtins))
+}
+
+// reregisterBuiltins re-sends the built-in registration payload for every
+// tracked workspace and returns whether all of them succeeded.
+func (d *Daemon) reregisterBuiltins(ctx context.Context, builtins []map[string]string) bool {
+	d.mu.Lock()
+	workspaceIDs := make([]string, 0, len(d.workspaces))
+	for id := range d.workspaces {
+		workspaceIDs = append(workspaceIDs, id)
+	}
+	d.mu.Unlock()
+	if len(workspaceIDs) == 0 {
+		return true
+	}
+	sort.Strings(workspaceIDs)
+
+	allOK := true
+	var changed bool
+	for _, id := range workspaceIDs {
+		resp, err := d.registerBuiltinRuntimesForWorkspace(ctx, id, builtins)
+		if err != nil {
+			d.logger.Warn("re-register after agent CLI version change failed; will retry",
+				"workspace_id", id, "error", err)
+			allOK = false
+			continue
+		}
+		if newIDs, ok := d.mergeBuiltinRegisterResponse(id, resp); ok && len(newIDs) > 0 {
+			changed = true
+		}
+	}
+	if changed {
+		d.notifyRuntimeSetChanged()
+	}
+	return allOK
 }
 
 // providersMissingRuntimes returns the discovered providers that do not have a

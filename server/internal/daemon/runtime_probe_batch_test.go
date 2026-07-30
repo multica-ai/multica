@@ -39,6 +39,9 @@ type batchFixture struct {
 	registered []registeredCall
 	// probes counts detectAgentVersion calls per executable path.
 	probes map[string]int
+	// probeVersion is what the version probe stub reports; defaults to "9.9.9".
+	// Changing it mid-test simulates an in-place agent CLI upgrade.
+	probeVersion string
 	// probeErr, when set, is consulted by the version probe stub before it
 	// succeeds. It receives the executable path and the 1-based attempt count
 	// for that path, and returns a non-nil error to fail that attempt.
@@ -96,6 +99,9 @@ func (fx *batchFixture) profilesShouldFail() bool {
 type registeredCall struct {
 	workspaceID string
 	types       []string
+	// versions maps runtime type -> the version that call reported, so a test
+	// can assert the server was told about an in-place CLI upgrade.
+	versions map[string]string
 }
 
 func (fx *batchFixture) setWorkspaces(ws ...WorkspaceInfo) {
@@ -108,6 +114,27 @@ func (fx *batchFixture) probeCount(path string) int {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
 	return fx.probes[path]
+}
+
+// setProbeVersion changes what `<cli> --version` reports from now on.
+func (fx *batchFixture) setProbeVersion(version string) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.probeVersion = version
+}
+
+// registeredVersionFor returns the version the LAST Register call for a
+// workspace reported for a provider.
+func (fx *batchFixture) registeredVersionFor(workspaceID, provider string) string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	var version string
+	for _, call := range fx.registered {
+		if call.workspaceID == workspaceID {
+			version = call.versions[provider]
+		}
+	}
+	return version
 }
 
 func (fx *batchFixture) setProbeErr(fn func(path string, attempt int) error) {
@@ -141,8 +168,9 @@ func (fx *batchFixture) registerCallCount() int {
 func newBatchFixture(t *testing.T) *batchFixture {
 	t.Helper()
 	fx := &batchFixture{
-		profiles: make(map[string][]RuntimeProfile),
-		probes:   make(map[string]int),
+		profiles:     make(map[string][]RuntimeProfile),
+		probes:       make(map[string]int),
+		probeVersion: "9.9.9",
 	}
 
 	origDetect := detectAgentVersion
@@ -156,13 +184,14 @@ func newBatchFixture(t *testing.T) *batchFixture {
 		fx.probes[path]++
 		attempt := fx.probes[path]
 		probeErr := fx.probeErr
+		version := fx.probeVersion
 		fx.mu.Unlock()
 		if probeErr != nil {
 			if err := probeErr(path, attempt); err != nil {
 				return "", err
 			}
 		}
-		return "9.9.9", nil
+		return version, nil
 	}
 	checkAgentMinVersion = func(_, _ string) error { return nil }
 
@@ -186,10 +215,11 @@ func newBatchFixture(t *testing.T) *batchFixture {
 				_, _ = w.Write([]byte(`{"error":"injected register failure"}`))
 				return
 			}
-			call := registeredCall{workspaceID: body.WorkspaceID}
+			call := registeredCall{workspaceID: body.WorkspaceID, versions: map[string]string{}}
 			var resp RegisterResponse
 			for _, rt := range body.Runtimes {
 				call.types = append(call.types, rt["type"])
+				call.versions[rt["type"]] = rt["version"]
 				resp.Runtimes = append(resp.Runtimes, Runtime{
 					ID:        "rt-" + strconv.Itoa(int(runtimeSeq.Add(1))),
 					Name:      rt["name"],
