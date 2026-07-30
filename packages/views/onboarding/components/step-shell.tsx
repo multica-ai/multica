@@ -22,14 +22,23 @@ import type { OnboardingStep } from "@multica/core/onboarding";
  *   - STEP_FRAME is the persistent chrome measure. Back and the step
  *     indicator sit on it, identically, on every step, so the one element
  *     that survives every transition never moves.
- *   - STEP_COLUMN is the reading measure for prose and forms. A step may use
- *     the frame instead when its content genuinely needs the width (the
- *     questionnaire's option grid does); both are centred, so the content
- *     stays on the frame's centreline either way.
+ *   - STEP_COLUMN is the reading measure for prose and forms, centred. A step
+ *     may use the frame instead when its content needs the width (the
+ *     questionnaire's option grid, the runtime list) and cap its own prose
+ *     with STEP_MEASURE; both are centred, so content stays on the frame's
+ *     centreline either way.
  */
 export const STEP_GUTTER = "px-6 sm:px-10 md:px-14 lg:px-16";
 export const STEP_FRAME = "mx-auto w-full max-w-[920px]";
 export const STEP_COLUMN = "mx-auto w-full max-w-[620px]";
+
+/**
+ * Reading measure applied INSIDE the frame, left-aligned rather than centred.
+ * Use it for prose and form fields on a step that sits on STEP_FRAME: the
+ * page margins then match every other step, while a workspace name still gets
+ * an input someone would want to type into instead of an 800px one.
+ */
+export const STEP_MEASURE = "max-w-[620px]";
 
 /** Vertical rhythm shared by every step's scrolling region. */
 export const STEP_BLOCK_PADDING = "py-10";

@@ -8,6 +8,7 @@ import {
   STEP_COLUMN,
   STEP_FRAME,
   STEP_GUTTER,
+  STEP_MEASURE,
   StepShellHeader,
 } from "./step-shell";
 
@@ -54,6 +55,15 @@ describe("onboarding step shell", () => {
       expect(measure).not.toMatch(/\bp[xlr]?-/);
     }
     expect(STEP_BLOCK_PADDING).toMatch(/^py-/);
+  });
+
+  // STEP_MEASURE caps prose and form fields inside a step that sits on the
+  // frame. It must NOT centre: centring it would pull the content off the
+  // frame's left edge, which is the alignment the frame exists to provide.
+  it("keeps the in-frame reading measure left-aligned and padding-free", () => {
+    expect(STEP_MEASURE).toMatch(/max-w-\[\d+px\]/);
+    expect(STEP_MEASURE).not.toContain("mx-auto");
+    expect(STEP_MEASURE).not.toMatch(/\bp[xlr]?-/);
   });
 
   it("renders Back only when the step can go back", () => {

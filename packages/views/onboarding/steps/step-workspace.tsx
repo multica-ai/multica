@@ -18,7 +18,8 @@ import { DragStrip } from "@multica/views/platform";
 import { useLogout } from "../../auth";
 import {
   STEP_BLOCK_PADDING,
-  STEP_COLUMN,
+  STEP_FRAME,
+  STEP_MEASURE,
   STEP_GUTTER,
   StepShellHeader,
 } from "../components/step-shell";
@@ -309,7 +310,7 @@ export function StepWorkspace({
         style={fadeStyle}
         className={cn("min-h-0 flex-1 overflow-y-auto", STEP_GUTTER)}
       >
-        <div className={cn(STEP_COLUMN, STEP_BLOCK_PADDING)}>
+        <div className={cn(STEP_FRAME, STEP_BLOCK_PADDING)}>
           <div className="mb-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {reusing
               ? workspaceCreationAllowed
@@ -328,7 +329,7 @@ export function StepWorkspace({
                 ? t(($) => $.step_workspace.headline_first)
                 : t(($) => $.step_workspace.creation_disabled_headline)}
           </h1>
-          <p className="mt-4 text-body-lg leading-[1.55] text-foreground">
+          <p className={cn("mt-4 text-body-lg leading-[1.55] text-foreground", STEP_MEASURE)}>
             {reusing
               ? workspaceCreationAllowed
                 ? t(($) => $.step_workspace.lede_resume)
@@ -338,7 +339,7 @@ export function StepWorkspace({
                 : t(($) => $.step_workspace.creation_disabled_lede)}
           </p>
 
-          <div className="mt-10">
+          <div className={cn("mt-10", STEP_MEASURE)}>
             {reusing ? (
               <div className="flex flex-col gap-3">
                 <ExistingWorkspaceCard
