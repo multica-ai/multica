@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	logicalCompanyBrainUpMigration   = "../../../migrations/9163_cerebro_company_brain_connection.up.sql"
-	logicalCompanyBrainDownMigration = "../../../migrations/9163_cerebro_company_brain_connection.down.sql"
+	logicalCompanyBrainUpMigration           = "../../../migrations/9163_cerebro_company_brain_connection.up.sql"
+	logicalCompanyBrainDownMigration         = "../../../migrations/9163_cerebro_company_brain_connection.down.sql"
+	companyBrainPermissionScopeUpMigration   = "../../../migrations/9164_cerebro_company_brain_permission_scope.up.sql"
+	companyBrainPermissionScopeDownMigration = "../../../migrations/9164_cerebro_company_brain_permission_scope.down.sql"
 )
 
 func TestLogicalCompanyBrainMigrationDefinesOneCatalogOwningConnection(t *testing.T) {
@@ -125,6 +127,167 @@ func TestLogicalCompanyBrainMigrationConstraints(t *testing.T) {
 	}
 }
 
+func TestCompanyBrainPermissionScopeMigrationExtendsExistingPermissionRows(t *testing.T) {
+	up := readLogicalCompanyBrainMigration(t, companyBrainPermissionScopeUpMigration)
+
+	for _, contract := range []string{
+		"ALTER TABLE cerebro_tool_policy",
+		"company_brain_connection_id",
+		"company_brain_allowed_read_sources",
+		"company_brain_write_source",
+		"company_brain_access_version",
+		"company_brain_lifecycle_state",
+		"layer = 'agent'",
+		"resource_pattern = ''",
+		"setting = 'allow'",
+	} {
+		if !strings.Contains(up, contract) {
+			t.Errorf("source-scoped permission migration missing %q", contract)
+		}
+	}
+
+	upper := strings.ToUpper(up)
+	for _, mutation := range []string{"INSERT INTO", "UPDATE ", "DELETE FROM"} {
+		if strings.Contains(upper, mutation) {
+			t.Errorf("schema-only migration must not mutate existing rows: found %q", mutation)
+		}
+	}
+}
+
+func TestCompanyBrainPermissionScopeMigrationConstraints(t *testing.T) {
+	pool := openConnectionMigrationPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	logicalUp := readLogicalCompanyBrainMigration(t, logicalCompanyBrainUpMigration)
+	if _, err := tx.Exec(ctx, logicalUp); err != nil {
+		t.Fatalf("apply logical connection migration: %v", err)
+	}
+
+	workspaceID := insertMigrationWorkspace(t, tx, "company-brain-permission-scope")
+	agentID := insertMigrationAgent(t, tx, workspaceID)
+	connectionID := insertMigrationConnection(t, tx, workspaceID, "company-brain")
+	logicalConnectionID := insertLogicalCompanyBrainConnection(t, tx, workspaceID, connectionID)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy
+			(workspace_id, tool_key, layer, subject_id, setting, resource_pattern)
+		VALUES ($1, 'connection:ordinary', 'agent', $2, 'deny', '')
+	`, workspaceID, agentID); err != nil {
+		t.Fatalf("insert ordinary permission before migration: %v", err)
+	}
+
+	scopeUp := readLogicalCompanyBrainMigration(t, companyBrainPermissionScopeUpMigration)
+	if _, err := tx.Exec(ctx, scopeUp); err != nil {
+		t.Fatalf("apply source-scoped permission migration: %v", err)
+	}
+
+	var ordinaryCount int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM cerebro_tool_policy
+		WHERE workspace_id = $1
+		  AND tool_key = 'connection:ordinary'
+		  AND company_brain_connection_id IS NULL
+		  AND company_brain_allowed_read_sources IS NULL
+		  AND company_brain_write_source IS NULL
+		  AND company_brain_access_version IS NULL
+		  AND company_brain_lifecycle_state IS NULL
+	`, workspaceID).Scan(&ordinaryCount); err != nil {
+		t.Fatal(err)
+	}
+	if ordinaryCount != 1 {
+		t.Fatalf("ordinary permission rows preserved with empty Company Brain scope = %d, want 1", ordinaryCount)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (
+			workspace_id, tool_key, layer, subject_id, setting, resource_pattern,
+			company_brain_connection_id,
+			company_brain_allowed_read_sources, company_brain_write_source,
+			company_brain_access_version, company_brain_lifecycle_state
+		)
+		VALUES (
+			$1, 'connection:company-brain', 'agent', $2, 'allow', '',
+			$3, ARRAY['shared', 'commercial'], 'commercial', 1, 'draft'
+		)
+	`, workspaceID, agentID, logicalConnectionID); err != nil {
+		t.Fatalf("insert source-scoped Company Brain permission: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		layer     string
+		setting   string
+		pattern   string
+		reads     string
+		write     string
+		version   string
+		lifecycle string
+	}{
+		{name: "partial scope", layer: "agent", setting: "allow", reads: "ARRAY['shared']", write: "NULL", version: "1", lifecycle: "'draft'"},
+		{name: "non-agent layer", layer: "workspace", setting: "allow", reads: "ARRAY['shared']", write: "'shared'", version: "1", lifecycle: "'draft'"},
+		{name: "tool-level row", layer: "agent", setting: "allow", pattern: "search", reads: "ARRAY['shared']", write: "'shared'", version: "1", lifecycle: "'draft'"},
+		{name: "deny carrying scope", layer: "agent", setting: "deny", reads: "ARRAY['shared']", write: "'shared'", version: "1", lifecycle: "'draft'"},
+		{name: "empty read scope", layer: "agent", setting: "allow", reads: "ARRAY[]::text[]", write: "'shared'", version: "1", lifecycle: "'draft'"},
+		{name: "blank read source", layer: "agent", setting: "allow", reads: "ARRAY['', 'shared']", write: "'shared'", version: "1", lifecycle: "'draft'"},
+		{name: "write outside read scope", layer: "agent", setting: "allow", reads: "ARRAY['shared']", write: "'commercial'", version: "1", lifecycle: "'draft'"},
+		{name: "invalid version", layer: "agent", setting: "allow", reads: "ARRAY['shared']", write: "'shared'", version: "0", lifecycle: "'draft'"},
+		{name: "invalid lifecycle", layer: "agent", setting: "allow", reads: "ARRAY['shared']", write: "'shared'", version: "1", lifecycle: "'unknown'"},
+	} {
+		statement := `
+			INSERT INTO cerebro_tool_policy (
+				workspace_id, tool_key, layer, subject_id, setting, resource_pattern,
+				company_brain_connection_id,
+				company_brain_allowed_read_sources, company_brain_write_source,
+				company_brain_access_version, company_brain_lifecycle_state
+			)
+			VALUES (
+				$1, 'connection:company-brain-' || gen_random_uuid(), '` + tc.layer + `', $2, '` + tc.setting + `', '` + tc.pattern + `',
+				$3, ` + tc.reads + `, ` + tc.write + `, ` + tc.version + `, ` + tc.lifecycle + `
+			)
+		`
+		expectMigrationConstraintFailure(t, tx, tc.name, statement, workspaceID, agentID, logicalConnectionID)
+	}
+
+	otherWorkspaceID := insertMigrationWorkspace(t, tx, "company-brain-permission-scope-other")
+	otherConnectionID := insertMigrationConnection(t, tx, otherWorkspaceID, "company-brain")
+	otherLogicalConnectionID := insertLogicalCompanyBrainConnection(t, tx, otherWorkspaceID, otherConnectionID)
+	expectMigrationConstraintFailure(t, tx, "cross-workspace logical connection", `
+		INSERT INTO cerebro_tool_policy (
+			workspace_id, tool_key, layer, subject_id, setting, resource_pattern,
+			company_brain_connection_id,
+			company_brain_allowed_read_sources, company_brain_write_source,
+			company_brain_access_version, company_brain_lifecycle_state
+		)
+		VALUES (
+			$1, 'connection:company-brain-cross-workspace', 'agent', $2, 'allow', '',
+			$3, ARRAY['shared'], 'shared', 1, 'draft'
+		)
+	`, workspaceID, agentID, otherLogicalConnectionID)
+
+	scopeDown := readLogicalCompanyBrainMigration(t, companyBrainPermissionScopeDownMigration)
+	if _, err := tx.Exec(ctx, scopeDown); err != nil {
+		t.Fatalf("apply source-scoped permission down migration: %v", err)
+	}
+	var scopedColumns int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = 'cerebro_tool_policy'
+		  AND column_name LIKE 'company_brain_%'
+	`).Scan(&scopedColumns); err != nil {
+		t.Fatal(err)
+	}
+	if scopedColumns != 0 {
+		t.Fatalf("down migration left %d Company Brain permission columns", scopedColumns)
+	}
+}
+
 func readLogicalCompanyBrainMigration(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -177,6 +340,33 @@ func insertMigrationConnection(t *testing.T, tx pgx.Tx, workspaceID, name string
 		        'Use Company Brain for durable company knowledge.')
 		RETURNING id
 	`, workspaceID, name).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func insertMigrationAgent(t *testing.T, tx pgx.Tx, workspaceID string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(context.Background(), `
+		INSERT INTO agent (workspace_id, name, runtime_mode)
+		VALUES ($1, 'Company Brain permission migration', 'local')
+		RETURNING id
+	`, workspaceID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func insertLogicalCompanyBrainConnection(t *testing.T, tx pgx.Tx, workspaceID, connectionID string) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(context.Background(), `
+		INSERT INTO cerebro_company_brain_connection
+			(workspace_id, connection_id, tool_contract_sha256)
+		VALUES ($1, $2, repeat('a', 64))
+		RETURNING id
+	`, workspaceID, connectionID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id

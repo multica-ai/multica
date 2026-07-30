@@ -12,6 +12,11 @@ documents one named patch + its rationale + the file location(s).
   existing `workspace_connection`, which remains the single storage location
   for URL, tools, instructions, and scopable arguments, and records the
   canonical tool-contract fingerprint without seeding or changing any rows.
+- `server/migrations/9164_cerebro_company_brain_permission_scope.{up,down}.sql`
+  keeps allowed read sources, the write source, access version, and lifecycle
+  on the existing agent-level Connection permission row. The fields are
+  nullable for ordinary permissions, and the migration neither seeds nor
+  changes permission assignments.
 - **Why:** prior to consolidation, Company Brain source claims only existed behind
   each legacy connection credential. The report invokes `whoami` server-side,
   returns only `write_source` and `allowed_read_sources`, and attaches that
