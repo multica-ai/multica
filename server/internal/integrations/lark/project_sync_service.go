@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -699,6 +700,100 @@ func (s *ProjectSyncService) ProjectSummary(ctx context.Context, workspaceID, pr
 
 func (s *ProjectSyncService) ProjectSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ChannelProjectSyncSummary, error) {
 	return s.store.listProjectSyncSummaries(ctx, workspaceID)
+}
+
+// IssueCreateTopicHookForAgentTask resolves the Feishu topic that triggered an
+// agent task and returns an IssueService transaction hook for binding any Issue
+// created by that task back to the same topic. Tasks originating outside a
+// Feishu group topic intentionally return a nil hook.
+func (s *ProjectSyncService) IssueCreateTopicHookForAgentTask(
+	ctx context.Context,
+	workspaceID, taskID pgtype.UUID,
+) (func(context.Context, pgx.Tx, db.Issue) error, error) {
+	task, err := s.queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
+		ID: taskID, WorkspaceID: workspaceID,
+	})
+	if isNoRows(err) || (err == nil && !task.ChatSessionID.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	binding, err := s.queries.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: task.ChatSessionID,
+		ChannelType:   "feishu",
+	})
+	if isNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if binding.ChatType != string(channel.ChatTypeGroup) ||
+		!binding.LastThreadID.Valid || strings.TrimSpace(binding.LastThreadID.String) == "" {
+		return nil, nil
+	}
+
+	installation, err := s.queries.GetChannelInstallationInWorkspace(ctx, db.GetChannelInstallationInWorkspaceParams{
+		ID: binding.InstallationID, WorkspaceID: workspaceID, ChannelType: "feishu",
+	})
+	if isNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if InstallationStatus(installation.Status) != InstallationActive || installation.AgentID != task.AgentID {
+		return nil, nil
+	}
+
+	var config larkBindingConfig
+	if len(binding.Config) > 0 {
+		if err := json.Unmarshal(binding.Config, &config); err != nil {
+			return nil, fmt.Errorf("decode Feishu chat binding config: %w", err)
+		}
+	}
+	threadID := strings.TrimSpace(binding.LastThreadID.String)
+	chatID := strings.TrimSpace(config.ChatID)
+	if chatID == "" {
+		chatID = strings.TrimSuffix(binding.ChannelChatID, ":"+threadID)
+	}
+	rootID := strings.TrimSpace(config.TopicRootMessageID)
+	if rootID == "" && binding.LastMessageID.Valid {
+		// Compatibility for topic sessions created before the root id was
+		// persisted in config. The trigger message is the best available root.
+		rootID = strings.TrimSpace(binding.LastMessageID.String)
+	}
+	if chatID == "" || rootID == "" {
+		return nil, nil
+	}
+
+	createdBy := task.InitiatorUserID
+	if !createdBy.Valid {
+		createdBy = task.OriginatorUserID
+	}
+	installationID := binding.InstallationID
+	return func(hookCtx context.Context, tx pgx.Tx, issue db.Issue) error {
+		if _, err := s.store.createIssueTopic(
+			hookCtx, tx, issue.WorkspaceID, installationID, pgtype.UUID{}, issue.ProjectID,
+			issue.ID, chatID, rootID, threadID, "issue_created_in_topic", createdBy,
+		); err != nil {
+			return translateProjectSyncConstraint(err)
+		}
+		// The Issue INSERT trigger runs before this hook and may have queued a
+		// Project-level issue_created notification. The direct topic route is
+		// authoritative, so remove that now-stale notification in the same
+		// transaction instead of letting the worker later reject it as a route
+		// conflict.
+		_, err := tx.Exec(hookCtx, `
+			DELETE FROM channel_notification_outbox
+			WHERE workspace_id = $1 AND issue_id = $2
+			  AND event_type = 'issue_created'
+			  AND issue_topic_binding_id IS NULL`,
+			issue.WorkspaceID, issue.ID)
+		return err
+	}, nil
 }
 
 func (s *ProjectSyncService) ListInstallationProjects(ctx context.Context, workspaceID, installationID pgtype.UUID) ([]ChannelProjectBindingListItem, error) {

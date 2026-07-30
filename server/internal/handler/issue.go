@@ -2523,6 +2523,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// be provided together.
 	var originType pgtype.Text
 	var originID pgtype.UUID
+	var agentCreateTaskID pgtype.UUID
 	if req.OriginType != nil || req.OriginID != nil {
 		if req.OriginType == nil || req.OriginID == nil {
 			writeError(w, http.StatusBadRequest, "origin_type and origin_id must be provided together")
@@ -2563,6 +2564,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {
 					originType = pgtype.Text{String: "agent_create", Valid: true}
 					originID = taskUUID
+					agentCreateTaskID = taskUUID
 				}
 			}
 		}
@@ -2595,6 +2597,37 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
+	createOpts := service.IssueCreateOpts{
+		ActorID:          actualCreatorID,
+		AnalyticsAgentID: analyticsAgentID,
+		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
+			payload := issueToResponse(issue, prefix)
+			payload.Attachments = buildAttachmentResponses(atts)
+			// Carry the authoritative label snapshot so every online client
+			// renders the new issue already labeled. Non-nil (even empty)
+			// pointer = authoritative list; the old flow's separate
+			// issue_labels:changed broadcast is gone.
+			labelResponses := labelsToResponse(labels)
+			payload.Labels = &labelResponses
+			return map[string]any{"issue": payload}
+		},
+	}
+	if agentCreateTaskID.Valid && h.LarkProjectSync != nil {
+		topicHook, hookErr := h.LarkProjectSync.IssueCreateTopicHookForAgentTask(
+			r.Context(), wsUUID, agentCreateTaskID,
+		)
+		if hookErr != nil {
+			slog.Warn("resolve agent-created issue Feishu topic failed", append(
+				logger.RequestAttrs(r), "error", hookErr, "workspace_id", workspaceID,
+				"task_id", uuidToString(agentCreateTaskID),
+			)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve Feishu topic binding")
+			return
+		}
+		createOpts.WithinTransaction = topicHook
+	}
+
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID:    wsUUID,
 		Title:          req.Title,
@@ -2615,22 +2648,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs:  attachmentIDs,
 		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
-	}, service.IssueCreateOpts{
-		ActorID:          actualCreatorID,
-		AnalyticsAgentID: analyticsAgentID,
-		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
-			payload := issueToResponse(issue, prefix)
-			payload.Attachments = buildAttachmentResponses(atts)
-			// Carry the authoritative label snapshot so every online client
-			// renders the new issue already labeled. Non-nil (even empty)
-			// pointer = authoritative list; the old flow's separate
-			// issue_labels:changed broadcast is gone.
-			labelResponses := labelsToResponse(labels)
-			payload.Labels = &labelResponses
-			return map[string]any{"issue": payload}
-		},
-	})
+	}, createOpts)
 
 	if errors.Is(err, service.ErrActiveDuplicate) {
 		dup := *res.DuplicateIssue

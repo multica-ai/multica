@@ -78,9 +78,12 @@ func TestFeishuSessionBinder_TopicMessageIsolatesByThread(t *testing.T) {
 	if _, err := b.EnsureSession(context.Background(), engine.EnsureSessionParams{
 		Installation: engine.ResolvedInstallation{ID: binderUUID(1), WorkspaceID: binderUUID(2), AgentID: binderUUID(3)},
 		Sender:       binderUUID(7),
-		Message: channel.InboundMessage{Source: channel.Source{
-			ChatID: "oc_chat", ChatType: channel.ChatTypeGroup, ThreadID: "omt_topic1",
-		}},
+		Message: channel.InboundMessage{
+			MessageID: "om_topic_root",
+			Source: channel.Source{
+				ChatID: "oc_chat", ChatType: channel.ChatTypeGroup, ThreadID: "omt_topic1",
+			},
+		},
 	}); err != nil {
 		t.Fatalf("EnsureSession: %v", err)
 	}
@@ -90,8 +93,9 @@ func TestFeishuSessionBinder_TopicMessageIsolatesByThread(t *testing.T) {
 		t.Errorf("BindingKey = %q, want chat:thread composite (topic isolation)", got.BindingKey)
 	}
 	var cfg larkBindingConfig
-	if err := json.Unmarshal(got.BindingConfig, &cfg); err != nil || cfg.ChatID != "oc_chat" {
-		t.Errorf("BindingConfig must carry the real chat id, got %q (err=%v)", got.BindingConfig, err)
+	if err := json.Unmarshal(got.BindingConfig, &cfg); err != nil ||
+		cfg.ChatID != "oc_chat" || cfg.TopicRootMessageID != "om_topic_root" {
+		t.Errorf("BindingConfig must carry the real chat and topic root ids, got %q (err=%v)", got.BindingConfig, err)
 	}
 }
 

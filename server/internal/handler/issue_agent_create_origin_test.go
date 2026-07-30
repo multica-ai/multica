@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 )
 
 // TestCreateIssue_AgentCreate_StampsActingTaskOrigin locks the MUL-4305 fix at
@@ -72,6 +74,111 @@ func TestCreateIssue_AgentCreate_StampsActingTaskOrigin(t *testing.T) {
 	}
 	if originID != taskID {
 		t.Fatalf("origin_id = %q, want acting task %q", originID, taskID)
+	}
+}
+
+// TestCreateIssue_AgentCreateFromFeishuTopicBindsTopic verifies that an Issue
+// created through the ordinary HTTP API by a Feishu-triggered agent task is
+// bound to the topic that owns the task's chat session in the same transaction.
+func TestCreateIssue_AgentCreateFromFeishuTopicBindsTopic(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "Feishu agent-created Issue topic")
+
+	var installationID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_installation (
+			workspace_id, agent_id, channel_type, config, installer_user_id, status
+		) VALUES ($1, $2, 'feishu', '{}', $3, 'active')
+		RETURNING id`, testWorkspaceID, agentID, testUserID,
+	).Scan(&installationID); err != nil {
+		t.Fatalf("create Feishu installation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding (
+			chat_session_id, installation_id, channel_type, channel_chat_id,
+			chat_type, last_message_id, last_thread_id, config
+		) VALUES (
+			$1, $2, 'feishu', 'oc_agent_topic:omt_agent_topic',
+			'group', 'om_agent_topic_root', 'omt_agent_topic',
+			'{"chat_id":"oc_agent_topic"}'
+		)`, sessionID, installationID); err != nil {
+		t.Fatalf("create Feishu chat binding: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id, status, priority,
+			initiator_user_id, originator_user_id, accountable_user_id
+		) VALUES ($1, $2, $3, 'running', 0, $4, $4, $4)
+		RETURNING id`, agentID, runtimeID, sessionID, testUserID,
+	).Scan(&taskID); err != nil {
+		t.Fatalf("create Feishu-triggered task: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_issue_topic_binding WHERE installation_id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, sessionID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+	})
+
+	projectSync, err := lark.NewProjectSyncService(lark.ProjectSyncServiceConfig{
+		Pool:    testPool,
+		Queries: testHandler.Queries,
+		Issues:  testHandler.IssueService,
+		Tasks:   testHandler.TaskService,
+	})
+	if err != nil {
+		t.Fatalf("create Project sync service: %v", err)
+	}
+	h := *testHandler
+	h.LarkProjectSync = projectSync
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Agent-created from Feishu topic",
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	h.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanup := withURLParam(newRequest("DELETE", "/api/issues/"+created.ID, nil), "id", created.ID)
+		h.DeleteIssue(httptest.NewRecorder(), cleanup)
+	})
+
+	var gotInstallationID, projectBindingID, projectID, chatID, rootID, threadID, source, state, createdBy string
+	if err := testPool.QueryRow(ctx, `
+		SELECT installation_id::text,
+		       COALESCE(project_binding_id::text, ''),
+		       COALESCE(project_id::text, ''),
+		       channel_chat_id, topic_root_message_id,
+		       COALESCE(channel_thread_id, ''), binding_source, state,
+		       COALESCE(created_by_user_id::text, '')
+		FROM channel_issue_topic_binding
+		WHERE issue_id = $1 AND state = 'active'`, created.ID,
+	).Scan(
+		&gotInstallationID, &projectBindingID, &projectID, &chatID,
+		&rootID, &threadID, &source, &state, &createdBy,
+	); err != nil {
+		t.Fatalf("load auto-created topic binding: %v", err)
+	}
+	if gotInstallationID != installationID || projectBindingID != "" || projectID != "" ||
+		chatID != "oc_agent_topic" || rootID != "om_agent_topic_root" ||
+		threadID != "omt_agent_topic" || source != "issue_created_in_topic" ||
+		state != "active" || createdBy != testUserID {
+		t.Fatalf("unexpected topic binding: installation=%q project_binding=%q project=%q chat=%q root=%q thread=%q source=%q state=%q created_by=%q",
+			gotInstallationID, projectBindingID, projectID, chatID, rootID,
+			threadID, source, state, createdBy)
 	}
 }
 
