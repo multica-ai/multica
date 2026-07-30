@@ -23,8 +23,7 @@ describe("Mode configuration API schemas", () => {
         allowed_tools: ["graphify"],
         data_sources: ["Company Brain"],
         approval_policy: "require",
-        workflow_id: "workflow-1",
-        eval_skill_ids: ["skill-1"],
+        extra_skill_ids: ["skill-1"],
       },
       draft: null,
       versions: [{ id: "v2", version: "2", config: {}, description: "Safer Plan", created_at: "2026-07-15T08:00:00Z" }],
@@ -58,7 +57,7 @@ describe("Mode configuration API schemas", () => {
         allowed_tools: null,
         data_sources: null,
         approval_policy: "inherit",
-        eval_skill_ids: null,
+        extra_skill_ids: null,
       },
       versions: [],
       updated_at: "2026-07-15T08:00:00Z",
@@ -68,6 +67,29 @@ describe("Mode configuration API schemas", () => {
     if (!result.success) return;
     expect(result.data.active.allowed_tools).toEqual([]);
     expect(result.data.active.data_sources).toEqual([]);
-    expect(result.data.active.eval_skill_ids).toEqual([]);
+    expect(result.data.active.extra_skill_ids).toEqual([]);
+  });
+
+  it("defaults the plan-write scope off when an older server omits it", () => {
+    const result = modeRecordSchema.safeParse({
+      mode: "review",
+      active_version: "1",
+      active: {
+        mode: "review",
+        version: "1",
+        instruction: "Review only.",
+        thinking_level: "high",
+        timeout_minutes: 45,
+        max_turns: 30,
+        allows_write: false,
+        approval_policy: "inherit",
+      },
+      versions: [],
+      updated_at: "2026-07-15T08:00:00Z",
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.active.allows_plan_write).toBe(false);
   });
 });

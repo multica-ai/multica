@@ -47,7 +47,7 @@ func configForVersion(config Config, version int) Config {
 	config.Version = strconv.Itoa(version)
 	config.AllowedTools = append([]string(nil), config.AllowedTools...)
 	config.DataSources = append([]string(nil), config.DataSources...)
-	config.EvalSkillIDs = append([]string(nil), config.EvalSkillIDs...)
+	config.ExtraSkillIDs = append([]string(nil), config.ExtraSkillIDs...)
 	return config
 }
 

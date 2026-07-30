@@ -86,11 +86,11 @@ type TaskContextForEnv struct {
 	SessionModeVersion        string // CEREBRO-PATCH(session-mode-config): pinned published version.
 	SessionModeInstruction    string // CEREBRO-PATCH(session-mode-config): workspace-authored runtime instruction.
 	SessionModeAllowsWrite    bool
+	SessionModePlanWrite      bool // CEREBRO-PATCH(session-mode-write-scopes): FIR-4047 plan/note writes are their own scope.
 	SessionModeAllowedTools   []string
 	SessionModeDataSources    []string
 	SessionModeApprovalPolicy string
-	SessionModeWorkflowID     string
-	SessionModeEvalSkillIDs   []string
+	SessionModeExtraSkillIDs  []string
 	// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks are platform activity, not synthetic comments.
 	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup
 	WakeupTriggerType       string // time, issue_status, or github_ci for wakeup tasks

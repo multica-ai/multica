@@ -1843,12 +1843,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					"workspace_id", resp.WorkspaceID, "mode", mode, "error", err)
 			} else {
 				resp.SessionModeConfig = &config
-				if resp.Agent != nil && h.TaskService != nil && len(config.EvalSkillIDs) > 0 {
+				if resp.Agent != nil && h.TaskService != nil && len(config.ExtraSkillIDs) > 0 { // CEREBRO-PATCH(session-mode-extra-skills): FIR-4047 a Mode adds skills, it does not run checks.
 					existing := make(map[string]struct{}, len(resp.Agent.Skills))
 					for _, skill := range resp.Agent.Skills {
 						existing[skill.ID] = struct{}{}
 					}
-					for _, skill := range h.TaskService.LoadWorkspaceSkillsByID(r.Context(), parseUUID(resp.WorkspaceID), config.EvalSkillIDs) {
+					for _, skill := range h.TaskService.LoadWorkspaceSkillsByID(r.Context(), parseUUID(resp.WorkspaceID), config.ExtraSkillIDs) {
 						if _, ok := existing[skill.ID]; !ok {
 							resp.Agent.Skills = append(resp.Agent.Skills, skill)
 						}

@@ -51,7 +51,6 @@ import type { SessionMode } from "./modes";
 import {
   type ModeConfig,
   type ThinkingLevel,
-  modeWorkflowOptions,
   modeConfigsOptions,
   usePublishMode,
   useRestoreMode,
@@ -322,7 +321,6 @@ interface EditorProps {
   onPublish: () => void | Promise<void>;
   canManage: boolean;
   busy?: boolean;
-  workflows?: Choice[];
   skills?: Choice[];
   modelChoices?: Choice[];
   toolChoices?: Choice[];
@@ -337,7 +335,6 @@ export function ModeConfigEditor({
   onPublish,
   canManage,
   busy = false,
-  workflows = [],
   skills = [],
   modelChoices = [],
   toolChoices = [],
@@ -349,10 +346,10 @@ export function ModeConfigEditor({
   const validation = validateModeConfig(config);
   const hasErrors = Object.keys(validation).length > 0;
   const thinking = THINKING_LEVELS.find((level) => level.value === config.thinking_level);
-  const [evaluationSearch, setEvaluationSearch] = useState("");
+  const [skillSearch, setSkillSearch] = useState("");
   const filteredSkills = skills
-    .filter((skill) => `${skill.name} ${skill.id}`.toLowerCase().includes(evaluationSearch.trim().toLowerCase()))
-    .sort((left, right) => Number(config.eval_skill_ids.includes(right.id)) - Number(config.eval_skill_ids.includes(left.id)) || left.name.localeCompare(right.name));
+    .filter((skill) => `${skill.name} ${skill.id}`.toLowerCase().includes(skillSearch.trim().toLowerCase()))
+    .sort((left, right) => Number(config.extra_skill_ids.includes(right.id)) - Number(config.extra_skill_ids.includes(left.id)) || left.name.localeCompare(right.name));
 
   return (
     <div className="space-y-8">
@@ -411,7 +408,11 @@ export function ModeConfigEditor({
           <p className="text-xs text-muted-foreground">Control which actions and connected sources this Mode can use.</p>
         </div>
         <div className="flex items-center justify-between rounded-lg border p-3">
-          <div><Label htmlFor="mode-write">Allow writes</Label><p className="text-xs text-muted-foreground">Allow changes to code or connected data when permissions permit.</p></div>
+          <div><Label htmlFor="mode-plan-write">Allow saving plans and notes</Label><p className="text-xs text-muted-foreground">Let the session save its own written output — a plan, a note, an artifact. Not code, not connected data.</p></div>
+          <Switch id="mode-plan-write" checked={config.allows_plan_write || config.allows_write} disabled={disabled || config.allows_write} onCheckedChange={(value) => patch("allows_plan_write", value)} />
+        </div>
+        <div className="flex items-center justify-between rounded-lg border p-3">
+          <div><Label htmlFor="mode-write">Allow writes</Label><p className="text-xs text-muted-foreground">Allow changes to code or connected data when permissions permit. This always includes plans and notes.</p></div>
           <Switch id="mode-write" checked={config.allows_write} disabled={disabled} onCheckedChange={(value) => patch("allows_write", value)} />
         </div>
 
@@ -434,30 +435,19 @@ export function ModeConfigEditor({
         </div>
       </section>
 
-      <section aria-labelledby="mode-workflow-and-quality" className="space-y-5 border-t pt-6">
+      <section aria-labelledby="mode-extra-skills" className="space-y-5 border-t pt-6">
         <div>
-          <h3 id="mode-workflow-and-quality" className="font-medium">Workflow and quality</h3>
-          <p className="text-xs text-muted-foreground">Choose the workflow and checks that apply before the Mode is used.</p>
-        </div>
-        <div className="space-y-2">
-          <Label>Workflow</Label>
-          <Select value={config.workflow_id || "__none__"} disabled={disabled} onValueChange={(value) => { const next = value ?? "__none__"; patch("workflow_id", next === "__none__" ? "" : next); }}>
-            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No workflow</SelectItem>
-              {workflows.map((workflow) => <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">Choose the shared Workflow recipe to use when this Mode starts work.</p>
+          <h3 id="mode-extra-skills" className="font-medium">Extra skills</h3>
+          <p className="text-xs text-muted-foreground">Add skills on top of the agent&apos;s own, only while it works in this Mode.</p>
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-end justify-between gap-2"><div><Label>Required evaluations</Label><p className="text-xs text-muted-foreground">Choose checks that must pass before this Mode is used.</p></div><span className="text-xs text-muted-foreground">{config.eval_skill_ids.length} selected</span></div>
-          <div className="relative"><Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search required evaluations" value={evaluationSearch} onChange={(event) => setEvaluationSearch(event.target.value)} placeholder="Search evaluations" className="h-8 pl-8" disabled={disabled} /></div>
+          <div className="flex items-end justify-between gap-2"><div><Label>Extra skills for this Mode</Label><p className="text-xs text-muted-foreground">These are added to the agent&apos;s skills for the session. They are not checks and nothing has to pass.</p></div><span className="text-xs text-muted-foreground">{config.extra_skill_ids.length} selected</span></div>
+          <div className="relative"><Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search extra skills" value={skillSearch} onChange={(event) => setSkillSearch(event.target.value)} placeholder="Search skills" className="h-8 pl-8" disabled={disabled} /></div>
           <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border p-2">
-            {skills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No workspace evaluations available.</p> : filteredSkills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No evaluations match your search.</p> : filteredSkills.map((skill) => (
+            {skills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No workspace skills available.</p> : filteredSkills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No skills match your search.</p> : filteredSkills.map((skill) => (
               <label key={skill.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50">
-                <input type="checkbox" checked={config.eval_skill_ids.includes(skill.id)} disabled={disabled} onChange={() => patch("eval_skill_ids", toggle(config.eval_skill_ids, skill.id))} />
+                <input type="checkbox" checked={config.extra_skill_ids.includes(skill.id)} disabled={disabled} onChange={() => patch("extra_skill_ids", toggle(config.extra_skill_ids, skill.id))} />
                 <span className="min-w-0 truncate">{skill.name}</span>
               </label>
             ))}
@@ -546,7 +536,6 @@ export function ModeSettingsTab() {
   const { role } = useCurrentMember(workspaceId);
   const canManage = role === "owner" || role === "admin";
   const modesQuery = useQuery(modeConfigsOptions(workspaceId));
-  const workflowsQuery = useQuery(modeWorkflowOptions(workspaceId));
   const skillsQuery = useQuery(skillListOptions(workspaceId));
   const membersQuery = useQuery(memberListOptions(workspaceId));
   const runtimesQuery = useQuery(runtimeListOptions(workspaceId));
@@ -575,9 +564,6 @@ export function ModeSettingsTab() {
     }
   }, [draftMode, record, selected]);
 
-  const workflows = (workflowsQuery.data?.workflows ?? [])
-    .filter((workflow) => workflow.workflow_type === "issue_loop" && workflow.enabled)
-    .map((workflow) => ({ id: workflow.id, name: workflow.name }));
   const skills = (skillsQuery.data ?? []).map((skill) => ({ id: skill.id, name: skill.name, description: skill.description }));
   const modelQueries = useModelQueries(runtimesQuery.data ?? []);
   const modelChoices = useMemo(() => {
@@ -685,7 +671,7 @@ export function ModeSettingsTab() {
         <Card><CardContent className="space-y-5 pt-6">
           {record && currentDraft ? <>
             <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4"><div><p className="font-medium">{MODES.find((mode) => mode.value === selected)?.label} settings</p><p className="text-xs text-muted-foreground">Published version {record.active_version}. New sessions use the published version.</p></div><span className="text-xs text-muted-foreground">{dirty ? "Draft needs saving" : "Ready to use"}</span></div>
-            <ModeConfigEditor config={currentDraft} onChange={setDraft} onSave={() => { void saveDraft(); }} onPublish={() => { setPublishOpen(true); }} canManage={canManage} busy={busy} workflows={workflows} skills={skills} modelChoices={modelChoices} toolChoices={toolChoices} dataSourceChoices={dataSourceChoices} dirty={dirty} />
+            <ModeConfigEditor config={currentDraft} onChange={setDraft} onSave={() => { void saveDraft(); }} onPublish={() => { setPublishOpen(true); }} canManage={canManage} busy={busy} skills={skills} modelChoices={modelChoices} toolChoices={toolChoices} dataSourceChoices={dataSourceChoices} dirty={dirty} />
             <div className="space-y-2 border-t pt-5"><div className="flex items-center justify-between gap-2"><div><h3 className="font-medium">Version history</h3><p className="text-xs text-muted-foreground">Restore an earlier version if the current setup is not right.</p></div><Badge variant="outline">{record.versions.length} versions</Badge></div>
               {record.versions.length === 0 ? <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">No published versions yet.</p> : record.versions.map((version) => <div key={version.id || version.version} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium">Version {version.version}</p>{version.version === record.active_version && <Badge>Active</Badge>}</div><p className="text-xs text-muted-foreground">{version.description || "No version note"}</p><p className="mt-1 text-xs text-muted-foreground">{readableDate(version.created_at)} · {memberNames.get(version.created_by) ?? "Workspace admin"}</p></div><Button size="sm" variant="outline" disabled={!canManage || busy || version.version === record.active_version} onClick={() => setRestoreVersion(version.version)}><RotateCcw className="size-3.5" /> Restore</Button></div>)}
             </div>

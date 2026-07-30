@@ -2212,3 +2212,46 @@ values above and nothing else.
 |---|---|---|
 | `agent-claude-result-subtype` | `server/pkg/agent/claude.go` (1 marked branch), `server/pkg/agent/cerebro_claude_result_subtype.go` (new) | When a failed `result` carries no text, render its `subtype` instead. Turns `claude execution failed` into `claude stopped: the run reached its maximum number of turns (error_max_turns)`. The wording is deliberately checked against `taskfailure.Classify` so it cannot trip a rule it does not belong to — it still classifies as `agent_error.unknown` until the taxonomy gains a turn-cap reason of its own. |
 | `session-mode-no-profile-fallback` | `server/internal/daemon/session_mode_profile.go` (1 marked line) | No Mode selected means no Mode profile. Removes the invisible 80-turn cap and 120-minute timeout from every run nobody labelled, restoring core Multica behaviour; runs that DO carry a Mode keep their published profile unchanged. |
+
+# FIR-4047 — Plan Mode could not save a plan, and a Mode's skills were mislabelled as checks
+
+Three defects in the Mode configuration surface, all reported from the Settings
+interface rather than from a failing run.
+
+**Plan Mode forbade its own deliverable.** A Mode carried exactly one write
+switch, `allows_write`. Plan, Research and Review all had it off, so the runtime
+brief rendered `Writes are disabled. Do not edit code or data and do not make
+external mutations.` directly underneath Plan Mode's own instruction to *save a
+concrete plan*. The agent obeyed the closer, more absolute sentence and skipped
+the artifact. `allows_write` is only ever rendered as brief text — no code path
+gates a tool call on it (verified across `daemon.go`, `execenv/`, and the tool
+policy chain) — so splitting it into `allows_write` (code and data) and
+`allows_plan_write` (plans, notes, artifacts) changes what the agent is told and
+nothing else. Plan, Build and Research now allow plan writes; Review
+deliberately still allows none, because a reviewer that writes documents stops
+being a reviewer.
+
+**A Mode's extra skills were labelled "Required evaluations".** The field
+attached skills to the agent for the duration of a session
+(`handler/daemon.go` merges them into `resp.Agent.Skills`) — it never ran an
+eval, never scored anything, and nothing had to pass. The name promised a gate
+the code does not implement, so `eval_skill_ids` is now `extra_skill_ids` and the
+interface section reads *Extra skills*. `Config.UnmarshalJSON` still accepts the
+old key: published Mode versions are immutable history and must stay readable.
+
+**A Mode could point at a Workflow that never ran.** `workflow_id` was
+selectable in the interface and carried all the way into the runtime brief, but
+no execution path ever read it. It is removed rather than wired up — Workflows
+are triggered from the issue-workflow feature, not from a session Mode. No
+migration is needed: Go's JSON decoder ignores the leftover key in old
+snapshots.
+
+The brief-rendering block moved out of `execenv/context.go` into a sibling
+`cerebro_session_mode_brief.go`, which cuts the upstream footprint from a
+23-line inline block to a single marked call.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `session-mode-config-brief` | `server/internal/daemon/execenv/context.go` (1 marked line), `server/internal/daemon/execenv/cerebro_session_mode_brief.go` (new) | The whole Settings-managed policy paragraph — write scope, allowed tools, data sources, approval policy, extra skills — now renders from a cerebro sibling file. Replaces the previous 23-line inline block, so the upstream file holds one call instead of the policy text itself. |
+| `session-mode-write-scopes` | `server/internal/daemon/execenv/execenv.go` (1 marked line), `server/internal/daemon/daemon.go` (1 marked line), `server/internal/daemon/execenv/session_mode_test.go` (2 marked lines) | Carries `AllowsPlanWrite` from the Mode profile into the runtime brief so saving a plan is its own permission, separate from editing code. Also drops `SessionModeWorkflowID`, which nothing read. |
+| `session-mode-extra-skills` | `server/internal/handler/daemon.go` (1 marked line) | Reads the renamed `ExtraSkillIDs` when merging a Mode's extra skills into the claimed agent. Behaviour is unchanged — only the field name, which no longer claims to be an evaluation. |

@@ -32,8 +32,7 @@ func TestRenderIssueContextUsesPublishedModeInstructionAndVersion(t *testing.T) 
 		SessionModeAllowedTools:   []string{"graphify", "multica issue get"},
 		SessionModeDataSources:    []string{"Company Brain"},
 		SessionModeApprovalPolicy: "require",
-		SessionModeWorkflowID:     "workflow-1",
-		SessionModeEvalSkillIDs:   []string{"skill-1"},
+		SessionModeExtraSkillIDs:  []string{"skill-1"}, // CEREBRO-PATCH(session-mode-write-scopes): FIR-4047 extra skills replace the eval-skill naming.
 	})
 	if !strings.Contains(out, "PLAN MODE · v7") {
 		t.Fatalf("published version missing: %s", out)
@@ -41,9 +40,44 @@ func TestRenderIssueContextUsesPublishedModeInstructionAndVersion(t *testing.T) 
 	if !strings.Contains(out, "Use the workspace Plan contract.") {
 		t.Fatalf("published instruction missing: %s", out)
 	}
-	for _, want := range []string{"Writes are disabled", "graphify", "Company Brain", "Approval is required", "workflow-1", "skill-1"} {
+	for _, want := range []string{"Writes are disabled", "graphify", "Company Brain", "Approval is required", "adds 1 extra skill"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Mode policy %q missing: %s", want, out)
 		}
+	}
+}
+
+// CEREBRO-PATCH(session-mode-write-scopes): FIR-4047 the brief used to tell Plan
+// Mode "Writes are disabled" right under an instruction to save a plan, so the
+// agent skipped its only deliverable.
+func TestRenderIssueContextSeparatesPlanWritesFromCodeWrites(t *testing.T) {
+	planOut := renderIssueContext("codex", TaskContextForEnv{
+		IssueID:              "issue-1",
+		SessionMode:          "plan",
+		SessionModePlanWrite: true,
+	})
+	if !strings.Contains(planOut, "You may save plans, notes and artifacts") {
+		t.Fatalf("plan-write permission missing: %s", planOut)
+	}
+	if strings.Contains(planOut, "Writes are disabled") {
+		t.Fatalf("plan mode still forbids saving a plan: %s", planOut)
+	}
+	if !strings.Contains(planOut, "Do not edit code or data") {
+		t.Fatalf("plan mode lost the code-write prohibition: %s", planOut)
+	}
+
+	reviewOut := renderIssueContext("codex", TaskContextForEnv{IssueID: "issue-1", SessionMode: "review"})
+	if !strings.Contains(reviewOut, "Writes are disabled") {
+		t.Fatalf("review mode should still disable every write: %s", reviewOut)
+	}
+
+	buildOut := renderIssueContext("codex", TaskContextForEnv{
+		IssueID:                "issue-1",
+		SessionMode:            "build",
+		SessionModeAllowsWrite: true,
+		SessionModePlanWrite:   true,
+	})
+	if !strings.Contains(buildOut, "Writes are enabled") {
+		t.Fatalf("build mode lost its write permission: %s", buildOut)
 	}
 }

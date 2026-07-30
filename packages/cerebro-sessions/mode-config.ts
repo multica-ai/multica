@@ -15,11 +15,11 @@ export interface ModeConfig {
   timeout_minutes: number;
   max_turns: number;
   allows_write: boolean;
+  allows_plan_write: boolean;
   allowed_tools: string[];
   data_sources: string[];
   approval_policy: ApprovalPolicy;
-  workflow_id: string;
-  eval_skill_ids: string[];
+  extra_skill_ids: string[];
 }
 
 export interface ModeVersion {
@@ -51,11 +51,11 @@ export const modeConfigSchema = z.object({
   timeout_minutes: z.number().default(30),
   max_turns: z.number().default(20),
   allows_write: z.boolean().default(false),
+  allows_plan_write: z.boolean().default(false),
   allowed_tools: nullableStringListSchema,
   data_sources: nullableStringListSchema,
   approval_policy: z.enum(["inherit", "require", "deny_external"]).default("inherit"),
-  workflow_id: z.string().default(""),
-  eval_skill_ids: nullableStringListSchema,
+  extra_skill_ids: nullableStringListSchema,
 }).loose();
 
 const modeVersionSchema = z.object({
@@ -82,25 +82,6 @@ export const modeConfigListSchema = z.object({
 
 export const EMPTY_MODE_CONFIG_LIST: { modes: ModeRecord[] } = { modes: [] };
 const base = "/api/cerebro/session-modes";
-
-const workflowChoicesSchema = z.object({
-  workflows: z.array(z.object({
-    id: z.string(), name: z.string(), enabled: z.boolean().default(false), workflow_type: z.string().default("standard"),
-  }).loose()).default([]),
-}).loose();
-
-export function modeWorkflowOptions(workspaceId: string) {
-  return queryOptions({
-    queryKey: ["cerebro", "session-modes", workspaceId, "workflows"] as const,
-    queryFn: async () => {
-      const raw = await api.listCerebroWorkflows<unknown>();
-      return parseWithFallback(raw, workflowChoicesSchema, { workflows: [] }, { endpoint: "listCerebroWorkflows" }) as {
-        workflows: { id: string; name: string; enabled: boolean; workflow_type: string }[];
-      };
-    },
-    enabled: !!workspaceId,
-  });
-}
 
 export async function listModeConfigs(): Promise<{ modes: ModeRecord[] }> {
   const raw = await api.cerebroRequest<unknown>(`${base}/`);
