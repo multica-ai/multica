@@ -14,15 +14,19 @@ export const ITEM_PREFIX = "item-";
 export const ITEM_ZONE_PREFIX = "itemzone-";
 export const COLUMN_PREFIX = "column-";
 
-export const columnId = (pageId: string, columnIndex: number) => `${COLUMN_PREFIX}${pageId}:${columnIndex}`;
+export const columnId = (pageId: string, rowIndex: number, columnIndex: number) => `${COLUMN_PREFIX}${pageId}:${rowIndex}:${columnIndex}`;
 
-export function parseColumnId(id: string): { pageId: string; columnIndex: number } | null {
+export function parseColumnId(id: string): { pageId: string; rowIndex: number; columnIndex: number } | null {
   if (!id.startsWith(COLUMN_PREFIX)) return null;
-  const separator = id.lastIndexOf(":");
-  if (separator <= COLUMN_PREFIX.length) return null;
-  const columnIndex = Number(id.slice(separator + 1));
-  if (!Number.isInteger(columnIndex)) return null;
-  return { pageId: id.slice(COLUMN_PREFIX.length, separator), columnIndex };
+  const body = id.slice(COLUMN_PREFIX.length);
+  const columnSeparator = body.lastIndexOf(":");
+  if (columnSeparator <= 0) return null;
+  const rowSeparator = body.lastIndexOf(":", columnSeparator - 1);
+  if (rowSeparator <= 0) return null;
+  const rowIndex = Number(body.slice(rowSeparator + 1, columnSeparator));
+  const columnIndex = Number(body.slice(columnSeparator + 1));
+  if (!Number.isInteger(rowIndex) || !Number.isInteger(columnIndex)) return null;
+  return { pageId: body.slice(0, rowSeparator), rowIndex, columnIndex };
 }
 
 // Tailwind needs the whole class name in the source, so the column counts are
@@ -31,37 +35,46 @@ const COLUMN_GRID: Record<number, string> = {
   1: "md:grid-cols-1",
   2: "md:grid-cols-2",
   3: "md:grid-cols-3",
+  4: "md:grid-cols-4",
 };
 
-function BoardColumn({ pageId, columnIndex, children }: { pageId: string; columnIndex: number; children: ReactNode }) {
-  const { setNodeRef } = useDroppable({ id: columnId(pageId, columnIndex) });
+function BoardColumn({ pageId, rowIndex, columnIndex, children }: { pageId: string; rowIndex: number; columnIndex: number; children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: columnId(pageId, rowIndex, columnIndex) });
   return (
-    <div ref={setNodeRef} aria-label={`Column ${columnIndex + 1}`} className="flex min-w-0 flex-col gap-4">
+    <div ref={setNodeRef} aria-label={`Row ${rowIndex + 1} column ${columnIndex + 1}`} className="flex min-w-0 flex-col gap-4">
       {children}
     </div>
   );
 }
 
+/**
+ * A page is drawn row by row, and each row decides how many columns it has
+ * (FIR-3589 item 4) — the Vision/Traction organiser puts a wide row over a
+ * narrow one, which a single per-page column count could never express.
+ */
 export function PageBoard({ page, sections, renderSection, renderColumnFooter }: {
   page: VisionPlanPage;
   sections: VisionPlanSection[];
   renderSection: (section: VisionPlanSection) => ReactNode;
-  renderColumnFooter: (columnIndex: number) => ReactNode;
+  renderColumnFooter: (rowIndex: number, columnIndex: number) => ReactNode;
 }) {
-  const columns = Array.from({ length: page.column_count }, (_, index) => index);
   return (
-    <div className={`grid items-start gap-4 ${COLUMN_GRID[page.column_count] ?? COLUMN_GRID[3]}`}>
-      {columns.map((columnIndex) => {
-        const blocks = columnSections(sections, page.id, columnIndex);
-        return (
-          <BoardColumn key={columnIndex} pageId={page.id} columnIndex={columnIndex}>
-            <SortableContext items={blocks.map((section) => `${SECTION_PREFIX}${section.id}`)} strategy={verticalListSortingStrategy}>
-              {blocks.map(renderSection)}
-            </SortableContext>
-            {renderColumnFooter(columnIndex)}
-          </BoardColumn>
-        );
-      })}
+    <div className="grid gap-4">
+      {page.row_column_counts.map((columnCount, rowIndex) => (
+        <div key={rowIndex} role="group" aria-label={`Row ${rowIndex + 1}`} className={`grid items-start gap-4 ${COLUMN_GRID[columnCount] ?? COLUMN_GRID[3]}`}>
+          {Array.from({ length: columnCount }, (_, columnIndex) => {
+            const blocks = columnSections(sections, page.id, rowIndex, columnIndex);
+            return (
+              <BoardColumn key={columnIndex} pageId={page.id} rowIndex={rowIndex} columnIndex={columnIndex}>
+                <SortableContext items={blocks.map((section) => `${SECTION_PREFIX}${section.id}`)} strategy={verticalListSortingStrategy}>
+                  {blocks.map(renderSection)}
+                </SortableContext>
+                {renderColumnFooter(rowIndex, columnIndex)}
+              </BoardColumn>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

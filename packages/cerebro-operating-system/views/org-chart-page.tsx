@@ -8,12 +8,13 @@ import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { orgChartOptions, settingsOptions, useCreateOrgChartSeat, useDeleteOrgChartSeat, useUpdateOrgChartSeat } from "../core/queries";
 import type { OrgChartSeat, OrgChartSeatInput } from "../core/types";
+import { OsPageShell } from "./os-page-shell";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
 import { RolesChart, type InsertMode, type SeatActor } from "./roles-chart";
 import { PeopleRolesTable, type RoleHolder } from "./people-roles-table";
 
 function inputFromSeat(seat: OrgChartSeat): OrgChartSeatInput {
-  return { parent_id: seat.parent_id, name: seat.name, responsibilities: seat.responsibilities, owner_type: seat.owner_type, owner_id: seat.owner_id, position: seat.position };
+  return { parent_id: seat.parent_id, name: seat.name, responsibilities: seat.responsibilities, owners: seat.owners.map((owner) => ({ type: owner.type, id: owner.id })), position: seat.position };
 }
 
 function initialsOf(name: string): string {
@@ -25,9 +26,16 @@ function initialsOf(name: string): string {
 interface InsertIntent { relativeToId: string; mode: InsertMode }
 
 // The owner picker speaks names, never IDs: one searchable field lists the
-// workspace's people and agents, and "Vacant" is simply no selection.
-function ownerValue(seat: { owner_type?: "member" | "agent"; owner_id?: string }) {
-  return seat.owner_id ? `${seat.owner_type}:${seat.owner_id}` : "";
+// workspace's people and agents, and "Vacant" is simply an empty selection.
+// A seat may hold several of them at once (FIR-3589 item 9).
+const ownerValues = (owners: { type: "member" | "agent"; id: string }[]) => owners.map((owner) => `${owner.type}:${owner.id}`);
+
+function ownersFromValues(values: string[]): { type: "member" | "agent"; id: string }[] {
+  return values.flatMap((value) => {
+    const [ownerType, ownerId] = value.split(":");
+    if (!ownerId || (ownerType !== "member" && ownerType !== "agent")) return [];
+    return [{ type: ownerType, id: ownerId }];
+  });
 }
 
 function SeatEditor({ seat, seats, ownerOptions, presetParentId, onSave, onCancel, onDelete, pending }: {
@@ -40,7 +48,7 @@ function SeatEditor({ seat, seats, ownerOptions, presetParentId, onSave, onCance
   onDelete?: () => void;
   pending: boolean;
 }) {
-  const [draft, setDraft] = useState<OrgChartSeatInput>(seat ? inputFromSeat(seat) : { name: "", responsibilities: [], position: seats.length, parent_id: presetParentId });
+  const [draft, setDraft] = useState<OrgChartSeatInput>(seat ? inputFromSeat(seat) : { name: "", responsibilities: [], owners: [], position: seats.length, parent_id: presetParentId });
   const parentOptions = seats.filter((candidate) => candidate.id !== seat?.id).map((candidate) => ({ value: candidate.id, label: candidate.name }));
 
   function setResponsibility(index: number, value: string) {
@@ -58,20 +66,34 @@ function SeatEditor({ seat, seats, ownerOptions, presetParentId, onSave, onCance
         </label>
       </div>
 
-      <label className="grid gap-1 text-sm font-medium">Owner
+      <div className="grid gap-1 text-sm font-medium">Name(s)
         <SearchSelect
-          label="Owner"
+          label="Name(s)"
+          fieldLabel="Name(s)"
           compact
+          multiple
           options={ownerOptions}
-          value={ownerValue(draft)}
-          onChange={(value) => {
-            const [ownerType, ownerId] = value.split(":");
-            setDraft({ ...draft, owner_type: ownerId ? (ownerType as OrgChartSeatInput["owner_type"]) : undefined, owner_id: ownerId || undefined });
-          }}
-          clearLabel="Leave vacant"
-          placeholder="Search people and agents"
+          values={ownerValues(draft.owners)}
+          onValuesChange={(values) => setDraft({ ...draft, owners: ownersFromValues(values) })}
+          placeholder="Vacant — search people and agents"
         />
-      </label>
+        {draft.owners.length > 0 && (
+          <ul aria-label="Selected names" className="flex flex-wrap gap-1.5 pt-1">
+            {draft.owners.map((owner) => {
+              const value = `${owner.type}:${owner.id}`;
+              const name = ownerOptions.find((option) => option.value === value)?.label ?? owner.id;
+              return (
+                <li key={value}>
+                  <button type="button" aria-label={`Remove ${name}`} onClick={() => setDraft({ ...draft, owners: draft.owners.filter((candidate) => `${candidate.type}:${candidate.id}` !== value) })} className="flex min-h-8 max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2.5 text-xs font-normal">
+                    <span className="truncate">{name}</span>
+                    <span aria-hidden className="text-muted-foreground">×</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
       <div className="grid gap-1 text-sm font-medium">Responsibilities
         <div className="grid gap-2">
@@ -151,18 +173,16 @@ export function OrgChartPage() {
   // and agent in the workspace, with the roles they currently hold.
   const rolesByOwner = new Map<string, string[]>();
   for (const seat of seats) {
-    if (!seat.owner_id || !seat.owner_type) continue;
-    const key = `${seat.owner_type}:${seat.owner_id}`;
-    rolesByOwner.set(key, [...(rolesByOwner.get(key) ?? []), seat.name]);
+    for (const owner of seat.owners) {
+      const key = `${owner.type}:${owner.id}`;
+      rolesByOwner.set(key, [...(rolesByOwner.get(key) ?? []), seat.name]);
+    }
   }
   const holders: RoleHolder[] = [
     ...memberList.map((member) => ({ key: `member:${member.id}`, name: member.name, type: "member" as const, initials: initialsOf(member.name), avatarUrl: member.avatar_url, roles: rolesByOwner.get(`member:${member.id}`) ?? [] })),
     ...agentList.map((agent) => ({ key: `agent:${agent.id}`, name: agent.name, type: "agent" as const, initials: initialsOf(agent.name), avatarUrl: agent.avatar_url, roles: rolesByOwner.get(`agent:${agent.id}`) ?? [] })),
   ].sort((a, b) => b.roles.length - a.roles.length || a.name.localeCompare(b.name));
-  const vacantRoles = seats.filter((seat) => !seat.owner_id).map((seat) => seat.name);
-
-  if (chart.isLoading) return <div className="w-full p-6 text-sm text-muted-foreground">Loading org chart…</div>;
-  if (chart.isError) return <div role="alert" className="w-full p-6 text-sm text-destructive">Org chart could not be loaded.</div>;
+  const vacantRoles = seats.filter((seat) => seat.owners.length === 0).map((seat) => seat.name);
 
   const editingSeat = seats.find((seat) => seat.id === editingId);
   const rolesLabel = settings.data?.terminology?.org_chart ?? "Roles";
@@ -197,14 +217,14 @@ export function OrgChartPage() {
   }
 
   return (
-    <div className="grid w-full gap-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">{rolesLabel}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Seats reporting into each other. Pick an owner by name; an empty seat stays visible as vacant.</p>
-        </div>
-        <button type="button" onClick={() => { setAdding(true); setEditingId(undefined); setInsert(undefined); }} className="min-h-11 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground">+ Add seat</button>
-      </div>
+    <OsPageShell
+      title={rolesLabel}
+      subtitle="Seats reporting into each other — an empty seat stays visible as vacant"
+      headerActions={<button type="button" onClick={() => { setAdding(true); setEditingId(undefined); setInsert(undefined); }} className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground">+ Add role</button>}
+    >
+      <div className="grid w-full gap-4 p-4 md:p-6">
+      {chart.isLoading && <p className="text-sm text-muted-foreground">Loading org chart…</p>}
+      {chart.isError && <p role="alert" className="text-sm text-destructive">Org chart could not be loaded.</p>}
 
       <SeatEditorDialog title="Add role" open={adding} onOpenChange={(open) => { if (!open) closeAdd(); }}>
         <SeatEditor seats={seats} ownerOptions={ownerOptions} presetParentId={presetParentId} pending={create.isPending || update.isPending} onCancel={closeAdd} onSave={handleCreate} />
@@ -230,6 +250,7 @@ export function OrgChartPage() {
       </Tabs>
 
       {(create.isError || update.isError || remove.isError) && <p role="alert" className="text-sm text-destructive">The org chart change could not be saved.</p>}
-    </div>
+      </div>
+    </OsPageShell>
   );
 }

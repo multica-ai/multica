@@ -59,12 +59,12 @@ export const visionPlanItemSchema = z.object({
 export const visionPlanSectionSchema = z.object({
   id: z.string(), workspace_id: z.string(), key: z.string(), name: z.string(),
   section_type: z.enum(["list", "structured", "process", "goals"]).catch("list"), position: z.number().int(),
-  page_id: z.string().default(""), column_index: z.number().int().min(0).catch(0),
+  page_id: z.string().default(""), row_index: z.number().int().min(0).catch(0), column_index: z.number().int().min(0).catch(0),
   items: z.array(visionPlanItemSchema).default([]), created_at: z.string(), updated_at: z.string(),
 });
 export const visionPlanPageSchema = z.object({
   id: z.string(), workspace_id: z.string(), key: z.string(), name: z.string(),
-  column_count: z.number().int().min(1).max(3).catch(3), position: z.number().int().catch(0),
+  row_column_counts: z.array(z.number().int().min(1).max(4)).nonempty().catch([3]), position: z.number().int().catch(0),
   created_at: z.string().default(""), updated_at: z.string().default(""),
 });
 export const visionPlanSchema = z.object({
@@ -132,10 +132,25 @@ export const meetingSchema = z.object({
   agenda: z.array(meetingAgendaSchema).nullable().transform((value) => value ?? []),
   available_note_types: z.array(meetingNoteTypeSchema).nullable().transform((value) => value ?? []),
 });
+// A cycle IS a recurring Note type, so creating and re-timing one writes
+// straight to the note-types endpoint (FIR-3589 item 6). Only the fields the
+// Cycles page reads or writes are parsed; the rest of the record is left alone.
+export const cycleNoteTypeSchema = z.object({
+  id: z.string(), name: z.string(), icon: z.string().default(""),
+  cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1),
+  enabled: z.boolean().catch(true),
+  anchor_weekday: z.number().int().nullable().optional().transform((value) => value ?? undefined),
+  anchor_week_of_month: z.number().int().nullable().optional().transform((value) => value ?? undefined),
+  participants: z.array(z.object({ type: z.enum(["member", "agent"]), id: z.string() })).nullable().optional().transform((value) => value ?? []),
+});
+export const orgChartSeatOwnerSchema = z.object({
+  type: z.enum(["member", "agent"]), id: z.string(), name: z.string().optional(),
+});
 export const orgChartSeatSchema = z.object({
   id: z.string(), workspace_id: z.string(), parent_id: z.string().optional(), name: z.string(),
-  responsibilities: z.array(z.string()).nullable().transform((value) => value ?? []), owner_type: z.enum(["member", "agent"]).optional(), owner_id: z.string().optional(),
-  owner_name: z.string().optional(), vacant: z.boolean().default(true), position: z.number().int().default(0),
+  responsibilities: z.array(z.string()).nullable().transform((value) => value ?? []),
+  owners: z.array(orgChartSeatOwnerSchema).nullable().transform((value) => value ?? []),
+  vacant: z.boolean().default(true), position: z.number().int().default(0),
 });
 export const orgChartSeatListSchema = z.object({ seats: z.array(orgChartSeatSchema).nullable().transform((value) => value ?? []) });
 export const EMPTY_STRATEGY = { strategy_items: [] };

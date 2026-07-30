@@ -18,6 +18,7 @@ import (
 const (
 	testWorkspaceID = "550e8400-e29b-41d4-a716-446655440000"
 	testMemberID    = "550e8400-e29b-41d4-a716-446655440001"
+	testAgentID     = "550e8400-e29b-41d4-a716-446655440002"
 )
 
 func TestHandlerRejectsNonMemberAccess(t *testing.T) {
@@ -105,9 +106,9 @@ func TestHandlerCreatesVisionPlanSection(t *testing.T) {
 
 func TestHandlerCreatesVisionPlanPage(t *testing.T) {
 	h := NewHandler(&fakeHandlerService{createVisionPage: func(_ context.Context, _ pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
-		return VisionPlanPageResponse{ID: "page-1", Name: input.Name, ColumnCount: input.ColumnCount}, nil
+		return VisionPlanPageResponse{ID: "page-1", Name: input.Name, RowColumnCounts: input.RowColumnCounts}, nil
 	}})
-	req := memberRequest(http.MethodPost, "/api/cerebro/vision-plan/pages", `{"name":"Accountability","column_count":2,"position":2}`)
+	req := memberRequest(http.MethodPost, "/api/cerebro/vision-plan/pages", `{"name":"Accountability","row_column_counts":[2],"position":2}`)
 	rec := httptest.NewRecorder()
 
 	h.CreateVisionPlanPage(rec, req)

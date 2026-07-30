@@ -169,6 +169,7 @@ type Handler struct {
 	SessionModeProfiles interface {
 		Active(context.Context, pgtype.UUID, sessionmode.Mode) (sessionmode.Config, error)
 	} // CEREBRO-PATCH(session-mode-config): claim-time published snapshot resolver.
+	SessionModeEvalRunner SessionModeEvalRunner // CEREBRO-PATCH(session-mode-evals): FIR-4047 runs a Mode's evaluations at task completion.
 	RoundReplyObserver RoundReplyObserver // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker

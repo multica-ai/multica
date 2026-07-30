@@ -51,8 +51,11 @@ func TestVisionPlanPagesSeedVisionAndTraction(t *testing.T) {
 	if vision == nil || traction == nil {
 		t.Fatalf("pages = %+v, want a vision and a traction page", plan.Pages)
 	}
-	if vision.ColumnCount != 2 || traction.ColumnCount != 3 {
-		t.Errorf("column counts = %d/%d, want 2/3", vision.ColumnCount, traction.ColumnCount)
+	if len(vision.RowColumnCounts) != 1 || vision.RowColumnCounts[0] != 2 {
+		t.Errorf("vision rows = %v, want one row of 2 columns", vision.RowColumnCounts)
+	}
+	if len(traction.RowColumnCounts) != 1 || traction.RowColumnCounts[0] != 3 {
+		t.Errorf("traction rows = %v, want one row of 3 columns", traction.RowColumnCounts)
 	}
 
 	// Every block lands on a page, so nothing can become invisible.
@@ -88,7 +91,7 @@ func TestVisionPlanPageCreateAndMoveBlock(t *testing.T) {
 		t.Fatalf("list vision plan: %v", err)
 	}
 
-	page, err := vplService.CreateVisionPlanPage(ctx, vplWsID, VisionPlanPageInput{Name: "Accountability", ColumnCount: 2, Position: 2})
+	page, err := vplService.CreateVisionPlanPage(ctx, vplWsID, VisionPlanPageInput{Name: "Accountability", RowColumnCounts: []int32{3, 1}, Position: 2})
 	if err != nil {
 		t.Fatalf("create page: %v", err)
 	}
@@ -97,19 +100,19 @@ func TestVisionPlanPageCreateAndMoveBlock(t *testing.T) {
 			t.Errorf("delete page: %v", err)
 		}
 	}()
-	if page.Key == "" || page.Name != "Accountability" || page.ColumnCount != 2 {
-		t.Fatalf("page = %+v, want a keyed 2-column Accountability page", page)
+	if page.Key == "" || page.Name != "Accountability" || len(page.RowColumnCounts) != 2 || page.RowColumnCounts[0] != 3 || page.RowColumnCounts[1] != 1 {
+		t.Fatalf("page = %+v, want a keyed Accountability page with a 3-column row over a 1-column row", page)
 	}
 
-	// A block created on the new page comes back on that page and column.
+	// A block created on the new page comes back in that page's row and column.
 	block, err := vplService.CreateVisionPlanSection(ctx, vplWsID, VisionPlanSectionInput{
-		Name: "Seats", SectionType: "list", Position: 0, PageID: page.ID, ColumnIndex: 1,
+		Name: "Seats", SectionType: "list", Position: 0, PageID: page.ID, RowIndex: 1, ColumnIndex: 0,
 	})
 	if err != nil {
 		t.Fatalf("create block: %v", err)
 	}
-	if block.PageID != page.ID || block.ColumnIndex != 1 {
-		t.Fatalf("block = %+v, want page %s column 1", block, page.ID)
+	if block.PageID != page.ID || block.RowIndex != 1 || block.ColumnIndex != 0 {
+		t.Fatalf("block = %+v, want page %s row 1 column 0", block, page.ID)
 	}
 
 	// Moving an existing seeded block to the new page sticks, and the seeding

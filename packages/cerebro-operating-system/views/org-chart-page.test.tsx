@@ -49,7 +49,7 @@ vi.mock("../core/queries", async (importOriginal) => {
 
 const seat = (partial: Partial<OrgChartSeat>): OrgChartSeat => ({
   id: "seat-1", workspace_id: "workspace-1", name: "Operations", responsibilities: [],
-  vacant: true, position: 0, ...partial,
+  owners: [], vacant: true, position: 0, ...partial,
 });
 
 describe("OrgChartPage", () => {
@@ -63,7 +63,7 @@ describe("OrgChartPage", () => {
   });
 
   it("shows an owner by name, not an ID", () => {
-    state.seats = [seat({ owner_type: "member", owner_id: "member-1", owner_name: "Jesper", vacant: false })];
+    state.seats = [seat({ owners: [{ type: "member", id: "member-1", name: "Jesper" }], vacant: false })];
 
     render(<OrgChartPage />);
 
@@ -79,12 +79,34 @@ describe("OrgChartPage", () => {
     render(<OrgChartPage />);
     fireEvent.click(screen.getByRole("button", { name: "Edit Operations" }));
 
-    // The owner is chosen from a searchable name list.
-    expect(screen.getByRole("button", { name: "Owner" })).toBeInTheDocument();
+    // The holders are chosen from a searchable name list.
+    expect(screen.getByRole("button", { name: "Name(s)" })).toBeInTheDocument();
     // The old agent-oriented fields must be gone.
     expect(screen.queryByLabelText("Owner ID")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Owner type" })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/UUID/i)).not.toBeInTheDocument();
+  });
+
+  // FIR-3589 item 9: one role, several holders — picked by name and saved as a list.
+  it("adds several people to one role", () => {
+    state.members = [{ id: "member-1", name: "Jesper" }, { id: "member-2", name: "Ava" }];
+
+    render(<OrgChartPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Operations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Name(s)" }));
+    fireEvent.click(screen.getByRole("option", { name: /Jesper/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Ava/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save seat" }));
+
+    expect(state.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "seat-1",
+        input: expect.objectContaining({ owners: [{ type: "member", id: "member-1" }, { type: "member", id: "member-2" }] }),
+      }),
+      expect.any(Object),
+    );
+    state.members = [{ id: "member-1", name: "Jesper" }];
   });
 
   it("edits responsibilities as individual rows, not a text blob", () => {
@@ -120,7 +142,7 @@ describe("OrgChartPage", () => {
 
   it("creates a seat from the add form", () => {
     render(<OrgChartPage />);
-    fireEvent.click(screen.getByRole("button", { name: "+ Add seat" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add role" }));
     fireEvent.change(screen.getByLabelText("Seat name"), { target: { value: "Finance" } });
     fireEvent.click(screen.getByRole("button", { name: "Save seat" }));
 
@@ -132,7 +154,7 @@ describe("OrgChartPage", () => {
 
   it("shows the owner's avatar picture when the member has one", () => {
     state.members = [{ id: "member-1", name: "Jesper", avatar_url: "https://pics/jesper.png" }];
-    state.seats = [seat({ owner_type: "member", owner_id: "member-1", owner_name: "Jesper", vacant: false })];
+    state.seats = [seat({ owners: [{ type: "member", id: "member-1", name: "Jesper" }], vacant: false })];
 
     render(<OrgChartPage />);
 
@@ -181,7 +203,7 @@ describe("OrgChartPage", () => {
 
   it("lists people and the roles they hold on a second tab", () => {
     state.seats = [
-      seat({ id: "seat-1", name: "Operations", owner_type: "member", owner_id: "member-1", owner_name: "Jesper", vacant: false }),
+      seat({ id: "seat-1", name: "Operations", owners: [{ type: "member", id: "member-1", name: "Jesper" }], vacant: false }),
       seat({ id: "seat-2", name: "Marketing" }),
     ];
 

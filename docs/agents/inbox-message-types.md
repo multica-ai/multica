@@ -231,12 +231,15 @@ agent**, and it now carries `issue_id`: the card links to the workspace's
 digest issue, which is what makes the alert answerable — a reader replies on
 the issue instead of hitting a dead end in the inbox. `details` carries
 `issue_id`, `capability_count`, `agent_count`, `capabilities`,
-`window_start_at`, `window_end_at`, `reason`; system-authored, `route` `inbox`.
+`auto_created_rules`, `window_start_at`, `window_end_at`, `reason`;
+system-authored, `route` `inbox`.
 The card is written only when the finding set CHANGED since the last digest, so
 a standing finding does not re-notify nightly. Emitted by the `driftwatch`
 sweeper, gated by the `cerebro_capability_drift_watcher` flag, default OFF;
 rule auto-creation is a second flag, `cerebro_capability_auto_permission`, also
-default OFF).
+default OFF — when it wrote any rules, the card body says so on the card itself,
+because a write done on the reader's behalf must not be discoverable only by
+opening the digest issue).
 
 Each type has an `InboxSeverity` (`action_required` | `attention` | `info`) and
 the set actually emitted by the server today is the `EmittedNotificationType`

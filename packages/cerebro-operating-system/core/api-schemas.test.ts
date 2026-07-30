@@ -123,14 +123,14 @@ describe("operating system API schemas", () => {
 
   it("parses Vision Plan pages and survives a server that has not shipped them yet", () => {
     const parsed = visionPlanSchema.parse({
-      pages: [{ id: "p1", workspace_id: "w1", key: "traction", name: "Traction", column_count: 3, position: 1, created_at: "", updated_at: "" }],
+      pages: [{ id: "p1", workspace_id: "w1", key: "traction", name: "Traction", row_column_counts: [3, 1], position: 1, created_at: "", updated_at: "" }],
       sections: [{
         id: "s1", workspace_id: "w1", key: "goals-board", name: "Goals", section_type: "goals",
-        position: 0, page_id: "p1", column_index: 1, created_at: "", updated_at: "", items: [],
+        position: 0, page_id: "p1", row_index: 1, column_index: 0, created_at: "", updated_at: "", items: [],
       }],
     });
-    expect(parsed.pages[0]).toMatchObject({ key: "traction", column_count: 3 });
-    expect(parsed.sections[0]).toMatchObject({ section_type: "goals", page_id: "p1", column_index: 1 });
+    expect(parsed.pages[0]).toMatchObject({ key: "traction", row_column_counts: [3, 1] });
+    expect(parsed.sections[0]).toMatchObject({ section_type: "goals", page_id: "p1", row_index: 1, column_index: 0 });
 
     // An older backend sends no pages and no page fields — the board must not crash.
     const legacy = visionPlanSchema.parse({ sections: [{
@@ -138,14 +138,14 @@ describe("operating system API schemas", () => {
       section_type: "list", position: 0, created_at: "", updated_at: "", items: [],
     }] });
     expect(legacy.pages).toEqual([]);
-    expect(legacy.sections[0]).toMatchObject({ page_id: "", column_index: 0 });
+    expect(legacy.sections[0]).toMatchObject({ page_id: "", row_index: 0, column_index: 0 });
 
     // Drifted values downgrade instead of throwing.
     const drifted = visionPlanSchema.parse({
-      pages: [{ id: "p1", workspace_id: "w1", key: "vision", name: "Vision", column_count: 9, position: 0, created_at: "", updated_at: "" }],
+      pages: [{ id: "p1", workspace_id: "w1", key: "vision", name: "Vision", row_column_counts: [9], position: 0, created_at: "", updated_at: "" }],
       sections: [],
     });
-    expect(drifted.pages[0]?.column_count).toBe(3);
+    expect(drifted.pages[0]?.row_column_counts).toEqual([3]);
   });
 
   it("parses meeting configuration and safely downgrades new enum values", () => {
@@ -158,8 +158,11 @@ describe("operating system API schemas", () => {
   });
 
   it("rejects malformed org chart seats instead of casting them", () => {
-    const parsed = orgChartSeatListSchema.parse({ seats: [{ id: "s1", workspace_id: "w1", name: "Operations", responsibilities: null, vacant: true }] });
-    expect(parsed.seats[0]).toMatchObject({ name: "Operations", responsibilities: [], vacant: true });
+    const parsed = orgChartSeatListSchema.parse({ seats: [{ id: "s1", workspace_id: "w1", name: "Operations", responsibilities: null, owners: null, vacant: true }] });
+    expect(parsed.seats[0]).toMatchObject({ name: "Operations", responsibilities: [], owners: [], vacant: true });
+    // FIR-3589: several holders on one seat survive the parse in order.
+    const shared = orgChartSeatListSchema.parse({ seats: [{ id: "s1", workspace_id: "w1", name: "Web", responsibilities: [], vacant: false, owners: [{ type: "member", id: "m1", name: "Junaid" }, { type: "agent", id: "a1", name: "Atlas" }] }] });
+    expect(shared.seats[0]?.owners.map((owner) => owner.name)).toEqual(["Junaid", "Atlas"]);
     expect(orgChartSeatListSchema.safeParse({ seats: [{ id: 1 }] }).success).toBe(false);
     expect(EMPTY_ORG_CHART).toEqual({ seats: [] });
   });

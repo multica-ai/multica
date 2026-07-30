@@ -2237,3 +2237,49 @@ values above and nothing else.
 |---|---|---|
 | `agent-claude-result-subtype` | `server/pkg/agent/claude.go` (1 marked branch), `server/pkg/agent/cerebro_claude_result_subtype.go` (new) | When a failed `result` carries no text, render its `subtype` instead. Turns `claude execution failed` into `claude stopped: the run reached its maximum number of turns (error_max_turns)`. The wording is deliberately checked against `taskfailure.Classify` so it cannot trip a rule it does not belong to — it still classifies as `agent_error.unknown` until the taxonomy gains a turn-cap reason of its own. |
 | `session-mode-no-profile-fallback` | `server/internal/daemon/session_mode_profile.go` (1 marked line) | No Mode selected means no Mode profile. Removes the invisible 80-turn cap and 120-minute timeout from every run nobody labelled, restoring core Multica behaviour; runs that DO carry a Mode keep their published profile unchanged. |
+
+# FIR-4047 — Plan Mode could not save a plan, and a Mode's "evaluations" were skills
+
+Three defects in the Mode configuration surface, all reported from the Settings
+interface rather than from a failing run.
+
+**Plan Mode forbade its own deliverable.** A Mode carries exactly one write
+switch, `allows_write`. Plan, Research and Review all have it off, so the runtime
+brief rendered a prohibition directly underneath Plan Mode's own instruction to
+*save a concrete plan*. The agent obeyed the closer, more absolute sentence and
+skipped the artifact. `allows_write` is only ever rendered as brief text — no
+code path gates a tool call on it (verified across `daemon.go`, `execenv/`, and
+the tool policy chain) — so the fix is in the wording, not in a new field: the
+disabled-write line names code, data and external mutations and says nothing
+about plans or notes. No Mode-level permission field was added; what a session
+may actually do is authored in the one permission model (the tool-policy chain,
+`docs/agents/permission-architecture.md` §1–2), not duplicated on the Mode.
+
+**A Mode's "required evaluations" were skill IDs.** The field attached skills to
+the agent for the duration of a session (`handler/daemon.go` merged them into
+`resp.Agent.Skills`) — it never ran an eval, never scored anything, and nothing
+had to pass. The field now holds real IDs from the workspace eval catalog
+(`cerebro_eval`), validated as UUIDs at publish time, and the server runs each
+one against the issue when a task in that session completes, through the same
+`evals.Store` + run executor the eval Run-now button and the Workflow hooks use.
+Runs land in the normal eval history. The runs are advisory on purpose: a failed
+evaluation is recorded, never turned into a failed task — blocking is the
+Workflow delivery gate's job. The old `eval_skill_ids` key is not remapped: it
+held skill IDs, and reading them as eval IDs would point evals at rows that do
+not exist.
+
+**A Mode could point at a Workflow that never ran.** `workflow_id` was
+selectable in the interface and carried all the way into the runtime brief, but
+no execution path ever read it. It is removed rather than wired up — Workflows
+are triggered from the issue-workflow feature, not from a session Mode. No
+migration is needed: Go's JSON decoder ignores the leftover key in old
+snapshots.
+
+The brief-rendering block moved out of `execenv/context.go` into a sibling
+`cerebro_session_mode_brief.go`, which cuts the upstream footprint from a
+23-line inline block to a single marked call.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `session-mode-config-brief` | `server/internal/daemon/execenv/context.go` (1 marked line), `server/internal/daemon/execenv/cerebro_session_mode_brief.go` (new) | The whole Settings-managed policy paragraph — write scope, allowed tools, data sources, approval policy, evaluations — now renders from a cerebro sibling file. Replaces the previous 23-line inline block, so the upstream file holds one call instead of the policy text itself. |
+| `session-mode-evals` | `server/internal/daemon/execenv/execenv.go` (1 marked line), `server/internal/daemon/daemon.go` (1 marked line), `server/internal/daemon/execenv/session_mode_test.go` (1 marked line), `server/internal/handler/daemon.go` (2 marked lines), `server/internal/handler/handler.go` (1 marked line), `server/cmd/server/router.go` (1 marked line), `server/internal/handler/cerebro_session_mode_evals.go` (new) | Carries the Mode's eval IDs into the runtime brief, and runs them against the issue at task completion via the shared eval run executor. Also removes the old skill-merge block, since a Mode no longer grants skills, and drops `SessionModeWorkflowID`, which nothing read. |

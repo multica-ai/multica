@@ -40,9 +40,12 @@ func NewHandler(cerebro *cerebrodb.Queries, pool *pgxpool.Pool) *Handler {
 // ---------------------------------------------------------------------------
 
 type noteTypeRequest struct {
-	Name             string          `json:"name"`
-	Icon             string          `json:"icon"`
-	TemplateBody     string          `json:"template_body"`
+	Name string `json:"name"`
+	// FIR-3589: pointers, so an update that only re-times a cycle leaves the
+	// note's icon and template alone. A plain string could not tell "not sent"
+	// apart from "set to empty", and silently wiped the template.
+	Icon             *string         `json:"icon"`
+	TemplateBody     *string         `json:"template_body"`
 	RecurrenceMode   string          `json:"recurrence_mode"`
 	CadenceUnit      string          `json:"cadence_unit"`
 	CadenceCount     *int32          `json:"cadence_count"`
@@ -61,6 +64,15 @@ type noteTypeRequest struct {
 	// FIR-3589: the people and agents who attend this cycle. nil leaves the
 	// stored list unchanged on update; an empty slice clears it.
 	Participants *[]ParticipantRef `json:"participants"`
+}
+
+// An omitted optional string means "empty" on create and "leave unchanged" on
+// update; the update path reads the existing value instead of calling this.
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // ParticipantRef is one attendee of a recurring note (a cycle): a workspace
@@ -264,8 +276,8 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 	nt, err := h.Cerebro.CreateCerebroNoteType(r.Context(), cerebrodb.CreateCerebroNoteTypeParams{
 		WorkspaceID:       wsUUID,
 		Name:              strings.TrimSpace(req.Name),
-		Icon:              req.Icon,
-		TemplateBody:      req.TemplateBody,
+		Icon:              optionalString(req.Icon),
+		TemplateBody:      optionalString(req.TemplateBody),
 		RecurrenceMode:    norm.mode,
 		CadenceUnit:       norm.cadence,
 		CadenceCount:      norm.count,
@@ -350,11 +362,20 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 		participants = encoded
 	}
 
+	icon := existing.Icon
+	if req.Icon != nil {
+		icon = *req.Icon
+	}
+	templateBody := existing.TemplateBody
+	if req.TemplateBody != nil {
+		templateBody = *req.TemplateBody
+	}
+
 	nt, err := h.Cerebro.UpdateCerebroNoteType(r.Context(), cerebrodb.UpdateCerebroNoteTypeParams{
 		ID:                id,
 		Name:              name,
-		Icon:              req.Icon,
-		TemplateBody:      req.TemplateBody,
+		Icon:              icon,
+		TemplateBody:      templateBody,
 		RecurrenceMode:    norm.mode,
 		CadenceUnit:       norm.cadence,
 		CadenceCount:      norm.count,

@@ -65,21 +65,23 @@ type StrategyItemInput struct {
 // A page is one arrangeable surface in the Vision/Traction organiser. Vision
 // and Traction are seeded pages, not code — a workspace can rename them, change
 // how many columns they have, or add pages of its own.
+// RowColumnCounts holds one column count per row, top to bottom, so a page can
+// put a three-column row above a one-column row (FIR-3589 item 4).
 type VisionPlanPageInput struct {
-	Name        string `json:"name"`
-	ColumnCount int32  `json:"column_count"`
-	Position    int32  `json:"position"`
+	Name            string  `json:"name"`
+	RowColumnCounts []int32 `json:"row_column_counts"`
+	Position        int32   `json:"position"`
 }
 
 type VisionPlanPageResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	ColumnCount int32  `json:"column_count"`
-	Position    int32  `json:"position"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	Key             string  `json:"key"`
+	Name            string  `json:"name"`
+	RowColumnCounts []int32 `json:"row_column_counts"`
+	Position        int32   `json:"position"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 type VisionPlanSectionInput struct {
@@ -87,6 +89,7 @@ type VisionPlanSectionInput struct {
 	SectionType string `json:"section_type"`
 	Position    int32  `json:"position"`
 	PageID      string `json:"page_id"`
+	RowIndex    int32  `json:"row_index"`
 	ColumnIndex int32  `json:"column_index"`
 }
 
@@ -142,6 +145,7 @@ type VisionPlanSectionResponse struct {
 	SectionType string                   `json:"section_type"`
 	Position    int32                    `json:"position"`
 	PageID      string                   `json:"page_id"`
+	RowIndex    int32                    `json:"row_index"`
 	ColumnIndex int32                    `json:"column_index"`
 	Items       []VisionPlanItemResponse `json:"items"`
 	CreatedAt   string                   `json:"created_at"`
@@ -357,26 +361,36 @@ type MeetingConfigResponse struct {
 	AvailableNoteTypes []MeetingNoteTypeResponse      `json:"available_note_types"`
 }
 
+// A seat can be held by several people and agents at once (FIR-3589), so
+// ownership is a list rather than a single type/id pair.
+type OrgChartSeatOwnerInput struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type OrgChartSeatOwnerResponse struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
 type OrgChartSeatInput struct {
-	ParentID         string   `json:"parent_id,omitempty"`
-	Name             string   `json:"name"`
-	Responsibilities []string `json:"responsibilities"`
-	OwnerType        string   `json:"owner_type,omitempty"`
-	OwnerID          string   `json:"owner_id,omitempty"`
-	Position         int32    `json:"position"`
+	ParentID         string                   `json:"parent_id,omitempty"`
+	Name             string                   `json:"name"`
+	Responsibilities []string                 `json:"responsibilities"`
+	Owners           []OrgChartSeatOwnerInput `json:"owners"`
+	Position         int32                    `json:"position"`
 }
 
 type OrgChartSeatResponse struct {
-	ID               string   `json:"id"`
-	WorkspaceID      string   `json:"workspace_id"`
-	ParentID         string   `json:"parent_id,omitempty"`
-	Name             string   `json:"name"`
-	Responsibilities []string `json:"responsibilities"`
-	OwnerType        string   `json:"owner_type,omitempty"`
-	OwnerID          string   `json:"owner_id,omitempty"`
-	OwnerName        string   `json:"owner_name,omitempty"`
-	Vacant           bool     `json:"vacant"`
-	Position         int32    `json:"position"`
+	ID               string                      `json:"id"`
+	WorkspaceID      string                      `json:"workspace_id"`
+	ParentID         string                      `json:"parent_id,omitempty"`
+	Name             string                      `json:"name"`
+	Responsibilities []string                    `json:"responsibilities"`
+	Owners           []OrgChartSeatOwnerResponse `json:"owners"`
+	Vacant           bool                        `json:"vacant"`
+	Position         int32                       `json:"position"`
 }
 
 type ObjectConnectionResponse struct {

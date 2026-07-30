@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
   ChevronDown,
+  Columns3,
+  FileSearch,
   Folder as FolderIcon,
   FolderPlus,
   Plus,
@@ -24,12 +26,10 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -71,9 +71,6 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
 import { cn } from "@multica/ui/lib/utils";
@@ -101,6 +98,12 @@ import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
+import { FolderMoveDialog, buildFolderChoices } from "./folder-move-dialog";
+import {
+  DOCUMENT_COLUMNS,
+  useDocumentColumns,
+  type DocumentColumnKey,
+} from "./document-columns";
 
 // ---------------------------------------------------------------------------
 // Tree helpers
@@ -592,6 +595,20 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     "all" | ArtifactAuthorType
   >("all");
   const [foldersSheetOpen, setFoldersSheetOpen] = React.useState(false);
+  // FIR-4163: names-only by default — searching for "budget" should find the
+  // folder and the document called Budget, not every document that happens to
+  // mention the word. "content" widens the same query to document bodies.
+  const [searchScope, setSearchScope] = React.useState<"names" | "content">(
+    "names",
+  );
+  // Move target: a single artifact, a single folder, or the current selection.
+  const [moveTarget, setMoveTarget] = React.useState<
+    | { type: "artifact"; artifact: Artifact }
+    | { type: "folder"; folder: ArtifactFolder }
+    | { type: "selection" }
+    | null
+  >(null);
+  const columnState = useDocumentColumns();
 
   React.useEffect(() => {
     setFolderId(initialFolderId ?? null);
@@ -611,6 +628,10 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const selectFolder = React.useCallback(
     (id: string | null) => {
       setFolderId(id);
+      // Search spans the whole workspace, so results would survive the folder
+      // change and hide the folder you just asked to see. Opening a folder is
+      // how you leave a search.
+      setQuery("");
       // Called only from a user action (click), so writing unconditionally
       // cannot loop and correctly clears a stale `?folder` when going to root.
       if (!router.replaceSilent) return;
@@ -625,11 +646,16 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "document" }),
   );
+  const trimmedQuery = query.trim();
+  const isSearching = trimmedQuery.length > 0;
   const { data: allArtifacts = [], isLoading } = useQuery(
     artifactSearchOptions(wsId, {
-      q: query.trim() || undefined,
+      q: trimmedQuery || undefined,
       author_type: authorFilter === "all" ? undefined : authorFilter,
-      limit: 200,
+      // The server matches title OR body, so a broad word can fill the page
+      // with body-only hits and push name matches past the cap. A larger cap
+      // while searching keeps name matches reachable in "names" scope.
+      limit: isSearching ? 500 : 200,
     }),
   );
 
@@ -645,8 +671,30 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     [folders, folderId],
   );
 
-  // Subfolders inside the current folder.
+  // FIR-4163: every folder with its full path, so the Location column and the
+  // move picker can name a folder unambiguously.
+  const folderChoices = React.useMemo(
+    () => buildFolderChoices(folders),
+    [folders],
+  );
+  const folderPathById = React.useMemo(() => {
+    const map = new Map<string, { name: string; path: string }>();
+    for (const c of folderChoices) {
+      map.set(c.folder.id, { name: c.folder.name, path: c.path });
+    }
+    return map;
+  }, [folderChoices]);
+
+  const needle = trimmedQuery.toLowerCase();
+
+  // Subfolders inside the current folder — or, while searching, every folder
+  // whose name or path matches, wherever it sits in the tree.
   const childFolders = React.useMemo(() => {
+    if (isSearching) {
+      return folderChoices
+        .filter((c) => c.path.toLowerCase().includes(needle))
+        .map((c) => ({ ...c.folder, children: [] as FolderNode[] }));
+    }
     if (folderId === null) return tree;
     const find = (nodes: FolderNode[]): FolderNode | undefined => {
       for (const n of nodes) {
@@ -657,14 +705,32 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
       return undefined;
     };
     return find(tree)?.children ?? [];
-  }, [tree, folderId]);
+  }, [tree, folderId, isSearching, folderChoices, needle]);
 
-  // Artifacts in the current folder. Server returns all artifacts (no folder
-  // filter on the search endpoint), so filter client-side. The cap of 200
-  // is generous for early use; we'll add a server filter if needed.
+  // Artifacts in the current folder. The server search endpoint has no folder
+  // filter, so scoping happens here. While searching we deliberately span the
+  // whole workspace — a document you are looking for is usually in a folder you
+  // are not standing in, and the Location column tells you where it lives.
   const artifacts = React.useMemo(() => {
-    return allArtifacts.filter((a) => (a.folder_id ?? null) === folderId);
-  }, [allArtifacts, folderId]);
+    if (!isSearching) {
+      return allArtifacts.filter((a) => (a.folder_id ?? null) === folderId);
+    }
+    // The server matches title OR body. "names" narrows that to the title (and
+    // the containing folder's name) locally; "content" keeps the body hits.
+    if (searchScope === "content") return allArtifacts;
+    return allArtifacts.filter((a) => {
+      if (a.title.toLowerCase().includes(needle)) return true;
+      const folder = a.folder_id ? folderPathById.get(a.folder_id) : undefined;
+      return folder ? folder.path.toLowerCase().includes(needle) : false;
+    });
+  }, [
+    allArtifacts,
+    folderId,
+    isSearching,
+    searchScope,
+    needle,
+    folderPathById,
+  ]);
 
   const toggleFolder = (id: string) => {
     setExpanded((prev) => {
@@ -763,6 +829,134 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const clearSelection = () => {
     setSelectedFolders(new Set());
     setSelectedArtifacts(new Set());
+  };
+
+  // Full folder path of a document, or null when it sits at the root.
+  const artifactFolderPath = (a: Artifact) =>
+    a.folder_id ? (folderPathById.get(a.folder_id)?.path ?? null) : null;
+
+  // FIR-4163: one place decides what a column contains, so the header, the
+  // grid track list and the row cells can never fall out of step.
+  const renderFolderCell = (
+    f: ArtifactFolder,
+    key: DocumentColumnKey,
+  ): React.ReactNode => {
+    switch (key) {
+      case "kind":
+        return "Folder";
+      case "location": {
+        const parent = f.parent_id
+          ? folderPathById.get(f.parent_id)
+          : undefined;
+        return parent ? parent.name : "All documents";
+      }
+      case "modified":
+        return formatDate(f.updated_at);
+      default:
+        return null;
+    }
+  };
+
+  const renderArtifactCell = (
+    a: Artifact,
+    key: DocumentColumnKey,
+  ): React.ReactNode => {
+    switch (key) {
+      case "kind":
+        return (
+          <span className="text-xs text-muted-foreground">
+            {KIND_LABELS[a.kind]}
+          </span>
+        );
+      case "format":
+        return (
+          <span className="text-xs uppercase text-muted-foreground">
+            {a.format}
+          </span>
+        );
+      case "author":
+        return <AuthorCell artifact={a} />;
+      case "linked":
+        return <ScopeBadge artifact={a} />;
+      case "location": {
+        const folder = a.folder_id
+          ? folderPathById.get(a.folder_id)
+          : undefined;
+        const label = folder ? folder.name : "All documents";
+        return (
+          <button
+            type="button"
+            // The bare folder name doesn't say what the button does, so the
+            // accessible name spells out that it navigates.
+            aria-label={`Go to ${label}`}
+            className="max-w-full truncate text-xs text-muted-foreground hover:text-foreground hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              selectFolder(a.folder_id ?? null);
+            }}
+          >
+            {label}
+          </button>
+        );
+      }
+      case "modified":
+        return (
+          <span className="text-xs text-muted-foreground">
+            {formatDate(a.updated_at)}
+          </span>
+        );
+      case "size":
+        return (
+          <span className="text-xs text-muted-foreground">
+            {a.file_size_bytes ? formatBytes(a.file_size_bytes) : "—"}
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  // A folder cannot become its own parent or land inside one of its own
+  // subfolders, so those destinations are removed before the picker opens.
+  const moveDestinations = React.useMemo(() => {
+    if (moveTarget?.type !== "folder") return folders;
+    const blocked = new Set<string>([moveTarget.folder.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of folders) {
+        if (f.parent_id && blocked.has(f.parent_id) && !blocked.has(f.id)) {
+          blocked.add(f.id);
+          grew = true;
+        }
+      }
+    }
+    return folders.filter((f) => !blocked.has(f.id));
+  }, [folders, moveTarget]);
+
+  const moveSubject = React.useMemo(() => {
+    if (moveTarget?.type === "artifact") return moveTarget.artifact.title;
+    if (moveTarget?.type === "folder") return moveTarget.folder.name;
+    return `${totalSelected} item${totalSelected === 1 ? "" : "s"}`;
+  }, [moveTarget, totalSelected]);
+
+  const moveCurrentFolderId =
+    moveTarget?.type === "artifact"
+      ? (moveTarget.artifact.folder_id ?? null)
+      : moveTarget?.type === "folder"
+        ? (moveTarget.folder.parent_id ?? null)
+        : folderId;
+
+  const handleMoveConfirmed = (target: string | null) => {
+    if (!moveTarget) return;
+    if (moveTarget.type === "artifact") {
+      handleMoveArtifact(moveTarget.artifact.id, target);
+    } else if (moveTarget.type === "folder") {
+      handleMoveFolder(moveTarget.folder.id, target);
+    } else {
+      void handleBatchMove(target);
+    }
+    setMoveTarget(null);
   };
 
   const handleBatchMove = async (target: string | null) => {
@@ -963,10 +1157,24 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search documents…"
+                placeholder="Search names…"
                 className="h-8 w-full pl-7 md:w-56"
               />
             </div>
+            {/* FIR-4163: names is the default; this widens the same query to
+                document contents. */}
+            <Button
+              size="sm"
+              variant={searchScope === "content" ? "secondary" : "outline"}
+              aria-pressed={searchScope === "content"}
+              onClick={() =>
+                setSearchScope((s) => (s === "content" ? "names" : "content"))
+              }
+              title="Also search inside document contents"
+            >
+              <FileSearch className="mr-1 size-4" />
+              <span className="hidden sm:inline">Contents</span>
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="outline" size="sm" />}
@@ -1011,6 +1219,35 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 <span className="sm:hidden">Typer</span>
               </Button>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="hidden md:inline-flex"
+                    aria-label="Columns"
+                  />
+                }
+              >
+                <Columns3 className="mr-1 size-4" /> Columns
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {DOCUMENT_COLUMNS.map((c) => (
+                  <DropdownMenuCheckboxItem
+                    key={c.key}
+                    checked={columnState.isVisible(c.key)}
+                    onCheckedChange={() => columnState.toggle(c.key)}
+                  >
+                    {c.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={columnState.reset}>
+                  Reset columns
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               size="sm"
               variant="outline"
@@ -1035,28 +1272,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
             <span className="text-muted-foreground">
               {totalSelected} selected
             </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button variant="ghost" size="sm" />}
-              >
-                <ArrowLeftRight className="mr-1 size-4" /> Move to
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => handleBatchMove(null)}>
-                  All documents (root)
-                </DropdownMenuItem>
-                {folders.length > 0 && <DropdownMenuSeparator />}
-                {folders.map((f) => (
-                  <DropdownMenuItem
-                    key={f.id}
-                    onClick={() => handleBatchMove(f.id)}
-                  >
-                    <FolderIcon className="mr-2 size-3.5" />
-                    {f.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setMoveTarget({ type: "selection" })}
+            >
+              <ArrowLeftRight className="mr-1 size-4" /> Move to…
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -1075,19 +1297,44 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
           {isLoading ? (
             <div className="px-6 py-6 text-sm text-muted-foreground">Loading…</div>
           ) : childFolders.length === 0 && artifacts.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
-              <FolderIcon className="size-8 opacity-40" />
-              <span>This folder is empty.</span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => router.push(wsPaths.documentNew(folderId))}
-              >
-                <Plus className="mr-1 size-4" /> New document
-              </Button>
-            </div>
+            isSearching ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
+                <Search className="size-8 opacity-40" />
+                <span>
+                  Nothing matches “{trimmedQuery}”
+                  {searchScope === "names" ? " in any name" : ""}.
+                </span>
+                {searchScope === "names" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSearchScope("content")}
+                  >
+                    <FileSearch className="mr-1 size-4" /> Search contents too
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
+                <FolderIcon className="size-8 opacity-40" />
+                <span>This folder is empty.</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => router.push(wsPaths.documentNew(folderId))}
+                >
+                  <Plus className="mr-1 size-4" /> New document
+                </Button>
+              </div>
+            )
           ) : (
-            <div className="flex flex-col text-sm md:grid md:min-w-[820px] md:grid-cols-[56px_minmax(0,1fr)_100px_80px_160px_120px_110px_44px]">
+            <div
+              className="flex flex-col text-sm md:grid md:min-w-[760px]"
+              // Column set is user-controlled, so the track list is derived
+              // rather than hardcoded. Only takes effect at md, where the
+              // container actually becomes a grid.
+              style={{ gridTemplateColumns: columnState.gridTemplate }}
+            >
               {/* Mobile-only header: just select-all */}
               <div className="flex items-center justify-between border-b border-border bg-muted/20 px-4 py-1.5 text-xs font-medium uppercase text-muted-foreground md:hidden">
                 <label className="flex cursor-pointer items-center gap-2">
@@ -1103,8 +1350,12 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                   {childFolders.length + artifacts.length === 1 ? "" : "s"}
                 </span>
               </div>
-              {/* Desktop table header */}
-              <div className="col-span-8 hidden grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground md:grid">
+              {/* Desktop table header — sticky so the column names stay
+                  readable while scrolling a long folder. */}
+              <div
+                className="sticky top-0 z-10 hidden grid-cols-subgrid border-b border-border bg-background/95 px-6 py-2 text-xs font-medium text-muted-foreground backdrop-blur md:grid"
+                style={{ gridColumn: `span ${columnState.cellCount}` }}
+              >
                 <div className="flex items-center">
                   <Checkbox
                     checked={allInViewSelected}
@@ -1113,11 +1364,9 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                   />
                 </div>
                 <div>Name</div>
-                <div>Kind</div>
-                <div>Format</div>
-                <div>Author</div>
-                <div>Linked to</div>
-                <div>Modified</div>
+                {columnState.columns.map((c) => (
+                  <div key={c.key}>{c.label}</div>
+                ))}
                 <div />
               </div>
               {childFolders.map((f) => (
@@ -1147,7 +1396,8 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         handleMoveFolder(movedFolderId, f.id);
                       }
                     }}
-                    className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-2.5 text-left hover:bg-accent/50 md:col-span-8 md:grid md:grid-cols-subgrid md:gap-0 md:border-b-0 md:px-6 md:py-2"
+                    style={{ gridColumn: `span ${columnState.cellCount}` }}
+                    className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/40 px-4 py-2.5 text-left hover:bg-accent/50 md:grid md:grid-cols-subgrid md:gap-0 md:px-6 md:py-2"
                   >
                     <div
                       className="flex items-center"
@@ -1159,8 +1409,10 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         aria-label={`Select ${f.name}`}
                       />
                     </div>
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                        <FolderIcon className="size-4" />
+                      </span>
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{f.name}</div>
                         <div className="truncate text-xs text-muted-foreground md:hidden">
@@ -1168,15 +1420,14 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         </div>
                       </div>
                     </div>
-                    <div className="hidden text-xs text-muted-foreground md:block">
-                      Folder
-                    </div>
-                    <div className="hidden md:block" />
-                    <div className="hidden md:block" />
-                    <div className="hidden md:block" />
-                    <div className="hidden text-xs text-muted-foreground md:block">
-                      {formatDate(f.updated_at)}
-                    </div>
+                    {columnState.columns.map((c) => (
+                      <div
+                        key={c.key}
+                        className="hidden min-w-0 truncate text-xs text-muted-foreground md:block"
+                      >
+                        {renderFolderCell(f, c.key)}
+                      </div>
+                    ))}
                     <div
                       className="flex items-center justify-end"
                       onClick={(e) => e.stopPropagation()}
@@ -1203,6 +1454,14 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                           >
                             <Pencil className="mr-2 size-3.5" /> Rename
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              setMoveTarget({ type: "folder", folder: f })
+                            }
+                          >
+                            <ArrowLeftRight className="mr-2 size-3.5" /> Move
+                            to…
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive"
@@ -1222,6 +1481,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       }}
                     >
                       <Pencil className="mr-2 size-3.5" /> Rename
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() =>
+                        setMoveTarget({ type: "folder", folder: f })
+                      }
+                    >
+                      <ArrowLeftRight className="mr-2 size-3.5" /> Move to…
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem
@@ -1246,7 +1512,8 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     onDoubleClick={() =>
                       router.push(wsPaths.documentEdit(a.id))
                     }
-                    className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-2.5 text-left hover:bg-accent/50 md:col-span-8 md:grid md:grid-cols-subgrid md:items-center md:gap-0 md:border-b-0 md:px-6 md:py-2"
+                    style={{ gridColumn: `span ${columnState.cellCount}` }}
+                    className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/40 px-4 py-2.5 text-left hover:bg-accent/50 md:grid md:grid-cols-subgrid md:items-center md:gap-0 md:px-6 md:py-2"
                   >
                     <div
                       className="flex items-center"
@@ -1258,34 +1525,28 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         aria-label={`Select ${a.title}`}
                       />
                     </div>
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <KindIcon
-                        kind={a.kind}
-                        className="size-4 shrink-0 text-muted-foreground"
-                      />
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                        <KindIcon kind={a.kind} className="size-4" />
+                      </span>
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{a.title}</div>
                         <MobileMeta artifact={a} />
                       </div>
                     </div>
-                    <div className="hidden text-xs text-muted-foreground md:block">
-                      {KIND_LABELS[a.kind]}
-                    </div>
-                    <div className="hidden text-xs uppercase text-muted-foreground md:block">
-                      {a.format}
-                      {a.format === "pdf" && a.file_size_bytes
-                        ? ` · ${formatBytes(a.file_size_bytes)}`
-                        : ""}
-                    </div>
-                    <div className="hidden md:block">
-                      <AuthorCell artifact={a} />
-                    </div>
-                    <div className="hidden md:block">
-                      <ScopeBadge artifact={a} />
-                    </div>
-                    <div className="hidden text-xs text-muted-foreground md:block">
-                      {formatDate(a.updated_at)}
-                    </div>
+                    {columnState.columns.map((c) => (
+                      <div
+                        key={c.key}
+                        className="hidden min-w-0 md:block"
+                        title={
+                          c.key === "location"
+                            ? (artifactFolderPath(a) ?? undefined)
+                            : undefined
+                        }
+                      >
+                        {renderArtifactCell(a, c.key)}
+                      </div>
+                    ))}
                     <div
                       className="flex items-center justify-end"
                       onClick={(e) => e.stopPropagation()}
@@ -1321,31 +1582,14 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                               <Pencil className="mr-2 size-3.5" /> Edit body
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuSub>
-                            <DropdownMenuSubTrigger>
-                              <ArrowLeftRight className="mr-2 size-3.5" /> Move
-                              to
-                            </DropdownMenuSubTrigger>
-                            <DropdownMenuSubContent>
-                              <DropdownMenuItem
-                                onClick={() => handleMoveArtifact(a.id, null)}
-                              >
-                                All documents (root)
-                              </DropdownMenuItem>
-                              {folders.length > 0 && <DropdownMenuSeparator />}
-                              {folders.map((f) => (
-                                <DropdownMenuItem
-                                  key={f.id}
-                                  onClick={() =>
-                                    handleMoveArtifact(a.id, f.id)
-                                  }
-                                >
-                                  <FolderIcon className="mr-2 size-3.5" />
-                                  {f.name}
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuSubContent>
-                          </DropdownMenuSub>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              setMoveTarget({ type: "artifact", artifact: a })
+                            }
+                          >
+                            <ArrowLeftRight className="mr-2 size-3.5" /> Move
+                            to…
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive"
@@ -1373,28 +1617,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         <Pencil className="mr-2 size-3.5" /> Edit body
                       </ContextMenuItem>
                     )}
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger>
-                        <ArrowLeftRight className="mr-2 size-3.5" /> Move to
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent>
-                        <ContextMenuItem
-                          onClick={() => handleMoveArtifact(a.id, null)}
-                        >
-                          All documents (root)
-                        </ContextMenuItem>
-                        {folders.length > 0 && <ContextMenuSeparator />}
-                        {folders.map((f) => (
-                          <ContextMenuItem
-                            key={f.id}
-                            onClick={() => handleMoveArtifact(a.id, f.id)}
-                          >
-                            <FolderIcon className="mr-2 size-3.5" />
-                            {f.name}
-                          </ContextMenuItem>
-                        ))}
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
+                    <ContextMenuItem
+                      onClick={() =>
+                        setMoveTarget({ type: "artifact", artifact: a })
+                      }
+                    >
+                      <ArrowLeftRight className="mr-2 size-3.5" /> Move to…
+                    </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem
                       className="text-destructive"
@@ -1409,6 +1638,16 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
           )}
         </div>
       </main>
+
+      <FolderMoveDialog
+        open={moveTarget !== null}
+        onOpenChange={(open) => !open && setMoveTarget(null)}
+        folders={moveDestinations}
+        subject={moveSubject}
+        currentFolderId={moveCurrentFolderId}
+        rootLabel="All documents"
+        onMove={handleMoveConfirmed}
+      />
 
       <NewFolderDialog
         open={newFolderOpen}
