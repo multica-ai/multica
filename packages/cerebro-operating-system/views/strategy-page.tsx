@@ -15,7 +15,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { ChevronDown, ChevronUp, FolderKanban, GripVertical, ListTodo, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, FolderKanban, GripVertical, ListTodo, Plus, Settings2, Trash2 } from "lucide-react";
 import { DEFAULT_TERMINOLOGY } from "../core/api-schemas";
 import {
   periodsOptions, rocksOptions, settingsOptions, useCreateConnection, useCreateVisionPlanItem,
@@ -23,9 +23,10 @@ import {
   useDeleteVisionPlanPage, useDeleteVisionPlanSection, useSaveRock, useUpdateVisionPlanItem,
   useUpdateVisionPlanPage, useUpdateVisionPlanSection, visionPlanOptions,
 } from "../core/queries";
-import { columnSections, moveItem, moveSection } from "../core/strategy-board";
+import { clampSectionsToLayout, columnSections, moveItem, moveSection } from "../core/strategy-board";
 import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanObjectLink, VisionPlanPage, VisionPlanSection } from "../core/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
+import { OsPageShell } from "./os-page-shell";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
 import {
   COLUMN_PREFIX, GoalsBlockBody, ITEM_PREFIX, ITEM_ZONE_PREFIX, PageBoard, SECTION_PREFIX, parseColumnId,
@@ -66,12 +67,13 @@ const sectionInputFrom = (section: VisionPlanSection, overrides: Partial<VisionP
   section_type: overrides.section_type ?? section.section_type,
   position: overrides.position ?? section.position,
   page_id: overrides.page_id ?? section.page_id,
+  row_index: overrides.row_index ?? section.row_index,
   column_index: overrides.column_index ?? section.column_index,
 });
 
 const pageInputFrom = (page: VisionPlanPage, overrides: Partial<VisionPlanPage> = {}) => ({
   name: overrides.name ?? page.name,
-  column_count: overrides.column_count ?? page.column_count,
+  row_column_counts: overrides.row_column_counts ?? page.row_column_counts,
   position: overrides.position ?? page.position,
 });
 
@@ -169,13 +171,13 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
         </div>
       </div>
       {section.section_type === "process" && (
-        <SearchSelect compact label={`${item.title} owner`} options={ownerOptions} value={item.owner_id ? `${item.owner_type}:${item.owner_id}` : ""} onChange={(value) => {
+        <SearchSelect compact fieldLabel="Owner" label={`${item.title} owner`} options={ownerOptions} value={item.owner_id ? `${item.owner_type}:${item.owner_id}` : ""} onChange={(value) => {
           const [ownerType, ownerId] = value.split(":");
           save({ owner_type: ownerId ? ownerType as "member" | "agent" : undefined, owner_id: ownerId || undefined });
-        }} clearLabel="No owner" placeholder="Process owner" />
+        }} clearLabel="No owner" placeholder="Unassigned" />
       )}
       <div className="grid gap-1.5">
-        <SearchSelect compact multiple label={`${item.title} Projects and Issues`} options={linkOptions} values={selectedLinks} onValuesChange={changeLinks} placeholder="Connect Project or Issue" />
+        <SearchSelect compact multiple fieldLabel="Linked" label={`${item.title} Projects and Issues`} options={linkOptions} values={selectedLinks} onValuesChange={changeLinks} placeholder="Connect Project or Issue" />
         {item.links.length > 0 && (
           <ul aria-label={`${item.title} connected Projects and Issues`} className="flex flex-wrap gap-1.5">
             {item.links.map((link) => (
@@ -192,7 +194,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
       </div>
       {allowGoalConnections && (
         <div className="grid gap-1.5">
-          <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
+          <SearchSelect compact multiple fieldLabel="Goals" label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
           {connectedGoals.length > 0 && (
             <ul aria-label={`${item.title} connected Goals`} className="flex flex-wrap gap-1.5">
               {connectedGoals.map((goal) => (
@@ -316,19 +318,19 @@ const boardCollision: CollisionDetection = (args) => {
 };
 
 // Adds a block to one column of the open page.
-function AddBlock({ pageId, columnIndex, blockCount, wsId }: { pageId: string; columnIndex: number; blockCount: number; wsId: string }) {
+function AddBlock({ pageId, rowIndex, columnIndex, blockCount, wsId }: { pageId: string; rowIndex: number; columnIndex: number; blockCount: number; wsId: string }) {
   const createSection = useCreateVisionPlanSection(wsId);
   const [name, setName] = useState("");
 
   function add() {
     if (!name.trim()) return;
-    createSection.mutate({ name: name.trim(), section_type: "list", position: blockCount, page_id: pageId, column_index: columnIndex });
+    createSection.mutate({ name: name.trim(), section_type: "list", position: blockCount, page_id: pageId, row_index: rowIndex, column_index: columnIndex });
     setName("");
   }
 
   return (
     <input
-      aria-label={`Add block to column ${columnIndex + 1}`}
+      aria-label={`Add block to row ${rowIndex + 1} column ${columnIndex + 1}`}
       value={name}
       onChange={(event) => setName(event.target.value)}
       onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }}
@@ -339,31 +341,60 @@ function AddBlock({ pageId, columnIndex, blockCount, wsId }: { pageId: string; c
   );
 }
 
-// Rename the open page, change how many columns it has, or delete it. The last
-// page is never deletable, so there is always somewhere to put a block.
+/**
+ * Rename the open page, lay out its rows, or delete it. The layout controls sit
+ * behind a Layout toggle rather than on screen at all times (FIR-3589 item 4) —
+ * they are set once and then in the way. The last page is never deletable, so
+ * there is always somewhere to put a block.
+ */
 function PageToolbar({ page, pageCount, wsId }: { page: VisionPlanPage; pageCount: number; wsId: string }) {
   const updatePage = useUpdateVisionPlanPage(wsId);
   const deletePage = useDeleteVisionPlanPage(wsId);
   const [name, setName] = useState(page.name);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showLayout, setShowLayout] = useState(false);
+  const rows = page.row_column_counts;
+
+  function saveRows(next: number[]) {
+    updatePage.mutate({ id: page.id, input: pageInputFrom(page, { row_column_counts: next }) });
+  }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-2">
-      <input aria-label={`${page.name} page name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updatePage.mutate({ id: page.id, input: pageInputFrom(page, { name: name.trim() || page.name }) })} className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3 text-sm font-medium" />
-      <div role="group" aria-label={`${page.name} columns`} className="flex items-center gap-1">
-        <span className="px-1 text-xs text-muted-foreground">Columns</span>
-        {[1, 2, 3].map((count) => (
-          <button key={count} type="button" aria-label={`${count} column layout`} aria-pressed={page.column_count === count} onClick={() => updatePage.mutate({ id: page.id, input: pageInputFrom(page, { column_count: count }) })} className={`size-9 rounded-md border text-sm ${page.column_count === count ? "border-foreground font-semibold" : "text-muted-foreground"}`}>{count}</button>
+    <div className="grid gap-2 rounded-xl border bg-card p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input aria-label={`${page.name} page name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updatePage.mutate({ id: page.id, input: pageInputFrom(page, { name: name.trim() || page.name }) })} className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3 text-sm font-medium" />
+        <button type="button" aria-label={`${page.name} layout settings`} aria-expanded={showLayout} onClick={() => setShowLayout(!showLayout)} className={`flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${showLayout ? "border-foreground" : "text-muted-foreground"}`}>
+          <Settings2 aria-hidden className="size-4" />Layout
+        </button>
+        {pageCount > 1 && (confirmingDelete ? (
+          <span className="flex items-center gap-1">
+            <button type="button" aria-label={`Confirm delete ${page.name} page`} onClick={() => deletePage.mutate(page.id)} className="h-9 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground">Delete page</button>
+            <button type="button" aria-label={`Cancel delete ${page.name} page`} onClick={() => setConfirmingDelete(false)} className="h-9 rounded-md border px-3 text-xs">Cancel</button>
+          </span>
+        ) : (
+          <button type="button" aria-label={`Delete ${page.name} page`} onClick={() => setConfirmingDelete(true)} className="grid size-9 place-items-center rounded-md border text-muted-foreground hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
         ))}
       </div>
-      {pageCount > 1 && (confirmingDelete ? (
-        <span className="flex items-center gap-1">
-          <button type="button" aria-label={`Confirm delete ${page.name} page`} onClick={() => deletePage.mutate(page.id)} className="h-9 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground">Delete page</button>
-          <button type="button" aria-label={`Cancel delete ${page.name} page`} onClick={() => setConfirmingDelete(false)} className="h-9 rounded-md border px-3 text-xs">Cancel</button>
-        </span>
-      ) : (
-        <button type="button" aria-label={`Delete ${page.name} page`} onClick={() => setConfirmingDelete(true)} className="grid size-9 place-items-center rounded-md border text-muted-foreground hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
-      ))}
+
+      {showLayout && (
+        <div aria-label={`${page.name} layout`} className="grid gap-2 rounded-lg border border-dashed bg-background p-2">
+          <p className="text-xs text-muted-foreground">How many columns each row has, from the top down.</p>
+          {rows.map((columnCount, rowIndex) => (
+            <div key={rowIndex} className="flex flex-wrap items-center gap-2">
+              <span className="w-14 text-xs font-medium text-muted-foreground">Row {rowIndex + 1}</span>
+              <div role="group" aria-label={`Row ${rowIndex + 1} columns`} className="flex items-center gap-1">
+                {[1, 2, 3, 4].map((count) => (
+                  <button key={count} type="button" aria-label={`Row ${rowIndex + 1}: ${count} column layout`} aria-pressed={columnCount === count} onClick={() => saveRows(rows.map((current, index) => index === rowIndex ? count : current))} className={`size-9 rounded-md border text-sm ${columnCount === count ? "border-foreground font-semibold" : "text-muted-foreground"}`}>{count}</button>
+                ))}
+              </div>
+              {rows.length > 1 && (
+                <button type="button" aria-label={`Remove row ${rowIndex + 1}`} onClick={() => saveRows(rows.filter((_, index) => index !== rowIndex))} className="grid size-9 place-items-center rounded-md border text-muted-foreground hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+              )}
+            </div>
+          ))}
+          <button type="button" aria-label="Add row" disabled={rows.length >= 12} onClick={() => saveRows([...rows, 1])} className="min-h-9 w-fit rounded-md border border-dashed px-3 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-40">+ Add row</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -409,7 +440,7 @@ export function StrategyPage() {
 
   function addPage() {
     if (!pageName.trim()) return;
-    createPage.mutate({ name: pageName.trim(), column_count: 3, position: pages.length });
+    createPage.mutate({ name: pageName.trim(), row_column_counts: [3], position: pages.length });
     setPageName(""); setAddingPage(false);
   }
 
@@ -430,13 +461,13 @@ export function StrategyPage() {
     return null;
   }
 
-  function blockTarget(overId: string): { pageId: string; columnIndex: number; beforeSectionId?: string } | null {
-    const column = parseColumnId(overId);
-    if (column) return column;
+  function blockTarget(overId: string): { pageId: string; rowIndex: number; columnIndex: number; beforeSectionId?: string } | null {
+    const cell = parseColumnId(overId);
+    if (cell) return cell;
     if (overId.startsWith(SECTION_PREFIX)) {
       const sectionId = overId.slice(SECTION_PREFIX.length);
       const target = sections.find((section) => section.id === sectionId);
-      if (target) return { pageId: target.page_id, columnIndex: target.column_index, beforeSectionId: sectionId };
+      if (target) return { pageId: target.page_id, rowIndex: target.row_index, columnIndex: target.column_index, beforeSectionId: sectionId };
     }
     return null;
   }
@@ -458,9 +489,9 @@ export function StrategyPage() {
     if (activeId.startsWith(SECTION_PREFIX)) {
       const target = blockTarget(overId);
       if (!target) return;
-      for (const change of moveSection(sections, activeId.slice(SECTION_PREFIX.length), target.pageId, target.columnIndex, target.beforeSectionId)) {
+      for (const change of moveSection(sections, activeId.slice(SECTION_PREFIX.length), target.pageId, target.rowIndex, target.columnIndex, target.beforeSectionId)) {
         const section = sections.find((candidate) => candidate.id === change.id);
-        if (section) updateSection.mutate({ id: section.id, input: sectionInputFrom(section, { page_id: change.page_id, column_index: change.column_index, position: change.position }) });
+        if (section) updateSection.mutate({ id: section.id, input: sectionInputFrom(section, { page_id: change.page_id, row_index: change.row_index, column_index: change.column_index, position: change.position }) });
       }
       return;
     }
@@ -479,13 +510,12 @@ export function StrategyPage() {
   const bodyProps = { wsId, goals, rocksLabel: terminology.rocks, ownerOptions, linkOptions, currentPeriodId, onOpenRock: openRock };
 
   return (
-    <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
-      <div className="flex w-full min-w-0 flex-col gap-5 p-4 sm:p-6">
-        <header className="flex flex-wrap items-end justify-between gap-4 border-b pb-5">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Vision/Traction Organizer</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.strategy_map}</h1><p className="mt-1 text-sm text-muted-foreground">Build each page from blocks, and connect long-term direction to current {terminology.rocks.toLowerCase()}.</p></div>
-          <button type="button" aria-label="Add page" onClick={() => setAddingPage(true)} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add page</button>
-        </header>
-
+    <OsPageShell
+      title={terminology.strategy_map}
+      subtitle={`Vision/Traction Organizer · connect long-term direction to current ${terminology.rocks.toLowerCase()}`}
+      headerActions={<button type="button" aria-label="Add page" onClick={() => setAddingPage(true)} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted">+ Add page</button>}
+    >
+      <div className="flex w-full min-w-0 flex-col gap-5 bg-muted/20 p-4 sm:p-6">
         {addingPage && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New page name" value={pageName} onChange={(event) => setPageName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addPage(); }} placeholder="Page name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addPage} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingPage(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
 
         {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : pages.length === 0 ? <p className="text-sm text-muted-foreground">No pages yet. Add one to start building.</p> : (
@@ -499,12 +529,12 @@ export function StrategyPage() {
                   <PageToolbar page={page} pageCount={pages.length} wsId={wsId} />
                   <PageBoard
                     page={page}
-                    sections={sections}
+                    sections={clampSectionsToLayout(sections, page.id, page.row_column_counts)}
                     renderSection={(section) => {
-                      const siblings = columnSections(sections, page.id, section.column_index);
+                      const siblings = columnSections(clampSectionsToLayout(sections, page.id, page.row_column_counts), page.id, section.row_index, section.column_index);
                       return <PlanSection key={section.id} section={section} index={siblings.findIndex((candidate) => candidate.id === section.id)} siblings={siblings} {...bodyProps} />;
                     }}
-                    renderColumnFooter={(columnIndex) => <AddBlock key={`add-${columnIndex}`} pageId={page.id} columnIndex={columnIndex} blockCount={columnSections(sections, page.id, columnIndex).length} wsId={wsId} />}
+                    renderColumnFooter={(rowIndex, columnIndex) => <AddBlock key={`add-${rowIndex}-${columnIndex}`} pageId={page.id} rowIndex={rowIndex} columnIndex={columnIndex} blockCount={columnSections(clampSectionsToLayout(sections, page.id, page.row_column_counts), page.id, rowIndex, columnIndex).length} wsId={wsId} />}
                   />
                 </TabsContent>
               ))}
@@ -514,6 +544,6 @@ export function StrategyPage() {
           </DndContext>
         )}
       </div>
-    </main>
+    </OsPageShell>
   );
 }

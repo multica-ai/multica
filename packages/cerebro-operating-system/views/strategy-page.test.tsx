@@ -69,14 +69,14 @@ vi.mock("../core/queries", async (importOriginal) => {
 
 const page = (partial: Partial<VisionPlanPage>): VisionPlanPage => ({
   id: partial.id ?? "vision", workspace_id: "workspace-1", key: partial.key ?? partial.id ?? "vision",
-  name: partial.name ?? "Vision", column_count: partial.column_count ?? 2, position: partial.position ?? 0,
+  name: partial.name ?? "Vision", row_column_counts: partial.row_column_counts ?? [2], position: partial.position ?? 0,
   created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z",
 });
 
 const section = (partial: Partial<VisionPlanSection>): VisionPlanSection => ({
   id: partial.id ?? "section-1", workspace_id: "workspace-1", key: partial.key ?? "core-values",
   name: partial.name ?? "Core Values", section_type: partial.section_type ?? "list", position: partial.position ?? 0,
-  page_id: partial.page_id ?? "vision", column_index: partial.column_index ?? 0,
+  page_id: partial.page_id ?? "vision", row_index: partial.row_index ?? 0, column_index: partial.column_index ?? 0,
   items: partial.items ?? [], created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z",
 });
 
@@ -87,8 +87,8 @@ describe("Vision Plan", () => {
   beforeEach(() => {
     state.enabled = true; state.loading = false; state.error = false; state.rocks = [];
     state.pages = [
-      page({ id: "vision", name: "Vision", column_count: 2, position: 0 }),
-      page({ id: "traction", key: "traction", name: "Traction", column_count: 3, position: 1 }),
+      page({ id: "vision", name: "Vision", row_column_counts: [2], position: 0 }),
+      page({ id: "traction", key: "traction", name: "Traction", row_column_counts: [3], position: 1 }),
     ];
     state.sections = [
       section({ id: "values", key: "core-values", name: "Core Values", position: 0, items: [{
@@ -112,7 +112,7 @@ describe("Vision Plan", () => {
   });
 
   it("draws one tab per page from the data, not from hard-coded layouts", () => {
-    state.pages = [...state.pages, page({ id: "accountability", key: "accountability", name: "Accountability", column_count: 1, position: 2 })];
+    state.pages = [...state.pages, page({ id: "accountability", key: "accountability", name: "Accountability", row_column_counts: [1], position: 2 })];
 
     renderEdit();
 
@@ -131,9 +131,45 @@ describe("Vision Plan", () => {
     // The named blanks the paper organiser asks for are offered as one-click chips.
     expect(screen.getByRole("button", { name: /Target Market \/ The List/ })).toBeInTheDocument();
     // Two columns on Vision, three on Traction — both come from the page record.
-    expect(screen.getAllByLabelText(/^Column /)).toHaveLength(2);
+    expect(screen.getAllByLabelText(/^Row 1 column /)).toHaveLength(2);
     openTraction();
-    expect(screen.getAllByLabelText(/^Column /)).toHaveLength(3);
+    expect(screen.getAllByLabelText(/^Row 1 column /)).toHaveLength(3);
+  }, 30_000);
+
+  // FIR-3589 item 4: each row decides its own column count, and the controls
+  // that set it stay behind a Layout toggle instead of always being on screen.
+  it("lays a page out row by row from a settings panel that is hidden by default", () => {
+    state.pages = [page({ id: "vision", name: "Vision", row_column_counts: [3, 1], position: 0 })];
+    state.sections = [
+      section({ id: "values", key: "core-values", name: "Core Values", position: 0 }),
+      section({ id: "wide", key: "issues-list", name: "Issues List", position: 0, row_index: 1, column_index: 0 }),
+    ];
+
+    renderEdit();
+
+    // Row 1 has three columns, row 2 has one.
+    expect(screen.getAllByLabelText(/^Row 1 column /)).toHaveLength(3);
+    expect(screen.getAllByLabelText(/^Row 2 column /)).toHaveLength(1);
+
+    // The layout controls are not on screen until asked for.
+    expect(screen.queryByRole("group", { name: "Row 2 columns" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Vision layout settings" }));
+    expect(screen.getByRole("group", { name: "Row 2 columns" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Row 2: 2 column layout" }));
+    expect(state.updatePage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "vision", input: expect.objectContaining({ row_column_counts: [3, 2] }),
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(state.updatePage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "vision", input: expect.objectContaining({ row_column_counts: [3, 1, 1] }),
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove row 2" }));
+    expect(state.updatePage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "vision", input: expect.objectContaining({ row_column_counts: [3] }),
+    }));
   }, 30_000);
 
   it("renders a Goals block as the current period's goals", () => {
@@ -158,15 +194,12 @@ describe("Vision Plan", () => {
     expect(state.createPage).toHaveBeenCalledWith(expect.objectContaining({ name: "Accountability", position: 2 }));
   });
 
-  it("renames the open page and changes its column count", () => {
+  it("renames the open page", () => {
     renderEdit();
 
     fireEvent.change(screen.getByLabelText("Vision page name"), { target: { value: "Our Vision" } });
     fireEvent.blur(screen.getByDisplayValue("Our Vision"));
     expect(state.updatePage).toHaveBeenCalledWith(expect.objectContaining({ id: "vision", input: expect.objectContaining({ name: "Our Vision" }) }));
-
-    fireEvent.click(screen.getByRole("button", { name: "3 column layout" }));
-    expect(state.updatePage).toHaveBeenCalledWith(expect.objectContaining({ id: "vision", input: expect.objectContaining({ column_count: 3 }) }));
   });
 
   it("deletes a page behind an inline confirm, and never the last one", () => {
@@ -183,11 +216,11 @@ describe("Vision Plan", () => {
 
   it("adds a block to a chosen column of the open page", () => {
     renderEdit();
-    const input = screen.getByLabelText("Add block to column 2");
+    const input = screen.getByLabelText("Add block to row 1 column 2");
     fireEvent.change(input, { target: { value: "Customer Promise" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(state.createSection).toHaveBeenCalledWith(expect.objectContaining({
-      name: "Customer Promise", page_id: "vision", column_index: 1, position: 2,
+      name: "Customer Promise", page_id: "vision", row_index: 0, column_index: 1, position: 2,
     }));
   });
 

@@ -9,6 +9,7 @@ import type { VisionPlanItem, VisionPlanSection } from "./types";
 export interface SectionMove {
   id: string;
   page_id: string;
+  row_index: number;
   column_index: number;
   position: number;
 }
@@ -22,31 +23,46 @@ export interface ItemMove {
 const activeItems = (section: VisionPlanSection): VisionPlanItem[] =>
   section.items.filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
 
-/** The blocks of one column, in the order they are drawn. */
-export function columnSections(sections: VisionPlanSection[], pageId: string, columnIndex: number): VisionPlanSection[] {
+/**
+ * Blocks whose stored cell no longer exists — a row was removed, or a row lost
+ * a column — fall back to the first cell instead of disappearing from the page.
+ * The next drag renumbers them, so the fallback heals itself.
+ */
+export function clampSectionsToLayout(sections: VisionPlanSection[], pageId: string, rowColumnCounts: number[]): VisionPlanSection[] {
+  return sections.map((section) => {
+    if (section.page_id !== pageId) return section;
+    const columns = rowColumnCounts[section.row_index];
+    if (columns !== undefined && section.column_index < columns) return section;
+    return { ...section, row_index: 0, column_index: 0 };
+  });
+}
+
+/** The blocks of one cell — a column inside a row — in the order they are drawn. */
+export function columnSections(sections: VisionPlanSection[], pageId: string, rowIndex: number, columnIndex: number): VisionPlanSection[] {
   return sections
-    .filter((section) => section.page_id === pageId && section.column_index === columnIndex)
+    .filter((section) => section.page_id === pageId && section.row_index === rowIndex && section.column_index === columnIndex)
     .sort((a, b) => a.position - b.position);
 }
 
 /**
- * Move block `activeId` into the column (`pageId`, `columnIndex`), inserting it
- * before `beforeSectionId` (or appending when that is undefined / not found).
- * Renumbers the source and destination columns and returns every block whose
- * page, column, or position changed.
+ * Move block `activeId` into the cell (`pageId`, `rowIndex`, `columnIndex`),
+ * inserting it before `beforeSectionId` (or appending when that is undefined /
+ * not found). Renumbers the source and destination cells and returns every
+ * block whose page, cell, or position changed.
  */
 export function moveSection(
   sections: VisionPlanSection[],
   activeId: string,
   pageId: string,
+  rowIndex: number,
   columnIndex: number,
   beforeSectionId?: string,
 ): SectionMove[] {
   const moved = sections.find((section) => section.id === activeId);
   if (!moved || activeId === beforeSectionId) return [];
 
-  const source = { pageId: moved.page_id, columnIndex: moved.column_index };
-  const dest = columnSections(sections, pageId, columnIndex).filter((section) => section.id !== activeId);
+  const source = { pageId: moved.page_id, rowIndex: moved.row_index, columnIndex: moved.column_index };
+  const dest = columnSections(sections, pageId, rowIndex, columnIndex).filter((section) => section.id !== activeId);
   let insertAt = dest.length;
   if (beforeSectionId) {
     const target = dest.findIndex((section) => section.id === beforeSectionId);
@@ -54,17 +70,18 @@ export function moveSection(
   }
   dest.splice(insertAt, 0, moved);
 
-  const columns = [{ pageId, columnIndex }];
-  if (source.pageId !== pageId || source.columnIndex !== columnIndex) columns.push(source);
+  const cells = [{ pageId, rowIndex, columnIndex }];
+  const sameCell = source.pageId === pageId && source.rowIndex === rowIndex && source.columnIndex === columnIndex;
+  if (!sameCell) cells.push(source);
 
   const changes: SectionMove[] = [];
-  for (const column of columns) {
-    const list = column.pageId === pageId && column.columnIndex === columnIndex
+  for (const cell of cells) {
+    const list = cell.pageId === pageId && cell.rowIndex === rowIndex && cell.columnIndex === columnIndex
       ? dest
-      : columnSections(sections, column.pageId, column.columnIndex).filter((section) => section.id !== activeId);
+      : columnSections(sections, cell.pageId, cell.rowIndex, cell.columnIndex).filter((section) => section.id !== activeId);
     list.forEach((section, index) => {
-      if (section.position !== index || section.page_id !== column.pageId || section.column_index !== column.columnIndex) {
-        changes.push({ id: section.id, page_id: column.pageId, column_index: column.columnIndex, position: index });
+      if (section.position !== index || section.page_id !== cell.pageId || section.row_index !== cell.rowIndex || section.column_index !== cell.columnIndex) {
+        changes.push({ id: section.id, page_id: cell.pageId, row_index: cell.rowIndex, column_index: cell.columnIndex, position: index });
       }
     });
   }
