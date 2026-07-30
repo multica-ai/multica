@@ -134,6 +134,15 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  /** Prefix-match key for the per-issue description histories. Carries no
+   *  wsId for the same reason timelineAll does — see the note above. */
+  descriptionVersionsAll: () => ["issues", "description-versions"] as const,
+  /** Version list for one issue's description (no snapshots — see the API). */
+  descriptionVersions: (issueId: string) =>
+    [...issueKeys.descriptionVersionsAll(), issueId] as const,
+  /** One version WITH its snapshot; the diff view pulls the two sides it needs. */
+  descriptionVersion: (issueId: string, versionId: string) =>
+    [...issueKeys.descriptionVersionsAll(), issueId, versionId] as const,
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -869,6 +878,26 @@ export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
     queryFn: () => api.listTimeline(issueId),
+  });
+}
+
+/**
+ * Description version history, newest first. Snapshots are omitted here; the
+ * diff view fetches the specific versions it renders through
+ * descriptionVersionOptions so an issue with a long history stays cheap to open.
+ */
+export function descriptionVersionsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.descriptionVersions(issueId),
+    queryFn: () => api.listDescriptionVersions(issueId),
+  });
+}
+
+/** One version including its content snapshot. */
+export function descriptionVersionOptions(issueId: string, versionId: string) {
+  return queryOptions({
+    queryKey: issueKeys.descriptionVersion(issueId, versionId),
+    queryFn: () => api.getDescriptionVersion(issueId, versionId),
   });
 }
 

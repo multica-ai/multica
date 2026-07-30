@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  History,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -43,6 +44,8 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DescriptionDiffView } from "./description-diff-view";
+import { DescriptionHistoryDialog, DiffStat } from "./description-history-dialog";
 import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
@@ -76,7 +79,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueUsageOptions, issueAttachmentsOptions, descriptionVersionsOptions, descriptionVersionOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -263,7 +266,9 @@ function formatActivity(
         to: details.to ?? "?",
       });
     case "description_updated":
-      return t(($) => $.activity.description_updated);
+      return details.restored_from_version_id
+        ? t(($) => $.activity.description_restored)
+        : t(($) => $.activity.description_updated);
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
@@ -452,11 +457,192 @@ function TimelineSkeleton() {
 const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
+/**
+ * The description's own history affordance: a quiet "last edited by X" line
+ * that opens the full panel.
+ *
+ * Rendered only once an issue actually HAS history, so an untouched issue keeps
+ * a clean description block instead of advertising an empty feature. The list
+ * is small (no snapshots) and shares its cache with the panel, so asking for it
+ * here costs one request per issue open.
+ */
+function DescriptionHistoryTrigger({
+  issueId,
+  onOpen,
+  getActorName,
+}: {
+  issueId: string;
+  onOpen: () => void;
+  getActorName: (type: string, id: string) => string;
+}) {
+  const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
+  const { data: versions } = useQuery(descriptionVersionsOptions(issueId));
+
+  // One row is just the seeded original — nothing has been edited yet.
+  if (!versions || versions.length < 2) return null;
+  const latest = versions[0];
+  if (!latest) return null;
+
+  const actorName =
+    latest.actor_type && latest.actor_id
+      ? getActorName(latest.actor_type, latest.actor_id)
+      : t(($) => $.description_history.unknown_actor);
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <History className="h-3 w-3 shrink-0" />
+      <span>{t(($) => $.description_history.last_edited_by, { name: actorName })}</span>
+      <span aria-hidden>·</span>
+      <span>{timeAgo(latest.updated_at)}</span>
+    </button>
+  );
+}
+
+/**
+ * One activity line. Split out of ActivityBlock's map so a description change
+ * can own its own expand state — hooks cannot live in a loop body.
+ *
+ * Only `description_updated` gets the expand affordance: it is the single
+ * activity whose content the reader actually needs, because it is where an
+ * agent can overwrite what a human wrote.
+ */
+function ActivityEntryRow({
+  issueId,
+  entry,
+  leadIcon,
+  versionId,
+  addedLines,
+  removedLines,
+  getActorName,
+  onOpenHistory,
+  t,
+  timeAgo,
+}: {
+  issueId: string;
+  entry: TimelineEntry;
+  leadIcon: React.ReactNode;
+  versionId: string | null;
+  addedLines: number;
+  removedLines: number;
+  getActorName: (type: string, id: string) => string;
+  onOpenHistory: (versionId: string) => void;
+  t: ActivityT;
+  timeAgo: (dateStr: string) => string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="text-xs text-muted-foreground">
+      <div className="flex items-center">
+        <div className="mr-2 flex w-4 shrink-0 justify-center">{leadIcon}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="shrink-0 font-medium">
+            {getActorName(entry.actor_type, entry.actor_id)}
+          </span>
+          <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+          {versionId && (
+            <DiffStat
+              added={addedLines}
+              removed={removedLines}
+              className="text-[11px] font-medium"
+            />
+          )}
+          {versionId && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="shrink-0 rounded px-1 py-0.5 text-[11px] underline-offset-2 transition-colors hover:text-foreground hover:underline"
+            >
+              {expanded
+                ? t(($) => $.description_history.hide_changes)
+                : t(($) => $.description_history.view_changes)}
+            </button>
+          )}
+          {(entry.coalesced_count ?? 1) > 1 &&
+            entry.action !== "task_completed" &&
+            entry.action !== "task_failed" && (
+              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+              </span>
+            )}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="ml-auto shrink-0 cursor-default">
+                  {timeAgo(entry.created_at)}
+                </span>
+              }
+            />
+            <TooltipContent side="top">
+              {new Date(entry.created_at).toLocaleString()}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+      {versionId && expanded && (
+        <div className="mt-1.5 pl-6">
+          <InlineDescriptionDiff issueId={issueId} versionId={versionId} />
+          <button
+            type="button"
+            onClick={() => onOpenHistory(versionId)}
+            className="mt-1.5 text-[11px] underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          >
+            {t(($) => $.description_history.history_entry)}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Fetches the two snapshots this version sits between and renders the diff.
+ *
+ * Mounted only once the row is expanded, so a timeline full of description
+ * edits costs nothing until the reader asks for one. The preview is capped —
+ * a long diff belongs in the history panel, not inline in a comment thread.
+ */
+function InlineDescriptionDiff({
+  issueId,
+  versionId,
+}: {
+  issueId: string;
+  versionId: string;
+}) {
+  const { data: version, isLoading } = useQuery(
+    descriptionVersionOptions(issueId, versionId),
+  );
+  const parentId = version?.parent_version_id ?? null;
+  const { data: parent, isLoading: loadingParent } = useQuery({
+    ...descriptionVersionOptions(issueId, parentId ?? ""),
+    enabled: parentId != null,
+  });
+
+  if (isLoading || (parentId != null && loadingParent)) {
+    return <Skeleton className="h-16 w-full" />;
+  }
+  if (!version) return null;
+
+  return (
+    <DescriptionDiffView
+      before={parentId != null ? (parent?.content ?? "") : ""}
+      after={version.content ?? ""}
+      maxLines={24}
+    />
+  );
+}
+
 // "N activities" summary line so the timeline isn't dominated by status /
 // priority / assignee churn; the trailing block stays expanded because it
 // usually answers "what just happened?". Expansion state is owned by the
 // parent so it survives Virtuoso's mount/unmount on scroll.
 function ActivityBlock({
+  issueId,
   entries,
   expanded,
   onToggle,
@@ -464,9 +650,11 @@ function ActivityBlock({
   showOlder,
   onToggleShowOlder,
   getActorName,
+  onOpenHistory,
   t,
   timeAgo,
 }: {
+  issueId: string;
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
@@ -477,6 +665,7 @@ function ActivityBlock({
   showOlder: boolean;
   onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
+  onOpenHistory: (versionId: string) => void;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
 }) {
@@ -550,35 +739,29 @@ function ActivityBlock({
           leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="sm" />;
         }
 
+        // A description change is the one activity worth reading in place: it
+        // is the moment an agent may have replaced what you wrote. The version
+        // id and line counts ride on the activity details, so the badge costs
+        // no extra request and the diff is one click away (MUL-5470).
+        const versionId =
+          entry.action === "description_updated" && typeof details.version_id === "string"
+            ? details.version_id
+            : null;
+
         return (
-          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-            <div className="mr-2 flex w-4 shrink-0 justify-center">
-              {leadIcon}
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-              {(entry.coalesced_count ?? 1) > 1 &&
-                entry.action !== "task_completed" &&
-                entry.action !== "task_failed" && (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                  </span>
-                )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="ml-auto shrink-0 cursor-default">
-                      {timeAgo(entry.created_at)}
-                    </span>
-                  }
-                />
-                <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString()}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
+          <ActivityEntryRow
+            key={entry.id}
+            issueId={issueId}
+            entry={entry}
+            leadIcon={leadIcon}
+            versionId={versionId}
+            addedLines={Number(details.added_lines ?? 0)}
+            removedLines={Number(details.removed_lines ?? 0)}
+            getActorName={getActorName}
+            onOpenHistory={onOpenHistory}
+            t={t}
+            timeAgo={timeAgo}
+          />
         );
       })}
     </div>
@@ -1201,7 +1384,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
-    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
+    // description_updated is excluded because the SERVER already coalesces
+    // description writes into one row per editing session (MUL-5470). Folding
+    // two of those together again would stack distinct versions under a single
+    // "x2" badge whose expanded diff only shows one of them.
+    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated", "description_updated"]);
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {
@@ -1566,6 +1753,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+
+  // Description history panel. `historyVersionId` preselects the version the
+  // reader clicked through from in the timeline; null opens on the newest.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyVersionId, setHistoryVersionId] = useState<string | null>(null);
+  const openDescriptionHistory = useCallback((versionId: string) => {
+    setHistoryVersionId(versionId);
+    setHistoryOpen(true);
+  }, []);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2156,6 +2352,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
+        issueId={id}
         entries={item.entries}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
@@ -2163,6 +2360,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         showOlder={showOlder}
         onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
+        onOpenHistory={openDescriptionHistory}
         t={t}
         timeAgo={timeAgo}
       />
@@ -2420,6 +2618,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               flushPendingOnUnmount
               currentIssueId={id}
               attachments={descEditorAttachments}
+            />
+
+            <DescriptionHistoryTrigger
+              issueId={id}
+              onOpen={() => {
+                setHistoryVersionId(null);
+                setHistoryOpen(true);
+              }}
+              getActorName={getActorName}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -2734,6 +2941,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       </div>
   );
 
+  // Mounted once for the whole detail view: both entry points (the description
+  // line and any timeline row) drive the same dialog state.
+  const descriptionHistory = (
+    <DescriptionHistoryDialog
+      issueId={id}
+      open={historyOpen}
+      onOpenChange={setHistoryOpen}
+      getActorName={getActorName}
+      initialVersionId={historyVersionId}
+    />
+  );
+
   if (isMobile) {
     return (
       <div className="flex flex-1 min-h-0">
@@ -2743,6 +2962,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {sidebarContent}
           </SheetContent>
         </Sheet>
+        {descriptionHistory}
       </div>
     );
   }
@@ -2769,6 +2989,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>
+      {descriptionHistory}
     </ResizablePanelGroup>
   );
 }

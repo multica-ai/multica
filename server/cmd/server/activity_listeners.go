@@ -223,13 +223,18 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if descriptionChanged {
+			// Details carry the version id and line counts written by
+			// recordDescriptionVersion, so the timeline can render "+12 −3" and
+			// expand the diff inline without a follow-up request per entry
+			// (MUL-5470). An empty blob still means "we know it changed but not
+			// what changed" — the pre-versioning shape.
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
 				ActorID:     optionalUUID(e.ActorID),
 				Action:      "description_updated",
-				Details:     []byte("{}"),
+				Details:     handler.DescriptionVersionDetails(payload),
 			})
 			if err != nil {
 				slog.Error("activity: failed to record description change",

@@ -330,6 +330,7 @@
     "due_date_removed": "期限を削除しました",
     "title_renamed": "このイシューのタイトルを \"{{from}}\" から \"{{to}}\" に変更しました",
     "description_updated": "説明を更新しました",
+    "description_restored": "説明を復元しました",
     "task_completed_other": "タスクを完了しました（{{count}} 回）",
     "task_failed_other": "タスクが失敗しました（{{count}} 回）",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",
@@ -596,5 +597,28 @@
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
     "row_todo_hint": "エージェントを開始します"
+  },
+  "description_history": {
+    "title": "説明の履歴",
+    "view_changes": "変更を表示",
+    "hide_changes": "変更を隠す",
+    "history_entry": "説明の履歴",
+    "last_edited_by": "最終編集者: {{name}}",
+    "original_badge": "初期",
+    "original_hint": "最初に記録された編集より前の説明です。",
+    "diff_against_parent": "このバージョンで行われた変更です。",
+    "restore": "復元",
+    "confirm_restore": "このバージョンを復元",
+    "cancel": "キャンセル",
+    "restore_hint": "復元はこのスナップショットを新しいバージョンとして書き戻します。履歴は削除されません。",
+    "select_prompt": "バージョンを選択すると変更内容が表示されます。",
+    "empty_history": "説明の履歴はまだありません。次回の編集から記録されます。",
+    "empty_both_sides": "どちらにも説明がありません。",
+    "empty_side": "空",
+    "rewrite_before": "変更前",
+    "rewrite_after": "変更後",
+    "skipped_lines": "変更のない {{count}} 行",
+    "diff_truncated": "差分は省略されています。履歴を開くと全体を確認できます。",
+    "unknown_actor": "不明"
   }
 }

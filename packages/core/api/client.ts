@@ -79,6 +79,7 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
+  DescriptionVersion,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -247,6 +248,9 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  DescriptionVersionSchema,
+  DescriptionVersionsSchema,
+  EMPTY_DESCRIPTION_VERSIONS,
   UserSchema,
   WebhookDeliveryResponseSchema,
   BillingBalanceSchema,
@@ -970,6 +974,32 @@ export class ApiClient {
     );
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
+    });
+  }
+
+  async listDescriptionVersions(issueId: string): Promise<DescriptionVersion[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/description/versions`,
+    );
+    return parseWithFallback(raw, DescriptionVersionsSchema, EMPTY_DESCRIPTION_VERSIONS, {
+      endpoint: "GET /api/issues/:id/description/versions",
+    });
+  }
+
+  async getDescriptionVersion(issueId: string, versionId: string): Promise<DescriptionVersion | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/description/versions/${versionId}`,
+    );
+    return parseWithFallback(raw, DescriptionVersionSchema, null, {
+      endpoint: "GET /api/issues/:id/description/versions/:versionId",
+    });
+  }
+
+  // Restore goes through the normal update path server-side, so it returns the
+  // updated issue and appends a new version rather than rewinding history.
+  async restoreDescriptionVersion(issueId: string, versionId: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${issueId}/description/versions/${versionId}/restore`, {
+      method: "POST",
     });
   }
 

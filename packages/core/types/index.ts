@@ -87,6 +87,7 @@ export { ISSUE_PROPERTY_TYPES, isKnownPropertyType } from "./property";
 export type {
   TimelineEntry,
   AssigneeFrequencyEntry,
+  DescriptionVersion,
 } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";

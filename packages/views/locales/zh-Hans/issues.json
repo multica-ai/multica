@@ -330,6 +330,7 @@
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个 issue 从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
+    "description_restored": "恢复了描述",
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_other": "task 失败（{{count}} 次）",
     "squad_leader_evaluated": "评估了小队触发",
@@ -596,5 +597,28 @@
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "Todo",
     "row_todo_hint": "启动智能体"
+  },
+  "description_history": {
+    "title": "描述历史",
+    "view_changes": "查看变更",
+    "hide_changes": "收起变更",
+    "history_entry": "描述历史",
+    "last_edited_by": "最近由 {{name}} 编辑",
+    "original_badge": "初始",
+    "original_hint": "首次记录编辑之前的描述内容。",
+    "diff_against_parent": "此版本所做的变更。",
+    "restore": "恢复",
+    "confirm_restore": "恢复此版本",
+    "cancel": "取消",
+    "restore_hint": "恢复会把该快照作为新版本写回，历史记录不会被删除。",
+    "select_prompt": "选择一个版本以查看变更。",
+    "empty_history": "暂无描述历史，将从下次编辑开始记录。",
+    "empty_both_sides": "两侧都没有描述内容。",
+    "empty_side": "空",
+    "rewrite_before": "变更前",
+    "rewrite_after": "变更后",
+    "skipped_lines": "{{count}} 行未改动",
+    "diff_truncated": "差异已截断，打开历史可查看全部。",
+    "unknown_actor": "未知"
   }
 }

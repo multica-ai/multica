@@ -333,6 +333,7 @@
     "due_date_removed": "removed due date",
     "title_renamed": "renamed this issue from \"{{from}}\" to \"{{to}}\"",
     "description_updated": "updated the description",
+    "description_restored": "restored the description",
     "task_completed_one": "completed the task",
     "task_completed_other": "completed the task ({{count}} times)",
     "task_failed_one": "task failed",
@@ -621,5 +622,28 @@
     "row_backlog_hint": "keeps the agent paused",
     "row_todo_label": "Todo",
     "row_todo_hint": "starts the agent"
+  },
+  "description_history": {
+    "title": "Description history",
+    "view_changes": "View changes",
+    "hide_changes": "Hide changes",
+    "history_entry": "Description history",
+    "last_edited_by": "Last edited by {{name}}",
+    "original_badge": "Original",
+    "original_hint": "The description as it stood before the first tracked edit.",
+    "diff_against_parent": "Changes made by this version.",
+    "restore": "Restore",
+    "confirm_restore": "Restore this version",
+    "cancel": "Cancel",
+    "restore_hint": "Restoring writes this snapshot back as a new version. Nothing in the history is deleted.",
+    "select_prompt": "Select a version to see what changed.",
+    "empty_history": "No description history yet. It starts from the next edit.",
+    "empty_both_sides": "No description on either side.",
+    "empty_side": "Empty",
+    "rewrite_before": "Before",
+    "rewrite_after": "After",
+    "skipped_lines": "{{count}} unchanged lines",
+    "diff_truncated": "Diff truncated — open the history to read all of it.",
+    "unknown_actor": "Unknown"
   }
 }

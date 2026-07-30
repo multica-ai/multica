@@ -646,6 +646,21 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueDescriptionVersion struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	ParentVersionID pgtype.UUID        `json:"parent_version_id"`
+	ActorType       pgtype.Text        `json:"actor_type"`
+	ActorID         pgtype.UUID        `json:"actor_id"`
+	SourceTaskID    pgtype.UUID        `json:"source_task_id"`
+	Content         string             `json:"content"`
+	AddedLines      int32              `json:"added_lines"`
+	RemovedLines    int32              `json:"removed_lines"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueLabel struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`

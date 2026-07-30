@@ -1131,3 +1131,27 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
   });
 }
+
+/**
+ * Restores a past description snapshot.
+ *
+ * Deliberately NOT optimistic. The optimistic-update rule wants a locally
+ * predictable outcome, and this one is not: the server appends a new version,
+ * recomputes line counts, and emits a timeline entry, none of which the client
+ * can synthesise. It is also a confirm-style action on content the user is
+ * about to overwrite — the wrong moment to guess. So we await the server and
+ * invalidate the three surfaces the write actually moves.
+ */
+export function useRestoreDescriptionVersion() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ issueId, versionId }: { issueId: string; versionId: string }) =>
+      api.restoreDescriptionVersion(issueId, versionId),
+    onSuccess: (issue, { issueId }) => {
+      qc.setQueryData(issueKeys.detail(wsId, issueId), issue);
+      qc.invalidateQueries({ queryKey: issueKeys.descriptionVersions(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+  });
+}

@@ -2922,7 +2922,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+	eventPayload := map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
@@ -2942,7 +2942,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	}
+
+	// Snapshot the description before the event fans out, so the activity
+	// listener can stamp the timeline entry with the version id and line counts
+	// instead of the empty details blob it used to write (MUL-5470). Recorded
+	// inline rather than in a listener: a dropped version would leave a hole in
+	// the history with no way to notice.
+	if descriptionChanged {
+		if write, ok := h.recordDescriptionVersion(r, issue,
+			prevIssue.Description.String, issue.Description.String, actorType, actorID, false); ok {
+			eventPayload["description_version_id"] = write.VersionID
+			eventPayload["description_parent_version_id"] = write.ParentVersionID
+			eventPayload["description_added_lines"] = write.AddedLines
+			eventPayload["description_removed_lines"] = write.RemovedLines
+		}
+	}
+
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, eventPayload)
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single
@@ -3170,6 +3187,15 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+
+	// Description versions carry no foreign key (repo rule), so they are cleaned
+	// up explicitly here rather than by a cascade. Best-effort and ordered
+	// before the issue row goes: a leftover version row would be unreachable but
+	// would still hold the description text.
+	if err := h.Queries.DeleteIssueDescriptionVersionsForIssue(r.Context(), issue.ID); err != nil {
+		slog.Warn("failed to delete description versions for issue",
+			append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
+	}
 
 	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
 		ID:          issue.ID,

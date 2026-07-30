@@ -44,6 +44,7 @@ import type {
   SearchProjectsResponse,
   Squad,
   TimelineEntry,
+  DescriptionVersion,
   User,
   WebhookDelivery,
 } from "../types";
@@ -413,6 +414,29 @@ const TimelineEntrySchema = z.object({
 export const TimelineEntriesSchema = z.array(TimelineEntrySchema);
 
 export const EMPTY_TIMELINE_ENTRIES: TimelineEntry[] = [];
+
+// One row of an issue description's version history. `content` is present only
+// on the single-version read; the list endpoint omits it so the history panel
+// does not pull every snapshot it might never show.
+const DescriptionVersionSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  parent_version_id: z.string().nullable(),
+  actor_type: z.string().nullable(),
+  actor_id: z.string().nullable(),
+  source_task_id: z.string().nullable().optional(),
+  content: z.string().nullable().optional(),
+  added_lines: z.number(),
+  removed_lines: z.number(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  is_original: z.boolean(),
+}).loose();
+
+export const DescriptionVersionsSchema = z.array(DescriptionVersionSchema);
+export { DescriptionVersionSchema };
+
+export const EMPTY_DESCRIPTION_VERSIONS: DescriptionVersion[] = [];
 
 const OptionalStringSchema = z.preprocess(
   (value) => (typeof value === "string" ? value : undefined),
