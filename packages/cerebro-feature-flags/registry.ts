@@ -247,6 +247,8 @@ export type CerebroFlagKey =
   | "cerebro_date_filter_v2"
   // TECH-3738 Bid C: capability drift watcher — periodically alert owners when an agent uses a tool its policy denies.
   | "cerebro_capability_drift_watcher"
+  // FIR-4012: auto-create a permission rule for every capability an agent used that no rule covers, so it becomes steerable.
+  | "cerebro_capability_auto_permission"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
   // FIR-2810: per-line note attribution (see who wrote/edited every line) + the per-note "stamp my member code on each line" toggle.
@@ -692,6 +694,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // until an admin turns it on; then it periodically alerts owners/admins when
   // an agent uses a tool its declared policy denies.
   cerebro_capability_drift_watcher: false,
+  // FIR-4012: OFF by default. This is the only part of the capability digest
+  // that WRITES — it creates a permission rule for every capability an agent
+  // used that no rule covers. The rule is created as allow (behaviour-neutral;
+  // the capability was already in use), so turning this on makes capabilities
+  // steerable without changing what any agent can do today.
+  cerebro_capability_auto_permission: false,
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
@@ -1675,7 +1683,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Capability drift watcher",
     group: "agents",
     description:
-      "Periodically scan each agent for capability drift — a tool it actually used (observed access) that its declared policy does not allow (blocked or unmapped). When drift is found, alert the workspace owners/admins in their inbox with the agent and the offending tools. Read-only and off by default; turn it on to get proactive alerts instead of only seeing drift on the Capabilities tab. TECH-3738 Bid C.",
+      "Periodically scan each agent for capabilities no permission rule sanctions — a tool it actually used (observed access) that is either denied by a rule or covered by no rule at all. Findings are collected into ONE issue for the whole workspace, listing each capability with the agents that used it and the recommended action, and the owners/admins get a single inbox card linking to it — so you can reply and decide instead of reading one alert per agent. Read-only and off by default. TECH-3738 Bid C, reshaped in FIR-4012.",
+  },
+  {
+    key: "cerebro_capability_auto_permission",
+    label: "Auto-create capability rules",
+    group: "agents",
+    description:
+      "When the capability digest finds a capability no rule covers at all, create the rule automatically instead of leaving the capability outside the permission table. The rule is created as allow, which changes nothing about what the agent can do — the capability was already in use — but it makes the capability visible and steerable, so blocking it is one change away from the digest issue or the agent's Capabilities tab. Requires the capability drift watcher to be on. Off by default; this is the only part of the digest that writes. FIR-4012.",
   },
   {
     key: "cerebro_note_scoped_mentions",

@@ -25,6 +25,19 @@
 > orphaned, and unused access by severity. The Permission
 > audit read model exposes and sorts by the same explicit severity concept.
 
+> **FIR-4012 system-authored capability rules.** The `driftwatch` sweeper is a
+> second, non-human writer into `cerebro_tool_policy`. When
+> `cerebro_capability_auto_permission` is ON (default OFF) it calls `Store.Set`
+> at `LayerAgent` for every capability an agent used that has NO policy row,
+> with `Setting=allow` and a zero `UpdatedBy` — which `Store.recordAudit` stamps
+> as a `system` write, so these rows are distinguishable from a human choice in
+> the change log. Two invariants hold and must keep holding: it only ever writes
+> where no row exists (a `deny` row is never overwritten, so the sweeper cannot
+> loosen a deliberate choice), and it never writes `deny` (every capability in
+> its input is one the agent already used, so an auto-deny would break working
+> agents overnight). Its purpose is to make an ungoverned capability appear in
+> the permission table at all; the decision to block stays human.
+
 **Read this together with [`permission-system.md`](./permission-system.md).** That doc is the
 *behavioral* map ("what is enforced live and which safety intersections apply", row by row). **This**
 doc is the *structural* map: what permission **models** actually exist, which gates are
