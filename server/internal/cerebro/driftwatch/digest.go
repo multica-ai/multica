@@ -258,6 +258,35 @@ func renderDigestBody(rows []DigestRow, windowStart, windowEnd string, autoPermi
 	return b.String()
 }
 
+// renderDigestNotificationBody builds the inbox card body — the one message the
+// owners/admins actually receive. It states the auto-created rules on the card
+// itself when auto-permission wrote any: a rule written on the reader's behalf is
+// the one thing in this digest that changed state, so it cannot live only in the
+// issue body the reader has to open first (FIR-4012).
+//
+// autoCreated == 0 renders no sentence at all, which is also the correct output
+// when the flag is off — nothing was written, so there is nothing to disclose.
+func renderDigestNotificationBody(rows []DigestRow, agentCount, autoCreated int) string {
+	agentSuffix := "s"
+	if agentCount == 1 {
+		agentSuffix = ""
+	}
+	body := fmt.Sprintf(
+		"%d capabilit%s across %d agent%s have no permission rule sanctioning them (%s). Open the issue to decide allow or block.",
+		len(rows), plural2(len(rows)), agentCount, agentSuffix, strings.Join(topDigestNames(rows, 5), ", "),
+	)
+	switch {
+	case autoCreated == 1:
+		body += " 1 rule was created automatically and set to allow, so the capability is now steerable — nothing changed about what the agents can do."
+	case autoCreated > 1:
+		body += fmt.Sprintf(
+			" %d rules were created automatically and set to allow, so those capabilities are now steerable — nothing changed about what the agents can do.",
+			autoCreated,
+		)
+	}
+	return body
+}
+
 // embedDigestSignature appends the fingerprint marker to a rendered body.
 func embedDigestSignature(body, signature string) string {
 	return body + fmt.Sprintf("\n<!-- %s: %s -->\n", digestSignatureMarker, signature)
