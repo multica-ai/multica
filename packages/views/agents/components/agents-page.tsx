@@ -60,6 +60,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
@@ -507,8 +508,16 @@ function RuntimeCell({ row }: { row: AgentListRow }) {
   return (
     <ListGridCell className="hidden @2xl:flex">
       {runtime ? (
-        <span className="min-w-0 truncate text-caption text-muted-foreground">
-          {runtimeDisplayLabel(runtime)}
+        // Provider mark before the label: scanning this column for "which of
+        // these run on Codex" is a shape match, not a read.
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <ProviderLogo
+            provider={runtime.provider}
+            className="h-3.5 w-3.5 shrink-0"
+          />
+          <span className="min-w-0 truncate text-caption text-muted-foreground">
+            {runtimeDisplayLabel(runtime)}
+          </span>
         </span>
       ) : (
         <span className="text-caption text-muted-foreground/40">—</span>
