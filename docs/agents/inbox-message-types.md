@@ -224,11 +224,19 @@ Both classic and Dynamic Inbox use this message-pane behavior.)
 Emitted by the
 agent-office handler and routed by `registerCerebroAgentOfficeNotificationListener`),
 `runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738
-Bid C — the capability drift watcher alerts workspace owners/admins, `severity`
-`attention`, when an agent uses a tool its declared policy denies; `details`
-carries `agent_id`, `agent_name`, `drift_tools`, `drift_count`; system-authored,
-`route` `inbox`. Emitted by the `driftwatch` sweeper, gated by the
-`cerebro_capability_drift_watcher` flag, default OFF).
+Bid C, reshaped by FIR-4012 — the capability watcher alerts workspace
+owners/admins, `severity` `attention`, about capabilities no permission rule
+sanctions. **One card per recipient for the whole workspace, not one per
+agent**, and it now carries `issue_id`: the card links to the workspace's
+digest issue, which is what makes the alert answerable — a reader replies on
+the issue instead of hitting a dead end in the inbox. `details` carries
+`issue_id`, `capability_count`, `agent_count`, `capabilities`,
+`window_start_at`, `window_end_at`, `reason`; system-authored, `route` `inbox`.
+The card is written only when the finding set CHANGED since the last digest, so
+a standing finding does not re-notify nightly. Emitted by the `driftwatch`
+sweeper, gated by the `cerebro_capability_drift_watcher` flag, default OFF;
+rule auto-creation is a second flag, `cerebro_capability_auto_permission`, also
+default OFF).
 
 Each type has an `InboxSeverity` (`action_required` | `attention` | `info`) and
 the set actually emitted by the server today is the `EmittedNotificationType`
