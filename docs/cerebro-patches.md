@@ -17,6 +17,11 @@ documents one named patch + its rationale + the file location(s).
   on the existing agent-level Connection permission row. The fields are
   nullable for ordinary permissions, and the migration neither seeds nor
   changes permission assignments.
+- `server/migrations/9165_cerebro_company_brain_rollback_tombstones.{up,down}.sql`
+  adds a bounded rollback window and non-secret tombstone references for each
+  legacy Connection, permission, approval/audit record, and tool alias. Foreign
+  keys prevent those rollback inputs from being deleted while referenced; the
+  migration creates no rows and does not copy credentials or secret values.
 - **Why:** prior to consolidation, Company Brain source claims only existed behind
   each legacy connection credential. The report invokes `whoami` server-side,
   returns only `write_source` and `allowed_read_sources`, and attaches that
