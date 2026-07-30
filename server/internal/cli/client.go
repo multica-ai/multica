@@ -161,7 +161,23 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	}
 }
 
+// clientCapabilities is the X-Client-Capabilities value every CLI request
+// advertises. It is a protocol detail, not a user-visible flag: the CLI always
+// knows how to handle these response shapes, so there is nothing for a caller
+// to opt into.
+//
+// stable_attachment_urls asks bulk responses to return the stable
+// /api/attachments/{id}/download path instead of a ~800-char CloudFront
+// signature that is re-minted on every request (MUL-5372 / GitHub #5999). The
+// CLI never hands an attachment URL to a native loader — `multica attachment
+// download <id>` fetches a fresh signature from the single-attachment endpoint,
+// which keeps signing regardless of this capability — so the signature in list
+// payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
+// differ on every read and therefore defeat agent prompt caching.
+const clientCapabilities = "stable_attachment_urls"
+
 func (c *APIClient) setHeaders(req *http.Request) {
+	req.Header.Set("X-Client-Capabilities", clientCapabilities)
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}

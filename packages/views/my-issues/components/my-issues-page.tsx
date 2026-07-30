@@ -22,7 +22,7 @@ export function MyIssuesPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeader className="gap-2">
         <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.breadcrumb)}</h1>
+        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
       </PageHeader>
 
       {user ? (
@@ -48,8 +48,8 @@ export function MyIssuesPage() {
           renderEmpty={() => (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
               <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-              <p className="text-sm">{t(($) => $.page.empty_title)}</p>
-              <p className="text-xs">{t(($) => $.page.empty_description)}</p>
+              <p className="text-body">{t(($) => $.page.empty_title)}</p>
+              <p className="text-caption">{t(($) => $.page.empty_description)}</p>
             </div>
           )}
         />

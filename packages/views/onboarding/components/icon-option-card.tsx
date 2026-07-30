@@ -64,11 +64,11 @@ export function IconOptionCard({
     >
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center text-[18px] leading-none text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center text-title leading-none text-foreground"
       >
         {icon}
       </span>
-      <span className="text-[14px] font-medium leading-tight text-foreground">
+      <span className="text-body font-medium leading-tight text-foreground">
         {label}
       </span>
     </button>
@@ -118,7 +118,7 @@ export function IconOtherOptionCard({
     >
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center text-[18px] leading-none text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center text-title leading-none text-foreground"
       >
         {icon}
       </span>
@@ -137,10 +137,10 @@ export function IconOtherOptionCard({
           placeholder={placeholder}
           maxLength={OTHER_INPUT_MAX_LENGTH}
           aria-label={placeholder}
-          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[14px] font-medium leading-tight text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-body font-medium leading-tight text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
         />
       ) : (
-        <span className="text-[14px] font-medium leading-tight text-foreground">
+        <span className="text-body font-medium leading-tight text-foreground">
           {label}
         </span>
       )}

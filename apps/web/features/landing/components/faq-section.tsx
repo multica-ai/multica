@@ -12,7 +12,7 @@ export function FAQSection() {
     <section id="faq" className="bg-[#f8f8f8] text-[#0a0d12]">
       <div className="mx-auto max-w-[860px] px-4 py-24 sm:px-6 sm:py-32 lg:py-40">
         <div className="text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0a0d12]/40">
+          <p className="text-micro font-semibold uppercase tracking-[0.16em] text-[#0a0d12]/40">
             {t.faq.label}
           </p>
           <h2 className="mt-4 landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem] lg:text-[4.2rem]">
@@ -28,7 +28,7 @@ export function FAQSection() {
                 onClick={() => setOpenIndex(openIndex === i ? null : i)}
                 className="flex w-full items-start justify-between gap-4 py-6 text-left"
               >
-                <span className="text-[16px] font-semibold leading-snug text-[#0a0d12] sm:text-[17px]">
+                <span className="text-title-sm font-semibold leading-snug text-[#0a0d12] sm:text-title">
                   {faq.question}
                 </span>
                 <span
@@ -57,7 +57,7 @@ export function FAQSection() {
                 )}
               >
                 <div className="overflow-hidden">
-                  <p className="pb-6 pr-12 text-[14px] leading-[1.7] text-[#0a0d12]/56 sm:text-[15px]">
+                  <p className="pb-6 pr-12 text-body leading-[1.7] text-[#0a0d12]/56 sm:text-body-lg">
                     {faq.answer}
                   </p>
                 </div>

@@ -1,62 +1,69 @@
 ---
-title: Chat
+title: Chat with agents
 description: One-to-one, fully private conversation with an agent, outside any issue. The agent starts with no issue context and never auto-creates issues — but it acts with your workspace access when you explicitly ask it to.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
+Chat fits work that hasn't formed a clear issue yet: sorting out ideas, checking on the workspace, discussing an approach, or having an agent finish a small task first.
+
 **Chat is a one-to-one conversation between you and an [agent](/agents)** — stepping outside the [issue](/issues) board. The agent starts with **no issue context** — it isn't looking at your board and won't turn the conversation into issues on its own — and the entire conversation is **fully private** (nobody else in the [workspace](/workspaces), including admins, can see it). It fits discussing an approach with an agent, brainstorming, or asking a question that does not belong to any issue.
 
-## Why not just @-mention the agent?
+A chat is **not bound to any issue**: the agent doesn't automatically receive an issue's description and comments, but it can still use the Multica CLI to query workspaces, projects, issues, and skills within its permissions.
 
-[@-mention](/mentioning-agents) **pulls the agent into** an issue's context — it reads the issue description and every historical comment, and it can change the issue. Chat flips this: **it pulls you out of** the issue — the agent sees only this single conversation and starts with no issue context, so it isn't reading or acting on any issue unless you explicitly ask it to.
+A chat can also carry background. Click **+** at the bottom left of the input and choose **Project context** to attach a [project](/projects) to the conversation; when the agent runs, it receives that project's description, repositories, and other resources.
 
-Two rules of thumb:
-
-- You want feedback grounded in the context of a specific issue → [@-mention](/mentioning-agents)
-- You want to discuss a topic unrelated to any issue (or you do not want anyone else to see the discussion) → Chat
+![A chat with an agent: a question answered with the result organized into a table](/images/docs/chat-conversation.png)
 
 ## Start a conversation
 
-Open **Chat** from the sidebar, pick an agent, and start a new conversation. The interface feels like any messaging app: you send a message, the agent replies. Each message triggers a run in the background (an enqueued `task`), so replies may take a few seconds.
+1. Open **Chat** in the sidebar.
+2. Click new and pick an agent you have permission to run.
+3. Type a message; you can also attach images or files.
+4. After you send, Multica creates a run for the message, and the reply comes back to the current conversation.
 
-## What an agent can and cannot do in chat
+If the runtime is offline, the message waits until it comes back online. Once the agent is archived, or you lose permission to run it, you can't send new messages.
 
-The isolation in Chat is about **context and privacy, not permissions**. The conversation is private and the agent starts with no issue context — but each reply still runs with **your workspace access**, acting on your behalf with the same permissions you have. So when you explicitly ask, the agent can use the `multica` CLI to act on your workspace, including creating or changing issues.
+## Chat vs. issues
 
-**Can do:**
+| Need | Better fit |
+|---|---|
+| Quick questions, exploring an approach, or private drafts | **Chat** |
+| A clear assignee, status, priority, and deliverable | **Issue** |
+| Letting teammates see the background and continue the discussion | **Issue** |
+| A quick look at workspace information with no work record needed | **Chat** |
 
-- Answer the questions in your current message
-- Use its configured [skills](/skills) and MCP
-- Read and write files in its own working directory
-- Run `multica` CLI commands, **including ones that read or change workspace data** — for example, `multica issue list` returns your workspace's issues, and asking the agent to file one runs `multica issue create`, producing a real issue recorded with the agent as its creator. These act with your permissions in this workspace.
+Direct chats created in Multica are visible only to their creator; other workspace members and admins cannot read them. Conclusions the team needs to see together should be written into an issue, a project description, or a skill.
 
-**Cannot do:**
+## Multi-turn context
 
-- **Auto-create or auto-surface issues** — the prompt has no issue IDs, and merely recognizing task-shaped content in the conversation does not, on its own, create or pull up anything; the agent only touches issues when you explicitly ask.
-- **Read your other conversations** — each run's prompt is scoped to this single chat; the contents of your other chat sessions are never given to it.
-- **Reach outside this workspace or your permissions** — every run is bound to this workspace and acts as you, so it can't touch another workspace or do anything your own account couldn't.
+A conversation tries to continue the original session in the AI coding tool, so later messages don't need to repeat earlier content. Multica stores the session ID and routes subsequent runs to a runtime that can access that session.
 
-## How multi-turn context is preserved
+If the local session no longer exists, the context can't be continued, or the previous error shouldn't be reused, the runtime starts from a fresh session. The conversation's message history is kept either way.
 
-Chat maintains multi-turn context via **provider session resumption** — the agent establishes a provider session on its first reply (for example, a Claude session), and the session ID is stored. On the next message, the task dispatch passes that ID back so the agent **resumes from where it left off** without re-reading history every time.
+## Watch and stop a run
 
-If **one turn fails**, Multica looks up the previous task that had established a session ID (whether that task succeeded or failed) and tries to resume — a single failure in the middle does not drop the memory of the whole conversation.
+While the agent runs, the UI shows the current phase and tool activity. Expand **View details** to inspect the run in full.
 
-Note: not every provider actually implements session resumption — see the [**Providers Matrix**](/providers) for support status.
+To interrupt, click the stop button next to the input. Content already returned to the conversation is kept; input not yet processed is restored to the editor when possible.
 
-## Archive a conversation
+## Organize the conversation list
 
-Conversations you no longer want to see can be archived — right-click in the conversation list or use the "Archive" button on the detail page. After archiving:
+Conversations can be renamed, pinned, archived, and deleted:
 
-- The conversation disappears from the active list (you can still find it in the "Archived" view)
-- Historical messages, session ID, and the working directory are all preserved — nothing is deleted
+- **Pin** keeps frequently used conversations at the top of the list;
+- **Archive** moves a conversation to Archived and makes it read-only;
+- **Unarchive** lets you send messages again;
+- **Delete** permanently removes the conversation and its messages.
+
+If a conversation is bound to an external channel (such as Slack), archiving breaks the binding; unarchiving does not restore it — bind again.
 
 <Callout type="warning">
-**There is no "restore" button after archiving.** There is currently no entry point to move an archived conversation back to active. If you want to continue the thread later, you will need to start a new conversation. To revisit content in an archived conversation, open the "Archived" view and read through the history.
+Deleting a conversation cannot be undone and stops any runs in it that haven't finished. Archive instead when you just don't need it for now.
 </Callout>
 
-## Next
+## Next steps
 
-- [**Autopilots**](/autopilots) — let agents start work automatically on a schedule
-- [**Assign issues to agents**](/assigning-issues) — bring the topic back onto the issue board
+- [Assign issues to agents](/assigning-issues) — turn a discussion into trackable work.
+- [Inbox and subscriptions](/inbox) — follow team activity that needs you.
+- [Providers matrix](/providers) — session and model capabilities per AI coding tool.

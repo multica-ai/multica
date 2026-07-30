@@ -24,7 +24,7 @@ export function CliSection() {
         <h2 className="landing-serif text-[2.2rem] leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
           {d.title}
         </h2>
-        <p className="mt-4 max-w-[620px] text-[15px] leading-7 text-[#0a0d12]/72">
+        <p className="mt-4 max-w-[620px] text-body-lg leading-7 text-[#0a0d12]/72">
           {d.sub}
         </p>
 
@@ -43,7 +43,7 @@ export function CliSection() {
           />
         </div>
 
-        <p className="mt-6 text-[13px] text-[#0a0d12]/60">{d.sshNote}</p>
+        <p className="mt-6 text-label text-[#0a0d12]/60">{d.sshNote}</p>
       </div>
     </section>
   );
@@ -71,10 +71,10 @@ function CommandBlock({
 
   return (
     <div>
-      <p className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-[#0a0d12]/55">
+      <p className="mb-2 text-caption font-medium uppercase tracking-[0.08em] text-[#0a0d12]/55">
         {label}
       </p>
-      <div className="flex items-start gap-3 rounded-xl border border-[#0a0d12]/10 bg-white px-4 py-3 font-mono text-[13.5px]">
+      <div className="flex items-start gap-3 rounded-xl border border-[#0a0d12]/10 bg-white px-4 py-3 font-mono text-label">
         <Terminal
           className="mt-0.5 size-4 shrink-0 text-[#0a0d12]/55"
           aria-hidden
@@ -86,7 +86,7 @@ function CommandBlock({
           type="button"
           onClick={onCopy}
           aria-label={copied ? copiedLabel : copyLabel}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-[#0a0d12]/70 transition-colors hover:bg-[#0a0d12]/5 hover:text-[#0a0d12]"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-caption font-medium text-[#0a0d12]/70 transition-colors hover:bg-[#0a0d12]/5 hover:text-[#0a0d12]"
         >
           {copied ? (
             <>

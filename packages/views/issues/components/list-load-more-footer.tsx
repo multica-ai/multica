@@ -41,7 +41,7 @@ export function ListLoadMoreFooter({
     return (
       <button
         type="button"
-        className="w-full py-2 text-xs text-destructive hover:underline"
+        className="w-full py-2 text-caption text-destructive hover:underline"
         onClick={onRetry}
       >
         {t(($) => $.table.load_more_failed_retry)}
@@ -61,7 +61,7 @@ export function ListLoadMoreFooter({
 
   if (total > PAGINATED_THRESHOLD) {
     return (
-      <div className="py-2 text-center text-xs text-muted-foreground/70">
+      <div className="py-2 text-center text-caption text-muted-foreground/70">
         {t(($) => $.table.no_more)}
       </div>
     );

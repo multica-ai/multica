@@ -249,7 +249,7 @@ export function DaemonPanel({
         <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             <Server className="size-4 shrink-0 text-muted-foreground" />
-            <DialogTitle className="text-sm font-medium">
+            <DialogTitle className="text-body font-medium">
               Local daemon logs
             </DialogTitle>
             <ContextBadge status={status} runtimeCount={runtimeCount} />
@@ -273,7 +273,7 @@ export function DaemonPanel({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search…"
-              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-caption placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
@@ -322,7 +322,7 @@ export function DaemonPanel({
         <div
           ref={logContainerRef}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-2 py-1 font-mono text-xs"
+          className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-2 py-1 font-mono text-caption"
         >
           {displayed.length === 0 ? (
             <EmptyState
@@ -362,7 +362,7 @@ export function DaemonPanel({
             communicated implicitly by the presence of the Jump-to-latest
             button below; an explicit "Paused" word read as "log stream is
             paused" (it isn't — data keeps flowing into the buffer). */}
-        <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-1.5 text-caption text-muted-foreground">
           <span className="tabular-nums">
             Showing {filtered.length} of {logs.length}
             {logs.length === MAX_LOG_LINES && (
@@ -398,7 +398,7 @@ function ContextBadge({
 }) {
   const isRunning = status.state === "running";
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-xs font-normal">
+    <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-caption font-normal">
       <span
         className={cn(
           "size-1.5 rounded-full",
@@ -445,7 +445,7 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-xs transition-colors hover:bg-accent",
+        "inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-caption transition-colors hover:bg-accent",
         active
           ? variant
             ? LEVEL_BADGE_CLASS[variant]
@@ -470,7 +470,7 @@ function LevelBadge({ level }: { level: LogLevel }) {
   return (
     <span
       className={cn(
-        "inline-flex h-4 shrink-0 items-center rounded border px-1 text-[10px] font-medium uppercase tracking-wide",
+        "inline-flex h-4 shrink-0 items-center rounded border px-1 text-micro font-medium uppercase tracking-wide",
         LEVEL_BADGE_CLASS[level],
       )}
     >
@@ -574,7 +574,7 @@ function GroupRows({
         <button
           type="button"
           onClick={onToggle}
-          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-[11px] italic text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
         >
           <span>···</span>
           <span>
@@ -608,7 +608,7 @@ function GroupRows({
       <button
         type="button"
         onClick={onToggle}
-        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-[11px] italic text-muted-foreground/60 hover:text-foreground"
+        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground/60 hover:text-foreground"
       >
         <span>···</span>
         <span>collapse {rest.length + 1} repeated</span>
@@ -643,8 +643,8 @@ function EmptyState({
   }
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground/70">
-      <p className="text-sm">{title}</p>
-      <p className="text-xs text-muted-foreground/50">{subtitle}</p>
+      <p className="text-body">{title}</p>
+      <p className="text-caption text-muted-foreground/50">{subtitle}</p>
     </div>
   );
 }

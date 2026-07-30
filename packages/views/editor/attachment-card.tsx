@@ -46,7 +46,7 @@ function AttachmentCardChrome({
         <FileText className="size-4 shrink-0 text-muted-foreground" />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm">
+        <p className="truncate text-body">
           {uploading
             ? t(($) => $.file_card.uploading, { filename })
             : filename}

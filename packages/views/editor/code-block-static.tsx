@@ -38,7 +38,7 @@ export function CodeBlockStatic({ language, body, className }: CodeBlockStaticPr
   }, [body, language]);
 
   return (
-    <pre className={cn("rich-text-editor m-0 overflow-auto text-sm", className)}>
+    <pre className={cn("rich-text-editor m-0 overflow-auto text-body", className)}>
       <code
         className={cn("hljs", language && `language-${language}`)}
         dangerouslySetInnerHTML={{ __html: html }}

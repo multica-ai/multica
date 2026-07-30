@@ -30,10 +30,10 @@ export function JoinDiscordCard() {
             exception to the semantic-token rule, like the landing social icons. */}
         <DiscordIcon className="mt-px size-4 shrink-0 text-[#5865F2]" />
         <span className="min-w-0">
-          <span className="block text-xs font-medium text-sidebar-foreground">
+          <span className="block text-caption font-medium text-sidebar-foreground">
             {t(($) => $.sidebar.discord_card.title)}
           </span>
-          <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+          <span className="mt-0.5 block text-micro leading-snug text-muted-foreground">
             {t(($) => $.sidebar.discord_card.description)}
           </span>
         </span>

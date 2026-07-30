@@ -153,7 +153,7 @@ export function AvatarCropDialog({
               </button>
             </>
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+            <div className="flex h-full w-full items-center justify-center text-caption text-muted-foreground">
               {loadError
                 ? t(($) => $.avatar_crop.load_failed)
                 : t(($) => $.avatar_crop.loading)}

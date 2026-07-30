@@ -4,7 +4,6 @@ import { type ReactNode, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpenText,
   Bot,
   FolderKanban,
   Inbox,
@@ -15,6 +14,7 @@ import {
   Plus,
   Zap,
 } from "lucide-react";
+import { SkillIcon } from "../../skills/lib/skill-icon";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -220,7 +220,7 @@ export function StepWorkspace({
       <div className="flex flex-col gap-1.5">
         <Label
           htmlFor="ws-name"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-caption font-medium text-muted-foreground"
         >
           {t(($) => $.step_workspace.name_label)}
         </Label>
@@ -240,12 +240,12 @@ export function StepWorkspace({
       <div className="flex flex-col gap-1.5">
         <Label
           htmlFor="ws-slug"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-caption font-medium text-muted-foreground"
         >
           {t(($) => $.step_workspace.url_label)}
         </Label>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
-          <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
+          <span className="select-none pl-3 font-mono text-body text-muted-foreground">
             {`${urlHost}/`}
           </span>
           <Input
@@ -261,13 +261,13 @@ export function StepWorkspace({
             }}
           />
         </div>
-        {slugError && <p className="text-xs text-destructive">{slugError}</p>}
+        {slugError && <p className="text-caption text-destructive">{slugError}</p>}
       </div>
       <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-medium text-muted-foreground">
+        <div className="text-caption font-medium text-muted-foreground">
           {t(($) => $.step_workspace.issue_prefix_label)}
         </div>
-        <div className="text-sm leading-[1.55] text-muted-foreground">
+        <div className="text-body leading-[1.55] text-muted-foreground">
           {t(($) => $.step_workspace.issue_prefix_prefix)}
           <span className="font-mono text-foreground">
             {issuePrefix(slug)}-123
@@ -289,7 +289,7 @@ export function StepWorkspace({
               type="button"
               onClick={onBack}
               disabled={isCreating}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+              className="flex items-center gap-1.5 text-body text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               {t(($) => $.common.back)}
@@ -308,7 +308,7 @@ export function StepWorkspace({
           className="min-h-0 flex-1 overflow-y-auto"
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
-            <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            <div className="mb-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
               {reusing
                 ? workspaceCreationAllowed
                   ? t(($) => $.step_workspace.eyebrow_resume)
@@ -317,7 +317,7 @@ export function StepWorkspace({
                   ? t(($) => $.step_workspace.eyebrow_first)
                   : t(($) => $.step_workspace.creation_disabled_eyebrow)}
             </div>
-            <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
+            <h1 className="text-balance font-serif text-display font-medium leading-[1.1] tracking-tight text-foreground">
               {reusing
                 ? workspaceCreationAllowed
                   ? t(($) => $.step_workspace.headline_resume, { name: reusing.name })
@@ -326,7 +326,7 @@ export function StepWorkspace({
                   ? t(($) => $.step_workspace.headline_first)
                   : t(($) => $.step_workspace.creation_disabled_headline)}
             </h1>
-            <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
+            <p className="mt-4 text-body-lg leading-[1.55] text-foreground/80">
               {reusing
                 ? workspaceCreationAllowed
                   ? t(($) => $.step_workspace.lede_resume)
@@ -368,7 +368,7 @@ export function StepWorkspace({
               <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
                 <span
                   aria-live="polite"
-                  className="mr-auto text-xs text-muted-foreground"
+                  className="mr-auto text-caption text-muted-foreground"
                 >
                   {hint}
                 </span>
@@ -445,10 +445,10 @@ function ExistingWorkspaceCard({
     >
       <WorkspaceAvatar name={workspace.name} avatarUrl={workspace.avatar_url} size="lg" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="truncate text-[14.5px] font-medium text-foreground">
+        <div className="truncate text-body font-medium text-foreground">
           {workspace.name}
         </div>
-        <div className="truncate font-mono text-xs text-muted-foreground">
+        <div className="truncate font-mono text-caption text-muted-foreground">
           {`${urlHost}/${workspace.slug}`}
         </div>
       </div>
@@ -498,10 +498,10 @@ function CreateNewWorkspaceCard({
           <Plus className="h-4 w-4" />
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="truncate text-[14.5px] font-medium text-foreground">
+          <div className="truncate text-body font-medium text-foreground">
             {t(($) => $.step_workspace.create_new_title)}
           </div>
-          <div className="truncate text-xs text-muted-foreground">
+          <div className="truncate text-caption text-muted-foreground">
             {t(($) => $.step_workspace.create_new_subtitle)}
           </div>
         </div>
@@ -516,7 +516,7 @@ function CreateWorkspaceSide() {
   const { t } = useT("onboarding");
   return (
     <div className="flex flex-col gap-6">
-      <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <div className="text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {t(($) => $.step_workspace.side_create_eyebrow)}
       </div>
 
@@ -525,7 +525,7 @@ function CreateWorkspaceSide() {
         slug={t(($) => $.step_workspace.side_preview_slug)}
       />
 
-      <div className="mt-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <div className="mt-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {t(($) => $.step_workspace.side_things_eyebrow)}
       </div>
       <div className="flex flex-col gap-3.5">
@@ -542,13 +542,13 @@ function ExistingWorkspaceSide({ workspace }: { workspace: Workspace }) {
   const { t } = useT("onboarding");
   return (
     <div className="flex flex-col gap-6">
-      <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <div className="text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {t(($) => $.step_workspace.side_existing_eyebrow)}
       </div>
 
       <WorkspacePreviewCard name={workspace.name} slug={workspace.slug} />
 
-      <div className="mt-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <div className="mt-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {t(($) => $.step_workspace.side_next_eyebrow)}
       </div>
       <div className="flex flex-col gap-3.5">
@@ -582,10 +582,10 @@ function WorkspacePreviewCard({
       <div className="flex items-center gap-3 border-b px-4 py-3.5">
         <WorkspaceAvatar name={name} size="md" />
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="truncate text-[14px] font-medium text-foreground">
+          <div className="truncate text-body font-medium text-foreground">
             {name}
           </div>
-          <div className="truncate font-mono text-[11.5px] text-muted-foreground">
+          <div className="truncate font-mono text-micro text-muted-foreground">
             {`${urlHost}/${slug}`}
           </div>
         </div>
@@ -626,7 +626,7 @@ function WorkspacePreviewCard({
           meta={t(($) => $.step_workspace.preview.runtimes_meta)}
         />
         <EntityRow
-          icon={<BookOpenText className="h-4 w-4" />}
+          icon={<SkillIcon className="h-4 w-4" />}
           label={t(($) => $.step_workspace.preview.skills_label)}
           meta={t(($) => $.step_workspace.preview.skills_meta)}
         />
@@ -666,7 +666,7 @@ function EntityRow({
       </span>
       <span
         className={cn(
-          "flex-1 text-[13.5px]",
+          "flex-1 text-label",
           dim ? "text-muted-foreground" : "text-foreground",
         )}
       >
@@ -674,7 +674,7 @@ function EntityRow({
       </span>
       <span
         className={cn(
-          "font-mono text-[11.5px]",
+          "font-mono text-micro",
           dim ? "text-muted-foreground/70" : "text-muted-foreground",
         )}
       >
@@ -691,7 +691,7 @@ function PerkRow({ children }: { children: ReactNode }) {
         aria-hidden
         className="mt-[11px] h-px w-3 shrink-0 bg-muted-foreground/40"
       />
-      <div className="text-[13.5px] leading-[1.55] text-foreground/85">
+      <div className="text-label leading-[1.55] text-foreground/85">
         {children}
       </div>
     </div>

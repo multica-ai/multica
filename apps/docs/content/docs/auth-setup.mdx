@@ -1,186 +1,156 @@
 ---
-title: Sign-in and signup configuration
-description: Configure email + verification code sign-in, Google OAuth, signup allowlists, and local test codes.
+title: Sign-in and signup
+description: Configure email verification codes, Google sign-in, and who can sign up.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
-import { Mermaid } from "@/components/mermaid";
 
-Multica supports two sign-in methods: **email + verification code** (default) and **Google OAuth** (optional). On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
+Multica signs users in with email verification codes by default; Google OAuth can be added on top. Existing users can always sign in again — signup restrictions only decide whether new accounts can be created.
 
-For the list of environment variables referenced below, see [Environment variables](/environment-variables); for token usage and lifecycle details, see [Authentication and tokens](/auth-tokens).
+## Email verification codes
 
-## How email + verification code sign-in works
+After the user enters an email address, Multica sends a 6-digit verification code. The code is valid for 10 minutes; once it verifies, the browser receives a sign-in cookie.
 
-The user enters an email on the sign-in page → the server sends a 6-digit code → the user enters it → the server verifies it → a JWT cookie is issued. Standard flow. Two delivery backends are supported — pick whichever fits your deployment:
+Email can be delivered through Resend or SMTP. When both are configured, `SMTP_HOST` takes priority.
 
-### Option A: Resend (recommended for cloud / public-internet deployments)
+### Using Resend
 
-1. Create a [Resend](https://resend.com/) account and verify your domain
-2. Create an API key
-3. Set the environment variables:
+1. Verify a sending domain and create an API key at [Resend](https://resend.com/).
+2. Set:
 
-    ```bash
-    RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-    RESEND_FROM_EMAIL=noreply@yourdomain.com  # must be a domain verified in Resend
-    ```
+   ```dotenv
+   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+   RESEND_FROM_EMAIL=noreply@example.com
+   ```
 
-4. Restart the server
+3. Restart the API service.
 
-### Option B: SMTP relay (for self-hosted / on-premise deployments)
+`RESEND_FROM_EMAIL` must belong to a domain already verified in Resend.
 
-Use this when the deployment can't reach `api.resend.com` or you already have an internal mail relay (Microsoft Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set — if `SMTP_HOST` is non-empty the server always goes through SMTP, even if `RESEND_API_KEY` is also configured, so verification and invite mail never leaves the internal network.
+### Using SMTP
 
-The SMTP path supports the three relay modes most on-premise mail servers (notably Microsoft Exchange's receive connectors) expose:
+At minimum, set the host and sender address:
 
-| Mode | Port | Auth | TLS |
-|---|---|---|---|
-| Anonymous internal relay | `25` | none — submission is trusted by IP / subnet | none on the wire (internal segment only) |
-| Authenticated submission | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS, upgraded automatically |
-| Implicit TLS (SMTPS) | `465` | optional (`SMTP_USERNAME` + `SMTP_PASSWORD`) | TLS handshake on connect — auto-enabled on port `465`, or force on a non-standard port with `SMTP_TLS=implicit` |
-
-**Anonymous Exchange relay on port 25** — the typical "internal SMTP relay" / Exchange anonymous receive connector that accepts mail from a trusted subnet without credentials:
-
-```bash
-SMTP_HOST=exchange.internal.example.com
-SMTP_PORT=25
-SMTP_USERNAME=
-SMTP_PASSWORD=
-SMTP_TLS_INSECURE=false
-RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
-```
-
-**Authenticated submission on port 587** — for relays that require a service account; STARTTLS is upgraded automatically when the server advertises it:
-
-```bash
-SMTP_HOST=smtp.internal.example.com
+```dotenv
+SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USERNAME=multica
-SMTP_PASSWORD=...
-SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
-RESEND_FROM_EMAIL=noreply@yourdomain.com
+SMTP_PASSWORD=<password>
+SMTP_FROM_EMAIL=noreply@example.com
 ```
 
-**Implicit TLS (SMTPS) on port 465** — for providers that only offer SMTPS and don't advertise STARTTLS (e.g. Aliyun / Tencent enterprise mail). Port `465` auto-enables implicit TLS; `SMTP_TLS=implicit` (aliases: `smtps`, `ssl`) forces it on a non-standard SMTPS port:
+Common connection modes:
 
-```bash
-SMTP_HOST=smtp.qiye.aliyun.com
-SMTP_PORT=465                  # implicit TLS auto-enabled on 465
-SMTP_USERNAME=multica@yourdomain.com
-SMTP_PASSWORD=...
-SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
-RESEND_FROM_EMAIL=noreply@yourdomain.com
+| Scenario | Configuration |
+|---|---|
+| Internal anonymous relay | `SMTP_PORT=25`, leave username and password empty |
+| STARTTLS | `SMTP_PORT=587`; upgrades to TLS by default when the server supports it |
+| Implicit TLS | `SMTP_PORT=465`, or set `SMTP_TLS=implicit` explicitly |
+
+If `SMTP_FROM_EMAIL` is unset, it falls back to `RESEND_FROM_EMAIL`. Private CAs or self-signed certificates require adding the CA to the container trust store; `SMTP_TLS_INSECURE=true` skips certificate verification and should only be used temporarily on a trusted internal network.
+
+Some strict relays also require a valid EHLO name:
+
+```dotenv
+SMTP_EHLO_NAME=mail.example.com
 ```
 
-**Strict public relays (e.g. Google Workspace `smtp-relay.gmail.com`)** additionally require a valid EHLO name. They reject the default `localhost` greeting from a public IP, and the relay drops the connection — which surfaces as an opaque `EOF` on a later command (`smtp auth: EOF`) rather than at the greeting. Set `SMTP_EHLO_NAME` to the FQDN the relay expects; it defaults to the machine hostname, which inside a container is usually not a valid FQDN:
+### Behavior without an email service
 
-```bash
-SMTP_HOST=smtp-relay.gmail.com
-SMTP_PORT=587
-SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
-RESEND_FROM_EMAIL=noreply@yourdomain.com
-```
+The server still starts, but verification codes and invitation links are only written to the log; no email is sent. This suits local development, not production.
 
-At startup the server prints which provider it picked, including the negotiated TLS mode — for example `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` or `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…` (or `Resend API` / `DEV mode`). The password is never logged. If you don't see the SMTP line after restart, `SMTP_HOST` didn't reach the process — check the container env (`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`).
+The startup log states whether the current mode is `Resend API`, `SMTP relay`, or `DEV mode`.
 
-**What happens if you set neither**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
+## Fixed local verification code
 
-## Fixed local testing codes
+Local automated tests can set a fixed verification code:
 
-<Callout type="warning">
-**Do not enable a fixed verification code on a publicly reachable instance.**
-
-The old behavior where non-production instances accepted `888888` by default has been removed. Unless you explicitly configure it, typing `888888` is treated like any other wrong code.
-
-Local development without any email backend configured (no Resend, no SMTP) should use the generated code printed in server logs. If you need deterministic local/private automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
-
-```bash
+```dotenv
 APP_ENV=development
 MULTICA_DEV_VERIFICATION_CODE=888888
 ```
 
-This shortcut is ignored when `APP_ENV=production`.
-</Callout>
-
-Production deployments should leave `MULTICA_DEV_VERIFICATION_CODE` empty and set `APP_ENV=production`. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, `APP_ENV` defaults to `production`.
-
-## Google OAuth configuration
-
-Optional. Without it, only email + verification code is available; with it, the sign-in page gets a "Sign in with Google" button.
-
-1. Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/)
-2. Set the **Authorized redirect URIs** to your Multica frontend address plus `/auth/callback`, for example:
-
-    ```text
-    https://multica.yourdomain.com/auth/callback
-    ```
-
-3. Once you have the client ID and client secret, set three environment variables:
-
-    ```bash
-    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-    GOOGLE_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
-    ```
-
-4. Restart the server.
-
-**Takes effect at runtime**: the frontend reads these settings at runtime via `/api/config` — after changing them, restart the server and the frontend picks up the new values with no rebuild or redeploy.
+The code must be 6 digits. The fixed code is ignored when `APP_ENV=production`.
 
 <Callout type="warning">
-**The redirect URI must match exactly in both the Google Console and `GOOGLE_REDIRECT_URI`** — including protocol (`http` vs `https`), trailing slash, and port. Any mismatch and Google rejects the entire OAuth flow; the error shown to the user is `redirect_uri_mismatch`.
+Do not enable a fixed code on a publicly reachable instance. The production combination is `APP_ENV=production` with an empty `MULTICA_DEV_VERIFICATION_CODE`.
 </Callout>
 
-## Restricting who can sign up
+## Google sign-in
 
-Three environment variables combine by priority:
+1. Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/).
+2. Add the Multica frontend's callback URL to **Authorized redirect URIs**:
 
-<Mermaid chart={`
-graph TD
-    Start[New user first sign-in] --> A{Email in<br/>ALLOWED_EMAILS?}
-    A -- Yes --> Allow[Allow signup]
-    A -- No --> B{Domain in<br/>ALLOWED_EMAIL_DOMAINS?}
-    B -- Yes --> Allow
-    B -- No --> C{Any allowlist<br/>non-empty?}
-    C -- Yes --> Block[Reject]
-    C -- No --> D{ALLOW_SIGNUP<br/>= true?}
-    D -- Yes --> Allow
-    D -- No --> Block
-`} />
+   ```text
+   https://multica.example.com/auth/callback
+   ```
 
-**Existing users can always sign in again** — the signup allowlist only applies to **first-time signup**, not returning users.
+3. Set:
 
-- **`ALLOWED_EMAILS`** (highest priority) — explicit email allowlist, comma-separated. **When non-empty, only listed emails can sign up.**
-- **`ALLOWED_EMAIL_DOMAINS`** — domain allowlist, comma-separated (for example `company.io,partner.com`).
-- **`ALLOW_SIGNUP`** — master switch, default `true`. Set `false` to disable signup entirely.
+   ```dotenv
+   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+   ```
 
-<Callout type="warning">
-**The three layers are AND semantics, not OR.** A common wrong intuition is that `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` means "allow company.io plus everyone else." It does **not**. If any layer has a non-empty value, **emails not matching it are rejected outright** — `ALLOW_SIGNUP=true` does not override that.
+4. Restart the API service.
 
-To actually "allow everyone," leave all three variables empty (or keep `ALLOW_SIGNUP=true`).
-</Callout>
+The URLs in the Google Console and in `GOOGLE_REDIRECT_URI` must match exactly, including protocol, port, and trailing slash. Once configured, the sign-in page shows a Google sign-in button; the frontend image needs no rebuild.
 
-**Typical configurations**:
+## Signup restrictions
 
-| Goal | Configuration |
+Three variables together decide whether a new account can be created:
+
+| Variable | Effect |
 |---|---|
-| Internal only, employees of `company.io` | `ALLOWED_EMAIL_DOMAINS=company.io` |
-| Internal + a few external collaborators | `ALLOWED_EMAIL_DOMAINS=company.io` + collaborator addresses added to `ALLOWED_EMAILS` |
-| Disable self-serve signup entirely, invite-only | `ALLOW_SIGNUP=false` |
-| Open signup (not recommended for production) | All three empty |
+| `ALLOWED_EMAILS` | Full email addresses allowed to sign up, comma-separated |
+| `ALLOWED_EMAIL_DOMAINS` | Email domains allowed to sign up, comma-separated |
+| `ALLOW_SIGNUP` | Whether signup is allowed when no allowlist is configured; defaults to `true` |
 
-## Can you still invite people when signup is disabled?
+The evaluation order is:
 
-**Only people who already have a Multica account.** Accepting an invite doesn't check the signup allowlist — if the invitee has signed up already (for example in another workspace), clicking the invite link and signing in lets them accept.
+1. The email matches `ALLOWED_EMAILS` — allow.
+2. Or its domain matches `ALLOWED_EMAIL_DOMAINS` — allow.
+3. With no match, if `ALLOW_SIGNUP=false` — reject.
+4. With `ALLOW_SIGNUP=true` but any allowlist configured and no match — still reject.
+5. With no allowlist configured and `ALLOW_SIGNUP=true` — allow.
 
-**But people who have never signed up cannot be rescued by an invite.** Before accepting, they must sign in, and the first step of sign-in (requesting the verification code) passes through the signup allowlist check. If `ALLOW_SIGNUP=false`, or their email isn't in `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, they **cannot complete signup**, and therefore cannot accept the invite.
+Common configurations:
 
-To invite an external collaborator who hasn't signed up yet: temporarily add their email to `ALLOWED_EMAILS`, wait for them to sign up and accept the invite, then remove the entry.
+```dotenv
+# Company domain only
+ALLOW_SIGNUP=false
+ALLOWED_EMAIL_DOMAINS=company.com
 
-For how to create and use invites, see [Members and roles](/members-roles).
+# Also admit one external collaborator
+ALLOWED_EMAILS=partner@example.net
+```
 
-## Next
+<Callout type="info">
+Both allowlists also work as an explicit exception list when `ALLOW_SIGNUP=false`.
+</Callout>
 
-- [Environment variables](/environment-variables) — full definitions of every variable used on this page
-- [Authentication and tokens](/auth-tokens) — JWT / PAT / daemon token categories and usage
-- [Troubleshooting](/troubleshooting) — verification code not received, OAuth `redirect_uri_mismatch`, signup rejected
+## Invitations and signup restrictions
+
+Invitations do not automatically bypass signup restrictions:
+
+- If the invitee already has a Multica account, they can sign in and accept the invitation.
+- If they do not, their email must satisfy the signup rules above.
+
+To invite a new member on an instance with open signup disabled, add their email to `ALLOWED_EMAILS` first. Once the account is created and the invitation accepted, you can remove the entry again.
+
+## Session lifetime
+
+Browser sign-ins last 30 days by default. Adjust with `AUTH_TOKEN_TTL`, which accepts a Go duration or a positive integer of seconds:
+
+```dotenv
+AUTH_TOKEN_TTL=720h
+```
+
+Restart the API service after changing it. The value only affects sign-in cookies and JWTs issued afterwards; it does not extend tokens that were already issued.
+
+## Next steps
+
+- [Environment variables](/environment-variables) — the full variable reference.
+- [Authentication and tokens](/auth-tokens) — sign-in sessions and token types.
+- [Members and roles](/members-roles) — invitations and roles.

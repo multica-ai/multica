@@ -510,12 +510,12 @@ function RuntimeWelcome({
             >
               🎉
             </div>
-            <DialogTitle className="text-center text-2xl font-semibold">
+            <DialogTitle className="text-center text-display-sm font-semibold">
               {t(($) => $.welcome_after_onboarding.runtime.success.title)}
             </DialogTitle>
             <DialogDescription
               id="welcome-after-onboarding-runtime-success-subtitle"
-              className="text-center text-sm text-muted-foreground"
+              className="text-center text-body text-muted-foreground"
             >
               {t(
                 ($) => $.welcome_after_onboarding.runtime.success.subtitle,
@@ -523,12 +523,12 @@ function RuntimeWelcome({
               )}
             </DialogDescription>
             <div className="mt-1 flex flex-col gap-1.5 max-w-sm">
-              <p className="text-center text-xs text-muted-foreground/80 leading-relaxed">
+              <p className="text-center text-caption text-muted-foreground/80 leading-relaxed">
                 {t(
                   ($) => $.welcome_after_onboarding.runtime.success.tip_inbox,
                 )}
               </p>
-              <p className="text-center text-xs text-muted-foreground/80 leading-relaxed">
+              <p className="text-center text-caption text-muted-foreground/80 leading-relaxed">
                 {t(
                   ($) => $.welcome_after_onboarding.runtime.success.tip_chat,
                 )}
@@ -566,22 +566,22 @@ function RuntimeWelcome({
             aria-hidden
             className="h-14 w-14 rounded-xl ring-1 ring-foreground/10"
           />
-          <DialogTitle className="text-center text-xl font-semibold">
+          <DialogTitle className="text-center text-title-lg font-semibold">
             {t(($) => $.welcome_after_onboarding.runtime.greeting)}
           </DialogTitle>
           <DialogDescription
             id="welcome-after-onboarding-runtime-subtitle"
-            className="text-center text-sm text-muted-foreground"
+            className="text-center text-body text-muted-foreground"
           >
             {t(($) => $.welcome_after_onboarding.runtime.subtitle)}
           </DialogDescription>
-          <p className="text-center text-sm text-muted-foreground max-w-md leading-relaxed">
+          <p className="text-center text-body text-muted-foreground max-w-md leading-relaxed">
             {t(($) => $.welcome_after_onboarding.runtime.capabilities)}
           </p>
         </div>
 
         <div className="mt-4 border-t pt-4">
-          <p className="mb-3 text-sm font-medium text-foreground">
+          <p className="mb-3 text-body font-medium text-foreground">
             {t(($) => $.welcome_after_onboarding.runtime.section_label)}
           </p>
           <div className="flex flex-col gap-2">
@@ -603,10 +603,10 @@ function RuntimeWelcome({
                   )}
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-tight">
+                    <p className="text-body font-medium leading-tight">
                       {HELPER_STARTER_PROMPTS[id].title[lang]}
                     </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground leading-snug">
+                    <p className="mt-0.5 text-caption text-muted-foreground leading-snug">
                       {t(
                         ($) =>
                           $.welcome_after_onboarding.runtime.cards[id]
@@ -640,13 +640,13 @@ function RuntimeWelcome({
         {submitError ? (
           <div
             role="alert"
-            className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-caption text-destructive"
           >
             <p>{submitError}</p>
             <Button
               variant="ghost"
               size="sm"
-              className="mt-1 h-6 px-2 text-xs"
+              className="mt-1 h-6 px-2 text-caption"
               onClick={() => setSubmitError(null)}
             >
               {t(($) => $.welcome_after_onboarding.dismiss_error)}
@@ -826,12 +826,12 @@ function SkipWelcome({ workspaceId, onDismiss }: SkipWelcomeProps) {
           <div className="text-6xl animate-welcome-emoji-pop" aria-hidden>
             🎉
           </div>
-          <DialogTitle className="text-center text-2xl font-semibold">
+          <DialogTitle className="text-center text-display-sm font-semibold">
             {t(($) => $.welcome_after_onboarding.skip.title)}
           </DialogTitle>
           <DialogDescription
             id="welcome-after-onboarding-skip-subtitle"
-            className="text-center text-sm text-muted-foreground max-w-md"
+            className="text-center text-body text-muted-foreground max-w-md"
           >
             {t(($) => $.welcome_after_onboarding.skip.subtitle)}
           </DialogDescription>
@@ -880,12 +880,12 @@ function SkipPreviewCard({
     <div className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2.5">
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-medium leading-tight">
+          <p className="text-body font-medium leading-tight">
             {t(($) => $.welcome_after_onboarding.skip.cards[cardKey].title)}
           </p>
           <span
             className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              "rounded-full px-2 py-0.5 text-micro font-medium",
               statusTone === "active"
                 ? "bg-primary/10 text-primary"
                 : "bg-muted text-muted-foreground",
@@ -894,7 +894,7 @@ function SkipPreviewCard({
             {statusLabel}
           </span>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground leading-snug">
+        <p className="mt-1 text-caption text-muted-foreground leading-snug">
           {t(($) => $.welcome_after_onboarding.skip.cards[cardKey].subtitle)}
         </p>
       </div>
@@ -911,7 +911,7 @@ function FullScreenLoading({ label }: { label: string }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
       <div className="flex flex-col items-center gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{label}</p>
+        <p className="text-body text-muted-foreground">{label}</p>
       </div>
     </div>
   );
@@ -936,10 +936,10 @@ function FullScreenError({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
       <div className="flex max-w-md flex-col items-center gap-4 rounded-lg border bg-card p-6 shadow-md">
         <AlertCircle className="h-6 w-6 text-destructive" />
-        <p className="text-center text-sm font-medium text-foreground">
+        <p className="text-center text-body font-medium text-foreground">
           {title}
         </p>
-        <p className="text-center text-xs text-muted-foreground">{message}</p>
+        <p className="text-center text-caption text-muted-foreground">{message}</p>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
             {closeLabel}

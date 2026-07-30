@@ -80,7 +80,7 @@ export function UpdatesSettingsTab() {
     >
       <SettingsCard>
         <SettingsRow label={t(($) => $.desktop.updates.current_version)}>
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-caption text-muted-foreground">
             v{currentVersion}
           </span>
         </SettingsRow>

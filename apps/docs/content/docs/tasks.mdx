@@ -1,119 +1,168 @@
 ---
 title: Tasks
-description: The unit of work for every agent run, with a clear state machine, timeouts, and retry rules.
+description: How a single agent run is queued, runs, stops, and retries.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
-import { Mermaid } from "@/components/mermaid";
 
-A **task** is the unit of every [agent](/agents) run — [assigning an issue to an agent](/assigning-issues), [@-mentioning an agent in a comment](/mentioning-agents), sending a message in [chat](/chat), or an [Autopilot](/autopilots) firing on schedule all produce a task. Multica puts it in a queue; a [daemon](/daemon-runtimes) picks it up and hands it off to the corresponding [AI coding tool](/providers), then writes the result back to the server when it finishes.
+Every time an agent starts working, Multica creates a **task**. It records what triggered the run, which agent it went to, how far it has progressed, and whether it ultimately succeeded.
 
-Tasks and [issues](/issues) are two different objects. A single issue can be assigned, @-mentioned, and manually rerun many times — each produces a **new** task.
+## Issues and tasks
 
-## The states a task goes through
+An issue holds the goal, discussion, assignee, and final status of a piece of work; a task records one agent run against that work.
 
-<Mermaid chart={`
-graph LR
-    Q["Queued<br/>queued"] -->|daemon picks up| D["Dispatched<br/>dispatched"]
-    D -->|agent starts| R["Running<br/>running"]
-    R -->|success| C["Completed<br/>completed"]
-    R -->|error or timeout| F["Failed<br/>failed"]
-    Q -->|user cancels| X["Cancelled<br/>cancelled"]
-    D -->|user cancels| X
-    R -->|user cancels| X
-    F -.retryable reason.-> Q
-`} />
+| | Issue | Task |
+| --- | --- | --- |
+| What it records | A piece of work moving forward | One agent run |
+| How long it lasts | Can be discussed, amended, and reassigned repeatedly | From trigger until completion, failure, or cancellation |
+| Cardinality | One issue can span many runs | Every run gets its own record |
 
-- **Queued** — the task was just created and is waiting for a daemon to pick it up
-- **Dispatched** — a daemon has claimed it and is starting the AI coding tool
-- **Running** — the AI coding tool is actually doing the work
-- **Completed** — finished successfully; the output (comments, code commits, status changes) is written back to the server
-- **Failed** — aborted with an error or timeout; if the failure reason is retryable, the task automatically returns to `queued` for another attempt
-- **Cancelled** — the user cancelled it
+So the same issue can be handed to different agents in turn, or run again after a failure. Each run produces a new task; earlier records are never overwritten.
 
-## What happens when a task times out
+## Trigger sources
 
-The Multica server scans every 30 seconds. Two kinds of timeout trigger a failure:
+Any of the following can trigger a run:
 
-| Situation | Timeout |
-|---|---|
-| Dispatched but never started (daemon picked it up but didn't launch the AI tool) | **5 minutes** |
-| Running too long | **2.5 hours** |
+- Assigning an issue to an agent or a squad.
+- Mentioning an agent in a comment.
+- Sending a message to an agent in chat.
+- An Autopilot firing on a schedule or from an external event.
 
-Both timeouts use failure reason `timeout` and **retry automatically** (next section). For the related runtime-missing check, see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+Different entry points provide different context, but execution works the same way: Multica creates a task, a runtime claims it, and the runtime invokes the AI coding tool the agent is configured with.
 
-## Which failures retry automatically, which don't
+## Execution lifecycle
 
-Failures fall into two categories: **retryable** and **non-retryable**.
+A task typically moves through these states:
 
-**Retryable** (Multica automatically requeues):
+| State | Meaning |
+| --- | --- |
+| `deferred` | Scheduled to fire later; enters the queue at the appointed time |
+| `queued` | Waiting for a runtime to claim it |
+| `dispatched` | A runtime has claimed it and is starting the AI coding tool |
+| `waiting_local_directory` | The target local directory is held by another run; waiting for the directory lock to release |
+| `running` | The AI coding tool is executing |
+| `completed` | The run finished normally |
+| `failed` | The run errored or was interrupted |
+| `cancelled` | The run was stopped manually |
 
-- `runtime_offline` — the daemon went missing after the task was dispatched
-- `runtime_recovery` — the daemon crashed and restarted, reclaiming tasks it didn't finish
-- `timeout` — runtime or dispatch timeout
+When the runtime is online, a new task usually starts quickly; if the runtime goes offline after the task enters the queue, the task stays queued until it recovers. A task left unclaimed for more than 2 hours ends as failed.
 
-**Non-retryable** (the task stays in failed):
-
-- `agent_error` — the AI coding tool itself reported an error (API error, quota exceeded, internal bug). Underlying problems aren't retried — that would loop forever.
-
-Automatic retry also has two extra conditions:
-
-1. **At most 2 attempts** — 1 original + 1 retry. If the retry also fails, no further retries, even if the reason is retryable.
-2. **Only for issue- and chat-triggered tasks** — Autopilot-triggered tasks do **not** retry automatically.
-
-<Callout type="warning">
-**Autopilot tasks don't retry automatically** by design. An Autopilot has its own firing cadence (e.g. daily); automatic retries on failure would overlap with the next scheduled run. If you need an immediate re-run after failure, use a manual rerun (next section).
-
-**How you'll know an Autopilot task failed**: a notification lands in your [Inbox](/inbox), and the associated issue's status reverts from `in_progress` back to `todo`. The [Autopilots](/autopilots) page also shows the latest run result per autopilot.
+<Callout type="info">
+If the system already knows the target runtime is offline before triggering, some immediate actions report that the run cannot start right now instead of creating a task nothing can claim.
 </Callout>
 
-## Manual rerun vs. automatic retry
+A runtime with a healthy heartbeat can execute long tasks; the server never force-ends a run just because it has been running for a while. The runtime decides whether the process has stalled based on actual activity; see [Environment variables](/environment-variables#daemon-configuration) for the relevant settings.
 
-A **manual rerun** is one you trigger from the CLI or the API (`POST /api/issues/{id}/rerun`):
+## Viewing run history
+
+Open an issue and go to the **Execution log** to see every task it has produced. Each row shows the trigger source, the executing agent, the state, and timing.
+
+From here you can:
+
+- Open a run record to see the agent's messages, tool calls, and error output.
+- Stop tasks that are deferred, queued, starting, waiting for a local directory, or running.
+- Retry a failed or cancelled task.
+
+![Run record: status timeline, agent summary, and individual tool calls](/images/docs/task-transcript.png)
+
+<Callout type="warning">
+Changing an issue's assignee or status does not stop a run that has already started. To interrupt one, stop the corresponding task in the execution log. Active tasks are cancelled along with an issue only when the issue is deleted.
+</Callout>
+
+## Failures and automatic retries
+
+Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular task runs at most twice by default; tool network interruptions get up to three attempts.
+
+Errors returned by the agent itself are usually not retried automatically. Expired credentials, exhausted quota, misconfiguration, or a model unable to complete the request all need the cause fixed first, followed by a manual retry.
+
+An Autopilot's **run only** mode does not retry automatically, to avoid overlapping with the next scheduled run. The **create issue** mode produces regular issue tasks, so infrastructure failures still retry under the rules above. Both modes show their final result in the Autopilot run history.
+
+When an issue has no other active task and no new retry waiting to run, a failure moves an `in_progress` issue back to `todo`.
+
+## Failure reason reference
+
+The failure reasons shown in the execution log and usage stats fall into two groups: unprefixed reason codes are recorded by the platform; `agent_error.*` codes are classified from the AI coding tool's own errors.
+
+**Platform side**
+
+| Reason | Meaning | What to do |
+| --- | --- | --- |
+| `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
+| `queued_expired` | Queued for over 2 hours with no runtime claiming it | Confirm the runtime is online, then retry |
+| `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
+| `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
+| `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
+| `iteration_limit` | Hit the iteration cap for a run | Narrow the issue scope |
+| `agent_blocked` | The agent reported it cannot proceed | Provide what its comment asked for |
+| `api_invalid_request` | The platform API rejected an invalid request | Retry; report the problem if it recurs |
+| `codex_semantic_inactivity` | Codex produced no meaningful output for too long and was judged stalled | Retry, or adjust the Codex inactivity timeout |
+
+**Tool side (`agent_error.*`, prefix omitted)**
+
+| Reason | Meaning | What to do |
+| --- | --- | --- |
+| `provider_auth_or_access` | Model provider authentication failed or access denied (401/403) | Sign in again in that AI coding tool, or check the API key |
+| `provider_quota_limit` | Quota or balance exhausted (402) | Top up or switch accounts |
+| `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Retry later |
+| `provider_server_error` | Model provider server error (5xx) | Retry later |
+| `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
+| `model_not_found_or_unavailable` | The model does not exist or is currently unavailable | Pick an available model in the agent settings |
+| `context_overflow` | Context exceeded the model window | Narrow the issue scope or reduce the input |
+| `missing_config` | Required configuration such as an API key is missing | Fill in the agent's environment variables or the tool configuration |
+| `runtime_missing_executable` | The AI coding tool's executable was not found | Reinstall the tool; see [Install AI coding tools](/install-agent-runtime) |
+| `runtime_version_unsupported` | The AI coding tool version is too old | Upgrade the tool |
+| `process_failure` | The tool process exited abnormally | Check the run record to locate the cause, then retry |
+| `empty_or_unparseable_output` | The tool produced no output, or output that could not be parsed | Retry; check the tool installation if it recurs |
+| `agent_timeout` | The tool was terminated after going unresponsive for too long | Retry or narrow the issue scope |
+| `unknown` | Unclassified failure | Check the raw error in the run record |
+
+## Manual retry
+
+Clicking the retry button on a row in the execution log invokes **the agent that ran that task at the time**. Even if the issue has since been reassigned, the retry does not switch to the new assignee.
+
+A retry keeps the files the previous run already wrote to the local directory whenever possible. If the original session is still safe and the same runtime claims the retry, it also continues the previous session. Errors that poison the session, such as context overflow or invalid requests, start a new session on top of the original working directory instead. When the original directory no longer exists, a fresh working directory is used.
+
+You can also rerun the current issue from the CLI:
 
 ```bash
 multica issue rerun <issue-id>
 ```
 
-Behavior:
+This form does not point at a specific past task, so it uses the issue's current agent assignee and starts with a fresh session and working directory.
 
-- By default, targets the issue's **current agent assignee** — useful when you want the rerun to follow the current assignment regardless of who ran the prior task.
-- The execution-log retry button on a specific row sends that row's task ID alongside, so the rerun targets **the agent that ran that exact task** — not the current assignee. This makes per-row retry meaningful for squad workers, parallel @-mention agents, or rows whose agent has since been displaced by a reassignment.
-- **Cancels** the target agent's queued or running task on this issue (if any). Tasks owned by other agents on the same issue (e.g. parallel @-mention runs) are left alone.
-- Creates a **brand-new** task — attempt count resets to 1, even if the original task hit the attempt ceiling.
-- **Reuses the workdir; the session is resumed conditionally — and this depends on how you triggered the rerun:**
-  - **Execution-log per-row retry** (carries a task ID): reuses that exact run's working directory, so files already written to disk are preserved. It resumes that run's agent session too — *unless* the failure poisoned the conversation (context overflow, iteration limit, invalid request, Codex semantic inactivity, agent fallback), in which case it starts a fresh session on top of the reused workdir. If the original directory is gone (garbage-collected, on a different runtime, or never recorded before the failure), it falls back to a fresh workdir. So a transient failure — a network blip, a provider 5xx / rate-limit, a runtime that briefly went offline, or an auth/quota/config error you've since fixed — continues from where it left off instead of starting over.
-  - **CLI / API rerun without a task ID**: there is no specific run to continue, so it starts a **fresh agent session in a fresh workdir**.
+## Task completion and issue completion
 
-Comparison:
+`completed` only means this particular run ended normally — it does not confirm the issue's goal has been met. You can still review the result, keep discussing, add requirements, or trigger the agent again.
 
-| Dimension | Automatic retry | Manual rerun |
-|---|---|---|
-| Trigger | System, based on failure reason | You, manually |
-| Ceiling | 2 attempts | No limit |
-| Applicable sources | Issues, chat | Issues with an agent assignee |
-| Agent picked | Same agent as the failed task | Source task's agent (UI per-row retry) or issue's current assignee (CLI / no task_id) |
-| Workdir | Reused (continues from prior files) | Per-row retry: reused when it still exists; CLI / no task_id: fresh |
-| Session inheritance | Yes (resumes prior session) | Per-row retry: resumes unless the failure poisoned the conversation; CLI / no task_id: fresh |
+Whether an issue is done is judged by the actual progress of the work and the issue's status.
 
-## How a failed task affects issue status
+## State and timeout quick reference
 
-If an issue-triggered task fails (and no automatic retry succeeds) because the issue was assigned to an agent, **the issue's status automatically rolls back from `in_progress` to `todo`** — so when you open the board you immediately see "this one needs another look." See [Issues and projects](/issues).
+The numbers below reflect the server's default configuration, for quick cross-checking while troubleshooting.
 
-## Can a task continue from the previous context
+| State | Meaning | Timeout and consequence |
+| --- | --- | --- |
+| `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
+| `queued` | Waiting for a runtime to claim it | Fails after **2 hours** unclaimed; not retried automatically |
+| `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
+| `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
+| `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its tasks fail with it |
 
-Yes — as long as the AI coding tool supports session resumption.
+Automatic retry covers only the transient faults below, and only applies to tasks attached to an issue or a chat (excluding the Autopilot **run only** mode):
 
-Multica pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is passed back to the next **automatic retry** and to an **execution-log per-row retry**, so the agent picks up the previous conversation and file state — unless the failure poisoned the conversation, in which case only the workdir is reused and a fresh session starts. A **CLI / API rerun without a task ID** starts a fresh session in a fresh workdir — see [Manual rerun vs. automatic retry](#manual-rerun-vs-automatic-retry).
+| Auto-retryable failure reason | Attempt ceiling |
+| --- | --- |
+| Runtime offline | 2 by default (first run + 1 retry) |
+| Reclaimed after a daemon restart | 2 by default |
+| Platform-judged execution timeout | 2 by default |
+| Codex stalled with no meaningful output | 2 by default |
+| Skill bundle download failure | 2 by default (the agent process has not started at this point; already-downloaded bundles come from the local cache) |
+| Tool network interruption | Up to 3; the final attempt starts after a delay of about 5 seconds |
 
-But **which AI coding tools actually support this** varies a lot:
+All other failure reasons (auth, quota, configuration, model, and so on) never retry automatically; fix the cause first, then retry manually.
 
-- ✅ **Real support** — Antigravity, Claude Code, Codex, Copilot, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi
-- ❌ **No support** — Gemini
+## Next steps
 
-See [Providers Matrix → Session resumption](/providers#session-resumption-who-really-supports-it).
-
-## Next
-
-- [Providers Matrix](/providers) — capability differences across the 16 AI coding tools (including the exact session-resumption status)
-- [Assigning issues to agents](/assigning-issues) / [@-mentioning agents in comments](/mentioning-agents) / [Chat](/chat) / [Autopilots](/autopilots) — the four ways to trigger a task
+- [Daemon and runtimes](/daemon-runtimes) — which computer a task executes on.
+- [Assigning issues to agents](/assigning-issues) — trigger a run from an issue.
+- [Mentioning agents](/mentioning-agents) — add requirements in comments or bring in other agents.

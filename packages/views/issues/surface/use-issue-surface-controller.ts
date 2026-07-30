@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
@@ -162,6 +162,35 @@ function useDebouncedTableSearch(value: string, delayMs = 250) {
   return debouncedValue;
 }
 
+/** One shared reference for every un-settled list default in this hook.
+ *
+ * `const { data = [] } = useQuery(...)` allocates a new array on every render
+ * for as long as the query has no data — which is the whole window right after
+ * a workspace switch. Downstream that array is a memo dependency, so the empty
+ * default alone was enough to rebuild the derived Sets, the table query spec,
+ * and the branch query list once per render (MUL-5477). */
+const EMPTY_LIST: never[] = [];
+
+/**
+ * Pin a derived value's identity to its CONTENT.
+ *
+ * `tableQuerySpec` is rebuilt from 17 dependencies, so any one of them losing
+ * referential stability hands every consumer a new object even though the query
+ * it describes is unchanged. Consumers use it as a memo dependency and, in the
+ * Table's case, as the source of a `useQueries` list — so a new-but-equal spec
+ * rebuilt that list on every render.
+ *
+ * Hashed with TanStack's own `hashKey` rather than `JSON.stringify` so this
+ * agrees exactly with how the same spec is hashed into a `queryKey`: object
+ * keys are sorted, so two specs that resolve to one query also resolve to one
+ * identity here.
+ */
+function useStableByContent<T>(value: T): T {
+  const contentKey = hashKey([value]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- identity follows the content hash, not the reference
+  return useMemo(() => value, [contentKey]);
+}
+
 export function useIssueSurfaceController({
   scope,
   modes,
@@ -225,7 +254,7 @@ export function useIssueSurfaceController({
   // (archive/delete): filters keyed by a non-active definition are stripped
   // before they reach the predicates, and a sort on a non-active definition
   // degrades to manual order — matching what the header already shows.
-  const { data: workspaceProperties = [], isSuccess: catalogSettled } = useQuery(propertyListOptions(wsId));
+  const { data: workspaceProperties = EMPTY_LIST, isSuccess: catalogSettled } = useQuery(propertyListOptions(wsId));
   const activePropertyIds = useMemo(
     () => new Set(workspaceProperties.map((p) => p.id)),
     [workspaceProperties],
@@ -324,7 +353,7 @@ export function useIssueSurfaceController({
         ? "any"
         : scope.relation
       : undefined;
-  const { data: workspaceWorkingAgents = [] } = useQuery(
+  const { data: workspaceWorkingAgents = EMPTY_LIST } = useQuery(
     workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
   );
   const workingIssueIDs = useMemo(() => {
@@ -335,7 +364,7 @@ export function useIssueSurfaceController({
     return issueIDs;
   }, [workspaceWorkingAgents]);
 
-  const tableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
+  const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
     switch (scope.type) {
       case "workspace":
@@ -422,6 +451,11 @@ export function useIssueSurfaceController({
     viewProjectFilters,
     workingIssueIDs,
   ]);
+  // Every consumer below — the facet request, the status/group branch hooks and
+  // the Table's own `useQueries` list — keys off this object's identity. Pin it
+  // to the content so an unstable dependency upstream cannot rebuild all of
+  // them for a query that did not change.
+  const tableQuerySpec = useStableByContent(derivedTableQuerySpec);
 
   const [activeTableFacet, setActiveTableFacet] =
     useState<IssueTableFacetSpec | null>(null);

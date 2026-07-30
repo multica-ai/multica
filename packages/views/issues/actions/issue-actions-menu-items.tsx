@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  ExternalLink,
   FolderOpen,
   Link2,
   Network,
@@ -104,6 +105,7 @@ export function IssueActionsMenuItems({
   const {
     isPinned,
     updateField,
+    openInNewTab,
     togglePin,
     copyLink,
     openCreateSubIssue,
@@ -158,7 +160,7 @@ export function IssueActionsMenuItems({
               <StatusIcon status={s} className="h-3.5 w-3.5" />
               {t(($) => $.status[s])}
               {issue.status === s && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -175,13 +177,13 @@ export function IssueActionsMenuItems({
           {PRIORITY_ORDER.map((p) => (
             <P.Item key={p} onClick={() => updateField({ priority: p })}>
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
                 {t(($) => $.priority[p])}
               </span>
               {issue.priority === p && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -254,6 +256,13 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {/* Leads the "do something with this issue itself" group: the only
+          discoverable way to open an issue elsewhere for users who don't know
+          modifier-click, so it sits above the copy actions. */}
+      <P.Item onClick={openInNewTab}>
+        <ExternalLink className="h-3.5 w-3.5" />
+        {t(($) => $.actions.open_in_new_tab)}
+      </P.Item>
       <P.Item onClick={togglePin}>
         {isPinned ? (
           <PinOff className="h-3.5 w-3.5" />

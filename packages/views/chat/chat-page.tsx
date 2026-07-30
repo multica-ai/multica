@@ -201,7 +201,7 @@ export function ChatPage() {
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
-        <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
+        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
       </div>
       {newChatButton}
     </PageHeader>
@@ -223,8 +223,10 @@ export function ChatPage() {
   // banner + input. Identical composition to the floating window's body, so a
   // brand-new chat (no active session) shows the agent-aware empty state + input.
   // No compose-box agent selector — the agent is fixed when the chat starts.
+  // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
+  // THIS pane, which the user resizes independently of the browser window.
   const conversation = (
-    <div className="flex flex-1 flex-col min-h-0">
+    <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
         <ChatSessionHeader
           session={c.currentSession}
@@ -341,7 +343,7 @@ export function ChatPage() {
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
               <MessageSquare className="h-10 w-10 text-muted-foreground/30" />
-              <p className="text-sm">{t(($) => $.page.select_prompt)}</p>
+              <p className="text-body">{t(($) => $.page.select_prompt)}</p>
             </div>
           )}
         </div>

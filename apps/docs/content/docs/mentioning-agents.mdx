@@ -1,63 +1,79 @@
 ---
 title: "@-mention agents in comments"
-description: Mention an agent with @ to have it take a look from a comment — no assignee change, no status change, lighter than assigning.
+description: "@-mention an agent in an issue comment, or keep replying, to have it handle new information without changing the assignee."
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-`@`-mentioning an [agent](/agents) in a [comment](/comments) is the lighter trigger — **no assignee change, no status change**, just a nudge to have the agent take a look at the current [issue](/issues). Compared to [**assigning**](/assigning-issues) (turning the agent into the owner and handing over the issue), @-mention fits "take a look at this section," "give me another angle," or "pull them in for a quick discussion."
+@-mention an agent in a comment when you want it to look at a new piece of information, answer a question, or help the current assignee. The comment becomes the starting point for the run; the issue's assignee and status stay unchanged.
 
-## Mention an agent in a comment
+## Assigning vs. @-mentioning
 
-Same as mentioning a member — type `@` to open the picker and select an agent. Once the comment is posted, Multica immediately enqueues a `task` for each mentioned agent with **that comment** as its trigger context. When the agent receives the task it can read:
+| | Assign to an agent | @-mention in a comment |
+|---|---|---|
+| Best for | Making the agent own the whole issue | Having the agent handle the current comment |
+| Changes the assignee | Yes | No |
+| Changes the status | No | No |
+| Targets per action | One agent or squad | Multiple agents or squads |
+| Focus of the run | The whole issue | The triggering comment, plus comments merged in the same batch |
 
-- The full issue (description + every historical comment)
-- The trigger comment itself — as the starting point for this run
+Use [assignment](/assigning-issues) when the issue needs a clear owner; use an @-mention to bring an agent into the discussion temporarily.
 
-The `@mention` Markdown syntax, the picker, and `@all` semantics are covered in [**Comments**](/comments).
+## Trigger preview
+
+After you pick an agent or squad in the comment editor, a trigger preview appears under the input:
+
+- which agents will start working once you send;
+- whether each target comes from a direct @-mention, the issue assignee, or a squad leader;
+- whether a target is unavailable, or you lack permission to run it.
+
+Unticking an agent skips this one trigger only — you don't need to delete its name from the comment, and the agent's Access is not changed.
+
+![Trigger preview before sending: lists the agents that will start working once the comment is sent](/images/docs/mention-trigger-preview.png)
+
+Once the comment is posted, an online runtime usually claims the task right away; if the runtime is offline, the task waits in the queue.
+
+## Automatic routing of replies
+
+A plain comment (containing no @ at all) is routed by discussion context:
+
+1. Replying to an agent's comment hands it to that agent.
+2. Replying inside a discussion an agent already participates in keeps that discussion's agent.
+3. Otherwise it goes to the issue's agent assignee; when the assignee is a squad, the leader handles it.
+
+When a comment explicitly @-mentions other targets (including members), the assignee fallback no longer applies.
+
+When a reply triggers an agent other than the assignee, Multica schedules a delayed fallback run for the assignee: if the target agent replies within about 5 minutes, the fallback is cancelled automatically; otherwise the assignee starts a run too.
+
+## Coalescing consecutive comments
+
+When the same agent already has a waiting task on the issue, new consecutive comments merge into the pending task; if the agent is already running, later comments wait for the current run to finish and merge into a single follow-up run. You can keep adding information without waiting for the agent to reply.
+
+When one comment @-mentions several different agents, each agent gets its own task; multiple mentions resolving to the same agent keep only one.
+
+## Comments that don't trigger agents
+
+Two ways:
+
+- Start the comment with `/note`: it's posted as a note between members and triggers no agent.
+- Use `@all`: it notifies every workspace member and switches off this comment's automatic trigger for the assignee.
+
+If the trigger preview still lists an agent, untick it before sending.
 
 <Callout type="info">
-**You can also `@`-mention a [squad](/squads) in a comment.** The same picker surfaces squads alongside members and agents; selecting one inserts `[@SquadName](mention://squad/<uuid>)` and triggers the squad's **leader agent** to coordinate a response — assignee and status stay untouched.
+`@all` does not include agents. Agents have no inbox; to put one to work, @-mention it explicitly, reply in its discussion, or assign the issue to it.
 </Callout>
 
-## How it differs from assignment
+## Access restrictions
 
-Both put the agent to work, but the mechanics are entirely different:
+An @-mention cannot bypass an agent's Access. When you lack permission to run the target, the target is archived, or it has no available runtime, the trigger preview explains that it won't start; the comment itself still posts normally. See [Agents](/agents#permissions-and-access) for the three Access levels.
 
-| Dimension | Assign | @-mention |
-|---|---|---|
-| Changes `assignee` | ✓ | ✗ |
-| Changes `status` | ✗ | ✗ |
-| Enqueues a `task` | Immediately (non-Backlog) | Immediately |
-| Trigger comment ID | Optional | Always carries the current comment |
-| Agents targeted per action | 1 (one assignee) | Many (a comment can @ multiple) |
-| Priority | Inherits from issue | Inherits from issue |
+## Agents mentioning each other
 
-The rule of thumb is simple: **use assignment when you want the agent to "own this issue from now on"; use @-mention when you want it to "take a look at the current context."**
+Agents can @-mention other agents in their replies. When A @-mentions B and B @-mentions A back, the system merges duplicate runs at the same moment, but it does not decide when the collaboration should end — write the stop condition into the agent instructions.
 
-## What happens when you @ multiple agents
+## Next steps
 
-If one comment @-mentions several agents, each one is enqueued an independent `task` on its own runtime — **they run in parallel** without blocking each other.
-
-If an agent already has a `queued` or `dispatched` `task` on the same issue (for example, it was just mentioned and has not started yet), the new mention is **deduplicated** and no duplicate `task` is enqueued. Deduplication is **scoped to a single comment** — two different comments seconds apart that both @ the same agent will both enqueue a `task`.
-
-<Callout type="warning">
-**Adding an @ by editing a comment does not re-trigger.** If you remember to add `@agent` only after posting, editing in the `@` only changes what is displayed — it **does not** deliver a new `task` to that agent. To trigger it, post a new comment or assign the issue to it.
-</Callout>
-
-## `@all` does not trigger any agent
-
-When you call everyone with `@all`, **only workspace members land in the inbox — agents are not included in the `@all` expansion.** This is by design: agents do not receive inbox notifications, so `@all` has no meaning for them. To put an agent to work, mention it by name.
-
-## Agents @-mentioning themselves does not loop
-
-Agents can post comments while executing, and those comments may contain `@mention`s. Multica has a hardcoded guard: **if the comment author is the same as the agent targeted by an `@` mention, that mention is skipped** — there is no "agent A @ agent A → new task → @ agent A again" infinite loop.
-
-This guard **only blocks direct self-references.** Agent A @-mentioning agent B works normally; if B then @-mentions A in its reply, A is triggered again — in other words, **indirect recursion is not blocked**. When writing agent instructions, be careful not to let a group of agents @-mention each other in a cycle.
-
-## Next
-
-- [**Squads**](/squads) — `@`-mention a squad to have the leader route the question to the right member
-- [**Chat**](/chat) — one-to-one conversation outside any issue
-- [**Autopilots**](/autopilots) — let agents start work automatically on a schedule
-- [**Comments**](/comments) — `@mention` syntax, the picker, and `@all` semantics
+- [Comments](/comments) — replies, resolving discussions, notifications, and subscriptions.
+- [Agents](/agents) — configure identity, Access, and runtimes.
+- [Squads](/squads) — have a leader coordinate multiple agents.

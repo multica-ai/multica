@@ -304,7 +304,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         <DialogTitle className="sr-only">{t(($) => $.create_project.title)}</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 text-caption">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
@@ -351,7 +351,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <button
                   type="button"
-                  className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
                   title={t(($) => $.create_project.icon_tooltip)}
                 >
                   {icon || "📁"}
@@ -371,7 +371,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             autoFocus
             defaultValue={draft.title}
             placeholder={t(($) => $.create_project.title_placeholder)}
-            className="text-lg font-semibold"
+            className="text-title font-semibold"
             onChange={(v) => updateTitle(v)}
             onSubmit={handleSubmit}
           />
@@ -385,7 +385,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             onUpdate={(md) => setDraft({ description: md })}
             debounceMs={500}
           />
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.create_project.description_hint)}
           </p>
         </div>
@@ -463,7 +463,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   value={leadFilter}
                   onChange={(e) => setLeadFilter(e.target.value)}
                   placeholder={t(($) => $.create_project.lead_placeholder)}
-                  className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                  className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
                 />
               </div>
               <div className="p-1 max-h-60 overflow-y-auto">
@@ -473,14 +473,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     updateLead(undefined, undefined);
                     setLeadOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                 >
                   <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-muted-foreground">{t(($) => $.create_project.no_lead)}</span>
                 </button>
                 {filteredMembers.length > 0 && (
                   <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
                       {t(($) => $.create_project.members_group)}
                     </div>
                     {filteredMembers.map((m) => (
@@ -491,7 +491,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           updateLead("member", m.user_id);
                           setLeadOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                       >
                         <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                         <span>{m.name}</span>
@@ -501,7 +501,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 )}
                 {filteredAgents.length > 0 && (
                   <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
                       {t(($) => $.create_project.agents_group)}
                     </div>
                     {filteredAgents.map((a) => (
@@ -512,7 +512,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           updateLead("agent", a.id);
                           setLeadOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                       >
                         <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                         <span>{a.name}</span>
@@ -523,7 +523,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {filteredMembers.length === 0 &&
                   filteredAgents.length === 0 &&
                   leadFilter && (
-                    <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+                    <div className="px-2 py-3 text-center text-body text-muted-foreground">
                       {t(($) => $.create_project.no_results)}
                     </div>
                   )}
@@ -596,7 +596,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("repos")}
                     className={cn(
-                      "rounded px-2 py-1 text-xs transition-colors",
+                      "rounded px-2 py-1 text-caption transition-colors",
                       sourceMode === "repos"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -608,7 +608,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("local")}
                     className={cn(
-                      "rounded px-2 py-1 text-xs transition-colors",
+                      "rounded px-2 py-1 text-caption transition-colors",
                       sourceMode === "local"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -621,7 +621,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
               {sourceMode === "repos" ? (
                 <>
-                  <div className="text-xs font-medium text-muted-foreground">
+                  <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.repos_heading)}
                   </div>
                   {workspaceRepos.length > 0 ? (
@@ -634,12 +634,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           onChange={(e) => setRepoSearch(e.target.value)}
                           aria-label={t(($) => $.create_project.repos_search_placeholder)}
                           placeholder={t(($) => $.create_project.repos_search_placeholder)}
-                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
                         />
                       </div>
                       <div className="max-h-48 space-y-1 overflow-y-auto">
                         {filteredWorkspaceRepos.length === 0 && repoQuery && (
-                          <p className="py-2 text-center text-xs text-muted-foreground">
+                          <p className="py-2 text-center text-caption text-muted-foreground">
                             {t(($) => $.create_project.repos_search_empty)}
                           </p>
                         )}
@@ -651,7 +651,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               key={repo.url}
                               onClick={() => toggleRepo(repo.url)}
                               className={cn(
-                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
+                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption hover:bg-accent transition-colors",
                                 checked && "bg-accent",
                               )}
                             >
@@ -669,7 +669,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       </div>
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       {t(($) => $.create_project.repos_empty)}
                     </p>
                   )}
@@ -685,13 +685,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       value={customRepoUrl}
                       onChange={(e) => setCustomRepoUrl(e.target.value)}
                       placeholder={t(($) => $.create_project.repos_url_placeholder)}
-                      className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+                      className="flex-1 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
                     />
                     <Button
                       type="submit"
                       size="sm"
                       variant="ghost"
-                      className="h-6 px-2 text-xs"
+                      className="h-6 px-2 text-caption"
                       disabled={!customRepoUrl.trim()}
                     >
                       {t(($) => $.create_project.repos_add)}
@@ -699,13 +699,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </form>
                   {selectedRepos.length > 0 && (
                     <div className="space-y-1 pt-1 border-t">
-                      <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                      <div className="text-micro font-medium text-muted-foreground uppercase tracking-wider">
                         {t(($) => $.create_project.repos_selected)}
                       </div>
                       {selectedRepos.map((url) => (
                         <div
                           key={url}
-                          className="flex items-center gap-2 text-xs"
+                          className="flex items-center gap-2 text-caption"
                         >
                           <GithubIcon className="size-3 text-muted-foreground" />
                           <RepoUrlText url={url} />
@@ -723,7 +723,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </>
               ) : (
                 <>
-                  <div className="text-xs font-medium text-muted-foreground">
+                  <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.local_heading)}
                   </div>
                   {/* Daemon must be online — daemon_id is required to bind
@@ -731,26 +731,26 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       the picker; once it boots we re-render automatically
                       via useLocalDaemonStatus. */}
                   {daemonStatus.daemonId && daemonStatus.running ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-micro text-muted-foreground">
                       {t(($) => $.create_project.local_on_device, {
                         device: daemonStatus.deviceName ?? t(($) => $.create_project.local_this_machine),
                       })}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    <p className="text-micro text-amber-600 dark:text-amber-400">
                       {t(($) => $.create_project.local_daemon_offline)}
                     </p>
                   )}
 
                   {selectedLocalPath ? (
                     <div className="rounded-md border px-2 py-2 space-y-1">
-                      <div className="flex items-start gap-2 text-xs">
+                      <div className="flex items-start gap-2 text-caption">
                         <FolderOpen className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                         <div className="min-w-0 flex-1">
                           {selectedLocalLabel && (
                             <div className="font-medium truncate">{selectedLocalLabel}</div>
                           )}
-                          <div className="font-mono text-[10px] text-muted-foreground break-all">
+                          <div className="font-mono text-micro text-muted-foreground break-all">
                             {selectedLocalPath}
                           </div>
                         </div>
@@ -767,7 +767,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         type="button"
                         size="sm"
                         variant="ghost"
-                        className="h-6 w-full text-xs"
+                        className="h-6 w-full text-caption"
                         onClick={handlePickLocalDirectory}
                         disabled={localPicking || !daemonStatus.running}
                       >
@@ -779,7 +779,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="w-full text-xs"
+                      className="w-full text-caption"
                       onClick={handlePickLocalDirectory}
                       disabled={localPicking || !daemonStatus.running}
                     >
@@ -791,10 +791,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   )}
 
                   {localPickError && (
-                    <p className="text-[11px] text-destructive">{localPickError}</p>
+                    <p className="text-micro text-destructive">{localPickError}</p>
                   )}
 
-                  <p className="text-[10px] text-muted-foreground leading-snug">
+                  <p className="text-micro text-muted-foreground leading-snug">
                     {t(($) => $.create_project.local_hint)}
                   </p>
                 </>

@@ -150,13 +150,13 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
             opacity={anyRunning ? "full" : "half"}
           />
           <span
-            className={`min-w-0 truncate text-xs ${anyRunning ? "text-info" : "text-muted-foreground"}`}
+            className={`min-w-0 truncate text-caption ${anyRunning ? "text-info" : "text-muted-foreground"}`}
           >
             {label}
           </span>
         </PopoverTrigger>
         <PopoverContent align="end" keepMounted className="w-80">
-          <div className="text-xs font-medium text-muted-foreground">
+          <div className="text-caption font-medium text-muted-foreground">
             {t(
               ($) =>
                 anyRunning

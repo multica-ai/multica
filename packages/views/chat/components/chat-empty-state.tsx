@@ -24,13 +24,13 @@ export function EmptyState({ agent }: { agent: Agent | null }) {
         />
       )}
       <div className="max-w-sm space-y-1 text-center">
-        <h3 className="text-base font-semibold">
+        <h3 className="text-title-sm font-semibold">
           {agent
             ? t(($) => $.empty_state.chat_with_named, { name: agent.name })
             : t(($) => $.empty_state.first_time_title)}
         </h3>
         {description && (
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <p className="text-body text-muted-foreground">{description}</p>
         )}
       </div>
     </div>

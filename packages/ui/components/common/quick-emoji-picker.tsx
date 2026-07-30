@@ -45,7 +45,7 @@ function QuickEmojiPicker({ onSelect, align = "start", className }: QuickEmojiPi
       />
       <PopoverContent align={align} className="w-auto p-0">
         {showFull ? (
-          <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading...</div>}>
+          <Suspense fallback={<div className="p-4 text-body text-muted-foreground">Loading...</div>}>
             <EmojiPicker onSelect={handleSelect} />
           </Suspense>
         ) : (
@@ -56,7 +56,7 @@ function QuickEmojiPicker({ onSelect, align = "start", className }: QuickEmojiPi
                   key={emoji}
                   type="button"
                   onClick={() => handleSelect(emoji)}
-                  className="h-8 w-8 flex items-center justify-center rounded hover:bg-accent text-base transition-colors"
+                  className="h-8 w-8 flex items-center justify-center rounded hover:bg-accent text-title-sm transition-colors"
                 >
                   {emoji}
                 </button>
@@ -65,7 +65,7 @@ function QuickEmojiPicker({ onSelect, align = "start", className }: QuickEmojiPi
             <button
               type="button"
               onClick={() => setShowFull(true)}
-              className="mt-1.5 w-full text-xs text-muted-foreground hover:text-foreground text-center py-1 rounded hover:bg-accent transition-colors"
+              className="mt-1.5 w-full text-caption text-muted-foreground hover:text-foreground text-center py-1 rounded hover:bg-accent transition-colors"
             >
               More emojis...
             </button>

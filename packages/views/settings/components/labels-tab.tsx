@@ -121,7 +121,7 @@ export function LabelsTab() {
             >
               <Tag className="size-3.5" />
               {t(($) => $.labels.scopes[type])}
-              <span className="text-xs tabular-nums text-muted-foreground">
+              <span className="text-caption tabular-nums text-muted-foreground">
                 {type === resourceType ? labels.length : ""}
               </span>
             </Button>
@@ -145,7 +145,7 @@ export function LabelsTab() {
         </div>
 
         <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(11rem,1fr)_minmax(12rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid">
+          <div className="hidden grid-cols-[minmax(11rem,1fr)_minmax(12rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground md:grid">
             <span>{t(($) => $.labels.columns.name)}</span>
             <span>{t(($) => $.labels.columns.description)}</span>
             <span>{t(($) => $.labels.columns.usage)}</span>
@@ -154,13 +154,13 @@ export function LabelsTab() {
           </div>
 
           {isLoading ? (
-            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+            <div className="px-4 py-12 text-center text-body text-muted-foreground">
               {t(($) => $.labels.loading)}
             </div>
           ) : filteredLabels.length === 0 ? (
             <div className="px-4 py-12 text-center">
               <Tag className="mx-auto size-6 text-muted-foreground/60" />
-              <p className="mt-3 text-sm font-medium">
+              <p className="mt-3 text-body font-medium">
                 {query
                   ? t(($) => $.labels.no_results)
                   : t(($) => $.labels.empty, { scope: scopeLabel })}
@@ -178,15 +178,15 @@ export function LabelsTab() {
                       className="size-2.5 shrink-0 rounded-full"
                       style={{ backgroundColor: label.color }}
                     />
-                    <span className="truncate text-sm font-medium">{label.name}</span>
+                    <span className="truncate text-body font-medium">{label.name}</span>
                   </div>
-                  <p className="min-w-0 truncate text-xs text-muted-foreground md:text-sm">
+                  <p className="min-w-0 truncate text-caption text-muted-foreground md:text-body">
                     {label.description || "—"}
                   </p>
-                  <span className="text-xs tabular-nums text-muted-foreground md:text-sm">
+                  <span className="text-caption tabular-nums text-muted-foreground md:text-body">
                     {t(($) => $.labels.usage_count, { count: label.usage_count ?? 0 })}
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     {new Date(label.updated_at).toLocaleDateString()}
                   </span>
                   <DropdownMenu>
@@ -362,7 +362,7 @@ function LabelEditorDialog({
                     className="size-5 rounded-full"
                     style={{ backgroundColor: draft.color }}
                   />
-                  <span className="font-mono text-xs uppercase text-muted-foreground">
+                  <span className="font-mono text-caption uppercase text-muted-foreground">
                     {draft.color}
                   </span>
                 </button>

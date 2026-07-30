@@ -42,7 +42,7 @@ export function WebhookEventFilterSection({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+      <div className="flex items-center gap-1.5 text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase">
         <Filter className="size-3" />
         {t(($) => $.dialog.event_filter_label)}
         <a
@@ -62,7 +62,7 @@ export function WebhookEventFilterSection({
           {filters.map((f, idx) => (
             <div
               key={idx}
-              className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+              className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-caption"
             >
               <span className="font-mono font-medium text-foreground">
                 {f.event}
@@ -96,7 +96,7 @@ export function WebhookEventFilterSection({
             }
           }}
           placeholder={t(($) => $.dialog.event_filter_event_placeholder)}
-          className="flex-1 min-w-0 rounded-md border bg-background px-2.5 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-ring"
+          className="flex-1 min-w-0 rounded-md border bg-background px-2.5 py-1.5 text-caption font-mono outline-none focus:ring-1 focus:ring-ring"
         />
         <input
           type="text"
@@ -109,14 +109,14 @@ export function WebhookEventFilterSection({
             }
           }}
           placeholder={t(($) => $.dialog.event_filter_actions_placeholder)}
-          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
+          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring"
         />
         <button
           type="button"
           onClick={addFilter}
           disabled={!newEvent.trim()}
           className={cn(
-            "inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+            "inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-caption font-medium transition-colors",
             newEvent.trim()
               ? "bg-background text-foreground hover:bg-accent/40 cursor-pointer"
               : "bg-muted text-muted-foreground cursor-not-allowed",
@@ -125,7 +125,7 @@ export function WebhookEventFilterSection({
           <Plus className="size-3.5" />
         </button>
       </div>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-micro text-muted-foreground">
         {t(($) => $.dialog.event_filter_hint)}
       </p>
     </div>

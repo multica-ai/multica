@@ -67,5 +67,9 @@
     "error_already_bound": "この Slack アカウントは別の Multica ユーザーに連携済みです。移行するにはまず明示的に解除する必要があります。",
     "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
+  },
+  "expandable_description": {
+    "expand": "詳細を表示",
+    "collapse": "折りたたむ"
   }
 }

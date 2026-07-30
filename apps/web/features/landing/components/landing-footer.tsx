@@ -30,11 +30,11 @@ export function LandingFooter() {
           <div className="lg:w-[340px] lg:shrink-0">
             <Link href="#product" className="flex items-center gap-3">
               <MulticaIcon className="size-5 text-white" noSpin />
-              <span className="text-[18px] font-semibold tracking-[0.04em] lowercase">
+              <span className="text-title font-semibold tracking-[0.04em] lowercase">
                 multica
               </span>
             </Link>
-            <p className="mt-4 max-w-[300px] text-[14px] leading-[1.7] text-white/50 sm:text-[15px]">
+            <p className="mt-4 max-w-[300px] text-body leading-[1.7] text-white/50 sm:text-body-lg">
               {t.footer.tagline}
             </p>
             <div className="mt-4 flex items-center gap-3">
@@ -67,7 +67,7 @@ export function LandingFooter() {
             <div className="mt-6">
               <Link
                 href={ctaHref}
-                className="inline-flex items-center justify-center rounded-[11px] bg-white px-5 py-2.5 text-[13px] font-semibold text-[#0a0d12] transition-colors hover:bg-white/88"
+                className="inline-flex items-center justify-center rounded-[11px] bg-white px-5 py-2.5 text-label font-semibold text-[#0a0d12] transition-colors hover:bg-white/88"
               >
                 {user ? t.header.dashboard : t.footer.cta}
               </Link>
@@ -78,7 +78,7 @@ export function LandingFooter() {
           <div className="grid flex-1 grid-cols-2 gap-8 sm:grid-cols-4">
             {groups.map((group) => (
               <div key={group.label}>
-                <h4 className="text-[12px] font-semibold uppercase tracking-[0.1em] text-white/40">
+                <h4 className="text-caption font-semibold uppercase tracking-[0.1em] text-white/40">
                   {group.label}
                 </h4>
                 <ul className="mt-4 flex flex-col gap-2.5">
@@ -89,7 +89,7 @@ export function LandingFooter() {
                         {...(link.href.startsWith("http")
                           ? { target: "_blank", rel: "noreferrer" }
                           : {})}
-                        className="text-[14px] text-white/50 transition-colors hover:text-white"
+                        className="text-body text-white/50 transition-colors hover:text-white"
                       >
                         {link.label}
                       </Link>
@@ -103,7 +103,7 @@ export function LandingFooter() {
 
         {/* Bottom: copyright + language switcher */}
         <div className="flex items-center justify-between py-6">
-          <p className="text-[13px] text-white/36">
+          <p className="text-label text-white/36">
             {t.footer.copyright.replace(
               "{year}",
               String(new Date().getFullYear()),
@@ -116,7 +116,7 @@ export function LandingFooter() {
                 key={l}
                 onClick={() => setLocale(l)}
                 className={cn(
-                  "px-1.5 py-1 text-[12px] font-medium transition-colors",
+                  "px-1.5 py-1 text-caption font-medium transition-colors",
                   l === locale
                     ? "text-white/70"
                     : "text-white/30 hover:text-white/50",

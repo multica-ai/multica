@@ -65,12 +65,12 @@ export function SlackBindPage({ token }: { token: string | null }) {
     <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
       <Card className="w-full">
         <CardContent className="space-y-4">
-          <h1 className="text-lg font-semibold">{t(($) => $.slack_bind.page_title)}</h1>
+          <h1 className="text-title font-semibold">{t(($) => $.slack_bind.page_title)}</h1>
           {state.kind === "idle" || state.kind === "redeeming" ? (
-            <p className="text-sm text-muted-foreground">{t(($) => $.slack_bind.redeeming)}</p>
+            <p className="text-body text-muted-foreground">{t(($) => $.slack_bind.redeeming)}</p>
           ) : state.kind === "needs-auth" ? (
             <>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body text-muted-foreground">
                 {t(($) => $.slack_bind.needs_auth_description)}
               </p>
               <Button
@@ -88,15 +88,15 @@ export function SlackBindPage({ token }: { token: string | null }) {
             </>
           ) : state.kind === "done" ? (
             <>
-              <p className="text-sm font-medium">{t(($) => $.slack_bind.done_title)}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-body font-medium">{t(($) => $.slack_bind.done_title)}</p>
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.slack_bind.done_description)}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm font-medium">{t(($) => $.slack_bind.error_title)}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-body font-medium">{t(($) => $.slack_bind.error_title)}</p>
+              <p className="text-caption text-muted-foreground">
                 {(() => {
                   switch (state.reason) {
                     case "missing_token":
@@ -112,7 +112,7 @@ export function SlackBindPage({ token }: { token: string | null }) {
                   }
                 })()}
               </p>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 {t(($) => $.slack_bind.error_admin_hint)}
               </p>
             </>

@@ -172,7 +172,7 @@ function CreateRunHint({
       <div className="overflow-hidden">
         <div
           aria-live="polite"
-          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-[0.6875rem] text-muted-foreground"
+          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground"
         >
           {avatarId && (
             <ActorAvatar
@@ -585,15 +585,15 @@ export function ManualCreatePanel({
               <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
                 <Check className="size-3" />
               </div>
-              <span className="text-sm font-medium">{t(($) => $.create_issue.toast_created)}</span>
+              <span className="text-body font-medium">{t(($) => $.create_issue.toast_created)}</span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+            <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
               <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
               <span className="truncate">{issue.identifier} – {issue.title}</span>
             </div>
             <button
               type="button"
-              className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+              className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
               onClick={() => {
                 router.push(p.issueDetail(issue.id));
                 toast.dismiss(toastId);
@@ -625,16 +625,16 @@ export function ManualCreatePanel({
                   <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
                     <AlertTriangle className="size-3" />
                   </div>
-                  <span className="text-sm font-medium">
+                  <span className="text-body font-medium">
                     {t(($) => $.create_issue.toast_duplicate_title)}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
                   <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
                 </div>
                 <button
                   type="button"
-                  className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+                  className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
                     router.push(p.issueDetail(dup.issue.id));
                     toast.dismiss(toastId);
@@ -803,7 +803,7 @@ export function ManualCreatePanel({
 
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-xs">
+              <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
                 <ChevronRight className="size-3 text-muted-foreground/50" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
@@ -852,7 +852,7 @@ export function ManualCreatePanel({
                 autoFocus
                 defaultValue={draft.manual.title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
-                className="text-lg font-semibold"
+                className="text-title font-semibold"
                 onChange={(v) => updateTitle(v)}
                 // Chord only — plain Enter still just ends title editing (#5532).
                 onSubmitShortcut={handleSubmit}
@@ -1015,7 +1015,7 @@ export function ManualCreatePanel({
                       triggerRender={<PillButton />}
                       trigger={
                         <>
-                          <PropertyIcon property={property} className="size-3.5 text-xs" />
+                          <PropertyIcon property={property} className="size-3.5 text-caption" />
                           <span className="max-w-32 truncate">{property.name}</span>
                           {value !== undefined && (
                             <span className="max-w-40 truncate text-muted-foreground">
@@ -1032,7 +1032,7 @@ export function ManualCreatePanel({
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
                   space is tight, but ⋯ always stays last in DOM order. */}
               {parentIssueId && parentIssue && (
-                <div className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60">
+                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
@@ -1059,7 +1059,7 @@ export function ManualCreatePanel({
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
                 >
                   <div className="flex items-center gap-1.5 py-1 pl-2.5">
                     <ArrowDown className="size-3 text-muted-foreground" />
@@ -1165,7 +1165,7 @@ export function ManualCreatePanel({
                             )}
                             onClick={() => setCustomPropertyPickerId(property.id)}
                           >
-                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <PropertyIcon property={property} className="size-3.5 text-caption" />
                             <span className="truncate">{property.name}</span>
                             {Object.prototype.hasOwnProperty.call(
                               propertyValues,
@@ -1244,12 +1244,12 @@ export function ManualCreatePanel({
                   aria-disabled={gate.uploading || undefined}
                   aria-busy={gate.uploading || undefined}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
                 </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                   <Switch
                     size="sm"
                     checked={keepOpen}

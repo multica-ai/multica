@@ -4,13 +4,13 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
-  BookOpen,
   Download,
   HardDrive,
   Lock,
   Pencil,
   Plus,
 } from "lucide-react";
+import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
   AgentRuntime,
@@ -173,7 +173,7 @@ function PageHeaderBar({
   const { t } = useT("skills");
   return (
     <CollectionPageHeader
-      icon={BookOpen}
+      icon={SkillIcon}
       title={t(($) => $.page.title)}
       count={totalCount}
       description={t(($) => $.page.tagline)}
@@ -237,7 +237,7 @@ function NameCell({ row }: { row: SkillRow }) {
   const { skill, canEdit } = row;
   return (
     <ListGridCell className="gap-1.5">
-      <span className="min-w-0 truncate text-sm font-medium">
+      <span className="min-w-0 truncate text-body font-medium">
         {skill.name}
       </span>
       {!canEdit && (
@@ -259,7 +259,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
   if (agents.length === 0) {
     return (
       <ListGridCell>
-        <span className="text-xs text-muted-foreground/70">
+        <span className="text-caption text-muted-foreground/70">
           {t(($) => $.table.unused)}
         </span>
       </ListGridCell>
@@ -277,7 +277,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
           isAgent
           size="md"
         />
-        <span className="min-w-0 truncate text-xs text-muted-foreground">
+        <span className="min-w-0 truncate text-caption text-muted-foreground">
           {agent.name}
         </span>
       </ListGridCell>
@@ -307,7 +307,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
           </Tooltip>
         ))}
         {extra > 0 && (
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground ring-2 ring-background">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-caption font-medium text-muted-foreground ring-2 ring-background">
             +{extra}
           </span>
         )}
@@ -349,7 +349,7 @@ function SourceCell({
   }
 
   return (
-    <ListGridCell className="hidden gap-1.5 text-xs text-muted-foreground @2xl:flex">
+    <ListGridCell className="hidden gap-1.5 text-caption text-muted-foreground @2xl:flex">
       {icon}
       <span className="min-w-0 truncate">{label}</span>
     </ListGridCell>
@@ -367,7 +367,7 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
             avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
             size="md"
           />
-          <span className="min-w-0 truncate text-xs text-muted-foreground">
+          <span className="min-w-0 truncate text-caption text-muted-foreground">
             {creator.name}
           </span>
         </>
@@ -384,7 +384,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT("skills");
   return (
     <CollectionPageState
-      icon={BookOpen}
+      icon={SkillIcon}
       title={t(($) => $.page.empty.title)}
       description={t(($) => $.page.empty.description)}
       actions={
@@ -802,7 +802,7 @@ export default function SkillsPage() {
       {supportingQueryDown && (
         <div
           role="status"
-          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-6 py-2 text-xs text-muted-foreground"
+          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-6 py-2 text-caption text-muted-foreground"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           <span>{t(($) => $.page.supporting_data_warning)}</span>
@@ -859,7 +859,7 @@ export default function SkillsPage() {
               }}
             >
               {rows.length === 0 && (
-                <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+                <div className="col-span-full py-16 text-center text-body text-muted-foreground">
                   {t(($) => $.page.no_matches.title)}
                 </div>
               )}
@@ -895,14 +895,14 @@ export default function SkillsPage() {
                   <ListGridCell className="hidden px-0 @2xl:flex" />
                 )}
                 {isColVisible("updated") ? (
-                  <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
                     {timeAgo(row.skill.updated_at)}
                   </ListGridCell>
                 ) : (
                   <ListGridCell className="hidden px-0 @2xl:flex" />
                 )}
                 {isColVisible("created") ? (
-                  <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
                     {timeAgo(row.skill.created_at)}
                   </ListGridCell>
                 ) : (

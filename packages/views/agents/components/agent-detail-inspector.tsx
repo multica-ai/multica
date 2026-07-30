@@ -195,7 +195,7 @@ export function AgentDetailInspector({
                 aria-invalid={nameInvalid || undefined}
               />
               {nameInvalid ? (
-                <p className="mt-1 text-xs text-destructive">
+                <p className="mt-1 text-caption text-destructive">
                   {t(($) => $.inspector.rename_required)}
                 </p>
               ) : null}
@@ -374,7 +374,7 @@ function ConcurrencyField({
         aria-label={t(($) => $.inspector.prop_concurrency)}
         className="font-mono tabular-nums"
       />
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p className="mt-1 text-caption text-muted-foreground">
         {t(($) => $.pickers.concurrency_range, {
           min: AGENT_MAX_CONCURRENT_TASKS_MIN,
           max: AGENT_MAX_CONCURRENT_TASKS_MAX,

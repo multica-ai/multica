@@ -132,7 +132,7 @@ export function ProjectPicker({
         ))}
 
         {projects.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">{t(($) => $.picker.empty)}</div>
+          <div className="px-2 py-1.5 text-caption text-muted-foreground">{t(($) => $.picker.empty)}</div>
         )}
         {projects.length > 0 && filtered.length === 0 && query && <PickerEmpty />}
       </PropertyPicker>

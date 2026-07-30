@@ -1,292 +1,267 @@
 ---
 title: Environment variables
-description: The full list of environment variables for running a self-hosted Multica server.
+description: Common server, storage, integration, and runtime configuration for self-hosting Multica.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A self-hosted Multica [server](/self-host-quickstart) reads its configuration from environment variables at startup — database, sign-in, email, storage, signup allowlists all live here. This page groups every variable by purpose: each section spells out **what happens if you leave it unset** and **which ones you must set in production**. For how to actually configure the auth-related ones, see [Sign-in and signup configuration](/auth-setup).
+Multica reads environment variables at process startup. After changing one, restart the affected API, web, or daemon process. Docker Compose's `docker compose restart` does not re-read `.env`; recreate containers with `up -d` for changes to take effect.
 
-## Core server variables
+This page lists deployment-facing configuration only; test variables and internal task variables are not covered here. It is a grouped reference — for full deployment steps, see the [self-host quickstart](/self-host-quickstart).
 
-These are the core variables you must think about before deploying — some have defaults that let the server start, but in production you should set the required ones explicitly.
+## Minimum production configuration
 
-| Variable | Default | Required in production? |
-|---|---|---|
-| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **Yes** |
-| `PORT` | `8080` | No (unless you change the port) |
-| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **Yes** (the default is unsafe) |
-| `APP_ENV` | empty | **Yes** (must be `production`) |
-| `FRONTEND_ORIGIN` | empty | **Yes** (self-host must set its own domain) |
-| `MULTICA_DEV_VERIFICATION_CODE` | empty | No (must stay empty in production) |
-| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | No. Optional delay after `SIGTERM`/`SIGINT` before graceful shutdown begins. Accepts non-negative Go duration strings such as `300s` or `5m`; empty or `0` starts shutdown immediately |
+```dotenv
+DATABASE_URL=postgres://user:password@postgres:5432/multica?sslmode=require
+JWT_SECRET=<long-random-secret>
+APP_ENV=production
+FRONTEND_ORIGIN=https://multica.example.com
+MULTICA_APP_URL=https://multica.example.com
+MULTICA_PUBLIC_URL=https://api.multica.example.com
+```
 
-When using `MULTICA_SHUTDOWN_HOLD_DURATION` under Kubernetes, set `terminationGracePeriodSeconds` longer than the hold plus the server's subsequent graceful-shutdown budget. Setting both to the same duration can make kubelet send `SIGKILL` before cleanup finishes.
+You also need to pick an email service, otherwise verification codes and invitations are only written to the server log.
 
 <Callout type="warning">
-**Keep `MULTICA_DEV_VERIFICATION_CODE` empty in production.** A fixed local test code is disabled by default, but if you opt in with `MULTICA_DEV_VERIFICATION_CODE=888888`, anyone who can request a code can sign in with that fixed value while `APP_ENV` is non-production. The shortcut is ignored when `APP_ENV=production`.
+Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_VERIFICATION_CODE`.
 </Callout>
 
-### Database connection pool
+## API and database
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_MAX_CONNS` | `25` | pgxpool max connections. The daemon polls frequently (every 3s) and uses connections; larger deployments may need a higher value |
-| `DATABASE_MIN_CONNS` | `5` | Minimum idle connections |
+| `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
+| `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
+| `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `PORT` | `8080` | API listen port |
+| `JWT_SECRET` | fixed development value | Secret for sign-in JWTs and some signing flows |
+| `APP_ENV` | empty | Set to `production` in production |
+| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
+| `LOG_LEVEL` | application default | Log level |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 
-**When unset**, the values above are used — **not** pgx's built-in 4/NumCPU defaults, which previously caused pool exhaustion in production.
+When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
 
-## Email configuration
+## Public URLs and browser access
 
-Multica supports two delivery backends — [Resend](https://resend.com/) for cloud deployments, or an SMTP relay for internal / on-premise networks. `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set.
+| Variable | Default | Description |
+|---|---|---|
+| `FRONTEND_ORIGIN` | empty | Frontend origin users visit; used for CORS, cookies, and invitation links |
+| `MULTICA_APP_URL` | falls back to `FRONTEND_ORIGIN` | User-reachable web URL; CLI sign-in and account-link URLs use it |
+| `MULTICA_PUBLIC_URL` | empty | Public API URL; used for webhook URLs and runtime connection instructions |
+| `CORS_ALLOWED_ORIGINS` | empty | Extra allowed HTTP origins, comma-separated |
+| `ALLOWED_ORIGINS` | falls back to CORS / frontend origins | WebSocket origin allowlist, comma-separated |
+| `COOKIE_DOMAIN` | empty | Required when the frontend and API use different hosts and the browser talks to the API domain directly; keep empty for single-domain deployments |
+
+When the frontend and API run on different hosts and the browser talks to the API domain directly, you must set `COOKIE_DOMAIN` — otherwise the browser cannot read the CSRF cookie: every write request returns `403 CSRF validation failed` while reads work fine. Use the narrowest parent domain that covers both hosts (`.agent.example.com` over `.example.com`). It spreads the sign-in session cookie to every host under that domain, which is only acceptable when all of those hosts are operated by the same trusted party. After changing it, clear the old cookies on both hosts and sign in again. If you follow the same-origin recipe in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) (the browser only visits the app domain), keep it empty. Do not use an IP address — browsers ignore cookies whose Domain is an IP.
+
+<Callout type="warning">
+Self-hosted deployments must set `FRONTEND_ORIGIN`. Without it, invitation links, cookie security attributes, and WebSocket origin checks can all disagree with your actual domain.
+</Callout>
+
+## Email and sign-in
 
 ### Resend
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESEND_API_KEY` | empty | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address for Resend (must be a domain verified in your Resend account). SMTP also uses it when `SMTP_FROM_EMAIL` is unset |
+| `RESEND_API_KEY` | empty | Setting it enables Resend |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address; must belong to a verified domain |
 
-### SMTP relay
+### SMTP
 
-| Variable | Default | Description |
-|---|---|---|
-| `SMTP_HOST` | empty | SMTP relay hostname. Setting this activates SMTP mode and overrides Resend |
-| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission, or `465` for SMTPS (implicit TLS, auto-enabled) |
-| `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
-| `SMTP_PASSWORD` | empty | SMTP password |
-| `SMTP_FROM_EMAIL` | empty | Sender address for SMTP `MAIL FROM` and `From:`. Falls back to `RESEND_FROM_EMAIL` when unset |
-| `SMTP_TLS` | `starttls` | TLS mode. `implicit` (aliases `smtps`, `ssl`) forces an immediate TLS handshake on connect (SMTPS); port `465` auto-enables it. Unset / `starttls` upgrades via STARTTLS after connect |
-| `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
-| `SMTP_EHLO_NAME` | machine hostname | EHLO/HELO name announced to the relay. Set a real FQDN when a strict relay (e.g. Google Workspace `smtp-relay.gmail.com`) rejects the default greeting from a public IP — otherwise the relay drops the connection and it surfaces as an opaque `EOF` on a later command |
-
-STARTTLS is upgraded automatically when the server advertises it. The dial timeout is 10s and the whole SMTP session has a 30s deadline, so a black-holed relay can't hang the auth handler.
-
-**Behavior when neither is set**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
-
-## Google OAuth configuration
-
-Optional. Leave unset for email + verification code only; configure it to add "Sign in with Google" on the sign-in page.
+SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 
 | Variable | Default | Description |
 |---|---|---|
-| `GOOGLE_CLIENT_ID` | empty | Google Cloud OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | empty | Google Cloud OAuth secret |
-| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth callback URL (self-host: replace with your frontend domain) |
+| `SMTP_HOST` | empty | SMTP host; setting it enables SMTP |
+| `SMTP_PORT` | `25` | Common values: 25, 587, 465 |
+| `SMTP_USERNAME` | empty | Username; leave empty for anonymous relays |
+| `SMTP_PASSWORD` | empty | Password |
+| `SMTP_FROM_EMAIL` | falls back to `RESEND_FROM_EMAIL` | Envelope From and message From |
+| `SMTP_TLS` | `starttls` | `implicit`, `smtps`, or `ssl` means implicit TLS; port 465 enables it automatically |
+| `SMTP_TLS_INSECURE` | `false` | Skips certificate verification; trusted internal networks only |
+| `SMTP_EHLO_NAME` | hostname | EHLO/FQDN required by strict relays |
 
-**Takes effect at runtime**: the frontend reads these settings via `/api/config` at runtime, so **changing them requires no frontend rebuild or redeploy** — restart the server and they apply.
-
-Full setup (including Google Cloud Console steps) is in [Sign-in and signup configuration](/auth-setup#google-oauth-configuration).
-
-## File storage configuration
-
-Multica stores user-uploaded attachments (images and files in comments). **S3 is preferred**; if S3 is not configured, it falls back to local disk.
-
-### S3 / S3-compatible storage
+### Google OAuth
 
 | Variable | Default | Description |
 |---|---|---|
-| `S3_BUCKET` | empty | **Bucket name only** (for example `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public host from `S3_BUCKET` + `S3_REGION`. Setting this enables S3 storage |
-| `S3_REGION` | `us-west-2` | AWS region. Must match the bucket's actual region — it is used both for SDK signing and for building the public URL |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Static credentials. When both are unset, the AWS SDK default credential chain is used (IAM role / environment credentials) |
-| `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/)). Setting this switches to path-style URLs |
-| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | Attachment download path: `auto`, `cloudfront`, `presign`, or `proxy`. In `auto`, CloudFront is preferred when fully configured; internal/private endpoint hosts use the server proxy; public S3-compatible endpoints use presigned GET URLs when supported |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | TTL for CloudFront signed URLs and S3 presigned download URLs. Accepts Go duration strings |
+| `GOOGLE_CLIENT_ID` | empty | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | empty | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Must exactly match the callback URL in the Google Console |
 
-**When `S3_BUCKET` is unset**: the server logs `"S3_BUCKET not set, cloud upload disabled"` at startup, and all uploads fall back to local disk.
-
-**Stored object URLs** are constructed in this order of priority:
-
-1. `https://<CLOUDFRONT_DOMAIN>/<key>` if `CLOUDFRONT_DOMAIN` is set.
-2. `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style) if `AWS_ENDPOINT_URL` is set.
-3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). When `S3_BUCKET` contains dots, the server falls back to `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style) because the AWS-issued wildcard TLS certificate does not validate dotted bucket hosts.
-
-API `download_url` values use `GET /api/attachments/{id}/download` unless CloudFront signing is configured. The endpoint redirects to CloudFront/S3 presigned URLs when safe, or streams through the server for private/internal endpoints such as `http://rustfs:9000`. For Docker/VPC-only object stores, set `ATTACHMENT_DOWNLOAD_MODE=proxy` if auto detection is not conservative enough for your network.
-
-### Local disk (when S3 is not configured)
+### Signup scope
 
 | Variable | Default | Description |
 |---|---|---|
-| `LOCAL_UPLOAD_DIR` | `./data/uploads` | Local storage directory |
-| `LOCAL_UPLOAD_BASE_URL` | empty (returns relative paths) | Public base URL — leave unset and the frontend can't resolve a full URL for attachments |
+| `ALLOW_SIGNUP` | `true` | Whether new accounts can be created when no allowlist is configured |
+| `ALLOWED_EMAILS` | empty | Full email addresses allowed to sign up, comma-separated |
+| `ALLOWED_EMAIL_DOMAINS` | empty | Email domains allowed to sign up, comma-separated |
+| `DISABLE_WORKSPACE_CREATION` | `false` | Blocks all users from creating workspaces; no owner/admin exception |
+| `MULTICA_DEV_VERIFICATION_CODE` | empty | Fixed 6-digit test code for non-production environments |
 
-### CloudFront (optional)
+For the exact allowlist evaluation order, see [Sign-in and signup](/auth-setup#signup-restrictions).
 
-If you front S3 with CloudFront, three variables apply: `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, `CLOUDFRONT_PRIVATE_KEY` (or `CLOUDFRONT_PRIVATE_KEY_SECRET` to read from Secrets Manager). Skip them if you don't use CloudFront — they don't conflict with S3 configuration.
+## Attachment storage
 
-### Cookie domain
+When `S3_BUCKET` is unset, Multica uses local disk.
 
-| Variable | Default | Description |
-|---|---|---|
-| `COOKIE_DOMAIN` | empty | Scope of the session cookie |
-
-- **Empty**: the cookie is valid only on the exact host visited (correct for single-host deployments)
-- **Set to `.example.com`**: the cookie is shared across subdomains (so `app.example.com` and `api.example.com` share a sign-in session)
-- **Required, not optional, when the frontend and backend are on different hostnames**: the browser has to read the `multica_csrf` cookie from the page's own origin, and without it every write request fails with `403 CSRF validation failed` while reads keep working
-- Use the **narrowest** parent domain that still covers both hosts (`.agent.example.com`, not `.example.com`). It also scopes the `multica_auth` session cookie to every host under that domain, so only use this layout when they are all operated by the same trusted party — see [Self-Hosting](/getting-started/self-hosting) for the full configuration
-- Warning: it cannot be an IP address (browsers ignore it)
-
-## Restricting who can sign up
-
-Three allowlist layers combine by priority. **If any layer is set to a non-empty value, emails that don't match are rejected** — even `ALLOW_SIGNUP=true` won't override that.
+### S3 or compatible storage
 
 | Variable | Default | Description |
 |---|---|---|
-| `ALLOWED_EMAILS` | empty | Explicit email allowlist (comma-separated). When non-empty, only listed emails can sign up |
-| `ALLOWED_EMAIL_DOMAINS` | empty | Domain allowlist (comma-separated). When non-empty, only listed domains can sign up |
-| `ALLOW_SIGNUP` | `true` | Signup master switch. Set `false` to disable signup entirely |
+| `S3_BUCKET` | empty | Bucket name; do not use the full hostname |
+| `S3_REGION` | `us-west-2` | Region the bucket lives in |
+| `AWS_ACCESS_KEY_ID` | SDK default credential chain | Static access key |
+| `AWS_SECRET_ACCESS_KEY` | SDK default credential chain | Static secret key |
+| `AWS_ENDPOINT_URL` | empty | S3-compatible endpoint such as MinIO |
+| `S3_USE_PATH_STYLE` | `true` with a custom endpoint | Whether to use path-style addressing |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, or `proxy` |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed download URLs |
 
-**The counterintuitive part**: `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` does **not** mean "allow company.io or everyone" — it means **only allow company.io**. The allowlist layers are AND semantics — the full decision tree is in [Sign-in and signup configuration → Signup allowlists](/auth-setup#restricting-who-can-sign-up).
+Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
 
-**Invite flows themselves do not check the signup allowlist** — but the invitee must still be able to **sign in** before accepting the invite. If they already have a Multica account (for example from another workspace), they can accept directly, unaffected by the allowlist; **if they have never signed up**, the first step of sign-in (requesting a verification code) still passes through the allowlist check, and an email rejected by `ALLOW_SIGNUP=false` or by `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` **cannot finish signup, and therefore cannot accept the invite**.
-
-## Locking down workspace creation
-
-`ALLOW_SIGNUP=false` blocks new accounts, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue, repo, and agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap.
-
-| Variable | Default | Description |
-|---|---|---|
-| `DISABLE_WORKSPACE_CREATION` | `false` | When `true`, every call to `POST /api/workspaces` returns `403 workspace creation is disabled for this instance`. The web UI hides every "Create workspace" affordance via `/api/config`. There is no role/owner exception — the gate is global per instance |
-
-Recommended bootstrap sequence:
-
-1. Start the instance with `DISABLE_WORKSPACE_CREATION` unset (the default).
-2. Sign in as the admin and create the shared workspace.
-3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. From this point on, users join via invitation only.
-
-If you also want to keep `ALLOW_SIGNUP=true` so invited users can finish signup with their first verification code, combine `DISABLE_WORKSPACE_CREATION=true` with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS` to scope which addresses can sign up. Setting `ALLOW_SIGNUP=false` will additionally block pending invitees from creating their account at all — useful only on instances where every member already has a Multica account.
-
-## Rate limiting (optional Redis)
-
-Public auth endpoints — `/auth/send-code`, `/auth/verify-code`, `/auth/google` — have per-IP fixed-window rate limiting in front of them. The limiter is backed by Redis. When `REDIS_URL` is unset the middleware is a **no-op** (fail-open) and the backend logs `rate limiting disabled: REDIS_URL not configured` at startup.
+### Local disk
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | empty | Redis connection URL (for example `redis://localhost:6379/0`). When unset, rate limiting on auth endpoints is disabled. The same Redis is also used by the realtime hub fan-out, the PAT cache, and the daemon-token cache — they all fall back to in-memory / direct-DB mode when unset |
-| `REDIS_DISABLE_CLIENT_NAME` | `false` | Set to `true` to skip the `CLIENT SETNAME` handshake on every Redis connection. **Required** for managed Redis providers that block the `CLIENT` command, such as GCP Memorystore or AWS ElastiCache with restricted ACLs. When enabled, connections lose their descriptive name in `CLIENT LIST` output but gain compatibility with restricted providers |
-| `RATE_LIMIT_AUTH` | `5` | Max requests per IP per minute against `/auth/send-code` and `/auth/google` |
-| `RATE_LIMIT_AUTH_VERIFY` | `20` | Max requests per IP per minute against `/auth/verify-code` |
-| `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated CIDRs whose `X-Forwarded-For` header the limiter is allowed to trust. Empty (the default) means **never trust XFF** — the limiter only uses the direct connection's `RemoteAddr` |
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | Directory for files and metadata; needs a persistent volume |
+| `LOCAL_UPLOAD_BASE_URL` | empty | Optional public base URL; when empty, in-app relative URLs are returned |
 
-When a request is over the limit, the server replies with `429 Too Many Requests`, `Retry-After: 60`, and body `{"error":"too many requests"}`.
+### CloudFront
 
-<Callout type="warning">
-**Behind a reverse proxy you must set `RATE_LIMIT_TRUSTED_PROXIES`.** Otherwise every real user shares the proxy's IP from the backend's point of view, the whole deployment ends up in one bucket, and `/auth/send-code` becomes 5 req/min for the entire site. Typical values: `127.0.0.1/32,::1/128` for a same-host Caddy / Nginx; the CDN's published ranges for Cloudflare / ALB / CloudFront. Only IPs whose `RemoteAddr` falls inside one of these CIDRs may use `X-Forwarded-For` to identify the client.
-</Callout>
+| Variable | Description |
+|---|---|
+| `CLOUDFRONT_DOMAIN` | CDN domain |
+| `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID |
+| `CLOUDFRONT_PRIVATE_KEY` | Full private key |
+| `CLOUDFRONT_PRIVATE_KEY_SECRET` | Use when reading the private key from Secrets Manager |
 
-This separate `RATE_LIMIT_TRUSTED_PROXIES` is **not** the same as `MULTICA_TRUSTED_PROXIES`, which controls the autopilot-webhook limiter (`/api/webhooks/autopilots/{token}`). Each limiter parses its own list, so a deployment behind a proxy should set both.
-
-## Daemon tuning parameters
-
-The daemon runs on the user's local machine, and its config is read from local environment variables too. The common ones:
+## Redis and rate limiting
 
 | Variable | Default | Description |
 |---|---|---|
-| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Server address (self-host: replace with your domain) |
-| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Human-readable device label shown in the Runtimes UI |
-| `MULTICA_AGENT_RUNTIME_NAME` | built-in default | Runtime display name |
+| `REDIS_URL` | empty | Used for auth rate limiting, realtime events, and the token cache; when unset, realtime events fall back to in-process memory and auth rate limiting is off |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
+| `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
+| `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated proxy CIDRs allowed to provide `X-Forwarded-For` |
+| `MULTICA_TRUSTED_PROXIES` | empty | Trusted proxy CIDRs for automation webhooks and realtime connections |
+
+Deployments behind a reverse proxy must list their real proxy ranges. Do not blanket-trust all sources, or clients can forge forwarded IPs.
+
+The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; without it, the startup log notes that rate limiting is disabled. If Redis becomes temporarily unavailable, the limiter fails open and does not block normal sign-ins.
+
+## External integrations
+
+| Integration | Variable | Description |
+|---|---|---|
+| GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
+| GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC and connect-state signing secret |
+| GitHub | `GITHUB_APP_ID` | Needed for CI status and mergeability on PR cards and the "pick from GitHub" repository picker |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
+| Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
+| Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
+| Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
+| Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
+| Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
+| Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab integration switch; enabled by default in compose |
+| Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
+
+Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
+
+For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), and [Slack bot](/slack-bot-integration#self-hosting-setup).
+
+## Server-side LLM
+
+This group configures server-side assist generation, such as conversation titles; it is not the AI coding tool credentials agents use to execute tasks.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_LLM_API_KEY` | empty | OpenAI-compatible API key |
+| `MULTICA_LLM_BASE_URL` | empty | OpenAI-compatible endpoint |
+| `MULTICA_LLM_DEFAULT_MODEL` | built-in default | Used when a request does not specify a model |
+
+When both the API key and base URL are empty, server-side LLM generation is off and callers use local fallback logic.
+
+## Daemon configuration
+
+The variables below are read on the computer that runs your agents, not in the API container.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket URL; also accepts `http(s)` |
+| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Device name shown in the runtime list |
+| `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Runtime display name |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Task polling interval when no wake event arrives |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Task polling interval |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
-| `MULTICA_AGENT_TIMEOUT` | `0` | Absolute wall-clock cap per agent run. `0` disables the cap and lets the inactivity watchdogs alone bound long runs. Set a positive Go duration when you want a hard resource/cost ceiling |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex-specific inactivity watchdog window |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` startup RPC timeout |
-| `MULTICA_DAEMON_AUTO_UPDATE` | cloud: `true`, self-host: `false` | Set to `false`/`0`/`no`/`off` to turn off the daemon's periodic CLI self-update; `true`/`1`/`yes`/`on` opts a self-host daemon into upstream updates |
-| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | How often the daemon polls GitHub for a newer CLI release |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Global no-message watchdog for runs with no tool in flight. `0` disables the whole watchdog, including provider-specific overrides |
-| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific no-message window for missing first tokens or stalled streams. `0` falls back to `MULTICA_AGENT_IDLE_WATCHDOG`; larger values cannot extend that global bound |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence budget while a tool call is in flight. `0` disables the stuck-tool backstop |
-| `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |
-| `MULTICA_<PROVIDER>_MODEL` | empty | Default model for each AI coding tool |
-| `MULTICA_<PROVIDER>_ARGS` | empty | Daemon-wide default CLI arguments for a backend, applied to every task before each agent's own `custom_args`. Supported for `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, and `MULTICA_CODEBUDDY_ARGS` |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent task ceiling per daemon |
+| `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Silence ceiling with no output and no tool execution |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence ceiling for a single tool call |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex semantic-silence threshold |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server startup handshake ceiling |
+| `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
 
-For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for four tools: Claude Code, Codex, CodeBuddy, and Qwen Code. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, and `MULTICA_QWEN_ARGS`. For example:
 
-### Persisting daemon settings in `config.json`
-
-Every daemon knob in the table above — `device_name`, `runtime_name`, `max_concurrent_tasks`, `poll_interval`, `heartbeat_interval`, `agent_timeout`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval` — can also be persisted in the profile's `~/.multica/config.json` (or `~/.multica/profiles/<name>/config.json`) so you don't have to re-pass flags or export env vars on every `daemon start`. Set them with:
-
-```bash
-multica config set device_name my-vm-custom-name
-multica config set runtime_name worker-a
-multica config set max_concurrent_tasks 8
-multica config set poll_interval 10s          # Go duration, must be > 0
-multica config set heartbeat_interval 30s
-multica config set agent_timeout 1h           # or 0s to explicitly disable the cap
-multica config set codex_semantic_inactivity_timeout 15m
-multica config set codex_handshake_timeout 45s
-multica config set disable_auto_update true   # single-direction: only turns auto-update off
-multica config set auto_update_check_interval 12h
+```dotenv
+MULTICA_CLAUDE_PATH=/opt/bin/claude
+MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
 
-Duration keys accept any positive Go duration (`500ms`, `10s`, `1m30s`, ...). Values ≤ 0 (`0s`, `-5s`) and un-parseable strings are rejected at `config set` time — **except `agent_timeout`, where `0s` is a meaningful "disable the wall-clock cap" sentinel** (negative values are still rejected). To clear a persisted value and fall back to the env / built-in default, pass an empty string: `multica config set poll_interval ""`.
+Precedence is command-line flag → environment variable → `~/.multica/config.json` → built-in default. For watchdog behavior, see [Daemon and runtimes](/daemon-runtimes).
 
-`disable_auto_update` is a single-direction bool: setting it to `true` turns off the daemon's periodic CLI self-update, and setting it to `false` (or clearing with `""`) hands the decision back to `MULTICA_DAEMON_AUTO_UPDATE` / the cloud-vs-self-host default. It cannot be used to *force* auto-update on from the config file.
+### Persisting daemon configuration
 
-Precedence, highest first: `--flag` on `daemon start` > `MULTICA_…` env var > `config.json` value > built-in default. A live env override (typical for systemd units) always wins over the file, and an explicit CLI flag wins over both.
+Common daemon-side settings can also be written to `~/.multica/config.json` instead of relying on shell environment variables; named profiles keep theirs at `~/.multica/profiles/<name>/config.json`:
 
-This is especially useful when running multiple daemons on one host via `--profile <name>`: each profile can pin its own `device_name` so the Runtimes UI shows distinct rows instead of collapsing them under the shared hostname.
+```bash
+multica config set poll_interval 10s
+multica config show
+```
 
-### Default agent arguments (`MULTICA_<PROVIDER>_ARGS`)
+Supported keys:
 
-These set a **fleet-wide default** layer of CLI flags for a backend — a convenient way to apply a default cost or resource baseline (for example `--max-turns`) across every agent on a daemon without editing each agent's `custom_args` individually. This is a default layer, not a hard ceiling: per-agent `custom_args` are appended afterward and can override it (see **Precedence** below).
+| Key | Default | Description |
+|---|---|---|
+| `server_url` | `ws://localhost:8080/ws` | Multica API / WebSocket URL |
+| `app_url` | empty | Web URL used for browser sign-in |
+| `workspace_id` | empty | Default workspace |
+| `device_name` | hostname | Device name shown in the runtime list |
+| `runtime_name` | `Local Agent` | Runtime display name |
+| `max_concurrent_tasks` | `20` | Concurrent task ceiling; `0` or empty means unset |
+| `poll_interval` | `30s` | Task polling interval |
+| `heartbeat_interval` | `15s` | Heartbeat interval |
+| `agent_timeout` | unlimited | Absolute time limit per run |
+| `codex_semantic_inactivity_timeout` | `10m` | Codex semantic-silence threshold |
+| `codex_handshake_timeout` | `30s` | Codex app-server handshake ceiling |
+| `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
+| `auto_update_check_interval` | `6h` | Update check interval |
 
-- **Precedence:** the default args are applied first, then each agent's own `custom_args` are appended after. For flags that take a value, the downstream CLI's own argument parser decides the winner (last occurrence wins for most tools), so an individual agent can raise a daemon default but the default still applies wherever the agent doesn't override it.
-- **Parsing:** the value is split with POSIX shell-word rules, so quoting works — `MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` parses into two tokens.
-- **Safety:** both the default-args and per-agent `custom_args` layers pass through the same blocked-flags filter, so protocol-critical flags (such as `-p`, `--output-format`, `--input-format`, `--permission-mode`, `--mcp-config` for Claude, and `--listen` for Codex) cannot be injected through either layer.
-- **Unset/empty** means no change to behavior.
+A few value rules:
 
-## Frontend access control
+- Duration keys accept positive Go durations (such as `10s`, `2h`); `0s` and negative values are rejected. The one exception is `agent_timeout`: `0s` is valid and explicitly disables the run time limit.
+- Passing an empty string clears a persisted value and falls back to the env var or built-in default, for example `multica config set poll_interval ""`.
+- `max_concurrent_tasks` requires a non-negative integer.
+
+## Observability and analytics
 
 | Variable | Default | Description |
 |---|---|---|
-| `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://multica.ai` — self-host must set this explicitly |
-| `MULTICA_APP_URL` | empty | Frontend URL for CLI login flow. Also used by the web UI to show self-host daemon setup commands with your app domain; for same-origin deployments this is also used as daemon `server_url` when `MULTICA_PUBLIC_URL` is unset |
-| `MULTICA_PUBLIC_URL` | empty | Public API URL, without trailing slash. Used for autopilot webhook URLs and by the web UI as the daemon `server_url` |
-| `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
-| `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
+| `ANALYTICS_DISABLED` | `false` | Set `true` to turn off PostHog reporting |
+| `POSTHOG_API_KEY` | empty | Reporting is off when unset; set it to use your own PostHog project |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog host |
+| `METRICS_ADDR` | empty | Prometheus metrics listen address; empty means not started |
+| `REALTIME_METRICS_TOKEN` | empty | Bearer token protecting `/health/realtime` |
 
-<Callout type="warning">
-**Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
-</Callout>
+## Next steps
 
-## GitHub integration
-
-The [GitHub PR ↔ issue integration](/github-integration) needs `GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` to enable Connect GitHub in Settings and accept incoming webhooks. `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are additionally **required** for the PR card's CI status and mergeability — without them the integration still mirrors PRs and auto-links issues, but the card shows no CI or merge status.
-
-| Variable | Default | Description |
-|---|---|---|
-| `GITHUB_APP_SLUG` | empty | The slug of your GitHub App (the tail of `https://github.com/apps/<slug>`). Drives the Settings → GitHub install button URL |
-| `GITHUB_WEBHOOK_SECRET` | empty | The Webhook secret you set on the GitHub App. Used for HMAC-SHA256 verification of every `pull_request` / `installation` delivery, and as the HMAC key for the setup-callback state token |
-| `GITHUB_APP_ID` | empty | Numeric App ID from the App's settings page. Required (with `GITHUB_APP_PRIVATE_KEY`) for PR-card CI status and mergeability, Settings → Repositories → Choose from GitHub, and fetching the connected account name on install |
-| `GITHUB_APP_PRIVATE_KEY` | empty | Full App RSA private-key PEM block (including `-----BEGIN/END-----` lines, newlines preserved). Required (with `GITHUB_APP_ID`) for App-authenticated PR snapshots and repository browsing |
-
-**Behavior when either of the required variables is unset:**
-
-- `Connect GitHub` in Settings → GitHub is **disabled** and shows a "not configured" hint to admins.
-- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret rather than treating every signature as valid.
-
-**Behavior when `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` are unset:**
-
-- The PR card shows **no CI status or mergeability** — the integration degrades cleanly: PRs still mirror, and issues still auto-link and move to Done on merge.
-- The connection card also briefly shows `Connected to unknown` after install. Multica refreshes the row to the real org/user name as soon as GitHub delivers the `installation.created` webhook (typically within a few seconds), and broadcasts a realtime update so any open Settings → GitHub tab reflects the change without a manual refresh.
-- Settings → Repositories → Choose from GitHub is disabled because the server cannot mint the installation token needed to list repositories.
-
-**Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
-
-## Usage analytics
-
-By default, the server reports to Multica's official PostHog instance. To opt out, set `ANALYTICS_DISABLED=true`.
-
-| Variable | Default | Description |
-|---|---|---|
-| `ANALYTICS_DISABLED` | `false` | Set `true` to disable backend analytics entirely |
-| `POSTHOG_API_KEY` | built-in default key | Set when pointing at your own PostHog instance |
-| `POSTHOG_HOST` | `https://us.i.posthog.com` | Change to your own host if you self-host PostHog |
-
-## Next
-
-- [Sign-in and signup configuration](/auth-setup) — how to actually configure the auth-related variables above and where the traps are
-- [GitHub integration](/github-integration) — how to set up the GitHub App that backs `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET`
-- [Troubleshooting](/troubleshooting) — symptoms and fixes for common misconfigurations
-- [Daemon and runtimes](/daemon-runtimes) — what the `MULTICA_DAEMON_*` parameters actually do
+- [Sign-in and signup](/auth-setup) — sign-in methods and signup restrictions.
+- [Troubleshooting](/troubleshooting) — symptom-based diagnosis of deployment problems.
+- [Daemon and runtimes](/daemon-runtimes) — the daemon-side counterparts of this configuration.

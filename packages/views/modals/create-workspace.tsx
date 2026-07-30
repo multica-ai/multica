@@ -55,7 +55,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
           <div className="flex w-full max-w-md flex-col items-center gap-6">
             {workspaceCreationDisabled ? (
               <div className="text-center">
-                <DialogTitle className="text-2xl font-semibold">
+                <DialogTitle className="text-display-sm font-semibold">
                   {tWorkspace(($) => $.creation_disabled.title)}
                 </DialogTitle>
                 <DialogDescription className="mt-2">
@@ -65,7 +65,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
             ) : (
               <>
                 <div className="text-center">
-                  <DialogTitle className="text-2xl font-semibold">
+                  <DialogTitle className="text-display-sm font-semibold">
                     {t(($) => $.create_workspace.title)}
                   </DialogTitle>
                   <DialogDescription className="mt-2">

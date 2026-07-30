@@ -120,7 +120,7 @@ export function WebhookDeliveriesSection({
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+      <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
         {t(($) => $.deliveries.section_title)}
       </h2>
       {isLoading ? (
@@ -130,7 +130,7 @@ export function WebhookDeliveriesSection({
           ))}
         </div>
       ) : deliveries.length === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+        <div className="rounded-md border border-dashed p-4 text-center text-body text-muted-foreground">
           {t(($) => $.deliveries.empty)}
         </div>
       ) : (
@@ -172,7 +172,7 @@ function DeliveryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/30 transition-colors"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
       >
         <StatusIcon
           className={cn(
@@ -181,13 +181,13 @@ function DeliveryRow({
             visual.spin && "animate-spin",
           )}
         />
-        <span className={cn("w-24 shrink-0 text-xs font-medium", visual.color)}>
+        <span className={cn("w-24 shrink-0 text-caption font-medium", visual.color)}>
           {statusLabel}
         </span>
-        <span className="w-20 shrink-0 text-xs text-muted-foreground truncate">
+        <span className="w-20 shrink-0 text-caption text-muted-foreground truncate">
           {providerLabel}
         </span>
-        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate font-mono">
+        <span className="flex-1 min-w-0 text-caption text-muted-foreground truncate font-mono">
           {delivery.event || t(($) => $.webhook_payload.unknown_event)}
         </span>
         {delivery.replayed_from_delivery_id && (
@@ -203,7 +203,7 @@ function DeliveryRow({
             })}
           </Badge>
         )}
-        <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+        <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
           {formatDate(delivery.received_at || delivery.created_at)}
         </span>
       </button>
@@ -267,20 +267,20 @@ function DeliveryDetailDialog({
                   visual.spin && "animate-spin",
                 )}
               />
-              <span className={cn("text-sm font-medium", visual.color)}>
+              <span className={cn("text-body font-medium", visual.color)}>
                 {t(($) => $.deliveries.status[full.status as WebhookDeliveryStatus]) ??
                   full.status}
               </span>
             </div>
             <Badge variant="outline">{full.provider || "—"}</Badge>
-            <code className="rounded bg-muted px-2 py-0.5 text-xs font-mono">
+            <code className="rounded bg-muted px-2 py-0.5 text-caption font-mono">
               {full.event || t(($) => $.webhook_payload.unknown_event)}
             </code>
             <SignatureBadge status={full.signature_status as WebhookSignatureStatus} />
           </div>
 
           {/* Meta grid */}
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-caption">
             <MetaRow
               label={t(($) => $.deliveries.detail.received_at)}
               value={formatDate(full.received_at)}
@@ -333,7 +333,7 @@ function DeliveryDetailDialog({
           </dl>
 
           {full.error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-caption text-destructive">
               <div className="font-medium">
                 {t(($) => $.deliveries.detail.error_label)}
               </div>
@@ -464,7 +464,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
     // surrounding grid/flex cell (and the whole DialogContent) past the
     // viewport edge.
     <div className="min-w-0 rounded-md border bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px]">
+      <div className="flex items-center justify-between border-b px-3 py-1.5 text-micro">
         <span className="font-medium text-muted-foreground">{label}</span>
         <button
           type="button"
@@ -484,7 +484,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
       {/* whitespace-pre-wrap keeps pretty-printed indentation but lets
           long lines wrap; break-all is the only thing that breaks mid-token
           (necessary for minified JSON, which has no whitespace to break at). */}
-      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">
+      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-caption font-mono leading-relaxed whitespace-pre-wrap break-all">
         {display}
         {isTruncated && (
           <span className="block pt-2 text-muted-foreground/70">
@@ -500,21 +500,21 @@ function ReplayHint({ delivery }: { delivery: WebhookDelivery }) {
   const { t } = useT("autopilots");
   if (delivery.signature_status === "invalid") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {t(($) => $.deliveries.replay.disabled_invalid_signature)}
       </span>
     );
   }
   if (delivery.status === "rejected") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {t(($) => $.deliveries.replay.disabled_rejected)}
       </span>
     );
   }
   if (delivery.status === "queued") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {t(($) => $.deliveries.replay.disabled_queued)}
       </span>
     );

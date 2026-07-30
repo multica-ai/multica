@@ -53,7 +53,7 @@ export function WorkingAgentsHoverContent({
 
   if (agents.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.agent_activity.empty_hover)}
       </p>
     );
@@ -61,12 +61,12 @@ export function WorkingAgentsHoverContent({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-muted-foreground">
+      <div className="text-caption font-medium text-muted-foreground">
         {t(($) => $.agent_activity.hover_header, { count: agents.length })}
       </div>
       <div className="flex flex-col gap-1.5">
         {agents.map((agent) => (
-          <div key={agent.id} className="flex items-center gap-2 text-xs">
+          <div key={agent.id} className="flex items-center gap-2 text-caption">
             <ActorAvatar
               name={agent.name}
               initials={agent.name.trim().slice(0, 2).toUpperCase()}

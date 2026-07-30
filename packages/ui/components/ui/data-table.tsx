@@ -390,7 +390,7 @@ export function DataTable<TData>({
         className="flex min-h-0 flex-1 flex-col overflow-auto bg-background"
       >
         <table
-          className="w-full table-fixed caption-bottom text-sm"
+          className="w-full table-fixed caption-bottom text-body"
           style={{
             minWidth: `${table.getTotalSize()}px`,
             ...columnSizeVars,
@@ -436,7 +436,7 @@ export function DataTable<TData>({
                       // Header typography overrides for a "spreadsheet
                       // header" look: smaller, all-caps, wider letter
                       // spacing, muted colour. shadcn's <TableHead>
-                      // defaults to text-sm + text-foreground +
+                      // defaults to text-body + text-foreground +
                       // font-medium, which reads as too heavy here.
                       // h-8 (32px) tightens the strip vs the default
                       // h-10 (40px).
@@ -449,7 +449,7 @@ export function DataTable<TData>({
                       // muted with background to preserve the same visual tone
                       // as muted/30 without introducing alpha.
                       className={cn(
-                        "relative h-8 overflow-hidden border-r px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground last:border-r-0",
+                        "relative h-8 overflow-hidden border-r px-4 py-2 text-caption uppercase tracking-wider text-muted-foreground last:border-r-0",
                         isPinned &&
                           "bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))]",
                       )}

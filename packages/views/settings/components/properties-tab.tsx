@@ -153,11 +153,11 @@ export function PropertiesTab() {
             />
           </div>
           <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2 text-caption text-muted-foreground">
               <Switch checked={showArchived} onCheckedChange={setShowArchived} />
               {t(($) => $.properties.show_archived)}
             </label>
-            <span className="text-xs tabular-nums text-muted-foreground">
+            <span className="text-caption tabular-nums text-muted-foreground">
               {t(($) => $.properties.limit_hint, {
                 count: activeCount,
                 max: MAX_ACTIVE_PROPERTIES,
@@ -177,13 +177,13 @@ export function PropertiesTab() {
         </div>
 
         {!canManage && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {t(($) => $.properties.editor.admin_hint)}
           </p>
         )}
 
         <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid">
+          <div className="hidden grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground md:grid">
             <span>{t(($) => $.properties.columns.name)}</span>
             <span>{t(($) => $.properties.columns.type)}</span>
             <span>{t(($) => $.properties.columns.options)}</span>
@@ -193,19 +193,19 @@ export function PropertiesTab() {
           </div>
 
           {isLoading ? (
-            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+            <div className="px-4 py-12 text-center text-body text-muted-foreground">
               {t(($) => $.properties.loading)}
             </div>
           ) : visible.length === 0 ? (
             <div className="px-4 py-12 text-center">
               <SlidersHorizontal className="mx-auto size-6 text-muted-foreground/60" />
-              <p className="mt-3 text-sm font-medium">
+              <p className="mt-3 text-body font-medium">
                 {query
                   ? t(($) => $.properties.no_results)
                   : t(($) => $.properties.empty)}
               </p>
               {!query && (
-                <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
+                <p className="mx-auto mt-1 max-w-sm text-caption text-muted-foreground">
                   {t(($) => $.properties.empty_hint)}
                 </p>
               )}
@@ -219,21 +219,21 @@ export function PropertiesTab() {
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <PropertyIcon property={property} />
-                    <span className="truncate text-sm font-medium">{property.name}</span>
+                    <span className="truncate text-body font-medium">{property.name}</span>
                     {property.archived && (
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                      <Badge variant="outline" className="shrink-0 text-micro">
                         {t(($) => $.properties.archived_badge)}
                       </Badge>
                     )}
                   </div>
-                  <span className="text-xs text-muted-foreground md:text-sm">
+                  <span className="text-caption text-muted-foreground md:text-body">
                     <PropertyTypeLabel type={property.type} />
                   </span>
                   <div className="flex min-w-0 flex-wrap items-center gap-1">
                     {(property.config.options ?? []).slice(0, 6).map((option) => (
                       <span
                         key={option.id}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-xs"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-caption"
                       >
                         <span
                           className="size-2 rounded-full"
@@ -243,18 +243,18 @@ export function PropertiesTab() {
                       </span>
                     ))}
                     {(property.config.options?.length ?? 0) > 6 && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-caption text-muted-foreground">
                         +{(property.config.options?.length ?? 0) - 6}
                       </span>
                     )}
                     {!typeHasOptions(property.type) && (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span className="text-caption text-muted-foreground">—</span>
                     )}
                   </div>
-                  <span className="text-xs tabular-nums text-muted-foreground md:text-sm">
+                  <span className="text-caption tabular-nums text-muted-foreground md:text-body">
                     {t(($) => $.properties.usage_count, { count: property.usage_count ?? 0 })}
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     {new Date(property.updated_at).toLocaleDateString()}
                   </span>
                   {canManage ? (
@@ -468,7 +468,7 @@ function PropertyEditorDialog({
                     <Button
                       type="button"
                       variant="outline"
-                      className="w-full px-0 text-lg"
+                      className="w-full px-0 text-title"
                       aria-label={t(($) => $.properties.editor.choose_icon)}
                     >
                       {draft.icon ? (
@@ -515,7 +515,7 @@ function PropertyEditorDialog({
               <FieldLabel>{t(($) => $.properties.editor.type)}</FieldLabel>
               {property ? (
                 <div
-                  className="flex h-9 items-center rounded-md border border-surface-border px-3 text-sm text-muted-foreground"
+                  className="flex h-9 items-center rounded-md border border-surface-border px-3 text-body text-muted-foreground"
                   title={t(($) => $.properties.editor.type_locked_hint)}
                 >
                   <PropertyTypeLabel type={property.type} />

@@ -50,11 +50,11 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   const prs = data?.pull_requests ?? [];
 
   if (isLoading) {
-    return <p className="text-xs text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
+    return <p className="text-caption text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
   }
   if (prs.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground px-2">
+      <p className="text-caption text-muted-foreground px-2">
         {t(($) => $.detail.pull_requests_empty)}
       </p>
     );
@@ -81,7 +81,7 @@ export function PullRequestList({ issueId }: { issueId: string }) {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="block w-[calc(100%+1rem)] -mx-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            className="block w-[calc(100%+1rem)] -mx-2 rounded-md px-2 py-1.5 text-left text-micro text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
           >
             {expanded
               ? t(($) => $.detail.pull_request_card_show_less)
@@ -113,10 +113,10 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
     >
       <StateIcon className={cn("h-3.5 w-3.5 mt-0.5 shrink-0", cfg.className)} />
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium leading-snug truncate group-hover:text-foreground">
+        <p className="text-caption font-medium leading-snug truncate group-hover:text-foreground">
           {pr.title}
         </p>
-        <p className="text-[11px] text-muted-foreground truncate">
+        <p className="text-micro text-muted-foreground truncate">
           {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
@@ -155,7 +155,7 @@ function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   if (!showStats && !checksBadge && !mergeBadge) return null;
 
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground">
       {showStats ? <PullRequestStats pr={pr} /> : null}
       {checksBadge ? <PullRequestBadge badge={checksBadge} stale={stale} title={staleTitle} /> : null}
       {mergeBadge ? <PullRequestBadge badge={mergeBadge} stale={stale} title={staleTitle} /> : null}

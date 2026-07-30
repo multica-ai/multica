@@ -151,7 +151,7 @@ function ActorAvatarProfileLink({
   href: string;
   children: React.ReactNode;
 }) {
-  const { push, openInNewTab } = useNavigation();
+  const { push, openInNewTab, getShareableUrl } = useNavigation();
 
   const navigate = (event: React.MouseEvent | React.KeyboardEvent) => {
     const controlAncestor = event.currentTarget.parentElement?.closest(
@@ -161,12 +161,15 @@ function ActorAvatarProfileLink({
 
     event.preventDefault();
     event.stopPropagation();
-    if (
-      "metaKey" in event &&
-      (event.metaKey || event.ctrlKey || event.shiftKey) &&
-      openInNewTab
-    ) {
-      openInNewTab(href);
+    if ("metaKey" in event && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+      if (openInNewTab) {
+        openInNewTab(href);
+        return;
+      }
+      // Web: the trigger is a `<span role="link">`, not an anchor, so there is
+      // no native modifier-click behaviour to fall back to — open the browser
+      // tab here rather than letting the click navigate in place.
+      window.open(getShareableUrl(href), "_blank", "noopener,noreferrer");
       return;
     }
     push(href);

@@ -54,7 +54,7 @@ function PlaceholderImage({ label }: { label: string }) {
         className={cn(
           "flex aspect-[16/9] items-center justify-center rounded-lg",
           "border-2 border-dashed border-[#0a0d12]/15 bg-[#fafafa]",
-          "px-6 text-center text-[13px] italic leading-relaxed text-[#0a0d12]/55",
+          "px-6 text-center text-label italic leading-relaxed text-[#0a0d12]/55",
         )}
       >
         {label}
@@ -76,7 +76,7 @@ function MDXCTA({
     <Link
       href={href}
       className={cn(
-        "inline-flex items-center gap-2 rounded-[12px] px-5 py-3 text-[14px] font-semibold not-italic transition-colors",
+        "inline-flex items-center gap-2 rounded-[12px] px-5 py-3 text-body font-semibold not-italic transition-colors",
         variant === "primary"
           ? "bg-[#0a0d12] text-white hover:bg-[#0a0d12]/88"
           : "border border-[#0a0d12]/15 text-[#0a0d12] hover:bg-[#0a0d12]/[0.04]",
@@ -197,7 +197,7 @@ function createMdxComponents(locale: SupportedLocale) {
     ),
     pre: (props: ComponentPropsWithoutRef<"pre">) => (
       <pre
-        className="my-6 overflow-x-auto rounded-lg bg-[#0a0d12]/[0.04] p-4 text-[13px] leading-[1.65]"
+        className="my-6 overflow-x-auto rounded-lg bg-[#0a0d12]/[0.04] p-4 text-label leading-[1.65]"
         {...props}
       />
     ),
@@ -234,7 +234,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
             <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
               {page.data.title}
             </h1>
-            <div className="mt-10 text-[16px] leading-[1.85] text-[#0a0d12]/72 [&>:first-child]:mt-0 [&>p]:my-5 sm:text-[17px]">
+            <div className="mt-10 text-title-sm leading-[1.85] text-[#0a0d12]/72 [&>:first-child]:mt-0 [&>p]:my-5 sm:text-title">
               <MDX components={mdxComponents} />
             </div>
           </article>
@@ -242,7 +242,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
           {toc.length > 0 ? (
             <aside className="hidden lg:block">
               <nav className="sticky top-[100px] max-h-[calc(100vh-120px)] overflow-y-auto">
-                <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[#0a0d12]/40">
+                <div className="mb-3 text-micro font-medium uppercase tracking-[0.14em] text-[#0a0d12]/40">
                   {text.tableOfContents}
                 </div>
                 <ul className="border-l border-[#0a0d12]/8">
@@ -251,11 +251,11 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
                       <a
                         href={item.url}
                         className={cn(
-                          "-ml-px block border-l border-transparent py-1.5 pl-4 text-[13px] leading-snug transition-colors",
+                          "-ml-px block border-l border-transparent py-1.5 pl-4 text-label leading-snug transition-colors",
                           "hover:border-[#0a0d12]/40 hover:text-[#0a0d12]",
                           item.depth === 2
                             ? "font-medium text-[#0a0d12]/70"
-                            : "pl-7 text-[12px] text-[#0a0d12]/50",
+                            : "pl-7 text-caption text-[#0a0d12]/50",
                         )}
                       >
                         {item.title}

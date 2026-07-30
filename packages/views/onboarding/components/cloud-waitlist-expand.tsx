@@ -59,7 +59,7 @@ export function CloudWaitlistExpand({
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border bg-muted/40 p-5">
-      <p className="text-[13.5px] leading-[1.55] text-foreground/85">
+      <p className="text-label leading-[1.55] text-foreground/85">
         {t(($) => $.cloud_waitlist.intro_main)}{" "}
         <span className="text-foreground/70">
           {t(($) => $.cloud_waitlist.intro_warning)}
@@ -69,7 +69,7 @@ export function CloudWaitlistExpand({
       <div className="flex flex-col gap-1.5">
         <Label
           htmlFor="waitlist-email"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-caption font-medium text-muted-foreground"
         >
           {t(($) => $.cloud_waitlist.email_label)}
         </Label>
@@ -93,7 +93,7 @@ export function CloudWaitlistExpand({
       <div className="flex flex-col gap-1.5">
         <Label
           htmlFor="waitlist-reason"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-caption font-medium text-muted-foreground"
         >
           {t(($) => $.cloud_waitlist.reason_label)}
           <span className="ml-2 font-normal text-muted-foreground/70">

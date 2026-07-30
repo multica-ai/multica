@@ -1,65 +1,73 @@
 ---
 title: Inbox and subscriptions
-description: When Multica notifies you, and how to mute issues you don't care about.
+description: One place for assignments, mentions, comments, and agent failures that need your follow-up.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The inbox is where Multica **interrupts** you — [issues](/issues) assigned to you, [`@` mentions](/comments), and activity on issues you're subscribed to all land here.
+The inbox collects the work activity that concerns you. It's not a full activity log — it flags where something changed that needs your attention; the full context stays on the corresponding issue.
 
-You control which issue activity reaches you by **subscribing** and **unsubscribing**.
+## What lands in the inbox
 
-## What shows up in your inbox
+Common notifications include:
 
-The following events deliver a notification to your inbox:
+- an issue is assigned to you, or moved away from you;
+- an issue you subscribe to gets a new comment, or its assignee, status, priority, or dates change;
+- someone @-mentions you in an issue description or comment;
+- an issue or comment you created gets a reaction;
+- an agent run fails on an issue you subscribe to;
+- creating an issue through an agent completes or fails;
+- an autopilot you subscribe to creates a new issue, or is paused after consecutive failures.
 
-- **Issue assigned / unassigned / reassigned** — you're notified when you're the new (or former) assignee
-- **Status, priority, or due date change on an issue you're subscribed to**
-- **New comment on an issue you're subscribed to**
-- **You're `@`-mentioned in a comment** — delivered whether or not you're subscribed
-- **Someone reacts to your issue or comment**
-- **An agent [task](/tasks) you assigned fails**
+Your own actions don't notify you. Multiple notifications on the same issue merge into one entry; open it to see the issue's recent changes.
 
-## `@all` notifies the entire workspace
+## Sources of automatic subscription
 
-`@all` is a special target — it pushes a notification to **every member** of the workspace.
+These participants subscribe to an issue automatically:
 
-<Callout type="warning">
-**Use `@all` sparingly.** In a 50-person workspace, one `@all` comment produces 50 inbox notifications instantly. Reserve it for high-stakes events (production incidents, milestone announcements) — not everyday discussion.
+- the issue's creator;
+- a new assignee;
+- anyone who comments;
+- anyone newly @-mentioned in the issue description;
+- subscribers preconfigured in an autopilot.
+
+Changing the assignee does not remove existing subscriptions. Subscribe or unsubscribe anytime on the issue page; after unsubscribing, ordinary updates stop reaching your inbox, while direct @-mentions still notify you individually.
+
+<Callout type="info">
+When a sub-issue's status changes, subscribers of the parent issue are notified as well. Sub-issue comments, priority, and date changes do not bubble up to the parent.
 </Callout>
 
-## Agents never receive notifications
+## Agents don't use the inbox
 
-Agents **never** get inbox notifications — not even when they're the assignee, creator, or `@`-mentioned in a comment.
+The inbox is only for workspace members. Even when an agent is the assignee or a subscriber, it never reads inbox notifications.
 
-This isn't a bug: agents don't read an inbox. They work by [**immediate trigger**](/assigning-issues) — assigning an issue or `@`-mentioning the agent in a comment kicks off a task for it right away. The inbox is a reminder mechanism for humans; it has no meaning for agents.
+@-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly instead of leaving the agent a notification. `@all` notifies members only.
 
-## Subscription rules
+## Handle notifications
 
-You're **auto-subscribed** to an issue in four situations:
+Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue. Once an issue reaches `in_review`, `done`, or `cancelled`, its run-failure notifications archive automatically.
 
-- You **created** it
-- You were **assigned** to it
-- You **commented** on it
-- You were **`@`-mentioned** on it or in one of its comments
+From the inbox menu you can also:
 
-Auto-subscription happens once — being both the creator and a mentionee doesn't subscribe you twice.
+- mark all as read;
+- archive all, or archive all read;
+- archive notifications for issues in `done` or `cancelled`;
+- open Archived and restore a notification.
 
-<Callout type="warning">
-**Reassignment doesn't auto-unsubscribe you.** If you used to be the assignee and got replaced, you'll **still receive updates on that issue** — the auto-subscription stays in the database.
+## Tune notification types
 
-To stop getting notified, open the issue and unsubscribe manually.
-</Callout>
+Open **Settings → Notifications** to toggle each group separately:
 
-You can also **manually subscribe** to any issue (even unrelated ones), or **manually unsubscribe** from any auto-subscription. In the UI, use the right panel on the issue page; in the CLI, use `multica issue subscriber add/remove`.
+- assignments;
+- status changes;
+- comments and mentions;
+- priority and dates;
+- agent activity.
 
-## Sub-issue status changes bubble up to the parent
+Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these five groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
-When a sub-issue's **status** changes, subscribers of the parent issue are notified too — even if they haven't subscribed to the sub-issue.
+## Next steps
 
-This applies to **status only**: comment, priority, and due date changes on sub-issues do **not** bubble up.
-
-## Next
-
-- [Comments and mentions](/comments) — how `@` mentions work and the gotchas
-- [Assigning issues to agents](/assigning-issues) — how agents are triggered (and why they don't read the inbox)
+- [Comments](/comments) — replies, mentions, and discussion threads.
+- [@-mention agents in comments](/mentioning-agents) — member notifications vs. agent runs.
+- [Autopilots](/autopilots) — configure automatic work creation and default subscribers.

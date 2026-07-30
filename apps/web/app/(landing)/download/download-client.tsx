@@ -79,7 +79,7 @@ function VersionInfoFooter({
 
   return (
     <section className="bg-white pb-16 text-[#0a0d12] sm:pb-20">
-      <div className="mx-auto flex max-w-[920px] flex-wrap items-center gap-x-6 gap-y-2 border-t border-[#0a0d12]/8 px-4 pt-8 text-[13px] text-[#0a0d12]/60 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-[920px] flex-wrap items-center gap-x-6 gap-y-2 border-t border-[#0a0d12]/8 px-4 pt-8 text-label text-[#0a0d12]/60 sm:px-6 lg:px-8">
         {version ? (
           <>
             <span>

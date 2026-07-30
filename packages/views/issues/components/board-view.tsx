@@ -614,13 +614,13 @@ function BoardViewImpl({
           groupBranches?.isError ? (
             <button
               type="button"
-              className="flex min-w-full flex-1 items-center justify-center text-sm text-destructive hover:underline"
+              className="flex min-w-full flex-1 items-center justify-center text-body text-destructive hover:underline"
               onClick={groupBranches.retryGroups}
             >
               {t(($) => $.table.load_more_failed_retry)}
             </button>
           ) : (
-            <div className="flex min-w-full flex-1 items-center justify-center text-sm text-muted-foreground">
+            <div className="flex min-w-full flex-1 items-center justify-center text-body text-muted-foreground">
               {t(($) => $.board.empty_grouping)}
             </div>
           )

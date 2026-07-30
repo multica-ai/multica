@@ -297,6 +297,7 @@
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
+    "thread_nav_resolved_label": "{{title}}（解決済み）",
     "sidebar_tooltip": "サイドバーの開閉",
     "find": {
       "placeholder": "イシュー内を検索...",
@@ -397,6 +398,7 @@
       "resolve_with_comment_action": "このコメントでスレッドを解決",
       "unresolve_action": "解決を取り消す",
       "resolution_badge": "解決",
+      "thread_resolved_badge": "解決済み",
       "collapse": "折りたたむ",
       "bar_other": "{{authors}} による解決済みコメント {{count}} 件",
       "fold_other": "{{authors}} のコメント {{count}} 件",
@@ -515,6 +517,7 @@
     "due_next_week": "来週",
     "due_clear": "日付をクリア",
     "unassigned": "未割り当て",
+    "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "copy_link": "リンクをコピー",

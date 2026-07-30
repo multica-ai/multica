@@ -123,7 +123,7 @@ export function RuntimePicker({
     );
     if (variant === "field") {
       const control = (
-        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
+        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-body text-muted-foreground">
           {icon}
           <span className="min-w-0 flex-1 truncate">{combinedLabel}</span>
           {selected ? (
@@ -145,7 +145,7 @@ export function RuntimePicker({
       );
     }
     return (
-      <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-xs text-muted-foreground">
+      <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-caption text-muted-foreground">
         {selected ? (
           <ProviderLogo
             provider={selected.provider}
@@ -250,7 +250,7 @@ export function RuntimePicker({
           type="button"
           className={
             variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
               : CHIP_CLASS
           }
           aria-label={triggerTitle}
@@ -319,13 +319,13 @@ export function RuntimePicker({
             type="button"
             onClick={() => setMachineId(null)}
             aria-label={t(($) => $.pickers.runtime_back_to_machines)}
-            className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+            className="flex w-full items-center gap-2 px-2 py-2 text-left text-body transition-colors hover:bg-muted/60"
           >
             <ChevronLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate font-medium">
               {drilled.title}
             </span>
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            <span className="shrink-0 text-caption tabular-nums text-muted-foreground">
               {onlineCountLabel(drilled)}
             </span>
           </button>
@@ -378,16 +378,16 @@ export function RuntimePicker({
                 provider={rt.provider}
                 className="h-4 w-4 shrink-0"
               />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+              <span className="min-w-0 flex-1 truncate text-body font-medium">
                 {label}
               </span>
               {rt.runtime_mode === "cloud" && (
-                <span className="shrink-0 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
+                <span className="shrink-0 rounded bg-info/10 px-1 text-micro font-medium text-info">
                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                 </span>
               )}
               {locked && (
-                <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+                <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
                   <Lock className="h-2.5 w-2.5" />
                   {t(($) => $.create_dialog.runtime_private_badge)}
                 </span>
@@ -402,7 +402,7 @@ export function RuntimePicker({
           );
         })
       ) : machines.length === 0 ? (
-        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+        <p className="px-2 py-3 text-center text-caption text-muted-foreground">
           {t(($) => $.pickers.runtime_empty)}
         </p>
       ) : (
@@ -419,20 +419,20 @@ export function RuntimePicker({
               type="button"
               data-picker-item
               onClick={() => setMachineId(machine.id)}
-              className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-body transition-colors hover:bg-accent"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-medium">
+                  <span className="truncate text-body font-medium">
                     {machine.title}
                   </span>
                   {machine.mode === "cloud" && (
-                    <span className="shrink-0 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
+                    <span className="shrink-0 rounded bg-info/10 px-1 text-micro font-medium text-info">
                       {t(($) => $.create_dialog.runtime_cloud_badge)}
                     </span>
                   )}
                 </div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <div className="mt-0.5 flex items-center gap-1.5 text-caption text-muted-foreground">
                   {owner && (
                     <span className="flex min-w-0 items-center gap-1">
                       <ActorAvatar
@@ -458,7 +458,7 @@ export function RuntimePicker({
                           />
                         ))}
                       {extraProviders > 0 && (
-                        <span className="text-[10px] tabular-nums">
+                        <span className="text-micro tabular-nums">
                           +{extraProviders}
                         </span>
                       )}
@@ -466,7 +466,7 @@ export function RuntimePicker({
                   )}
                 </div>
               </div>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              <span className="shrink-0 text-caption tabular-nums text-muted-foreground">
                 {onlineCountLabel(machine)}
               </span>
               {containsSelection && (
@@ -506,7 +506,7 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+      className={`flex-1 rounded px-2 py-0.5 text-caption font-medium transition-colors ${
         active
           ? "bg-background text-foreground shadow-sm"
           : "text-muted-foreground hover:text-foreground"

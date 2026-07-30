@@ -172,7 +172,7 @@ export function AgentBatchToolbar({
               }}
             >
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-sm font-medium">
+          <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
           <button

@@ -231,7 +231,7 @@ function ScheduleField({
       disabled={disabled}
       className={cn("flex min-w-0 flex-col gap-1.5 border-0 p-0", disabled && "opacity-60")}
     >
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="text-caption font-medium text-muted-foreground">{label}</p>
       {/* flex gap, not space-y: Base UI's Select appends a hidden fixed-position
           form input after the trigger, which space-y counts as the last child —
           handing its 8px to the visible control and inflating the block. */}
@@ -753,7 +753,7 @@ export function ScheduleEditor({
                   // change a chip's size.
                   className={cn(
                     "inline-flex h-6.5 min-w-0 flex-1 items-center justify-center rounded-md",
-                    "text-[11px] font-medium leading-none transition-colors",
+                    "text-micro font-medium leading-none transition-colors",
                     selected
                       ? "bg-foreground text-background"
                       : "bg-muted text-muted-foreground hover:text-foreground",
@@ -766,7 +766,7 @@ export function ScheduleEditor({
           </div>
         )}
         {value.days.kind === "monthly" && value.days.dayOfMonth >= 29 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {t(($) => $.schedule_editor.monthly_short_month_hint, {
               day: value.days.dayOfMonth,
             })}
@@ -791,7 +791,7 @@ export function ScheduleEditor({
           result of the fields above, not more fields alongside them. The cron
           line inside it doubles as the advanced editing entry — clicking it
           swaps the text for an input, and the form dims while raw mode holds. */}
-      <div className="rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
+      <div className="rounded-md bg-muted/40 p-2.5 text-caption text-muted-foreground">
         <div className="space-y-2">
           {/* The plain-language sentence leads: it is the line a person reads,
               so it takes the panel's entry and the foreground color, and the
@@ -812,7 +812,7 @@ export function ScheduleEditor({
                 // Its own row above the fields, mirroring the closed readback:
                 // a long zone name and long fields truncate independently
                 // instead of splitting one line between them.
-                <InputGroupAddon align="block-start" className="font-mono text-xs">
+                <InputGroupAddon align="block-start" className="font-mono text-caption">
                   {/* eslint-disable-next-line i18next/no-literal-string -- cron syntax, not copy */}
                   <span className="min-w-0 truncate">TZ={value.timezone}</span>
                 </InputGroupAddon>
@@ -850,7 +850,7 @@ export function ScheduleEditor({
                 }}
                 aria-invalid={cronErrorDetail !== null}
                 aria-describedby={cronErrorDetail !== null ? cronErrorId : undefined}
-                className="font-mono text-sm"
+                className="font-mono text-body"
               />
             </InputGroup>
           ) : (
@@ -888,7 +888,7 @@ export function ScheduleEditor({
               </p>
               {/* The parser's own words, verbatim — untranslated, but it is the
                   only text that says which field is wrong. */}
-              <p className="font-mono text-[11px] text-destructive/70">{cronErrorDetail}</p>
+              <p className="font-mono text-micro text-destructive/70">{cronErrorDetail}</p>
             </div>
           ) : advanced ? (
             // Three different things are being said here, and only the first is
@@ -962,7 +962,7 @@ export function ScheduleEditor({
         )}
       </div>
       {disabled === true && disabledReason !== undefined && (
-        <p className="mt-2 text-[11px] text-muted-foreground">{disabledReason}</p>
+        <p className="mt-2 text-micro text-muted-foreground">{disabledReason}</p>
       )}
     </div>
   );

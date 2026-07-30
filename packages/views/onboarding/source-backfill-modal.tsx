@@ -300,13 +300,13 @@ function SourceBackfillDialogBody({
   return (
     <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden">
       <div className="px-6 pt-6 pb-2">
-        <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        <div className="text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">
           {t(($) => $.source_backfill.eyebrow)}
         </div>
-        <h2 className="mt-1 text-balance font-serif text-2xl font-medium leading-tight tracking-tight text-foreground">
+        <h2 className="mt-1 text-balance font-serif text-display-sm font-medium leading-tight tracking-tight text-foreground">
           {t(($) => $.questions.source.question)}
         </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-body text-muted-foreground">
           {t(($) => $.source_backfill.lede)}
         </p>
       </div>
@@ -346,7 +346,7 @@ function SourceBackfillDialogBody({
       <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t bg-muted/40 px-6 py-3">
         <span
           aria-live="polite"
-          className="mr-auto text-xs text-muted-foreground"
+          className="mr-auto text-caption text-muted-foreground"
         >
           {canSubmit
             ? t(($) => $.source_backfill.hint_ready)

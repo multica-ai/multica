@@ -58,7 +58,7 @@ function ActorIssuesHeader({
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t(($) => $.actor_issues.search_placeholder)}
-            className="h-8 w-64 pl-8 text-sm"
+            className="h-8 w-64 pl-8 text-body"
           />
         </div>
         <div className="flex items-center gap-1">
@@ -147,17 +147,17 @@ export function ActorIssuesPanel({
         search.trim() === "" ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">
+            <p className="text-body">
               {t(($) => $.actor_issues.empty[scope].title)}
             </p>
-            <p className="text-xs">
+            <p className="text-caption">
               {t(($) => $.actor_issues.empty[scope].description)}
             </p>
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <Search className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">{t(($) => $.actor_issues.search_empty)}</p>
+            <p className="text-body">{t(($) => $.actor_issues.search_empty)}</p>
           </div>
         )
       }

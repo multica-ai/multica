@@ -72,8 +72,8 @@ export function BillingTestPage() {
   return (
     <div className="space-y-6 p-6">
       <header>
-        <h1 className="text-xl font-semibold">{t(($) => $.title)}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-title-lg font-semibold">{t(($) => $.title)}</h1>
+        <p className="mt-1 text-body text-muted-foreground">
           {t(($) => $.subtitle)}
         </p>
       </header>
@@ -147,10 +147,10 @@ function CheckoutSessionStatusBanner({
   return (
     <Card className="border-primary/40 bg-primary/5">
       <CardHeader>
-        <CardTitle className="text-sm">
+        <CardTitle className="text-body">
           {t(($) => $.checkout.session_label, { prefix: sessionId.slice(0, 16) })}
         </CardTitle>
-        <CardDescription className="text-xs">
+        <CardDescription className="text-caption">
           {isLoading
             ? t(($) => $.checkout.loading)
             : isError
@@ -168,7 +168,7 @@ function CheckoutSessionStatusBanner({
         </CardDescription>
       </CardHeader>
       {data && (
-        <CardContent className="text-xs">
+        <CardContent className="text-caption">
           <dl className="grid grid-cols-[120px_1fr] gap-y-1">
             <dt className="text-muted-foreground">{t(($) => $.checkout.label_order)}</dt>
             <dd className="font-mono">{data.order_id}</dd>
@@ -214,8 +214,8 @@ function BalanceCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.balance.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.balance.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.balance)}
           </CardDescription>
         </div>
@@ -230,14 +230,14 @@ function BalanceCard() {
         ) : balance.isError ? (
           <ErrorText error={balance.error} />
         ) : (
-          <div className="space-y-1 text-sm">
-            <div className="text-2xl font-semibold tabular-nums">
+          <div className="space-y-1 text-body">
+            <div className="text-display-sm font-semibold tabular-nums">
               {balance.data?.balance_credit.toLocaleString() ?? 0}
-              <span className="ml-1 text-sm font-normal text-muted-foreground">
+              <span className="ml-1 text-body font-normal text-muted-foreground">
                 {t(($) => $.balance.credits_suffix)}
               </span>
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-caption text-muted-foreground">
               {t(($) => $.balance.meta, {
                 micro: balance.data?.balance_micro.toLocaleString() ?? 0,
                 owner: balance.data?.owner_id.slice(0, 8) ?? "",
@@ -306,8 +306,8 @@ function BuyAndPortalSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">{t(($) => $.buy.title)}</CardTitle>
-        <CardDescription className="text-xs">
+        <CardTitle className="text-body">{t(($) => $.buy.title)}</CardTitle>
+        <CardDescription className="text-caption">
           {t(($) => $.endpoints.buy)}
         </CardDescription>
       </CardHeader>
@@ -329,7 +329,7 @@ function BuyAndPortalSection() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">{t(($) => $.buy.no_tiers)}</p>
+          <p className="text-caption text-muted-foreground">{t(($) => $.buy.no_tiers)}</p>
         )}
 
         <div className="border-t pt-4">
@@ -347,7 +347,7 @@ function BuyAndPortalSection() {
             )}
             {t(($) => $.buy.open_portal)}
           </Button>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.buy.portal_hint)}
           </p>
         </div>
@@ -391,14 +391,14 @@ function TierButton({
       className="rounded-md border bg-background p-3 text-left transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
     >
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">{display}</div>
+        <div className="text-body font-medium">{display}</div>
         {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
+      <div className="mt-1 text-caption text-muted-foreground">
         {baseLine}
         {bonusLine}
       </div>
-      <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground/70">
         {t(($) => $.buy.tier_id, { id: tier.id })}
       </div>
     </button>
@@ -414,8 +414,8 @@ function TransactionsCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.transactions.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.transactions.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.transactions)}
           </CardDescription>
         </div>
@@ -430,7 +430,7 @@ function TransactionsCard() {
         ) : txs.isError ? (
           <ErrorText error={txs.error} />
         ) : txs.data?.items.length ? (
-          <ul className="space-y-2 text-xs">
+          <ul className="space-y-2 text-caption">
             {txs.data.items.map((row) => (
               <TransactionRow key={row.id} row={row} />
             ))}
@@ -454,14 +454,14 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">
+        <span className="text-caption font-medium">
           {row.tx_type}
-          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {row.source}
           </span>
         </span>
         <span
-          className={`text-sm tabular-nums ${
+          className={`text-body tabular-nums ${
             credit >= 0
               ? "text-green-700 dark:text-green-400"
               : "text-red-700 dark:text-red-400"
@@ -473,9 +473,9 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
         </span>
       </div>
       {row.description && (
-        <div className="mt-1 text-xs text-muted-foreground">{row.description}</div>
+        <div className="mt-1 text-caption text-muted-foreground">{row.description}</div>
       )}
-      <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground/70">
         {t(($) => $.transactions.row_meta, {
           date: formatDate(row.created_at, t),
           balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(),
@@ -493,8 +493,8 @@ function BatchesCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.batches.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.batches.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.batches)}
           </CardDescription>
         </div>
@@ -509,7 +509,7 @@ function BatchesCard() {
         ) : batches.isError ? (
           <ErrorText error={batches.error} />
         ) : batches.data?.items.length ? (
-          <ul className="space-y-2 text-xs">
+          <ul className="space-y-2 text-caption">
             {batches.data.items.map((row) => (
               <BatchRow key={row.id} row={row} />
             ))}
@@ -535,20 +535,20 @@ function BatchRow({ row }: { row: BillingBatch }) {
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">
+        <span className="text-caption font-medium">
           {row.source_type}
-          <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
+          <span className="ml-1.5 font-mono text-micro text-muted-foreground">
             {t(($) => $.batches.id_suffix, { id: row.id.slice(0, 8) })}
           </span>
         </span>
-        <span className="text-sm tabular-nums">
+        <span className="text-body tabular-nums">
           {t(($) => $.batches.remaining_over_total, {
             remaining: remaining.toLocaleString(),
             total: total.toLocaleString(),
           })}
         </span>
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
+      <div className="mt-1 text-caption text-muted-foreground">
         {t(($) => $.batches.consumed, { value: consumed.toLocaleString() })}
         {row.expires_at
           ? t(($) => $.batches.expires_suffix, { value: formatDate(row.expires_at, t) })
@@ -565,8 +565,8 @@ function TopupsCard() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle className="text-sm">{t(($) => $.topups.title)}</CardTitle>
-          <CardDescription className="text-xs">
+          <CardTitle className="text-body">{t(($) => $.topups.title)}</CardTitle>
+          <CardDescription className="text-caption">
             {t(($) => $.endpoints.topups)}
           </CardDescription>
         </div>
@@ -581,7 +581,7 @@ function TopupsCard() {
         ) : topups.isError ? (
           <ErrorText error={topups.error} />
         ) : topups.data?.items.length ? (
-          <ul className="space-y-2 text-xs">
+          <ul className="space-y-2 text-caption">
             {topups.data.items.map((row) => (
               <TopupRow key={row.id} row={row} />
             ))}
@@ -604,10 +604,10 @@ function TopupRow({ row }: { row: BillingTopup }) {
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">
+        <span className="text-caption font-medium">
           {row.tier_id || row.id.slice(0, 8)}
           <span
-            className={`ml-1.5 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+            className={`ml-1.5 rounded px-1.5 py-0.5 font-mono text-micro ${
               row.status === "credited"
                 ? "bg-green-500/10 text-green-700 dark:text-green-400"
                 : row.status === "failed" || row.status === "canceled"
@@ -618,7 +618,7 @@ function TopupRow({ row }: { row: BillingTopup }) {
             {row.status}
           </span>
         </span>
-        <span className="text-sm tabular-nums">
+        <span className="text-body tabular-nums">
           {row.bonus_credits > 0
             ? t(($) => $.topups.amount_to_credits_with_bonus, {
                 money: formatMoney(row.amount_cents, row.currency),
@@ -631,7 +631,7 @@ function TopupRow({ row }: { row: BillingTopup }) {
               })}
         </span>
       </div>
-      <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground/70">
         {t(($) => $.topups.row_meta, {
           date: formatDate(row.created_at, t),
           checkout: row.stripe_checkout_id || t(($) => $.topups.stripe_empty),
@@ -655,7 +655,7 @@ function PagingFooter({
   const { t } = useT("billing");
   if (total === 0) return null;
   return (
-    <div className="mt-3 text-[10px] text-muted-foreground">
+    <div className="mt-3 text-micro text-muted-foreground">
       {t(($) => $.shared.paging, {
         page,
         totalPages: Math.max(1, Math.ceil(total / pageSize)),
@@ -691,14 +691,14 @@ function RefreshButton({
 function ErrorText({ error }: { error: unknown }) {
   const { t } = useT("billing");
   return (
-    <p className="text-xs text-destructive">
+    <p className="text-caption text-destructive">
       {error instanceof Error ? error.message : t(($) => $.shared.request_failed)}
     </p>
   );
 }
 
 function EmptyText({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-muted-foreground">{children}</p>;
+  return <p className="text-caption text-muted-foreground">{children}</p>;
 }
 
 function formatMoney(amountCents: number, currency: string): string {

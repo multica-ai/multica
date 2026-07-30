@@ -67,7 +67,7 @@ export function InboxList({
         <button
           type="button"
           onClick={onOpenArchived}
-          className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           <span className="flex size-7 shrink-0 items-center justify-center">
             <Archive className="size-4" />
@@ -91,7 +91,7 @@ export function InboxList({
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm">
+          <p className="text-body">
             {isArchivedView
               ? t(($) => $.list.archived_empty)
               : t(($) => $.list.empty)}

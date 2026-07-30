@@ -59,7 +59,7 @@ export function DeleteIssueConfirmModal({
           <AlertDialogTitle>{t(($) => $.delete_issue.title)}</AlertDialogTitle>
           <AlertDialogDescription>
             {t(($) => $.delete_issue.description)}
-            <span className="mt-2 block text-xs text-muted-foreground/80">
+            <span className="mt-2 block text-caption text-muted-foreground/80">
               {t(($) => $.delete_issue.hint)}
             </span>
           </AlertDialogDescription>

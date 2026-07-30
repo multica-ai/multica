@@ -842,19 +842,19 @@ export function AgentCreationStudio() {
           <ArrowLeft className="size-4" aria-hidden="true" />
         </Button>
         <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold">
+          <h1 className="truncate text-body font-semibold">
             {duplicateAgent
               ? t(($) => $.creation_studio.duplicate_title, { name: duplicateAgent.name })
               : squadId
                 ? t(($) => $.creation_studio.squad_title)
                 : t(($) => $.creation_studio.title)}
           </h1>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="truncate text-caption text-muted-foreground">
             {currentModeLabel}
           </p>
         </div>
         {mode !== "choose" && mode !== "templates" && (
-          <div className="ml-auto hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+          <div className="ml-auto hidden items-center gap-2 text-caption text-muted-foreground sm:flex">
             <span className="rounded-full bg-muted px-2 py-1">
               {sourceTemplate?.name ?? (mode === "ai" ? t(($) => $.creation_studio.modes.ai.title) : t(($) => $.creation_studio.modes.blank.title))}
             </span>
@@ -906,12 +906,12 @@ export function AgentCreationStudio() {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-8">
             {duplicateAgent && (
-              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
+              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-body">
                 {t(($) => $.creation_studio.duplicate_env_notice)}
               </div>
             )}
             {duplicateRuntimeReset && (
-              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
+              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-body">
                 {t(($) => $.creation_studio.duplicate_runtime_reset_notice)}
               </div>
             )}
@@ -975,10 +975,10 @@ export function AgentCreationStudio() {
           <div className="min-h-0 overflow-y-auto border-l bg-muted/10">
             <div className="mx-auto max-w-2xl px-5 py-6">
               <div className="mb-6">
-                <h2 className="text-base font-semibold tracking-tight">
+                <h2 className="text-title-sm font-semibold tracking-tight">
                   {t(($) => $.creation_studio.live_draft)}
                 </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   {t(($) => $.creation_studio.live_draft_hint)}
                 </p>
               </div>
@@ -1042,13 +1042,13 @@ export function ModeChooser({
     <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10">
       <div className="w-full max-w-5xl">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
             {t(($) => $.creation_studio.eyebrow)}
           </div>
-          <h2 className="mt-2 text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="mt-2 text-balance text-display-sm font-semibold tracking-tight sm:text-display">
             {t(($) => $.creation_studio.choose_title)}
           </h2>
-          <p className="mt-3 text-pretty text-sm text-muted-foreground">
+          <p className="mt-3 text-pretty text-body text-muted-foreground">
             {t(($) => $.creation_studio.choose_description)}
           </p>
         </div>
@@ -1066,16 +1066,16 @@ export function ModeChooser({
               )}
             >
               {recommended && (
-                <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
+                <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2 py-1 text-micro font-medium text-primary">
                   {t(($) => $.creation_studio.recommended)}
                 </span>
               )}
               <span className="flex size-11 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-foreground">
                 <Icon className="size-5" aria-hidden="true" />
               </span>
-              <span className="mt-7 text-base font-semibold">{title}</span>
-              <span className="mt-2 text-sm leading-6 text-muted-foreground">{description}</span>
-              <span className="mt-auto flex items-center gap-1 pt-5 text-xs font-medium text-foreground">
+              <span className="mt-7 text-title-sm font-semibold">{title}</span>
+              <span className="mt-2 text-body leading-6 text-muted-foreground">{description}</span>
+              <span className="mt-auto flex items-center gap-1 pt-5 text-caption font-medium text-foreground">
                 {t(($) => $.creation_studio.continue)}
                 <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
               </span>
@@ -1130,7 +1130,7 @@ function TemplateChooser({
           {loading ? (
             <div className="flex justify-center py-16"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
           ) : templates.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">{t(($) => $.creation_studio.templates.empty)}</div>
+            <div className="py-16 text-center text-body text-muted-foreground">{t(($) => $.creation_studio.templates.empty)}</div>
           ) : (
             <div className="space-y-2">
               {templates.map((template) => (
@@ -1147,10 +1147,10 @@ function TemplateChooser({
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><Bot className="size-4" /></span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium">{template.name}</span>
-                      {template.category && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{template.category}</span>}
+                      <span className="truncate text-body font-medium">{template.name}</span>
+                      {template.category && <span className="ml-auto shrink-0 text-micro text-muted-foreground">{template.category}</span>}
                     </span>
-                    <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted-foreground">{template.description}</span>
+                    <span className="mt-1 line-clamp-2 block text-caption leading-5 text-muted-foreground">{template.description}</span>
                   </span>
                 </button>
               ))}
@@ -1162,18 +1162,18 @@ function TemplateChooser({
         {!selected ? (
           <div className="flex h-full min-h-80 flex-col items-center justify-center px-8 text-center text-muted-foreground">
             <Bot className="size-8" />
-            <p className="mt-3 text-sm">{t(($) => $.creation_studio.templates.select_hint)}</p>
+            <p className="mt-3 text-body">{t(($) => $.creation_studio.templates.select_hint)}</p>
           </div>
         ) : (
           <div className="mx-auto max-w-3xl p-6 sm:p-8">
             <div className="flex items-start gap-4">
               <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Bot className="size-6" /></span>
-              <div><h2 className="text-xl font-semibold">{selected.name}</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">{selected.description}</p></div>
+              <div><h2 className="text-title-lg font-semibold">{selected.name}</h2><p className="mt-1 text-body leading-6 text-muted-foreground">{selected.description}</p></div>
             </div>
             {selected.skills.length > 0 && (
-              <div className="mt-7"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.skills)}</h3><div className="mt-3 space-y-2">{selected.skills.map((skill) => <div key={skill.source_url} className="flex items-start gap-2 rounded-lg border bg-card p-3"><Check className="mt-0.5 size-4 shrink-0 text-success" /><div><div className="text-sm font-medium">{skill.cached_name}</div><div className="mt-0.5 text-xs text-muted-foreground">{skill.cached_description}</div></div></div>)}</div></div>
+              <div className="mt-7"><h3 className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.skills)}</h3><div className="mt-3 space-y-2">{selected.skills.map((skill) => <div key={skill.source_url} className="flex items-start gap-2 rounded-lg border bg-card p-3"><Check className="mt-0.5 size-4 shrink-0 text-success" /><div><div className="text-body font-medium">{skill.cached_name}</div><div className="mt-0.5 text-caption text-muted-foreground">{skill.cached_description}</div></div></div>)}</div></div>
             )}
-            <div className="mt-7"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.instructions)}</h3><div className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-6">{detailLoading ? <Loader2 className="size-4 animate-spin" /> : detail?.instructions}</div></div>
+            <div className="mt-7"><h3 className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.instructions)}</h3><div className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-body leading-6">{detailLoading ? <Loader2 className="size-4 animate-spin" /> : detail?.instructions}</div></div>
             <div className="mt-7 flex justify-end"><Button onClick={onUse} disabled={detailLoading || !detail}>{t(($) => $.creation_studio.templates.use)}<ChevronRight className="size-4" /></Button></div>
           </div>
         )}
@@ -1309,7 +1309,7 @@ function ConfigurationPanel({
               onChange={(event) => set("instructions", event.target.value)}
               placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
               rows={compact ? 9 : 12}
-              className="min-h-44 resize-y font-mono text-[13px] leading-6"
+              className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
           <div className="px-4 py-4">
@@ -1341,7 +1341,7 @@ function ConfigurationPanel({
                   user reaches for it exactly when the current runtime has gone
                   wrong, so say what unblocks it instead of just refusing. */}
               {runtimeSwitchPending && (
-                <p className="mt-1.5 text-xs text-muted-foreground">
+                <p className="mt-1.5 text-caption text-muted-foreground">
                   {t(($) => $.creation_studio.builder.switch_runtime_pending)}
                 </p>
               )}
@@ -1406,10 +1406,10 @@ function ConfigurationPanel({
                     ) : null}
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-sm font-medium">
+                    <span className="block text-body font-medium">
                       {t(($) => $.creation_studio.access[scope].title)}
                     </span>
-                    <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
                       {t(($) => $.creation_studio.access[scope].description)}
                     </span>
                   </span>
@@ -1440,14 +1440,14 @@ function ConfigurationPanel({
                       actorId={member.user_id}
                       size="sm"
                     />
-                    <span className="min-w-0 flex-1 truncate text-sm">
+                    <span className="min-w-0 flex-1 truncate text-body">
                       {member.name}
                     </span>
                   </label>
                 );
               })}
               {draft.memberIds.size === 0 ? (
-                <p className="px-2 py-1 text-xs text-destructive">
+                <p className="px-2 py-1 text-caption text-destructive">
                   {t(($) => $.creation_studio.access.members.required)}
                 </p>
               ) : null}
@@ -1500,7 +1500,7 @@ export function AgentNameField({
           placeholder={t(($) => $.create_dialog.name_placeholder)}
         />
         {error ? (
-          <p id={errorId} className="text-xs text-destructive">
+          <p id={errorId} className="text-caption text-destructive">
             {error}
           </p>
         ) : null}
@@ -1579,11 +1579,11 @@ function DraftFieldRow({
       )}
     >
       {htmlFor ? (
-        <label htmlFor={htmlFor} className="text-sm font-medium">
+        <label htmlFor={htmlFor} className="text-body font-medium">
           {label}
         </label>
       ) : (
-        <div className="text-sm font-medium">{label}</div>
+        <div className="text-body font-medium">{label}</div>
       )}
       <div className="min-w-0">{children}</div>
     </div>
@@ -1593,7 +1593,7 @@ function DraftFieldRow({
 function BuilderSetup({ draft, onChange, runtimes, runtimesLoading, members, currentUserId, selectedRuntime, starting, error, onStart, onConnectRuntime }: { draft: AgentDraft; onChange: (draft: AgentDraft) => void; runtimes: RuntimeDevice[]; runtimesLoading: boolean; members: MemberWithUser[]; currentUserId: string | null; selectedRuntime: RuntimeDevice | null; starting: boolean; error: string | null; onStart: () => void; onConnectRuntime: () => void; }) {
   const { t } = useT("agents");
   const hasOnline = runtimes.some((runtime) => runtime.status === "online" && isRuntimeUsableForUser(runtime, currentUserId));
-  return <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10"><div className="w-full max-w-xl rounded-xl border bg-card p-6 shadow-sm"><span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><MessageSquare className="size-5" /></span><h2 className="mt-5 text-xl font-semibold">{t(($) => $.creation_studio.builder.setup_title)}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t(($) => $.creation_studio.builder.setup_description)}</p><div className="mt-6 space-y-4"><RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={currentUserId} selectedRuntimeId={draft.runtimeId} onSelect={(runtimeId) => { if (runtimeId !== draft.runtimeId) onChange(applyDraftRuntimeChange(draft, runtimeId)); }} /><ModelDropdown runtimeId={selectedRuntime?.id ?? null} runtimeOnline={selectedRuntime?.status === "online"} value={draft.model} onChange={(model) => onChange(applyDraftModelChange(draft, model))} disabled={!selectedRuntime} /></div>{error && <div role="alert" className="mt-4 text-sm text-destructive">{error}</div>}<div className="mt-6 flex justify-end">{hasOnline ? <Button onClick={onStart} disabled={starting || selectedRuntime?.status !== "online"}>{starting && <Loader2 className="size-4 animate-spin" />}{t(($) => $.creation_studio.builder.start)}</Button> : <Button onClick={onConnectRuntime}>{t(($) => $.creation_studio.builder.connect_runtime)}</Button>}</div></div></main>;
+  return <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10"><div className="w-full max-w-xl rounded-xl border bg-card p-6 shadow-sm"><span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><MessageSquare className="size-5" /></span><h2 className="mt-5 text-title-lg font-semibold">{t(($) => $.creation_studio.builder.setup_title)}</h2><p className="mt-2 text-body leading-6 text-muted-foreground">{t(($) => $.creation_studio.builder.setup_description)}</p><div className="mt-6 space-y-4"><RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={currentUserId} selectedRuntimeId={draft.runtimeId} onSelect={(runtimeId) => { if (runtimeId !== draft.runtimeId) onChange(applyDraftRuntimeChange(draft, runtimeId)); }} /><ModelDropdown runtimeId={selectedRuntime?.id ?? null} runtimeOnline={selectedRuntime?.status === "online"} value={draft.model} onChange={(model) => onChange(applyDraftModelChange(draft, model))} disabled={!selectedRuntime} /></div>{error && <div role="alert" className="mt-4 text-body text-destructive">{error}</div>}<div className="mt-6 flex justify-end">{hasOnline ? <Button onClick={onStart} disabled={starting || selectedRuntime?.status !== "online"}>{starting && <Loader2 className="size-4 animate-spin" />}{t(($) => $.creation_studio.builder.start)}</Button> : <Button onClick={onConnectRuntime}>{t(($) => $.creation_studio.builder.connect_runtime)}</Button>}</div></div></main>;
 }
 
 function BuilderConversation({
@@ -1629,17 +1629,19 @@ function BuilderConversation({
   ];
 
   return (
-    <section className="flex min-h-0 flex-col bg-background">
+    // `@container`: this is one column of the studio's split layout, so the
+    // shared chat gutter must size against the column, not the viewport.
+    <section className="flex min-h-0 flex-col bg-background @container">
       <header className="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b px-5 py-2.5">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">
+          <h2 className="truncate text-body font-semibold">
             {t(($) => $.creation_studio.builder.chat_title)}
           </h2>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="truncate text-caption text-muted-foreground">
             {t(($) => $.creation_studio.builder.chat_hint)}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground">
           <span
             className={cn(
               "size-2 rounded-full",
@@ -1665,10 +1667,10 @@ function BuilderConversation({
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-8">
           <div className="w-full max-w-xl text-center">
-            <h3 className="text-balance text-lg font-semibold">
+            <h3 className="text-balance text-title font-semibold">
               {t(($) => $.creation_studio.builder.empty_title)}
             </h3>
-            <p className="mx-auto mt-2 max-w-md text-pretty text-sm leading-6 text-muted-foreground">
+            <p className="mx-auto mt-2 max-w-md text-pretty text-body leading-6 text-muted-foreground">
               {t(($) => $.creation_studio.builder.empty_description)}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -1677,7 +1679,7 @@ function BuilderConversation({
                   key={prompt}
                   type="button"
                   onClick={() => void onSend(prompt)}
-                  className="rounded-full border bg-background px-3 py-1.5 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border bg-background px-3 py-1.5 text-caption transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {prompt}
                 </button>
@@ -1691,7 +1693,7 @@ function BuilderConversation({
         <div
           role="alert"
           aria-live="polite"
-          className="mx-5 mb-3 rounded-md bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          className="mx-5 mb-3 rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive"
         >
           {error}
         </div>
@@ -1727,11 +1729,11 @@ export function StudioFooter({
 }) {
   const { t } = useT("agents");
   return (
-    <div className="sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 px-5 py-3 backdrop-blur">
+    <div className="pe-chat-launcher sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 py-3 pl-5 backdrop-blur">
       {error ? (
         <p
           role="alert"
-          className="min-w-0 flex-1 break-words text-sm text-destructive"
+          className="min-w-0 flex-1 break-words text-body text-destructive"
         >
           {error}
         </p>

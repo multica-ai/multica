@@ -487,7 +487,7 @@ function ActivityBlock({
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronRight className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.activity_count, { count })}</span>
@@ -514,7 +514,7 @@ function ActivityBlock({
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronDown className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
@@ -524,7 +524,7 @@ function ActivityBlock({
         <button
           type="button"
           onClick={onToggleShowOlder}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronRight className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
@@ -551,7 +551,7 @@ function ActivityBlock({
         }
 
         return (
-          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+          <div key={entry.id} className="flex items-center text-caption text-muted-foreground">
             <div className="mr-2 flex w-4 shrink-0 justify-center">
               {leadIcon}
             </div>
@@ -561,7 +561,7 @@ function ActivityBlock({
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-caption font-medium tabular-nums text-muted-foreground">
                     {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
                   </span>
                 )}
@@ -687,14 +687,14 @@ function SubIssueRow({
           href={paths.issueDetail(child.id)}
           className="flex min-w-0 flex-1 items-center gap-2.5"
         >
-          <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+          <span className="text-micro text-muted-foreground tabular-nums font-medium shrink-0">
             {child.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={child.id} />
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
               className={cn(
-                "text-sm truncate",
+                "text-body truncate",
                 isDone
                   ? "text-muted-foreground"
                   : "group-hover/row:text-foreground",
@@ -708,7 +708,7 @@ function SubIssueRow({
                   <LabelChip key={label.id} label={label} />
                 ))}
                 {labels.length > 2 && (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     +{labels.length - 2}
                   </span>
                 )}
@@ -719,9 +719,9 @@ function SubIssueRow({
                 {customPropsWithValue.slice(0, 3).map((property) => (
                   <span
                     key={property.id}
-                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground"
                   >
-                    <PropertyIcon property={property} className="size-3 text-[11px]" />
+                    <PropertyIcon property={property} className="size-3 text-micro" />
                     <CustomPropertyValueDisplay
                       property={property}
                       value={child.properties?.[property.id]}
@@ -737,7 +737,7 @@ function SubIssueRow({
                   total={childProgress.total}
                   size={11}
                 />
-                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                <span className="text-micro text-muted-foreground tabular-nums font-medium">
                   {childProgress.done}/{childProgress.total}
                 </span>
               </span>
@@ -752,7 +752,7 @@ function SubIssueRow({
             trigger={
               <span
                 className={cn(
-                  "flex shrink-0 items-center gap-1 text-xs tabular-nums",
+                  "flex shrink-0 items-center gap-1 text-caption tabular-nums",
                   !isDone && isPastDateOnly(child.due_date)
                     ? "text-destructive"
                     : "text-muted-foreground",
@@ -848,7 +848,7 @@ function SubIssueDisplayPopover({
                 key={key}
                 className="flex cursor-pointer items-center justify-between"
               >
-                <span className="text-sm">
+                <span className="text-body">
                   {t(($) => $.display[SUB_ISSUE_ROW_PROPERTY_LABEL_KEY[key]])}
                 </span>
                 <Switch
@@ -863,8 +863,8 @@ function SubIssueDisplayPopover({
                 key={property.id}
                 className="flex cursor-pointer items-center justify-between gap-3"
               >
-                <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
-                  <PropertyIcon property={property} className="size-3.5 text-xs" />
+                <span className="flex min-w-0 items-center gap-1.5 truncate text-body">
+                  <PropertyIcon property={property} className="size-3.5 text-caption" />
                   <span className="truncate">{property.name}</span>
                 </span>
                 <Switch
@@ -897,6 +897,95 @@ interface IssueDetailProps {
 }
 
 // ---------------------------------------------------------------------------
+// Not found
+// ---------------------------------------------------------------------------
+
+/**
+ * Exported so `IssueDetailRoute` can render it for an identifier that names no
+ * issue. The route must NOT fall through to `IssueDetail` in that case: doing
+ * so mounts a second observer on the already-failed query, which refetches it
+ * and restarts the resolve/remount cycle indefinitely.
+ */
+export function IssueNotFound({ showBackLink = true }: { showBackLink?: boolean }) {
+  const { t } = useT("issues");
+  const backOrReplace = useBackOrReplace();
+  const paths = useWorkspacePaths();
+
+  return (
+    <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-body text-muted-foreground">
+      <p>{t(($) => $.detail.not_found)}</p>
+      {showBackLink && (
+        <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
+          <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+          {t(($) => $.detail.back)}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loading skeleton
+// ---------------------------------------------------------------------------
+
+/**
+ * Exported so `IssueDetailRoute` can show the identical frame while it resolves
+ * an identifier URL to its issue — the two waits are indistinguishable to the
+ * user, and rendering the same skeleton keeps them that way.
+ */
+export function IssueDetailSkeleton() {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-4 w-4" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <div className="flex flex-1 min-h-0">
+        {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
+            column doesn't shift sideways when real content mounts. */}
+        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+          <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
+            <Skeleton className="h-8 w-3/4" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+            <Skeleton className="h-px w-full" />
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-20" />
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-16 w-full rounded-lg" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="hidden md:block w-80 border-l p-4 space-y-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className="h-5 w-24" />
+            </div>
+          ))}
+          <Skeleton className="h-px w-full" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
@@ -904,7 +993,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
-  const backOrReplace = useBackOrReplace();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
 
@@ -1302,14 +1390,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Quick-jump minimap rail: one tick per comment thread (folded resolved
   // bars included), activity groups skipped. Derived from the same flat
   // `items` array Virtuoso renders so tick order always matches the page.
+  // The resolved flag comes from `deriveThreadResolution`, not from the
+  // `resolved-bar` kind: that kind only covers root resolutions that are
+  // currently folded, so it would miss reply resolutions and would flip off
+  // as soon as the user expanded a resolved thread.
   const minimapThreads = useMemo<ThreadMinimapThread[]>(
     () =>
       items.flatMap((it) =>
         it.kind === "comment" || it.kind === "resolved-bar"
-          ? [{ id: it.id, entry: it.entry }]
+          ? [
+              {
+                id: it.id,
+                entry: it.entry,
+                resolved:
+                  deriveThreadResolution(
+                    it.entry,
+                    timelineView.threadReplies.get(it.id) ?? EMPTY_REPLIES,
+                  ).kind !== "none",
+              },
+            ]
           : [],
       ),
-    [items],
+    [items, timelineView.threadReplies],
   );
 
   // When the timeline renders flat (deep-link or in-page find), there is no
@@ -1698,69 +1800,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
 
   if (loading) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-4" />
-          <Skeleton className="h-4 w-24" />
-        </div>
-        <div className="flex flex-1 min-h-0">
-          {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
-              column doesn't shift sideways when real content mounts. */}
-          <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
-            <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
-              <Skeleton className="h-8 w-3/4" />
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-2/3" />
-              </div>
-              <Skeleton className="h-px w-full" />
-              <div className="space-y-3">
-                <Skeleton className="h-4 w-20" />
-                <div className="flex items-start gap-3">
-                  <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-16 w-full rounded-lg" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="hidden md:block w-80 border-l p-4 space-y-5">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-5 w-24" />
-              </div>
-            ))}
-            <Skeleton className="h-px w-full" />
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-4 w-28" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <IssueDetailSkeleton />;
   }
 
   if (!issue) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-        <p>{t(($) => $.detail.not_found)}</p>
-        {!onDelete && (
-          <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
-            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            {t(($) => $.detail.back)}
-          </Button>
-        )}
-      </div>
-    );
+    return <IssueNotFound showBackLink={!onDelete} />;
   }
 
   const sidebarContent = (
@@ -1769,7 +1813,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div>
         <button
           type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
           {t(($) => $.detail.section_properties)}
@@ -1857,7 +1901,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 key={p.id}
                 label={
                   <>
-                    <PropertyIcon property={p} className="size-3.5 text-xs" />
+                    <PropertyIcon property={p} className="size-3.5 text-caption" />
                     <span className="truncate">{p.name}</span>
                   </>
                 }
@@ -1879,13 +1923,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="col-span-2 mt-1">
               <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
                 <PopoverTrigger
-                  className="flex items-center gap-1.5 rounded-md px-2 py-1 -mx-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 -mx-2 text-caption text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
                 >
                   <Plus className="h-3 w-3 shrink-0" />
                   <span>{t(($) => $.detail.add_property_action)}</span>
                 </PopoverTrigger>
                 {/* Item visuals mirror the inspector rows' typography
-                    (text-xs, muted icons) and each option leads with the
+                    (text-caption, muted icons) and each option leads with the
                     icon the resulting picker uses, so the dropdown reads
                     as a preview of what will show up below. */}
                 <PopoverContent align="start" className="w-44 p-1">
@@ -1894,7 +1938,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       key={k}
                       type="button"
                       onClick={() => addOptionalProp(k)}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-caption text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                     >
                       {k === "priority" && (
                         <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
@@ -1936,10 +1980,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             key={p.id}
                             type="button"
                             onClick={() => addCustomProp(p.id)}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-caption text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                           >
                             {p.icon ? (
-                              <PropertyIcon property={p} className="size-3.5 text-xs" />
+                              <PropertyIcon property={p} className="size-3.5 text-caption" />
                             ) : (
                               <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             )}
@@ -1964,7 +2008,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div>
           <button
             type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
             {t(($) => $.detail.section_parent_issue)}
@@ -1974,7 +2018,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="flex items-center gap-0.5 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors group">
               <AppLink
                 href={paths.issueDetail(parentIssue.id)}
-                className="flex flex-1 min-w-0 items-center gap-1.5 py-1.5 text-xs"
+                className="flex flex-1 min-w-0 items-center gap-1.5 py-1.5 text-caption"
               >
                 <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
                 <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
@@ -2001,7 +2045,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div>
           <button
             type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
           >
             {t(($) => $.detail.section_pull_requests)}
@@ -2015,7 +2059,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div>
         <button
           type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
           {t(($) => $.detail.section_details)}
@@ -2045,7 +2089,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div>
           <button
             type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
             {t(($) => $.detail.section_token_usage)}
@@ -2085,7 +2129,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <>
           <button
             type="button"
-            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
             onClick={() => setMetadataOpen(true)}
           >
             {t(($) => $.detail.section_metadata)}
@@ -2098,7 +2142,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <DialogHeader>
                 <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
               </DialogHeader>
-              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
+              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-caption">
                 {JSON.stringify(issue.metadata ?? {}, null, 2)}
               </pre>
             </DialogContent>
@@ -2327,7 +2371,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ref={titleEditorRef}
                 defaultValue={issue.title}
                 placeholder={t(($) => $.detail.title_placeholder)}
-                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                className="w-full text-display-sm font-bold leading-snug tracking-tight"
                 onReady={titleLazy.onReady}
                 onBlur={(value) => {
                   const trimmed = value.trim();
@@ -2340,7 +2384,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div
               role="button"
               tabIndex={0}
-              className="w-full cursor-text text-2xl font-bold leading-snug tracking-tight"
+              className="w-full cursor-text text-display-sm font-bold leading-snug tracking-tight"
               onClick={(e) => {
                 // A drag-selection (copying the title) must not summon the editor.
                 const sel = window.getSelection();
@@ -2361,7 +2405,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {parentIssue && (
             <AppLink
               href={paths.issueDetail(parentIssue.id)}
-              className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
+              className="mt-2 inline-flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
@@ -2374,7 +2418,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 return (
                   <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
                     <ProgressRing done={done} total={parentChildIssues.length} size={11} />
-                    <span className="tabular-nums text-[10.5px] font-medium">
+                    <span className="tabular-nums text-micro font-medium">
                       {done}/{parentChildIssues.length}
                     </span>
                   </span>
@@ -2443,7 +2487,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="mt-6">
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="inline-flex items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() => actions.openCreateSubIssue()}
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -2463,7 +2507,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <button
                     type="button"
                     onClick={() => setSubIssuesCollapsed((v) => !v)}
-                    className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors"
+                    className="flex items-center gap-1.5 text-body font-medium text-foreground hover:text-foreground/80 transition-colors"
                   >
                     <ChevronDown
                       className={cn(
@@ -2475,7 +2519,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </button>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
-                    <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                    <span className="text-micro text-muted-foreground tabular-nums font-medium">
                       {doneCount}/{childIssues.length}
                     </span>
                   </div>
@@ -2530,7 +2574,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {groups.map(({ stage: groupStage, items }) => (
                         <Fragment key={groupStage ?? "unstaged"}>
                           {staged && (
-                            <div className="bg-muted/40 px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                            <div className="bg-muted/40 px-3 py-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">
                               {groupStage == null
                                 ? t(($) => $.stage.none)
                                 : t(($) => $.stage.value, { n: groupStage })}
@@ -2561,13 +2605,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">{t(($) => $.detail.activity_section)}</h2>
+                <h2 className="text-title-sm font-semibold">{t(($) => $.detail.activity_section)}</h2>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleToggleSubscribe}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="text-caption text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {isSubscribed ? t(($) => $.detail.unsubscribe) : t(($) => $.detail.subscribe)}
                 </button>

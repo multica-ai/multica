@@ -114,7 +114,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     <div>
       <button
         type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
+        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${
           open ? "" : "text-muted-foreground hover:text-foreground"
         }`}
         onClick={() => setOpen(!open)}
@@ -146,7 +146,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
               <button
                 type="button"
                 onClick={() => setShowPast(!showPast)}
-                className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                className="flex w-full items-center gap-1 rounded px-1 py-1 text-caption text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
               >
                 <ChevronRight
                   className={`!size-3 shrink-0 stroke-[2.5] transition-transform ${
@@ -468,7 +468,7 @@ function RowShell({
 }
 
 function TriggerText({ text }: { text: string }) {
-  return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+  return <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{text}</span>;
 }
 
 function supportsCommentCoverage(status: AgentTask["status"]): boolean {
@@ -508,7 +508,7 @@ export function TaskCommentCoverage({ task }: { task: AgentTask }) {
   if (commentIds.size <= 1) return null;
 
   return (
-    <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">
+    <span className="shrink-0 whitespace-nowrap text-micro text-muted-foreground">
       {t(($) => $.execution_log.included_comments, { count: commentIds.size })}
     </span>
   );
@@ -524,7 +524,7 @@ function RowStatus({
   return (
     <div
       title={title}
-      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs [@media(hover:hover)]:group-hover/execution-log-row:hidden"
+      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-caption [@media(hover:hover)]:group-hover/execution-log-row:hidden"
     >
       {children}
     </div>

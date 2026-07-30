@@ -201,7 +201,7 @@ function LinkHoverCard({
       onMouseLeave={onCardLeave}
     >
       <span
-        className="min-w-0 flex-1 truncate text-xs text-muted-foreground px-1"
+        className="min-w-0 flex-1 truncate text-caption text-muted-foreground px-1"
         title={href}
       >
         {truncateUrl(href)}

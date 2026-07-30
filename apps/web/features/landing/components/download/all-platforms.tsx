@@ -127,7 +127,7 @@ export function AllPlatforms({
         </div>
 
         {isFallbackNeeded(assets) ? (
-          <p className="mt-6 text-[13px] text-[#0a0d12]/60">
+          <p className="mt-6 text-label text-[#0a0d12]/60">
             <Link
               href={fallbackHref}
               className="underline decoration-[#0a0d12]/30 underline-offset-4 hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70"
@@ -167,7 +167,7 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0a0d12]/5">
           {icon}
         </span>
-        <span className="text-[14.5px] font-medium">{label}</span>
+        <span className="text-body font-medium">{label}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {formats.map((f) =>
@@ -175,7 +175,7 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
             <a
               key={f.label}
               href={f.href}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a0d12]/12 bg-white px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[#0a0d12]/30 hover:bg-[#0a0d12]/5"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a0d12]/12 bg-white px-3 py-1.5 text-label font-medium transition-colors hover:border-[#0a0d12]/30 hover:bg-[#0a0d12]/5"
             >
               {f.label}
             </a>
@@ -183,7 +183,7 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
             <span
               key={f.label}
               aria-disabled="true"
-              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-[#0a0d12]/8 bg-[#0a0d12]/5 px-3 py-1.5 text-[13px] text-[#0a0d12]/40"
+              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-[#0a0d12]/8 bg-[#0a0d12]/5 px-3 py-1.5 text-label text-[#0a0d12]/40"
               title={unavailable}
             >
               {f.label}

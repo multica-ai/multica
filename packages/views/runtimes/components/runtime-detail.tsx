@@ -158,13 +158,13 @@ export function RuntimeDetail({
             : []),
         ]}
         leaf={
-          <span className="truncate font-mono text-xs text-foreground">
+          <span className="truncate font-mono text-caption text-foreground">
             {runtimeDisplayName(runtime)}
           </span>
         }
         actions={
           !canEditRuntime ? (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
@@ -272,11 +272,11 @@ function HeroCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="truncate text-base font-semibold tracking-tight">
+            <h2 className="truncate text-title-sm font-semibold tracking-tight">
               {runtimeDisplayName(runtime)}
             </h2>
             <HealthBadge health={health} />
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t(($) => $.detail.last_seen, { when: lastSeen })}
             </span>
           </div>
@@ -296,10 +296,10 @@ function HeroCard({
                 size="sm"
                 enableHoverCard
               />
-              <span className="cursor-pointer truncate text-sm">{ownerMember.name}</span>
+              <span className="cursor-pointer truncate text-body">{ownerMember.name}</span>
             </span>
           ) : (
-            <span className="text-sm text-muted-foreground">—</span>
+            <span className="text-body text-muted-foreground">—</span>
           )}
         </Fact>
         <Fact label={t(($) => $.detail.fact_device)}>
@@ -307,7 +307,7 @@ function HeroCard({
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span className="block truncate font-mono text-xs">
+                  <span className="block truncate font-mono text-caption">
                     {device.hostname}
                   </span>
                 }
@@ -315,11 +315,11 @@ function HeroCard({
               <TooltipContent>{device.hostname}</TooltipContent>
             </Tooltip>
           ) : (
-            <span className="text-sm text-muted-foreground">—</span>
+            <span className="text-body text-muted-foreground">—</span>
           )}
         </Fact>
         <Fact label={t(($) => $.detail.fact_runtime)}>
-          <span className="block truncate text-sm">
+          <span className="block truncate text-body">
             {device?.runtime ?? (
               <span className="capitalize">{runtime.provider}</span>
             )}
@@ -335,7 +335,7 @@ function HeroCard({
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
-            className="flex w-full items-center gap-1 px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex w-full items-center gap-1 px-4 py-2 text-caption text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <ChevronRight
               className={`h-3 w-3 transition-transform ${
@@ -377,10 +377,10 @@ function Fact({
 }) {
   return (
     <div className={`min-w-0 ${compact ? "" : "px-4 py-3"}`}>
-      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+      <dt className="text-micro uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
-      <dd className={`mt-1 ${mono ? "font-mono text-xs" : ""}`}>{children}</dd>
+      <dd className={`mt-1 ${mono ? "font-mono text-caption" : ""}`}>{children}</dd>
     </div>
   );
 }
@@ -399,15 +399,15 @@ function ServingAgentsCard({
   return (
     <div className="rounded-lg border">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">{t(($) => $.detail.serving_title)}</span>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption font-semibold">{t(($) => $.detail.serving_title)}</span>
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.detail.serving_count, { count: agents.length })}
         </span>
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">
           <Cpu className="h-5 w-5 text-muted-foreground/40" />
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="mt-2 text-caption text-muted-foreground">
             {t(($) => $.detail.no_agents)}
           </p>
         </div>
@@ -430,10 +430,10 @@ function ServingAgentsCard({
               >
                 <ActorAvatar actorType="agent" actorId={agent.id} size="sm" enableHoverCard showStatusDot />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium">
+                  <div className="truncate text-caption font-medium">
                     {agent.name}
                   </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-caption">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
                       <span className={av.textClass}>{avLabel}</span>
@@ -480,11 +480,11 @@ function DiagnosticsCard({
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
+        <span className="text-caption font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
         <div>
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1.5 text-micro uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_visibility)}
           </div>
           {canEdit ? (
@@ -530,7 +530,7 @@ function VisibilityReadout({ runtime }: { runtime: AgentRuntime }) {
     <Tooltip>
       <TooltipTrigger
         render={
-          <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
+          <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1.5 text-caption">
             <Icon className="h-3 w-3 text-muted-foreground" />
             <span className="font-medium">
               {t(($) => $.detail.visibility_label[visibility])}
@@ -622,7 +622,7 @@ function VisibilityChoice({
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-caption font-medium transition-colors ${
               active
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"

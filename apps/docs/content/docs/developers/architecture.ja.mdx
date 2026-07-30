@@ -1,0 +1,129 @@
+---
+title: プロジェクトアーキテクチャ
+description: Multica のクライアント、Go サービス、実行デーモン、共有フロントエンドパッケージがどのように連携するかを説明します。
+---
+
+Multica は Go バックエンド、複数のクライアント、実行用コンピューター上で動作するデーモンで構成されています。PostgreSQL がコラボレーションデータを保存し、デーモンがタスクを取得してローカルの AI コーディングツールを呼び出します。
+
+```text
+Web / Desktop / Mobile / CLI
+             │
+       HTTP + WebSocket
+             │
+      Go API ───────── PostgreSQL
+             │
+      daemon WebSocket
+             │
+  ローカルデーモン ─── AI コーディングツール
+```
+
+プロダクト利用者向けの説明は [Multica の仕組み](/how-multica-works)を参照してください。このページではコードの階層構造に焦点を当てます。
+
+## リポジトリ構成
+
+| ディレクトリ | 責務 | 主な技術 |
+| --- | --- | --- |
+| `server/` | API、認証、タスクスケジューリング、インテグレーション、CLI、デーモン | Go、Chi、sqlc、gorilla/websocket |
+| `apps/web/` | ブラウザクライアントとランディングページ | Next.js App Router |
+| `apps/desktop/` | デスクトップクライアントとローカルプロセス管理 | Electron、electron-vite |
+| `apps/mobile/` | 独立した iOS クライアント | Expo、React Native |
+| `apps/docs/` | 多言語ドキュメントサイト | Next.js、Fumadocs |
+| `packages/core/` | API クライアント、型、クエリ、mutation、プラットフォーム非依存のビジネスロジック | TanStack Query、Zustand |
+| `packages/ui/` | ビジネスロジックを含まない基礎 UI | shadcn、Base UI |
+| `packages/views/` | Web と Desktop で共有するビジネスページとコンポーネント | React |
+| `packages/tsconfig/`、`packages/eslint-config/` | 共有ツール設定 | TypeScript、ESLint |
+
+共有パッケージは `.ts` と `.tsx` のソースファイルを直接エクスポートし、利用するアプリケーション側でコンパイルします。依存方向は `views → core + ui` であり、`core` と `ui` は互いに依存しません。
+
+## Web と Desktop のコード共有
+
+Web と Desktop は次の 3 層を共有します。
+
+1. `packages/core` が API、キャッシュ、権限、プラットフォーム非依存の状態を扱います。
+2. `packages/ui` が基礎コンポーネントを提供します。
+3. `packages/views` がビジネスページを構成します。
+
+ルーティング、cookie、Electron IPC などのプラットフォーム機能はアプリケーション層に残します。共有ページは `NavigationAdapter` を通じて遷移し、`next/*` や `react-router-dom` を直接インポートしません。
+
+たとえば Web と Desktop の両方で必要なイシュー機能は、通常次の場所にまたがります。
+
+```text
+packages/core/issues/      クエリ、mutation、キャッシュ更新
+packages/views/issues/     ページとビジネスコンポーネント
+apps/web/platform/         Next.js ルーティングアダプター
+apps/desktop/.../platform/ Electron ルーティングアダプター
+```
+
+Mobile はこれらの React ページを再利用しません。`@multica/core` の型や純粋関数をインポートできますが、UI、query key、状態、リアルタイム購読、リリースフローは独自に持ちます。
+
+## フロントエンドの状態
+
+サーバーデータとクライアント状態は分けて管理します。
+
+- **TanStack Query** はイシュー、エージェント、メンバー、受信トレイなどのサーバーデータを保持します。
+- **Zustand** はフィルター、下書き、ダイアログ、レイアウトなどのクライアント状態を保持します。
+- 現在のワークスペースはルートで決まり、リクエスト、永続化 namespace、再接続に必要な範囲だけプラットフォーム層へ反映します。
+- React Context はワークスペース ID やナビゲーションアダプターなど、プラットフォームの plumbing だけを渡します。
+
+WebSocket イベントは TanStack Query のキャッシュを更新または無効化します。サーバーオブジェクトを Zustand にコピーしてはいけません。ワークスペースの作成、削除、退出のように画面遷移を伴う mutation は、サーバーの確認を待ってからローカル状態を消去する必要があります。
+
+API レスポンスは `packages/core/api/` の境界で zod schema により解析します。インストール済みの Desktop がより新しいバックエンドへ接続する場合があるため、ネットワーク JSON を TypeScript 型へ直接キャストしてはいけません。
+
+## バックエンドの階層
+
+主なエントリーポイントは `server/cmd/` にあります。
+
+| エントリーポイント | 役割 |
+| --- | --- |
+| `server` | HTTP API、WebSocket、スケジューラー、インテグレーション worker を起動 |
+| `multica` | CLI とローカルデーモン |
+| `migrate` | データベース migration を実行 |
+| `backfill_*` | 特定バージョン向けのデータ backfill ツール |
+
+リクエストは通常、次の方向に流れます。
+
+```text
+router → middleware → handler → service → sqlc query → PostgreSQL
+```
+
+- `internal/middleware/` は認証、ワークスペース、リクエスト境界を扱います。
+- `internal/handler/` は HTTP 入力を解析し、レスポンスを生成します。
+- `internal/service/` は複数クエリにまたがるビジネスフローとトランザクションを担当します。
+- `pkg/db/queries/` には手書きの SQL を置きます。
+- `pkg/db/generated/` は sqlc により生成されるため、直接編集できません。
+- `internal/integrations/` は GitHub、Slack、飛書などの外部イベントを扱います。
+- `internal/storage/` はローカルまたは S3 の添付ファイルを扱います。
+
+PostgreSQL がビジネスデータの信頼できる情報源です。Redis は任意のコンポーネントで、複数インスタンス間のリアルタイムイベント、キャッシュ、一時的な調整に使います。未設定の場合、単一インスタンスの開発環境ではプロセス内実装を使用します。
+
+## リアルタイム接続
+
+Multica には異なる 2 つの WebSocket パスがあります。
+
+- `internal/realtime/` はイシュー、コメント、受信トレイなどの変更をユーザークライアントへ配信します。
+- `internal/daemonws/` はデーモンを接続し、ランタイムの起動通知と daemon RPC に使います。
+
+WebSocket は遅延を減らしますが、最終的な状態はデータベースにあります。クライアントは再接続後にクエリで再同期する必要があります。デーモンも polling 経路を保持し、1 回の切断で queued タスクが永久に止まらないようにします。
+
+## 1 回の実行におけるコードパス
+
+1. ユーザーがイシューを割り当てる、エージェントをメンションする、または自動化がトリガーされます。
+2. `TaskService` が queued タスクを作成し、対応するランタイムへ通知します。
+3. デーモンが daemon API を通じてタスクを取得します。
+4. サーバーがタスクとエージェントに紐づく一時的な認証情報を発行します。
+5. デーモンがローカルディレクトリを準備し、`pkg/agent` の対応する provider backend を呼び出します。
+6. ツールがローカルで動作し、デーモンが進捗、メッセージ、最終状態をアップロードします。
+7. サーバーがタスクとイシューを更新し、リアルタイムイベントでクライアントを更新します。
+
+provider アダプター層は AI コーディングツールごとの起動、ストリーミングイベント、キャンセル、使用量データを統一しますが、ローカルディレクトリとセッションは引き続きデーモンが管理します。
+
+## 複数ワークスペースの境界
+
+ビジネスクエリは必ず `workspace_id` で限定し、リクエストがワークスペースルートへ入る前にメンバーシップを確認します。`X-Workspace-ID` は現在のワークスペースを選択しますが、権限確認の代わりにはなりません。
+
+イシューの担当者は多態的な関係であり、メンバー、エージェント、スクワッドのいずれかを指します。クエリ、キャッシュ key、リアルタイムイベントを追加するときは、リソース ID だけでグローバルに一意なコンテキストだと仮定せず、ワークスペースと担当者の型を保持する必要があります。
+
+## 次のステップ
+
+- [開発に参加する](/developers/contributing) — ローカル環境、worktree、テストの配置。
+- [開発規約](/developers/conventions) — 命名、用語、中国語文言に関するリポジトリの契約。

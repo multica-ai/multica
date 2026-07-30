@@ -67,5 +67,9 @@
     "error_already_bound": "该 Slack 账号已关联到其他 Multica 用户。账户转移需要先显式解绑。",
     "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
     "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
+  },
+  "expandable_description": {
+    "expand": "查看详情",
+    "collapse": "收起"
   }
 }

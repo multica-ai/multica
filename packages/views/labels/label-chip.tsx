@@ -56,7 +56,7 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
   const nameClass = fullName ? "break-all" : "truncate max-w-[12rem]";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${className ?? ""}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
       style={{ backgroundColor: label.color, color: textColor }}
       // aria-label exposes the full name to screen readers when the span
       // visually truncates. title stays for sighted hover-tooltip.

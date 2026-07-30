@@ -1,186 +1,303 @@
 ---
-title: CLI command reference
-description: One-page overview of every top-level Multica CLI command. For full usage, run `multica <command> --help`.
+title: Using the CLI
+description: Install and log in to the Multica CLI, and manage workspaces, issues, agents, and runtimes from the terminal.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The Multica CLI mirrors almost everything the Web UI can do (create [issues](/issues), assign [agents](/agents), start the [daemon](/daemon-runtimes), and more). This page lists every top-level command with a one-line description. For the full set of flags and examples, run `multica <command> --help`.
+The Multica CLI both connects local runtimes and manages workspaces, issues, agents, and automations from the terminal. This page covers the common paths; the flags your installed version supports are always defined by each command's own `--help`.
 
-## Getting authenticated
+## Installation
 
-Run this the first time you use the CLI to obtain a **personal access token (PAT)**:
+**macOS / Linux**
 
 ```bash
-multica login
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-Your browser opens automatically. After you approve in the web app, the CLI saves the PAT (prefixed with `mul_`) to `~/.multica/config.json`. Every subsequent command authenticates with that PAT.
+With Homebrew installed, you can also run:
 
-<Callout type="tip">
-For CI or headless environments, skip the browser flow: create a PAT in the web app under **Settings → Personal Access Tokens**, then run `multica login --token <mul_...>` to supply it directly.
-</Callout>
+```bash
+brew install multica-ai/tap/multica
+```
 
-For the difference between token types, see [Authentication and tokens](/auth-tokens).
+**Windows PowerShell**
 
-## Auth and setup
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
 
-| Command | Purpose |
-|---|---|
-| `multica login` | Log in and save a PAT |
-| `multica auth status` | Show current login status, user, and workspace |
-| `multica auth logout` | Clear the local PAT |
-| `multica setup cloud` | One-shot setup for Multica Cloud (login + install daemon) |
-| `multica setup self-host` | One-shot setup for a self-hosted backend |
+Confirm the install:
 
-## Workspaces and members
+```bash
+multica version
+```
 
-| Command | Purpose |
-|---|---|
-| `multica workspace list` | List every workspace you can access |
-| `multica workspace create --name "..." --slug "..." [--issue-prefix "..."] [--description "..."] [--context "..."]` | Create a workspace (you become its owner). `--name` and `--slug` are required; the slug is permanent. Does not switch your current workspace. |
-| `multica workspace get <slug>` | Show details for one workspace |
-| `multica workspace member list` | List members of the current workspace |
-| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Update workspace metadata (admin/owner). Long fields accept `--description-stdin` / `--context-stdin`. |
+## First connection
 
-## Issues and projects
+Connect to Multica Cloud:
 
-<Callout type="info">
-`list` commands (`multica issue list`, `autopilot list`, `project list`, etc.) print short, copy-paste-ready IDs by default — issue keys like `MUL-123` for issues, short UUID prefixes for the rest. The `<id>` argument on the follow-up commands below accepts either the short ID or the full UUID, so the typical flow is `multica issue list` → copy the key → `multica issue get MUL-123`. Pass `--full-id` to a list command when you need the canonical UUID.
-</Callout>
+```bash
+multica setup
+```
 
-| Command | Purpose |
-|---|---|
-| `multica issue list` | List issues (prints copy-paste-ready issue keys) |
-| `multica issue get <id>` | Show a single issue (accepts an issue key or a UUID) |
-| `multica issue create --title "..."` | Create a new issue |
-| `multica issue update <id> ...` | Update an issue (status, priority, assignee, etc.) |
-| `multica issue assign <id> --to <name>` | Assign to a member, agent, or squad (assigning to an agent triggers a run) |
-| `multica issue status <id> <status>` | Shortcut to change status |
-| `multica issue search <query>` | Keyword search |
-| `multica issue children <id>` | List sub-issues grouped by stage |
-| `multica issue pull-requests <id>` | List linked pull requests and their status |
-| `multica issue runs <id>` | Show agent runs on an issue |
-| `multica issue run-messages <task-id>` | Show messages for one execution |
-| `multica issue usage <id>` | Show aggregated token usage for an issue |
-| `multica issue rerun <id>` | Re-enqueue a fresh task for the issue's current agent assignee |
-| `multica issue cancel-task <task-id>` | Cancel a queued or running task |
-| `multica issue comment <id> ...` | Nested: view / post comments |
-| `multica issue comment resolve/unresolve <comment-id>` | Mark a comment thread resolved or unresolved |
-| `multica issue subscriber <id> ...` | Nested: subscribe / unsubscribe |
-| `multica issue metadata <id> ...` | Nested: read / write issue metadata |
-| `multica issue label <id> ...` | Nested: manage labels on an issue |
-| `multica project list/get/create/update/delete/status` | Project CRUD |
-| `multica label list/create/update/delete` | Workspace label CRUD |
+Connect to a self-hosted instance:
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+`setup` saves the server address, opens a browser to complete sign-in, and starts the daemon. When it finishes, check:
+
+```bash
+multica auth status
+multica daemon status
+```
+
+If you only need to sign in again without overwriting other configuration, run `multica login`. On a machine without a browser, create a personal access token in the web settings first, then enter it with:
+
+```bash
+multica login --token
+```
+
+The command prompts you to paste the token in the terminal, keeping the full value out of shell history.
+
+## Choosing a workspace
+
+List workspaces and switch the default:
+
+```bash
+multica workspace list
+multica workspace switch <slug>
+```
+
+Subsequent commands use this workspace. A single command can override it with `--workspace-id`, or you can set `MULTICA_WORKSPACE_ID`.
+
+Invite members:
+
+```bash
+multica workspace member invite teammate@example.com
+multica workspace member invite admin@example.com --role admin
+```
+
+## Common issue operations
+
+```bash
+# View and search
+multica issue list
+multica issue get MUL-123
+multica issue search "login failure"
+
+# Create and update
+multica issue create --title "Fix login failure"
+multica issue status MUL-123 in_progress
+multica issue assign MUL-123 --to "Backend Agent"
+
+# Comments and runs
+multica issue comment list MUL-123
+multica issue comment add MUL-123 --content "Check the regression tests first"
+multica issue runs MUL-123
+```
+
+Read long descriptions or comments from stdin to avoid dealing with newlines and quoting:
+
+```bash
+multica issue create --title "Upgrade notes" --description-stdin < notes.md
+multica issue comment add MUL-123 --content-stdin < review.md
+```
+
+View the messages of a single run, or stop a task:
+
+```bash
+multica issue run-messages <task-id> --issue MUL-123
+multica issue cancel-task <task-id> --issue MUL-123
+```
 
 ## Agents and skills
 
-| Command | Purpose |
-|---|---|
-| `multica agent list` | List the workspace's agents |
-| `multica agent get <slug>` | Show an agent's configuration |
-| `multica agent create ...` | Create an agent |
-| `multica agent update <slug> ...` | Update an agent |
-| `multica agent archive <slug>` | Archive |
-| `multica agent restore <slug>` | Restore an archived agent |
-| `multica agent tasks <slug>` | Show an agent's task history |
-| `multica agent avatar <slug>` | Upload an agent avatar |
-| `multica agent env <slug> ...` | Read or replace an agent's custom environment variables |
-| `multica agent skills ...` | Nested: attach / detach skills |
-| `multica skill list/get/create/update/delete` | Skill CRUD |
-| `multica skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
-| `multica skill files ...` | Nested: manage a skill's files |
-
-### Skill import conflicts
-
-`multica skill import --url <url>` defaults to `--on-conflict fail`. If a skill
-with the same name already exists, the command exits with a structured
-`conflict` result and does not change the workspace.
-
-Use `--on-conflict overwrite` when you created the existing skill and want to
-replace its content while preserving its ID and agent bindings. Use
-`--on-conflict rename` to import a copy with an automatic suffix such as `-2`.
-Use `--on-conflict skip` to leave the existing skill untouched and report
-`skipped`.
-
 ```bash
-multica skill import --url https://skills.sh/acme/repo/review-helper
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+multica agent list
+multica agent get <agent-id>
+multica agent create --help
+multica agent update <agent-id> --help
+
+multica skill list
+multica skill get <skill-id>
+multica skill import --url <skill-url>
+multica agent skills add <agent-id> --skill-ids <skill-id>
 ```
 
-## Squads
+When an import hits a skill with the same name, the default is to stop without modifying existing content. Pick by intent:
 
-| Command | Purpose |
-|---|---|
-| `multica squad list` | List squads in the workspace |
-| `multica squad get <id>` | Show a single squad |
-| `multica squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
-| `multica squad update <id> ...` | Update name, description, instructions, leader, or avatar |
-| `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
-| `multica squad member list/add/remove/set-role <squad-id>` | Manage squad members and update roles in place |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Used by squad leader agents to record an evaluation per turn |
+```bash
+multica skill import --url <skill-url> --on-conflict overwrite
+multica skill import --url <skill-url> --on-conflict rename
+multica skill import --url <skill-url> --on-conflict skip
+```
 
-See [Squads](/squads) for the full model.
-
-## Autopilots
-
-| Command | Purpose |
-|---|---|
-| `multica autopilot list` | List every autopilot in the workspace |
-| `multica autopilot get <id>` | Show a single autopilot |
-| `multica autopilot create ...` | Create an autopilot |
-| `multica autopilot update <id> ...` | Update |
-| `multica autopilot delete <id>` | Delete |
-| `multica autopilot runs <id>` | Show run history |
-| `multica autopilot trigger <id>` | Trigger a run manually |
-| `multica autopilot trigger-add/update/delete <id>` | Manage schedule or webhook triggers |
-| `multica autopilot trigger-rotate-url <id> <trigger-id>` | Rotate a webhook trigger URL |
-
-`multica autopilot create/update` also accepts `--subscriber` to set default
-subscribers for issues created by a `create_issue` autopilot; update accepts
-`--clear-subscribers` to remove them.
+`overwrite` is only allowed for the skill's creator and preserves the original ID and agent bindings.
 
 ## Daemon and runtimes
 
-| Command | Purpose |
-|---|---|
-| `multica daemon start` | Start the daemon (background by default; add `--foreground` to run in the foreground) |
-| `multica daemon stop` | Stop the daemon |
-| `multica daemon restart` | Restart the daemon |
-| `multica daemon status` | Check whether the daemon is online and its concurrency |
-| `multica daemon logs` | View daemon logs |
-| `multica runtime list` | List runtimes in the current workspace |
-| `multica runtime usage` | Show resource usage |
-| `multica runtime activity` | Recent activity log |
-| `multica runtime update <id> ...` | Initiate a CLI update on a runtime |
-| `multica runtime delete <id> [--cascade]` | Delete a runtime, optionally archiving bound agents |
-| `multica runtime profile ...` | Manage custom runtime profiles and local path overrides |
-
-## Miscellaneous
-
-| Command | Purpose |
-|---|---|
-| `multica repo checkout <url>` | Clone a repo locally for agents to use |
-| `multica config` | View or edit local CLI configuration |
-| `multica version` | Print the CLI version |
-| `multica update` | Upgrade the CLI to the latest release |
-| `multica attachment download <id>` | Download an attachment from an issue or comment |
-
-## Getting full flags
-
-Every command supports `--help`:
-
 ```bash
-multica issue create --help
-multica agent update --help
+multica daemon start
+multica daemon stop
+multica daemon restart
+multica daemon status --output json
+multica daemon logs --follow
+
+multica runtime list
+multica runtime rename <runtime-id> "Office Mac"
+multica runtime usage <runtime-id>
+multica runtime activity <runtime-id>
 ```
 
-v2 will ship a dedicated detailed reference page for each command.
+Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` also archives those agents and cancels their active tasks.
+
+See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom profiles.
+
+## Command overview
+
+| Command | Purpose |
+| --- | --- |
+| `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, and runs |
+| `project` | Manage projects and their resources |
+| `label`, `property` | Manage workspace labels and custom properties |
+| `agent`, `skill`, `squad` | Manage agents, skills, and squads |
+| `autopilot` | Manage automations, triggers, and run history |
+| `workspace` | Create, view, and switch workspaces, and invite members |
+| `repo` | Manage workspace repositories and check them out locally |
+| `daemon`, `runtime` | Start and stop the local daemon; view and manage runtimes |
+| `attachment` | Upload or download attachments |
+| `user profile` | View or update the current user's profile |
+| `auth`, `login`, `setup` | Log in, check auth status, and initialize a connection |
+| `config` | View or edit the current CLI profile's local configuration |
+| `update`, `version` | Update the CLI or print the version |
+
+`multica chat` reads **the external chat session an agent is currently handling**; it is mainly for agents in chat integrations, not a general command for browsing arbitrary workspace conversations.
+
+## IDs and output formats
+
+Issues use keys like `MUL-123` or full UUIDs; short UUID prefixes are not accepted.
+
+`list` commands for other resources usually print copyable short IDs and support `--full-id` for the full UUID. When a short ID is ambiguous, the CLI asks for more characters or the full UUID. Short task IDs also require `--issue` to identify the owning issue.
+
+Many commands support structured output:
+
+```bash
+multica issue list --output json
+multica agent list --output json
+```
+
+Scripts should use JSON output rather than parsing the terminal-oriented tables. The output formats and pagination flags each command supports are defined by `multica <command> --help`.
+
+## Profiles and configuration
+
+The default configuration lives in `~/.multica/config.json`. Use `--profile <name>` to isolate a separate set of server address, token, default workspace, and daemon state:
+
+```bash
+multica setup self-host --profile staging \
+  --server-url https://api.staging.example.com \
+  --app-url https://app.staging.example.com
+
+multica issue list --profile staging
+```
+
+Named profiles live in `~/.multica/profiles/<name>/config.json`. Inspect the current values:
+
+```bash
+multica config show
+multica config show --profile staging
+```
+
+<Callout type="warning">
+CLI configuration files contain tokens that can access Multica as you. Don't commit them to a repository, upload them to logs, or share them with others.
+</Callout>
+
+## Command reference
+
+The tables below cover every current top-level command, grouped the way the CLI itself groups them. All commands accept the global flags `--server-url`, `--workspace-id`, `--profile`, and `--debug`. `--output` is registered per command, and the default format varies: `list` commands default to a table, while `get` and `create` commands mostly default to JSON. Full flags are defined by `multica <command> --help`.
+
+### Core
+
+| Command | Subcommand | Purpose | Key flags |
+| --- | --- | --- | --- |
+| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--limit`, `--offset`, `--sort`, `--full-id` |
+| | `get <id>` | Show a single issue | |
+| | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable) |
+| | `update <id>` | Update issue fields | Same fields as `create`, plus `--position` |
+| | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign` |
+| | `status <id> <status>` | Change status | |
+| | `reorder <id>` | Move within a column | |
+| | `search <query>` | Search issues | `--limit`, `--include-closed` |
+| | `children <id>` | List sub-issues grouped by stage | |
+| | `pull-requests <id>` | List linked PRs | |
+| | `comment list/add/delete/resolve/unresolve` | Manage comments | `add`: `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment`; `list`: `--since`, `--thread`, `--tail` |
+| | `subscriber list/add/remove <issue-id>` | Manage subscribers | `--user`, `--user-id` (defaults to the current user) |
+| | `label list/add/remove <issue-id>` | Manage labels on an issue | |
+| | `metadata list/get/set/delete <issue-id>` | Manage issue-level key-value metadata | |
+| | `property list/set/unset <issue-id>` | Set custom property values | `set`: `--name`, `--value` |
+| | `runs <issue-id>` | View run history | `--full-id` |
+| | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
+| | `usage <issue-id>` | View aggregated token usage | |
+| | `rerun <id>` | Re-enqueue a run for the current assignee | |
+| | `cancel-task <task-id>` | Cancel a running or queued task | `--issue` |
+| `project` | `list/get/create/update/delete` | Manage projects | |
+| | `status <id> <status>` | Change project status | |
+| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url` |
+| `label` | `list/get/create/update/delete` | Manage workspace labels | |
+| `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type`, `--option` (repeatable); `list`: `--include-archived`; the type cannot be changed after creation |
+| `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
+| | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
+| | `tasks <id>` | View an agent's tasks | |
+| | `avatar <id>` | Upload an avatar | |
+| | `env get/set <agent-id>` | Read and write custom environment variables (owner and admin only) | |
+| | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
+| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--priority`, `--project`, `--subscriber` (repeatable) |
+| | `trigger <id>` | Trigger a run manually | |
+| | `runs <id>` | View run history | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | |
+| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | |
+| | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
+| `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
+| `skill` | `list/get/create/update/delete` | Manage skills | |
+| | `import` | Import a skill from a URL or local file | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip`; default `fail`) |
+| | `search <query>` | Search skills | |
+| | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | |
+| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
+| | `member list/add/set-role/remove` | Manage squad members | |
+| | `activity <issue-id> <outcome>` | Record a leader evaluation | |
+| `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
+
+### Runtime
+
+| Command | Subcommand | Purpose | Key flags |
+| --- | --- | --- | --- |
+| `daemon` | `start` | Start the local daemon | `--foreground`, `--device-name`, `--runtime-name`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` means no limit), `--max-concurrent-tasks`, `--no-auto-update`; each has a matching `MULTICA_*` environment variable |
+| | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
+| | `logs` | View daemon logs | `--follow`, `--lines` |
+| | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |
+| `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (also archives bound agents and cancels their tasks) |
+| | `profile list/create/update/delete` | Manage custom runtime profiles | |
+| | `profile set-path/unset-path <profile-id>` | Pin a local executable path (local only, never uploaded to the server) | |
+
+### Additional
+
+| Command | Subcommand | Purpose | Key flags |
+| --- | --- | --- | --- |
+| `auth` | `status` / `logout` | Check auth status; `logout` only deletes the locally saved token and does not revoke it on the server | |
+| `user` | `profile get/update` | View or update the current user's profile | |
+| `login` | — | Sign in via the browser and configure all workspaces automatically | `--token` (prompts interactively in the terminal when passed without a value) |
+| `setup` | `cloud` (default), `self-host` | Save the server address, complete sign-in, and start the daemon | `self-host`: `--server-url`, `--app-url`, `--port`, `--frontend-port` |
+| `attachment` | `download <attachment-id>`, `upload <path>` | Download or upload attachments | `download`: `--output-dir`; `upload`: `--task` |
+| `config` | `show`, `set <key> <value>` | View or edit the current profile's local configuration | Precedence: command-line flags > environment variables > `config.json` > built-in defaults; set an empty string to clear a value |
+| `update` | — | Update the CLI to the latest version | |
+| `version` | — | Print version information | `--output` (`text` or `json`) |
 
 ## Next steps
 
-- [Authentication and tokens](/auth-tokens) — PAT vs. JWT vs. daemon token
-- [Daemon and runtimes](/daemon-runtimes) — how the `daemon` commands work under the hood
-- [Creating and configuring agents](/agents-create) — all options for `multica agent create`
+- [Authentication and tokens](/auth-tokens) — creating, renewing, and revoking PATs.
+- [Troubleshooting](/troubleshooting) — diagnosing command errors and tasks that never start.
+- [Create and configure an agent](/agents-create) — the full semantics of every `agent create` field.

@@ -101,7 +101,7 @@ export function IssuePickerModal({
         />
         <CommandList>
           {isLoading && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
+            <div className="py-6 text-center text-body text-muted-foreground">
               {t(($) => $.issue_picker.searching)}
             </div>
           )}
@@ -109,7 +109,7 @@ export function IssuePickerModal({
             <CommandEmpty>{t(($) => $.issue_picker.no_results)}</CommandEmpty>
           )}
           {!isLoading && !query.trim() && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
+            <div className="py-6 text-center text-body text-muted-foreground">
               {t(($) => $.issue_picker.prompt_to_search)}
             </div>
           )}

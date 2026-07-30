@@ -59,6 +59,63 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Type scale — the only font sizes product UI may use.
+ *
+ * There was no `--text-*` token here before, so sizes grew ad hoc: 51 distinct
+ * font sizes across web + desktop, 370 of them written as arbitrary values,
+ * including half-pixel steps (10.5 / 11.5 / 12.5 / 13.5 / 14.5 / 15.5px) that
+ * nobody chose deliberately — they appeared because there was no step to reach
+ * for. Hierarchy does not come from having more sizes; past a handful, every
+ * extra size makes the hierarchy blurrier, because two values a pixel apart
+ * read as "the same, but wrong" rather than as two levels.
+ *
+ * The steps are named for the role the text plays, not for a t-shirt size.
+ * That is what keeps the scale from drifting again: "what is this text for"
+ * has an answer a reader can check, "is this sm or base" does not.
+ *
+ * Six of the ten steps replace Tailwind's default scale and deliberately keep
+ * that scale's exact size/line-height pairs, so `text-sm` -> `text-body` moves
+ * nothing on screen. Only the steps that fill the old gaps — micro (11), label
+ * (13), body-lg (15) — are new sizes; those are the gaps the arbitrary values
+ * were papering over. Every step carries its own line-height so leading cannot
+ * fragment the way size did; a `leading-*` utility still wins where a specific
+ * block needs to override it.
+ *
+ * Landing-page display type (rem/clamp, 2.2-6.4rem) is marketing typography on
+ * a separate ramp and stays out of this scale on purpose. */
+@theme {
+    /* counters, badges, timestamps, overline labels */
+    --text-micro: 11px;
+    --text-micro--line-height: 15px;
+    /* secondary and helper text — was text-xs */
+    --text-caption: 12px;
+    --text-caption--line-height: 16px;
+    /* dense labels: table headers, metadata rows */
+    --text-label: 13px;
+    --text-label--line-height: 18px;
+    /* UI body, the workhorse — was text-sm */
+    --text-body: 14px;
+    --text-body--line-height: 20px;
+    /* roomier body: dialog copy, onboarding prose */
+    --text-body-lg: 15px;
+    --text-body-lg--line-height: 22px;
+    /* small headings — was text-base */
+    --text-title-sm: 16px;
+    --text-title-sm--line-height: 24px;
+    /* section headings — was text-lg */
+    --text-title: 18px;
+    --text-title--line-height: 28px;
+    /* card and dialog titles — was text-xl */
+    --text-title-lg: 20px;
+    --text-title-lg--line-height: 28px;
+    /* page titles — was text-2xl */
+    --text-display-sm: 24px;
+    --text-display-sm--line-height: 32px;
+    /* hero numbers and empty-state headlines — was text-3xl (30px) */
+    --text-display: 36px;
+    --text-display--line-height: 40px;
+}
+
 :root {
     color-scheme: light;
     /* Surface system: the app shell is the quiet outer frame; the page canvas
@@ -75,6 +132,18 @@
     --surface-border: oklch(0.92 0.004 286.32);
     --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
     --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+
+    /* The chat launcher is an overlay pinned to the dashboard's bottom-right
+       corner on every workspace page, so that corner is not available to page
+       content. Its geometry lives here rather than in the button so that the
+       clearance is derived from it: anything reaching that corner — a footer's
+       action buttons, a floating toolbar — reserves --chat-launcher-clearance
+       and stays correct if the launcher ever moves or changes size. */
+    --chat-launcher-size: 2.5rem;
+    --chat-launcher-inset: 0.5rem;
+    --chat-launcher-clearance: calc(
+      var(--chat-launcher-size) + var(--chat-launcher-inset) * 2
+    );
     /* Menus (dropdown/context/select/popover) hover just above their trigger,
        so they carry a lighter shadow than window-level overlays (dialogs,
        sheets), which keep --floating-shadow. */

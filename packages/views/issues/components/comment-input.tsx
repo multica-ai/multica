@@ -249,7 +249,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           {/* rich-text-editor + <p>: the shell line inherits the editor's
               exact type metrics (line-height 1.625 from prose.css), so the
               shell→editor swap doesn't shift layout. */}
-          <div className="rich-text-editor text-sm">
+          <div className="rich-text-editor text-body">
             <p className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
           </div>
         </div>

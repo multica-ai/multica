@@ -49,7 +49,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
   if (!agent) {
     return (
-      <div className="text-xs text-muted-foreground">{t(($) => $.profile_card.unavailable)}</div>
+      <div className="text-caption text-muted-foreground">{t(($) => $.profile_card.unavailable)}</div>
     );
   }
 
@@ -84,10 +84,10 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <p className="truncate text-sm font-semibold">{agent.name}</p>
+            <p className="truncate text-body font-semibold">{agent.name}</p>
             {!isArchived && <VisibilityBadge value={agent.visibility} compact />}
             {isArchived && (
-              <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
                 {t(($) => $.row.archived)}
               </span>
             )}
@@ -99,7 +99,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         {!isArchived && (
           <AppLink
             href={p.agentDetail(agent.id)}
-            className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
+            className="mr-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
           >
             {t(($) => $.profile_card.detail_link)}
           </AppLink>
@@ -108,7 +108,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
       {/* Description */}
       {agent.description && (
-        <p className="line-clamp-2 text-xs text-muted-foreground">
+        <p className="line-clamp-2 text-caption text-muted-foreground">
           {agent.description}
         </p>
       )}
@@ -117,7 +117,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           skills (what it knows), owner (who manages it). Model + effort
           are surfaced here so a quick hover answers "which model is this
           agent running?" without opening the detail page. */}
-      <div className="flex flex-col gap-1.5 text-xs">
+      <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
         <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {agent.skills.length > 0 && (
@@ -149,7 +149,7 @@ function AgentAvailabilityLine({
   return (
     <div className="mt-0.5 inline-flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-      <span className={`text-xs ${av.textClass}`}>{t(($) => $.availability[detail.availability])}</span>
+      <span className={`text-caption ${av.textClass}`}>{t(($) => $.availability[detail.availability])}</span>
     </div>
   );
 }
@@ -217,7 +217,7 @@ function ModelRow({
         {t(($) => $.profile_card.model_label)}
       </span>
       {hasModel ? (
-        <span className="min-w-0 truncate font-mono text-[11px]" title={model}>
+        <span className="min-w-0 truncate font-mono text-micro" title={model}>
           {model}
         </span>
       ) : (
@@ -226,7 +226,7 @@ function ModelRow({
         </span>
       )}
       {effort && (
-        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
           {effort}
         </span>
       )}
@@ -246,7 +246,7 @@ function MetaRow({
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-12 shrink-0 text-muted-foreground">{label}</span>
-      <span className={`truncate ${mono ? "font-mono text-[11px]" : ""}`} title={value}>
+      <span className={`truncate ${mono ? "font-mono text-micro" : ""}`} title={value}>
         {value}
       </span>
     </div>
@@ -270,14 +270,14 @@ function SkillsRow({ skills }: { skills: string[] }) {
         {visible.map((s) => (
           <span
             key={s}
-            className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground"
             title={s}
           >
             {s}
           </span>
         ))}
         {overflow > 0 && (
-          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
             +{overflow}
           </span>
         )}

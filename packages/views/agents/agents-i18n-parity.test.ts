@@ -64,3 +64,52 @@ describe("access-scope i18n parity across all 4 locales", () => {
     }
   });
 });
+
+/**
+ * The transcript's multi-file patch summary is handed the number of files
+ * *beyond* the named one. A translation that phrases this as a total silently
+ * under-reports by one — "a.go 等 2 个文件" reads as two files including a.go
+ * when three changed. English hides the distinction ("+2 more"), so it has to
+ * be pinned per locale.
+ */
+describe("transcript patch summary i18n", () => {
+  const KEY = "transcript.patch_summary_more";
+
+  const read = (loc: object): unknown =>
+    KEY.split(".").reduce<unknown>(
+      (node, part) =>
+        node !== null && typeof node === "object"
+          ? (node as Record<string, unknown>)[part]
+          : undefined,
+      loc,
+    );
+
+  const phraseOf = (loc: object): string => {
+    const node = read(loc);
+    return typeof node === "string" ? node : "";
+  };
+
+  it("is present in all 4 locales", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      expect(typeof read(loc), `${name}: ${KEY} missing`).toBe("string");
+      expect(phraseOf(loc).length > 0, `${name}: ${KEY} is empty`).toBe(true);
+    }
+  });
+
+  it("interpolates {{path}} and {{extra}} in every locale", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      const phrase = phraseOf(loc);
+      expect(phrase.includes("{{path}}"), `${name}: ${KEY} lost {{path}}`).toBe(true);
+      expect(phrase.includes("{{extra}}"), `${name}: ${KEY} lost {{extra}}`).toBe(true);
+    }
+  });
+
+  // `count` is i18next's plural selector — this namespace already uses it that
+  // way for events_one/events_other. Reusing it here for a plain number ties
+  // the string to plural resolution it does not want.
+  it("does not use the reserved {{count}} token", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      expect(phraseOf(loc).includes("{{count}}"), `${name}: ${KEY} must use {{extra}}`).toBe(false);
+    }
+  });
+});

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
@@ -438,5 +439,151 @@ describe("AgentTranscriptDialog", () => {
     expect(copyTextMock).toHaveBeenCalledWith(
       ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n\n"),
     );
+  });
+  it("renders a file edit as a diff instead of escaped JSON strings", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: {
+          file_path: "/repo/src/counter.rs",
+          old_string: "pub count: u32,",
+          new_string: "pub count: u32,\npub total: u64,",
+        },
+      },
+    ]);
+
+    // Changed lines read as diff rows. Text is asserted on the row, not on a
+    // leaf node: syntax highlighting splits a line across `hljs-*` spans.
+    const rowText = (selector: string) =>
+      Array.from(container.querySelectorAll(selector)).map((el) => el.textContent?.trim());
+    // The first line is unchanged, so it is context; only the second is added.
+    expect(rowText(".bg-success\\/10")).toEqual(["+ pub total: u64,"]);
+    expect(rowText(".bg-destructive\\/10")).toEqual([]);
+    expect(container.querySelector("pre")?.textContent).toContain("pub count: u32,");
+    // ...and the raw JSON keys are gone from the surface.
+    expect(screen.queryByText(/"new_string"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\\n/)).not.toBeInTheDocument();
+  });
+
+  it("highlights diff rows using the grammar for the file extension", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: {
+          file_path: "/repo/src/lib.rs",
+          old_string: "let a = 1;",
+          new_string: "let b = 2;",
+        },
+      },
+    ]);
+
+    // `let` is a Rust keyword, so the highlighter must have marked it up.
+    expect(container.querySelector(".hljs-keyword")?.textContent).toBe("let");
+  });
+
+  it("carries the scope class the hljs palette is defined under", () => {
+    // The palette lives in editor/styles/code.css, scoped to the editor surface
+    // and this class. Without it the spans render but stay uncoloured.
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: { file_path: "/repo/src/lib.rs", old_string: "let a = 1;", new_string: "let b = 2;" },
+      },
+    ]);
+
+    expect(container.querySelector("pre")?.className).toContain("transcript-code");
+    const css = readFileSync("editor/styles/code.css", "utf8");
+    expect(css).toContain(".transcript-code");
+  });
+
+  it("leaves an unknown extension unhighlighted rather than guessing", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: { file_path: "/repo/NOTES", old_string: "let a = 1;", new_string: "let b = 2;" },
+      },
+    ]);
+
+    expect(container.querySelector(".hljs-keyword")).toBeNull();
+    expect(container.textContent).toContain("let b = 2;");
+  });
+
+  it("unwraps a JSON-encoded tool result so it reads as terminal output", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_result",
+        tool: "Bash",
+        output: '"total 0\\ndrwxr-xr-x  2 user  staff"',
+      },
+    ]);
+
+    expect(
+      screen.getByText("total 0\ndrwxr-xr-x  2 user  staff", {
+        selector: "pre",
+        // Keep the newline and column spacing the unwrap is meant to restore.
+        normalizer: (text) => text,
+      }),
+    ).toBeInTheDocument();
+  });
+  it("shows a whole-file write as plain content with a line count", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Write",
+        input: { file_path: "/f.rs", content: "alpha\nbeta" },
+      },
+    ]);
+
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    // Plain content: no per-line + gutter and no diff tinting.
+    const pre = container.querySelector("pre");
+    expect(pre?.textContent).toBe("alpha\nbeta");
+    expect(container.querySelector(".bg-success\\/10")).toBeNull();
+  });
+
+  it("clamps a long body behind the show-all affordance", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const content = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+    const { container } = renderDialog([
+      { seq: 1, type: "tool_use", tool: "Write", input: { file_path: "/f.rs", content } },
+    ]);
+
+    const pre = container.querySelector("pre");
+    expect(pre?.className).toContain("max-h-52");
+    expect(pre?.className).toContain("overflow-hidden");
+    expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(container.querySelector("pre")?.className).not.toContain("max-h-52");
+  });
+
+  it("does not clamp a short diff", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Edit",
+        input: { file_path: "/f.rs", old_string: "a", new_string: "b" },
+      },
+    ]);
+
+    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
   });
 });

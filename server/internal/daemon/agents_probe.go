@@ -190,13 +190,14 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
-	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
-	if path, err := resolveAgentExecutablePath(qoderPath); err == nil {
-		agents["qoder"] = AgentEntry{
-			Path:    path,
-			Command: qoderPath,
-			Model:   strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
-		}
+	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
+	// on PATH; users install it separately, often via an npm global prefix).
+	// It must go through probe() like every other provider so the login-shell
+	// fallback applies: a GUI/Launchpad-started daemon does not inherit the
+	// interactive shell PATH, and without the fallback a perfectly good
+	// qodercli install stayed invisible across restarts (MUL-5524).
+	if e, ok := probe("MULTICA_QODER_PATH", "qodercli", "MULTICA_QODER_MODEL"); ok {
+		agents["qoder"] = e
 	}
 	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
 	// driven over ACP via `traecli acp serve --yolo`. MULTICA_TRAECLI_MODEL seeds

@@ -262,7 +262,7 @@ function SortableTabItem({
       title={tab.pinned ? `${title} (pinned)` : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
-        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-xs transition-colors",
+        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
         "select-none cursor-default",
         isActive
           ? "font-medium text-foreground"

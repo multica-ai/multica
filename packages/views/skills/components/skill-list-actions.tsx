@@ -127,11 +127,11 @@ function AgentPickerRow({
         isAgent
         size="md"
       />
-      <span className="min-w-0 flex-1 truncate text-sm">{agent.name}</span>
+      <span className="min-w-0 flex-1 truncate text-body">{agent.name}</span>
       {hasAll ? (
         <Check className="size-3.5 shrink-0 text-muted-foreground" />
       ) : owned > 0 ? (
-        <span className="shrink-0 text-xs text-muted-foreground">
+        <span className="shrink-0 text-caption text-muted-foreground">
           {t(($) => $.actions.has_partial, { owned, total: skillIds.length })}
         </span>
       ) : null}
@@ -149,7 +149,7 @@ function SkillChips({ skills }: { skills: SkillSummary[] }) {
   const visible = skills.slice(0, MAX_SKILL_CHIPS);
   const overflow = skills.slice(MAX_SKILL_CHIPS);
   const chipClass =
-    "max-w-[10rem] truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground";
+    "max-w-[10rem] truncate rounded bg-muted px-1.5 py-0.5 text-caption text-muted-foreground";
   return (
     <div className="flex flex-wrap items-center gap-1">
       {visible.map((s) => (
@@ -199,7 +199,7 @@ function AgentGroup({
   if (agents.length === 0) return null;
   return (
     <Collapsible defaultOpen={defaultOpen}>
-      <CollapsibleTrigger className="group/trigger flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/50">
+      <CollapsibleTrigger className="group/trigger flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-accent/50">
         <ChevronRight className="size-3 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
         <span>{label}</span>
         <span className="text-muted-foreground/60">{agents.length}</span>
@@ -312,10 +312,10 @@ export function AddToAgentDialog({
           confirm dialogs — this is a working picker, not a prompt. */}
       <DialogContent className="flex h-[32rem] max-h-[85svh] max-w-lg flex-col">
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle className="text-body">
             {t(($) => $.actions.add_to_agent)}
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription className="text-caption">
             {t(($) => $.actions.add_dialog_description)}
           </DialogDescription>
         </DialogHeader>
@@ -329,18 +329,18 @@ export function AddToAgentDialog({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t(($) => $.actions.search_placeholder)}
-              className="h-8 pl-7 text-xs"
+              className="h-8 pl-7 text-caption"
             />
           </div>
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-card p-1.5">
           {!hasAnyAgent ? (
-            <div className="py-6 text-center text-xs text-muted-foreground">
+            <div className="py-6 text-center text-caption text-muted-foreground">
               {t(($) => $.actions.no_agents)}
             </div>
           ) : !hasMatch ? (
-            <div className="py-6 text-center text-xs text-muted-foreground">
+            <div className="py-6 text-center text-caption text-muted-foreground">
               {t(($) => $.actions.no_agents_match)}
             </div>
           ) : (
@@ -468,7 +468,7 @@ export function DeleteSkillsDialog({
               : t(($) => $.actions.delete_dialog_desc, { count })}
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <div className="rounded-md bg-destructive/10 px-3 py-2 text-caption text-destructive">
           {t(($) => $.detail.delete_dialog.warning)}
         </div>
         <DialogFooter>
@@ -620,7 +620,7 @@ export function SkillBatchToolbar({
           toolbar. */}
       <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-sm font-medium">
+          <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
           <button

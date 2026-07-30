@@ -189,10 +189,10 @@ function OrphanRuntimeProfiles({
   return (
     <section className={hasMachines ? "mt-6" : undefined}>
       <div className="mb-3">
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-body font-semibold">
           {t(($) => $.profiles.unassigned_title)}
         </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-caption text-muted-foreground">
           {t(($) => $.profiles.unassigned_description)}
         </p>
       </div>
@@ -300,10 +300,10 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
         />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">
+        <span className="block truncate text-body font-medium">
           {machine.title}
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="mt-1 flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="truncate">
             {machine.subtitle ??
               (machine.section === "cloud"
@@ -311,26 +311,26 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
                 : t(($) => $.machine.metrics.local_daemon))}
           </span>
           {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
               {t(($) => $.machine.this_machine)}
             </span>
           )}
         </span>
       </span>
 
-      <span className="hidden w-36 shrink-0 items-center gap-1.5 text-xs md:flex">
+      <span className="hidden w-36 shrink-0 items-center gap-1.5 text-caption md:flex">
         <HealthIcon health={machine.health} />
         <span>{healthLabel(machine.health)}</span>
       </span>
       <span className="hidden w-40 shrink-0 flex-col gap-1 lg:flex">
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.machine.runtime_count, {
             count: machine.runtimes.length,
           })}
         </span>
         <ProviderIconStack providers={machine.providerNames} />
       </span>
-      <span className="hidden w-36 shrink-0 text-xs text-muted-foreground xl:block">
+      <span className="hidden w-36 shrink-0 text-caption text-muted-foreground xl:block">
         {busyCount > 0
           ? t(($) => $.machine.metrics.workload_hint, {
               running: machine.runningCount,
@@ -338,7 +338,7 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
             })
           : t(($) => $.machine.metrics.workload_idle)}
       </span>
-      <span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground lg:block">
+      <span className="hidden w-28 shrink-0 text-right text-caption text-muted-foreground lg:block">
         {machine.lastSeenAt ? timeAgo(machine.lastSeenAt) : "—"}
       </span>
       {locator && (
@@ -375,7 +375,7 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
         </span>
       ))}
       {extra > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground ring-1 ring-border">
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
           +{extra}
         </span>
       )}

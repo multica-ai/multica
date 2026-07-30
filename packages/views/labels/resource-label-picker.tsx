@@ -22,6 +22,17 @@ import {
 import { useT } from "../i18n";
 import { LabelChip } from "./label-chip";
 
+/**
+ * Whether agent- and skill-scoped labels are available. The server gates the
+ * attach/detach routes on the same release flag, so with it off the picker has
+ * no working endpoint to call — and callers need to know that before they lay
+ * out a row for it, since a row whose only control renders nothing reads as a
+ * broken field rather than an absent feature.
+ */
+export function useResourceLabelsEnabled() {
+  return useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
+}
+
 export function ResourceLabelPicker({
   resourceType,
   resourceId,
@@ -33,7 +44,7 @@ export function ResourceLabelPicker({
 }) {
   const { t } = useT("labels");
   const wsId = useWorkspaceId();
-  const resourceLabelsEnabled = useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
+  const resourceLabelsEnabled = useResourceLabelsEnabled();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { data: catalog = [] } = useQuery({
@@ -62,7 +73,7 @@ export function ResourceLabelPicker({
       ))}
     </div>
   ) : (
-    <span className="text-sm text-muted-foreground">{t(($) => $.resource_picker.empty)}</span>
+    <span className="text-body text-muted-foreground">{t(($) => $.resource_picker.empty)}</span>
   );
 
   if (!canEdit) return content;
@@ -99,7 +110,7 @@ export function ResourceLabelPicker({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t(($) => $.resource_picker.search)}
-            className="h-8 pl-8 text-sm"
+            className="h-8 pl-8 text-body"
           />
         </div>
         <div className="max-h-64 space-y-0.5 overflow-y-auto">
@@ -112,7 +123,7 @@ export function ResourceLabelPicker({
                 onClick={() =>
                   isSelected ? detach.mutate(label.id) : attach.mutate(label.id)
                 }
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body hover:bg-accent"
               >
                 <span
                   className="size-2.5 shrink-0 rounded-full"
@@ -124,7 +135,7 @@ export function ResourceLabelPicker({
             );
           })}
           {filtered.length === 0 ? (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            <p className="px-2 py-6 text-center text-caption text-muted-foreground">
               {catalog.length === 0
                 ? t(($) => $.resource_picker.no_labels)
                 : t(($) => $.resource_picker.no_results)}

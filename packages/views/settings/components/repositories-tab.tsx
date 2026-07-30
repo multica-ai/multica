@@ -376,7 +376,7 @@ export function RepositoriesTab() {
       >
         <SettingsCard>
           {repositories.length === 0 ? (
-            <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+            <div className="px-4 py-8 text-center text-caption text-muted-foreground">
               {t(($) => $.repositories.empty)}
             </div>
           ) : null}
@@ -400,7 +400,7 @@ export function RepositoriesTab() {
                 disabled={!canManageWorkspace}
                 aria-invalid={!repository.url.trim()}
                 placeholder={t(($) => $.repositories.url_placeholder)}
-                className="font-mono text-xs"
+                className="font-mono text-caption"
               />
               <Input
                 type="text"
@@ -462,13 +462,13 @@ export function RepositoriesTab() {
                 </Button>
               </div>
               {!allUrlsValid ? (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-caption text-muted-foreground">
                   {t(($) => $.repositories.url_empty)}
                 </span>
               ) : null}
             </div>
           ) : (
-            <div className="px-4 py-3 text-xs text-muted-foreground">
+            <div className="px-4 py-3 text-caption text-muted-foreground">
               {t(($) => $.repositories.manage_hint)}
             </div>
           )}
@@ -520,7 +520,7 @@ export function RepositoriesTab() {
                 </SelectContent>
               </Select>
             ) : githubInstallations[0] ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.repositories.github_account)}:{" "}
                 <span className="font-medium text-foreground">
                   {githubInstallations[0].account_login}
@@ -546,16 +546,16 @@ export function RepositoriesTab() {
 
           <div className="min-h-0 flex-1 overflow-y-auto border-y">
             {githubRepositoriesQuery.isPending ? (
-              <div className="flex items-center justify-center gap-2 px-6 py-12 text-sm text-muted-foreground">
+              <div className="flex items-center justify-center gap-2 px-6 py-12 text-body text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" />
                 {t(($) => $.repositories.github_loading)}
               </div>
             ) : githubRepositoriesQuery.isError ? (
-              <div className="px-6 py-12 text-center text-sm text-muted-foreground">
+              <div className="px-6 py-12 text-center text-body text-muted-foreground">
                 {t(($) => $.repositories.github_load_failed)}
               </div>
             ) : filteredGitHubRepositories.length === 0 ? (
-              <div className="px-6 py-12 text-center text-sm text-muted-foreground">
+              <div className="px-6 py-12 text-center text-body text-muted-foreground">
                 {repositorySearch
                   ? t(($) => $.repositories.github_no_search_results)
                   : t(($) => $.repositories.github_empty)}
@@ -590,7 +590,7 @@ export function RepositoriesTab() {
                       />
                       <span className="min-w-0 flex-1 space-y-1">
                         <span className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-medium">
+                          <span className="truncate text-body font-medium">
                             {repository.full_name}
                           </span>
                           {repository.private ? (
@@ -610,7 +610,7 @@ export function RepositoriesTab() {
                           ) : null}
                         </span>
                         {repository.description ? (
-                          <span className="block truncate text-xs text-muted-foreground">
+                          <span className="block truncate text-caption text-muted-foreground">
                             {repository.description}
                           </span>
                         ) : null}
@@ -638,7 +638,7 @@ export function RepositoriesTab() {
           </div>
 
           <DialogFooter className="m-0 border-t bg-muted/30 px-6 py-4">
-            <p className="mr-auto text-xs text-muted-foreground">
+            <p className="mr-auto text-caption text-muted-foreground">
               {t(($) => $.repositories.github_selected_count, {
                 count: selectedRepositories.size,
               })}

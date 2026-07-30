@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -4460,5 +4462,719 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 				t.Fatalf("hasManagedCodexMcpConfig(%q) = %v, want %v", string(tc.raw), got, tc.want)
 			}
 		})
+	}
+}
+
+// --- patch_apply payload capture (GH #6157) -------------------------------
+//
+// Both Codex protocols used to record a file edit as a bare call ID, leaving
+// the transcript with two unexpandable blank rows per edit. These tests pin the
+// payload on both paths, including the two shapes that differ between them:
+// legacy reports add/delete as whole-file content under a path-keyed map, while
+// v2 reports an ordered array whose `kind` is an object rather than a string.
+
+// codexTestChanges extracts the normalized change list from a tool_use input.
+func codexTestChanges(t *testing.T, msg Message) []map[string]any {
+	t.Helper()
+	if msg.Input == nil {
+		t.Fatalf("expected input on tool_use message, got nil: %+v", msg)
+	}
+	raw, ok := msg.Input["changes"].([]any)
+	if !ok {
+		t.Fatalf("expected changes slice, got %#v", msg.Input["changes"])
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, entry := range raw {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("expected change to be an object, got %#v", entry)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func TestCodexLegacyPatchApplyRecordsChanges(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true,"changes":{"src/b.go":{"type":"update","unified_diff":"@@ -1 +1 @@\n-old\n+new\n","move_path":"src/c.go"},"src/a.txt":{"type":"add","content":"hello"}}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"Success. Updated the following files:\nM src/b.go","stderr":"","success":true,"status":"completed","changes":{"src/b.go":{"type":"update","unified_diff":"@@ -1 +1 @@\n-old\n+new\n"},"src/a.txt":{"type":"add","content":"hello"}}}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "patch_apply" || begin.CallID != "p1" {
+		t.Fatalf("unexpected begin message: %+v", begin)
+	}
+	changes := codexTestChanges(t, begin)
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d: %#v", len(changes), changes)
+	}
+	// Sorted by path so a replayed event does not reshuffle the file list.
+	if changes[0]["path"] != "src/a.txt" || changes[1]["path"] != "src/b.go" {
+		t.Fatalf("changes not sorted by path: %#v", changes)
+	}
+	if changes[0]["kind"] != "add" || changes[0]["content"] != "hello" {
+		t.Fatalf("add change lost its whole-file content: %#v", changes[0])
+	}
+	if _, hasDiff := changes[0]["diff"]; hasDiff {
+		t.Fatalf("legacy add must not invent a diff: %#v", changes[0])
+	}
+	if changes[1]["kind"] != "update" {
+		t.Fatalf("expected update kind, got %#v", changes[1]["kind"])
+	}
+	if diff, _ := changes[1]["diff"].(string); !strings.Contains(diff, "-old") || !strings.Contains(diff, "+new") {
+		t.Fatalf("update change lost its unified diff: %#v", changes[1])
+	}
+	if changes[1]["move_path"] != "src/c.go" {
+		t.Fatalf("expected move_path to be preserved: %#v", changes[1])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.CallID != "p1" {
+		t.Fatalf("unexpected end message: %+v", end)
+	}
+	if end.Output == "" {
+		t.Fatal("patch_apply_end output is empty, transcript row stays unexpandable")
+	}
+	if !strings.Contains(end.Output, "completed") {
+		t.Fatalf("expected status in output, got %q", end.Output)
+	}
+	if !strings.Contains(end.Output, "Success. Updated the following files:") {
+		t.Fatalf("expected apply_patch stdout in output, got %q", end.Output)
+	}
+}
+
+func TestCodexLegacyPatchApplyDeleteKeepsContent(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true,"changes":{"old.txt":{"type":"delete","content":"gone"}}}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	if len(changes) != 1 || changes[0]["kind"] != "delete" || changes[0]["content"] != "gone" {
+		t.Fatalf("delete change not captured: %#v", changes)
+	}
+}
+
+func TestCodexLegacyPatchApplyStatusFallsBackToSuccess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		event   string
+		wantSub string
+	}{
+		{
+			name:    "success true without status",
+			event:   `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"","success":true,"changes":{"a.txt":{"type":"add","content":"x"}}}}}`,
+			wantSub: "completed",
+		},
+		{
+			name:    "success false without status",
+			event:   `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"parse error","success":false,"changes":{"a.txt":{"type":"add","content":"x"}}}}}`,
+			wantSub: "failed",
+		},
+		{
+			name:    "explicit declined status wins",
+			event:   `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"","success":false,"status":"declined","changes":{}}}}`,
+			wantSub: "declined",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			c.handleLine(tc.event)
+
+			if len(messages) != 1 {
+				t.Fatalf("expected 1 message, got %d", len(messages))
+			}
+			if !strings.Contains(messages[0].Output, tc.wantSub) {
+				t.Fatalf("expected output to contain %q, got %q", tc.wantSub, messages[0].Output)
+			}
+		})
+	}
+}
+
+func TestCodexLegacyPatchApplyStderrSurfaced(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_end","call_id":"p1","stdout":"","stderr":"apply_patch: could not parse hunk","success":false,"status":"failed","changes":{}}}}`)
+
+	if !strings.Contains(messages[0].Output, "could not parse hunk") {
+		t.Fatalf("expected stderr in output, got %q", messages[0].Output)
+	}
+}
+
+func TestCodexRawPatchApplyRecordsChanges(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	// Fixtures follow upstream convert_patch_changes: `diff` holds a unified
+	// diff only for `update`. For `add` it is the whole file's contents.
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","status":"inProgress","changes":[{"path":"src/a.go","kind":{"type":"update","move_path":null},"diff":"@@ -1 +1 @@\n-a\n+b\n"},{"path":"src/new.go","kind":{"type":"add"},"diff":"package main\n"}]}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"fileChange","id":"patch-1","status":"completed","changes":[{"path":"src/a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b\n"},{"path":"src/new.go","kind":{"type":"add"},"diff":"package main\n"}]}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "patch_apply" || begin.CallID != "patch-1" {
+		t.Fatalf("unexpected start message: %+v", begin)
+	}
+	changes := codexTestChanges(t, begin)
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d: %#v", len(changes), changes)
+	}
+	if changes[0]["path"] != "src/a.go" || changes[1]["path"] != "src/new.go" {
+		t.Fatalf("v2 change order not preserved: %#v", changes)
+	}
+	// `kind` arrives as an object; reading it as a string yields "" and loses
+	// the add/delete/update distinction.
+	if changes[0]["kind"] != "update" {
+		t.Fatalf("expected kind flattened to \"update\", got %#v", changes[0]["kind"])
+	}
+	if diff, _ := changes[0]["diff"].(string); !strings.Contains(diff, "+b") {
+		t.Fatalf("v2 update diff not captured: %#v", changes[0])
+	}
+	// The add's payload is file content, so it must NOT be labelled a diff:
+	// a diff parser would mislabel every line and invert any line starting
+	// with '+' or '-'.
+	if changes[1]["kind"] != "add" {
+		t.Fatalf("expected kind flattened to \"add\", got %#v", changes[1]["kind"])
+	}
+	if _, isDiff := changes[1]["diff"]; isDiff {
+		t.Fatalf("v2 add must not be recorded as a diff: %#v", changes[1])
+	}
+	if changes[1]["content"] != "package main\n" {
+		t.Fatalf("v2 add content not captured: %#v", changes[1])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.CallID != "patch-1" {
+		t.Fatalf("unexpected complete message: %+v", end)
+	}
+	if end.Output == "" {
+		t.Fatal("fileChange completion output is empty, transcript row stays unexpandable")
+	}
+	if !strings.Contains(end.Output, "completed") || !strings.Contains(end.Output, "2 files") {
+		t.Fatalf("expected status and file count, got %q", end.Output)
+	}
+}
+
+// Upstream format_file_change_diff returns whole-file contents for add and
+// delete under the `diff` field. Treating that as a unified diff renders plain
+// lines as context, and inverts any line that begins with '+' or '-'.
+func TestCodexRawPatchApplyContentKindsAreNotDiffs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		kind string
+		body string
+	}{
+		{name: "add", kind: "add", body: "package main\n"},
+		{name: "delete", kind: "delete", body: "goodbye\n"},
+		{
+			name: "add whose content looks like a diff",
+			kind: "add",
+			body: "--- not a header\n+++ also not\n-minus lead\n+plus lead\n",
+		},
+		{name: "empty add", kind: "add", body: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			event, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "item/started",
+				"params": map[string]any{
+					"item": map[string]any{
+						"type": "fileChange", "id": "patch-1", "status": "inProgress",
+						"changes": []any{
+							map[string]any{
+								"path": "f.txt",
+								"kind": map[string]any{"type": tc.kind},
+								"diff": tc.body,
+							},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal event: %v", err)
+			}
+			c.handleLine(string(event))
+
+			changes := codexTestChanges(t, messages[0])
+			if len(changes) != 1 {
+				t.Fatalf("expected 1 change, got %#v", changes)
+			}
+			if _, isDiff := changes[0]["diff"]; isDiff {
+				t.Fatalf("%s must be recorded as content, not diff: %#v", tc.kind, changes[0])
+			}
+			content, ok := changes[0]["content"].(string)
+			if !ok {
+				// Presence, not non-emptiness: an empty added file still has a
+				// body, and dropping it would render as "no content reported".
+				t.Fatalf("expected content to be present for %s: %#v", tc.kind, changes[0])
+			}
+			if content != tc.body {
+				t.Fatalf("content altered: got %q want %q", content, tc.body)
+			}
+		})
+	}
+}
+
+// A moved update has "\n\nMoved to: <path>" appended to its diff upstream. The
+// destination is already carried as move_path, and leaving the sentence in
+// renders as two stray context rows at the end of the diff.
+func TestCodexRawPatchApplyStripsMovedToSuffix(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","status":"inProgress","changes":[{"path":"old/name.go","kind":{"type":"update","move_path":"new/name.go"},"diff":"@@ -1 +1 @@\n-x\n+y\n\n\nMoved to: new/name.go"}]}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	if changes[0]["move_path"] != "new/name.go" {
+		t.Fatalf("expected move_path lifted out of kind, got %#v", changes[0])
+	}
+	diff, _ := changes[0]["diff"].(string)
+	if strings.Contains(diff, "Moved to:") {
+		t.Fatalf("Moved to: sentence should be stripped from the diff: %q", diff)
+	}
+	if !strings.Contains(diff, "+y") {
+		t.Fatalf("stripping removed real diff content: %q", diff)
+	}
+}
+
+func TestCodexRawPatchApplyMovePathFromKind(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","status":"inProgress","changes":[{"path":"old/name.go","kind":{"type":"update","move_path":"new/name.go"},"diff":"@@ -1 +1 @@\n-x\n+y\n"}]}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	if changes[0]["move_path"] != "new/name.go" {
+		t.Fatalf("expected move_path lifted out of kind, got %#v", changes[0])
+	}
+}
+
+func TestCodexLegacyPatchApplyKeepsEmptyAddedFile(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true,"changes":{"empty.txt":{"type":"add","content":""}}}}}`)
+
+	changes := codexTestChanges(t, messages[0])
+	content, ok := changes[0]["content"].(string)
+	if !ok || content != "" {
+		t.Fatalf("empty added file should keep an empty body: %#v", changes[0])
+	}
+}
+
+func TestCodexRawPatchApplyStatusNormalized(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ status, want string }{
+		{"inProgress", "in_progress"},
+		{"completed", "completed"},
+		{"failed", "failed"},
+		{"declined", "declined"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.status, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = "raw"
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"fileChange","id":"patch-1","status":%q,"changes":[{"path":"a.go","kind":{"type":"add"},"diff":"+x"}]}}}`, tc.status))
+
+			if len(messages) != 1 {
+				t.Fatalf("expected 1 message, got %d", len(messages))
+			}
+			if !strings.Contains(messages[0].Output, tc.want) {
+				t.Fatalf("status %q: expected output to contain %q, got %q", tc.status, tc.want, messages[0].Output)
+			}
+		})
+	}
+}
+
+// A missing or malformed `changes` must degrade to the previous payload-less
+// behaviour rather than panicking or emitting a broken payload.
+func TestCodexPatchApplyMalformedChangesDegrade(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		event string
+		raw   bool
+	}{
+		{
+			name:  "legacy changes absent",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","auto_approved":true}}}`,
+		},
+		{
+			name:  "legacy changes wrong type",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","changes":"not-an-object"}}}`,
+		},
+		{
+			name:  "legacy changes empty",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","changes":{}}}}`,
+		},
+		{
+			name:  "legacy change entry not an object",
+			event: `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"patch_apply_begin","call_id":"p1","changes":{"a.txt":42}}}}`,
+		},
+		{
+			name:  "raw changes absent",
+			event: `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1"}}}`,
+			raw:   true,
+		},
+		{
+			name:  "raw changes wrong type",
+			event: `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","changes":{"path":"a.go"}}}}`,
+			raw:   true,
+		},
+		{
+			name:  "raw change entries unusable",
+			event: `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"fileChange","id":"patch-1","changes":[42,null]}}}`,
+			raw:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _ := newTestCodexClient(t)
+			if tc.raw {
+				c.notificationProtocol = "raw"
+			}
+			var messages []Message
+			c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+			c.handleLine(tc.event)
+
+			if len(messages) != 1 {
+				t.Fatalf("expected the tool_use message to still be emitted, got %d", len(messages))
+			}
+			if messages[0].Type != MessageToolUse || messages[0].Tool != "patch_apply" {
+				t.Fatalf("unexpected message: %+v", messages[0])
+			}
+			if messages[0].Input != nil {
+				t.Fatalf("expected nil input for unusable changes, got %#v", messages[0].Input)
+			}
+		})
+	}
+}
+
+func TestCodexPatchApplyTruncatesOversizePayload(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	// Legacy add/delete report whole-file content, so a single generated file
+	// can dwarf the transcript budget.
+	huge := strings.Repeat("x", codexPatchInputMaxBytes+5000)
+	event, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "item/started",
+		"params": map[string]any{
+			"item": map[string]any{
+				"type":   "fileChange",
+				"id":     "patch-1",
+				"status": "inProgress",
+				"changes": []any{
+					map[string]any{"path": "big.txt", "kind": map[string]any{"type": "add"}, "diff": huge},
+					map[string]any{"path": "second.txt", "kind": map[string]any{"type": "add"}, "diff": "small"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	c.handleLine(string(event))
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	input := messages[0].Input
+	if input["truncated"] != true {
+		t.Fatalf("expected truncated marker, got %#v", input["truncated"])
+	}
+	if input["original_bytes"] == nil {
+		t.Fatal("expected original_bytes to be recorded alongside truncation")
+	}
+
+	changes := codexTestChanges(t, messages[0])
+	total := 0
+	for _, change := range changes {
+		// An `add` is recorded as content, not diff, so both keys count
+		// toward the budget.
+		for _, key := range []string{"diff", "content"} {
+			body, ok := change[key].(string)
+			if !ok {
+				continue
+			}
+			total += len(body)
+			if !utf8.ValidString(body) {
+				t.Fatalf("truncation split a rune in %v", change["path"])
+			}
+		}
+	}
+	if total == 0 {
+		t.Fatal("expected some body to survive truncation")
+	}
+	if total > codexPatchInputMaxBytes {
+		t.Fatalf("payload %d bytes exceeds budget %d", total, codexPatchInputMaxBytes)
+	}
+	// The path survives even when its body is dropped: it is the part a
+	// reviewer still needs.
+	if changes[0]["path"] != "big.txt" || changes[1]["path"] != "second.txt" {
+		t.Fatalf("paths must survive truncation: %#v", changes)
+	}
+	if changes[0]["truncated"] != true {
+		t.Fatalf("expected per-change truncation marker: %#v", changes[0])
+	}
+}
+
+func TestCodexPatchApplyTruncationKeepsValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	// Multi-byte runes straddling the cut must not leave an invalid string,
+	// or the payload fails to marshal into the JSONB column.
+	body := strings.Repeat("世", codexPatchInputMaxBytes)
+	changes := []any{
+		map[string]any{"path": "wide.txt", "kind": "add", "content": body},
+	}
+	input := codexPatchInput(changes)
+	if input["truncated"] != true {
+		t.Fatalf("expected truncation for %d-byte body", len(body))
+	}
+	for _, kept := range codexTestBodies(t, input) {
+		if !utf8.ValidString(kept) {
+			t.Fatal("truncated content is not valid UTF-8")
+		}
+		if len(kept) > codexPatchInputMaxBytes {
+			t.Fatalf("kept %d bytes, budget is %d", len(kept), codexPatchInputMaxBytes)
+		}
+	}
+	if _, err := json.Marshal(input); err != nil {
+		t.Fatalf("truncated payload does not marshal: %v", err)
+	}
+}
+
+func TestCodexPatchApplyUnderBudgetIsNotMarkedTruncated(t *testing.T) {
+	t.Parallel()
+
+	input := codexPatchInput([]any{
+		map[string]any{"path": "a.go", "kind": "update", "diff": "@@ -1 +1 @@\n-a\n+b\n"},
+	})
+	if _, marked := input["truncated"]; marked {
+		t.Fatalf("small payload must not be marked truncated: %#v", input)
+	}
+	if _, marked := input["original_bytes"]; marked {
+		t.Fatalf("small payload must not carry original_bytes: %#v", input)
+	}
+}
+
+// codexTestBodies returns the diff/content bodies carried by a tool_use input.
+//
+// Read the *returned* payload, never the slice handed to codexPatchInput:
+// redaction copies before the budget trims, so the caller's originals stay
+// untouched and asserting on them would pass vacuously.
+func codexTestBodies(t *testing.T, input map[string]any) []string {
+	t.Helper()
+	raw, ok := input["changes"].([]any)
+	if !ok {
+		t.Fatalf("expected changes slice, got %#v", input["changes"])
+	}
+	var bodies []string
+	for _, change := range raw {
+		entry, ok := change.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"diff", "content"} {
+			if body, ok := entry[key].(string); ok {
+				bodies = append(bodies, body)
+			}
+		}
+	}
+	return bodies
+}
+
+// Redaction has to happen before the size budget, not after it. Several rules
+// only match a credential as a whole: the PEM rule needs both the BEGIN and the
+// END marker. If a key straddles the budget, truncating first strands the
+// opening half — marker plus key material — in text that no later pass can
+// recognise, so both the daemon's and the server's redaction wave it through
+// and it lands in the database and the WebSocket broadcast.
+func TestCodexPatchApplyRedactsBeforeTruncating(t *testing.T) {
+	t.Parallel()
+
+	const keyChunk = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKg"
+	// BEGIN lands inside the budget; END lands well past it.
+	pem := "-----BEGIN PRIVATE KEY-----\n" +
+		strings.Repeat(keyChunk, 2000) +
+		"\n-----END PRIVATE KEY-----\n"
+	if len(pem) <= codexPatchInputMaxBytes {
+		t.Fatalf("fixture must exceed the budget to exercise the boundary: %d", len(pem))
+	}
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	event, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "item/started",
+		"params": map[string]any{
+			"item": map[string]any{
+				"type": "fileChange", "id": "patch-1", "status": "inProgress",
+				"changes": []any{
+					map[string]any{
+						"path": "id_rsa",
+						"kind": map[string]any{"type": "add"},
+						"diff": pem,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	c.handleLine(string(event))
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	bodies := codexTestBodies(t, messages[0].Input)
+	if len(bodies) == 0 {
+		t.Fatal("expected a recorded body")
+	}
+
+	total := 0
+	for _, body := range bodies {
+		total += len(body)
+		if strings.Contains(body, "BEGIN PRIVATE KEY") {
+			t.Errorf("PEM opening marker survived: %q", body[:min(len(body), 120)])
+		}
+		if strings.Contains(body, keyChunk) {
+			t.Error("private key material survived redaction")
+		}
+		if !strings.Contains(body, "[REDACTED PRIVATE KEY]") {
+			t.Errorf("expected the redaction placeholder, got %q", body[:min(len(body), 120)])
+		}
+	}
+	if total > codexPatchInputMaxBytes {
+		t.Fatalf("payload %d bytes exceeds budget %d", total, codexPatchInputMaxBytes)
+	}
+}
+
+// The daemon and the server redact again after the adapter. Those passes must
+// not corrupt an already-redacted payload, or the placeholder itself would be
+// rewritten on the way to the database.
+func TestCodexPatchApplyRedactionIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	input := codexPatchInput([]any{
+		map[string]any{
+			"path":    ".env",
+			"kind":    "delete",
+			"content": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn\n",
+		},
+	})
+
+	first, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(first), "ghp_ABCDEFGH") {
+		t.Fatalf("token survived the adapter: %s", first)
+	}
+
+	second, err := json.Marshal(redact.InputMap(input))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("a second redaction pass changed the payload:\n first=%s\nsecond=%s", first, second)
+	}
+}
+
+// Redaction running first must not disable the budget for ordinary large
+// patches: a big generated file carries no secret to shrink.
+func TestCodexPatchApplyStillTruncatesNonSecretPayload(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("x", codexPatchInputMaxBytes+5000)
+	changes := []any{map[string]any{"path": "big.txt", "kind": "add", "content": body}}
+	input := codexPatchInput(changes)
+
+	if input["truncated"] != true {
+		t.Fatalf("expected truncation for a %d-byte body: %#v", len(body), input["truncated"])
+	}
+	if got := input["original_bytes"]; got != len(body) {
+		t.Fatalf("original_bytes should report the pre-redaction size: got %v want %d", got, len(body))
+	}
+	total := 0
+	for _, kept := range codexTestBodies(t, input) {
+		total += len(kept)
+	}
+	if total > codexPatchInputMaxBytes {
+		t.Fatalf("kept %d bytes, budget is %d", total, codexPatchInputMaxBytes)
+	}
+	// The caller's slice is deliberately left alone: redaction copies first.
+	if original, _ := changes[0].(map[string]any)["content"].(string); len(original) != len(body) {
+		t.Fatalf("codexPatchInput must not mutate its argument: %d != %d", len(original), len(body))
 	}
 }

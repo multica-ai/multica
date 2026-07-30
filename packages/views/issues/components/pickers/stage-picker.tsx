@@ -82,7 +82,7 @@ export function StagePicker({
           setOpen(false);
         }}
       >
-        <span className="truncate text-xs text-muted-foreground">{t(($) => $.stage.none)}</span>
+        <span className="truncate text-caption text-muted-foreground">{t(($) => $.stage.none)}</span>
       </PickerItem>
       {options.map((s) => (
         <PickerItem
@@ -93,7 +93,7 @@ export function StagePicker({
             setOpen(false);
           }}
         >
-          <span className="inline-flex items-center gap-1.5 text-xs">
+          <span className="inline-flex items-center gap-1.5 text-caption">
             <Milestone className="h-3 w-3 shrink-0 text-muted-foreground" />
             {t(($) => $.stage.value, { n: s })}
           </span>

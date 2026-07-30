@@ -116,7 +116,7 @@ export function MyIssuesHeader({
 
         <div className="flex shrink-0 items-center gap-1">
           {agentRunningFilter && (
-            <span className="mr-1 hidden text-xs text-muted-foreground md:inline">
+            <span className="mr-1 hidden text-caption text-muted-foreground md:inline">
               {tIssues(($) => $.agent_activity.filter_active_label)}
             </span>
           )}

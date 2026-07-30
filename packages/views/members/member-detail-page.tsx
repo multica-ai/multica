@@ -32,8 +32,8 @@ export function MemberDetailPage({ userId }: { userId: string }) {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <UserRound className="h-8 w-8 text-muted-foreground" />
           <div>
-            <p className="text-sm font-medium">{t(($) => $.detail.not_found_title)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.detail.not_found_title)}</p>
+            <p className="mt-1 text-caption text-muted-foreground">
               {t(($) => $.detail.not_found_description)}
             </p>
           </div>
@@ -63,10 +63,10 @@ export function MemberDetailPage({ userId }: { userId: string }) {
         />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-base font-semibold">{member.name}</h1>
+            <h1 className="truncate text-title-sm font-semibold">{member.name}</h1>
             <RoleBadge role={member.role} />
           </div>
-          <p className="mt-0.5 truncate text-sm text-muted-foreground">
+          <p className="mt-0.5 truncate text-body text-muted-foreground">
             {member.email}
           </p>
         </div>
@@ -90,15 +90,15 @@ function MemberBreadcrumb({
   return (
     <PageHeader className="gap-1.5">
       <WorkspaceAvatar name={workspaceName ?? "W"} avatarUrl={workspaceAvatarUrl} size="sm" />
-      <span className="text-sm text-muted-foreground">
+      <span className="text-body text-muted-foreground">
         {workspaceName ?? t(($) => $.detail.workspace_fallback)}
       </span>
       <ChevronRight className="h-3 w-3 text-muted-foreground" />
-      <span className="text-sm text-muted-foreground">
+      <span className="text-body text-muted-foreground">
         {t(($) => $.detail.members_breadcrumb)}
       </span>
       <ChevronRight className="h-3 w-3 text-muted-foreground" />
-      <span className="truncate text-sm font-medium">{title}</span>
+      <span className="truncate text-body font-medium">{title}</span>
     </PageHeader>
   );
 }
@@ -106,7 +106,7 @@ function MemberBreadcrumb({
 function RoleBadge({ role }: { role: MemberRole }) {
   const { t } = useT("members");
   return (
-    <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+    <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
       {role === "owner"
         ? t(($) => $.role.owner)
         : role === "admin"
