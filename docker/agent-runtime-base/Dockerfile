@@ -89,14 +89,14 @@ ARG CLAUDE_CODE_VERSION=latest
 ARG CODEX_VERSION=latest
 ARG OPENCODE_VERSION=latest
 ARG PI_VERSION=latest
-# HERMES_REF is the upstream calver release tag (e.g. v2026.5.7) we install
+# HERMES_REF is the upstream calver release tag (e.g. v2026.7.20) we install
 # against. The companion HERMES_COMMIT is the *commit SHA* that tag resolves
 # to (after annotated-tag peeling — `git ls-remote ... refs/tags/<tag>` shows
 # the tag-object SHA; `git rev-parse HEAD` after `git clone --branch <tag>`
 # returns the underlying commit SHA, and that's what we verify against).
 # Bump both together via the README's "Bump procedure".
-ARG HERMES_REF=v2026.5.7
-ARG HERMES_COMMIT=498bfc7bc12a937621b4215312049b1000726df3
+ARG HERMES_REF=v2026.7.20
+ARG HERMES_COMMIT=3ef6bbd201263d354fd83ec55b3c306ded2eb72a
 # Pin gh via apt — `latest` resolves to whatever cli.github.com/packages ships
 # at build time. Empty means "no version constraint" (apt picks the available
 # candidate); the cache-from in the bake file plus the smoke test bound risk.

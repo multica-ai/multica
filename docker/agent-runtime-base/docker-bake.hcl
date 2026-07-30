@@ -48,8 +48,8 @@ variable "PI_VERSION"          { default = "latest" }
 // post-clone — build fails if the tag is force-moved. Bump both together
 // via the README's "Bump procedure". Never default HERMES_REF back to a
 // branch name like `main`.
-variable "HERMES_REF"          { default = "v2026.5.7" }
-variable "HERMES_COMMIT"       { default = "498bfc7bc12a937621b4215312049b1000726df3" }
+variable "HERMES_REF"          { default = "v2026.7.20" }
+variable "HERMES_COMMIT"       { default = "3ef6bbd201263d354fd83ec55b3c306ded2eb72a" }
 // gh CLI apt version pin (e.g. "2.63.0"). Empty = whatever cli.github.com
 // ships at build time; pin for stricter reproducibility once a known-good
 // version is identified.
