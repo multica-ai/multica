@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus, Check, X, Reply, Trash2, CornerDownRight, Send, ListPlus } from "lucide-react";
+import { MessageSquarePlus, Check, X, Reply, Trash2, Send, ListPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@multica/views/editor";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   Avatar,
   AvatarFallback,
@@ -61,6 +62,11 @@ import { NoteCoupleAndSend } from "./note-couple-and-send";
 import { NoteSuggestIssueReference } from "./note-suggest-issue-reference";
 import { NoteCommentCreateIssueDialog } from "./note-comment-create-issue-dialog";
 import { NoteCommentIssueLink } from "./note-comment-issue-link";
+import {
+  NoteCommentComposer,
+  FloatingNoteCommentComposer,
+  type NoteComposerMode,
+} from "./note-comment-composer";
 
 // FIR-1621 — the reference `object` kinds a note can be coupled to as a send
 // destination. Mirrors couplingIssue/couplingChat in the Go send handler.
@@ -229,7 +235,7 @@ export function NoteCommentsPanel({
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
-  const [mode, setMode] = React.useState<"comment" | "suggestion">("comment");
+  const [mode, setMode] = React.useState<NoteComposerMode>("comment");
   const [draft, setDraft] = React.useState("");
   // FIR-1647 — the comment/suggestion composer is the mention-aware rich editor
   // (same one used in the note body), so a member can @-tag a person, agent or
@@ -386,8 +392,28 @@ export function NoteCommentsPanel({
       .catch(() => doCreate(payload));
   }
 
+  // FIR-4139 — the composer floats next to the marked text when there is a
+  // selection to anchor to. `panelRef` is the fallback anchor for the rare case
+  // where the marking is not painted (quote no longer locatable in the body).
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
+  const floatingComposer = Boolean(draftQuote) && !isMobile;
+  const composerProps = {
+    noteId,
+    mode,
+    onModeChange: setMode,
+    draftQuote,
+    onClearDraft,
+    draft,
+    onDraftChange: setDraft,
+    composerRef,
+    onSubmit: submit,
+    submitting: create.isPending,
+    scopedMentions,
+  };
+
   return (
-    <div className="flex h-full w-full min-w-0 flex-col">
+    <div ref={panelRef} className="flex h-full w-full min-w-0 flex-col">
       {/* FIR-2595: "give access?" prompt when a comment tags people who can't
           open this note. Give access grants them so they get the comment; Post
           without still posts (they simply aren't notified); Cancel keeps the
@@ -585,81 +611,25 @@ export function NoteCommentsPanel({
         </div>
       </ScrollArea>
 
-      {/* FIR-2826 — keep the composer at the bottom like a chat box, while the
-          existing comments scroll above it. */}
-      <div className="shrink-0 border-t bg-background p-3">
-        <div className="mb-2 flex gap-1">
-          <Button
-            size="sm"
-            variant={mode === "comment" ? "secondary" : "ghost"}
-            onClick={() => setMode("comment")}
-          >
-            Comment
-          </Button>
-          <Button
-            size="sm"
-            variant={mode === "suggestion" ? "secondary" : "ghost"}
-            onClick={() => setMode("suggestion")}
-          >
-            Suggest edit
-          </Button>
+      {/* FIR-4139 — while a selection is being commented on, the composer floats
+          next to the marking itself instead of sitting at the far bottom of the
+          rail, so you can see what you marked while you write. With nothing
+          marked (a note-level comment) there is nothing to float against, so it
+          stays docked at the bottom like a chat box (FIR-2826). Mobile keeps the
+          docked composer: the rail is a full-width sheet there, and a card
+          positioned over the note behind it would be unreachable. */}
+      {floatingComposer ? (
+        <FloatingNoteCommentComposer
+          {...composerProps}
+          onDismiss={onClearDraft}
+          fallbackRef={panelRef}
+          autoFocus
+        />
+      ) : (
+        <div className="shrink-0 border-t bg-background p-3">
+          <NoteCommentComposer {...composerProps} />
         </div>
-        {draftQuote ? (
-          <div className="mb-2 flex items-start gap-1 rounded border border-orange-400/60 bg-orange-400/10 px-2 py-1 text-xs">
-            <CornerDownRight className="mt-0.5 inline size-3 shrink-0 text-orange-600" />
-            <span className="line-clamp-2 flex-1">“{draftQuote}”</span>
-            <button
-              type="button"
-              onClick={onClearDraft}
-              className="shrink-0 text-muted-foreground hover:text-destructive"
-              aria-label="Clear selection"
-            >
-              <X className="size-3" />
-            </button>
-          </div>
-        ) : (
-          <p className="mb-2 rounded border border-dashed px-2 py-1.5 text-xs text-muted-foreground">
-            Select text in the note — a “Comment” button appears above the
-            selection to attach it here.
-          </p>
-        )}
-        <div className="rounded-md border px-2 py-1 focus-within:ring-1 focus-within:ring-ring">
-          <ContentEditor
-            ref={composerRef}
-            defaultValue=""
-            onUpdate={setDraft}
-            onSubmit={submit}
-            showBubbleMenu={false}
-            debounceMs={150}
-            // FIR-2595 point 3: scope @mentions to people with note access.
-            currentNoteId={scopedMentions ? noteId : undefined}
-            placeholder={
-              mode === "suggestion"
-                ? "Replace the selected text with…"
-                : "Write a comment… (type @ to mention a person, agent or issue)"
-            }
-            className="min-h-[60px] text-sm"
-          />
-        </div>
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <Button
-            size="sm"
-            onClick={submit}
-            disabled={
-              create.isPending ||
-              !draft.trim() ||
-              (mode === "suggestion" && !draftQuote)
-            }
-          >
-            {mode === "suggestion" ? "Suggest" : "Comment"}
-          </Button>
-        </div>
-        {mode === "suggestion" && !draftQuote && (
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            A suggestion needs attached text to replace.
-          </p>
-        )}
-      </div>
+      )}
     </div>
   );
 }
