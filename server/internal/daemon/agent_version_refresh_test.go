@@ -144,6 +144,27 @@ func TestRefreshAgentVersions_ProbeFailureIsNotAVersionChange(t *testing.T) {
 	}
 }
 
+// TestRefreshAgentVersions_BlankVersionKeepsThePreviousOne closes a hole the
+// minimum-version gate leaves open: agent.CheckMinVersion returns nil for any
+// provider with no MinVersions entry, so a CLI whose `--version` succeeds but
+// prints nothing lands in the registration payload with a blank version.
+// Treating that as a change would replace a version the server had with nothing.
+func TestRefreshAgentVersions_BlankVersionKeepsThePreviousOne(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+	callsBefore := fx.registerCallCount()
+
+	fx.setProbeVersion("")
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registerCallCount() - callsBefore; got != 0 {
+		t.Errorf("made %d Register calls off a blank version, want 0", got)
+	}
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "9.9.9" {
+		t.Errorf("ws-1 registered codex version = %q, want the previous 9.9.9 intact", got)
+	}
+}
+
 // TestRefreshAgentVersions_RetriesAfterRegisterFailure closes the hole the
 // version cache creates: setAgentVersion has already moved on by the time the
 // register call fails, so the next round sees no change. Without the retry flag
@@ -175,26 +196,48 @@ func TestRefreshAgentVersions_RetriesAfterRegisterFailure(t *testing.T) {
 	}
 }
 
-// TestRefreshAgentVersions_YieldsToConverge avoids probing every CLI twice in
-// the same window: when a provider is missing a runtime, convergeRuntimeRegistrations
-// is about to re-probe and re-register anyway.
-func TestRefreshAgentVersions_YieldsToConverge(t *testing.T) {
+// TestRefreshAgentVersions_NotStarvedByAStuckProvider guards against an
+// optimization that looks free and isn't: skipping the round while the converge
+// half has work to do.
+//
+// A provider permanently below the minimum supported version never leaves
+// providersMissingRuntimes — deliberately, so it recovers on its own after an
+// upgrade. Yielding to that would let one stuck CLI silently disable version
+// refresh for every healthy provider on the machine, forever.
+func TestRefreshAgentVersions_NotStarvedByAStuckProvider(t *testing.T) {
 	fx := newVersionRefreshFixture(t)
 	d := fx.daemon
 
-	// The user installs a second CLI, so a provider is now missing a runtime.
+	// A second CLI is installed but permanently rejected by the version gate,
+	// so it stays in the missing set no matter how often converge retries.
 	setProbe := stubAgentProbe(t, map[string]AgentEntry{"codex": {Path: "/fake/codex"}})
 	setProbe(map[string]AgentEntry{
-		"codex":       {Path: "/fake/codex"},
-		"antigravity": {Path: "/fake/agy"},
+		"codex":  {Path: "/fake/codex"},
+		"claude": {Path: "/fake/claude-ancient"},
 	})
 	d.refreshAgentAvailability()
-	probesBefore := fx.probeCount("/fake/codex")
+	origCheck := checkAgentMinVersion
+	t.Cleanup(func() { checkAgentMinVersion = origCheck })
+	checkAgentMinVersion = func(provider, _ string) error {
+		if provider == "claude" {
+			return errors.New("version too old")
+		}
+		return nil
+	}
+	d.convergeRuntimeRegistrations(context.Background())
+	if missing := d.providersMissingRuntimes(); len(missing) == 0 {
+		t.Fatal("claude should still be missing a runtime; the starvation setup is wrong")
+	}
 
+	// codex nevertheless upgrades, and must still be picked up.
+	fx.setProbeVersion("10.0.0")
 	d.refreshAgentVersions(context.Background())
 
-	if got := fx.probeCount("/fake/codex") - probesBefore; got != 0 {
-		t.Errorf("probed codex %d times while converge had work to do, want 0", got)
+	if got := d.agentVersion("codex"); got != "10.0.0" {
+		t.Errorf("cached codex version = %q, want 10.0.0 — a stuck provider must not starve the healthy ones", got)
+	}
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Errorf("ws-1 registered codex version = %q, want 10.0.0", got)
 	}
 }
 

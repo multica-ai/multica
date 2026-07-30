@@ -205,12 +205,13 @@ func (d *Daemon) refreshAgentAvailability() []string {
 // identically, and mergeBuiltinRegisterResponse swaps a server-side ID rotation
 // in place instead of accumulating a duplicate — the workspace still holds
 // exactly one runtime per provider, and no running task is touched.
+// This runs unconditionally rather than yielding when the converge half has
+// work to do, even though the two occasionally probe in the same window. A
+// provider that is permanently below the minimum supported version never leaves
+// providersMissingRuntimes — that is by design, so it recovers on its own after
+// an upgrade — so yielding to it would let one stuck CLI silently disable version
+// refresh for every healthy provider on the machine, forever.
 func (d *Daemon) refreshAgentVersions(ctx context.Context) {
-	// The converge half is about to re-probe and re-register this round anyway;
-	// doing it twice would just fork every CLI twice.
-	if len(d.providersMissingRuntimes()) > 0 {
-		return
-	}
 	before := d.agentVersionSnapshot()
 	if len(before) == 0 {
 		return
@@ -222,13 +223,24 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	}
 	var changes []string
 	for _, rt := range builtins {
-		prev, known := before[rt["type"]]
+		provider, version := rt["type"], rt["version"]
+		prev, known := before[provider]
 		// An unknown or blank previous version means this provider has not
 		// registered a version yet; that is the converge path's job, not a change.
-		if !known || prev == "" || prev == rt["version"] {
+		if !known || prev == "" || prev == version {
 			continue
 		}
-		changes = append(changes, fmt.Sprintf("%s %s -> %s", rt["type"], prev, rt["version"]))
+		// A blank *new* version reaches here for any provider with no entry in
+		// agent.MinVersions, since the gate passes it through. Treating it as a
+		// change would re-register the provider with no version at all, replacing
+		// a version the server had with nothing — the same "couldn't read it is
+		// not a change" rule trySelfReload applies.
+		if version == "" {
+			d.logger.Warn("agent CLI reported no version; keeping the previous one",
+				"provider", provider, "previous", prev)
+			continue
+		}
+		changes = append(changes, fmt.Sprintf("%s %s -> %s", provider, prev, version))
 	}
 	// A round whose register call failed is retried on the next one even though
 	// the version cache has already moved on, so a transient 5xx doesn't leave

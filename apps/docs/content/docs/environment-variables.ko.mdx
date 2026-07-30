@@ -205,6 +205,7 @@ API key와 base URL이 모두 비어 있으면 서버 측 LLM 생성이 꺼지�
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 시작 handshake 상한 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
+| `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 실행 태스크 작업 디렉터리의 루트 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 실행 태스크 디렉터리 유지 |
 
@@ -243,6 +244,7 @@ multica config show
 | `codex_handshake_timeout` | `30s` | Codex app-server handshake 상한 |
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
+| `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
 
 값에는 다음 규칙이 적용됩니다.
 

@@ -27,10 +27,10 @@ var detectSelfVersion = func(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("run %s --version: %w", path, err)
 	}
-	return parseSelfVersion(string(out)), nil
+	return ParseSelfVersion(string(out)), nil
 }
 
-// parseSelfVersion pulls the version out of `multica --version` output, whose
+// ParseSelfVersion pulls the version out of `multica --version` output, whose
 // first line is rendered by cmd/multica's version template:
 //
 //	multica 0.3.7 (commit: abc1234, built: 2026-07-29T10:00:00Z)
@@ -40,7 +40,11 @@ var detectSelfVersion = func(ctx context.Context, path string) (string, error) {
 // also what lands in Config.CLIVersion — so the two are directly comparable.
 // Anything that doesn't match the template shape is returned trimmed, which
 // compares unequal and is therefore reported rather than silently ignored.
-func parseSelfVersion(raw string) string {
+//
+// Exported solely so cmd/multica can pin that contract from the producing side:
+// this parser and the version template have to agree, and nothing else would
+// notice if a template edit silently broke the auto-reload probe.
+func ParseSelfVersion(raw string) string {
 	line, _, _ := strings.Cut(raw, "\n")
 	line = strings.TrimSpace(line)
 	if fields := strings.Fields(line); len(fields) >= 2 && fields[0] == "multica" {
@@ -114,22 +118,16 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 		return
 	}
 
-	// A disabled half leaves its channel nil, which never fires in a select.
-	var pullTick, reloadTick <-chan time.Time
+	pullInterval := d.cfg.AutoUpdateCheckInterval
+	if pullInterval <= 0 {
+		pullInterval = DefaultAutoUpdateCheckInterval
+	}
+	// Log what each half will do before the startup delay, so a user reading
+	// daemon.log right after `daemon start` sees it immediately.
 	if pullEnabled {
-		interval := d.cfg.AutoUpdateCheckInterval
-		if interval <= 0 {
-			interval = DefaultAutoUpdateCheckInterval
-		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		pullTick = ticker.C
-		d.logger.Info("auto-update: started", "interval", interval, "current", d.cfg.CLIVersion)
+		d.logger.Info("auto-update: started", "interval", pullInterval, "current", d.cfg.CLIVersion)
 	}
 	if reloadEnabled {
-		ticker := time.NewTicker(selfReloadCheckInterval)
-		defer ticker.Stop()
-		reloadTick = ticker.C
 		d.logger.Info("auto-reload: watching the multica binary on disk",
 			"interval", selfReloadCheckInterval, "current", d.cfg.CLIVersion)
 	}
@@ -142,6 +140,23 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 	}
 	if reloadEnabled {
 		d.trySelfReload(ctx)
+	}
+
+	// Tickers start only now, after the first check. Starting them before the
+	// delay would let an interval shorter than autoUpdateInitialDelay buffer a
+	// tick and fire a second check immediately after the first.
+	//
+	// A disabled half leaves its channel nil, which never fires in a select.
+	var pullTick, reloadTick <-chan time.Time
+	if pullEnabled {
+		ticker := time.NewTicker(pullInterval)
+		defer ticker.Stop()
+		pullTick = ticker.C
+	}
+	if reloadEnabled {
+		ticker := time.NewTicker(selfReloadCheckInterval)
+		defer ticker.Stop()
+		reloadTick = ticker.C
 	}
 
 	for {

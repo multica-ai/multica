@@ -384,8 +384,8 @@ func TestParseSelfVersion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := parseSelfVersion(tc.raw); got != tc.want {
-				t.Fatalf("parseSelfVersion(%q) = %q, want %q", tc.raw, got, tc.want)
+			if got := ParseSelfVersion(tc.raw); got != tc.want {
+				t.Fatalf("ParseSelfVersion(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})
 	}
