@@ -6,20 +6,28 @@
 // last run failed" all read as rows of one bar and collapse together once
 // there is more than one, whatever their type.
 //
-// The row is deliberately thin: it says what broke and offers the three things
-// you can do about it — open the run log, continue, or start over. The "why"
-// (failure reason + last step + output tail) now lives in the run log modal,
-// which is also where the same Resume / Start over pair is offered.
+// The row is deliberately thin: it says what broke, whose run it was, and
+// offers the three things you can do about it — open the run log, continue, or
+// start over. The "why" (failure reason + last step + output tail) lives in the
+// run log modal, which is also where the same Resume / Start over pair is
+// offered.
+//
+// The whole text block opens the run log. It used to be a separate icon
+// button, which on a phone was both hard to hit and the first casualty of a
+// long failure reason overflowing the row — see RunSummary for the overflow
+// rules that keep the actions on the right reachable.
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { TranscriptButton } from "@multica/views/common/task-transcript";
 import { resolveFailureReasonLabel } from "../failure-reason-label";
+import { formatRunIdentity } from "../run-identity";
 import type { DeadFailedRun } from "../dead-failed-runs";
 import { RunRetryActions } from "./run-retry-actions";
+import { RunSummary } from "./run-summary";
+import { useRunLog } from "./use-run-log";
 
 export function FailedRunActivityRow({
   issueId,
@@ -38,28 +46,34 @@ export function FailedRunActivityRow({
     staleTime: 30_000,
   });
   const task = tasks.find((t) => t.id === run.task_id);
+  const agentName = run.agent_id ? getAgentName(run.agent_id) : "";
+  const runLog = useRunLog(task, agentName);
   const label = resolveFailureReasonLabel(run.failure_reason) ?? "Run failed";
+  const identity = formatRunIdentity(
+    {
+      agentName,
+      completedAt: run.completed_at,
+      attempt: run.attempt,
+      maxAttempts: run.max_attempts,
+      runtimeName: run.runtime_name,
+    },
+    new Date(),
+  );
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2 text-muted-foreground"
+      className="flex items-center gap-2 overflow-hidden px-3 py-2 text-muted-foreground"
       data-testid="failed-run-row"
     >
       <AlertCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-destructive" />
-      <div className="flex min-w-0 items-center gap-1.5 text-xs">
-        <span className="shrink-0 font-medium text-destructive">{label}</span>
-        {run.runtime_name ? (
-          <span className="hidden min-w-0 truncate sm:inline">{run.runtime_name}</span>
-        ) : null}
-      </div>
+      <RunSummary
+        headline={label}
+        headlineClassName="text-destructive"
+        identity={identity}
+        onOpen={runLog.available ? runLog.open : undefined}
+        loading={runLog.loading}
+      />
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        {task ? (
-          <TranscriptButton
-            task={task}
-            agentName={run.agent_id ? getAgentName(run.agent_id) : ""}
-            title="Open run log"
-          />
-        ) : null}
         <RunRetryActions
           issueId={issueId}
           taskId={run.task_id}
@@ -67,6 +81,7 @@ export function FailedRunActivityRow({
           blockedReason={run.blocked_reason}
         />
       </div>
+      {runLog.dialog}
     </div>
   );
 }

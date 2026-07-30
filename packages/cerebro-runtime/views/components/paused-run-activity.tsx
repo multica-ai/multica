@@ -15,8 +15,10 @@ import { PauseCircle } from "lucide-react";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { TranscriptButton } from "@multica/views/common/task-transcript";
+import { formatRunIdentity } from "../run-identity";
 import type { DeadFailedRun } from "../dead-failed-runs";
+import { RunSummary } from "./run-summary";
+import { useRunLog } from "./use-run-log";
 
 /**
  * "Resumes 14:05" when we know when, "resumes when the machine is unpaused"
@@ -50,30 +52,33 @@ export function PausedRunActivityRow({
     staleTime: 30_000,
   });
   const task = tasks.find((t) => t.id === run.task_id);
+  const agentName = run.agent_id ? getAgentName(run.agent_id) : "";
+  const runLog = useRunLog(task, agentName);
+  const now = new Date();
+  const identity = formatRunIdentity(
+    {
+      agentName,
+      completedAt: run.completed_at,
+      attempt: run.attempt,
+      maxAttempts: run.max_attempts,
+      runtimeName: run.runtime_name,
+    },
+    now,
+  );
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2 text-muted-foreground"
+      className="flex items-center gap-2 overflow-hidden px-3 py-2 text-muted-foreground"
       data-testid="paused-run-row"
     >
       <PauseCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-      <div className="flex min-w-0 items-center gap-1.5 text-xs">
-        <span className="shrink-0 font-medium">
-          {pausedRunLabel(run.unpause_at, new Date())}
-        </span>
-        {run.runtime_name ? (
-          <span className="hidden min-w-0 truncate sm:inline">{run.runtime_name}</span>
-        ) : null}
-      </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        {task ? (
-          <TranscriptButton
-            task={task}
-            agentName={run.agent_id ? getAgentName(run.agent_id) : ""}
-            title="Open run log"
-          />
-        ) : null}
-      </div>
+      <RunSummary
+        headline={pausedRunLabel(run.unpause_at, now)}
+        identity={identity}
+        onOpen={runLog.available ? runLog.open : undefined}
+        loading={runLog.loading}
+      />
+      {runLog.dialog}
     </div>
   );
 }
