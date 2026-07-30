@@ -1428,3 +1428,78 @@ func TestIssueTableHierarchyRootKeysetPagination(t *testing.T) {
 		}
 	}
 }
+
+// `archived` is closed-but-not-completed (KTD2): the table surface hides
+// archived by default (matches list/board), independent of any explicit
+// filters.statuses request. The IncludeArchived top-level flag is the toggle;
+// when nil/absent/false the compiled query MUST contain "i.status <>
+// 'archived'", and when explicitly true it MUST NOT.
+func TestIssueTableArchivedGateIsIndependentOfFilters(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	base := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "workspace"},
+		Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+
+	cases := []struct {
+		name        string
+		spec        issueTableQuerySpec
+		wantExclude bool
+	}{
+		{
+			name:        "default (nil flag, no statuses) excludes archived",
+			spec:        base,
+			wantExclude: true,
+		},
+		{
+			name: "explicit false still excludes",
+			spec: func() issueTableQuerySpec {
+				s := base
+				f := false
+				s.IncludeArchived = &f
+				return s
+			}(),
+			wantExclude: true,
+		},
+		{
+			name: "filters.statuses=['archived'] without the flag still excludes",
+			spec: func() issueTableQuerySpec {
+				s := base
+				s.Filters.Statuses = []string{"archived"}
+				return s
+			}(),
+			wantExclude: true,
+		},
+		{
+			name: "include_archived=true surfaces archived rows",
+			spec: func() issueTableQuerySpec {
+				s := base
+				t := true
+				s.IncludeArchived = &t
+				return s
+			}(),
+			wantExclude: false,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			compiled, ok := testHandler.compileIssueTableQuery(
+				w,
+				newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+				tt.spec,
+			)
+			if !ok {
+				t.Fatalf("compile failed: %d %s", w.Code, w.Body.String())
+			}
+			excluded := strings.Contains(compiled.where, "i.status <> 'archived'")
+			if excluded != tt.wantExclude {
+				t.Fatalf("archived exclusion = %v, want %v (where=%q)", excluded, tt.wantExclude, compiled.where)
+			}
+		})
+	}
+}

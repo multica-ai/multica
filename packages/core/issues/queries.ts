@@ -231,7 +231,14 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
 async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
+      api.listIssues({
+        status,
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        include_archived: status === "archived",
+        ...sort,
+        ...filter,
+      }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
@@ -768,9 +775,13 @@ export function childIssueProgressOptions(wsId: string) {
     queryKey: issueKeys.childProgress(wsId),
     queryFn: () => api.getChildIssueProgress(),
     select: (data) => {
-      const map = new Map<string, { done: number; total: number }>();
+      const map = new Map<string, { done: number; total: number; archived: number }>();
       for (const entry of data.progress) {
-        map.set(entry.parent_issue_id, { done: entry.done, total: entry.total });
+        map.set(entry.parent_issue_id, {
+          done: entry.done,
+          total: entry.total,
+          archived: entry.archived,
+        });
       }
       return map;
     },

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -87,7 +88,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"parent_id", uuidToString(issue.ParentIssueID))
 		return
 	}
-	if parent.Status == "done" || parent.Status == "cancelled" {
+	if issueguard.IsClosedStatus(parent.Status) {
 		return
 	}
 	// A parent parked in backlog is deliberately held for later. Posting the
@@ -185,7 +186,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 		// Same parent guards as the single path (see notifyParentOfChildDone).
-		if parent.Status == "done" || parent.Status == "cancelled" {
+		if issueguard.IsClosedStatus(parent.Status) {
 			continue
 		}
 		if parent.Status == "backlog" {
@@ -337,8 +338,10 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 // isTerminalChildStatus reports whether a child issue status counts as
 // "finished" for stage-barrier purposes. Cancelled counts as terminal: a
 // cancelled sibling will never complete, so it must not hold a stage open.
+// "Terminal" here is exactly the closed set (done | cancelled | archived), so
+// this delegates to the shared classifier.
 func isTerminalChildStatus(status string) bool {
-	return status == "done" || status == "cancelled"
+	return issueguard.IsClosedStatus(status)
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit

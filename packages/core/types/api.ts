@@ -133,6 +133,12 @@ export interface ListIssuesParams {
    */
   ids?: string[];
   /**
+   * Surface archived rows. Defaults to false; the only status fetch that should
+   * set this is an explicit `archived` status request (board/list otherwise hide
+   * archived by default).
+   */
+  include_archived?: boolean;
+  /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that
    * involves the user (human member / leader-via-owned-agent / agent member
@@ -196,6 +202,10 @@ export interface ListGroupedIssuesParams {
   properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
+  /** Surface archived rows. Defaults to false so the default list/board
+   *  payload never carries archived rows unless the caller explicitly opts in
+   *  (R11). Independent of any other filter. */
+  include_archived?: boolean;
   creator_filters?: IssueActorRef[];
   project_ids?: string[];
   include_no_project?: boolean;
@@ -288,6 +298,11 @@ export interface IssueTableQuerySpec {
     field: IssueTableSortField;
     direction: "asc" | "desc";
   };
+  /** Surface archived rows. Defaults to false so the default table payload
+   *  never carries archived rows unless the caller explicitly opts in (R11).
+   *  Independent of filters.statuses — an explicit status filter is a subset
+   *  request, not an opt-in toggle for archived. */
+  include_archived?: boolean;
 }
 
 export type IssueTableGroupSpec =

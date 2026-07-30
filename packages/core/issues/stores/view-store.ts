@@ -202,6 +202,7 @@ export interface IssueViewState {
   toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
+  setStatusFilters: (statuses: IssueStatus[]) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;
@@ -281,13 +282,14 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
   toggleGanttShowCompleted: () =>
     set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
-  setGrouping: (grouping) => set({ grouping }),
+  setGrouping: (grouping: IssueGrouping) => set({ grouping }),
   toggleStatusFilter: (status) =>
     set((state) => ({
       statusFilters: state.statusFilters.includes(status)
         ? state.statusFilters.filter((s) => s !== status)
         : [...state.statusFilters, status],
     })),
+  setStatusFilters: (statuses) => set({ statusFilters: statuses }),
   togglePriorityFilter: (priority) =>
     set((state) => ({
       priorityFilters: state.priorityFilters.includes(priority)
@@ -352,9 +354,9 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
     set((state) => {
-      // If no filter active, activate filter with all EXCEPT this one
+      // If no filter active, activate filter with all EXCEPT this one and archived.
       if (state.statusFilters.length === 0) {
-        return { statusFilters: ALL_STATUSES.filter((s) => s !== status) };
+        return { statusFilters: ALL_STATUSES.filter((s) => s !== status && s !== "archived") };
       }
       return {
         statusFilters: state.statusFilters.filter((s) => s !== status),

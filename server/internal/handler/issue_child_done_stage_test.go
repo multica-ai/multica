@@ -227,3 +227,61 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 		}
 	})
 }
+
+// `archived` is closed-but-not-completed (KTD2): it must be terminal for the
+// stage barrier (KTD3) so archiving the last open child closes the stage,
+// exactly like done/cancelled.
+func TestIsTerminalChildStatus_Archived(t *testing.T) {
+	for _, s := range []string{"done", "cancelled", "archived"} {
+		if !isTerminalChildStatus(s) {
+			t.Errorf("isTerminalChildStatus(%q) = false, want true (closed-semantic)", s)
+		}
+	}
+	for _, s := range []string{"backlog", "todo", "in_progress", "in_review", "blocked"} {
+		if isTerminalChildStatus(s) {
+			t.Errorf("isTerminalChildStatus(%q) = true, want false (active status)", s)
+		}
+	}
+}
+
+func TestStageBarrierClosed_ArchivedClosesStage(t *testing.T) {
+	t.Run("staged: archiving the last open child closes the stage", func(t *testing.T) {
+		children := []db.Issue{
+			child(1, "done"), child(1, "archived"),
+			child(2, "backlog"),
+		}
+		if !stageBarrierClosed(children, child(1, "archived")) {
+			t.Fatal("expected the stage to close when its last open child is archived")
+		}
+	})
+	t.Run("unstaged: archiving the last open child closes the implicit stage", func(t *testing.T) {
+		children := []db.Issue{child(0, "done"), child(0, "archived")}
+		if !stageBarrierClosed(children, child(0, "archived")) {
+			t.Fatal("expected the implicit stage to close on archive")
+		}
+	})
+}
+
+// KTD8 restore re-arm: restoring an archived child to an active status makes
+// it non-terminal again, so the barrier (recomputed live from ListChildIssues)
+// re-opens — the resurrected child once more holds its stage. stageBarrierClosed
+// reads committed sibling state on every call, so a restored child is correctly
+// counted as open on the next evaluation.
+func TestStageBarrierClosed_RestoredChildReArms(t *testing.T) {
+	t.Run("unstaged: a restored (active) sibling re-opens the barrier", func(t *testing.T) {
+		// child B was archived (barrier closed), then restored to todo.
+		children := []db.Issue{child(0, "done"), child(0, "todo")}
+		if stageBarrierClosed(children, child(0, "done")) {
+			t.Fatal("expected the barrier to re-open once an archived child is restored to an active status")
+		}
+	})
+	t.Run("staged: a restored child re-holds its stage", func(t *testing.T) {
+		children := []db.Issue{
+			child(1, "done"), child(1, "in_progress"), // restored archived -> in_progress
+			child(2, "backlog"),
+		}
+		if stageBarrierClosed(children, child(1, "done")) {
+			t.Fatal("expected stage 1 to re-open after its archived child is restored to in_progress")
+		}
+	})
+}

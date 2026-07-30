@@ -646,6 +646,7 @@ export class ApiClient {
       search.set("properties", JSON.stringify(params.properties));
     }
     if (params?.open_only) search.set("open_only", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.date_field) search.set("date_field", params.date_field);
     if (params?.date_start) search.set("date_start", params.date_start);
@@ -880,7 +881,7 @@ export class ApiClient {
     });
   }
 
-  async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
+  async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number; archived: number }[] }> {
     return this.fetch("/api/issues/child-progress");
   }
 

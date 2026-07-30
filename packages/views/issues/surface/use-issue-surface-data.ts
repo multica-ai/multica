@@ -6,7 +6,10 @@ import {
   type QueryKey,
 } from "@tanstack/react-query";
 import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import {
+  ALL_STATUSES,
+  BOARD_STATUSES,
+} from "@multica/core/issues/config";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   childIssueProgressOptions,
@@ -57,7 +60,9 @@ const EMPTY_PROJECTS: Project[] = [];
 function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
   const dated = issues.filter((i) => i.start_date || i.due_date);
   if (showCompleted) return dated;
-  return dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
+  return dated.filter(
+    (i) => i.status !== "done" && i.status !== "cancelled" && i.status !== "archived",
+  );
 }
 
 export interface IssueSurfaceData {
@@ -133,7 +138,7 @@ export function useIssueSurfaceData({
   usesTable: boolean;
   serverStatusBranches: IssueStatusBranches;
   serverGroupBranches: IssueGroupBranches;
-  /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
+  /** Gantt's "show closed" display toggle. The canvas hides done/cancelled/archived
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
   sort: IssueSortParam;
@@ -480,20 +485,21 @@ export function useIssueSurfaceData({
   );
 
   const visibleStatuses = useMemo<IssueStatus[]>(() => {
-    // Default view shows every lifecycle status, `cancelled` last (its
-    // canonical position in ALL_STATUSES). An active status filter narrows to
-    // the selected subset while preserving that order.
+    // Default board/swimlane view shows the lifecycle statuses that belong on
+    // the board. An explicit status filter narrows to the selected subset while
+    // preserving canonical order (KTD4/R7: `archived` only appears when the user
+    // explicitly filters for it).
     if (statusFilters.length > 0) {
       return ALL_STATUSES.filter((s) => statusFilters.includes(s));
     }
-    return ALL_STATUSES;
+    return BOARD_STATUSES;
   }, [statusFilters]);
 
-  // Hidden columns are the lifecycle statuses not currently visible, so
-  // `cancelled` participates in the board show/hide controls exactly like the
-  // rest of the statuses.
+  // Hidden columns are the lifecycle statuses not currently visible. Because
+  // archived is not part of the default board set, it is never offered as a
+  // re-pinnable default column; it only renders when explicitly filtered.
   const hiddenStatuses = useMemo<IssueStatus[]>(
-    () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),
+    () => BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 

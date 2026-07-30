@@ -47,7 +47,7 @@ import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { STATUS_CONFIG, PRIORITY_CONFIG, isClosedStatus } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -103,6 +103,7 @@ import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { formatProgressText } from "./child-progress";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
@@ -597,7 +598,7 @@ function SubIssueRow({
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
-  childProgress?: { done: number; total: number };
+  childProgress?: { done: number; total: number; archived?: number };
   /** User-level display preference: which built-in fields the row shows. */
   rowProps: SubIssueRowProperties;
   /** Workspace custom properties the user opted into showing on rows. */
@@ -608,7 +609,10 @@ function SubIssueRow({
   const updateIssue = useUpdateIssue();
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
-  const isDone = child.status === "done" || child.status === "cancelled";
+  // Dim closed sub-issues (done/cancelled/archived): archived reads as closed
+  // but keeps its own icon, so it isn't mistaken for a
+  // completed issue.
+  const isDone = isClosedStatus(child.status);
   const labels = rowProps.labels ? (child.labels ?? []) : [];
   const customPropsWithValue = customProperties.filter(
     (p) => child.properties?.[p.id] !== undefined,
@@ -738,7 +742,7 @@ function SubIssueRow({
                   size={11}
                 />
                 <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                  {childProgress.done}/{childProgress.total}
+                  {formatProgressText(childProgress)}
                 </span>
               </span>
             )}
@@ -2483,6 +2487,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
+            const archivedCount = childIssues.filter((c) => c.status === "archived").length;
             return (
               // Provider hosts the shared right-click actions menu the rows
               // delegate to (one singleton menu, not one per row).
@@ -2505,8 +2510,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </button>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
-                    <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                      {doneCount}/{childIssues.length}
+<span className="text-micro text-muted-foreground tabular-nums font-medium">
+                      {formatProgressText({ done: doneCount, total: childIssues.length, archived: archivedCount })}
                     </span>
                   </div>
                   {/* issue.id, not the route param — the endpoint takes a

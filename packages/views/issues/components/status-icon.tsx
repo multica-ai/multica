@@ -139,6 +139,39 @@ function CancelledIcon() {
   );
 }
 
+/** Outlined rectangle / inbox-tray silhouette, no surrounding circle. */
+function ArchivedIcon() {
+  return (
+    <g aria-label="archived">
+      <rect
+        x="2"
+        y="3.5"
+        width="10"
+        height="7"
+        rx="1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+      />
+      <path
+        d="M2.5 6.5 H11.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M5.5 6.5 L7 8 L8.5 6.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </g>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Renderer map
 // ---------------------------------------------------------------------------
@@ -151,6 +184,7 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,
+  archived: ArchivedIcon,
 };
 
 // ---------------------------------------------------------------------------
@@ -169,12 +203,17 @@ export function StatusIcon({
   const knownStatus = status in STATUS_RENDERERS ? (status as IssueStatus) : null;
   const cfg = knownStatus ? STATUS_CONFIG[knownStatus] : null;
   const Renderer = knownStatus ? STATUS_RENDERERS[knownStatus] : TodoIcon;
+  const label = knownStatus === "archived" ? "archived" : undefined;
+  const ariaHidden = label ? undefined : true;
 
   return (
     <svg
       viewBox="0 0 14 14"
       fill="none"
       className={`${className} ${inheritColor ? "" : cfg?.iconColor ?? "text-muted-foreground"} shrink-0`}
+      aria-label={label}
+      aria-hidden={ariaHidden}
+      role="img"
     >
       <Renderer />
     </svg>

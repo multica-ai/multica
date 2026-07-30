@@ -13,6 +13,7 @@ import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { useViewStoreApiOptional } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 
 export interface UseIssueActionsResult {
@@ -54,6 +55,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const updateIssue = useUpdateIssue();
   const surfaceActions = useIssueSurfaceActionsOptional();
+  const viewStoreApi = useViewStoreApiOptional();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const openModal = useModalStore((s) => s.open);
@@ -66,6 +68,10 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issueId) return;
+      if (updates.status === "archived" && issueStatus === "archived") {
+        toast.error(t(($) => $.archived.toast_error));
+        return;
+      }
       // Assigning to an agent/squad may start a run. Route through the
       // pre-trigger confirm modal (preview + optional handoff note + "暂不开始"),
       // which applies the change itself — the four entry points share this one
@@ -89,14 +95,26 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         });
         return;
       }
+      const onSuccess = () => {
+        if (updates.status === "archived") {
+          toast.success(t(($) => $.archived.toast_archived), {
+            action: {
+              label: t(($) => $.archived.toast_view_archived),
+              onClick: () => viewStoreApi?.getState().setStatusFilters(["archived"]),
+            },
+          });
+        }
+      };
       if (surfaceActions) {
         surfaceActions.updateIssue(issueId, updates, {
           errorMessage: t(($) => $.detail.update_failed),
+          onSuccess,
         });
       } else {
         updateIssue.mutate(
           { id: issueId, ...updates },
           {
+            onSuccess,
             onError: (err) =>
               toast.error(
                 err instanceof Error && err.message
@@ -107,7 +125,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         );
       }
     },
-    [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
+    [issueId, issueStatus, surfaceActions, updateIssue, openModal, t, viewStoreApi],
   );
 
   // Explicit "open it somewhere else" CTA, so the new tab takes focus

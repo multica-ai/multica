@@ -106,6 +106,13 @@ type issueTableQuerySpec struct {
 	Filters issueTableFiltersRequest `json:"filters"`
 	Search  string                   `json:"search,omitempty"`
 	Sort    issueTableSortRequest    `json:"sort"`
+	// IncludeArchived defaults to false: the table surface hides archived
+	// rows by default (matching list/board), independent of any explicit
+	// status filter in Filters.Statuses. When true, archived rows surface.
+	// Pointer so a missing key means "use the server default (exclude)"
+	// rather than Go's zero-value false being indistinguishable from an
+	// explicit false.
+	IncludeArchived *bool `json:"include_archived,omitempty"`
 }
 
 type issueTableGroupSpec struct {
@@ -421,6 +428,12 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	}
 	if len(spec.Filters.Statuses) > 0 {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
+	}
+	// Default-hide archived (matches list/board/surface semantics — KTD7/R11).
+	// Independent of Filters.Statuses: an explicit status filter is a subset
+	// request, not a "must include archived" toggle.
+	if spec.IncludeArchived == nil || !*spec.IncludeArchived {
+		where = append(where, "i.status <> 'archived'")
 	}
 	for _, priority := range spec.Filters.Priorities {
 		if !issueTableContainsString(validIssuePriorities, priority) {

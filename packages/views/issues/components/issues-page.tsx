@@ -1,6 +1,6 @@
 "use client";
 
-import { ListTodo } from "lucide-react";
+import { Archive, ListTodo } from "lucide-react";
 import type {
   Issue,
   IssueTableFacetSpec,
@@ -12,6 +12,7 @@ import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
+import { Button } from "@multica/ui/components/ui/button";
 
 function IssuesSurfaceHeader({
   issues,
@@ -42,6 +43,13 @@ function IssuesSurfaceHeader({
   );
 }
 
+function archivedCountFromFacets(
+  tableFacetCounts: IssueTableFacetsResponse | undefined,
+): number | undefined {
+  const statusFacet = tableFacetCounts?.facets.find((f) => f.kind === "status");
+  return statusFacet?.values.find((v) => v.key === "archived")?.count;
+}
+
 export function IssuesPage() {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -66,14 +74,42 @@ export function IssuesPage() {
             onTableFacetChange={controller.setActiveTableFacet}
           />
         )}
-        renderEmpty={() => (
-          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-body">{t(($) => $.page.empty_title)}</p>
-            <p className="text-caption">{t(($) => $.page.empty_hint)}</p>
-          </div>
+renderEmpty={({ controller }) => (
+          <IssuesEmptyState tableFacetCounts={controller.tableFacetCounts} />
         )}
       />
+    </div>
+  );
+}
+
+// Rendered via IssueSurface's renderEmpty, i.e. INSIDE ViewStoreProvider — so
+// it is safe to call useViewStoreApi() here (unlike the page-level IssuesPage,
+// which renders above the provider and must not).
+function IssuesEmptyState({
+  tableFacetCounts,
+}: {
+  tableFacetCounts?: IssueTableFacetsResponse;
+}) {
+  const { t } = useT("issues");
+  const setStatusFilters = useViewStore((s) => s.setStatusFilters);
+  const archivedCount = archivedCountFromFacets(tableFacetCounts) ?? 0;
+  const showArchivedHint = archivedCount > 0;
+  return (
+    <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
+      <ListTodo className="h-10 w-10 text-muted-foreground/40" />
+      <p className="text-body">{t(($) => $.page.empty_title)}</p>
+      <p className="text-caption">{t(($) => $.page.empty_hint)}</p>
+      {showArchivedHint && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-1 gap-1.5 text-caption"
+          onClick={() => setStatusFilters(["archived"])}
+        >
+          <Archive className="size-3.5" />
+          {t(($) => $.archived.empty_state_hint, { count: archivedCount })}
+        </Button>
+      )}
     </div>
   );
 }

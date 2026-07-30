@@ -2692,6 +2692,7 @@ func TestValidIssueStatuses(t *testing.T) {
 		"done":        true,
 		"blocked":     true,
 		"cancelled":   true,
+		"archived":    true,
 	}
 	for _, s := range validIssueStatuses {
 		if !expected[s] {
@@ -3416,5 +3417,30 @@ func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
 	}
 	if _, present := body["position"]; present {
 		t.Fatalf("position must be absent from the body when --position is not passed, got %#v", body["position"])
+	}
+}
+
+// `archived` is a first-class status (KTD1): the CLI must accept it for
+// `issue status <id> archived` / `issue list --status archived`, reject
+// near-miss typos, and list it in the valid-values error (R6).
+func TestValidateIssueStatusArchived(t *testing.T) {
+	if err := validateIssueStatus("archived"); err != nil {
+		t.Errorf("validateIssueStatus(\"archived\") = %v, want nil", err)
+	}
+	// Free-form restore (R2): moving back to an active status is valid.
+	if err := validateIssueStatus("todo"); err != nil {
+		t.Errorf("validateIssueStatus(\"todo\") = %v, want nil", err)
+	}
+	// A bogus value still errors and the message names archived as valid.
+	err := validateIssueStatus("bogus")
+	if err == nil {
+		t.Fatal("validateIssueStatus(\"bogus\") = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("valid-values message %q should include %q", err.Error(), "archived")
+	}
+	// A near-miss typo is rejected.
+	if err := validateIssueStatus("archive"); err == nil {
+		t.Error("validateIssueStatus(\"archive\") = nil, want an error for the typo")
 	}
 }

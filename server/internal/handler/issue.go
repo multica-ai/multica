@@ -75,7 +75,7 @@ type IssueResponse struct {
 // the issue table. Write handlers pre-validate these so callers get a clean
 // 400 with the allowed values instead of a database CHECK violation bubbling
 // up as a 500.
-var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled", "archived"}
 var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 
 func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
@@ -473,7 +473,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
 
 	if !includeClosed {
-		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+		whereClause += " AND NOT issue_status_is_closed(i.status)"
 	}
 
 	// --- ORDER BY clause ---
@@ -539,7 +539,8 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		WHEN 'backlog' THEN 4
 		WHEN 'done' THEN 5
 		WHEN 'cancelled' THEN 6
-		ELSE 7
+		WHEN 'archived' THEN 7
+		ELSE 8
 	END`
 
 	// --- match_source expression ---
@@ -854,7 +855,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// open_only=true returns all non-done/cancelled issues (no limit).
+	// include_archived=true surfaces archived rows. Defaults to false so the
+	// default list/board payload never carries archived rows unless the caller
+	// explicitly opts in. Independent of include_closed/open_only.
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+
+	// open_only=true returns all non-done/cancelled/archived issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		// Serialize the parsed AND-of-ORs groups into the single jsonb param
 		// the static query unrolls (see properties_filter in ListOpenIssues).
@@ -963,7 +969,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 WHEN 'archived' THEN 7 ELSE 8 END"
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
@@ -1018,6 +1024,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	if len(statusesFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statusesFilter)))
+	}
+	if !includeArchived {
+		where = append(where, "i.status <> 'archived'")
 	}
 	if len(prioritiesFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(prioritiesFilter)))
@@ -1480,6 +1489,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
 	}
 
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	if !includeArchived {
+		where = append(where, "i.status <> 'archived'")
+	}
+
 	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
 	if len(priorities) == 0 {
 		priorities = splitCommaParam(r.URL.Query().Get("priority"))
@@ -1686,7 +1700,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 WHEN 'archived' THEN 7 ELSE 8 END"
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
@@ -2027,6 +2041,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID string `json:"parent_issue_id"`
 		Total         int64  `json:"total"`
 		Done          int64  `json:"done"`
+		Archived      int64  `json:"archived"`
 	}
 	resp := make([]progressEntry, len(rows))
 	for i, row := range rows {
@@ -2034,6 +2049,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 			ParentIssueID: uuidToString(row.ParentIssueID),
 			Total:         row.Total,
 			Done:          row.Done,
+			Archived:      row.Archived,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

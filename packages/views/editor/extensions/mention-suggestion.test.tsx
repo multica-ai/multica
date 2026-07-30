@@ -303,6 +303,23 @@ describe("createMentionSuggestion", () => {
     expect(command).not.toHaveBeenCalled();
   });
 
+  it("dims archived issue suggestions like other closed statuses", () => {
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue", description: "Retired spike", status: "archived" },
+      { id: "i-2", label: "MUL-2", type: "issue", description: "Active work", status: "in_progress" },
+    ];
+
+    render(<I18nWrapper><MentionList items={items} query="" command={vi.fn()} /></I18nWrapper>);
+
+    const archivedTitle = screen.getByText("Retired spike");
+    expect(archivedTitle.className).toContain("line-through");
+    expect(archivedTitle.closest("button")?.className).toContain("opacity-60");
+
+    const activeTitle = screen.getByText("Active work");
+    expect(activeTitle.className).not.toContain("line-through");
+    expect(activeTitle.closest("button")?.className).not.toContain("opacity-60");
+  });
+
   it("captures Tab while the popup has no selectable items, like Enter", () => {
     const ref = createRef<MentionListRef>();
 

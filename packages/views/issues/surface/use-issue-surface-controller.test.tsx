@@ -1134,7 +1134,7 @@ describe("useIssueSurfaceController", () => {
     });
 
     const store = getIssueSurfaceViewStore("project:p1");
-    act(() => store.getState().toggleStatusFilter("todo"));
+    act(() => store.getState().setStatusFilters(["todo"]));
 
     const { result } = renderHook(
       () =>
@@ -1163,7 +1163,7 @@ describe("useIssueSurfaceController", () => {
     });
 
     const store = getIssueSurfaceViewStore("project:p1");
-    act(() => store.getState().toggleStatusFilter("cancelled"));
+    act(() => store.getState().setStatusFilters(["cancelled"]));
 
     const { result } = renderHook(
       () =>
@@ -1268,7 +1268,7 @@ describe("useIssueSurfaceController", () => {
     // ...but the user is only looking at `todo`.
     const store = getIssueSurfaceViewStore("project:p1");
     act(() => {
-      store.getState().toggleStatusFilter("todo");
+      store.getState().setStatusFilters(["todo"]);
       store.getState().toggleAgentRunningFilter();
     });
 

@@ -22,7 +22,7 @@ import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
-import type { ChildProgress } from "./list-row";
+import { formatProgressText, type ChildProgress } from "./child-progress";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
@@ -294,7 +294,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 <div className="inline-flex shrink-0 items-center gap-1">
                   <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
                   <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                    {childProgress!.done}/{childProgress!.total}
+                    {formatProgressText(childProgress!)}
                   </span>
                 </div>
               )}

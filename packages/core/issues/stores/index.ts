@@ -14,6 +14,7 @@ export {
   ViewStoreProvider,
   useViewStore,
   useViewStoreApi,
+  useViewStoreApiOptional,
 } from "./view-store-context";
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
