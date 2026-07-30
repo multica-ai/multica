@@ -1448,7 +1448,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Move comments to a new thread",
     group: "issues",
     description:
-      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
+      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread — 'Select all after this' takes the anchor and everything below it in one click — and lift them into a new thread on the same issue. The comments are moved, not copied: they keep their author, timestamps, attachments and reactions, and no breadcrumb is left behind. JEH-2488, FIR-3880.",
   },
   {
     key: "cerebro_skill_ownership",

@@ -194,15 +194,31 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async createComment(issueId: string, content: string) {
+  // `parentId` hangs the new comment under an existing one, which is the only
+  // way to build a multi-comment thread for the move-to-thread specs.
+  async createComment(issueId: string, content: string, parentId?: string) {
     const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(parentId ? { content, parent_id: parentId } : { content }),
     });
     if (!res.ok) {
       throw new Error(`createComment failed: ${res.status} ${await res.text()}`);
     }
     return res.json();
+  }
+
+  async listComments(issueId: string): Promise<Array<{
+    id: string;
+    parent_id: string | null;
+    content: string | null;
+    type: string;
+  }>> {
+    const res = await this.authedFetch(`/api/issues/${issueId}/comments`);
+    if (!res.ok) {
+      throw new Error(`listComments failed: ${res.status} ${await res.text()}`);
+    }
+    const body = await res.json();
+    return Array.isArray(body) ? body : (body.comments ?? []);
   }
 
   // FIR-2680 — create a named channel (kind='channel'). Channels are issues, so
