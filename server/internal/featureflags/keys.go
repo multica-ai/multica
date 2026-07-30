@@ -16,6 +16,12 @@ const (
 	// ResourceLabels controls the agent- and skill-scoped label namespaces.
 	// Issue labels remain available while this release flag is off.
 	ResourceLabels = "settings_resource_labels"
+	// DesktopHangStackCapture gates reading a JS call stack out of a hung
+	// desktop renderer (MUL-5345). Capture holds a debugger channel open on
+	// every renderer, so the desktop client is fail-closed: it stays off unless
+	// this key arrives as an explicit true. That makes publishing the key here
+	// mandatory — a key the client never receives can never be turned on.
+	DesktopHangStackCapture = "desktop_hang_stack_capture"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -29,6 +35,7 @@ const (
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	ResourceLabels,
+	DesktopHangStackCapture,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -37,6 +44,10 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+func DesktopHangStackCaptureEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, DesktopHangStackCapture, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

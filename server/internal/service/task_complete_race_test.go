@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // mockRow implements pgx.Row, returning either a scanned task or pgx.ErrNoRows.
@@ -109,7 +110,7 @@ func TestCompleteTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.CompleteTask(context.Background(), taskID, nil, "", "", false)
+			got, err := svc.CompleteTask(context.Background(), taskID, nil, "", "", false, "")
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
@@ -151,7 +152,7 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "", false)
+			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "", false, "")
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
@@ -276,5 +277,50 @@ func TestTaskFailureClassifiers(t *testing.T) {
 				t.Fatalf("retryableReasons[%q] = %v, want %v", tc.reason, got, tc.wantRetry)
 			}
 		})
+	}
+}
+
+// TestSkillBundleFailureFromLegacyDaemonRetries is the mixed-version
+// regression for MUL-5370. It walks the exact chain FailTask runs for a task
+// an un-upgraded daemon just failed, and asserts the user-visible outcome:
+// the run is retried instead of dying.
+//
+// The trap this guards: the daemon-side fix labels the failure structurally,
+// but an old daemon reports a NON-EMPTY catchall, so FailTask's "classify only
+// when the caller gave us nothing" branch leaves it alone. Without
+// NormalizeDaemonReason the reason stays agent_error.unknown, which is not on
+// retryableReasons — meaning the fix would reach only hosts that happened to
+// update, while the un-upgraded hosts most likely to be hitting the bug keep
+// failing terminally.
+func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
+	const legacyErr = "resolve skill bundles: context deadline exceeded"
+	task := db.AgentTaskQueue{
+		Attempt:     1,
+		MaxAttempts: 2,
+		IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+	}
+
+	// What an old daemon puts on the wire, and what FailTask does with it.
+	legacyReason := taskfailure.ReasonAgentUnknown.String()
+	if retryEligible(legacyReason, task) {
+		t.Fatal("precondition: the raw catchall must not be retryable, or this test proves nothing")
+	}
+
+	normalized := taskfailure.NormalizeDaemonReason(legacyReason, legacyErr).String()
+	if normalized != taskfailure.ReasonSkillBundleUnavailable.String() {
+		t.Fatalf("normalized reason = %q, want %q", normalized, taskfailure.ReasonSkillBundleUnavailable)
+	}
+	if !retryEligible(normalized, task) {
+		t.Errorf("a skill-bundle failure reported by an old daemon must still be retried; got reason %q", normalized)
+	}
+
+	// A current daemon supplies the reason itself and must reach the same
+	// outcome — the two versions converge rather than diverging by client.
+	current := taskfailure.NormalizeDaemonReason(
+		taskfailure.ReasonSkillBundleUnavailable.String(),
+		`skill bundle unavailable: skill "x" (id=1, 10 bytes) after 30s: context deadline exceeded`,
+	).String()
+	if !retryEligible(current, task) {
+		t.Errorf("a skill-bundle failure reported by a current daemon must be retried; got reason %q", current)
 	}
 }

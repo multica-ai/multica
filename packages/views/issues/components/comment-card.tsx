@@ -29,7 +29,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useEditorUpload } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
+import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
@@ -322,19 +323,23 @@ function useEditAttachmentState(
 ) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
-  const { uploadWithToast } = useEditorUpload();
   const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [initialValue, setInitialValue] = useState(entry.content ?? "");
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
   // pasted in — same failure as posting a new comment.
   const uploadGate = useUploadGate(editorRef);
   const cancelledRef = useRef(false);
-  const savingRef = useRef(false);
   const [content, setContent] = useState(entry.content ?? "");
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  // Uploads for this edit session (MUL-5181) — coordinator-owned, persisted in
+  // the draft store keyed by the edit draft so scroll-out/close no longer drops
+  // an in-flight upload.
+  const draftKey = `edit:${issueId}:${entry.id}` as const;
+  // `gate` widens the editor gate with coordinator-owned placeholders — see
+  // CommentInput.
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate } =
+    useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const triggerPreview = useCommentTriggerPreview({
     issueId,
@@ -347,12 +352,6 @@ function useEditAttachmentState(
     ? [...(entry.attachments ?? []), ...pendingAttachments]
     : entry.attachments;
 
-  const handleUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) setPendingAttachments((prev) => [...prev, result]);
-    return result;
-  }, [uploadWithToast, issueId]);
-
   useEffect(() => {
     setSuppressedAgentIds(new Set());
   }, [issueId, entry.id, entry.parent_id]);
@@ -362,7 +361,6 @@ function useEditAttachmentState(
     enabled: editing,
   });
 
-  const draftKey = `edit:${issueId}:${entry.id}` as const;
   const getDraft = useCommentDraftStore.getState().getDraft;
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
@@ -392,8 +390,8 @@ function useEditAttachmentState(
     setEditing(false);
     setContent(entry.content ?? "");
     setSuppressedAgentIds(new Set());
-    setPendingAttachments([]);
     setRetainedStandaloneIds(null);
+    // clearDraft drops both the edit text and its pending attachments.
     clearDraft(draftKey);
   };
 
@@ -411,59 +409,93 @@ function useEditAttachmentState(
     resetState();
   };
 
-  const saveEdit = async () => {
-    if (cancelledRef.current || savingRef.current) return;
-    // Submit-time re-read — Cmd+Enter bypasses the Save button entirely.
-    if (uploadGate.isBlocked()) return;
-    const trimmed = editorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
-    if (!trimmed) return;
-    const activeIds = collectActiveAttachmentIds(
-      trimmed,
-      [...(entry.attachments ?? []), ...pendingAttachments],
-      retainedStandaloneIds,
-    );
-    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
-    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
-      resetState();
-      return;
-    }
-    const suppressAgentIds = triggerPreview.agents
-      .filter((agent) => suppressedAgentIds.has(agent.id))
-      .map((agent) => agent.id);
-    savingRef.current = true;
-    setSaving(true);
-    try {
-      await onEdit(
-        entry.id,
+  // Await-then-render save (MUL-5181): shared submit contract, with the edit-
+  // only concerns folded into onSubmit — the cancel-race guard, the no-op
+  // short-circuit, and the failure toast. The hook owns the empty guard,
+  // upload re-check, single-flight, and lock/spin via `submitting`.
+  // Stale-submit guard (MUL-5181 P0) — see CommentInput. The edit hook lives
+  // in CommentRow, so "unmounted" here means the issue detail closed.
+  const editMountedRef = useRef(true);
+  useEffect(() => {
+    editMountedRef.current = true;
+    return () => {
+      editMountedRef.current = false;
+    };
+  }, []);
+  const submittedEntryRef = useRef<unknown>(null);
+
+  const { submitting: saving, submit: saveEdit } = useComposerSubmit({
+    editorRef,
+    uploadGate: gate,
+    onSubmit: async (trimmed) => {
+      // A save racing a just-pressed Cancel must never reach the server.
+      if (cancelledRef.current) return false;
+      // Flush pending debounce before snapshotting — see CommentInput.
+      const pendingMd = editorRef.current?.flushPendingUpdate?.();
+      if (pendingMd != null) setDraft(draftKey, pendingMd);
+      submittedEntryRef.current = useCommentDraftStore.getState().drafts[draftKey];
+      const activeIds = collectActiveAttachmentIds(
         trimmed,
-        activeIds,
-        suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        [...(entry.attachments ?? []), ...pendingAttachments],
+        // Body-referenced + retained-standalone only (MUL-5181): an upload the
+        // user removed from the body is really unbound. Close-surviving
+        // uploads are written back into the body by the settle handler.
+        retainedStandaloneIds,
       );
+      const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+      // Nothing changed — close the editor without a write. Accepted, so
+      // onAccepted resets the edit state.
+      if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
+        return true;
+      }
+      const suppressAgentIds = triggerPreview.agents
+        .filter((agent) => suppressedAgentIds.has(agent.id))
+        .map((agent) => agent.id);
+      try {
+        await onEdit(
+          entry.id,
+          trimmed,
+          activeIds,
+          suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        );
+        return true;
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.update_failed),
+        );
+        return false;
+      }
+    },
+    onAccepted: () => {
+      // Success may only consume the entry it submitted: edits made during the
+      // save survive, and the editor then STAYS in edit mode on them.
+      const lateMd = editorRef.current?.flushPendingUpdate?.();
+      if (lateMd != null) setDraft(draftKey, lateMd);
+      const store = useCommentDraftStore.getState();
+      const live = store.drafts[draftKey];
+      const untouched = live === undefined || live === submittedEntryRef.current;
+      if (!editMountedRef.current) {
+        if (untouched) store.clearDraft(draftKey);
+        return;
+      }
+      if (!untouched) return;
       resetState();
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.comment.update_failed),
-      );
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
+    },
+  });
 
   return {
     editing,
     saving,
-    uploading: uploadGate.uploading,
-    onUploadingChange: uploadGate.onUploadingChange,
+    uploading: gate.uploading,
+    onUploadingChange: gate.onUploadingChange,
     uploadingLabel: tEditor(($) => $.upload.in_progress),
     editorRef,
     editorAttachments,
     handleUpload,
+    uploads,
+    removeUpload,
     isDragOver,
     dropZoneProps,
     triggerPreview,

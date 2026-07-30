@@ -260,7 +260,7 @@ export function ChangelogPageClient() {
             </aside>
 
             <div className="mx-auto min-w-0 max-w-[720px] lg:mx-0">
-              <h1 className="font-[family-name:var(--font-serif)] text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
+              <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
                 {t.changelog.title}
               </h1>
               <p className="mt-4 text-[15px] leading-7 text-[#0a0d12]/60 sm:text-[16px]">

@@ -6,6 +6,8 @@ import {
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
+  DashboardFailureByAgentListSchema,
+  DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
@@ -22,6 +24,8 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
+  MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -638,7 +642,46 @@ describe("dashboard + runtime usage schema drift", () => {
 
   it("rejects a non-array body so parseWithFallback can return its fallback", () => {
     expect(DashboardUsageDailyListSchema.safeParse(null).success).toBe(false);
+    expect(DashboardFailureDailyListSchema.safeParse(null).success).toBe(false);
+    expect(DashboardFailureByAgentListSchema.safeParse({ rows: [] }).success).toBe(
+      false,
+    );
     expect(RuntimeUsageListSchema.safeParse({ rows: [] }).success).toBe(false);
+  });
+
+  it("keeps a failure_reason the client build has never heard of", () => {
+    // failure_reason is an open string, not an enum: the backend taxonomy
+    // grows, and an installed desktop client must still count a reason its
+    // build predates rather than dropping the row (and with it the day's
+    // error total).
+    const parsed = DashboardFailureDailyListSchema.parse([
+      { date: "2026-05-19", failure_reason: "agent_error.brand_new", task_count: 3 },
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.failure_reason).toBe("agent_error.brand_new");
+    expect(parsed[0]?.task_count).toBe(3);
+  });
+
+  it("coerces a missing failure row field without dropping the array", () => {
+    const daily = DashboardFailureDailyListSchema.parse([{ date: "2026-05-19" }]);
+    expect(daily).toHaveLength(1);
+    // "" is the succeeded bucket, so a reason-less row lands in the
+    // denominator instead of inventing a failure that never happened.
+    //
+    // Defaulting to a failure bucket instead was considered and rejected: the
+    // realistic drift here is someone adding `omitempty` to the Go struct
+    // tag, which would strip the field from exactly the SUCCESS rows and turn
+    // every window into a 100% error rate. Deflating a rate under drift is
+    // the milder failure. TestDashboardFailureWireContractKeepsEmptyReason
+    // (server/internal/handler/dashboard_test.go) guards the other side by
+    // pinning that the server always emits the field.
+    expect(daily[0]?.failure_reason).toBe("");
+    expect(daily[0]?.task_count).toBe(0);
+
+    const byAgent = DashboardFailureByAgentListSchema.parse([
+      { failure_reason: "timeout", task_count: 2 },
+    ]);
+    expect(byAgent[0]?.agent_id).toBe("");
   });
 
   it("keeps unknown server-side fields via .loose()", () => {
@@ -946,5 +989,121 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
       ],
     });
     expect(parsed.blocked.map((b) => b.target_id)).toEqual(["s1", "a1"]);
+  });
+});
+
+describe("RuntimeModelListRequestSchema", () => {
+  const completed = {
+    id: "req-1",
+    runtime_id: "rt-1",
+    status: "completed",
+    supported: true,
+    created_at: "2026-07-29T00:00:00Z",
+    updated_at: "2026-07-29T00:00:01Z",
+    models: [
+      {
+        id: "gpt-5.6-sol",
+        label: "GPT-5.6-Sol",
+        provider: "openai",
+        default: true,
+        thinking: {
+          supported_levels: [{ value: "high", label: "High" }],
+          default_level: "low",
+        },
+        service_tiers: [{ id: "fast", name: "Fast" }],
+      },
+    ],
+  };
+
+  it("parses a live completed discovery, keeping the fields the UI branches on", () => {
+    const parsed = parseWithFallback(
+      completed,
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("completed");
+    expect(parsed.supported).toBe(true);
+    expect(parsed.models?.[0]?.default).toBe(true);
+    expect(parsed.models?.[0]?.thinking?.supported_levels).toEqual([
+      { value: "high", label: "High" },
+    ]);
+    expect(parsed.models?.[0]?.service_tiers).toEqual([{ id: "fast", name: "Fast" }]);
+    expect(parsed.cached).toBeUndefined();
+  });
+
+  it("keeps the additive cache markers when the server serves a snapshot", () => {
+    const parsed = parseWithFallback(
+      { ...completed, cached: true, cached_at: "2026-07-29T00:00:00Z" },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.cached).toBe(true);
+    expect(parsed.cached_at).toBe("2026-07-29T00:00:00Z");
+  });
+
+  // A backend that predates MUL-5444 sends neither marker; an even older one
+  // may omit `supported`. Both must stay usable rather than reading as
+  // "runtime manages the model itself" off an undefined.
+  it("defaults supported to true on an older backend that omits it", () => {
+    const { supported: _omitted, ...withoutSupported } = completed;
+    const parsed = parseWithFallback(
+      withoutSupported,
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.supported).toBe(true);
+    expect(parsed.cached).toBeUndefined();
+  });
+
+  it("passes an unknown status through instead of failing the whole response", () => {
+    const parsed = parseWithFallback(
+      { ...completed, status: "superseded" },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("superseded");
+  });
+
+  // Malformed bodies must land on the "failed" fallback: `completed` would
+  // fabricate an empty catalog and `pending` would spin the picker until the
+  // client-side poll timeout.
+  it("falls back to an explicit failure on a malformed body", () => {
+    for (const malformed of [
+      null,
+      "nope",
+      42,
+      {},
+      { status: 7 },
+      { ...completed, status: undefined },
+      { ...completed, supported: "yes" },
+      { ...completed, models: "nope" },
+      { ...completed, models: [{ label: "no id" }] },
+    ]) {
+      const parsed = parseWithFallback(
+        malformed,
+        RuntimeModelListRequestSchema,
+        MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+        { endpoint: "test" },
+      );
+      expect(parsed.status).toBe("failed");
+      expect(parsed.supported).toBe(true);
+      expect(parsed.error).toBe("invalid model discovery response");
+    }
+  });
+
+  it("keeps unknown server fields instead of stripping them", () => {
+    const parsed = parseWithFallback(
+      { ...completed, future_field: "keep me" },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe(
+      "keep me",
+    );
   });
 });

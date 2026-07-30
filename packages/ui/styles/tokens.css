@@ -90,7 +90,14 @@
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.21 0.006 285.885);
     --muted: oklch(0.967 0.001 286.375);
-    --muted-foreground: oklch(0.552 0.016 285.938);
+    /* Lightness is pinned by WCAG AA, not by taste: muted text sits on every
+       light surface we have, and the darkest of them — --sidebar-accent, the
+       nav hover state — is the binding constraint. At the old 0.552 that pair
+       was 3.98:1; 0.505 clears 4.5:1 on all of app-shell / page-canvas /
+       sidebar / sidebar-accent / muted / surface-selected / surface, with the
+       worst case at 4.88:1. Raise it and the nav labels fail again. Hue and
+       chroma are unchanged so the neutral ramp keeps its cast. */
+    --muted-foreground: oklch(0.505 0.016 285.938);
     --accent: oklch(0.967 0.001 286.375);
     --accent-foreground: oklch(0.21 0.006 285.885);
     --destructive: oklch(0.577 0.245 27.325);

@@ -163,7 +163,7 @@ export function ContactSalesPageClient() {
             <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#0a0d12]/45">
               {c.eyebrow}
             </p>
-            <h1 className="mt-2 font-[family-name:var(--font-serif)] text-[2.4rem] leading-[1.1] tracking-[-0.02em] sm:text-[2.8rem]">
+            <h1 className="mt-2 landing-serif text-[2.4rem] leading-[1.1] tracking-[-0.02em] sm:text-[2.8rem]">
               {c.title}
             </h1>
             <p className="mt-3 text-[14px] text-[#0a0d12]/60 sm:text-[15px]">
@@ -206,7 +206,7 @@ function SuccessCard({
 }) {
   return (
     <div className="rounded-[16px] border border-[#0a0d12]/8 bg-white p-8 shadow-[0_1px_2px_rgba(10,13,18,0.04)] sm:p-10">
-      <h2 className="font-[family-name:var(--font-serif)] text-[1.8rem] leading-[1.15] tracking-[-0.02em]">
+      <h2 className="landing-serif text-[1.8rem] leading-[1.15] tracking-[-0.02em]">
         {title}
       </h2>
       <p className="mt-3 text-[15px] leading-[1.7] text-[#0a0d12]/70">

@@ -139,6 +139,15 @@ type WorkspaceSetRefreshNotifier interface {
 	NotifyWorkspacesChanged(userID string)
 }
 
+// DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
+// daemon so a queued heartbeat-carried request (model discovery) is picked up
+// immediately instead of on the daemon's next scheduled tick (MUL-5444).
+// Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
+// (multi-node, fans out through Redis).
+type DaemonPendingWorkNotifier interface {
+	NotifyPendingWork(runtimeID, kind string)
+}
+
 type Handler struct {
 	Queries                *db.Queries
 	DB                     dbExecutor
@@ -162,6 +171,16 @@ type Handler struct {
 	Storage                storage.Storage
 	CFSigner               *auth.CloudFrontSigner
 	Analytics              analytics.Client
+	// DaemonPendingWork pushes "heartbeat now" hints for queued
+	// heartbeat-carried requests (MUL-5444). Optional: when nil,
+	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
+	// correct delivery scope for a single-node deployment.
+	DaemonPendingWork DaemonPendingWorkNotifier
+	// ModelCatalogCache serves the last known good model list for a runtime so
+	// the picker can render without waiting for a daemon round trip
+	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
+	// cache as a permanent miss and falls back to the full discovery flow.
+	ModelCatalogCache ModelCatalogCache
 	// Metrics is the shared business-metrics collector built by main.go.
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
@@ -309,6 +328,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
+		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
 		LivenessStore:                NewNoopLivenessStore(),

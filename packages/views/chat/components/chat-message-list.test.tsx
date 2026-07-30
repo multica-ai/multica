@@ -165,3 +165,71 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.queryByText(/Hidden protocol/)).not.toBeInTheDocument();
   });
 });
+
+describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
+  // The backend moved to the refined taxonomy (agent_error.*) in MUL-2946 but
+  // the copy map stayed on the six coarse values, so an exact-key lookup
+  // missed every refined reason and fell through to the generic fallback.
+  // A user whose skill bundle download stalled was told only "Something went
+  // wrong", and the maintainer debugging it had nothing better to go on.
+  function renderFailure(reason: string) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "m1",
+                chat_session_id: "s1",
+                role: "assistant",
+                content: "skill bundle unavailable: skill \"x\"",
+                task_id: null,
+                created_at: new Date(0).toISOString(),
+                failure_reason: reason,
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  const FALLBACK = enChat.message_list.failure.fallback;
+
+  it("renders dedicated copy for a stalled skill bundle download", async () => {
+    renderFailure("skill_bundle_unavailable");
+    expect(
+      await screen.findByText(enChat.message_list.failure.skill_bundle_unavailable),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("renders dedicated copy for a refined reason the map names", async () => {
+    renderFailure("agent_error.provider_network");
+    expect(
+      await screen.findByText(enChat.message_list.failure.provider_network),
+    ).toBeInTheDocument();
+  });
+
+  it("degrades an unnamed refined reason to its agent_error family", async () => {
+    renderFailure("agent_error.unknown");
+    expect(
+      await screen.findByText(enChat.message_list.failure.agent_error),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("degrades a reason newer than this build to its agent_error family", async () => {
+    renderFailure("agent_error.some_future_bucket");
+    expect(
+      await screen.findByText(enChat.message_list.failure.agent_error),
+    ).toBeInTheDocument();
+  });
+
+  it("still falls back when neither the reason nor its family is known", async () => {
+    renderFailure("something_entirely_new");
+    expect(await screen.findByText(FALLBACK)).toBeInTheDocument();
+  });
+});

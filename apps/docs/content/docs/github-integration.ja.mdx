@@ -149,7 +149,7 @@ GITHUB_APP_PRIVATE_KEY=<BEGIN/END 行を含む完全な PEM ブロック>
 - Settings の `Connect GitHub` が**無効**になり、「not configured」のヒントが表示されます。
 - `/api/webhooks/github` エンドポイントが **`503 github webhooks not configured`** を返します — Multica は secret なしでイベントを処理することを拒否し、すべての署名を黙って有効として扱うことはありません。
 
-`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` は現在、**PR カードの CI ステータスとマージ可否に必須**です — これらにより Multica は App として認証し（App JWT → installation token）、各カードの基になる GitHub API スナップショットを取得します。秘密鍵は App 設定ページの **Private keys → Generate a private key** で生成し、PEM ブロック全体（`-----BEGIN/END RSA PRIVATE KEY-----` の行を含む）を改行を保ったまま env 変数に貼り付けてください。これらがない場合、連携は**きれいに縮退**します: PR は引き続きミラーリングされ、イシューは引き続き自動で紐づき、マージ時に Done へ移動し、接続済みアカウント名も引き続き `installation.created` webhook から解決されます — ただし PR カードには CI やマージ状態が表示されません。
+`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` は、**PR カードの CI ステータスとマージ可否**、および **Settings → Repositories → GitHub から選択**の両方に必要です。これらにより Multica は App として認証し（App JWT → installation token）、PR カードの GitHub API スナップショットを取得するとともに、metadata read のみに限定した短命 token で installation のリポジトリを一覧します。秘密鍵は App 設定ページの **Private keys → Generate a private key** で生成し、PEM ブロック全体（`-----BEGIN/END RSA PRIVATE KEY-----` の行を含む）を改行を保ったまま env 変数に貼り付けてください。これらがない場合、連携は**きれいに縮退**します: PR は引き続きミラーリングされ、イシューは引き続き自動で紐づき、マージ時に Done へ移動し、接続済みアカウント名も `installation.created` webhook から解決されます — ただし PR カードには CI やマージ状態が表示されず、リポジトリ参照も無効になります。
 
 `FRONTEND_ORIGIN` も設定されている必要があります（どのプロダクションのセルフホストでもすでに設定されています）。インストール後、setup コールバックがユーザーを `<FRONTEND_ORIGIN>/settings?tab=github` に戻します。
 

@@ -161,7 +161,7 @@ GITHUB_APP_PRIVATE_KEY=<完整 PEM 块，包含 BEGIN/END 行>
 - Settings 里 `Connect GitHub` 按钮会被 **disable**，并显示「not configured」提示
 - `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——Multica 在 secret 没配置时拒绝处理事件，不会出现「没 secret 也接受 webhook」的安全坑
 
-`GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 现在是 **PR 卡片 CI 状态与可合并性的必填项**——它们让 Multica 以 App 身份鉴权（App JWT → installation token）并拉取每张卡片所依赖的 GitHub API 快照。私钥从 App 设置页 **Private keys → Generate a private key** 生成，把整段 PEM（含 `-----BEGIN/END RSA PRIVATE KEY-----` 两行）粘到 env 里，保留换行。不配这两个时集成**干净降级**：PR 照常镜像、issue 照常自动关联并在 merge 时转 Done、关联账号名也仍由 `installation.created` webhook 解析——只是 PR 卡片不显示任何 CI 或 merge 状态。
+`GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 同时用于 **PR 卡片的 CI 状态与可合并性**和 **Settings → Repositories → 从 GitHub 选择**。它们让 Multica 以 App 身份鉴权（App JWT → installation token）、拉取 PR 卡片依赖的 GitHub API 快照，并签发仅有 metadata read 权限的短效 token 来列出 installation 的仓库。私钥从 App 设置页 **Private keys → Generate a private key** 生成，把整段 PEM（含 `-----BEGIN/END RSA PRIVATE KEY-----` 两行）粘到 env 里，保留换行。不配这两个时集成会**干净降级**：PR 照常镜像、issue 照常自动关联并在 merge 时转 Done、关联账号名仍由 `installation.created` webhook 解析——但 PR 卡片不显示 CI/merge 状态，仓库浏览也会被禁用。
 
 `FRONTEND_ORIGIN` 也必须设置（任何生产 self-host 都已经设了）——setup 回调结束后用它把用户跳回 `<FRONTEND_ORIGIN>/settings?tab=github`。
 

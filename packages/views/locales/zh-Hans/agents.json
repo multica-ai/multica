@@ -306,10 +306,12 @@
       "behavior": "行为与能力",
       "behavior_hint": "定义它的工作方式，并添加可使用的工作区 skill。",
       "execution": "运行方式",
-      "execution_hint": "选择智能体使用的运行时，也可以覆盖运行时的默认模型。",
+      "execution_hint": "选择智能体使用的运行时，也可以覆盖运行时的默认模型、思考等级和速度。",
       "access": "访问权限",
       "access_hint": "控制谁可以运行此智能体，创建后仍可修改。"
     },
+    "thinking_label": "思考",
+    "speed_label": "速度",
     "access": {
       "private": {
         "title": "只有我",
@@ -351,7 +353,8 @@
     },
     "live_draft": "智能体配置",
     "live_draft_hint": "对话生成的建议会更新到这里，你也可以随时直接调整。",
-    "duplicate_env_notice": "指令、skill、模型和命令行参数会被复制。出于安全考虑，环境变量不会复制。",
+    "duplicate_env_notice": "指令、skill 和命令行参数会被复制。环境变量、MCP 服务器和本机运行时配置不会复制。",
+    "duplicate_runtime_reset_notice": "原运行时当前不可用，副本已改用其他运行时。模型、思考等级和速度只在所选运行时上有效，因此已被清空。",
     "create_and_open": "创建并打开",
     "create_and_add": "创建并加入小队",
     "creating": "正在创建…",

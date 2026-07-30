@@ -864,6 +864,97 @@ func TestHermesClientAcceptNotificationGate(t *testing.T) {
 	}
 }
 
+// TestHermesBackendEmitsSessionStatusBeforeCompletion pins the producer side
+// of the daemon's mid-flight resume contract. Both a fresh session and a
+// resumed session must reveal the effective session ID before the prompt
+// finishes, otherwise a daemon restart can lose the only usable resume pointer.
+func TestHermesBackendEmitsSessionStatusBeforeCompletion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tests := []struct {
+		name            string
+		resumeSessionID string
+		effectiveID     string
+	}{
+		{name: "fresh", effectiveID: "ses_new"},
+		{name: "resume uses returned id", resumeSessionID: "ses_old", effectiveID: "ses_resumed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			fakePath := filepath.Join(tempDir, "hermes")
+			gatePath := filepath.Join(tempDir, "release-prompt")
+			script := fmt.Sprintf(`#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*|*'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"%s"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      while [ ! -f "$HERMES_TEST_GATE" ]; do sleep 0.01; done
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`, tt.effectiveID)
+			writeTestExecutable(t, fakePath, []byte(script))
+
+			backend, err := New("hermes", Config{
+				ExecutablePath: fakePath,
+				Logger:         slog.Default(),
+				Env:            map[string]string{"HERMES_TEST_GATE": gatePath},
+			})
+			if err != nil {
+				t.Fatalf("new hermes backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "prompt", ExecOptions{
+				ResumeSessionID: tt.resumeSessionID,
+				Timeout:         10 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+
+			select {
+			case msg, ok := <-session.Messages:
+				if !ok {
+					t.Fatal("message channel closed before session status")
+				}
+				if msg.Type != MessageStatus || msg.Status != "running" || msg.SessionID != tt.effectiveID {
+					t.Fatalf("session status = %+v, want running with session ID %q", msg, tt.effectiveID)
+				}
+			case result := <-session.Result:
+				t.Fatalf("terminal result arrived before session status: %+v", result)
+			case <-time.After(5 * time.Second):
+				t.Fatal("timeout waiting for mid-flight session status")
+			}
+
+			if err := os.WriteFile(gatePath, []byte("release"), 0o600); err != nil {
+				t.Fatalf("release prompt: %v", err)
+			}
+			select {
+			case result := <-session.Result:
+				if result.Status != "completed" || result.SessionID != tt.effectiveID {
+					t.Fatalf("result = %+v, want completed with session ID %q", result, tt.effectiveID)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for terminal result")
+			}
+		})
+	}
+}
+
 func TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

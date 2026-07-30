@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { AppLink } from "../../navigation";
-import { useNavigation } from "../../navigation";
+import { AppLink, useBackOrReplace } from "../../navigation";
 import {
   Archive,
   Calendar,
@@ -59,6 +58,7 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
@@ -904,7 +904,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
-  const router = useNavigation();
+  const backOrReplace = useBackOrReplace();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
 
@@ -1105,7 +1105,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
   // be notified directly — instead, the detail page observes its own cache
-  // clearing and runs the callback. We navigate via `onDeletedNavigateTo` on
+  // clearing and runs the callback. We navigate via `onDeletedFallbackPath` on
   // the actions menu when no callback is supplied (standalone routes).
   const hadIssueRef = useRef(false);
   const firedDeleteCallbackRef = useRef(false);
@@ -1754,9 +1754,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <p>{t(($) => $.detail.not_found)}</p>
         {!onDelete && (
-          <Button variant="outline" size="sm" onClick={() => router.push(paths.issues())}>
+          <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            {t(($) => $.detail.back_to_issues)}
+            {t(($) => $.detail.back)}
           </Button>
         )}
       </div>
@@ -2280,8 +2280,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               issue={issue}
               align="end"
               // When a parent passes `onDelete`, we detect deletion via effect
-              // above and skip navigation. Otherwise the modal navigates for us.
-              onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+              // above and skip navigation. Otherwise the modal takes us back
+              // to the list we came from, falling back to all issues.
+              onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
               trigger={
                 <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                   <MoreHorizontal />
@@ -2478,6 +2479,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {doneCount}/{childIssues.length}
                     </span>
                   </div>
+                  {/* issue.id, not the route param — the endpoint takes a
+                      UUID and the route may carry a human-readable id. */}
+                  <SubIssuesAgentWorkingChip parentIssueId={issue.id} />
                   <input
                     type="checkbox"
                     checked={allChildrenSelected}

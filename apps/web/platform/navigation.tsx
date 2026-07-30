@@ -6,6 +6,7 @@ import {
   NavigationProvider,
   type NavigationAdapter,
 } from "@multica/views/navigation";
+import { canGoBackInApp } from "./in-app-history";
 
 /**
  * Web half of the `multica:navigate` bridge — the event shared content
@@ -40,6 +41,7 @@ function NavigationProviderInner({
     push: router.push,
     replace: router.replace,
     back: router.back,
+    canGoBack: canGoBackInApp,
     pathname,
     searchParams: new URLSearchParams(searchParams.toString()),
     getShareableUrl: (path: string) =>

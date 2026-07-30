@@ -231,7 +231,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
           )}
         >
           <article>
-            <h1 className="font-[family-name:var(--font-serif)] text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
+            <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
               {page.data.title}
             </h1>
             <div className="mt-10 text-[16px] leading-[1.85] text-[#0a0d12]/72 [&>:first-child]:mt-0 [&>p]:my-5 sm:text-[17px]">

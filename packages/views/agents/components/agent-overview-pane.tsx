@@ -201,10 +201,17 @@ export function AgentOverviewPane({
 
   const visibleSettingsTabs = useMemo(
     () =>
-      SETTINGS_TABS.filter(
-        (tab) => tab.id !== "runtime_config" || runtime?.provider === "openclaw",
-      ),
-    [runtime?.provider],
+      SETTINGS_TABS.filter((tab) => {
+        // Env is the only settings tab backed by a secret-bearing endpoint.
+        // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
+        // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
+        // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
+        // The server stays the boundary; this only removes a dead entry point.
+        if (tab.id === "env") return canEdit;
+        if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
+        return true;
+      }),
+    [canEdit, runtime?.provider],
   );
 
   const visibleViews = useMemo(

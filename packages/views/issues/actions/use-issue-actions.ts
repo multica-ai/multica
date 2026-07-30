@@ -24,7 +24,7 @@ export interface UseIssueActionsResult {
   openSetParent: () => void;
   removeParent: () => void;
   openAddChild: () => void;
-  openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
+  openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
 /**
@@ -185,12 +185,12 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   }, [openModal, issueId]);
 
   const openDeleteConfirm = useCallback(
-    (opts?: { onDeletedNavigateTo?: string }) => {
+    (opts?: { onDeletedFallbackPath?: string }) => {
       if (!issueId) return;
       openModal("issue-delete-confirm", {
         issueId,
         identifier: issueIdentifier,
-        onDeletedNavigateTo: opts?.onDeletedNavigateTo,
+        onDeletedFallbackPath: opts?.onDeletedFallbackPath,
       });
     },
     [openModal, issueId, issueIdentifier],

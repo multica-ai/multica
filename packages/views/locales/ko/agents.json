@@ -770,10 +770,12 @@
       "behavior": "동작 및 기능",
       "behavior_hint": "작업 방식을 정의하고 사용할 워크스페이스 스킬을 추가하세요.",
       "execution": "실행",
-      "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델을 변경하세요.",
+      "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델, 추론 수준, 속도를 변경하세요.",
       "access": "접근 권한",
       "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."
     },
+    "thinking_label": "추론",
+    "speed_label": "속도",
     "access": {
       "private": {
         "title": "나만",
@@ -815,7 +817,8 @@
     },
     "live_draft": "에이전트 설정",
     "live_draft_hint": "대화 내용이 여기에 반영되며 각 항목을 직접 조정할 수 있습니다.",
-    "duplicate_env_notice": "지침, 스킬, 모델 및 명령 인수는 복사됩니다. 보안을 위해 환경 변수는 복사되지 않습니다.",
+    "duplicate_env_notice": "지침, 스킬, 명령 인수는 복사됩니다. 환경 변수, MCP 서버, 머신 로컬 런타임 설정은 복사되지 않습니다.",
+    "duplicate_runtime_reset_notice": "원래 런타임을 사용할 수 없어 이 복사본은 다른 런타임에서 실행됩니다. 모델, 추론 수준, 속도는 선택한 런타임에서만 유효하므로 초기화되었습니다.",
     "create_and_open": "만들고 열기",
     "create_and_add": "만들고 스쿼드에 추가",
     "creating": "에이전트 만드는 중…",

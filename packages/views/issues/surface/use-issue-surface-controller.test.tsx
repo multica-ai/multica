@@ -858,7 +858,7 @@ describe("useIssueSurfaceController", () => {
     );
     expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined);
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
     expect(listIssues).not.toHaveBeenCalled();
   });
 
@@ -891,6 +891,7 @@ describe("useIssueSurfaceController", () => {
       expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith(
         "issue",
         "assigned",
+        undefined,
       ),
     );
     expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([]);
@@ -927,7 +928,7 @@ describe("useIssueSurfaceController", () => {
       );
       expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
       expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
-      expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined);
+      expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
       expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
     },
   );
@@ -1336,7 +1337,7 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.workingScopeIssues).toEqual([]);
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined);
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
   });
 
@@ -1508,6 +1509,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() =>
       expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith(
         "issue",
+        undefined,
         undefined,
       ),
     );

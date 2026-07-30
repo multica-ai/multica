@@ -136,6 +136,29 @@ SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     updated_at = now()
 WHERE id = sqlc.arg('id');
 
+-- name: ClearChatSessionSessionIfMatches :exec
+-- Drops the chat session's resume pointer, but only while it still points at
+-- the exact session the caller proved unresumable.
+--
+-- The claim handler reads chat_session.session_id FIRST and only falls back to
+-- GetLastChatTaskSession when it is empty, so a poisoned pointer here bypasses
+-- every filter that query applies. Declining to OVERWRITE the pointer on a
+-- resume-unsafe failure — which is all the fail path used to do — leaves the
+-- dead session in place and the next turn resumes it (GH #6066).
+--
+-- The session_id + runtime_id predicate is what makes this safe to run in the
+-- fail transaction: a concurrent turn that has already written a NEW pointer
+-- does not match, so its healthy session survives instead of being cleared by
+-- a slower sibling's failure. work_dir is deliberately left alone — the
+-- directory is still reusable, only the conversation is not.
+UPDATE chat_session
+SET session_id = NULL,
+    runtime_id = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+  AND session_id = sqlc.arg('session_id')
+  AND runtime_id = sqlc.arg('runtime_id');
+
 -- name: LockChatSessionForDelete :one
 -- Acquires an exclusive (FOR UPDATE) row lock on chat_session(id). Used by
 -- the delete path so that a concurrent SendChatMessage cannot enqueue a new
@@ -387,17 +410,46 @@ RETURNING *;
 -- excluded because replaying those sessions deterministically reproduces the
 -- same terminal state. Keep this list in sync with resumeUnsafeFailureReason
 -- and GetLastTaskSession.
-SELECT session_id, work_dir, runtime_id FROM agent_task_queue
-WHERE chat_session_id = $1
+--
+-- The regex pair mirrors GetLastTaskSession's provider-agnostic guard for an
+-- empty message baked into the conversation history: both must match, and
+-- both track emptyContentRe / historyMessageLocatorRe in
+-- pkg/taskfailure/resume.go (GH #6066).
+--
+-- Selection is per-session, not per-row, and retired sessions are excluded —
+-- both mirroring GetLastTaskSession, which this query had drifted away from.
+-- A plain row-level filter reopens the poisoning wormhole GH #5975 closed on
+-- the issue side: it drops the newest poisoned row for a session and then
+-- happily falls back to an OLDER completed row carrying the same dead
+-- session_id. Judging each session by its LATEST terminal state means a newer
+-- poisoned row invalidates the whole session, while a genuinely different
+-- healthy session stays eligible.
+WITH retired_sessions AS (
+    SELECT DISTINCT r.retired_session_id AS session_id
+    FROM agent_task_queue r
+    WHERE r.chat_session_id = $1
+      AND r.retired_session_id IS NOT NULL
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.session_id)
+        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error, t.completed_at
+    FROM agent_task_queue t
+    WHERE t.chat_session_id = $1
+      AND t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed')
+    ORDER BY t.session_id, t.completed_at DESC
+)
+SELECT session_id, work_dir, runtime_id FROM latest_per_session
+WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status = 'completed'
     OR (
       status = 'failed'
       AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+      AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+               AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
     )
   )
-  AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1;
 

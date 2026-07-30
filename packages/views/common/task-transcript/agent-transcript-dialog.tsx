@@ -747,7 +747,7 @@ export function AgentTranscriptDialog({
             )}
             {duration && (
               <>
-                <span>{t(($) => $.transcript.fact_took, { duration })}</span>
+                <span className="tabular-nums">{t(($) => $.transcript.fact_took, { duration })}</span>
                 <FactDot />
               </>
             )}

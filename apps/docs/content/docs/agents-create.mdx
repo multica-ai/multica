@@ -64,7 +64,7 @@ ANTHROPIC_BASE_URL = https://my-proxy.example.com
 System-critical variables cannot be overridden: `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME`, and any key starting with `MULTICA_*` are silently ignored by the daemon (with a warn log — no error).
 
 <Callout type="warning">
-**Values in `custom_env` are stored in plaintext in Multica's server database.** Agent list/get responses no longer carry env values at all — only an opaque count. Reading values requires a workspace owner or admin to hit the dedicated, audited `GET /api/agents/{id}/env` endpoint (CLI: `multica agent env get <id>`). Agents running tasks can NOT use their host's owner credentials to reveal env on other agents — the endpoint denies agent-actor sessions.
+**Values in `custom_env` are stored in plaintext in Multica's server database.** Agent list/get responses no longer carry env values at all — only an opaque count. Reading values requires the agent's own owner — or a workspace owner/admin — to hit the dedicated, audited `GET /api/agents/{id}/env` endpoint (CLI: `multica agent env get <id>`). Agents running tasks can NOT use their host's owner credentials to reveal env on other agents, not even on an agent the same human owns — the endpoint denies agent-actor sessions.
 
 **Don't put high-value secrets in `custom_env`** (production database passwords, root-level tokens, etc.). Use **dedicated, limited-scope credentials** for agents (read-only API keys, single-scope PATs), and rotate them regularly. Database backups and DB audits remain a meaningful exposure surface.
 </Callout>

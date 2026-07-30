@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
-  Webhook, Copy, Check, RotateCw,
+  Webhook, RotateCw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -29,7 +29,6 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
-import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -47,6 +46,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
+import { WebhookUrlField } from "./webhook-url-field";
 import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
 import { browserTimezone } from "../../common/timezone-select";
 import { cronFields, parseCron, toCron } from "./schedule-editor/cron-mapping";
@@ -262,7 +262,6 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -293,17 +292,6 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
         currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
       })
     : null;
-
-  const handleCopy = async () => {
-    if (!webhookUrl) return;
-    if (await copyText(webhookUrl)) {
-      setCopied(true);
-      toast.success(t(($) => $.trigger_row.url_copied));
-      setTimeout(() => setCopied(false), 1500);
-    } else {
-      toast.error(t(($) => $.trigger_row.url_copy_failed));
-    }
-  };
 
   const handleRotate = async () => {
     try {
@@ -395,32 +383,27 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </div>
         )}
         {showWebhookUrlRow && (
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <code className="flex-1 min-w-0 truncate rounded bg-muted px-2 py-1 text-xs font-mono text-foreground">
-              {webhookUrl}
-            </code>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 shrink-0"
-              onClick={handleCopy}
-              title={t(($) => $.trigger_row.copy_url)}
-            >
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
-            </Button>
-            {canWrite && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 shrink-0"
-                onClick={() => setRotateOpen(true)}
-                title={t(($) => $.trigger_row.rotate_url)}
-                disabled={rotateToken.isPending}
-              >
-                <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
-              </Button>
-            )}
-            {deleteButton}
+          <div className="mt-1.5">
+            <WebhookUrlField
+              url={webhookUrl}
+              actions={
+                <>
+                  {canWrite && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => setRotateOpen(true)}
+                      title={t(($) => $.trigger_row.rotate_url)}
+                      disabled={rotateToken.isPending}
+                    >
+                      <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
+                    </Button>
+                  )}
+                  {deleteButton}
+                </>
+              }
+            />
           </div>
         )}
       </div>

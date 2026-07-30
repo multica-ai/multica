@@ -327,19 +327,16 @@ function IssueSurfaceContent({
   );
 }
 
+// Table is deliberately absent. It owns its own placeholders, drawn as rows
+// inside its real grid so the header, column widths and toolbar are up before
+// any data is — a surface-level stand-in would replace all of that with bars
+// of a different shape and then jump when the rows arrived.
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
-  if (mode === "list" || mode === "table") {
+  if (mode === "list") {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {mode === "table" && <Skeleton className="mb-1 h-8 w-full" />}
-        {Array.from({ length: mode === "table" ? 8 : 4 }).map((_, i) => (
-          <Skeleton
-            key={i}
-            className={cn(
-              "w-full",
-              mode === "table" ? "h-9 rounded-sm" : "h-10 rounded-lg",
-            )}
-          />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full rounded-lg" />
         ))}
       </div>
     );

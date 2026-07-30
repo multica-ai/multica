@@ -402,6 +402,19 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 			if d.workspaceChanges != nil {
 				d.workspaceChanges.broadcast()
 			}
+		case protocol.EventDaemonPendingWork:
+			var payload protocol.PendingWorkPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("pending work websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.RuntimeID == "" {
+				d.logger.Debug("pending work websocket missing runtime_id")
+				continue
+			}
+			// Own goroutine: the hint triggers an HTTP heartbeat plus the work it
+			// claims, and the read pump must stay free for the next frame.
+			go d.handlePendingWorkHint(payload.RuntimeID, payload.Kind)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {

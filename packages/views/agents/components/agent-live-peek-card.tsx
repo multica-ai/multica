@@ -141,14 +141,17 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
   );
 }
 
-// Pick the most recent terminal task for last-activity display. Snapshot
-// already caps this to one terminal row per agent (see queries.ts header),
-// but a defensive max-by-completed_at keeps the card honest if that shape
-// ever changes.
+// Pick the most recent terminal task for last-activity display. The snapshot
+// already caps this to one terminal row per agent (see queries.ts header), but
+// a defensive max-by-completed_at keeps the card honest if that shape ever
+// changes. Only completed / failed count, matching the snapshot's outcome
+// filter exactly: cancelled never reaches this card, and treating it as a
+// terminal outcome here would let an aborted attempt mask the agent's last
+// real result if the endpoint ever started returning it.
 function pickLatestTerminal(tasks: readonly AgentTask[]): AgentTask | null {
   let best: AgentTask | null = null;
   for (const t of tasks) {
-    if (t.status !== "completed" && t.status !== "failed" && t.status !== "cancelled") {
+    if (t.status !== "completed" && t.status !== "failed") {
       continue;
     }
     if (!t.completed_at) continue;

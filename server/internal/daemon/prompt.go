@@ -21,6 +21,43 @@ func freshSessionRetryPrompt(prompt string) string {
 	return notice + prompt
 }
 
+// Turn-mode markers consumed by the runtime brief's mode router
+// (execenv.writeWorkflowIssue). The brief is byte-identical on every run and
+// therefore cannot say what triggered this turn; these lines do, and they are
+// emitted unconditionally from the same branches BuildPrompt uses to pick a
+// path, so the two can never disagree.
+//
+// Reply mode = respond to the triggering comment, do not touch issue status.
+// Ownership mode = an assignment/status change started this run; own the
+// status arc. Applying the wrong one silently changes issue status.
+const (
+	turnModeReply     = "**Turn mode: Reply.** Follow the Reply-mode block in your runtime workflow file for this turn; the Ownership-mode status steps do not apply.\n\n"
+	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"
+)
+
+// perTurnContextBlocks renders the run-scoped context blocks that used to live
+// in the runtime brief (CLAUDE.md / AGENTS.md).
+//
+// Every value here changes from one run to the next on the same issue — the
+// initiator differs whenever another person comments, the continuity notice is
+// true of one run and false of the next, and the connected-app set is resolved
+// per run from the runtime MCP overlay. Claude Code loads the brief into
+// messages[0], ahead of the entire conversation, so rendering these there threw
+// away the prompt cache for the whole history on every resume. Appending them
+// to the per-turn user message puts them after the cached prefix instead, where
+// changing them costs only this turn's own tokens (MUL-5377).
+//
+// Returns "" when none of the blocks apply.
+func perTurnContextBlocks(task Task) string {
+	var b strings.Builder
+	if task.PriorSessionResumeUnavailable {
+		b.WriteString(execenv.SessionContinuityNotice)
+	}
+	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
+	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
+	return b.String()
+}
+
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig. The provider string is threaded
@@ -29,6 +66,20 @@ func freshSessionRetryPrompt(prompt string) string {
 // post with `--content-file`) because the shell-layer corruption it guards
 // against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPrompt(task Task, provider string) string {
+	body := buildPromptBody(task, provider)
+	// Run-scoped context is appended, never prepended: everything ahead of it
+	// is stable across runs of a resumed session, and appending keeps it after
+	// the cached prefix (MUL-5377).
+	if blocks := perTurnContextBlocks(task); blocks != "" {
+		if !strings.HasSuffix(body, "\n\n") {
+			body += "\n"
+		}
+		body += blocks
+	}
+	return body
+}
+
+func buildPromptBody(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -44,6 +95,7 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	b.WriteString(turnModeOwnership)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a
 	// comment to reply to — there is no comment thread to answer here.
@@ -52,7 +104,7 @@ func BuildPrompt(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. Your runtime workflow file documents the rest of the read surface, including pagination and `--since` for incremental polling.\n", task.IssueID)
 	return b.String()
 }
 
@@ -170,6 +222,13 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	// Mode marker for the brief's router. Emitted unconditionally from the same
+	// branch that selects this code path, so the brief and the prompt can never
+	// disagree about which mode this turn is in. It must NOT be gated on
+	// TriggerCommentContent: an empty comment body (or an older server that
+	// doesn't send one) would otherwise leave the turn unlabelled, and the
+	// agent would fall through to Ownership mode and change the issue status.
+	b.WriteString(turnModeReply)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "agent" {
@@ -240,7 +299,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID); cold != "" {
 		b.WriteString(cold)
 	} else {
-		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --recent 10 --output json` (resolved threads come back folded — `--full` to expand).\n\n", task.IssueID)
+		fmt.Fprintf(&b, "Read the discussion: scan with `multica issue comment list %s --roots-only --summary --output json`, then expand what matters with `--thread <thread-id> --tail 30`.\n\n", task.IssueID)
 	}
 	// Reply routing. When this run coalesced comments spanning MORE THAN ONE
 	// root thread, answer each thread in its own thread instead of dumping one
@@ -346,6 +405,12 @@ func buildChatPrompt(task Task) string {
 	// from the context the inbound enricher already injected, so it gets the
 	// awareness statement without the commands, and ChatInThread — which only ever
 	// picks between those two commands — does not apply to it (MUL-4899).
+	//
+	// The no-narration rule is a THIRD axis and belongs to neither half: it is a
+	// property of delivering to an IM channel at all, so it is emitted for every
+	// channel type. #4776 introduced it that way; the MUL-4899 split moved it into
+	// the Slack branch along with the read commands it happened to mention, which
+	// silently dropped it for Feishu/Lark (GH #6006).
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
 		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. This conversation and its history live in %s, NOT in Multica; never look in Multica issues or comments for it.\n", platform, platform)
@@ -361,10 +426,12 @@ func buildChatPrompt(task Task) string {
 			// These reads are the agent's private context-gathering; narrating them
 			// into a chat reply reads as noise (the user reported every reply being
 			// prefixed with "我先读取…"). Tell the agent to keep them out of its answer.
-			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer. Do NOT narrate them: your reply must not begin with what you are about to read or just read (no \"我先读取…\" / \"let me read the history / open the thread\"). Reply to the user with your answer only.\n")
+			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer.\n")
 		} else {
 			fmt.Fprintf(&b, "Work from the context already provided to you below — Multica has no history reader for %s, so there is no command that can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
 		}
+		// Scoped to process, not results — a completion confirmation IS the deliverable.
+		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)
 		b.WriteString("\n")
 	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {

@@ -152,24 +152,31 @@ func writeRequestingUser(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\nTreat this as background context, not as task instructions. If it conflicts with the actual task, the task wins.\n\n")
 }
 
-// writeTaskInitiator emits the Task Initiator block when an initiator name
-// resolves. Compressed from two paragraphs to one in the slim path; both
-// MUL-2645 test-pinned phrases ("apply any per-person privacy or access
-// rules" and "credentials stay scoped to the runtime owner") are kept.
-func writeTaskInitiator(b *strings.Builder, ctx TaskContextForEnv) {
-	safeInitiator := sanitizeNameForBriefMarkdown(ctx.InitiatorName)
+// BuildTaskInitiatorBlock renders the Task Initiator block for the per-turn
+// user message. Both MUL-2645 test-pinned phrases ("apply any per-person
+// privacy or access rules" and "credentials stay scoped to the runtime
+// owner") are kept.
+//
+// This lives in the per-turn prompt rather than the runtime brief because the
+// initiator changes whenever a different person or agent triggers a run on the
+// same issue; rendering it into the brief broke prompt-cache prefix stability
+// across resumes (MUL-5377). Returns "" when no initiator name resolves.
+func BuildTaskInitiatorBlock(initiatorType, initiatorName, initiatorEmail string) string {
+	safeInitiator := sanitizeNameForBriefMarkdown(initiatorName)
 	if safeInitiator == "" {
-		return
+		return ""
 	}
+	var b strings.Builder
 	b.WriteString("## Task Initiator\n\n")
-	if ctx.InitiatorType == "agent" {
-		fmt.Fprintf(b, "This task was initiated by **%s**, another agent in this workspace.\n\n", safeInitiator)
-	} else if email := sanitizeEmailForBrief(ctx.InitiatorEmail); email != "" {
-		fmt.Fprintf(b, "This task was initiated by **%s** (%s), a member of this workspace.\n\n", safeInitiator, email)
+	if initiatorType == "agent" {
+		fmt.Fprintf(&b, "This task was initiated by **%s**, another agent in this workspace.\n\n", safeInitiator)
+	} else if email := sanitizeEmailForBrief(initiatorEmail); email != "" {
+		fmt.Fprintf(&b, "This task was initiated by **%s** (%s), a member of this workspace.\n\n", safeInitiator, email)
 	} else {
-		fmt.Fprintf(b, "This task was initiated by **%s**, a member of this workspace.\n\n", safeInitiator)
+		fmt.Fprintf(&b, "This task was initiated by **%s**, a member of this workspace.\n\n", safeInitiator)
 	}
 	b.WriteString("Attribute this request to that person and apply any per-person privacy or access rules your instructions define — in a workspace many people can reach, the initiator (not the runtime owner) is who you are answering. Your Multica credentials stay scoped to the runtime owner, so this attribution does not widen what you can read or write — do not assume the initiator can see everything you can.\n\n")
+	return b.String()
 }
 
 // writeWorkspaceContext emits the workspace-level system prompt configured
@@ -184,12 +191,18 @@ func writeWorkspaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n\n")
 }
 
-func writeConnectedApps(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.ConnectedApps) == 0 {
-		return
+// BuildConnectedAppsBlock renders the Connected Apps block for the per-turn
+// user message. The app set is per-run state (runtime MCP overlays are
+// resolved at enqueue time), so it cannot live in the runtime brief without
+// breaking prompt-cache prefix stability across resumes (MUL-5377).
+// Returns "" when no app resolves.
+func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
+	if len(apps) == 0 {
+		return ""
 	}
+	var b strings.Builder
 	var lines strings.Builder
-	for _, app := range ctx.ConnectedApps {
+	for _, app := range apps {
 		serverName := sanitizeBriefCodeToken(app.ServerName)
 		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
 		if serverName == "" || toolkitSlug == "" {
@@ -205,11 +218,12 @@ func writeConnectedApps(b *strings.Builder, ctx TaskContextForEnv) {
 		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
 	}
 	if lines.Len() == 0 {
-		return
+		return ""
 	}
 	b.WriteString("## Connected Apps\n\n")
 	b.WriteString(lines.String())
 	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+	return b.String()
 }
 
 func sanitizeBriefCodeToken(s string) string {
@@ -243,7 +257,7 @@ func writeAvailableCommands(b *strings.Builder) {
 	b.WriteString("Prefer `--output json` for structured data. The default brief lists only the core agent loop and common issue create/update tasks; for everything else run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — full issue.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — thread-aware comment reads. Resolved threads come back folded by default on complete-thread reads (default list, `--recent`, `--thread` without `--tail`); pass `--full` to expand. Page older replies / threads with `--before`/`--before-id` (stderr labels: `Next reply cursor`, `Next thread cursor`); `--help` for full semantics.\n")
+	b.WriteString("- `multica issue comment list <issue-id> [--roots-only] [--summary] [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — thread-aware comment reads. `--recent N` caps THREADS, not comments: every returned thread carries its root plus EVERY descendant with no per-thread cap, so on an issue with fewer than N root threads it hands you the entire history apart from the resolved threads it folds. `--roots-only` (top-level comments with `reply_count` + `last_activity_at`) and `--summary` (clip each body to a preview) are how you bound a wide read; `--thread <id> --tail N` is how you bound a deep one. Resolved threads come back folded by default on complete-thread reads (default list, `--recent`, `--thread` without `--tail`); pass `--full` to expand. Page older replies / threads with `--before`/`--before-id` (stderr labels: `Next reply cursor`, `Next thread cursor`); `--help` for full semantics.\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>]` — update fields; pass `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
@@ -340,28 +354,26 @@ func writeIssueMetadata(b *strings.Builder) {
 	b.WriteString("- **Recommended keys** (use snake_case ASCII; reuse these names so queries stay consistent): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`.\n\n")
 }
 
-// writeInstructionPrecedence emits the "Agent Identity wins over the
-// assignment workflow below" guardrail. Caller gates on
-// kind == kindAssignmentTriggered.
+// writeInstructionPrecedence emits the "Agent Identity wins over the issue
+// workflow below" guardrail. Caller gates on kind == kindIssue.
 func writeInstructionPrecedence(b *strings.Builder) {
 	b.WriteString("## Instruction Precedence\n\n")
-	b.WriteString("Agent Identity instructions have priority over the assignment workflow below. ")
+	b.WriteString("Agent Identity instructions have priority over the issue workflow below. ")
 	b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 	b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
 }
 
-// writeSessionContinuityNotice warns the agent — and, through it, the user —
-// when a resume the task expected could not be honored. The daemon has already
-// cleared the resume flags, so without this the run would silently reappear as a
-// brand-new conversation; here we make the loss explicit and ask the agent to
-// disclose it in its reply (MUL-4424). No-op unless a resume was actually lost.
-func writeSessionContinuityNotice(b *strings.Builder, ctx TaskContextForEnv) {
-	if !ctx.PriorSessionResumeUnavailable {
-		return
-	}
-	b.WriteString("## Session Continuity Notice\n\n")
-	b.WriteString("This run was meant to continue an earlier conversation, but that session's context could NOT be restored — you are starting fresh with no memory of the previous turns. Rebuild context from the issue/thread before acting. **When you reply, tell the user up front (one short sentence) that the previous conversation context was unavailable and this is a new session**, so they understand why the thread did not carry over.\n\n")
-}
+// SessionContinuityNotice warns the agent — and, through it, the user — when a
+// resume the task expected could not be honored. The daemon has already
+// cleared the resume flags, so without this the run would silently reappear as
+// a brand-new conversation; here we make the loss explicit and ask the agent to
+// disclose it in its reply (MUL-4424).
+//
+// Emitted into the per-turn user message rather than the runtime brief: it is
+// true of one run and false of the next on the same issue, so rendering it into
+// the brief broke prompt-cache prefix stability across resumes (MUL-5377).
+const SessionContinuityNotice = "## Session Continuity Notice\n\n" +
+	"This run was meant to continue an earlier conversation, but that session's context could NOT be restored — you are starting fresh with no memory of the previous turns. Rebuild context from the issue/thread before acting. **When you reply, tell the user up front (one short sentence) that the previous conversation context was unavailable and this is a new session**, so they understand why the thread did not carry over.\n\n"
 
 // writeWorkflowHeader emits the unconditional `### Workflow` heading.
 func writeWorkflowHeader(b *strings.Builder) {
@@ -418,37 +430,84 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 }
 
-// writeWorkflowComment emits the comment-triggered workflow.
-func writeWorkflowComment(b *strings.Builder, provider string, ctx TaskContextForEnv) {
-	b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
+// writeWorkflowIssue emits the single issue workflow used by BOTH
+// assignment-triggered and comment-triggered runs.
+//
+// One section, not two, because this text lands in messages[0] — ahead of the
+// whole conversation — and any divergence between the first run and later runs
+// on the same resumed session throws away the prompt cache for the entire
+// history (MUL-5377). So nothing here may depend on which trigger fired this
+// turn, and no per-run identifier (trigger comment id, thread id, new-comment
+// delta, reply targets) may be interpolated. Those travel in the per-turn user
+// message instead; see daemon.buildCommentPrompt.
+//
+// The two modes are expressed as a router rather than two concatenated step
+// lists: the mode-specific status rules live INSIDE their own mode block so
+// "own the status arc" and "do not touch the status" can never be read as
+// peer instructions with no arbitration.
+//
+// Step 3 asks for a roots scan first, not `--recent 10` (MUL-5372). `--recent N`
+// caps THREADS, not comments: each returned thread carries its root plus every
+// descendant with no depth cap, so on an issue with fewer than N root threads it
+// returns the entire comment history. Because this step is mandatory and fires on
+// every run, making it the bulk read meant every reply turn re-read the whole
+// issue — and, on comment-triggered turns, duplicated the bounded thread read the
+// per-turn message had already pointed at (see daemon.buildCommentPrompt and
+// BuildColdCommentsHint). `--roots-only --summary` keeps the anti-stale property
+// that step exists for — the agent still sees every thread that exists — at a
+// fraction of the payload, and the drill-down stays explicit.
+//
+// The step names ONLY the two reads it mandates. Flag semantics — including the
+// `--recent N` saturation trap above — belong to `## Available Commands`, which
+// is the single discovery point for the comment-read surface; repeating them per
+// step is what made this one bloat in the first place.
+//
+// Ordinary agents own the full status arc for their issue: open with
+// in_progress, deliver with in_review. Squad leaders share the opening
+// in_progress step so the parent leaves todo as soon as coordination
+// starts, but their first assignment turn is only a dispatch — flipping
+// the parent to in_review there would mark unfinished multi-stage work
+// as ready for review. Leaders move the parent to in_review later, when
+// a re-trigger (member update / stage barrier) confirms the overall goal
+// is met; see the Squad Operating Protocol and child-done system comments.
+//
+// ctx.IsSquadLeader is agent configuration, not per-run state, so branching
+// on it does not break byte-stability across runs of one session.
+func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
+	b.WriteString("**Mode router — read this before acting.** This file is identical on every run, so it cannot tell you what triggered THIS turn. The user message for this turn names its mode on a line of its own:\n\n")
+	b.WriteString("- `Turn mode: Reply.` → **Reply mode**. That message also carries the triggering comment's id, the exact `--parent` value for your reply, and the comment's content when the platform supplied it.\n")
+	b.WriteString("- `Turn mode: Ownership.` → **Ownership mode** (an assignment or status change started this run).\n\n")
+	b.WriteString("Steps 1–6 below are the same in both modes. The mode blocks after them differ, and they differ on issue status in particular — **apply exactly one mode block, the one the user message named. Never apply both.** If neither line is present, treat the turn as Reply mode and do not change the issue status.\n\n")
+
+	b.WriteString("**Steps 1–6 — both modes**\n\n")
 	fmt.Fprintf(b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
 	fmt.Fprintf(b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-	if hint := BuildNewCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID, ctx.NewCommentsSince, ctx.NewCommentCount); hint != "" {
-		b.WriteString("3. " + hint)
-	} else if ctx.PriorSessionResumed {
-		b.WriteString("3. " + BuildResumedCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID))
-	} else if cold := BuildColdCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID); cold != "" {
-		b.WriteString("3. " + cold)
-	} else {
-		fmt.Fprintf(b, "3. Catch up on comments — read with `multica issue comment list %s --recent 10 --output json` (resolved threads come back folded — `--full` to expand).\n", ctx.IssueID)
-	}
-	fmt.Fprintf(b, "4. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
+	fmt.Fprintf(b, "3. Catch up on the comment history — this is mandatory, not optional, but read it in two bounded steps instead of one bulk pull. First scan every thread cheaply: `multica issue comment list %s --roots-only --summary --output json`, which tells you what discussion exists without paying for its contents. Then expand only the threads that matter: `multica issue comment list %s --thread <thread-id> --tail 30 --output json`. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions — so always run the scan, even when the trigger looks self-contained. In Reply mode the per-turn user message names the thread to expand first; the scan is how you decide whether any OTHER thread is also relevant. If these two reads genuinely are not enough, the rest of the read surface and its pagination cursors are documented once in `## Available Commands` above.\n", ctx.IssueID, ctx.IssueID)
+	b.WriteString("4. Complete the task within your Agent Identity boundaries. Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action; if your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered.\n")
 	if ctx.IsSquadLeader {
-		b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
-		fmt.Fprintf(b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
+		fmt.Fprintf(b, "5. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
 	} else {
-		b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+		fmt.Fprintf(b, "5. **Post your final results as a comment — this step is mandatory**: post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered. In Reply mode this step is conditional on the reply rule below.\n", ctx.IssueID)
 	}
-	b.WriteString("6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
-	b.WriteString("7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
-	if len(ctx.CommentReplyTargets) >= 2 {
-		// Cross-thread coalesced run: fan out one reply per root thread, matching
-		// the per-turn prompt so the two reply-instruction sources agree (MUL-4348).
-		b.WriteString(BuildMultiThreadCommentReplyInstructions(ctx.IssueID, ctx.CommentReplyTargets))
+	b.WriteString("6. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n\n")
+
+	b.WriteString("**Ownership mode only — you own the issue status this run**\n\n")
+	fmt.Fprintf(b, "- Before step 4, run `multica issue status %s in_progress` unless your Agent Identity forbids issue status changes; if it does, skip it.\n", ctx.IssueID)
+	if ctx.IsSquadLeader {
+		fmt.Fprintf(b, "- After this initial dispatch, leave the parent issue `in_progress` — do NOT run `multica issue status %s in_review` or `done` on this turn. Dispatching members is not completion. You will be re-triggered when members post updates or a stage closes; only then, if the overall goal is met, move the parent to `in_review`.\n", ctx.IssueID)
 	} else {
-		b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
+		fmt.Fprintf(b, "- When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip it.\n", ctx.IssueID)
 	}
-	b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
+	fmt.Fprintf(b, "- If blocked, run `multica issue status %s blocked` unless your Agent Identity forbids issue status changes. Post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
+
+	b.WriteString("**Reply mode only — respond to the comment in the user message**\n\n")
+	b.WriteString("- Your primary job is to respond to THAT specific comment, even if you have handled similar requests before in this session. Do NOT confuse it with previous comments; take its id from the user message, never from this file or from an earlier turn.\n")
+	b.WriteString("- **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 5 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+	if ctx.IsSquadLeader {
+		fmt.Fprintf(b, "- **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
+	}
+	b.WriteString("- If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
+	b.WriteString("- **If you reply, posting it as a comment is mandatory.** Text in your terminal or run logs is NOT delivered to the user. Use the `--parent` value the per-turn user message gives you for this turn; do NOT reuse a `--parent` from an earlier turn in this session. When that message lists more than one thread to answer, post one reply per thread instead of merging them.\n")
 	if ctx.IsSquadLeader {
 		// The default rule below and the Squad Operating Protocol's
 		// "Own the parent issue status" responsibility would otherwise
@@ -462,41 +521,10 @@ func writeWorkflowComment(b *strings.Builder, provider string, ctx TaskContextFo
 		// grant only exists in the instructions when the server determined
 		// this issue is assigned to this squad (see buildSquadLeaderBriefing);
 		// a guest leader gets the opposite text and this stays a no-op.
-		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it — **or** a section in your instructions explicitly grants you ownership of this issue's status (the Squad Operating Protocol's \"Own the parent issue status\" responsibility). That section only appears when this issue is assigned to your squad; when it is there, treat it as a standing instruction and move the parent to `in_review` on the turn you confirm the overall goal is met, without waiting to be asked. When it is absent, the rule above is absolute.\n\n")
+		b.WriteString("- Do NOT change the issue status unless the comment explicitly asks for it — **or** a section in your instructions explicitly grants you ownership of this issue's status (the Squad Operating Protocol's \"Own the parent issue status\" responsibility). That section only appears when this issue is assigned to your squad; when it is there, treat it as a standing instruction and move the parent to `in_review` on the turn you confirm the overall goal is met, without waiting to be asked. When it is absent, the rule above is absolute. **The Ownership-mode status steps above do not apply in Reply mode.**\n\n")
 	} else {
-		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		b.WriteString("- Do NOT change the issue status unless the comment explicitly asks for it. **The Ownership-mode status steps above do not apply in Reply mode.**\n\n")
 	}
-}
-
-// writeWorkflowAssignment emits the assignment-triggered workflow.
-//
-// Ordinary agents own the full status arc for their issue: open with
-// in_progress, deliver with in_review. Squad leaders share the opening
-// in_progress step so the parent leaves todo as soon as coordination
-// starts, but their first assignment turn is only a dispatch — flipping
-// the parent to in_review there would mark unfinished multi-stage work
-// as ready for review. Leaders move the parent to in_review later, when
-// a re-trigger (member update / stage barrier) confirms the overall goal
-// is met; see the Squad Operating Protocol and child-done system comments.
-func writeWorkflowAssignment(b *strings.Builder, ctx TaskContextForEnv) {
-	b.WriteString("You are responsible for managing the issue status throughout your work, unless your Agent Identity forbids issue status changes.\n\n")
-	fmt.Fprintf(b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-	fmt.Fprintf(b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-	fmt.Fprintf(b, "3. Run `multica issue comment list %s --recent 10 --output json` to catch up on recent active comment threads — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. Resolved threads come back folded — `--full` to expand. If the recent window shows that older context is needed, page older threads with the stderr `Next thread cursor:` values and the matching `--before` / `--before-id` flags until you have enough history.\n", ctx.IssueID)
-	fmt.Fprintf(b, "4. Run `multica issue status %s in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
-	b.WriteString("5. Complete the task within your Agent Identity boundaries. Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action; if your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered.\n")
-	if ctx.IsSquadLeader {
-		fmt.Fprintf(b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
-	} else {
-		fmt.Fprintf(b, "6. **Post your final results as a comment — this step is mandatory**: post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
-	}
-	b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-	if ctx.IsSquadLeader {
-		fmt.Fprintf(b, "8. After this initial dispatch, leave the parent issue `in_progress` — do NOT run `multica issue status %s in_review` or `done` on this turn. Dispatching members is not completion. You will be re-triggered when members post updates or a stage closes; only then, if the overall goal is met, move the parent to `in_review`.\n", ctx.IssueID)
-	} else {
-		fmt.Fprintf(b, "8. When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
-	}
-	fmt.Fprintf(b, "9. If blocked, run `multica issue status %s blocked` unless your Agent Identity forbids issue status changes. Post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
 }
 
 // writeSubIssueCreation emits the Sub-issue Creation section (compressed
@@ -655,14 +683,15 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
 
+	// Session Continuity Notice, Task Initiator and Connected Apps used to be
+	// rendered here. They are per-run values, so emitting them into this file
+	// broke prompt-cache prefix stability on every resume; they now travel in
+	// the per-turn user message (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
 	writeBackgroundTaskSafetySlim(&b)
 	writeAgentIdentity(&b, ctx)
-	writeSessionContinuityNotice(&b, ctx)
 	writeRequestingUser(&b, ctx)
-	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
-	writeConnectedApps(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:
@@ -671,7 +700,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeAvailableCommands(&b)
 	}
 
-	if kind == kindCommentTriggered || kind == kindAssignmentTriggered {
+	if kind == kindIssue {
 		writeCommentFormatting(&b)
 	}
 
@@ -685,7 +714,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeIssueMetadata(&b)
 	}
 
-	if kind == kindAssignmentTriggered {
+	if kind == kindIssue {
 		writeInstructionPrecedence(&b)
 	}
 
@@ -697,10 +726,8 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeWorkflowQuickCreate(&b)
 	case kindAutopilotRunOnly:
 		writeWorkflowAutopilot(&b, ctx)
-	case kindCommentTriggered:
-		writeWorkflowComment(&b, provider, ctx)
-	case kindAssignmentTriggered:
-		writeWorkflowAssignment(&b, ctx)
+	case kindIssue:
+		writeWorkflowIssue(&b, ctx)
 	}
 
 	if kind.hasIssueContext() && ctx.IssueID != "" {
@@ -711,7 +738,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeSkills(&b, provider, ctx)
 	}
 
-	if kind == kindCommentTriggered || kind == kindAssignmentTriggered {
+	if kind == kindIssue {
 		writeMentions(&b)
 		writeAttachments(&b)
 	}

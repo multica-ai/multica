@@ -122,6 +122,8 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 
 - **비어 있음**: cookie는 방문한 정확한 호스트에서만 유효합니다 (단일 호스트 배포에 적합)
 - **`.example.com`으로 설정**: cookie가 하위 도메인 간에 공유됩니다 (그래서 `app.example.com`과 `api.example.com`이 로그인 세션을 공유함)
+- **프런트엔드와 백엔드가 서로 다른 호스트에 있으면 선택이 아니라 필수입니다**: 브라우저가 페이지 자체 origin에서 `multica_csrf` cookie를 읽을 수 있어야 하며, 그렇지 않으면 읽기는 계속 동작하는 반면 모든 쓰기 요청이 `403 CSRF validation failed`로 실패합니다
+- 두 호스트를 모두 포함하는 **가장 좁은** 상위 도메인을 사용하세요 (`.example.com`이 아니라 `.agent.example.com`). 이 값은 `multica_auth` 세션 cookie도 해당 도메인 아래의 모든 호스트로 확장하므로, 그 호스트들이 모두 동일한 신뢰 주체가 운영하는 경우에만 이 구성을 사용하세요 — 전체 설정은 [Self-Hosting](/getting-started/self-hosting)을 참고하세요
 - 경고: IP 주소일 수 없습니다 (브라우저가 무시함)
 
 ## 누가 가입할 수 있는지 제한하기
@@ -251,8 +253,8 @@ multica config set auto_update_check_interval 12h
 |---|---|---|
 | `GITHUB_APP_SLUG` | 비어 있음 | GitHub App의 slug (`https://github.com/apps/<slug>`의 끝부분). 설정 → GitHub 설치 버튼 URL을 구성합니다 |
 | `GITHUB_WEBHOOK_SECRET` | 비어 있음 | GitHub App에 설정한 Webhook secret. 모든 `pull_request` / `installation` delivery의 HMAC-SHA256 검증에 사용되며, setup 콜백 state token의 HMAC 키로도 사용됩니다 |
-| `GITHUB_APP_ID` | 비어 있음 | App 설정 페이지에 표시되는 숫자 App ID. `GITHUB_APP_PRIVATE_KEY`와 함께, PR 카드의 CI 상태와 머지 가능 여부에 필수이며, 설치 시점에 연결된 계정 이름을 가져오는 데에도 사용됩니다 |
-| `GITHUB_APP_PRIVATE_KEY` | 비어 있음 | App RSA 비공개 키의 전체 PEM 블록 (`-----BEGIN/END-----` 줄 포함, 줄바꿈 유지). `GITHUB_APP_ID`와 함께, App으로 인증하고 PR 카드의 CI 상태와 머지 가능 여부의 기반이 되는 GitHub API 스냅샷을 가져오는 데 사용됩니다 |
+| `GITHUB_APP_ID` | 비어 있음 | App 설정 페이지에 표시되는 숫자 App ID. `GITHUB_APP_PRIVATE_KEY`와 함께 PR 카드의 CI 상태와 머지 가능 여부, Settings → Repositories → GitHub에서 선택 기능, 설치 시 연결된 계정 이름 가져오기에 사용됩니다 |
+| `GITHUB_APP_PRIVATE_KEY` | 비어 있음 | App RSA 비공개 키의 전체 PEM 블록(`-----BEGIN/END-----` 줄 포함, 줄바꿈 유지). `GITHUB_APP_ID`와 함께 App 인증 PR 스냅샷과 저장소 탐색에 사용됩니다 |
 
 **필수 변수 중 하나라도 설정하지 않았을 때의 동작:**
 
@@ -263,6 +265,7 @@ multica config set auto_update_check_interval 12h
 
 - PR 카드에 **CI 상태도 머지 가능 여부도 표시되지 않습니다** — 연동은 깔끔하게 축소됩니다: PR은 계속 미러링되고, 이슈는 계속 자동 연결되며 머지 시 Done으로 이동합니다.
 - 설치 직후 연결 카드에 잠시 `Connected to unknown`도 표시됩니다. GitHub의 `installation.created` 웹훅이 도착하면(보통 몇 초 이내) Multica가 행을 실제 조직/사용자 이름으로 갱신하고 실시간 브로드캐스트를 보내, 열려 있는 Settings → GitHub 탭이 수동 새로고침 없이 업데이트됩니다.
+- 서버가 저장소 목록에 필요한 installation token을 발급할 수 없으므로 Settings → Repositories → GitHub에서 선택 기능이 비활성화됩니다.
 
 **참고:** `GITHUB_WEBHOOK_SECRET`은 설치 흐름 state token의 서명 키로 재사용되므로, 운영자는 secret 하나만 관리하면 됩니다. 이것은 GitHub App의 *Client* secret이 **아닙니다** — Client secret은 OAuth 관련이며 이 연동에서는 사용되지 않습니다. 전체 안내는 [GitHub 연동 → 자체 호스팅 설정](/github-integration#self-host-setup)을 참고하세요.
 

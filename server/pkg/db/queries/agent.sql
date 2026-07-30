@@ -8,6 +8,21 @@ SELECT * FROM agent
 WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
+-- name: ListAllAgentsAnyKind :many
+-- Every agent row in the workspace, INCLUDING `kind = 'system'` execution
+-- carriers (agent builder sessions) that ListAllAgents deliberately hides.
+--
+-- Only for surfaces that aggregate over raw `agent_task_queue` / task_usage
+-- rows, which carry no kind filter of their own: a system carrier runs real
+-- tasks and books real usage, so a per-agent rollup returns it whether or not
+-- any list endpoint will ever name it. Those surfaces need the full population
+-- to decide what to hide (MUL-5409). Do NOT use this to build a user-facing
+-- agent list — `kind = 'system'` must stay out of every picker and assignee
+-- surface.
+SELECT * FROM agent
+WHERE workspace_id = $1
+ORDER BY created_at ASC;
+
 -- name: GetAgent :one
 SELECT * FROM agent
 WHERE id = $1;
@@ -670,11 +685,18 @@ RETURNING *;
 -- session_id NULL and flagging the row happen in THIS terminal transaction so an
 -- auto-retry created and woken by the same commit can never observe the bad
 -- pointer or a missing gap flag.
+--
+-- retired_session_id (GH #6066): a session this run abandoned as unresumable.
+-- Recorded even on the completed path, because that is exactly the case the
+-- resume lookups could not see — a fresh-session retry that SUCCEEDS still has
+-- to retire the transcript it retried away from, or an older completed row
+-- pointing at the same id resurrects it on the next run.
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE $3 END,
     work_dir = $4,
     session_rollout_missing = sqlc.arg('session_rollout_missing'),
+    retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
 RETURNING *;
@@ -743,24 +765,51 @@ RETURNING *;
 -- resuming the poisoned session. Both markers are required so the clause stays
 -- exactly as narrow as classifyPoisonedError and the Kiro detector — an
 -- unrelated error that only mentions image dimensions is NOT excluded.
-WITH latest_per_session AS (
-    SELECT DISTINCT ON (session_id)
-        session_id, work_dir, runtime_id, status, failure_reason, error,
-        COALESCE(completed_at, started_at, dispatched_at, created_at) AS terminal_at
-    FROM agent_task_queue
-    WHERE agent_id = $1 AND issue_id = $2
-      AND session_id IS NOT NULL
-      AND status IN ('completed', 'failed')
-    ORDER BY session_id, COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+--
+-- The final pair of regexes is the provider-agnostic version of the same
+-- guard, and it matters most for self-hosted installs: daemons upgrade on
+-- their own cadence, so a host still running a daemon without
+-- taskfailure.UnresumableHistory reports an empty-message rejection as
+-- agent_error.unknown and would otherwise keep resuming the transcript the
+-- provider just refused (GH #6066). Both regexes must match — an emptiness
+-- complaint AND a locator pointing into the message history — mirroring
+-- emptyContentRe and historyMessageLocatorRe in pkg/taskfailure/resume.go.
+-- Keep the three in sync.
+--
+-- retired_sessions is the explicit half of the same rule (GH #6066). The
+-- per-session latest state above can only judge sessions that some row still
+-- POINTS at, so it cannot see a session a run deliberately abandoned: a fresh
+-- retry that succeeded reports its own new id (or none), leaving the poisoned
+-- id visible on nothing but an older completed row, which then looks perfectly
+-- healthy. retired_session_id records the abandonment itself, so one row
+-- retiring a session removes it from every later lookup no matter how many
+-- clean rows still reference it.
+WITH retired_sessions AS (
+    SELECT DISTINCT r.retired_session_id AS session_id
+    FROM agent_task_queue r
+    WHERE r.agent_id = $1 AND r.issue_id = $2
+      AND r.retired_session_id IS NOT NULL
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.session_id)
+        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error,
+        COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed')
+    ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
 SELECT session_id, work_dir, runtime_id FROM latest_per_session
-WHERE (
+WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
+  AND (
     status = 'completed'
     OR (
       status = 'failed'
       AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
+      AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+               AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
     )
   )
 ORDER BY terminal_at DESC
@@ -828,6 +877,7 @@ SET status = 'failed',
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE COALESCE(sqlc.narg('session_id'), session_id) END,
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
     session_rollout_missing = sqlc.arg('session_rollout_missing'),
+    retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
@@ -1327,23 +1377,31 @@ GROUP BY atq.agent_id, bucket
 ORDER BY atq.agent_id, bucket;
 
 -- name: ListWorkspaceAgentTaskSnapshot :many
--- Returns the tasks needed to derive each agent's current presence:
---   - All active tasks (queued / dispatched / running) — for working signal + counts
---   - Each agent's most recent OUTCOME task (completed / failed) — for sticky
---     failed signal
--- The front-end picks "active wins, else latest outcome" — see derive-presence.ts.
+-- Returns the tasks the front-end reads off one workspace-wide snapshot:
+--   - All active tasks (queued / dispatched / running / waiting_local_directory)
+--     — the current workload: working signal + counts (see derive-presence.ts).
+--   - Each agent's most recent OUTCOME task (completed / failed) — NOT part of
+--     presence since #1823; it is the "last activity" line the Squad hover card
+--     renders (agent-live-peek-card.tsx). Kept in this response because shipped
+--     desktop builds read it from here; see MUL-5436 for the plan to move it to
+--     a dedicated lazy endpoint.
 --
 -- Cancelled tasks are excluded from the outcome half on purpose: cancel is a
 -- procedural signal ("attempt aborted"), not an outcome. It tells us nothing
 -- about whether the agent works, so it must NOT be allowed to mask a prior
 -- failure. Concretely: if an agent fails and then the user cancels the queued
--- retry (or the parent issue closes and cascades cancels), the failed signal
--- has to stay red. Only a real success (completed) or a fresh attempt (active)
--- clears it.
+-- retry (or the parent issue closes and cascades cancels), the failure stays
+-- the agent's last real outcome.
 --
--- No UI windows in SQL: stickiness is decided by "is the latest outcome a
--- failure?", not a 2-minute clock. JOINs agent because agent_task_queue has
--- no workspace_id column.
+-- The outcome half is a per-agent LATERAL Top-1 rather than a workspace-wide
+-- DISTINCT ON: with idx_agent_task_queue_agent_terminal_latest (migration 233)
+-- each agent costs one ordered index scan + LIMIT 1, so the cost no longer
+-- grows with how much terminal history the workspace has accumulated. The
+-- (created_at, id) tie-break makes the pick deterministic when completed_at
+-- ties or is NULL — plain completed_at DESC returned an arbitrary row there.
+-- Row shape and row set are unchanged.
+--
+-- Both halves JOIN / scan agent because agent_task_queue has no workspace_id.
 SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
@@ -1351,14 +1409,16 @@ WHERE a.workspace_id = $1
 
 UNION ALL
 
-SELECT t.* FROM (
-  SELECT DISTINCT ON (atq.agent_id) atq.*
+SELECT latest.* FROM agent a
+JOIN LATERAL (
+  SELECT atq.*
   FROM agent_task_queue atq
-  JOIN agent a ON a.id = atq.agent_id
-  WHERE a.workspace_id = $1
+  WHERE atq.agent_id = a.id
     AND atq.status IN ('completed', 'failed')
-  ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
-) t;
+  ORDER BY atq.completed_at DESC NULLS LAST, atq.created_at DESC, atq.id DESC
+  LIMIT 1
+) latest ON TRUE
+WHERE a.workspace_id = $1;
 
 -- name: ListWorkspaceWorkingAgents :many
 -- Workspace-level source for consumers that show currently working agents.
@@ -1369,7 +1429,10 @@ SELECT t.* FROM (
 -- comment-triggered issue work. Quick-create work is present only in the
 -- unfiltered projection because it has no source FK yet. mine_relation is
 -- optional (empty = workspace); when set it narrows issue work to the
--- authenticated member's My Issues relation.
+-- authenticated member's My Issues relation. parent_issue_id is optional
+-- (NULL = workspace); when set it narrows issue work to the direct children
+-- of that issue, so an issue detail's sub-issue header reads the same
+-- projection as the Issues list header instead of deriving its own count.
 SELECT
   a.id,
   a.name,
@@ -1469,6 +1532,16 @@ WHERE a.workspace_id = $1
             )
           )
         )
+    )
+  )
+  AND (
+    @parent_issue_id::uuid IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM issue child
+      WHERE child.id = atq.issue_id
+        AND child.workspace_id = a.workspace_id
+        AND child.parent_issue_id = @parent_issue_id::uuid
     )
   )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at

@@ -652,6 +652,136 @@ func TestAgentCreateDoesNotExposeFromTemplate(t *testing.T) {
 	}
 }
 
+func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	var requestCount int
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	newCreateCmd := func(t *testing.T, value string) *cobra.Command {
+		t.Helper()
+		cmd := &cobra.Command{Use: "create"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("runtime-id", "", "")
+		cmd.Flags().Int32("max-concurrent-tasks", 6, "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("name", "TestAgent"); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Flags().Set("runtime-id", "runtime-1"); err != nil {
+			t.Fatal(err)
+		}
+		if value != "" {
+			if err := cmd.Flags().Set("max-concurrent-tasks", value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return cmd
+	}
+	newUpdateCmd := func(t *testing.T, value string) *cobra.Command {
+		t.Helper()
+		cmd := &cobra.Command{Use: "update"}
+		cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("max-concurrent-tasks", value); err != nil {
+			t.Fatal(err)
+		}
+		return cmd
+	}
+
+	for _, value := range []string{"0", "-1", "51"} {
+		t.Run("create rejects "+value, func(t *testing.T) {
+			before := requestCount
+			err := runAgentCreate(newCreateCmd(t, value), nil)
+			if err == nil || !strings.Contains(err.Error(), "between 1 and 50") {
+				t.Fatalf("error = %v, want readable 1-50 validation error", err)
+			}
+			if requestCount != before {
+				t.Fatalf("invalid create sent %d HTTP request(s), want 0", requestCount-before)
+			}
+		})
+
+		t.Run("update rejects "+value, func(t *testing.T) {
+			before := requestCount
+			err := runAgentUpdate(newUpdateCmd(t, value), []string{"agent-123"})
+			if err == nil || !strings.Contains(err.Error(), "between 1 and 50") {
+				t.Fatalf("error = %v, want readable 1-50 validation error", err)
+			}
+			if requestCount != before {
+				t.Fatalf("invalid update sent %d HTTP request(s), want 0", requestCount-before)
+			}
+		})
+	}
+
+	for _, value := range []string{"1", "50"} {
+		t.Run("create accepts "+value, func(t *testing.T) {
+			gotBody = nil
+			if err := runAgentCreate(newCreateCmd(t, value), nil); err != nil {
+				t.Fatalf("runAgentCreate: %v", err)
+			}
+			want := float64(1)
+			if value == "50" {
+				want = 50
+			}
+			if gotBody["max_concurrent_tasks"] != want {
+				t.Fatalf("body max_concurrent_tasks = %v, want %v", gotBody["max_concurrent_tasks"], want)
+			}
+		})
+
+		t.Run("update accepts "+value, func(t *testing.T) {
+			gotBody = nil
+			if err := runAgentUpdate(newUpdateCmd(t, value), []string{"agent-123"}); err != nil {
+				t.Fatalf("runAgentUpdate: %v", err)
+			}
+			want := float64(1)
+			if value == "50" {
+				want = 50
+			}
+			if gotBody["max_concurrent_tasks"] != want {
+				t.Fatalf("body max_concurrent_tasks = %v, want %v", gotBody["max_concurrent_tasks"], want)
+			}
+		})
+	}
+
+	t.Run("create omission stays omitted", func(t *testing.T) {
+		gotBody = nil
+		if err := runAgentCreate(newCreateCmd(t, ""), nil); err != nil {
+			t.Fatalf("runAgentCreate: %v", err)
+		}
+		if _, ok := gotBody["max_concurrent_tasks"]; ok {
+			t.Fatalf("omitted flag should not be sent: %v", gotBody)
+		}
+	})
+}
+
 // TestParseCustomEnvErrorSanitization guards against future changes
 // re-introducing %w wrapping of json.Unmarshal errors. Those errors
 // can surface short fragments of the input, which — for a flag that

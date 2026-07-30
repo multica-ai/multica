@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,17 +13,18 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  useDndContext,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
+import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import {
   SortableContext,
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import {
   getCoreRowModel,
   useReactTable,
@@ -65,6 +67,7 @@ import {
   TableCell,
   TableRow,
 } from "@multica/ui/components/ui/table";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -135,8 +138,12 @@ import {
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
-import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+
+// Enough placeholder rows to cover a typical viewport; the virtualizer only
+// mounts what fits, so overshooting costs nothing.
+const SKELETON_ROW_COUNT = 12;
 
 const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
@@ -366,21 +373,68 @@ function SortableColumnHeader({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: columnKey, disabled: !sortable });
   const active = sortField === sortBy;
+  // Any column in flight, not only this one: the neighbours shift to open a
+  // gap, and each is clipped by its own cell just the same.
+  const isReordering = useDndContext().active != null;
+  const nodeRef = useRef<HTMLDivElement | null>(null);
+
+  // The cell clips its own content, which is what made a dragged column look
+  // like it vanished rather than travelled. The clip only earns its keep at
+  // rest, capping a label wider than its column, so it is lifted for the length
+  // of a reorder and the column in hand is raised over its neighbours.
+  //
+  // Only overflow and stacking are touched. Transforming the <th> itself would
+  // carry the header's full height along, but `transform` on a table cell is a
+  // corner of the spec browsers take liberties with — Chromium lifts the cell
+  // out of the table's box model and its geometry stops matching the row. The
+  // wrapper below is padded out to the cell's size instead.
+  useLayoutEffect(() => {
+    const cell = nodeRef.current?.closest("th");
+    if (!cell || !isReordering) return;
+    cell.style.overflow = "visible";
+    if (isDragging) cell.style.zIndex = "20";
+    return () => {
+      cell.style.removeProperty("overflow");
+      cell.style.removeProperty("z-index");
+    };
+  }, [isDragging, isReordering]);
 
   return (
     <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      ref={(node) => {
+        nodeRef.current = node;
+        setNodeRef(node);
+      }}
+      // Horizontal travel only. dnd-kit's layout animation also hands back
+      // scaleX/scaleY — old rect over new rect — to tween an item into the
+      // shape of the slot it landed in. Between two tabs of equal width that
+      // ratio is 1 and never shows; between two columns it is not, so a 174px
+      // column swapping with a 96px one gets stretched to 1.8x on the way.
+      // Reordering columns changes no column's width, so there is nothing for
+      // a shape tween to say here. The move and the settle stay animated
+      // through `transition`.
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+        transition,
+      }}
+      // The wrapper spans the cell's own box — the negative margins undo the
+      // <th>'s padding and put it back inside — so it renders exactly as at
+      // rest while being what travels: a header-sized block rather than the
+      // line of text in it. Height is derived rather than fixed at h-8: the
+      // strip is taller than the cell's nominal height once row borders are in.
       className={cn(
-        "group/header flex min-w-0 items-center",
-        isDragging && "opacity-40",
+        "group/header -mx-4 -my-2 flex h-[calc(100%+1rem)] min-w-0 items-center px-4",
+        isDragging && "opacity-60",
       )}
     >
       {sortable && (
         <button
           type="button"
           aria-label={reorderLabel}
-          className="-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground/50 opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100"
+          className={cn(
+            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground/50 opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
+            isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
+          )}
           {...attributes}
           {...listeners}
         >
@@ -388,9 +442,7 @@ function SortableColumnHeader({
         </button>
       )}
       <DropdownMenu>
-        <DropdownMenuTrigger
-          className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 hover:bg-accent"
-        >
+        <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 hover:bg-accent">
           <span className="truncate">{label}</span>
           {active &&
             (sortDirection === "asc" ? (
@@ -628,7 +680,7 @@ export function InlineTitle({
 
   return (
     <div
-      className="flex min-w-0 items-center gap-1.5"
+      className="group/title relative flex min-w-0 items-center gap-1.5"
       style={{ paddingLeft: row.depth * 18 }}
       // Record whether the gesture began while editing (mousedown fires before
       // the blur that commits), then swallow that click in the capture phase —
@@ -695,29 +747,48 @@ export function InlineTitle({
           >
             {row.issue.title}
           </button>
-          <button
-            type="button"
-            aria-label={createSubIssueLabel}
-            className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-            onClick={(event) => {
-              event.stopPropagation();
-              onCreateSubIssue();
-            }}
-          >
-            <Plus className="size-3" />
-          </button>
-          <button
-            type="button"
-            aria-label={renameLabel}
-            className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-            onClick={(event) => {
-              event.stopPropagation();
-              setDraft(row.issue.title);
-              onEditingChange(true);
-            }}
-          >
-            <Pencil className="size-3" />
-          </button>
+          {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
+            * out inline these two reserved ~40px of the title column for
+            * buttons that are invisible until hovered — and title is the
+            * column with the least room to spare. The gradient fades the text
+            * running underneath rather than letting the icons sit on top of
+            * it; the sidebar has no need for one because its labels are short,
+            * but a title runs to the cell's edge. focus-within keeps them
+            * reachable by keyboard, where hover never fires. */}
+          {/* The fade has to be whatever the cell is painted with at the
+            * moment the actions show, and a hovered row is not the resting
+            * background — pinned cells switch to the muted mix on hover, so
+            * the gradient follows. */}
+          {/* Keyed to the title cell, not the row: these act on the title,
+            * and offering them from anywhere along a row puts them under the
+            * pointer while it is somewhere else entirely. The fade still
+            * follows the row's hover colour, since that is what the cell is
+            * painted with when they appear. */}
+          <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-0 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-hover/title:pointer-events-auto group-hover/title:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+            <button
+              type="button"
+              aria-label={createSubIssueLabel}
+              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCreateSubIssue();
+              }}
+            >
+              <Plus className="size-3" />
+            </button>
+            <button
+              type="button"
+              aria-label={renameLabel}
+              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              onClick={(event) => {
+                event.stopPropagation();
+                setDraft(row.issue.title);
+                onEditingChange(true);
+              }}
+            >
+              <Pencil className="size-3" />
+            </button>
+          </span>
         </>
       )}
     </div>
@@ -774,7 +845,11 @@ function LazyLabelCell({
   );
 }
 
-type IssueTableGroupRowProps = {
+// Extends the <tr> props so the virtualizer's measuring ref and data-index,
+// which DataTable clones onto whatever renderRow returns, reach the element
+// instead of being absorbed here. A group header is shorter than a data row,
+// so it is exactly the kind of row the measurement exists for.
+type IssueTableGroupRowProps = React.ComponentProps<"tr"> & {
   group: Extract<IssueTableDisplayRow, { kind: "group" }>;
   colSpan: number;
   onToggle: () => void;
@@ -784,9 +859,11 @@ export function IssueTableGroupRow({
   group,
   colSpan,
   onToggle,
+  ...rowProps
 }: IssueTableGroupRowProps) {
   return (
     <TableRow
+      {...rowProps}
       className="bg-muted/40 hover:bg-muted/60"
       onClick={onToggle}
     >
@@ -1011,6 +1088,12 @@ function IssueTableBodyCell({
     meta.editingCellKey,
     meta.setEditingCellKey,
   );
+  // Placeholder rows go through the ordinary cell renderer so they inherit the
+  // real column widths, pinning and borders — the grid is already correct
+  // before any data arrives, so the rows swap in without shifting anything.
+  if (row.original.kind === "skeleton") {
+    return <Skeleton className="h-3.5 w-full" />;
+  }
   if (row.original.kind !== "issue") return null;
   const issueRow = row.original;
   const issue = issueRow.issue;
@@ -1711,9 +1794,8 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `${registered ? "loading" : "activate"}:${key}`,
-          label: t(($) => $.table.loading_branch),
-          loading: registered,
-          autoLoad: !registered,
+          state: registered ? "loading" : "has_more",
+          total: 0,
           onLoad: registered
             ? undefined
             : () => activateServerBranch(groupKey, parentId, ancestorIds),
@@ -1724,8 +1806,8 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `loading:${key}`,
-          label: t(($) => $.table.loading_branch),
-          loading: true,
+          state: "loading",
+          total: 0,
         });
       }
       for (const row of data.rows) {
@@ -1754,8 +1836,8 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `retry:${key}`,
-          label: t(($) => $.table.load_more_failed_retry),
-          loading: false,
+          state: "error",
+          total: data.total,
           onLoad: () => retryServerBranch(key),
         });
       } else if (data.nextCursor) {
@@ -1763,10 +1845,19 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `more:${key}:${nextCursor}`,
-          label: t(($) => $.table.load_more),
-          loading: data.loading,
-          autoLoad: true,
+          state: data.loading ? "loading" : "has_more",
+          total: data.total,
           onLoad: () => loadNextServerBranchPage(key, nextCursor),
+        });
+      } else if (data.rows.length > 0) {
+        // Reaching the end is only worth marking on a branch that paginated;
+        // the footer applies that rule, so the row is pushed unconditionally
+        // and carries the total for it to judge by.
+        result.push({
+          kind: "load_more",
+          key: `end:${key}`,
+          state: "end",
+          total: data.total,
         });
       }
     };
@@ -1794,27 +1885,40 @@ export function TableView({
       result.push({
         kind: "load_more",
         key: "loading:groups",
-        label: t(($) => $.table.loading_branch),
-        loading: true,
+        state: "loading",
+        total: 0,
       });
     } else if (usesServerGrouping && serverGroupsError) {
       result.push({
         kind: "load_more",
         key: "retry:groups",
-        label: t(($) => $.table.load_failed_retry),
-        loading: false,
+        state: "error",
+        total: 0,
         onLoad: () => void refetchServerGroups(),
       });
     } else if (usesServerGrouping && hasNextServerGroupPage) {
       result.push({
         kind: "load_more",
         key: "more:groups",
-        label: t(($) => $.table.load_more),
-        loading: fetchingNextServerGroupPage,
-        autoLoad: true,
+        state: fetchingNextServerGroupPage ? "loading" : "has_more",
+        total: 0,
         onLoad: () => void fetchNextServerGroupPage(),
       });
     }
+
+    // Nothing has landed yet and something is still in flight: show the grid
+    // filled with placeholders instead of one "Loading…" line, which reads as
+    // an empty table more than a loading one.
+    const isColdLoad =
+      !result.some((row) => row.kind === "issue") &&
+      result.some((row) => row.kind === "load_more" && row.state === "loading");
+    if (isColdLoad) {
+      return Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => ({
+        kind: "skeleton" as const,
+        key: `skeleton:${index}`,
+      }));
+    }
+
     return result;
   }, [
     collapsedGroupSet,
@@ -1832,7 +1936,6 @@ export function TableView({
     fetchingNextServerGroupPage,
     refetchServerGroups,
     fetchNextServerGroupPage,
-    t,
     tableHierarchy,
     usesServerGrouping,
   ]);
@@ -2287,6 +2390,18 @@ export function TableView({
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        // Columns only ever swap sideways, so the header should not follow the
+        // pointer up out of its own strip — same constraint the desktop tab bar
+        // puts on tab reordering.
+        modifiers={[restrictToHorizontalAxis]}
+        // Modifiers constrain the drag's movement but not its auto-scrolling,
+        // which reads raw pointer coordinates: drifting a few pixels vertically
+        // while dragging a header sent the rows scrolling underneath it. Zero
+        // on y removes an axis the gesture cannot act on. On x it stays, since
+        // a table wider than its viewport needs it to reach a distant slot, but
+        // the default 0.2 arms it a fifth of the way in from either edge, which
+        // is most of a wide header.
+        autoScroll={{ threshold: { x: 0.05, y: 0 } }}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
@@ -2318,32 +2433,27 @@ export function TableView({
                   <TableRow className="hover:bg-transparent">
                     <TableCell
                       colSpan={table.getVisibleLeafColumns().length}
-                      className="relative h-9 px-4 py-1"
+                      className="p-0"
                     >
-                      {loadMoreRow.autoLoad &&
-                        loadMoreRow.onLoad &&
-                        !loadMoreRow.loading && (
-                        <InfiniteScrollSentinel
-                          onVisible={loadMoreRow.onLoad}
-                          loading={false}
-                          rootMargin="240px"
-                          className="absolute inset-y-0 left-0 w-px"
+                      {/* The same footer Board / List / Swimlane end their
+                        * columns with. Hand-rolling it here had left the table
+                        * as the one surface where a failed page read as muted
+                        * body text rather than an error, and where reaching the
+                        * end of a paginated branch said nothing at all. The row
+                        * only supplies the cell it lives in. */}
+                      <div className="sticky left-0 w-full">
+                        <ListLoadMoreFooter
+                          hasMore={
+                            loadMoreRow.state === "loading" ||
+                            loadMoreRow.state === "has_more"
+                          }
+                          isLoading={loadMoreRow.state === "loading"}
+                          total={loadMoreRow.total}
+                          onLoadMore={() => loadMoreRow.onLoad?.()}
+                          isError={loadMoreRow.state === "error"}
+                          onRetry={loadMoreRow.onLoad}
                         />
-                      )}
-                      <button
-                        type="button"
-                        disabled={loadMoreRow.loading || !loadMoreRow.onLoad}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          loadMoreRow.onLoad?.();
-                        }}
-                        className="sticky left-4 flex items-center gap-2 text-xs text-muted-foreground enabled:hover:text-foreground disabled:cursor-default"
-                      >
-                        {loadMoreRow.loading && (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        )}
-                        {loadMoreRow.label}
-                      </button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

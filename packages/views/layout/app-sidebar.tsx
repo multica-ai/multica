@@ -159,7 +159,7 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 ];
 
 function DraftDot() {
-  const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
+  const hasDraft = useIssueDraftStore((s) => s.hasDraft());
   if (!hasDraft) return null;
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
 }

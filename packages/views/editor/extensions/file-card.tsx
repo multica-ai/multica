@@ -133,7 +133,14 @@ export const FileCardExtension = Node.create({
     return helpers.createNode("fileCard", token.attributes);
   },
   renderMarkdown: (node: any) => {
-    const { href, filename } = node.attrs || {};
+    const { href, filename, uploading } = node.attrs || {};
+    // An in-flight placeholder is not content. The document IS the draft body
+    // (getMarkdown → setDraft), so serialising it would persist `!file[x](
+    // )` — a line the tokenizer above cannot parse back, leaving dead literal
+    // text in the draft that outlives the upload and ships with the comment.
+    // Emitting nothing is the whole guarantee: the card becomes content the
+    // moment it has a real href, and never before.
+    if (uploading === true || !href) return "";
     return `!file[${escapeMarkdownLabel(filename || "file")}](${href})`;
   },
 

@@ -261,7 +261,7 @@ export function ChatPage() {
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         onRestoreDraftApplied={c.handleRestoreDraftApplied}
-        onUploadFile={c.handleUploadFile}
+        uploadEnabled={c.uploadEnabled}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
         disabled={c.isSessionArchived || c.isAgentArchived}

@@ -263,6 +263,11 @@ type TaskResult struct {
 	// session because its rollout was not in the store (MUL-5305). Forwarded to
 	// the terminal report so the server clears the resume pointer and flags the
 	// continuity gap for the next claim. Not part of the wire result itself.
-	SessionRolloutMissing bool             `json:"-"`
-	Usage                 []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	SessionRolloutMissing bool `json:"-"`
+	// RetiredSessionID names a session this run was told to resume and then
+	// abandoned as unresumable (GH #6066). Forwarded on every terminal path,
+	// including the completed one: a fresh-session retry that SUCCEEDS is
+	// precisely when the abandoned id would otherwise stay selectable.
+	RetiredSessionID string           `json:"-"`
+	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
 }

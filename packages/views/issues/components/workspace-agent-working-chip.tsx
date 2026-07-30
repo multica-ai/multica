@@ -38,7 +38,13 @@ export function chipAppearance(
   return { variant: "outline", className: `${layout} text-muted-foreground` };
 }
 
-function WorkingAgentsHoverContent({
+/**
+ * Hover body for every surface that reads the working-agents projection —
+ * the workspace filter chip here and the sub-issues header chip on issue
+ * detail. Shared so a narrowed read and an unnarrowed one describe activity
+ * the same way; the only difference between the two is the query's scope.
+ */
+export function WorkingAgentsHoverContent({
   agents,
 }: {
   agents: readonly WorkspaceWorkingAgent[];

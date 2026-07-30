@@ -141,8 +141,10 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	msgStream := newQoderMessageStream(256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Qoder emits interim narration and the final answer as the same ACP
+	// AgentMessageChunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
@@ -162,11 +164,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			if msg.Type == MessageToolUse {
 				msg.Tool = kimiToolNameFromTitle(msg.Tool)
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -405,16 +403,14 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// send and close so the late send is dropped instead of panicking.
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text stream show a
 		// terminal upstream-LLM failure (HTTP 4xx / rate-limit / expired token).
 		// Mirrors hermes/kimi/kiro; without it a run that exhausts retries still
 		// reports "completed" because session/prompt ends with stopReason=end_turn
 		// even though qodercli wrote a terminal error to stderr.
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage

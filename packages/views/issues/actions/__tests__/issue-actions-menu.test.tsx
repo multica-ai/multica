@@ -238,7 +238,7 @@ describe("IssueActionsDropdown", () => {
         <IssueActionsDropdown
           issue={mockIssue}
           trigger={<button data-testid="trigger">Menu</button>}
-          onDeletedNavigateTo="/test/issues"
+          onDeletedFallbackPath="/test/issues"
         />,
       ),
     );
@@ -250,7 +250,7 @@ describe("IssueActionsDropdown", () => {
     expect(mockOpenModal).toHaveBeenCalledWith("issue-delete-confirm", {
       issueId: "issue-1",
       identifier: "TES-1",
-      onDeletedNavigateTo: "/test/issues",
+      onDeletedFallbackPath: "/test/issues",
     });
   });
 });

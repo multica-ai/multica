@@ -649,8 +649,76 @@ func TestCopilotEventLoopDeltaFallbackOutput(t *testing.T) {
 		handleCopilotEvent(evt, st)
 	}
 
-	if st.output.String() != "hello world" {
-		t.Fatalf("expected output 'hello world', got %q", st.output.String())
+	if st.finalOutput() != "hello world" {
+		t.Fatalf("expected output 'hello world', got %q", st.finalOutput())
+	}
+}
+
+// TestCopilotEventLoopDeliversFinalTurnOnly pins Result.Output to the LAST
+// assistant turn. Copilot used to join every turn with "\n\n", so a run that
+// narrated, called a tool, then answered shipped narration + answer to Slack and
+// Lark as one reply (GH #6006). The narration still reaches the transcript as
+// MessageText; only the deliverable narrows.
+func TestCopilotEventLoopDeliversFinalTurnOnly(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"Let me check the logs."},"id":"d1","timestamp":"2026-04-16T08:43:38.000Z","parentId":"p1","ephemeral":true}`,
+		`{"type":"assistant.message","data":{"messageId":"m1","content":"Let me check the logs.","toolRequests":[{"toolCallId":"t1","name":"shell","arguments":{}}]},"id":"a1","timestamp":"2026-04-16T08:43:38.100Z","parentId":"p1"}`,
+		`{"type":"tool.execution_complete","data":{"toolCallId":"t1","success":true,"result":{"content":"nothing there"}},"id":"tc1","timestamp":"2026-04-16T08:43:39.000Z","parentId":"p1"}`,
+		`{"type":"assistant.message_delta","data":{"messageId":"m2","deltaContent":"The retry loop is the cause."},"id":"d2","timestamp":"2026-04-16T08:43:40.000Z","parentId":"p1","ephemeral":true}`,
+		`{"type":"assistant.message","data":{"messageId":"m2","content":"The retry loop is the cause."},"id":"a2","timestamp":"2026-04-16T08:43:40.100Z","parentId":"p1"}`,
+	}
+
+	st := newCopilotEventState("copilot")
+	var streamed []string
+	for _, line := range lines {
+		var evt copilotEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range handleCopilotEvent(evt, st) {
+			if m.Type == MessageText {
+				streamed = append(streamed, m.Content)
+			}
+		}
+	}
+
+	if got := st.finalOutput(); got != "The retry loop is the cause." {
+		t.Fatalf("Result.Output should be the final turn only, got %q", got)
+	}
+	// The transcript must still see the narration — this fix narrows delivery,
+	// not the timeline the Multica UI renders.
+	if len(streamed) != 2 || streamed[0] != "Let me check the logs." {
+		t.Fatalf("expected both turns streamed as MessageText, got %q", streamed)
+	}
+}
+
+// TestCopilotEventLoopToolOnlyTurnClearsPendingDelta covers the turn shape the
+// delta fallback can get wrong: a turn whose authoritative assistant.message
+// reports content:"" because the tool requests ARE the turn. Its deltas must not
+// stay buffered, or a later turn that dies mid-stream would deliver the two
+// stitched together.
+func TestCopilotEventLoopToolOnlyTurnClearsPendingDelta(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"Checking the logs now."},"id":"d1","timestamp":"2026-04-16T08:43:38.000Z","parentId":"p1","ephemeral":true}`,
+		`{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"t1","name":"shell","arguments":{}}]},"id":"a1","timestamp":"2026-04-16T08:43:38.100Z","parentId":"p1"}`,
+		// Next turn starts streaming, then the process dies before its
+		// assistant.message lands.
+		`{"type":"assistant.message_delta","data":{"messageId":"m2","deltaContent":"The retry loop"},"id":"d2","timestamp":"2026-04-16T08:43:40.000Z","parentId":"p1","ephemeral":true}`,
+	}
+
+	st := newCopilotEventState("copilot")
+	for _, line := range lines {
+		var evt copilotEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatal(err)
+		}
+		handleCopilotEvent(evt, st)
+	}
+
+	if got := st.finalOutput(); got != "The retry loop" {
+		t.Fatalf("killed mid-turn should deliver that turn's partial only, got %q", got)
 	}
 }
 

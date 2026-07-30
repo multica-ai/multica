@@ -26,51 +26,86 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
-const mockSetDraft = vi.hoisted(() => vi.fn());
+const mockSetShared = vi.hoisted(() => vi.fn());
+const mockSetManual = vi.hoisted(() => vi.fn());
+const mockSetAgent = vi.hoisted(() => vi.fn());
+const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
-const mockUploadWithToast = vi.hoisted(() => vi.fn());
+// Uploads flow through the module-level coordinator, which calls
+// `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
+// mocking that call; it resolves a plain server Attachment row.
+const mockApiUploadFile = vi.hoisted(() => vi.fn());
 
-const mockDraftStore = {
-  draft: {
+type DraftAttachment = {
+  id: string;
+  workspace_id: string;
+  issue_id: string | null;
+  comment_id: string | null;
+  chat_session_id: string | null;
+  chat_message_id: string | null;
+  uploader_type: string;
+  uploader_id: string;
+  filename: string;
+  url: string;
+  download_url: string;
+  markdown_url: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
+};
+
+// Coordinator-owned upload entry persisted in the shared pool (MUL-5181 L2).
+type DraftUploadEntry = {
+  clientUploadId: string;
+  status: "uploading" | "uploaded" | "failed" | "interrupted";
+  filename: string;
+  size: number;
+  contentType?: string;
+  attachment?: DraftAttachment;
+  error?: string;
+};
+
+const emptyIssueDraft = () => ({
+  shared: {
+    projectId: undefined as string | undefined,
+    priority: "none" as "none" | "low" | "medium" | "high" | "urgent",
+    dueDate: null as string | null,
+    attachments: [] as DraftUploadEntry[],
+  },
+  manual: {
     title: "",
     description: "",
     status: "todo" as const,
-    priority: "none" as const,
+    startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
-    projectId: undefined as string | undefined,
-    startDate: null,
-    dueDate: null,
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
-    attachments: [] as Array<{
-      id: string;
-      workspace_id: string;
-      issue_id: string | null;
-      comment_id: string | null;
-      chat_session_id: string | null;
-      chat_message_id: string | null;
-      uploader_type: string;
-      uploader_id: string;
-      filename: string;
-      url: string;
-      download_url: string;
-      markdown_url: string;
-      content_type: string;
-      size_bytes: number;
-      created_at: string;
-    }>,
   },
-  lastAssigneeType: undefined,
-  lastAssigneeId: undefined,
-  setDraft: mockSetDraft,
+  agent: {
+    prompt: "",
+    actorType: undefined as "agent" | "squad" | undefined,
+    actorId: undefined as string | undefined,
+  },
+  activeMode: "manual" as "manual" | "agent",
+});
+
+const mockDraftStore = {
+  draft: emptyIssueDraft(),
+  lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
+  lastAssigneeId: undefined as string | undefined,
+  setShared: mockSetShared,
+  setManual: mockSetManual,
+  setAgent: mockSetAgent,
+  setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
+  hasDraft: () => false,
 };
 
 const mockQuickCreateStore = {
@@ -98,6 +133,11 @@ const DEFAULT_MANUAL_FIELDS: ManualCreateField[] = [
 const mockCreateSettingsStore = {
   manualCreateFields: DEFAULT_MANUAL_FIELDS as ManualCreateField[],
 };
+
+// The real handle mints an id when it inserts the placeholder and hands it to
+// the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
+// the same or the two records drift apart only in tests.
+let mockUploadIdSeq = 0;
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
@@ -191,9 +231,6 @@ vi.mock("@multica/core/properties", async (importOriginal) => {
   };
 });
 
-vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
-}));
 
 // Hoisted ApiError class so both the vi.mock factory and the tests below
 // can construct/instanceof-check the same identity. vi.mock is hoisted, so
@@ -231,6 +268,7 @@ vi.mock("@multica/core/api", async () => {
     api: {
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
+      uploadFile: mockApiUploadFile,
     },
     ApiError,
     parseWithFallback,
@@ -243,6 +281,9 @@ vi.mock("../editor", async () => {
   // `hasActiveUploads` / `onUploadingChange`.
   const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
     "../editor/use-upload-gate",
+  );
+  const composer = await vi.importActual<typeof import("../editor/use-composer-submit")>(
+    "../editor/use-composer-submit",
   );
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
@@ -261,13 +302,18 @@ vi.mock("../editor", async () => {
         inFlightRef.current += 1;
         if (inFlightRef.current === 1) onUploadingChange?.(true);
         try {
-          return await onUploadFile?.(file);
+          return await onUploadFile?.(file, `mock-upload-${++mockUploadIdSeq}`);
         } finally {
           inFlightRef.current -= 1;
           if (inFlightRef.current === 0) onUploadingChange?.(false);
         }
       },
       hasActiveUploads: () => inFlightRef.current > 0,
+      // Placeholder rebuild contract: the real handle draws a card for an
+      // upload the document is not showing and reports whether it landed.
+      // Mocks track ids only — no document to draw into.
+      insertUploadPlaceholder: () => true,
+      settleUploadPlaceholder: () => false,
     }));
     return (
       <>
@@ -325,11 +371,7 @@ vi.mock("../editor", async () => {
 
   return {
     ...uploadGate,
-    useEditorUpload: () => ({
-      uploadWithToast: mockUploadWithToast,
-      upload: vi.fn(),
-      uploading: false,
-    }),
+    ...composer,
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
     ContentEditor,
@@ -512,40 +554,25 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
-    mockDraftStore.draft.title = "";
-    mockDraftStore.draft.description = "";
-    mockDraftStore.draft.status = "todo";
-    mockDraftStore.draft.priority = "none";
-    // Reset the shared draft mock so per-test assignee seeding (squad / agent)
+    // Reset the unified draft mock so per-test seeding (assignee, project, …)
     // doesn't leak into the next test in the suite.
-    mockDraftStore.draft.assigneeType = undefined;
-    mockDraftStore.draft.assigneeId = undefined;
-    mockDraftStore.draft.projectId = undefined;
-    mockDraftStore.draft.startDate = null;
-    mockDraftStore.draft.dueDate = null;
-    mockDraftStore.draft.labelIds = [];
-    mockDraftStore.draft.propertyValues = {};
-    mockDraftStore.draft.attachments = [];
-    mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
-      mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
+    mockDraftStore.draft = emptyIssueDraft();
+    mockSetShared.mockImplementation((patch: Partial<typeof mockDraftStore.draft.shared>) => {
+      mockDraftStore.draft.shared = { ...mockDraftStore.draft.shared, ...patch };
+    });
+    mockSetManual.mockImplementation((patch: Partial<typeof mockDraftStore.draft.manual>) => {
+      mockDraftStore.draft.manual = { ...mockDraftStore.draft.manual, ...patch };
+    });
+    mockSetAgent.mockImplementation((patch: Partial<typeof mockDraftStore.draft.agent>) => {
+      mockDraftStore.draft.agent = { ...mockDraftStore.draft.agent, ...patch };
     });
     mockClearDraft.mockImplementation(() => {
-      mockDraftStore.draft = {
-        title: "",
-        description: "",
-        status: "todo",
-        priority: "none",
-        assigneeType: mockDraftStore.lastAssigneeType,
-        assigneeId: mockDraftStore.lastAssigneeId,
-        projectId: undefined,
-        startDate: null,
-        dueDate: null,
-        labelIds: [],
-        propertyValues: {},
-        attachments: [],
-      };
+      const next = emptyIssueDraft();
+      next.manual.assigneeType = mockDraftStore.lastAssigneeType;
+      next.manual.assigneeId = mockDraftStore.lastAssigneeId;
+      mockDraftStore.draft = next;
     });
-    mockUploadWithToast.mockResolvedValue({
+    mockApiUploadFile.mockResolvedValue({
       id: "11111111-2222-3333-4444-555555555555",
       workspace_id: "ws-test",
       issue_id: null,
@@ -561,8 +588,6 @@ describe("CreateIssueModal", () => {
       content_type: "image/png",
       size_bytes: 123,
       created_at: "2026-06-12T00:00:00Z",
-      link: "https://cdn.example.test/shot.png",
-      markdownLink: "https://multica-api.copilothub.ai/api/attachments/11111111-2222-3333-4444-555555555555/download",
     });
     mockCreateIssue.mockResolvedValue({
       id: "issue-123",
@@ -649,7 +674,7 @@ describe("CreateIssueModal", () => {
 
   it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
     const user = userEvent.setup();
-    mockDraftStore.draft.labelIds = [
+    mockDraftStore.draft.manual.labelIds = [
       "aaaaaaaa-1111-2222-3333-444444444444",
       "bbbbbbbb-1111-2222-3333-444444444444",
     ];
@@ -687,7 +712,7 @@ describe("CreateIssueModal", () => {
       title: "Labeled issue",
       status: "todo",
     });
-    mockDraftStore.draft.labelIds = [
+    mockDraftStore.draft.manual.labelIds = [
       "aaaaaaaa-1111-2222-3333-444444444444",
       "bbbbbbbb-1111-2222-3333-444444444444",
     ];
@@ -742,17 +767,20 @@ describe("CreateIssueModal", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Issue title")).toHaveValue("");
     expect(screen.getByPlaceholderText("Add description...")).toHaveValue("");
-    expect(mockSetDraft).toHaveBeenCalledWith({
+    expect(mockSetManual).toHaveBeenCalledWith({
       title: "",
       description: "",
       status: "todo",
-      priority: "none",
       assigneeType: undefined,
       assigneeId: undefined,
       startDate: null,
-      dueDate: null,
       labelIds: [],
       propertyValues: {},
+    });
+    expect(mockSetShared).toHaveBeenCalledWith({
+      priority: "none",
+      projectId: undefined,
+      dueDate: null,
       attachments: [],
     });
   });
@@ -785,23 +813,18 @@ describe("CreateIssueModal", () => {
 
     await user.click(screen.getByRole("button", { name: "Upload file" }));
 
+    // Coordinator flow (MUL-5181 L2): a placeholder is written at pick time,
+    // then settles into an `uploaded` entry carrying the server row.
     await waitFor(() => {
-      expect(mockSetDraft).toHaveBeenCalledWith({
-        attachments: [
-          expect.objectContaining({
-            id: "11111111-2222-3333-4444-555555555555",
-            filename: "shot.png",
-            download_url: "",
-          }),
-        ],
-      });
+      const uploads = mockDraftStore.draft.shared.attachments;
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0]).toMatchObject({ status: "uploaded", filename: "shot.png" });
+      expect(uploads[0]?.attachment?.id).toBe("11111111-2222-3333-4444-555555555555");
     });
-    const draftAttachmentsCall = mockSetDraft.mock.calls.find(
-      ([patch]) => Array.isArray(patch.attachments),
-    )?.[0] as { attachments?: Array<{ download_url: string }> } | undefined;
-    expect(draftAttachmentsCall?.attachments?.[0]?.download_url).not.toContain(
-      "Signature=",
-    );
+    // The response-scoped signed download_url must never be persisted — the
+    // draft survives dialog closes, and a stale signature would 403 the
+    // preview on reopen. Durable render paths re-resolve via markdown_url.
+    expect(mockDraftStore.draft.shared.attachments[0]?.attachment?.download_url).toBe("");
   });
 
   it("reuses draft attachments after reopening manual create so pasted images can render and bind", async () => {
@@ -823,9 +846,18 @@ describe("CreateIssueModal", () => {
       size_bytes: 123,
       created_at: "2026-06-12T00:00:00Z",
     };
-    mockDraftStore.draft.title = "Image draft";
-    mockDraftStore.draft.description = `![shot.png](${attachment.markdown_url})`;
-    mockDraftStore.draft.attachments = [attachment];
+    mockDraftStore.draft.manual.title = "Image draft";
+    mockDraftStore.draft.manual.description = `![shot.png](${attachment.markdown_url})`;
+    mockDraftStore.draft.shared.attachments = [
+      {
+        clientUploadId: attachment.id,
+        status: "uploaded",
+        filename: attachment.filename,
+        size: attachment.size_bytes,
+        contentType: attachment.content_type,
+        attachment,
+      },
+    ];
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
@@ -871,23 +903,76 @@ describe("CreateIssueModal", () => {
       url: "https://cdn.example.test/deleted.png",
       markdown_url: "https://multica-api.copilothub.ai/api/attachments/99999999-8888-7777-6666-555555555555/download",
     };
-    mockDraftStore.draft.title = "Image draft";
-    mockDraftStore.draft.description = `![kept.png](${referenced.markdown_url})`;
-    mockDraftStore.draft.attachments = [referenced, deleted];
+    const wrap = (att: typeof referenced): DraftUploadEntry => ({
+      clientUploadId: att.id,
+      status: "uploaded",
+      filename: att.filename,
+      size: att.size_bytes,
+      contentType: att.content_type,
+      attachment: att,
+    });
+    mockDraftStore.draft.manual.title = "Image draft";
+    mockDraftStore.draft.manual.description = `![kept.png](${referenced.markdown_url})`;
+    mockDraftStore.draft.shared.attachments = [wrap(referenced), wrap(deleted)];
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
     await waitFor(() => {
-      expect(mockSetDraft).toHaveBeenCalledWith({ attachments: [referenced] });
+      expect(mockSetShared).toHaveBeenCalledWith({
+        attachments: [expect.objectContaining({ clientUploadId: referenced.id })],
+      });
     });
   });
 
-  // Manual → agent must also forward the picked squad. Without this branch
-  // the agent panel silently falls back to the persisted actor / first
+  it("mount prune keeps in-flight placeholders while dropping unreferenced uploaded rows", async () => {
+    // Reopen-while-uploading: the placeholder has no body reference yet (the
+    // chips are its only UI), so the mount prune must never touch it —
+    // dropping it here would let the settle hit the generation guard and
+    // silently discard the file.
+    const orphanRow = {
+      id: "99999999-8888-7777-6666-555555555555",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "orphan.png",
+      url: "https://cdn.example.test/orphan.png",
+      download_url: "",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/99999999-8888-7777-6666-555555555555/download",
+      content_type: "image/png",
+      size_bytes: 5,
+      created_at: "2026-06-12T00:00:00Z",
+    };
+    mockDraftStore.draft.manual.title = "Reopened";
+    mockDraftStore.draft.shared.attachments = [
+      { clientUploadId: "c-flight", status: "uploading", filename: "mid.png", size: 9 },
+      {
+        clientUploadId: orphanRow.id,
+        status: "uploaded",
+        filename: orphanRow.filename,
+        size: orphanRow.size_bytes,
+        attachment: orphanRow,
+      },
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockSetShared).toHaveBeenCalledWith({
+        attachments: [expect.objectContaining({ clientUploadId: "c-flight" })],
+      });
+    });
+  });
+
+  // Manual → agent must seed the agent actor from the picked squad. Without
+  // this the agent panel silently falls back to the persisted actor / first
   // visible agent and the user loses the squad they just chose in manual.
-  it("forwards the picked squad when switching to agent mode", async () => {
-    mockDraftStore.draft.assigneeType = "squad";
-    mockDraftStore.draft.assigneeId = "squad-1";
+  it("seeds the agent actor from the picked squad when switching to agent mode", async () => {
+    mockDraftStore.draft.manual.assigneeType = "squad";
+    mockDraftStore.draft.manual.assigneeId = "squad-1";
     const user = userEvent.setup();
     const onSwitchMode = vi.fn();
 
@@ -904,11 +989,14 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
     expect(onSwitchMode).toHaveBeenCalledTimes(1);
-    const carry = onSwitchMode.mock.calls[0]?.[0];
-    expect(carry).toEqual(
-      expect.objectContaining({ prompt: "Refactor auth", squad_id: "squad-1" }),
-    );
-    expect(carry).not.toHaveProperty("agent_id");
+    // Prompt assist-init + squad actor land in the unified agent draft.
+    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+    expect(mockSetAgent).toHaveBeenCalledWith({
+      actorType: "squad",
+      actorId: "squad-1",
+    });
+    // Actor rides the store, not the carry; no parent here → carry is null.
+    expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
   });
 
   // Manual → agent must forward the picked project so the new modal pins to
@@ -1002,7 +1090,10 @@ describe("CreateIssueModal", () => {
     expect(mockToastError).toHaveBeenCalledWith("Failed to create issue");
   });
 
-  it("forwards the picked project when switching to agent mode", async () => {
+  // Manual → agent must preserve the picked project. It now rides the shared
+  // draft slot rather than the carry: the switch commits the (data-seeded)
+  // project into `shared` so the agent panel reads it from there.
+  it("commits the picked project to the shared draft when switching to agent mode", async () => {
     const user = userEvent.setup();
     const onSwitchMode = vi.fn();
 
@@ -1021,12 +1112,10 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
     expect(onSwitchMode).toHaveBeenCalledTimes(1);
-    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        prompt: "Refactor auth",
-        project_id: "proj-1",
-      }),
+    expect(mockSetShared).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-1" }),
     );
+    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
   });
 
   it("restores an unfinished project selection after manual create remounts", async () => {
@@ -1036,7 +1125,7 @@ describe("CreateIssueModal", () => {
     expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "none");
 
     await user.click(screen.getByTestId("project-picker"));
-    expect(mockSetDraft).toHaveBeenCalledWith({ projectId: "proj-1" });
+    expect(mockSetShared).toHaveBeenCalledWith({ projectId: "proj-1" });
 
     firstOpen.unmount();
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
@@ -1077,13 +1166,13 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
     expect(onSwitchMode).toHaveBeenCalledTimes(1);
-    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        prompt: "Refactor auth",
-        parent_issue_id: "parent-uuid-1",
-        parent_issue_identifier: "MUL-2534",
-      }),
-    );
+    // The parent context is not persisted (a per-invocation intent), so it
+    // still rides the carry channel. The prompt rides the store now.
+    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual({
+      parent_issue_id: "parent-uuid-1",
+      parent_issue_identifier: "MUL-2534",
+    });
+    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
   });
 
   // Start date is a low-frequency field — by default it lives behind the
@@ -1156,7 +1245,7 @@ describe("CreateIssueModal", () => {
 
   it("keeps a hidden field on the toolbar while it holds a value", () => {
     mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
-    mockDraftStore.draft.labelIds = ["label-1"];
+    mockDraftStore.draft.manual.labelIds = ["label-1"];
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
@@ -1185,11 +1274,12 @@ describe("CreateIssueModal", () => {
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
   });
 
-  // Title + description are packed into the agent prompt on switch; if we
-  // leave them in the shared draft store, the next agent→manual switch
-  // surfaces the stale manual draft on top of the prompt-as-description,
-  // duplicating the user's text on every round-trip.
-  it("clears the manual draft when packing title and description into the agent prompt", async () => {
+  // MUL-5181: switching to agent must PRESERVE the manual draft. The agent
+  // prompt is assist-init'd from title + description (a one-time convenience
+  // when the agent slot is empty), but the manual title/description are left
+  // untouched so a later agent→manual switch restores them verbatim — no
+  // concatenate-then-clear, no duplication on round-trips.
+  it("assist-inits the agent prompt from title and description without clearing the manual draft", async () => {
     const user = userEvent.setup();
 
     renderModal(
@@ -1204,20 +1294,124 @@ describe("CreateIssueModal", () => {
     await user.type(screen.getByPlaceholderText("Issue title"), "Update");
     await user.type(screen.getByPlaceholderText("Add description..."), "Some body");
 
-    mockSetDraft.mockClear();
+    mockSetManual.mockClear();
+    mockSetAgent.mockClear();
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
-    expect(mockSetDraft).toHaveBeenCalledWith({ title: "", description: "" });
+    // Agent prompt seeded from the manual content...
+    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Update\n\nSome body" });
+    // ...and the manual slot is never cleared.
+    expect(mockSetManual).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "" }),
+    );
+    expect(mockSetManual).not.toHaveBeenCalledWith(
+      expect.objectContaining({ description: "" }),
+    );
   });
 
   // MUL-4808 — manual create had no upload gate at all: Create, Enter on the
   // title, and Switch to Agent would each fix the draft while an image was
   // still uploading, dropping it from the description with no warning.
+  // MUL-5181 P0: the issue draft is a SINGLETON store. A submit that outlives
+  // its dialog may only consume the draft it submitted — never one the user
+  // typed after closing and reopening.
+  describe("stale-submit draft guard", () => {
+    function renderManualPanel(onClose = vi.fn()) {
+      return renderModal(
+        <ManualCreatePanel
+          onClose={onClose}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+    }
+
+    async function startPendingCreate() {
+      let resolveCreate!: (v: unknown) => void;
+      mockCreateIssue.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveCreate = resolve; }),
+      );
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      const view = renderManualPanel(onClose);
+      await user.type(screen.getByPlaceholderText("Issue title"), "Draft A");
+      fireEvent.keyDown(screen.getByPlaceholderText("Issue title"), {
+        key: "Enter",
+        metaKey: true,
+      });
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalled());
+      return {
+        view,
+        onClose,
+        finish: () =>
+          act(async () => {
+            resolveCreate({ id: "issue-9", identifier: "TES-9", title: "Draft A", status: "todo", labels: [] });
+            await Promise.resolve();
+          }),
+      };
+    }
+
+    it("typing draft B while draft A's submit is pending survives the success (mounted)", async () => {
+      const { onClose, finish } = await startPendingCreate();
+
+      // The editor stays interactive during the request; a store write during
+      // the flight replaces the singleton draft's object identity.
+      mockDraftStore.draft = {
+        ...emptyIssueDraft(),
+        manual: { ...emptyIssueDraft().manual, title: "Draft B" },
+      };
+
+      await finish();
+
+      expect(mockClearDraft).not.toHaveBeenCalled();
+      // The dialog must not close/reset over the newer draft either.
+      expect(onClose).not.toHaveBeenCalled();
+      expect(mockDraftStore.draft.manual.title).toBe("Draft B");
+    });
+
+    it("an untouched mounted submit still clears and closes", async () => {
+      const { onClose, finish } = await startPendingCreate();
+
+      await finish();
+
+      expect(mockClearDraft).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it("a late success does NOT clear a draft replaced after the dialog closed", async () => {
+      const { view, finish } = await startPendingCreate();
+
+      view.unmount();
+      // The user reopened the dialog and typed draft B — the singleton store
+      // now holds a different draft object than the submit snapshot.
+      mockDraftStore.draft = {
+        ...emptyIssueDraft(),
+        manual: { ...emptyIssueDraft().manual, title: "Draft B" },
+      };
+
+      await finish();
+
+      expect(mockClearDraft).not.toHaveBeenCalled();
+      expect(mockDraftStore.draft.manual.title).toBe("Draft B");
+    });
+
+    it("a late success still clears an untouched draft", async () => {
+      const { view, finish } = await startPendingCreate();
+
+      view.unmount();
+      await finish();
+
+      expect(mockClearDraft).toHaveBeenCalled();
+    });
+  });
+
   describe("upload submit gate", () => {
-    /** Attach a file whose upload stays in flight until the caller releases it. */
+    /** Attach a file whose upload stays in flight until the caller releases it.
+     *  Controls the coordinator's `api.uploadFile` promise (MUL-5181 L2). */
     function startPendingUpload() {
       let release!: (result: unknown) => void;
-      mockUploadWithToast.mockImplementationOnce(
+      mockApiUploadFile.mockImplementationOnce(
         () => new Promise((resolve) => { release = resolve; }),
       );
       fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
@@ -1247,7 +1441,15 @@ describe("CreateIssueModal", () => {
       await waitFor(() => expect(createButton).toBeDisabled());
       expect(createButton).toHaveAttribute("aria-busy", "true");
 
-      await act(async () => { pending.release({ id: "att-1", url: "https://cdn/x.png" }); });
+      await act(async () => {
+        pending.release({
+          id: "att-1",
+          url: "https://cdn/x.png",
+          filename: "x.png",
+          size_bytes: 1,
+          content_type: "image/png",
+        });
+      });
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Create Issue" })).not.toBeDisabled(),
       );

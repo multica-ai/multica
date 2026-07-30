@@ -26,12 +26,31 @@ type copilotBackend struct {
 // event stream. It is shared between production (Execute) and tests via
 // handleCopilotEvent, so the parsing logic is never duplicated.
 type copilotEventState struct {
-	output      strings.Builder
-	sessionID   string
-	activeModel string
-	finalStatus string
-	finalError  string
-	usage       map[string]TokenUsage
+	// output holds the latest COMPLETE assistant turn, not every turn joined:
+	// Result.Output is "final user-facing output selected by the backend"
+	// (agent.go), and a tool-using run's earlier turns are narration around the
+	// work, not the deliverable (GH #6006). Every turn still reaches the
+	// transcript through the emitted MessageText.
+	output strings.Builder
+	// pendingDelta buffers the turn currently streaming. It is cleared when that
+	// turn's authoritative assistant.message lands, so it is non-empty only when
+	// the process died mid-turn — the one case where a partial beats the
+	// previous turn's complete text.
+	pendingDelta strings.Builder
+	sessionID    string
+	activeModel  string
+	finalStatus  string
+	finalError   string
+	usage        map[string]TokenUsage
+}
+
+// finalOutput is the deliverable for Result.Output: the last complete assistant
+// turn, or the partial turn that was still streaming when the process died.
+func (st *copilotEventState) finalOutput() string {
+	if st.pendingDelta.Len() > 0 {
+		return st.pendingDelta.String()
+	}
+	return st.output.String()
 }
 
 func newCopilotEventState(seedModel string) *copilotEventState {
@@ -68,9 +87,9 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 	case "assistant.message_delta":
 		var delta copilotMessageDelta
 		if err := json.Unmarshal(evt.Data, &delta); err == nil && delta.DeltaContent != "" {
-			// Write to output as defense-in-depth: if the process is killed
-			// before the final assistant.message arrives, we still have text.
-			st.output.WriteString(delta.DeltaContent)
+			// Buffer deltas as defense-in-depth: if the process is killed before
+			// this turn's assistant.message arrives, we still have its text.
+			st.pendingDelta.WriteString(delta.DeltaContent)
 			msgs = append(msgs, Message{Type: MessageText, Content: delta.DeltaContent})
 		}
 
@@ -79,19 +98,19 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		if err := json.Unmarshal(evt.Data, &msg); err != nil {
 			return nil
 		}
-		// assistant.message carries the full turn content. Since deltas
-		// already wrote to output incrementally, we reset and write the
-		// authoritative content once to avoid double-counting.
+		// assistant.message carries the full turn content and supersedes both the
+		// deltas that streamed it and whatever earlier turn output held: a run
+		// that narrates, calls a tool, then answers must deliver the answer, not
+		// the pair joined together.
 		if msg.Content != "" {
-			// Separator between turns.
-			trimmed := strings.TrimSuffix(st.output.String(), msg.Content)
 			st.output.Reset()
-			st.output.WriteString(trimmed)
-			if st.output.Len() > 0 && !strings.HasSuffix(st.output.String(), "\n\n") {
-				st.output.WriteString("\n\n")
-			}
 			st.output.WriteString(msg.Content)
 		}
+		// Clear unconditionally — this event IS the turn boundary. A tool-only
+		// turn reports content:"" (the toolRequests below are the whole turn), and
+		// leaving its deltas buffered would let them be stitched onto the NEXT
+		// turn's partial text if the process then died mid-stream.
+		st.pendingDelta.Reset()
 		if msg.ReasoningText != "" {
 			msgs = append(msgs, Message{Type: MessageThinking, Content: msg.ReasoningText})
 		}
@@ -296,7 +315,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		resCh <- Result{
 			Status:     st.finalStatus,
-			Output:     st.output.String(),
+			Output:     st.finalOutput(),
 			Error:      st.finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  st.sessionID,

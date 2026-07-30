@@ -122,6 +122,8 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 - **空**：cookie 只对访问的那个 host 生效（单主机部署正确）
 - **设成 `.example.com`**：cookie 在所有子域共享（让 `app.example.com` 和 `api.example.com` 共用登录态）
+- **前后端在不同 host 上时，这是必需项而非可选项**：浏览器必须能从页面自身的 origin 读到 `multica_csrf` cookie，否则所有写请求都会 `403 CSRF validation failed`，而读请求照常
+- 用能覆盖前后端的**最窄**父域（`.agent.example.com`，而不是 `.example.com`）。这个值同时会把 `multica_auth` 会话 cookie 扩散到该域下的每个 host，所以只有当这些 host 都由同一可信主体运维时才用这种部署方式——完整配置见 [Self-Hosting](/getting-started/self-hosting)
 - ⚠️ 不能是 IP 地址（浏览器会忽略）
 
 ## 怎么限制谁能注册
@@ -256,8 +258,8 @@ multica config set auto_update_check_interval 12h
 |---|---|---|
 | `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → GitHub 里安装按钮的跳转 URL 用它拼 |
 | `GITHUB_WEBHOOK_SECRET` | 空 | 你在 GitHub App 上设置的 Webhook secret。每条 `pull_request` / `installation` delivery 都用它做 HMAC-SHA256 校验；同一个值也用作 setup 回调里 state token 的签名密钥 |
-| `GITHUB_APP_ID` | 空 | App 设置页上的数字 App ID。配合 `GITHUB_APP_PRIVATE_KEY`，是 PR 卡片 CI 状态与可合并性的必填项，同时也用于在安装那一刻直接从 GitHub 取到关联账号名 |
-| `GITHUB_APP_PRIVATE_KEY` | 空 | App RSA 私钥的完整 PEM 块（包含 `-----BEGIN/END-----` 两行，保留换行）。配合 `GITHUB_APP_ID`，用于以 App 身份鉴权并拉取 PR 卡片 CI 状态与可合并性背后的 GitHub API 快照 |
+| `GITHUB_APP_ID` | 空 | App 设置页上的数字 App ID。配合 `GITHUB_APP_PRIVATE_KEY`，用于 PR 卡片 CI 状态与可合并性、Settings → Repositories → 从 GitHub 选择，以及安装时直接获取关联账号名 |
+| `GITHUB_APP_PRIVATE_KEY` | 空 | App RSA 私钥的完整 PEM 块（包含 `-----BEGIN/END-----` 两行，保留换行）。配合 `GITHUB_APP_ID`，用于 App 鉴权的 PR 快照和仓库浏览 |
 
 **任一必填变量未设时：**
 
@@ -268,6 +270,7 @@ multica config set auto_update_check_interval 12h
 
 - PR 卡片**不显示任何 CI 状态或可合并性**——集成干净降级：PR 照常镜像，issue 照常自动关联并在 merge 时转 Done。
 - 安装完成后，连接卡片还会先短暂显示 `已连接到 unknown`。等 GitHub 的 `installation.created` webhook 到达（通常几秒内），Multica 会把 row 刷成真实的组织/用户名，并通过 realtime 推送让正在打开的 Settings → GitHub 页面无需手动刷新即可更新。
+- Settings → Repositories → 从 GitHub 选择会被禁用，因为服务端无法签发列出仓库所需的 installation token。
 
 **注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
 

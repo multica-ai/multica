@@ -231,7 +231,7 @@
   "detail": {
     "not_found": "このイシューはこのワークスペースに存在しないか、削除されています。",
     "breadcrumb_project_unknown": "不明なプロジェクト",
-    "back_to_issues": "イシューに戻る",
+    "back": "戻る",
     "title_placeholder": "イシューのタイトル",
     "desc_placeholder": "説明を追加...",
     "sub_issues_label": "サブイシュー",

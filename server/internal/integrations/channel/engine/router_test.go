@@ -538,11 +538,17 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	if !waitFor(time.Second, func() bool { return h.typing.calls() == 1 }) {
 		t.Fatalf("ingest must show the typing indicator")
 	}
-	if h.media.calls() != 1 {
+	// Media resolution runs on its own goroutine (r.mediaWg), and the binding
+	// happens only after it returns, so both of these are downstream of work
+	// that Handle does not wait for. Reading them bare raced with that
+	// goroutine and made this test fail intermittently on loaded CI runners
+	// with "resolved media 0 times, want 1". The waits below match what the
+	// sibling media assertions in this file already do.
+	if !waitFor(time.Second, func() bool { return h.media.calls() == 1 }) {
 		t.Fatalf("ingested message resolved media %d times, want 1", h.media.calls())
 	}
-	if refs := h.binder.boundMedia().MediaRefs; len(refs) != 1 {
-		t.Fatalf("resolved media not bound after append: %+v", refs)
+	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+		t.Fatalf("resolved media not bound after append: %+v", h.binder.boundMedia().MediaRefs)
 	}
 }
 

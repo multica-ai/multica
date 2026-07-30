@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  Copy,
   FilePlus2,
   FolderKanban,
   Maximize2,
@@ -21,7 +20,6 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
-import { copyText } from "@multica/ui/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -69,6 +67,7 @@ import { browserTimezone } from "../../common/timezone-select";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
+import { WebhookUrlField } from "./webhook-url-field";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 import type { WebhookEventFilter } from "@multica/core/types";
@@ -919,7 +918,6 @@ function WebhookCreatedPanel({
   onClose: () => void;
 }) {
   const { t } = useT("autopilots");
-  const [copied, setCopied] = useState(false);
 
   // Same URL composition the trigger row uses: prefer the server-provided
   // webhook_url, fall back to apiBaseUrl + webhook_path, then origin + path.
@@ -929,17 +927,6 @@ function WebhookCreatedPanel({
       apiBaseUrl: api.getBaseUrl(),
       currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
     }) ?? "";
-
-  const handleCopy = async () => {
-    if (!url) return;
-    if (await copyText(url)) {
-      setCopied(true);
-      toast.success(t(($) => $.trigger_row.url_copied));
-      setTimeout(() => setCopied(false), 1500);
-    } else {
-      toast.error(t(($) => $.trigger_row.url_copy_failed));
-    }
-  };
 
   return (
     <>
@@ -961,24 +948,7 @@ function WebhookCreatedPanel({
             <div className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
               {t(($) => $.trigger_row.webhook_url_label)}
             </div>
-            <div className="flex items-stretch gap-1.5">
-              <code className="flex-1 min-w-0 truncate rounded-md border bg-muted px-3 py-2 text-xs font-mono text-foreground">
-                {url}
-              </code>
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-9 w-9 shrink-0"
-                onClick={handleCopy}
-                title={t(($) => $.trigger_row.copy_url)}
-              >
-                {copied ? (
-                  <Check className="size-4 text-emerald-500" />
-                ) : (
-                  <Copy className="size-4 text-muted-foreground" />
-                )}
-              </Button>
-            </div>
+            <WebhookUrlField url={url} size="md" />
           </div>
 
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 leading-relaxed">

@@ -1117,11 +1117,11 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 	}
 }
 
-func commentAgentTriggerToResponse(trigger commentAgentTrigger) CommentTriggerAgentResponse {
+func (h *Handler) commentAgentTriggerToResponse(trigger commentAgentTrigger) CommentTriggerAgentResponse {
 	return CommentTriggerAgentResponse{
 		ID:        uuidToString(trigger.Agent.ID),
 		Name:      trigger.Agent.Name,
-		AvatarURL: textToPtr(trigger.Agent.AvatarUrl),
+		AvatarURL: h.resolveAvatarURLPtr(textToPtr(trigger.Agent.AvatarUrl)),
 		Source:    string(trigger.Source),
 		Reason:    commentAgentTriggerReason(trigger),
 	}
@@ -1210,7 +1210,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 		Blocked: commentBlockedTargetOutcomes(targets),
 	}
 	for _, trigger := range triggers {
-		resp.Agents = append(resp.Agents, commentAgentTriggerToResponse(trigger))
+		resp.Agents = append(resp.Agents, h.commentAgentTriggerToResponse(trigger))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2118,12 +2118,19 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// creator's authority by commenting on that autopilot's issue.
 
 	mentions := util.ParseMentions(content)
-	if util.HasMentionAll(mentions) {
-		return nil, nil
-	}
 
+	// EXPLICIT @agent / @squad mentions are a direct request and win over the
+	// @all broadcast (MUL-5411). @all only suppresses the IMPLICIT routing
+	// fallbacks (assignee / thread parent / conversation) below — it must not
+	// swallow a target the author named by hand. Before this ordering, a
+	// comment carrying both `@all` and `@Preflight` enqueued nothing at all.
+	// `all` is neither "agent" nor "squad", so it is skipped inside
+	// resolveMentionedAgentCommentTriggers and never enqueues a run of its own.
 	if hasAgentOrSquadMention(mentions) {
 		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+	}
+	if util.HasMentionAll(mentions) {
+		return nil, nil
 	}
 	if hasMemberMention(mentions) {
 		return nil, nil
@@ -2495,7 +2502,18 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	for _, m := range mentions {
 		if m.Type == "squad" {
 			// @squad mention → trigger the squad's leader agent.
-			squadUUID := parseUUID(m.ID)
+			// The mention id comes from untrusted comment text and MentionRe
+			// accepts any hex/dash run (`mention://squad/-`), so it is parsed
+			// with the error-returning ParseUUID — the Must* variant would
+			// panic the request, and on the create path the comment row is
+			// already committed by then. A malformed id is indistinguishable
+			// from a well-formed id that owns no squad: same target_unavailable
+			// outcome, no run.
+			squadUUID, err := util.ParseUUID(m.ID)
+			if err != nil {
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
+				continue
+			}
 			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 				ID:          squadUUID,
 				WorkspaceID: issue.WorkspaceID,
@@ -2554,7 +2572,14 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		if m.Type != "agent" {
 			continue
 		}
-		agentUUID := parseUUID(m.ID)
+		agentUUID, err := util.ParseUUID(m.ID)
+		if err != nil {
+			// Untrusted comment text: MentionRe matches any hex/dash run, so a
+			// malformed id must not reach the panicking Must* parser. It gets
+			// the same enumeration-safe outcome as an id that owns no agent.
+			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
+			continue
+		}
 		// Load the agent scoped to the current issue's workspace. Using the
 		// bare GetAgent here would let a mention resolve to an agent in a
 		// different workspace, and the visibility check below would then be

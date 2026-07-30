@@ -33,6 +33,14 @@ type RendererRecoveryOptions = {
    * process never recovers.
    */
   clearBreadcrumb?: () => void;
+  /**
+   * Read the JS call stack out of the hung renderer. This is the only signal
+   * that says WHICH code blocked the thread — the in-thread watchdog reports a
+   * duration and the breadcrumb reports a route, but neither can name the
+   * function. Resolves to null whenever a stack can't be obtained; the hang is
+   * still reported without it. Omit in dev.
+   */
+  captureStack?: () => Promise<unknown>;
   log?: (tag: string, ...args: unknown[]) => void;
   unresponsivePromptDelayMs?: number;
 };
@@ -47,6 +55,7 @@ export function installRendererRecoveryHandlers(
     getDiagnosticContext,
     persistBreadcrumb,
     clearBreadcrumb,
+    captureStack,
     log = noopDevLog,
     unresponsivePromptDelayMs = 1500,
   }: RendererRecoveryOptions,
@@ -95,15 +104,24 @@ export function installRendererRecoveryHandlers(
     if (isDev || unresponsivePromptTimer) return;
     unresponsivePromptTimer = setTimeout(() => {
       unresponsivePromptTimer = null;
-      const payload: ReloadPromptPayload = {
-        kind: "unresponsive",
-        context: mergeDiagnosticContext({}),
-      };
-      persistBreadcrumb?.(payload);
-      unresponsiveBreadcrumbWritten = true;
-      maybePromptReload(payload);
+      void reportHang();
     }, unresponsivePromptDelayMs);
   });
+
+  // The stack has to be read while the thread is still stuck, so it is
+  // captured before the breadcrumb is written — but it is never allowed to
+  // delay the prompt indefinitely (captureStack is itself bounded) and a
+  // failure just means the hang is reported without a stack.
+  const reportHang = async () => {
+    const stack = captureStack ? await readStack(captureStack, log) : null;
+    const payload: ReloadPromptPayload = {
+      kind: "unresponsive",
+      context: mergeDiagnosticContext(stack ? { stack } : {}),
+    };
+    persistBreadcrumb?.(payload);
+    unresponsiveBreadcrumbWritten = true;
+    maybePromptReload(payload);
+  };
 
   window.on("responsive", () => {
     if (unresponsivePromptTimer) {
@@ -186,6 +204,18 @@ function rendererRecoveryDetail(payload: ReloadPromptPayload) {
     `kind: ${payload.kind}`,
     `context: ${JSON.stringify(payload.context)}`,
   ].join("\n");
+}
+
+async function readStack(
+  captureStack: () => Promise<unknown>,
+  log: (tag: string, ...args: unknown[]) => void,
+): Promise<unknown> {
+  try {
+    return (await captureStack()) ?? null;
+  } catch (error) {
+    log("stack-capture-failed", formatError(error));
+    return null;
+  }
 }
 
 function readDiagnosticContext(

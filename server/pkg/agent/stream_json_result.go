@@ -102,6 +102,21 @@ type streamProtocolObservation struct {
 	scannerError               bool
 	lastEventType              string
 	anthropicBaseURLConfigured bool
+	// unhandledEventTypeCount / unhandledEventTypes / unhandledSubtypeCount
+	// report stream events the parser did not turn into messages. They belong on
+	// this line rather than only in a separate warning so they can be read
+	// together with toolUseCount and invalidEventCount.
+	//
+	// They are evidence, not a verdict. A non-zero count means the stream
+	// carried events we do not handle and is the starting point for identifying
+	// a protocol change; a zero count means only that none were observed at the
+	// top level, and does not establish that the agent used no tools — a CLI can
+	// execute tools without serializing the updates at all, and a new shape can
+	// be nested inside a type we already recognize. Set by providers that track
+	// them; zero elsewhere.
+	unhandledEventTypeCount int
+	unhandledEventTypes     string
+	unhandledSubtypeCount   int
 }
 
 // logStreamProtocolObservation records only protocol metadata. It deliberately
@@ -124,6 +139,9 @@ func logStreamProtocolObservation(logger *slog.Logger, obs streamProtocolObserva
 		"last_assistant_bytes", obs.lastAssistantBytes,
 		"scanner_error", obs.scannerError,
 		"last_event_type", obs.lastEventType,
+		"unhandled_event_type_count", obs.unhandledEventTypeCount,
+		"unhandled_event_types", obs.unhandledEventTypes,
+		"unhandled_subtype_count", obs.unhandledSubtypeCount,
 		"anthropic_base_url_configured", obs.anthropicBaseURLConfigured,
 	)
 }

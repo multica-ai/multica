@@ -2390,6 +2390,55 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	})
 }
 
+// TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic pins the
+// DECISION layer for GH #6066 / GH #5760: given the same provider error, every
+// supported backend gets the same verdict, so recovery is not a property of
+// whichever adapter happened to get a bug report. ResumeRejected is false for
+// all of them here — nothing rejected the resume; the transcript loaded and the
+// provider refused to replay it.
+//
+// Scope, deliberately: this feeds each backend a hand-built agent.Result, so it
+// proves the shared decision ignores the provider NAME. It does not prove all
+// 17 adapters surface an upstream error into Result.Error in the first place —
+// #5760 is the counter-example, where the Kimi/ACP adapter swallowed the error
+// and reported completed. The fix therefore covers every backend that surfaces
+// the error; adapter-level surfacing is tracked separately (#5785 for ACP).
+//
+// The safety half is asserted in the same loop: tools > 0 must still veto the
+// retry for every backend, because re-running a turn that already posted a
+// comment or wrote a commit duplicates that side effect. Those tasks recover
+// on the next trigger instead — classifyPoisonedError retires the session at
+// report time.
+func TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic(t *testing.T) {
+	t.Parallel()
+
+	// Both real-world wordings, neither of which the pre-fix detector matched.
+	errors := map[string]string{
+		"gh6066": "Invalid request: the message at position 37 with role 'assistant' must not be empty",
+		"gh5760": "kimi provider error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty",
+	}
+
+	for _, provider := range agent.SupportedTypes {
+		for label, errMsg := range errors {
+			t.Run(provider+"/"+label+" retries fresh", func(t *testing.T) {
+				t.Parallel()
+				result := agent.Result{Status: "failed", Error: errMsg, SessionID: "poisoned-id"}
+				if !shouldRetryWithFreshSession(result, "poisoned-id", 0, provider) {
+					t.Fatalf("%s: an unresumable history must trigger the fresh-session retry on every backend", provider)
+				}
+			})
+
+			t.Run(provider+"/"+label+" respects the tool gate", func(t *testing.T) {
+				t.Parallel()
+				result := agent.Result{Status: "failed", Error: errMsg, SessionID: "poisoned-id"}
+				if shouldRetryWithFreshSession(result, "poisoned-id", 1, provider) {
+					t.Fatalf("%s: a run that already used a tool must never be re-run automatically", provider)
+				}
+			})
+		}
+	}
+}
+
 func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")

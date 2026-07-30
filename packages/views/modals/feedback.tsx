@@ -153,7 +153,7 @@ export function FeedbackModal({
               defaultValue={seededMessage}
               placeholder={t(($) => $.feedback.placeholder)}
               onUpdate={(md) => { setMessage(md); setDraft({ message: md }); }}
-              onUploadFile={uploadWithToast}
+              onUploadFile={(file) => uploadWithToast(file)}
               onUploadingChange={uploadGate.onUploadingChange}
               onSubmit={handleSubmit}
               debounceMs={150}

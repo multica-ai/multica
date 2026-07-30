@@ -17,7 +17,7 @@ export function HowItWorksSection() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/40">
           {t.howItWorks.label}
         </p>
-        <h2 className="mt-4 font-[family-name:var(--font-serif)] text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem] lg:text-[4.2rem]">
+        <h2 className="mt-4 landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem] lg:text-[4.2rem]">
           {t.howItWorks.headlineMain}
           <br />
           <span className="text-white/40">{t.howItWorks.headlineFaded}</span>

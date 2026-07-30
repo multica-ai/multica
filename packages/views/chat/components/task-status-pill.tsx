@@ -174,7 +174,7 @@ export function TaskStatusPill({
         <span className={cn(!stage.static && "animate-chat-text-shimmer")}>
           {stage.label}
         </span>
-        <span className="opacity-70"> · {formatElapsedSecs(elapsedSecs)}</span>
+        <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
       </span>
     </div>
   );

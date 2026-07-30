@@ -315,10 +315,12 @@
       "behavior": "Behavior & capabilities",
       "behavior_hint": "Define how it should work and attach workspace skills it can rely on.",
       "execution": "Execution",
-      "execution_hint": "Choose where the agent runs and optionally override the runtime's default model.",
+      "execution_hint": "Choose where the agent runs, and optionally override the runtime's default model, thinking level and speed.",
       "access": "Access",
       "access_hint": "Control who can start runs with this agent. You can change this later."
     },
+    "thinking_label": "Thinking",
+    "speed_label": "Speed",
     "access": {
       "private": {
         "title": "Only me",
@@ -360,7 +362,8 @@
     },
     "live_draft": "Agent configuration",
     "live_draft_hint": "Conversation updates appear here, and you can adjust any field directly.",
-    "duplicate_env_notice": "Instructions, skills, model, and command arguments are copied. Environment variables are not copied for security.",
+    "duplicate_env_notice": "Instructions, skills and command arguments are copied. Environment variables, MCP servers and machine-local runtime config are not.",
+    "duplicate_runtime_reset_notice": "The original runtime is unavailable, so this copy runs on another one. Model, thinking level and speed were cleared because they only apply to the runtime they were chosen on.",
     "create_and_open": "Create & open agent",
     "create_and_add": "Create & add to squad",
     "creating": "Creating agent…",

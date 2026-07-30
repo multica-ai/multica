@@ -430,6 +430,33 @@ describe("IssueSurface — table pagination ownership", () => {
       listSquads: vi.fn(() => Promise.resolve([])),
     } as unknown as ApiClient);
 
+    // Continuation is driven by the shared footer's sentinel, the same one
+    // Board / List / Swimlane use — there is no manual button to press, so the
+    // observer has to actually report the footer as visible.
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+        root = null;
+        rootMargin = "0px";
+        thresholds = [0];
+      },
+    );
+
     render(
       <QueryClientProvider client={qc}>
         <IssueSurface
@@ -442,12 +469,6 @@ describe("IssueSurface — table pagination ownership", () => {
     );
 
     await screen.findByText("First cursor row");
-    const loadMoreButton = document.querySelector<HTMLButtonElement>(
-      "tbody button.sticky",
-    );
-    expect(loadMoreButton).not.toBeNull();
-    fireEvent.click(loadMoreButton!);
-
     await screen.findByText("Second cursor row");
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({ page: { limit: 50, cursor: "cursor-2" } }),

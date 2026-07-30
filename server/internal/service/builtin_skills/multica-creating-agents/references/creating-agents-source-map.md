@@ -23,15 +23,16 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Secret-safe MCP input: `mcp-config`, `mcp-config-stdin`, `mcp-config-file` (create) | 172–174 | Same three-channel pattern as `custom-env`; `--mcp-config` warns about shell history / `ps`; value must be a JSON object or `null` | `multica agent create --help` |
 | MCP flags on `agent update` | 200–202 | Same three channels on update; `--mcp-config null` clears. Unlike `custom_env`, `mcp_config` IS settable via update | `multica agent update --help` |
 | `thinking-level` / `service-tier` flags on `agent update` | 189–190 | Thin pass-throughs; an explicit empty string clears the saved override and restores the runtime/local Codex default | `multica agent update --help` |
-| `runAgentCreate` builds body + `POST /api/agents` | 533–624 | Only sets a body key when the flag `Changed`; posts to `/api/agents` (line 614) | read 533–624 |
-| Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model/thinking-level/service-tier | 548–608 | `model`, `thinking_level`, and `service_tier` are `Changed`-gated pass-throughs; omitted flags are not sent | read the `runAgentCreate` body assembly |
-| `runAgentUpdate` sends `thinking_level` / `service_tier` / `mcp_config` | 627–718 | Each override key is added only when its flag is `Changed`; `custom_env` is intentionally not a flag here | read the `runAgentUpdate` body assembly |
-| `parseMcpConfig` / `resolveMcpConfig` helpers | 1210, 1238 | Validator (object-or-`null`, content-free errors) + three-channel resolver, mirroring `parseCustomEnv`/`resolveCustomEnv` | read 1210–1294 |
-| `agent skills set` = replace-all | 916 | `PUT /api/agents/{id}/skills` (934); `--skill-ids ''` clears all (922–925) | `multica agent skills set --help` |
-| `agent skills add` = additive | 941 | `POST /api/agents/{id}/skills/add` (962); requires ≥1 id (947–952) | `multica agent skills add --help` |
-| `agent skills list` | 884 | reads bindings, no side effect | `multica agent skills list --help` |
-| `agent env get` | 1018 | `GET /api/agents/{id}/env` (1028) | `multica agent env get --help` |
-| `agent env set` | 1053 | `PUT /api/agents/{id}/env` with full `custom_env` map (1073) | `multica agent env set --help` |
+| `max-concurrent-tasks` flags + validation | `cmd_agent.go` 179, 208; `cmd_agent_validation.go` 5–20 | Shared CLI helper enforces 1–50; create/update call it before their HTTP mutation and omitted create flags stay absent | `multica agent create --help`; `multica agent update --help` |
+| `runAgentCreate` builds body + `POST /api/agents` | 533–628 | Only sets a body key when the flag `Changed`; validates `max_concurrent_tasks` at 605–611, then posts to `/api/agents` (617) | read 533–628 |
+| Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model/thinking-level/service-tier | 548–611 | `model`, `thinking_level`, and `service_tier` are `Changed`-gated pass-throughs; omitted flags are not sent | read the `runAgentCreate` body assembly |
+| `runAgentUpdate` sends `thinking_level` / `service_tier` / `mcp_config` | 630–725 | Each override key is added only when its flag is `Changed`; `max_concurrent_tasks` is range-checked at 693–699; `custom_env` is intentionally not a flag here | read the `runAgentUpdate` body assembly |
+| `parseMcpConfig` / `resolveMcpConfig` helpers | 1216, 1244 | Validator (object-or-`null`, content-free errors) + three-channel resolver, mirroring `parseCustomEnv`/`resolveCustomEnv` | read 1216–1301 |
+| `agent skills set` = replace-all | 922 | `PUT /api/agents/{id}/skills` (940); `--skill-ids ''` clears all (928–931) | `multica agent skills set --help` |
+| `agent skills add` = additive | 947 | `POST /api/agents/{id}/skills/add` (968); requires ≥1 id (953–958) | `multica agent skills add --help` |
+| `agent skills list` | 890 | reads bindings, no side effect | `multica agent skills list --help` |
+| `agent env get` | 1024 | `GET /api/agents/{id}/env` (1034) | `multica agent env get --help` |
+| `agent env set` | 1059 | `PUT /api/agents/{id}/env` with full `custom_env` map (1079) | `multica agent env set --help` |
 
 ## Copy command — `server/cmd/multica/cmd_agent_copy.go`
 
@@ -40,6 +41,7 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `agentCopyCmd` (`copy <source-agent-id>`) + flag registrar | 21, 47, 54 | Own file with its own `init()` so `cmd_agent.go` line refs stay stable; `registerAgentCopyFlags` is shared with the tests | `multica agent copy --help` |
 | Reads source via `GET /api/agents/<id>` | 95 | Composes over existing endpoints — no dedicated copy API | read `runAgentCopy` |
 | Same-runtime vs cross-runtime rule | 114, 187 | `sameRuntime` copies `model`/`thinking_level`/`service_tier`; a different `--runtime-id` drops them and requires `--model` (empty allowed) | `multica agent copy --help` |
+| Concurrency copy compatibility | `runAgentCopy`, `copiedAgentMaxConcurrentTasks` | Explicit `--max-concurrent-tasks` is validated before any request; valid source values are copied, while historical values outside 1–50 are omitted so create defaults to 6 | read the concurrency body assembly |
 | Skills copied in the create transaction | 239 | Source skill ids sent as `skill_ids`, bound in the same `POST /api/agents` tx (267); `--no-skills` opts out | read `runAgentCopy` |
 | Secrets never copied | 240–266 | `custom_env`/`mcp_config`/`runtime_config` set only from explicit secret-safe flags, never read from the source | `multica agent copy --help` |
 
@@ -69,7 +71,8 @@ only.
 | `service_tier` provider-level validation | `agent.go` create/update paths | Non-empty values are Codex-only safe tokens; exact per-model support is daemon-owned |
 | Defaults: `{}` config/env, `[]` args | 688–701 | `RuntimeConfig`→`{}`, `CustomEnv`→`{}`, `CustomArgs`→`[]` when nil, before insert |
 | `visibility` default | 635–636 | `if req.Visibility == "" { req.Visibility = "private" }` — access-control field, not the runtime prompt |
-| `max_concurrent_tasks` default | 638–639 | `if req.MaxConcurrentTasks == 0 { req.MaxConcurrentTasks = 6 }` — scheduler cap |
+| `max_concurrent_tasks` create/default validation | `agent.go`; `agent_validation.go`; `internal/agentconfig/concurrency.go` | Shared 1–50 validator; a missing or explicit `null` field defaults to 6, while an explicitly supplied numeric 0/out-of-range value returns 400 |
+| `max_concurrent_tasks` update validation | 1660–1666 | Omission preserves the existing value; a supplied value outside 1–50 returns 400 before persistence |
 | `mcp_config` null-skip on create | 704–705 | raw JSON copied through unless the body value is the literal `null` |
 | `mcp_config` redacted on read | 54, 848–851 | `redactMcpConfig` sets `McpConfigRedacted=true`; a private agent read by a member also redacts (494, 509) |
 | Qwen Code managed-MCP injection | `pkg/agent/qwen.go` | Non-null `mcp_config` is written to a daemon-owned 0600 temporary JSON file and passed with `--mcp-config`; the file is removed after the process exits, while `null` preserves native inheritance. |
@@ -78,6 +81,12 @@ only.
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
+
+## Create-from-template handler — `server/internal/handler/agent_template.go`
+
+| Contract | Line | Behavior |
+|---|---|---|
+| `max_concurrent_tasks` default + validation | `CreateAgentFromTemplate`; `defaultAndValidateAgentMaxConcurrentTasks` | Uses the same helper as manual create: omission or `null` defaults to 6; explicit numeric values outside 1–50 return 400 |
 
 ## Runtime model/thinking discovery — `server/pkg/agent/{models,thinking}.go`
 
@@ -96,9 +105,10 @@ only.
 
 | Contract | Line | Behavior |
 |---|---|---|
-| `authorizeAgentEnv` gate | 66 | loads agent, then applies the two checks below |
-| Agent actors denied | 80–84 | `if actorType == "agent"` → 403 "agents may not access env management endpoints" (MUL-2600 impersonation guard) |
-| Owner/admin only | 86 | `requireWorkspaceRole(..., "owner", "admin")` |
+| `authorizeAgentEnv` gate | 76 | loads agent, then applies the two checks below |
+| Agent actors denied | 90–94 | `if actorType == "agent"` → 403 "agents may not access env management endpoints" (MUL-2600 impersonation guard); runs FIRST, so an agent is denied even when its backing human owns the target agent |
+| Agent owner or ws owner/admin | 96–103 | `requireWorkspaceRole(..., "owner", "admin", "member")` then `canManageAgentEnv` → 403 otherwise (MUL-5438) |
+| `canManageAgentEnv` predicate | 120 | workspace owner/admin, or `agent.owner_id == member.user_id`; a NULL `owner_id` never matches |
 
 ## Routes — `server/cmd/server/router.go`
 

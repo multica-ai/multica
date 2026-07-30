@@ -73,6 +73,9 @@ func TestDetectBuiltinRuntimes_ProbesRunConcurrently(t *testing.T) {
 // version detection or the min-version gate is dropped from the payload while
 // the healthy ones still register — matching the old serial loop's semantics.
 func TestDetectBuiltinRuntimes_SkipsFailedProbes(t *testing.T) {
+	// /broken fails fast, so it earns its bounded retry before being dropped;
+	// shrink the retry delay so this test doesn't wait out the real one.
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	origDetect := detectAgentVersion
 	origCheck := checkAgentMinVersion
 	t.Cleanup(func() {

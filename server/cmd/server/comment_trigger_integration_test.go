@@ -408,6 +408,17 @@ func TestCommentTriggerAtAllSuppression(t *testing.T) {
 			t.Errorf("expected 0 pending tasks (@all in agent thread), got %d", n)
 		}
 	})
+
+	// MUL-5411: @all suppresses only the IMPLICIT routes. An explicit @agent in
+	// the same comment is a direct request and must still enqueue that agent.
+	t.Run("@all with explicit @agent still triggers the agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		content := fmt.Sprintf("[@All](mention://all/all) heads up — [@Agent](mention://agent/%s) please take this", agentID)
+		postComment(t, issueID, content, nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (@all must not swallow the explicit @agent), got %d", n)
+		}
+	})
 }
 
 // TestCommentTriggerOnAssignNoStatusGate verifies that assigning an agent to

@@ -668,14 +668,23 @@ WHERE storage_key = ANY(@storage_keys::text[])
   AND state = 'pending'
 RETURNING storage_key;
 
--- name: ClaimChannelMediaPendingObjectsForReconcile :many
--- Short-transaction claim: flips due rows to 'deleting' under a fresh lease.
+-- name: ClaimNextChannelMediaPendingObjectForReconcile :one
+-- Short-transaction claim of ONE due row, taken immediately before that row is
+-- settled. Claiming a whole batch up front made the claim a promise the sweep
+-- might not keep: a tail row sat in 'deleting' with attempt already bumped
+-- while earlier rows ran, and could expire and be reclaimed before its own
+-- DELETE was ever tried, inflating attempt/backoff for work that never
+-- happened. One row per claim means attempt counts attempts.
+--
 -- Due means (a) 'pending' rows older than the settle delay — an operational
 -- buffer only; correctness comes from the state flip, after which a bind can
 -- never succeed on the key — or (b) 'deleting' rows whose lease expired (a
--- crashed or failed worker). FOR UPDATE SKIP LOCKED keeps replicas from
--- claiming the same rows; the object-storage DELETE happens outside any
--- transaction, gated by the lease token.
+-- crashed or failed worker) — or (c) tombstones: the object was deleted, but a
+-- PUT the client abandoned may still materialize it afterwards, so each due
+-- tombstone gets another idempotent delete before the row is finally dropped.
+-- FOR UPDATE SKIP LOCKED keeps replicas off each other's row; the
+-- object-storage DELETE happens outside any transaction, gated by the lease
+-- token. No row (ErrNoRows) means nothing is due — the sweep is done.
 UPDATE channel_media_pending_object AS obj
 SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
     lease_token = @lease_token,
@@ -687,31 +696,14 @@ FROM (
       AND (
           (cand.state = 'pending' AND cand.created_at <= now() - @settle_delay::interval)
           OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
-          -- Tombstones: the object was deleted, but a PUT the client abandoned
-          -- may still materialize it afterwards, so each due tombstone gets
-          -- another idempotent delete before the row is finally dropped.
           OR (cand.state = 'tombstoned' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
       )
     ORDER BY cand.next_attempt_at
-    LIMIT @batch_limit
+    LIMIT 1
     FOR UPDATE SKIP LOCKED
 ) AS due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.*;
-
--- name: RenewChannelMediaPendingObjectLease :execrows
--- Per-row heartbeat: the batch shares one claim, so the lease must be
--- extended before EACH row's settle work — otherwise a few storage deletes
--- running at their full timeout could outlive the lease mid-batch and a
--- second replica would reclaim the tail, duplicating deletes and inflating
--- attempt/backoff. Zero rows affected means another worker already reclaimed
--- this row: the caller must skip it. workspace_id explicit per the tenancy
--- rule.
-UPDATE channel_media_pending_object
-SET lease_expires_at = now() + @lease::interval
-WHERE storage_key = @storage_key
-  AND workspace_id = @workspace_id
-  AND lease_token = @lease_token;
 
 -- name: ReleaseChannelMediaPendingObject :exec
 -- Object-storage DELETE failed: keep the row in 'deleting' (bind must still

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -27,7 +28,7 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
-		"--disallowedTools", "AskUserQuestion",
+		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 		"--model", "claude-sonnet-4-20250514",
 		"--max-turns", "25",
 		"--append-system-prompt", "You are an agent.",
@@ -39,6 +40,37 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 	for i, want := range expected {
 		if args[i] != want {
 			t.Fatalf("args[%d] = %q, want %q\nfull args: %v", i, args[i], want, args)
+		}
+	}
+}
+
+func TestBuildCodebuddyArgs_DisallowsInteractiveTools(t *testing.T) {
+	t.Parallel()
+
+	// The daemon runs CodeBuddy headless, so every tool that waits on a human
+	// confirmation stalls the turn instead of ending it (GitHub #6012).
+	// CodeBuddy matches each --disallowedTools entry against the tool name
+	// exactly, so each tool must arrive as its own argv value.
+	args := buildCodebuddyArgs(ExecOptions{}, slog.Default())
+
+	idx := -1
+	for i, a := range args {
+		if a == "--disallowedTools" {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("expected --disallowedTools in args: %v", args)
+	}
+
+	for offset, want := range []string{"AskUserQuestion", "EnterPlanMode", "ExitPlanMode"} {
+		got := ""
+		if idx+1+offset < len(args) {
+			got = args[idx+1+offset]
+		}
+		if got != want {
+			t.Fatalf("disallowed tool %d = %q, want %q\nfull args: %v", offset, got, want, args)
 		}
 	}
 }
@@ -472,5 +504,64 @@ func TestCodebuddyHandleUserToolResult(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+func TestCodebuddyHandleControlRequestApprovesInCodebuddyShape(t *testing.T) {
+	t.Parallel()
+
+	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
+
+	var written bytes.Buffer
+
+	msg := codebuddySDKMessage{
+		Type:      "control_request",
+		RequestID: "perm_1730000000000_1",
+		Request: mustMarshal(t, codebuddyControlRequestPayload{
+			Subtype:  "can_use_tool",
+			ToolName: "Bash",
+			Input:    mustMarshal(t, map[string]any{"command": "ls"}),
+		}),
+	}
+
+	b.handleControlRequest(msg, &written)
+
+	var resp map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if resp["type"] != "control_response" {
+		t.Fatalf("expected type control_response, got %v", resp["type"])
+	}
+	respInner, ok := resp["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected response object, got %v", resp["response"])
+	}
+	if respInner["subtype"] != "success" {
+		t.Fatalf("expected subtype success, got %v", respInner["subtype"])
+	}
+	if respInner["request_id"] != "perm_1730000000000_1" {
+		t.Fatalf("expected the request_id to be echoed back, got %v", respInner["request_id"])
+	}
+
+	innerResp, ok := respInner["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected inner response object, got %v", respInner["response"])
+	}
+	// CodeBuddy reads `allowed`; a missing key is read as a denial, which
+	// leaves the CLI waiting on a confirmation the daemon can never deliver.
+	if innerResp["allowed"] != true {
+		t.Fatalf("expected allowed=true, got %v", innerResp["allowed"])
+	}
+	if innerResp["behavior"] != "allow" {
+		t.Fatalf("expected behavior allow, got %v", innerResp["behavior"])
+	}
+	updatedInput, ok := innerResp["updatedInput"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected updatedInput object, got %v", innerResp["updatedInput"])
+	}
+	if updatedInput["command"] != "ls" {
+		t.Fatalf("expected the original tool input to be preserved, got %v", updatedInput["command"])
 	}
 }

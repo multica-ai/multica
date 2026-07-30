@@ -2,18 +2,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { TimelineEntry } from "@multica/core/types";
+import type { Attachment, TimelineEntry } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 
+const apiUploadFile = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
 }));
 
+// The real handle mints an id when it inserts the placeholder and hands it to
+// the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
+// the same or the two records drift apart only in tests.
+let mockUploadIdSeq = 0;
+
 vi.mock("@multica/core/api", () => ({
-  api: {},
+  // Uploads flow through the coordinator, which calls api.uploadFile (MUL-5181).
+  api: { uploadFile: apiUploadFile },
   dispatchReasonCode: () => undefined,
 }));
 
@@ -48,6 +55,11 @@ vi.mock("../../editor", async () => ({
   ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
     "../../editor/use-lazy-editor",
   )),
+  // Real await-then-render submit contract (pure React) — the edit save path
+  // now delegates to it.
+  ...(await vi.importActual<typeof import("../../editor/use-composer-submit")>(
+    "../../editor/use-composer-submit",
+  )),
   useEditorUpload: () => ({ uploadWithToast, upload: vi.fn(), uploading: false }),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
@@ -65,7 +77,7 @@ vi.mock("../../editor", async () => ({
     }: {
       defaultValue?: string;
       onUpdate?: (markdown: string) => void;
-      onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
       onUploadingChange?: (uploading: boolean) => void;
       onSubmit?: () => void;
       placeholder?: string;
@@ -92,7 +104,7 @@ vi.mock("../../editor", async () => ({
         inFlightRef.current += 1;
         if (inFlightRef.current === 1) onUploadingChange?.(true);
         try {
-          const result = await onUploadFile?.(file);
+          const result = await onUploadFile?.(file, `mock-upload-${++mockUploadIdSeq}`);
           if (!result) return;
           valueRef.current = `${valueRef.current}\n${result.url}`.trim();
           onUpdate?.(valueRef.current);
@@ -102,6 +114,11 @@ vi.mock("../../editor", async () => ({
         }
       },
       hasActiveUploads: () => inFlightRef.current > 0,
+      // Placeholder rebuild contract: the real handle draws a card for an
+      // upload the document is not showing and reports whether it landed.
+      // Mocks track ids only — no document to draw into.
+      insertUploadPlaceholder: () => true,
+      settleUploadPlaceholder: () => false,
     }));
     return (
       <textarea
@@ -172,6 +189,7 @@ function getSaveButton() {
 
 beforeEach(() => {
   uploadWithToast.mockReset();
+  apiUploadFile.mockReset();
   useCommentDraftStore.setState({ drafts: {} });
   editorDefaultValues.values = [];
 });
@@ -198,16 +216,16 @@ describe("comment edit — draft snapshot", () => {
 // edit with the pending image stripped out of the body and its id unbound.
 describe("comment edit — upload submit gate", () => {
   function startPendingUpload(container: HTMLElement) {
-    let release!: (result: UploadResult | null) => void;
-    uploadWithToast.mockImplementationOnce(
-      () => new Promise<UploadResult | null>((resolve) => { release = resolve; }),
+    let resolveUpload!: (att: Attachment) => void;
+    apiUploadFile.mockImplementationOnce(
+      () => new Promise<Attachment>((resolve) => { resolveUpload = resolve; }),
     );
     const input = container.querySelector('input[type="file"]');
     if (!input) throw new Error("Expected a file input to render");
     fireEvent.change(input, {
       target: { files: [new File(["x"], "shot.png", { type: "image/png" })] },
     });
-    return { release: (result: UploadResult | null) => release(result) };
+    return { resolve: (att: Attachment) => resolveUpload(att) };
   }
 
   it("disables Save while an upload is in flight and re-enables once it settles", async () => {
@@ -221,13 +239,15 @@ describe("comment edit — upload submit gate", () => {
     expect(getSaveButton()).toHaveAttribute("aria-busy", "true");
 
     await act(async () => {
-      pending.release({
+      pending.resolve({
         id: "att-1",
         url: "https://cdn.example/att-1.png",
+        download_url: "https://cdn.example/att-1.png",
+        markdown_url: "https://cdn.example/att-1.png",
         filename: "shot.png",
-        link: "https://cdn.example/att-1.png",
-        markdownLink: "https://cdn.example/att-1.png",
-      } as unknown as UploadResult);
+        content_type: "image/png",
+        size_bytes: 1,
+      } as unknown as Attachment);
     });
 
     await waitFor(() => expect(getSaveButton()).not.toBeDisabled());

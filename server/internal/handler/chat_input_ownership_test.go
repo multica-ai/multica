@@ -94,7 +94,7 @@ func TestDirectChat_TaskOwnsItsOwnInputBatch(t *testing.T) {
 	// coalesced pair. The claim leaves T1 dispatched; move it to running so the
 	// completion CAS (WHERE status='running') applies.
 	markTaskRunning(t, ctx, t1)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "上海晴"), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "上海晴"), "", "", false, ""); err != nil {
 		t.Fatalf("complete first task: %v", err)
 	}
 	claimed2 := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
@@ -152,7 +152,7 @@ func TestCompleteTask_ChatEmptyOutputWritesNoResponse(t *testing.T) {
 	markTaskRunning(t, ctx, taskID)
 
 	// Whitespace-only output trims to empty → no_response.
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "   "), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "   "), "", "", false, ""); err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestCompleteTask_ChatNonEmptyOutputWritesMessage(t *testing.T) {
 	taskID := sendDirectChat(t, ctx, agentID, sessionID, "hello")
 	markTaskRunning(t, ctx, taskID)
 
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "hi there"), "sess-1", "/tmp/wd", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "hi there"), "sess-1", "/tmp/wd", false, ""); err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
 	rows := assistantRows(t, ctx, sessionID)
@@ -208,11 +208,11 @@ func TestCompleteTask_ChatCallbackIdempotent(t *testing.T) {
 	markTaskRunning(t, ctx, taskID)
 
 	res := completeResult(t, "reply")
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", "", false, ""); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
 	// Replay: the status CAS fails, so this is an idempotent no-op success.
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", "", false, ""); err != nil {
 		t.Fatalf("replayed complete must be idempotent success, got %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 1 {
@@ -233,7 +233,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	rootID := sendDirectChat(t, ctx, agentID, sessionID, "root question")
 	markTaskRunning(t, ctx, rootID)
 
-	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "runtime_offline", false); err != nil {
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "runtime_offline", false, ""); err != nil {
 		t.Fatalf("fail task: %v", err)
 	}
 
@@ -392,7 +392,7 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 
 	// Empty output → no row at all.
 	emptyTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false, ""); err != nil {
 		t.Fatalf("complete channel task (empty): %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
@@ -401,7 +401,7 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 
 	// Non-empty output → one ordinary message (kind 'message', not no_response).
 	textTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "channel reply"), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "channel reply"), "", "", false, ""); err != nil {
 		t.Fatalf("complete channel task (text): %v", err)
 	}
 	rows := assistantRows(t, ctx, sessionID)
@@ -427,7 +427,7 @@ func TestCompleteTask_SealedChannelEmptyOutputWritesNoRow(t *testing.T) {
 	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "sealed channel chat")
 
 	emptyTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "[Image]")
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false, ""); err != nil {
 		t.Fatalf("complete sealed channel task (empty): %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
@@ -436,7 +436,7 @@ func TestCompleteTask_SealedChannelEmptyOutputWritesNoRow(t *testing.T) {
 
 	// Non-empty output still writes one ordinary message.
 	textTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "hello")
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "sealed channel reply"), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "sealed channel reply"), "", "", false, ""); err != nil {
 		t.Fatalf("complete sealed channel task (text): %v", err)
 	}
 	rows := assistantRows(t, ctx, sessionID)
@@ -467,7 +467,7 @@ func TestCompleteTask_SealedChannelRetryEmptyOutputWritesNoRow(t *testing.T) {
 		t.Fatalf("setup: create retry clone: %v", err)
 	}
 
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(retryTask), completeResult(t, ""), "", "", false); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(retryTask), completeResult(t, ""), "", "", false, ""); err != nil {
 		t.Fatalf("complete sealed channel retry (empty): %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {

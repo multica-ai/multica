@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestClassifyTask pins the precedence rule on classifyTask. All five
+// TestClassifyTask pins the precedence rule on classifyTask. All four
 // kinds plus tiebreak cases for safety.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
@@ -17,9 +17,9 @@ func TestClassifyTask(t *testing.T) {
 		{"chat", TaskContextForEnv{ChatSessionID: "c"}, kindChat},
 		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "p"}, kindQuickCreate},
 		{"autopilot", TaskContextForEnv{AutopilotRunID: "r"}, kindAutopilotRunOnly},
-		{"comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindCommentTriggered},
-		{"assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindAssignmentTriggered},
-		{"assignment-bare", TaskContextForEnv{}, kindAssignmentTriggered},
+		{"issue-comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindIssue},
+		{"issue-assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindIssue},
+		{"issue-bare", TaskContextForEnv{}, kindIssue},
 		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
 		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
 		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
@@ -43,8 +43,7 @@ func TestTaskKindHasIssueContext(t *testing.T) {
 		kind taskKind
 		want bool
 	}{
-		{kindCommentTriggered, true},
-		{kindAssignmentTriggered, true},
+		{kindIssue, true},
 		{kindAutopilotRunOnly, false},
 		{kindQuickCreate, false},
 		{kindChat, false},
@@ -92,12 +91,10 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		mustHave map[taskKind]bool
 	}
 	allKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
-		kindAutopilotRunOnly: true, kindQuickCreate: true, kindChat: true,
+		kindIssue: true, kindAutopilotRunOnly: true,
+		kindQuickCreate: true, kindChat: true,
 	}
-	issueKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
-	}
+	issueKinds := map[taskKind]bool{kindIssue: true}
 	checks := []sectionCheck{
 		{"# Multica Agent Runtime", allKinds},
 		{"## Background Task Safety", allKinds},
@@ -108,15 +105,13 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Output", allKinds},
 		{"## Comment Formatting", issueKinds},
 		{"## Repositories", map[taskKind]bool{
-			kindCommentTriggered: true, kindAssignmentTriggered: true,
-			kindAutopilotRunOnly: true, kindChat: true,
+			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
 		{"## Issue Metadata", issueKinds},
-		{"## Instruction Precedence", map[taskKind]bool{kindAssignmentTriggered: true}},
+		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
 		{"## Skills", map[taskKind]bool{
-			kindCommentTriggered: true, kindAssignmentTriggered: true,
-			kindAutopilotRunOnly: true, kindChat: true,
+			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
 		{"## Mentions", issueKinds},
 		{"## Attachments", issueKinds},
@@ -129,9 +124,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			Repos: baseRepo, AgentSkills: baseSkill},
 		kindAutopilotRunOnly: {AutopilotRunID: "r-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
-		kindCommentTriggered: {IssueID: "i-1", TriggerCommentID: "tc-1",
-			AgentName: "Eve", AgentID: "eve-1", Repos: baseRepo, AgentSkills: baseSkill},
-		kindAssignmentTriggered: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
+		kindIssue: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
 	}
 

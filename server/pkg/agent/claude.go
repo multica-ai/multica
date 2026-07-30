@@ -699,9 +699,10 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.SystemPrompt)
-	}
+	// SystemPrompt is intentionally not forwarded as --append-system-prompt:
+	// Claude Code loads the per-task CLAUDE.md the daemon writes into the
+	// workdir, so inlining the same runtime brief would duplicate it on every
+	// turn. Verified against Claude Code 2.1.220 (MUL-5392).
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}

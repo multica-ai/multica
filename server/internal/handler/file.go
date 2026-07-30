@@ -580,7 +580,8 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	// stored Content-Disposition (inline for media, attachment otherwise), which
 	// keeps images renderable inline while preserving the original download
 	// filename.
-	if h.CFSigner == nil && h.resolveAttachmentDownloadMode(att.Url) == attachmentDownloadModePresign {
+	switch mode := h.resolveAttachmentDownloadMode(att.Url); {
+	case h.CFSigner == nil && mode == attachmentDownloadModePresign:
 		if presigner, ok := h.Storage.(storage.DownloadPresigner); ok {
 			key := h.Storage.KeyFromURL(att.Url)
 			signedURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), "")
@@ -590,6 +591,24 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 				resp.DownloadURL = signedURL
 			}
 		}
+	case h.CFSigner == nil && mode == attachmentDownloadModeProxy:
+		// Proxy mode has no signed storage URL to offer, so this response
+		// would otherwise hand back the auth-gated API path — which a
+		// native download on a token-mode client cannot authenticate,
+		// leaving the user with no file (MUL-5292). Mint a
+		// single-attachment, 60-second capability instead, so the same
+		// "replace the auth-gated path with something a native loader can
+		// fetch" contract holds in all three modes.
+		//
+		// Only here, never in attachmentToResponse: list responses are held
+		// far longer than the TTL, so a capability embedded in one would be
+		// expired by the time anything used it.
+		//
+		// Gated on CFSigner being nil for the same reason as the presign
+		// branch above: when a signer is configured attachmentToResponse has
+		// already produced a credential-free signed URL, which solves the
+		// native-download problem without a capability.
+		resp.DownloadURL = attachmentCapabilityPath(resp.ID, time.Now())
 	}
 
 	writeJSON(w, http.StatusOK, resp)

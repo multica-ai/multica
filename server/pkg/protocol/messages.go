@@ -84,6 +84,25 @@ type RuntimeProfilesChangedPayload struct {
 // no workspace data is embedded in the event.
 type WorkspacesChangedPayload struct{}
 
+// PendingWorkKind values carried by PendingWorkPayload.Kind. The kind is
+// advisory only — the daemon reacts identically to every kind (one immediate
+// heartbeat, which claims whatever is queued) — so an unknown value from a
+// newer server stays safe on an older daemon.
+const (
+	PendingWorkKindModelList = "model_list"
+)
+
+// PendingWorkPayload is sent from server to daemon as a wakeup hint when a
+// heartbeat-carried request is enqueued for a runtime. The daemon responds by
+// sending one immediate heartbeat for RuntimeID instead of waiting for its next
+// scheduled tick; the request itself is still claimed through the normal
+// heartbeat path, so this event carries no work and is safe to lose, duplicate,
+// or ignore (MUL-5444).
+type PendingWorkPayload struct {
+	RuntimeID string `json:"runtime_id"`
+	Kind      string `json:"kind,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

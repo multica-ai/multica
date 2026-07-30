@@ -28,7 +28,7 @@ export function AllPlatforms({
       className="bg-white py-20 text-[#0a0d12] sm:py-24"
     >
       <div className="mx-auto max-w-[920px] px-4 sm:px-6 lg:px-8">
-        <h2 className="font-[family-name:var(--font-serif)] text-[2.2rem] leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
+        <h2 className="landing-serif text-[2.2rem] leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
           {d.title}
         </h2>
 

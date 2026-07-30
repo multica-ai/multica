@@ -63,7 +63,7 @@ func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(rawError)
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
-		// but that bucket is not part of the canonical 21. In-flight
+		// but that bucket is not part of the canonical 22. In-flight
 		// callers should never hand us empty input — if they do, the
 		// safest landing is the catchall.
 		return ReasonAgentUnknown
@@ -167,6 +167,16 @@ func Classify(rawError string) Reason {
 	//    instead of falling through to agent_error.unknown / process_failure
 	//    and terminating the task (MUL-4910). Checked before rule 13 so the
 	//    "... exited with error: exit status N ..." variant still routes here.
+	//
+	//    "deadline exceeded" covers every Go-side context deadline that
+	//    reaches the classifier as text — `context deadline exceeded` from a
+	//    cancelled request, and net/http's `Client.Timeout exceeded while
+	//    awaiting headers` variant. Before MUL-5370 these all landed in
+	//    agent_error.unknown, which is not on the retry allowlist, so a
+	//    transient stall became a terminal failure with no usable label.
+	//    Note this only catches deadlines that arrive as a bare string;
+	//    callers holding the error value should classify structurally
+	//    instead (see taskRunFailureReason in daemon/daemon.go).
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
@@ -179,6 +189,8 @@ func Classify(rawError string) Reason {
 		"connectionrefused",
 		"dns",
 		"i/o timeout",
+		"deadline exceeded",
+		"timeout exceeded while awaiting",
 	):
 		return ReasonAgentProviderNetwork
 
@@ -240,6 +252,47 @@ func Classify(rawError string) Reason {
 	}
 
 	return ReasonAgentUnknown
+}
+
+// legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
+// failed skill-bundle download. It is an unambiguous witness: no other code
+// path ever produced it, and a current daemon writes "skill bundle
+// unavailable: ..." instead.
+const legacySkillBundlePrefix = "resolve skill bundles:"
+
+// legacySkillBundleReasons are the buckets an older daemon's own classifier
+// could land that failure in. All three mean "we only knew it was some
+// transport fault": agent_error.unknown from a daemon predating the deadline
+// rule, agent_error.provider_network from one that has it, and the
+// pre-MUL-1949 coarse agent_error. None of them carries information that
+// upgrading would discard.
+var legacySkillBundleReasons = map[string]bool{
+	string(ReasonAgentUnknown):         true,
+	string(ReasonAgentProviderNetwork): true,
+	"agent_error":                      true,
+}
+
+// NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
+// onto the taxonomy this server understands, using the raw error text as the
+// witness. It returns the reason unchanged when nothing applies.
+//
+// Why this exists (MUL-5370): installed daemons upgrade on their own cadence,
+// so a fix that only labels a failure correctly on the daemon side reaches
+// nobody until every host updates. The daemon reports a non-empty reason, so
+// FailTask's "classify when empty" guard does not fire, and the server would
+// persist the stale label — no auto-retry, and the chat bubble falls back to
+// generic copy. Recognising the wire shape an old daemon produces closes that
+// gap the moment the server deploys.
+//
+// This is a boundary compatibility shim, not internal fallback logic: it can
+// be deleted once no daemon old enough to emit legacySkillBundlePrefix is
+// still reporting.
+func NormalizeDaemonReason(reason, rawError string) Reason {
+	if legacySkillBundleReasons[reason] &&
+		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
+		return ReasonSkillBundleUnavailable
+	}
+	return Reason(reason)
 }
 
 // containsAny reports whether s contains any of the supplied substrings.

@@ -481,7 +481,7 @@ export function InboxPage() {
               // candidate (still editable).
               const prompt = selected.details?.original_prompt ?? "";
               const agentId = selected.details?.agent_id;
-              useIssueDraftStore.getState().setDraft({
+              useIssueDraftStore.getState().setManual({
                 description: prompt,
                 ...(agentId
                   ? { assigneeType: "agent" as const, assigneeId: agentId }

@@ -297,6 +297,24 @@ html[data-sidebar-resizing="true"] * {
      * Native CSS text-autospace (Chrome 119+, Electron recent versions).
      * Progressive enhancement: browsers that don't support it simply ignore the rule. */
     text-autospace: ideograph-alpha ideograph-numeric;
+    /* `style` keyword = allow style synthesis, forbid weight synthesis.
+     *
+     * Weight OFF: every face we load has real weights — Inter, Source Serif 4
+     * and Geist Mono are all variable (100-900) on both platforms, and landing's
+     * 400-only Instrument Serif is never set to another weight. Synthesis can
+     * only make those worse, and on the CJK tail of `--font-sans` it is actively
+     * harmful: `font-bold` against PingFang SC (which stops at Semibold) makes
+     * Chromium smear a fake 700, and the added stroke weight closes up the
+     * counters of dense Han glyphs. Forbidding it picks real Semibold instead.
+     *
+     * Style ON, deliberately: `auto` only synthesizes when no real italic face
+     * matches, so now that Inter Italic is loaded on both platforms the real face
+     * already wins for all Latin UI text and markdown <em>. What is left
+     * synthesizing is exactly the two stacks that ship no italic at all — the CJK
+     * fallbacks and Geist Mono — and there `font-style: italic` has no other
+     * visual carrier. Forbidding it would silently flatten every Chinese <em>,
+     * every editor italic mark, and every hljs comment to upright. */
+    font-synthesis: style;
   }
 
   @media (max-width: 767px), (pointer: coarse) {
