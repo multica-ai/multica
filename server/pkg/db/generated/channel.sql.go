@@ -73,6 +73,72 @@ func (q *Queries) BackfillChannelInstallationRegionToFeishuLark(ctx context.Cont
 	return result.RowsAffected(), nil
 }
 
+const backfillChannelProjectIssueNotifications = `-- name: BackfillChannelProjectIssueNotifications :execrows
+INSERT INTO channel_notification_outbox (
+    event_id, workspace_id, project_id, project_binding_id, issue_id,
+    event_type, payload
+)
+SELECT
+    gen_random_uuid(), i.workspace_id, i.project_id, $1, i.id,
+    'issue_created',
+    jsonb_build_object(
+        'issue_id', i.id,
+        'number', i.number,
+        'title', i.title,
+        'status', i.status,
+        'assignee_type', i.assignee_type,
+        'assignee_id', i.assignee_id,
+        'creator_type', i.creator_type,
+        'creator_id', i.creator_id,
+        'backfill', true,
+        'occurred_at', now()
+    )
+FROM issue i
+WHERE i.workspace_id = $2
+  AND i.project_id = $3
+  AND NOT EXISTS (
+      SELECT 1
+      FROM channel_issue_topic_binding citb
+      WHERE citb.issue_id = i.id
+        AND citb.project_binding_id = $1
+        AND citb.state = 'active'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM channel_issue_topic_binding latest
+      WHERE latest.id = (
+          SELECT latest_id.id
+          FROM channel_issue_topic_binding latest_id
+          WHERE latest_id.issue_id = i.id
+          ORDER BY latest_id.created_at DESC
+          LIMIT 1
+      )
+        AND latest.state = 'manual_unbound'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM channel_notification_outbox pending
+      WHERE pending.issue_id = i.id
+        AND pending.project_binding_id = $1
+        AND pending.event_type = 'issue_created'
+        AND pending.status IN ('pending', 'sending', 'sent')
+  )
+`
+
+type BackfillChannelProjectIssueNotificationsParams struct {
+	ProjectBindingID pgtype.UUID `json:"project_binding_id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ProjectID        pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) BackfillChannelProjectIssueNotifications(ctx context.Context, arg BackfillChannelProjectIssueNotificationsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillChannelProjectIssueNotifications, arg.ProjectBindingID, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const channelMediaObjectIsReferenced = `-- name: ChannelMediaObjectIsReferenced :one
 SELECT EXISTS (
     SELECT 1 FROM attachment
@@ -178,6 +244,79 @@ func (q *Queries) ClaimChannelMediaPendingObjectsForBind(ctx context.Context, ar
 	return items, nil
 }
 
+const claimChannelNotificationOutbox = `-- name: ClaimChannelNotificationOutbox :many
+WITH candidates AS (
+    SELECT cno.id
+    FROM channel_notification_outbox cno
+    WHERE (
+        (cno.status = 'pending' AND cno.next_attempt_at <= now())
+        OR
+        (cno.status = 'sending' AND cno.locked_at < $2)
+    )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM channel_notification_outbox earlier
+          WHERE earlier.issue_id = cno.issue_id
+            AND earlier.created_at < cno.created_at
+            AND earlier.status IN ('pending', 'sending')
+      )
+    ORDER BY cno.created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT $3
+)
+UPDATE channel_notification_outbox cno
+SET status = 'sending',
+    locked_at = now(),
+    locked_by = $1
+FROM candidates
+WHERE cno.id = candidates.id
+RETURNING cno.id, cno.event_id, cno.workspace_id, cno.project_id, cno.project_binding_id, cno.issue_id, cno.task_id, cno.event_type, cno.payload, cno.status, cno.attempts, cno.next_attempt_at, cno.locked_at, cno.locked_by, cno.last_error, cno.created_at, cno.sent_at
+`
+
+type ClaimChannelNotificationOutboxParams struct {
+	WorkerID    pgtype.Text        `json:"worker_id"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	BatchSize   int32              `json:"batch_size"`
+}
+
+func (q *Queries) ClaimChannelNotificationOutbox(ctx context.Context, arg ClaimChannelNotificationOutboxParams) ([]ChannelNotificationOutbox, error) {
+	rows, err := q.db.Query(ctx, claimChannelNotificationOutbox, arg.WorkerID, arg.StaleBefore, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelNotificationOutbox{}
+	for rows.Next() {
+		var i ChannelNotificationOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.ProjectBindingID,
+			&i.IssueID,
+			&i.TaskID,
+			&i.EventType,
+			&i.Payload,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LockedAt,
+			&i.LockedBy,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.SentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimNextChannelMediaPendingObjectForReconcile = `-- name: ClaimNextChannelMediaPendingObjectForReconcile :one
 UPDATE channel_media_pending_object AS obj
 SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
@@ -243,6 +382,64 @@ func (q *Queries) ClaimNextChannelMediaPendingObjectForReconcile(ctx context.Con
 	return i, err
 }
 
+const confirmChannelProjectBinding = `-- name: ConfirmChannelProjectBinding :one
+UPDATE channel_project_binding
+SET channel_chat_id = $1,
+    channel_chat_name = $2,
+    state = 'active',
+    bound_by_user_id = $3,
+    bound_at = now(),
+    bind_token_hash = NULL,
+    bind_token_expires_at = NULL,
+    updated_at = now()
+WHERE id = $4
+  AND workspace_id = $5
+  AND installation_id = $6
+  AND state = 'pending_group'
+RETURNING id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at
+`
+
+type ConfirmChannelProjectBindingParams struct {
+	ChannelChatID   pgtype.Text `json:"channel_chat_id"`
+	ChannelChatName pgtype.Text `json:"channel_chat_name"`
+	BoundByUserID   pgtype.UUID `json:"bound_by_user_id"`
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	InstallationID  pgtype.UUID `json:"installation_id"`
+}
+
+func (q *Queries) ConfirmChannelProjectBinding(ctx context.Context, arg ConfirmChannelProjectBindingParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, confirmChannelProjectBinding,
+		arg.ChannelChatID,
+		arg.ChannelChatName,
+		arg.BoundByUserID,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.InstallationID,
+	)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const consumeChannelBindingToken = `-- name: ConsumeChannelBindingToken :one
 UPDATE channel_binding_token
 SET consumed_at = now()
@@ -289,6 +486,88 @@ func (q *Queries) CountChannelMediaPendingObjects(ctx context.Context) (CountCha
 	row := q.db.QueryRow(ctx, countChannelMediaPendingObjects)
 	var i CountChannelMediaPendingObjectsRow
 	err := row.Scan(&i.PendingObjects, &i.TombstonedObjects)
+	return i, err
+}
+
+const countPendingChannelNotificationsByProject = `-- name: CountPendingChannelNotificationsByProject :one
+SELECT count(*)
+FROM channel_notification_outbox
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND status IN ('pending', 'sending')
+`
+
+type CountPendingChannelNotificationsByProjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) CountPendingChannelNotificationsByProject(ctx context.Context, arg CountPendingChannelNotificationsByProjectParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingChannelNotificationsByProject, arg.WorkspaceID, arg.ProjectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createActiveChannelProjectBinding = `-- name: CreateActiveChannelProjectBinding :one
+
+INSERT INTO channel_project_binding (
+    workspace_id, project_id, installation_id, channel_type,
+    channel_chat_id, channel_chat_name, state,
+    created_by_user_id, bound_by_user_id, bound_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, 'active',
+    $7, $8, now()
+)
+RETURNING id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at
+`
+
+type CreateActiveChannelProjectBindingParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	InstallationID  pgtype.UUID `json:"installation_id"`
+	ChannelType     string      `json:"channel_type"`
+	ChannelChatID   pgtype.Text `json:"channel_chat_id"`
+	ChannelChatName pgtype.Text `json:"channel_chat_name"`
+	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+	BoundByUserID   pgtype.UUID `json:"bound_by_user_id"`
+}
+
+// ===========================
+// Project / issue Feishu sync
+// ===========================
+func (q *Queries) CreateActiveChannelProjectBinding(ctx context.Context, arg CreateActiveChannelProjectBindingParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, createActiveChannelProjectBinding,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.InstallationID,
+		arg.ChannelType,
+		arg.ChannelChatID,
+		arg.ChannelChatName,
+		arg.CreatedByUserID,
+		arg.BoundByUserID,
+	)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -393,6 +672,64 @@ func (q *Queries) CreateChannelChatSessionBinding(ctx context.Context, arg Creat
 		&i.LastThreadID,
 		&i.Config,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createChannelIssueTopicBinding = `-- name: CreateChannelIssueTopicBinding :one
+INSERT INTO channel_issue_topic_binding (
+    workspace_id, project_binding_id, project_id, issue_id,
+    channel_chat_id, topic_root_message_id, channel_thread_id,
+    binding_source, state, created_by_user_id
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, 'active', $9
+)
+RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at
+`
+
+type CreateChannelIssueTopicBindingParams struct {
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	ProjectBindingID   pgtype.UUID `json:"project_binding_id"`
+	ProjectID          pgtype.UUID `json:"project_id"`
+	IssueID            pgtype.UUID `json:"issue_id"`
+	ChannelChatID      string      `json:"channel_chat_id"`
+	TopicRootMessageID string      `json:"topic_root_message_id"`
+	ChannelThreadID    pgtype.Text `json:"channel_thread_id"`
+	BindingSource      string      `json:"binding_source"`
+	CreatedByUserID    pgtype.UUID `json:"created_by_user_id"`
+}
+
+func (q *Queries) CreateChannelIssueTopicBinding(ctx context.Context, arg CreateChannelIssueTopicBindingParams) (ChannelIssueTopicBinding, error) {
+	row := q.db.QueryRow(ctx, createChannelIssueTopicBinding,
+		arg.WorkspaceID,
+		arg.ProjectBindingID,
+		arg.ProjectID,
+		arg.IssueID,
+		arg.ChannelChatID,
+		arg.TopicRootMessageID,
+		arg.ChannelThreadID,
+		arg.BindingSource,
+		arg.CreatedByUserID,
+	)
+	var i ChannelIssueTopicBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectBindingID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.ChannelChatID,
+		&i.TopicRootMessageID,
+		&i.ChannelThreadID,
+		&i.BindingSource,
+		&i.State,
+		&i.CreatedByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnboundAt,
 	)
 	return i, err
 }
@@ -504,6 +841,127 @@ func (q *Queries) CreateChannelUserBinding(ctx context.Context, arg CreateChanne
 		&i.BoundAt,
 	)
 	return i, err
+}
+
+const createPendingChannelProjectBinding = `-- name: CreatePendingChannelProjectBinding :one
+INSERT INTO channel_project_binding (
+    workspace_id, project_id, installation_id, channel_type,
+    state, bind_token_hash, bind_token_expires_at, created_by_user_id
+) VALUES (
+    $1, $2, $3, $4,
+    'pending_group', $5, $6, $7
+)
+RETURNING id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at
+`
+
+type CreatePendingChannelProjectBindingParams struct {
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	InstallationID     pgtype.UUID        `json:"installation_id"`
+	ChannelType        string             `json:"channel_type"`
+	BindTokenHash      pgtype.Text        `json:"bind_token_hash"`
+	BindTokenExpiresAt pgtype.Timestamptz `json:"bind_token_expires_at"`
+	CreatedByUserID    pgtype.UUID        `json:"created_by_user_id"`
+}
+
+func (q *Queries) CreatePendingChannelProjectBinding(ctx context.Context, arg CreatePendingChannelProjectBindingParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, createPendingChannelProjectBinding,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.InstallationID,
+		arg.ChannelType,
+		arg.BindTokenHash,
+		arg.BindTokenExpiresAt,
+		arg.CreatedByUserID,
+	)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deadChannelNotification = `-- name: DeadChannelNotification :one
+UPDATE channel_notification_outbox
+SET status = 'dead',
+    attempts = attempts + 1,
+    last_error = $1,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE id = $2
+  AND status IN ('pending', 'sending')
+RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at
+`
+
+type DeadChannelNotificationParams struct {
+	LastError pgtype.Text `json:"last_error"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) DeadChannelNotification(ctx context.Context, arg DeadChannelNotificationParams) (ChannelNotificationOutbox, error) {
+	row := q.db.QueryRow(ctx, deadChannelNotification, arg.LastError, arg.ID)
+	var i ChannelNotificationOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.ProjectBindingID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.EventType,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LockedAt,
+		&i.LockedBy,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.SentAt,
+	)
+	return i, err
+}
+
+const deadChannelNotificationsForProjectBinding = `-- name: DeadChannelNotificationsForProjectBinding :execrows
+UPDATE channel_notification_outbox
+SET status = 'dead',
+    last_error = $1,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE project_binding_id = $2
+  AND workspace_id = $3
+  AND status IN ('pending', 'sending')
+`
+
+type DeadChannelNotificationsForProjectBindingParams struct {
+	Reason           pgtype.Text `json:"reason"`
+	ProjectBindingID pgtype.UUID `json:"project_binding_id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeadChannelNotificationsForProjectBinding(ctx context.Context, arg DeadChannelNotificationsForProjectBindingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deadChannelNotificationsForProjectBinding, arg.Reason, arg.ProjectBindingID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteChannelBindingTokensByInstallation = `-- name: DeleteChannelBindingTokensByInstallation :exec
@@ -681,6 +1139,53 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const findChannelProjectsForCommand = `-- name: FindChannelProjectsForCommand :many
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+WHERE workspace_id = $1
+  AND (id::text = $2 OR lower(title) = lower($2))
+ORDER BY created_at
+LIMIT 2
+`
+
+type FindChannelProjectsForCommandParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Identifier  pgtype.UUID `json:"identifier"`
+}
+
+func (q *Queries) FindChannelProjectsForCommand(ctx context.Context, arg FindChannelProjectsForCommandParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, findChannelProjectsForCommand, arg.WorkspaceID, arg.Identifier)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.StartDate,
+			&i.DueDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
@@ -730,6 +1235,152 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+	)
+	return i, err
+}
+
+const getActiveChannelIssueTopicByIssue = `-- name: GetActiveChannelIssueTopicByIssue :one
+SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at FROM channel_issue_topic_binding
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND state = 'active'
+`
+
+type GetActiveChannelIssueTopicByIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetActiveChannelIssueTopicByIssue(ctx context.Context, arg GetActiveChannelIssueTopicByIssueParams) (ChannelIssueTopicBinding, error) {
+	row := q.db.QueryRow(ctx, getActiveChannelIssueTopicByIssue, arg.IssueID, arg.WorkspaceID)
+	var i ChannelIssueTopicBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectBindingID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.ChannelChatID,
+		&i.TopicRootMessageID,
+		&i.ChannelThreadID,
+		&i.BindingSource,
+		&i.State,
+		&i.CreatedByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnboundAt,
+	)
+	return i, err
+}
+
+const getActiveChannelIssueTopicByRoot = `-- name: GetActiveChannelIssueTopicByRoot :one
+SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at FROM channel_issue_topic_binding
+WHERE project_binding_id = $1
+  AND topic_root_message_id = $2
+  AND workspace_id = $3
+  AND state = 'active'
+`
+
+type GetActiveChannelIssueTopicByRootParams struct {
+	ProjectBindingID   pgtype.UUID `json:"project_binding_id"`
+	TopicRootMessageID string      `json:"topic_root_message_id"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetActiveChannelIssueTopicByRoot(ctx context.Context, arg GetActiveChannelIssueTopicByRootParams) (ChannelIssueTopicBinding, error) {
+	row := q.db.QueryRow(ctx, getActiveChannelIssueTopicByRoot, arg.ProjectBindingID, arg.TopicRootMessageID, arg.WorkspaceID)
+	var i ChannelIssueTopicBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectBindingID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.ChannelChatID,
+		&i.TopicRootMessageID,
+		&i.ChannelThreadID,
+		&i.BindingSource,
+		&i.State,
+		&i.CreatedByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnboundAt,
+	)
+	return i, err
+}
+
+const getActiveChannelProjectBindingByBotGroup = `-- name: GetActiveChannelProjectBindingByBotGroup :one
+SELECT id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at FROM channel_project_binding
+WHERE installation_id = $1
+  AND channel_chat_id = $2
+  AND state = 'active'
+`
+
+type GetActiveChannelProjectBindingByBotGroupParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelChatID  pgtype.Text `json:"channel_chat_id"`
+}
+
+func (q *Queries) GetActiveChannelProjectBindingByBotGroup(ctx context.Context, arg GetActiveChannelProjectBindingByBotGroupParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, getActiveChannelProjectBindingByBotGroup, arg.InstallationID, arg.ChannelChatID)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveChannelProjectBindingByProject = `-- name: GetActiveChannelProjectBindingByProject :one
+SELECT id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at FROM channel_project_binding
+WHERE project_id = $1
+  AND workspace_id = $2
+  AND state = 'active'
+`
+
+type GetActiveChannelProjectBindingByProjectParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetActiveChannelProjectBindingByProject(ctx context.Context, arg GetActiveChannelProjectBindingByProjectParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, getActiveChannelProjectBindingByProject, arg.ProjectID, arg.WorkspaceID)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -968,6 +1619,123 @@ func (q *Queries) GetChannelOutboundCardByTask(ctx context.Context, arg GetChann
 	return i, err
 }
 
+const getChannelProjectBindingByID = `-- name: GetChannelProjectBindingByID :one
+SELECT id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at FROM channel_project_binding
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetChannelProjectBindingByIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetChannelProjectBindingByID(ctx context.Context, arg GetChannelProjectBindingByIDParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelProjectBindingByID, arg.ID, arg.WorkspaceID)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getChannelProjectSyncSummary = `-- name: GetChannelProjectSyncSummary :one
+SELECT
+    cpb.id AS project_binding_id,
+    cpb.installation_id,
+    cpb.state,
+    cpb.channel_chat_id,
+    cpb.channel_chat_name,
+    cpb.bound_at,
+    ci.agent_id,
+    a.name AS agent_name,
+    COALESCE(ci.config ->> 'bot_name', a.name || ' Bot') AS bot_name,
+    count(DISTINCT i.id)::bigint AS total_issue_count,
+    count(DISTINCT citb.issue_id) FILTER (WHERE citb.state = 'active')::bigint AS bound_issue_count,
+    count(DISTINCT latest_manual.issue_id)::bigint AS manual_unbound_issue_count,
+    count(DISTINCT cno.id) FILTER (WHERE cno.status IN ('pending', 'sending'))::bigint AS pending_notification_count,
+    max(cno.sent_at) AS last_synced_at
+FROM channel_project_binding cpb
+JOIN channel_installation ci ON ci.id = cpb.installation_id AND ci.workspace_id = cpb.workspace_id
+JOIN agent a ON a.id = ci.agent_id AND a.workspace_id = cpb.workspace_id
+LEFT JOIN issue i ON i.project_id = cpb.project_id AND i.workspace_id = cpb.workspace_id
+LEFT JOIN channel_issue_topic_binding citb ON citb.issue_id = i.id AND citb.project_binding_id = cpb.id AND citb.state = 'active'
+LEFT JOIN channel_issue_topic_binding latest_manual ON latest_manual.issue_id = i.id
+    AND latest_manual.state = 'manual_unbound'
+    AND latest_manual.id = (
+        SELECT lm.id
+        FROM channel_issue_topic_binding lm
+        WHERE lm.issue_id = i.id
+        ORDER BY lm.created_at DESC
+        LIMIT 1
+    )
+LEFT JOIN channel_notification_outbox cno ON cno.project_binding_id = cpb.id
+WHERE cpb.project_id = $1
+  AND cpb.workspace_id = $2
+  AND cpb.state IN ('pending_group', 'active')
+GROUP BY cpb.id, cpb.installation_id, cpb.state, cpb.channel_chat_id,
+         cpb.channel_chat_name, cpb.bound_at, ci.agent_id, a.name, ci.config
+`
+
+type GetChannelProjectSyncSummaryParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetChannelProjectSyncSummaryRow struct {
+	ProjectBindingID         pgtype.UUID        `json:"project_binding_id"`
+	InstallationID           pgtype.UUID        `json:"installation_id"`
+	State                    string             `json:"state"`
+	ChannelChatID            pgtype.Text        `json:"channel_chat_id"`
+	ChannelChatName          pgtype.Text        `json:"channel_chat_name"`
+	BoundAt                  pgtype.Timestamptz `json:"bound_at"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	AgentName                string             `json:"agent_name"`
+	BotName                  interface{}        `json:"bot_name"`
+	TotalIssueCount          int64              `json:"total_issue_count"`
+	BoundIssueCount          int64              `json:"bound_issue_count"`
+	ManualUnboundIssueCount  int64              `json:"manual_unbound_issue_count"`
+	PendingNotificationCount int64              `json:"pending_notification_count"`
+	LastSyncedAt             interface{}        `json:"last_synced_at"`
+}
+
+func (q *Queries) GetChannelProjectSyncSummary(ctx context.Context, arg GetChannelProjectSyncSummaryParams) (GetChannelProjectSyncSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getChannelProjectSyncSummary, arg.ProjectID, arg.WorkspaceID)
+	var i GetChannelProjectSyncSummaryRow
+	err := row.Scan(
+		&i.ProjectBindingID,
+		&i.InstallationID,
+		&i.State,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.BoundAt,
+		&i.AgentID,
+		&i.AgentName,
+		&i.BotName,
+		&i.TotalIssueCount,
+		&i.BoundIssueCount,
+		&i.ManualUnboundIssueCount,
+		&i.PendingNotificationCount,
+		&i.LastSyncedAt,
+	)
+	return i, err
+}
+
 const getChannelUserBindingByUserID = `-- name: GetChannelUserBindingByUserID :one
 SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2
@@ -994,6 +1762,120 @@ func (q *Queries) GetChannelUserBindingByUserID(ctx context.Context, arg GetChan
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+	)
+	return i, err
+}
+
+const getCurrentChannelProjectBindingByProject = `-- name: GetCurrentChannelProjectBindingByProject :one
+SELECT id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at FROM channel_project_binding
+WHERE project_id = $1
+  AND workspace_id = $2
+  AND state IN ('pending_group', 'active')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetCurrentChannelProjectBindingByProjectParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetCurrentChannelProjectBindingByProject(ctx context.Context, arg GetCurrentChannelProjectBindingByProjectParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, getCurrentChannelProjectBindingByProject, arg.ProjectID, arg.WorkspaceID)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestChannelIssueTopicByIssue = `-- name: GetLatestChannelIssueTopicByIssue :one
+SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at FROM channel_issue_topic_binding
+WHERE issue_id = $1
+  AND workspace_id = $2
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLatestChannelIssueTopicByIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetLatestChannelIssueTopicByIssue(ctx context.Context, arg GetLatestChannelIssueTopicByIssueParams) (ChannelIssueTopicBinding, error) {
+	row := q.db.QueryRow(ctx, getLatestChannelIssueTopicByIssue, arg.IssueID, arg.WorkspaceID)
+	var i ChannelIssueTopicBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectBindingID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.ChannelChatID,
+		&i.TopicRootMessageID,
+		&i.ChannelThreadID,
+		&i.BindingSource,
+		&i.State,
+		&i.CreatedByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnboundAt,
+	)
+	return i, err
+}
+
+const getPendingChannelProjectBindingByToken = `-- name: GetPendingChannelProjectBindingByToken :one
+SELECT id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at FROM channel_project_binding
+WHERE installation_id = $1
+  AND bind_token_hash = $2
+  AND state = 'pending_group'
+  AND bind_token_expires_at > now()
+FOR UPDATE
+`
+
+type GetPendingChannelProjectBindingByTokenParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	BindTokenHash  pgtype.Text `json:"bind_token_hash"`
+}
+
+func (q *Queries) GetPendingChannelProjectBindingByToken(ctx context.Context, arg GetPendingChannelProjectBindingByTokenParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, getPendingChannelProjectBindingByToken, arg.InstallationID, arg.BindTokenHash)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1040,6 +1922,51 @@ func (q *Queries) ListActiveChannelInstallations(ctx context.Context, channelTyp
 			&i.InstallerUserID,
 			&i.InstalledAt,
 			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveChannelProjectBindingsByInstallation = `-- name: ListActiveChannelProjectBindingsByInstallation :many
+SELECT id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at FROM channel_project_binding
+WHERE installation_id = $1
+  AND state = 'active'
+ORDER BY created_at
+`
+
+func (q *Queries) ListActiveChannelProjectBindingsByInstallation(ctx context.Context, installationID pgtype.UUID) ([]ChannelProjectBinding, error) {
+	rows, err := q.db.Query(ctx, listActiveChannelProjectBindingsByInstallation, installationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelProjectBinding{}
+	for rows.Next() {
+		var i ChannelProjectBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.InstallationID,
+			&i.ChannelType,
+			&i.ChannelChatID,
+			&i.ChannelChatName,
+			&i.State,
+			&i.BindTokenHash,
+			&i.BindTokenExpiresAt,
+			&i.CreatedByUserID,
+			&i.BoundByUserID,
+			&i.UnboundByUserID,
+			&i.CreatedAt,
+			&i.BoundAt,
+			&i.UnboundAt,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -1192,6 +2119,179 @@ func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, arg L
 	return items, nil
 }
 
+const listChannelProjectBindingsByInstallation = `-- name: ListChannelProjectBindingsByInstallation :many
+SELECT cpb.id, cpb.workspace_id, cpb.project_id, cpb.installation_id, cpb.channel_type, cpb.channel_chat_id, cpb.channel_chat_name, cpb.state, cpb.bind_token_hash, cpb.bind_token_expires_at, cpb.created_by_user_id, cpb.bound_by_user_id, cpb.unbound_by_user_id, cpb.created_at, cpb.bound_at, cpb.unbound_at, cpb.updated_at,
+       p.title AS project_title,
+       a.name AS agent_name,
+       COALESCE(ci.config ->> 'bot_name', a.name || ' Bot') AS bot_name
+FROM channel_project_binding cpb
+JOIN project p ON p.id = cpb.project_id AND p.workspace_id = cpb.workspace_id
+JOIN channel_installation ci ON ci.id = cpb.installation_id AND ci.workspace_id = cpb.workspace_id
+JOIN agent a ON a.id = ci.agent_id AND a.workspace_id = cpb.workspace_id
+WHERE cpb.installation_id = $1
+  AND cpb.workspace_id = $2
+  AND cpb.state IN ('pending_group', 'active')
+ORDER BY cpb.created_at
+`
+
+type ListChannelProjectBindingsByInstallationParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+}
+
+type ListChannelProjectBindingsByInstallationRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	InstallationID     pgtype.UUID        `json:"installation_id"`
+	ChannelType        string             `json:"channel_type"`
+	ChannelChatID      pgtype.Text        `json:"channel_chat_id"`
+	ChannelChatName    pgtype.Text        `json:"channel_chat_name"`
+	State              string             `json:"state"`
+	BindTokenHash      pgtype.Text        `json:"bind_token_hash"`
+	BindTokenExpiresAt pgtype.Timestamptz `json:"bind_token_expires_at"`
+	CreatedByUserID    pgtype.UUID        `json:"created_by_user_id"`
+	BoundByUserID      pgtype.UUID        `json:"bound_by_user_id"`
+	UnboundByUserID    pgtype.UUID        `json:"unbound_by_user_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	BoundAt            pgtype.Timestamptz `json:"bound_at"`
+	UnboundAt          pgtype.Timestamptz `json:"unbound_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ProjectTitle       string             `json:"project_title"`
+	AgentName          string             `json:"agent_name"`
+	BotName            interface{}        `json:"bot_name"`
+}
+
+func (q *Queries) ListChannelProjectBindingsByInstallation(ctx context.Context, arg ListChannelProjectBindingsByInstallationParams) ([]ListChannelProjectBindingsByInstallationRow, error) {
+	rows, err := q.db.Query(ctx, listChannelProjectBindingsByInstallation, arg.InstallationID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelProjectBindingsByInstallationRow{}
+	for rows.Next() {
+		var i ListChannelProjectBindingsByInstallationRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.InstallationID,
+			&i.ChannelType,
+			&i.ChannelChatID,
+			&i.ChannelChatName,
+			&i.State,
+			&i.BindTokenHash,
+			&i.BindTokenExpiresAt,
+			&i.CreatedByUserID,
+			&i.BoundByUserID,
+			&i.UnboundByUserID,
+			&i.CreatedAt,
+			&i.BoundAt,
+			&i.UnboundAt,
+			&i.UpdatedAt,
+			&i.ProjectTitle,
+			&i.AgentName,
+			&i.BotName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const manualUnbindChannelIssueTopicByIssue = `-- name: ManualUnbindChannelIssueTopicByIssue :one
+UPDATE channel_issue_topic_binding
+SET state = 'manual_unbound',
+    unbound_by_user_id = $1,
+    unbound_at = now(),
+    updated_at = now()
+WHERE issue_id = $2
+  AND workspace_id = $3
+  AND state = 'active'
+RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at
+`
+
+type ManualUnbindChannelIssueTopicByIssueParams struct {
+	UnboundByUserID pgtype.UUID `json:"unbound_by_user_id"`
+	IssueID         pgtype.UUID `json:"issue_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ManualUnbindChannelIssueTopicByIssue(ctx context.Context, arg ManualUnbindChannelIssueTopicByIssueParams) (ChannelIssueTopicBinding, error) {
+	row := q.db.QueryRow(ctx, manualUnbindChannelIssueTopicByIssue, arg.UnboundByUserID, arg.IssueID, arg.WorkspaceID)
+	var i ChannelIssueTopicBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectBindingID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.ChannelChatID,
+		&i.TopicRootMessageID,
+		&i.ChannelThreadID,
+		&i.BindingSource,
+		&i.State,
+		&i.CreatedByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnboundAt,
+	)
+	return i, err
+}
+
+const manualUnbindChannelIssueTopicByRoot = `-- name: ManualUnbindChannelIssueTopicByRoot :one
+UPDATE channel_issue_topic_binding
+SET state = 'manual_unbound',
+    unbound_by_user_id = $1,
+    unbound_at = now(),
+    updated_at = now()
+WHERE project_binding_id = $2
+  AND topic_root_message_id = $3
+  AND workspace_id = $4
+  AND state = 'active'
+RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at
+`
+
+type ManualUnbindChannelIssueTopicByRootParams struct {
+	UnboundByUserID    pgtype.UUID `json:"unbound_by_user_id"`
+	ProjectBindingID   pgtype.UUID `json:"project_binding_id"`
+	TopicRootMessageID string      `json:"topic_root_message_id"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ManualUnbindChannelIssueTopicByRoot(ctx context.Context, arg ManualUnbindChannelIssueTopicByRootParams) (ChannelIssueTopicBinding, error) {
+	row := q.db.QueryRow(ctx, manualUnbindChannelIssueTopicByRoot,
+		arg.UnboundByUserID,
+		arg.ProjectBindingID,
+		arg.TopicRootMessageID,
+		arg.WorkspaceID,
+	)
+	var i ChannelIssueTopicBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectBindingID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.ChannelChatID,
+		&i.TopicRootMessageID,
+		&i.ChannelThreadID,
+		&i.BindingSource,
+		&i.State,
+		&i.CreatedByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnboundAt,
+	)
+	return i, err
+}
+
 const markChannelInboundDedupProcessed = `-- name: MarkChannelInboundDedupProcessed :execrows
 UPDATE channel_inbound_message_dedup
 SET processed_at = now()
@@ -1217,6 +2317,120 @@ func (q *Queries) MarkChannelInboundDedupProcessed(ctx context.Context, arg Mark
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const markChannelIssueTopicsProjectUnbound = `-- name: MarkChannelIssueTopicsProjectUnbound :execrows
+UPDATE channel_issue_topic_binding
+SET state = 'project_unbound',
+    unbound_at = now(),
+    updated_at = now()
+WHERE project_binding_id = $1
+  AND workspace_id = $2
+  AND state = 'active'
+`
+
+type MarkChannelIssueTopicsProjectUnboundParams struct {
+	ProjectBindingID pgtype.UUID `json:"project_binding_id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) MarkChannelIssueTopicsProjectUnbound(ctx context.Context, arg MarkChannelIssueTopicsProjectUnboundParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markChannelIssueTopicsProjectUnbound, arg.ProjectBindingID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markChannelNotificationSent = `-- name: MarkChannelNotificationSent :one
+UPDATE channel_notification_outbox
+SET status = 'sent',
+    sent_at = now(),
+    locked_at = NULL,
+    locked_by = NULL,
+    last_error = NULL
+WHERE id = $1
+  AND status = 'sending'
+  AND locked_by = $2
+RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at
+`
+
+type MarkChannelNotificationSentParams struct {
+	ID       pgtype.UUID `json:"id"`
+	WorkerID pgtype.Text `json:"worker_id"`
+}
+
+func (q *Queries) MarkChannelNotificationSent(ctx context.Context, arg MarkChannelNotificationSentParams) (ChannelNotificationOutbox, error) {
+	row := q.db.QueryRow(ctx, markChannelNotificationSent, arg.ID, arg.WorkerID)
+	var i ChannelNotificationOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.ProjectBindingID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.EventType,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LockedAt,
+		&i.LockedBy,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.SentAt,
+	)
+	return i, err
+}
+
+const markChannelProjectBindingsBotRevoked = `-- name: MarkChannelProjectBindingsBotRevoked :many
+UPDATE channel_project_binding
+SET state = 'bot_revoked',
+    unbound_at = now(),
+    updated_at = now()
+WHERE installation_id = $1
+  AND state IN ('pending_group', 'active')
+RETURNING id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at
+`
+
+func (q *Queries) MarkChannelProjectBindingsBotRevoked(ctx context.Context, installationID pgtype.UUID) ([]ChannelProjectBinding, error) {
+	rows, err := q.db.Query(ctx, markChannelProjectBindingsBotRevoked, installationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelProjectBinding{}
+	for rows.Next() {
+		var i ChannelProjectBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.InstallationID,
+			&i.ChannelType,
+			&i.ChannelChatID,
+			&i.ChannelChatName,
+			&i.State,
+			&i.BindTokenHash,
+			&i.BindTokenExpiresAt,
+			&i.CreatedByUserID,
+			&i.BoundByUserID,
+			&i.UnboundByUserID,
+			&i.CreatedAt,
+			&i.BoundAt,
+			&i.UnboundAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const nullChannelInboundAuditInstallationID = `-- name: NullChannelInboundAuditInstallationID :exec
@@ -1528,6 +2742,109 @@ func (q *Queries) ReleaseChannelWSLease(ctx context.Context, arg ReleaseChannelW
 	return err
 }
 
+const replaceActiveChannelIssueTopic = `-- name: ReplaceActiveChannelIssueTopic :execrows
+UPDATE channel_issue_topic_binding
+SET state = 'replaced',
+    unbound_by_user_id = $1,
+    unbound_at = now(),
+    updated_at = now()
+WHERE issue_id = $2
+  AND workspace_id = $3
+  AND state = 'active'
+`
+
+type ReplaceActiveChannelIssueTopicParams struct {
+	UnboundByUserID pgtype.UUID `json:"unbound_by_user_id"`
+	IssueID         pgtype.UUID `json:"issue_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ReplaceActiveChannelIssueTopic(ctx context.Context, arg ReplaceActiveChannelIssueTopicParams) (int64, error) {
+	result, err := q.db.Exec(ctx, replaceActiveChannelIssueTopic, arg.UnboundByUserID, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retryChannelNotification = `-- name: RetryChannelNotification :one
+UPDATE channel_notification_outbox
+SET status = 'pending',
+    attempts = attempts + 1,
+    next_attempt_at = $1,
+    last_error = $2,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE id = $3
+  AND status = 'sending'
+  AND locked_by = $4
+RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at
+`
+
+type RetryChannelNotificationParams struct {
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	ID            pgtype.UUID        `json:"id"`
+	WorkerID      pgtype.Text        `json:"worker_id"`
+}
+
+func (q *Queries) RetryChannelNotification(ctx context.Context, arg RetryChannelNotificationParams) (ChannelNotificationOutbox, error) {
+	row := q.db.QueryRow(ctx, retryChannelNotification,
+		arg.NextAttemptAt,
+		arg.LastError,
+		arg.ID,
+		arg.WorkerID,
+	)
+	var i ChannelNotificationOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.ProjectBindingID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.EventType,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LockedAt,
+		&i.LockedBy,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.SentAt,
+	)
+	return i, err
+}
+
+const retryDeadChannelNotificationsByProject = `-- name: RetryDeadChannelNotificationsByProject :execrows
+UPDATE channel_notification_outbox
+SET status = 'pending',
+    attempts = 0,
+    next_attempt_at = now(),
+    last_error = NULL,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND status = 'dead'
+  AND last_error NOT IN ('project_unbound', 'project_or_topic_unbound', 'manual_unbound')
+`
+
+type RetryDeadChannelNotificationsByProjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) RetryDeadChannelNotificationsByProject(ctx context.Context, arg RetryDeadChannelNotificationsByProjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retryDeadChannelNotificationsByProject, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setChannelInstallationConfig = `-- name: SetChannelInstallationConfig :exec
 UPDATE channel_installation
 SET config = $2, updated_at = now()
@@ -1610,6 +2927,51 @@ func (q *Queries) TombstoneChannelMediaPendingObject(ctx context.Context, arg To
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const unbindChannelProjectBinding = `-- name: UnbindChannelProjectBinding :one
+UPDATE channel_project_binding
+SET state = 'unbound',
+    unbound_by_user_id = $1,
+    unbound_at = now(),
+    bind_token_hash = NULL,
+    bind_token_expires_at = NULL,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND state IN ('pending_group', 'active')
+RETURNING id, workspace_id, project_id, installation_id, channel_type, channel_chat_id, channel_chat_name, state, bind_token_hash, bind_token_expires_at, created_by_user_id, bound_by_user_id, unbound_by_user_id, created_at, bound_at, unbound_at, updated_at
+`
+
+type UnbindChannelProjectBindingParams struct {
+	UnboundByUserID pgtype.UUID `json:"unbound_by_user_id"`
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) UnbindChannelProjectBinding(ctx context.Context, arg UnbindChannelProjectBindingParams) (ChannelProjectBinding, error) {
+	row := q.db.QueryRow(ctx, unbindChannelProjectBinding, arg.UnboundByUserID, arg.ID, arg.WorkspaceID)
+	var i ChannelProjectBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChannelChatName,
+		&i.State,
+		&i.BindTokenHash,
+		&i.BindTokenExpiresAt,
+		&i.CreatedByUserID,
+		&i.BoundByUserID,
+		&i.UnboundByUserID,
+		&i.CreatedAt,
+		&i.BoundAt,
+		&i.UnboundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateChannelChatSessionBindingReplyTarget = `-- name: UpdateChannelChatSessionBindingReplyTarget :exec

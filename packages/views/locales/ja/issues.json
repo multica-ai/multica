@@ -589,6 +589,22 @@
     "update_failed": "ラベルを更新できませんでした",
     "delete_failed": "ラベルを削除できませんでした"
   },
+  "feishu_topic": {
+    "section_title": "Feishu トピック",
+    "state_active": "同期中",
+    "state_paused": "手動で一時停止",
+    "state_historical": "履歴トピック",
+    "state_none": "トピック未接続",
+    "chat_label": "グループ: {{id}}",
+    "root_label": "トピックルート: {{id}}",
+    "empty_hint": "Project をグループに接続すると、この Issue の同期時にトピックが作成されます。",
+    "unbind": "トピック同期を停止",
+    "enable": "トピック同期を再開",
+    "toast_unbound": "Issue トピックの同期を停止しました",
+    "toast_unbind_failed": "Issue トピックの同期を停止できませんでした",
+    "toast_enabled": "Issue トピックの同期を再開しました",
+    "toast_enable_failed": "Issue トピックの同期を再開できませんでした"
+  },
   "backlog_hint": {
     "title": "バックログではエージェントが一時停止します",
     "description": "このイシューは保留中のため、割り当てられたエージェントは待機します。エージェントを開始したいときは未着手に移動してください。",

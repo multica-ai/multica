@@ -453,6 +453,12 @@ func main() {
 		go h.ChannelMediaReconciler.Run(sweepCtx)
 	}
 
+	// Durable Project/Issue → Feishu notification worker. It claims Outbox
+	// rows with SKIP LOCKED, so every API replica may run one safely.
+	if h.LarkProjectSyncWorker != nil {
+		go h.LarkProjectSyncWorker.Run(sweepCtx)
+	}
+
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
 	// `sys_cron_executions` table into the distributed lease + audit
 	// log for internal periodic jobs. The first job is

@@ -14,6 +14,24 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent" | "squad";
 
+export interface ChannelIssueTopicBinding {
+  id: string;
+  project_binding_id: string;
+  project_id: string;
+  issue_id: string;
+  chat_id: string;
+  topic_root_message_id: string;
+  thread_id: string | null;
+  binding_source: string;
+  state: "active" | "manual_unbound" | "project_unbound" | "orphaned" | "replaced" | string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelIssueTopicBindingResponse {
+  channel_topic_binding: ChannelIssueTopicBinding | null;
+}
+
 export interface IssueReaction {
   id: string;
   issue_id: string;

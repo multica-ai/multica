@@ -54,6 +54,40 @@ export function useUpdateProject() {
   });
 }
 
+export function useBeginProjectFeishuBinding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ projectId, installationId }: { projectId: string; installationId: string }) =>
+      api.beginProjectFeishuBinding(projectId, installationId),
+    onSettled: (_data, _error, variables) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, variables.projectId) });
+    },
+  });
+}
+
+export function useDeleteProjectFeishuBinding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (projectId: string) => api.deleteProjectFeishuBinding(projectId),
+    onSettled: (_data, _error, projectId) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, projectId) });
+    },
+  });
+}
+
+export function useRetryProjectFeishuTopics() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (projectId: string) => api.retryProjectFeishuTopics(projectId),
+    onSettled: (_data, _error, projectId) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, projectId) });
+    },
+  });
+}
+
 export function useDeleteProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

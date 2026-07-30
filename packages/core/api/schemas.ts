@@ -14,6 +14,7 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CancelTaskResponse,
+  ChannelIssueTopicBindingResponse,
   ChatDraftRestoresResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
@@ -33,6 +34,7 @@ import type {
   IssueTableGroupsResponse,
   IssueTableRowsResponse,
   ListIssuesResponse,
+  ListLarkProjectBindingsResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
@@ -1820,6 +1822,69 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// Project ↔ Feishu synchronization responses are consumed by both settings
+// tables and mutation flows. Read endpoints degrade to explicit empty records;
+// mutation callers use these schemas with a null fallback and reject malformed
+// success bodies so the UI never reports a binding/retry that did not parse.
+export const ChannelIssueTopicBindingSchema = z.object({
+  id: z.string(),
+  project_binding_id: z.string(),
+  project_id: z.string(),
+  issue_id: z.string(),
+  chat_id: z.string(),
+  topic_root_message_id: z.string(),
+  thread_id: z.string().nullable(),
+  binding_source: z.string(),
+  state: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ChannelIssueTopicBindingResponseSchema = z.object({
+  channel_topic_binding: ChannelIssueTopicBindingSchema.nullable(),
+}).loose();
+
+export const EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE: ChannelIssueTopicBindingResponse = {
+  channel_topic_binding: null,
+};
+
+export const ProjectFeishuBindingSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string(),
+  installation_id: z.string(),
+  state: z.string(),
+  chat_id: z.string().optional(),
+  chat_name: z.string().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const BeginProjectFeishuBindingResponseSchema = z.object({
+  binding: ProjectFeishuBindingSchema,
+  confirmation_code: z.string(),
+  confirmation_command: z.string(),
+  expires_in_seconds: z.number(),
+}).loose();
+
+export const RetryProjectFeishuTopicsResponseSchema = z.object({
+  retried_dead_notifications: z.number(),
+}).loose();
+
+export const LarkProjectBindingSchema = ProjectFeishuBindingSchema.extend({
+  project_title: z.string(),
+  agent_name: z.string(),
+  bot_name: z.string(),
+});
+
+export const ListLarkProjectBindingsResponseSchema = z.object({
+  project_bindings: z.array(LarkProjectBindingSchema),
+}).loose();
+
+export const EMPTY_LIST_LARK_PROJECT_BINDINGS_RESPONSE: ListLarkProjectBindingsResponse = {
+  project_bindings: [],
 };
 
 // ---------------------------------------------------------------------------

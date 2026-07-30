@@ -277,6 +277,7 @@ func dispatchResultFromEngine(res engine.Result) DispatchResult {
 		IssueNumber:     res.IssueNumber,
 		IssueIdentifier: res.IssueIdentifier,
 		IssueTitle:      res.IssueTitle,
+		ReplyText:       res.ReplyText,
 	}
 }
 

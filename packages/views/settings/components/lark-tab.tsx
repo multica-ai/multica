@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, FolderKanban, RefreshCw, Trash2 } from "lucide-react";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -37,7 +37,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
+import { larkInstallationsOptions, larkKeys, larkProjectBindingsOptions } from "@multica/core/lark";
 import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -94,7 +94,7 @@ export function LarkTab() {
     if (!disconnectTarget || disconnecting) return;
     setDisconnecting(true);
     try {
-      await api.deleteLarkInstallation(wsId, disconnectTarget);
+      await api.deleteLarkInstallation(wsId, disconnectTarget, true);
       await qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
       toast.success(t(($) => $.lark.toast_disconnected));
       setDisconnectTarget(null);
@@ -220,6 +220,11 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const wsId = useWorkspaceId();
+  const { data: projectBindingData } = useQuery(
+    larkProjectBindingsOptions(wsId, installation.id),
+  );
+  const projectBindings = projectBindingData?.project_bindings ?? [];
   // The bot is bound 1:1 to a Multica Agent (per the (workspace_id,
   // agent_id) UNIQUE in lark_installation). Render the Multica agent's
   // identity here rather than the raw Lark app_id / bot_open_id — those
@@ -258,6 +263,21 @@ function InstallationRow({
               when: new Date(installation.installed_at).toLocaleString(),
             })}
           </p>
+          {projectBindings.length > 0 && (
+            <div className="space-y-1 pt-1" data-testid="lark-project-bindings">
+              <p className="text-[10px] font-medium text-muted-foreground">
+                {t(($) => $.lark.project_bindings_title)}
+              </p>
+              {projectBindings.map((binding) => (
+                <div key={binding.id} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <FolderKanban className="size-3 shrink-0" />
+                  <span className="font-medium text-foreground">{binding.project_title}</span>
+                  <span>·</span>
+                  <span>{binding.chat_name || t(($) => $.lark.project_binding_pending_group)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {canManage && isActive && (
@@ -531,7 +551,7 @@ function LarkAgentBotConnectedBadge({
     if (disconnecting) return;
     setDisconnecting(true);
     try {
-      await api.deleteLarkInstallation(wsId, installation.id);
+      await api.deleteLarkInstallation(wsId, installation.id, true);
       // Invalidate before closing the dialog: the badge unmounts when
       // the listings query updates (the parent swaps to the Bind CTA),
       // so leaving the open state behind is fine — but doing the

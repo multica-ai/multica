@@ -1,0 +1,1 @@
+ALTER TABLE channel_notification_outbox DROP CONSTRAINT IF EXISTS channel_notification_outbox_pkey;

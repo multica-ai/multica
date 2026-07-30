@@ -1,0 +1,1 @@
+ALTER TABLE channel_issue_topic_binding DROP CONSTRAINT IF EXISTS channel_issue_topic_binding_pkey;

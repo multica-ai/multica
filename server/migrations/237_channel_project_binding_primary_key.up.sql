@@ -1,0 +1,1 @@
+ALTER TABLE channel_project_binding ADD CONSTRAINT channel_project_binding_pkey PRIMARY KEY USING INDEX channel_project_binding_id_uidx;

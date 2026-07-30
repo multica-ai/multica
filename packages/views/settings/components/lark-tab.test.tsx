@@ -101,6 +101,10 @@ vi.mock("@multica/core/lark", () => ({
     queryKey: ["lark", "installations"],
     queryFn: vi.fn(),
   }),
+  larkProjectBindingsOptions: (_wsId: string, installationId: string) => ({
+    queryKey: ["lark", "project-bindings", installationId],
+    queryFn: vi.fn(),
+  }),
   larkKeys: { installations: (wsId: string) => ["lark", "installations", wsId] },
 }));
 
@@ -520,7 +524,7 @@ describe("LarkAgentBotConnectedBadge (Unbind / Disconnect)", () => {
     await waitFor(() => {
       expect(mockDeleteInstallation).toHaveBeenCalledTimes(1);
     });
-    expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-1");
+    expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-1", true);
     // Listings cache must be invalidated so the parent re-renders the
     // Bind CTA in place of the now-stale Connected badge.
     expect(mockInvalidate).toHaveBeenCalledWith({

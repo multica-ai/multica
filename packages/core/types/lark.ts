@@ -24,6 +24,25 @@ export interface LarkInstallation {
   updated_at: string;
 }
 
+export interface LarkProjectBinding {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  installation_id: string;
+  project_title: string;
+  agent_name: string;
+  bot_name: string;
+  state: string;
+  chat_id?: string;
+  chat_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListLarkProjectBindingsResponse {
+  project_bindings: LarkProjectBinding[];
+}
+
 export interface ListLarkInstallationsResponse {
   installations: LarkInstallation[];
   /** Whether the deployment has the at-rest secret key configured. When

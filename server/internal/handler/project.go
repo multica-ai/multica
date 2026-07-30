@@ -43,6 +43,9 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+	// FeishuSync is present when the Project has an active or pending
+	// Project → Bot + group binding.
+	FeishuSync *ProjectFeishuSyncResponse `json:"feishu_sync,omitempty"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -193,6 +196,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	resp.FeishuSync = h.loadProjectFeishuSync(r.Context(), project.WorkspaceID, project.ID)
 	writeJSON(w, http.StatusOK, resp)
 }
 

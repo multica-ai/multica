@@ -1,0 +1,1 @@
+ALTER TABLE channel_project_binding DROP CONSTRAINT IF EXISTS channel_project_binding_pkey;

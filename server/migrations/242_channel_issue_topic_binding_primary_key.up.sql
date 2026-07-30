@@ -1,0 +1,1 @@
+ALTER TABLE channel_issue_topic_binding ADD CONSTRAINT channel_issue_topic_binding_pkey PRIMARY KEY USING INDEX channel_issue_topic_binding_id_uidx;

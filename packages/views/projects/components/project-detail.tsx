@@ -25,6 +25,7 @@ import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectFeishuSyncSection } from "./project-feishu-sync-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
@@ -461,6 +462,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </p>
         </div>}
       </div>
+
+      {/* Feishu synchronization */}
+      <ProjectFeishuSyncSection project={project} canManage={isWorkspaceAdmin} />
 
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />

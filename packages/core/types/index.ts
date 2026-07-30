@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction, ChannelIssueTopicBinding, ChannelIssueTopicBindingResponse } from "./issue";
 export type {
   Agent,
   AgentStatus,
@@ -114,6 +114,10 @@ export type {
   Project,
   ProjectStatus,
   ProjectPriority,
+  ProjectFeishuSync,
+  ProjectFeishuBinding,
+  BeginProjectFeishuBindingResponse,
+  RetryProjectFeishuTopicsResponse,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -151,6 +155,8 @@ export type {
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
+  LarkProjectBinding,
+  ListLarkProjectBindingsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,

@@ -133,6 +133,11 @@ type InboundMessage struct {
 	// itself is in MediaRefs.
 	Text string
 
+	// CommandText is the sender's own, un-enriched text used exclusively for
+	// deterministic command parsing. Adapters leave it equal to Text unless
+	// they enrich Text with quoted or recent conversation context.
+	CommandText string
+
 	// MediaRefs is the OUTPUT channel of engine.MediaResolver.ResolveMedia:
 	// the objects it downloaded and uploaded for this message, each covered
 	// by an intent-ledger row written before its PUT. Inbound messages always

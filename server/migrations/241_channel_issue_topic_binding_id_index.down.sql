@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS channel_issue_topic_binding_id_uidx;

@@ -614,6 +614,22 @@
     "update_failed": "Failed to update label",
     "delete_failed": "Failed to delete label"
   },
+  "feishu_topic": {
+    "section_title": "Feishu topic",
+    "state_active": "Synchronized",
+    "state_paused": "Manually paused",
+    "state_historical": "Historical topic",
+    "state_none": "No topic binding",
+    "chat_label": "Group: {{id}}",
+    "root_label": "Topic root: {{id}}",
+    "empty_hint": "A topic is created after the Project is bound and this Issue is synchronized.",
+    "unbind": "Stop topic sync",
+    "enable": "Resume topic sync",
+    "toast_unbound": "Issue topic synchronization stopped",
+    "toast_unbind_failed": "Failed to stop Issue topic synchronization",
+    "toast_enabled": "Issue topic synchronization resumed",
+    "toast_enable_failed": "Failed to resume Issue topic synchronization"
+  },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",
     "description": "This issue is parked, so the assigned agent will wait. Move it to Todo when you want the agent to start.",

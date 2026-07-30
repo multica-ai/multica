@@ -321,6 +321,24 @@ type ChannelInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelIssueTopicBinding struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectBindingID   pgtype.UUID        `json:"project_binding_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ChannelChatID      string             `json:"channel_chat_id"`
+	TopicRootMessageID string             `json:"topic_root_message_id"`
+	ChannelThreadID    pgtype.Text        `json:"channel_thread_id"`
+	BindingSource      string             `json:"binding_source"`
+	State              string             `json:"state"`
+	CreatedByUserID    pgtype.UUID        `json:"created_by_user_id"`
+	UnboundByUserID    pgtype.UUID        `json:"unbound_by_user_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	UnboundAt          pgtype.Timestamptz `json:"unbound_at"`
+}
+
 type ChannelMediaPendingObject struct {
 	StorageKey     string             `json:"storage_key"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -337,6 +355,26 @@ type ChannelMediaPendingObject struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChannelNotificationOutbox struct {
+	ID               pgtype.UUID        `json:"id"`
+	EventID          pgtype.UUID        `json:"event_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ProjectBindingID pgtype.UUID        `json:"project_binding_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	EventType        string             `json:"event_type"`
+	Payload          []byte             `json:"payload"`
+	Status           string             `json:"status"`
+	Attempts         int32              `json:"attempts"`
+	NextAttemptAt    pgtype.Timestamptz `json:"next_attempt_at"`
+	LockedAt         pgtype.Timestamptz `json:"locked_at"`
+	LockedBy         pgtype.Text        `json:"locked_by"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	SentAt           pgtype.Timestamptz `json:"sent_at"`
+}
+
 type ChannelOutboundCardMessage struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ChatSessionID        pgtype.UUID        `json:"chat_session_id"`
@@ -347,6 +385,26 @@ type ChannelOutboundCardMessage struct {
 	Status               string             `json:"status"`
 	LastPatchedAt        pgtype.Timestamptz `json:"last_patched_at"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChannelProjectBinding struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	InstallationID     pgtype.UUID        `json:"installation_id"`
+	ChannelType        string             `json:"channel_type"`
+	ChannelChatID      pgtype.Text        `json:"channel_chat_id"`
+	ChannelChatName    pgtype.Text        `json:"channel_chat_name"`
+	State              string             `json:"state"`
+	BindTokenHash      pgtype.Text        `json:"bind_token_hash"`
+	BindTokenExpiresAt pgtype.Timestamptz `json:"bind_token_expires_at"`
+	CreatedByUserID    pgtype.UUID        `json:"created_by_user_id"`
+	BoundByUserID      pgtype.UUID        `json:"bound_by_user_id"`
+	UnboundByUserID    pgtype.UUID        `json:"unbound_by_user_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	BoundAt            pgtype.Timestamptz `json:"bound_at"`
+	UnboundAt          pgtype.Timestamptz `json:"unbound_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelUserBinding struct {

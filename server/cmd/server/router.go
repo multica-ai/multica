@@ -389,6 +389,28 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					resolverReplier = replier
 				}
 
+				projectSyncSvc, syncErr := lark.NewProjectSyncService(lark.ProjectSyncServiceConfig{
+					Pool:        pool,
+					Queries:     queries,
+					Issues:      h.IssueService,
+					Tasks:       h.TaskService,
+					APIClient:   larkClient,
+					Credentials: installSvc,
+					AppURL:      appURLFromEnv(),
+					Logger:      slog.Default(),
+				})
+				if syncErr != nil {
+					slog.Error("lark project sync init failed; project commands disabled", "error", syncErr)
+				} else {
+					h.LarkProjectSync = projectSyncSvc
+					h.LarkProjectSyncWorker = lark.NewProjectIssueSyncWorker(
+						projectSyncSvc,
+						"project-issue-sync-"+strings.TrimSpace(os.Getenv("HOSTNAME")),
+					)
+					channelRouter.SetProjectCommandHandler(projectSyncSvc)
+					slog.Info("lark project and issue synchronization enabled")
+				}
+
 				// Feishu adapter (MUL-3620): the WSLongConnConnector talks
 				// Lark's long-conn protocol over gorilla/websocket and wraps
 				// every read with a ctx-cancel watchdog so lease loss /
@@ -1151,6 +1173,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/channel-topic-binding", h.GetIssueChannelTopicBinding)
+					r.Delete("/channel-topic-binding", h.DeleteIssueChannelTopicBinding)
+					r.Post("/channel-topic-binding/enable", h.EnableIssueChannelTopicBinding)
 				})
 			})
 
@@ -1191,8 +1216,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Post("/channel-bindings/feishu", h.BeginProjectFeishuBinding)
+					r.Get("/channel-bindings/feishu", h.GetProjectFeishuBinding)
+					r.Delete("/channel-bindings/feishu", h.DeleteProjectFeishuBinding)
+					r.Post("/channel-bindings/feishu/confirm", h.ConfirmProjectFeishuBinding)
+					r.Post("/channel-bindings/feishu/retry-topics", h.RetryProjectFeishuTopics)
 				})
 			})
+
+			r.Get("/api/channel-installations/{installationId}/project-bindings", h.ListInstallationProjectBindings)
 
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {

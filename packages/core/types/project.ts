@@ -2,6 +2,45 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+export interface ProjectFeishuSync {
+  state: "pending_group" | "active" | "unbound" | "bot_revoked" | "bot_removed" | string;
+  project_binding_id: string;
+  installation_id: string;
+  bot_name: string;
+  agent_id: string;
+  agent_name: string;
+  chat_id: string | null;
+  chat_name: string | null;
+  bound_issue_count: number;
+  manual_unbound_issue_count: number;
+  total_issue_count: number;
+  pending_notification_count: number;
+  last_synced_at: string | null;
+}
+
+export interface ProjectFeishuBinding {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  installation_id: string;
+  state: string;
+  chat_id?: string;
+  chat_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BeginProjectFeishuBindingResponse {
+  binding: ProjectFeishuBinding;
+  confirmation_code: string;
+  confirmation_command: string;
+  expires_in_seconds: number;
+}
+
+export interface RetryProjectFeishuTopicsResponse {
+  retried_dead_notifications: number;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -21,6 +60,8 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  /** Optional for compatibility with servers predating project Feishu sync. */
+  feishu_sync?: ProjectFeishuSync | null;
 }
 
 export interface CreateProjectRequest {

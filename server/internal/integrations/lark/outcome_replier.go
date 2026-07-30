@@ -180,6 +180,14 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				"err", err.Error(),
 			)
 		}
+	case OutcomeCommandHandled:
+		if err := r.sendCommandReply(ctx, inst, msg, res.ReplyText); err != nil {
+			r.log.Warn("lark outcome replier: command reply failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
 	case OutcomeIngested:
 		// The agent's chat reply itself goes through the Patcher (text
 		// message on ChatDone). But /issue does NOT block on the
@@ -235,6 +243,28 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 // after MUL-2671's plain-text refactor. The link to Multica is
 // included on its own line so Lark's auto-linker turns it into a
 // tappable URL.
+func (r *LarkOutcomeReplier) sendCommandReply(ctx context.Context, inst Installation, msg InboundMessage, text string) error {
+	if msg.ChatID == "" {
+		return errors.New("missing chat_id")
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	creds, err := r.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	return sendWithThreadFallback(r.log, "send command reply", inboundReplyTarget(msg), func(t ReplyTarget) error {
+		_, err := r.client.SendTextMessage(ctx, SendTextParams{
+			InstallationID: creds,
+			ChatID:         msg.ChatID,
+			Text:           text,
+			ReplyTarget:    t,
+		})
+		return err
+	})
+}
+
 func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")

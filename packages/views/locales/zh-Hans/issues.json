@@ -589,6 +589,22 @@
     "update_failed": "更新标签失败",
     "delete_failed": "删除标签失败"
   },
+  "feishu_topic": {
+    "section_title": "飞书话题",
+    "state_active": "同步中",
+    "state_paused": "已手动暂停",
+    "state_historical": "历史话题",
+    "state_none": "未绑定话题",
+    "chat_label": "群：{{id}}",
+    "root_label": "话题根消息：{{id}}",
+    "empty_hint": "项目绑定群后，此 Issue 同步时会自动创建话题。",
+    "unbind": "停止话题同步",
+    "enable": "恢复话题同步",
+    "toast_unbound": "已停止 Issue 话题同步",
+    "toast_unbind_failed": "停止 Issue 话题同步失败",
+    "toast_enabled": "已恢复 Issue 话题同步",
+    "toast_enable_failed": "恢复 Issue 话题同步失败"
+  },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",
     "description": "这个 issue 处于待规划状态，被分配的智能体会等待。准备启动时把它移到 todo。",

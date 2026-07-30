@@ -1,5 +1,6 @@
 import type {
   Issue,
+  ChannelIssueTopicBindingResponse,
   IssuePriority,
   CreateIssueRequest,
   MoveIssueRequest,
@@ -93,6 +94,8 @@ import type {
   SendChatMessageResponse,
   CancelTaskResponse,
   Project,
+  BeginProjectFeishuBindingResponse,
+  RetryProjectFeishuTopicsResponse,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -142,6 +145,7 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListLarkInstallationsResponse,
+  ListLarkProjectBindingsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
@@ -292,6 +296,12 @@ import {
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
+  ChannelIssueTopicBindingResponseSchema,
+  BeginProjectFeishuBindingResponseSchema,
+  RetryProjectFeishuTopicsResponseSchema,
+  ListLarkProjectBindingsResponseSchema,
+  EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE,
+  EMPTY_LIST_LARK_PROJECT_BINDINGS_RESPONSE,
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
@@ -783,6 +793,34 @@ export class ApiClient {
 
   async getIssue(id: string): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`);
+  }
+
+  async getIssueChannelTopicBinding(id: string): Promise<ChannelIssueTopicBindingResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/channel-topic-binding`);
+    return parseWithFallback(
+      raw,
+      ChannelIssueTopicBindingResponseSchema,
+      EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE,
+      { endpoint: "GET /api/issues/:id/channel-topic-binding" },
+    );
+  }
+
+  async deleteIssueChannelTopicBinding(id: string): Promise<void> {
+    await this.fetch(`/api/issues/${id}/channel-topic-binding`, { method: "DELETE" });
+  }
+
+  async enableIssueChannelTopicBinding(id: string): Promise<ChannelIssueTopicBindingResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/channel-topic-binding/enable`, {
+      method: "POST",
+    });
+    const response = parseWithFallback<ChannelIssueTopicBindingResponse | null>(
+      raw,
+      ChannelIssueTopicBindingResponseSchema,
+      null,
+      { endpoint: "POST /api/issues/:id/channel-topic-binding/enable" },
+    );
+    if (!response) throw new Error("invalid issue topic binding response");
+    return response;
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
@@ -2439,6 +2477,47 @@ export class ApiClient {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
   }
 
+  async beginProjectFeishuBinding(
+    projectId: string,
+    installationId: string,
+  ): Promise<BeginProjectFeishuBindingResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/channel-bindings/feishu`, {
+      method: "POST",
+      body: JSON.stringify({ installation_id: installationId }),
+    });
+    const response = parseWithFallback<BeginProjectFeishuBindingResponse | null>(
+      raw,
+      BeginProjectFeishuBindingResponseSchema,
+      null,
+      { endpoint: "POST /api/projects/:id/channel-bindings/feishu" },
+    );
+    if (!response) throw new Error("invalid project Feishu binding response");
+    return response;
+  }
+
+  async deleteProjectFeishuBinding(projectId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/channel-bindings/feishu`, {
+      method: "DELETE",
+    });
+  }
+
+  async retryProjectFeishuTopics(
+    projectId: string,
+  ): Promise<RetryProjectFeishuTopicsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/channel-bindings/feishu/retry-topics`,
+      { method: "POST" },
+    );
+    const response = parseWithFallback<RetryProjectFeishuTopicsResponse | null>(
+      raw,
+      RetryProjectFeishuTopicsResponseSchema,
+      null,
+      { endpoint: "POST /api/projects/:id/channel-bindings/feishu/retry-topics" },
+    );
+    if (!response) throw new Error("invalid project topic retry response");
+    return response;
+  }
+
   // Project resources
   async listProjectResources(
     projectId: string,
@@ -2999,6 +3078,21 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
   }
 
+  async listLarkProjectBindings(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<ListLarkProjectBindingsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/channel-installations/${installationId}/project-bindings?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListLarkProjectBindingsResponseSchema,
+      EMPTY_LIST_LARK_PROJECT_BINDINGS_RESPONSE,
+      { endpoint: "GET /api/channel-installations/:id/project-bindings" },
+    );
+  }
+
   async beginLarkInstall(
     workspaceId: string,
     agentId: string,
@@ -3022,10 +3116,16 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/lark/install/${sessionId}/status`);
   }
 
-  async deleteLarkInstallation(workspaceId: string, installationId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/lark/installations/${installationId}`, {
-      method: "DELETE",
-    });
+  async deleteLarkInstallation(
+    workspaceId: string,
+    installationId: string,
+    confirmProjectSync = false,
+  ): Promise<void> {
+    const query = confirmProjectSync ? "?confirm_project_sync=true" : "";
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/lark/installations/${installationId}${query}`,
+      { method: "DELETE" },
+    );
   }
 
   async redeemLarkBindingToken(token: string): Promise<RedeemLarkBindingTokenResponse> {

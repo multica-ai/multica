@@ -589,6 +589,22 @@
     "update_failed": "라벨을 업데이트하지 못했습니다",
     "delete_failed": "라벨을 삭제하지 못했습니다"
   },
+  "feishu_topic": {
+    "section_title": "Feishu 토픽",
+    "state_active": "동기화 중",
+    "state_paused": "수동 일시 중지",
+    "state_historical": "기록 토픽",
+    "state_none": "토픽 연결 없음",
+    "chat_label": "그룹: {{id}}",
+    "root_label": "토픽 루트: {{id}}",
+    "empty_hint": "Project를 그룹에 연결하면 이 Issue가 동기화될 때 토픽이 생성됩니다.",
+    "unbind": "토픽 동기화 중지",
+    "enable": "토픽 동기화 재개",
+    "toast_unbound": "Issue 토픽 동기화를 중지했습니다",
+    "toast_unbind_failed": "Issue 토픽 동기화를 중지하지 못했습니다",
+    "toast_enabled": "Issue 토픽 동기화를 재개했습니다",
+    "toast_enable_failed": "Issue 토픽 동기화를 재개하지 못했습니다"
+  },
   "backlog_hint": {
     "title": "백로그에서는 에이전트가 대기합니다",
     "description": "이 이슈는 보류 상태이므로 할당된 에이전트가 기다립니다. 에이전트를 시작하려면 할 일로 이동하세요.",

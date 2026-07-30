@@ -346,6 +346,9 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
 	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	if p.IdempotencyKey != "" {
+		body["uuid"] = p.IdempotencyKey
+	}
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -532,6 +535,41 @@ func (c *httpAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 // them on demand from the bot_open_id, and freezing them into our
 // schema would create a drift surface every time the operator edits
 // the Bot on Lark's side.
+// GetChatInfo resolves the current group name during Project binding. The
+// persisted chat ID remains the routing key; the name is display metadata and
+// can be refreshed later without changing delivery.
+func (c *httpAPIClient) GetChatInfo(ctx context.Context, creds InstallationCredentials, chatID ChatID) (ChatInfo, error) {
+	if chatID == "" {
+		return ChatInfo{}, errors.New("lark http client: missing chat_id")
+	}
+	token, err := c.tenantAccessToken(ctx, creds)
+	if err != nil {
+		return ChatInfo{}, err
+	}
+	path := "/open-apis/im/v1/chats/" + url.PathEscape(string(chatID))
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ChatID string `json:"chat_id"`
+			Name   string `json:"name"`
+		} `json:"data"`
+	}
+	if err := c.doJSON(ctx, c.resolveBaseURL(creds), http.MethodGet, path, token, nil, &resp); err != nil {
+		return ChatInfo{}, fmt.Errorf("lark http client: get chat info: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(creds.AppID)
+		}
+		return ChatInfo{}, &APIError{Op: "get chat info", Code: resp.Code, Msg: resp.Msg}
+	}
+	if resp.Data.ChatID == "" {
+		resp.Data.ChatID = string(chatID)
+	}
+	return ChatInfo{ID: resp.Data.ChatID, Name: resp.Data.Name}, nil
+}
+
 func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	if creds.AppID == "" || creds.AppSecret == "" {
 		return BotInfo{}, errors.New("lark http client: missing app credentials for GetBotInfo")

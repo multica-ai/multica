@@ -778,3 +778,383 @@ SELECT
     count(*) FILTER (WHERE state <> 'tombstoned') AS pending_objects,
     count(*) FILTER (WHERE state = 'tombstoned') AS tombstoned_objects
 FROM channel_media_pending_object;
+
+
+-- ===========================
+-- Project / issue Feishu sync
+-- ===========================
+
+-- name: CreateActiveChannelProjectBinding :one
+INSERT INTO channel_project_binding (
+    workspace_id, project_id, installation_id, channel_type,
+    channel_chat_id, channel_chat_name, state,
+    created_by_user_id, bound_by_user_id, bound_at
+) VALUES (
+    @workspace_id, @project_id, @installation_id, @channel_type,
+    @channel_chat_id, @channel_chat_name, 'active',
+    @created_by_user_id, @bound_by_user_id, now()
+)
+RETURNING *;
+
+-- name: CreatePendingChannelProjectBinding :one
+INSERT INTO channel_project_binding (
+    workspace_id, project_id, installation_id, channel_type,
+    state, bind_token_hash, bind_token_expires_at, created_by_user_id
+) VALUES (
+    @workspace_id, @project_id, @installation_id, @channel_type,
+    'pending_group', @bind_token_hash, @bind_token_expires_at, @created_by_user_id
+)
+RETURNING *;
+
+-- name: GetChannelProjectBindingByID :one
+SELECT * FROM channel_project_binding
+WHERE id = @id AND workspace_id = @workspace_id;
+
+-- name: GetActiveChannelProjectBindingByProject :one
+SELECT * FROM channel_project_binding
+WHERE project_id = @project_id
+  AND workspace_id = @workspace_id
+  AND state = 'active';
+
+-- name: GetCurrentChannelProjectBindingByProject :one
+SELECT * FROM channel_project_binding
+WHERE project_id = @project_id
+  AND workspace_id = @workspace_id
+  AND state IN ('pending_group', 'active')
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetActiveChannelProjectBindingByBotGroup :one
+SELECT * FROM channel_project_binding
+WHERE installation_id = @installation_id
+  AND channel_chat_id = @channel_chat_id
+  AND state = 'active';
+
+-- name: GetPendingChannelProjectBindingByToken :one
+SELECT * FROM channel_project_binding
+WHERE installation_id = @installation_id
+  AND bind_token_hash = @bind_token_hash
+  AND state = 'pending_group'
+  AND bind_token_expires_at > now()
+FOR UPDATE;
+
+-- name: ConfirmChannelProjectBinding :one
+UPDATE channel_project_binding
+SET channel_chat_id = @channel_chat_id,
+    channel_chat_name = @channel_chat_name,
+    state = 'active',
+    bound_by_user_id = @bound_by_user_id,
+    bound_at = now(),
+    bind_token_hash = NULL,
+    bind_token_expires_at = NULL,
+    updated_at = now()
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND installation_id = @installation_id
+  AND state = 'pending_group'
+RETURNING *;
+
+-- name: ListChannelProjectBindingsByInstallation :many
+SELECT cpb.*,
+       p.title AS project_title,
+       a.name AS agent_name,
+       COALESCE(ci.config ->> 'bot_name', a.name || ' Bot') AS bot_name
+FROM channel_project_binding cpb
+JOIN project p ON p.id = cpb.project_id AND p.workspace_id = cpb.workspace_id
+JOIN channel_installation ci ON ci.id = cpb.installation_id AND ci.workspace_id = cpb.workspace_id
+JOIN agent a ON a.id = ci.agent_id AND a.workspace_id = cpb.workspace_id
+WHERE cpb.installation_id = @installation_id
+  AND cpb.workspace_id = @workspace_id
+  AND cpb.state IN ('pending_group', 'active')
+ORDER BY cpb.created_at;
+
+-- name: ListActiveChannelProjectBindingsByInstallation :many
+SELECT * FROM channel_project_binding
+WHERE installation_id = @installation_id
+  AND state = 'active'
+ORDER BY created_at;
+
+-- name: FindChannelProjectsForCommand :many
+SELECT * FROM project
+WHERE workspace_id = @workspace_id
+  AND (id::text = @identifier OR lower(title) = lower(@identifier))
+ORDER BY created_at
+LIMIT 2;
+
+-- name: UnbindChannelProjectBinding :one
+UPDATE channel_project_binding
+SET state = 'unbound',
+    unbound_by_user_id = @unbound_by_user_id,
+    unbound_at = now(),
+    bind_token_hash = NULL,
+    bind_token_expires_at = NULL,
+    updated_at = now()
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND state IN ('pending_group', 'active')
+RETURNING *;
+
+-- name: MarkChannelIssueTopicsProjectUnbound :execrows
+UPDATE channel_issue_topic_binding
+SET state = 'project_unbound',
+    unbound_at = now(),
+    updated_at = now()
+WHERE project_binding_id = @project_binding_id
+  AND workspace_id = @workspace_id
+  AND state = 'active';
+
+-- name: DeadChannelNotificationsForProjectBinding :execrows
+UPDATE channel_notification_outbox
+SET status = 'dead',
+    last_error = @reason,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE project_binding_id = @project_binding_id
+  AND workspace_id = @workspace_id
+  AND status IN ('pending', 'sending');
+
+-- name: MarkChannelProjectBindingsBotRevoked :many
+UPDATE channel_project_binding
+SET state = 'bot_revoked',
+    unbound_at = now(),
+    updated_at = now()
+WHERE installation_id = @installation_id
+  AND state IN ('pending_group', 'active')
+RETURNING *;
+
+-- name: BackfillChannelProjectIssueNotifications :execrows
+INSERT INTO channel_notification_outbox (
+    event_id, workspace_id, project_id, project_binding_id, issue_id,
+    event_type, payload
+)
+SELECT
+    gen_random_uuid(), i.workspace_id, i.project_id, @project_binding_id, i.id,
+    'issue_created',
+    jsonb_build_object(
+        'issue_id', i.id,
+        'number', i.number,
+        'title', i.title,
+        'status', i.status,
+        'assignee_type', i.assignee_type,
+        'assignee_id', i.assignee_id,
+        'creator_type', i.creator_type,
+        'creator_id', i.creator_id,
+        'backfill', true,
+        'occurred_at', now()
+    )
+FROM issue i
+WHERE i.workspace_id = @workspace_id
+  AND i.project_id = @project_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM channel_issue_topic_binding citb
+      WHERE citb.issue_id = i.id
+        AND citb.project_binding_id = @project_binding_id
+        AND citb.state = 'active'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM channel_issue_topic_binding latest
+      WHERE latest.id = (
+          SELECT latest_id.id
+          FROM channel_issue_topic_binding latest_id
+          WHERE latest_id.issue_id = i.id
+          ORDER BY latest_id.created_at DESC
+          LIMIT 1
+      )
+        AND latest.state = 'manual_unbound'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM channel_notification_outbox pending
+      WHERE pending.issue_id = i.id
+        AND pending.project_binding_id = @project_binding_id
+        AND pending.event_type = 'issue_created'
+        AND pending.status IN ('pending', 'sending', 'sent')
+  );
+
+-- name: GetChannelProjectSyncSummary :one
+SELECT
+    cpb.id AS project_binding_id,
+    cpb.installation_id,
+    cpb.state,
+    cpb.channel_chat_id,
+    cpb.channel_chat_name,
+    cpb.bound_at,
+    ci.agent_id,
+    a.name AS agent_name,
+    COALESCE(ci.config ->> 'bot_name', a.name || ' Bot') AS bot_name,
+    count(DISTINCT i.id)::bigint AS total_issue_count,
+    count(DISTINCT citb.issue_id) FILTER (WHERE citb.state = 'active')::bigint AS bound_issue_count,
+    count(DISTINCT latest_manual.issue_id)::bigint AS manual_unbound_issue_count,
+    count(DISTINCT cno.id) FILTER (WHERE cno.status IN ('pending', 'sending'))::bigint AS pending_notification_count,
+    max(cno.sent_at) AS last_synced_at
+FROM channel_project_binding cpb
+JOIN channel_installation ci ON ci.id = cpb.installation_id AND ci.workspace_id = cpb.workspace_id
+JOIN agent a ON a.id = ci.agent_id AND a.workspace_id = cpb.workspace_id
+LEFT JOIN issue i ON i.project_id = cpb.project_id AND i.workspace_id = cpb.workspace_id
+LEFT JOIN channel_issue_topic_binding citb ON citb.issue_id = i.id AND citb.project_binding_id = cpb.id AND citb.state = 'active'
+LEFT JOIN channel_issue_topic_binding latest_manual ON latest_manual.issue_id = i.id
+    AND latest_manual.state = 'manual_unbound'
+    AND latest_manual.id = (
+        SELECT lm.id
+        FROM channel_issue_topic_binding lm
+        WHERE lm.issue_id = i.id
+        ORDER BY lm.created_at DESC
+        LIMIT 1
+    )
+LEFT JOIN channel_notification_outbox cno ON cno.project_binding_id = cpb.id
+WHERE cpb.project_id = @project_id
+  AND cpb.workspace_id = @workspace_id
+  AND cpb.state IN ('pending_group', 'active')
+GROUP BY cpb.id, cpb.installation_id, cpb.state, cpb.channel_chat_id,
+         cpb.channel_chat_name, cpb.bound_at, ci.agent_id, a.name, ci.config;
+
+-- name: CreateChannelIssueTopicBinding :one
+INSERT INTO channel_issue_topic_binding (
+    workspace_id, project_binding_id, project_id, issue_id,
+    channel_chat_id, topic_root_message_id, channel_thread_id,
+    binding_source, state, created_by_user_id
+) VALUES (
+    @workspace_id, @project_binding_id, @project_id, @issue_id,
+    @channel_chat_id, @topic_root_message_id, @channel_thread_id,
+    @binding_source, 'active', @created_by_user_id
+)
+RETURNING *;
+
+-- name: GetActiveChannelIssueTopicByIssue :one
+SELECT * FROM channel_issue_topic_binding
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND state = 'active';
+
+-- name: GetLatestChannelIssueTopicByIssue :one
+SELECT * FROM channel_issue_topic_binding
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetActiveChannelIssueTopicByRoot :one
+SELECT * FROM channel_issue_topic_binding
+WHERE project_binding_id = @project_binding_id
+  AND topic_root_message_id = @topic_root_message_id
+  AND workspace_id = @workspace_id
+  AND state = 'active';
+
+-- name: ReplaceActiveChannelIssueTopic :execrows
+UPDATE channel_issue_topic_binding
+SET state = 'replaced',
+    unbound_by_user_id = @unbound_by_user_id,
+    unbound_at = now(),
+    updated_at = now()
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND state = 'active';
+
+-- name: ManualUnbindChannelIssueTopicByIssue :one
+UPDATE channel_issue_topic_binding
+SET state = 'manual_unbound',
+    unbound_by_user_id = @unbound_by_user_id,
+    unbound_at = now(),
+    updated_at = now()
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND state = 'active'
+RETURNING *;
+
+-- name: ManualUnbindChannelIssueTopicByRoot :one
+UPDATE channel_issue_topic_binding
+SET state = 'manual_unbound',
+    unbound_by_user_id = @unbound_by_user_id,
+    unbound_at = now(),
+    updated_at = now()
+WHERE project_binding_id = @project_binding_id
+  AND topic_root_message_id = @topic_root_message_id
+  AND workspace_id = @workspace_id
+  AND state = 'active'
+RETURNING *;
+
+-- name: ClaimChannelNotificationOutbox :many
+WITH candidates AS (
+    SELECT cno.id
+    FROM channel_notification_outbox cno
+    WHERE (
+        (cno.status = 'pending' AND cno.next_attempt_at <= now())
+        OR
+        (cno.status = 'sending' AND cno.locked_at < @stale_before)
+    )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM channel_notification_outbox earlier
+          WHERE earlier.issue_id = cno.issue_id
+            AND earlier.created_at < cno.created_at
+            AND earlier.status IN ('pending', 'sending')
+      )
+    ORDER BY cno.created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT @batch_size
+)
+UPDATE channel_notification_outbox cno
+SET status = 'sending',
+    locked_at = now(),
+    locked_by = @worker_id
+FROM candidates
+WHERE cno.id = candidates.id
+RETURNING cno.*;
+
+-- name: MarkChannelNotificationSent :one
+UPDATE channel_notification_outbox
+SET status = 'sent',
+    sent_at = now(),
+    locked_at = NULL,
+    locked_by = NULL,
+    last_error = NULL
+WHERE id = @id
+  AND status = 'sending'
+  AND locked_by = @worker_id
+RETURNING *;
+
+-- name: RetryChannelNotification :one
+UPDATE channel_notification_outbox
+SET status = 'pending',
+    attempts = attempts + 1,
+    next_attempt_at = @next_attempt_at,
+    last_error = @last_error,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE id = @id
+  AND status = 'sending'
+  AND locked_by = @worker_id
+RETURNING *;
+
+-- name: DeadChannelNotification :one
+UPDATE channel_notification_outbox
+SET status = 'dead',
+    attempts = attempts + 1,
+    last_error = @last_error,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE id = @id
+  AND status IN ('pending', 'sending')
+RETURNING *;
+
+-- name: RetryDeadChannelNotificationsByProject :execrows
+UPDATE channel_notification_outbox
+SET status = 'pending',
+    attempts = 0,
+    next_attempt_at = now(),
+    last_error = NULL,
+    locked_at = NULL,
+    locked_by = NULL
+WHERE workspace_id = @workspace_id
+  AND project_id = @project_id
+  AND status = 'dead'
+  AND last_error NOT IN ('project_unbound', 'project_or_topic_unbound', 'manual_unbound');
+
+-- name: CountPendingChannelNotificationsByProject :one
+SELECT count(*)
+FROM channel_notification_outbox
+WHERE workspace_id = @workspace_id
+  AND project_id = @project_id
+  AND status IN ('pending', 'sending');

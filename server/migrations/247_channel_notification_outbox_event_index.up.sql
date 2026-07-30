@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY uq_channel_notification_outbox_event ON channel_notification_outbox (event_id);

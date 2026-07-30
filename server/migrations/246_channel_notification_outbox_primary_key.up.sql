@@ -1,0 +1,1 @@
+ALTER TABLE channel_notification_outbox ADD CONSTRAINT channel_notification_outbox_pkey PRIMARY KEY USING INDEX channel_notification_outbox_id_uidx;

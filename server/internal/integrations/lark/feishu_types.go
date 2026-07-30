@@ -72,6 +72,8 @@ const (
 	OutcomeNeedsBinding Outcome = "needs_binding"
 	// OutcomeIngested — the message landed and a run was (or will be) enqueued.
 	OutcomeIngested Outcome = "ingested"
+	// OutcomeCommandHandled — deterministic control command completed.
+	OutcomeCommandHandled Outcome = "command_handled"
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
@@ -95,4 +97,6 @@ type DispatchResult struct {
 	IssueIdentifier string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
+	// ReplyText is the deterministic response for a control command.
+	ReplyText string
 }

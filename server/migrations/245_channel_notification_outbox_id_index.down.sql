@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS channel_notification_outbox_id_uidx;

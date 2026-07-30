@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_channel_notification_outbox_event;

@@ -166,6 +166,43 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 	} else if !h.canManageAgent(w, r, agent) {
 		return
 	}
+	if h.LarkProjectSync != nil {
+		affected, listErr := h.LarkProjectSync.ListInstallationProjects(r.Context(), wsUUID, instUUID)
+		if listErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to inspect affected project bindings")
+			return
+		}
+		if len(affected) > 0 {
+			if _, ok := h.requireWorkspaceRole(
+				w, r, uuidToString(wsUUID), "lark installation not found", "owner", "admin",
+			); !ok {
+				return
+			}
+		}
+		if len(affected) > 0 && r.URL.Query().Get("confirm_project_sync") != "true" {
+			projects := make([]map[string]any, 0, len(affected))
+			for _, item := range affected {
+				projects = append(projects, map[string]any{
+					"project_id":    uuidToString(item.Binding.ProjectID),
+					"project_title": item.ProjectTitle,
+					"chat_name":     item.Binding.ChannelChatName.String,
+					"state":         item.Binding.State,
+				})
+			}
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":             "bot has active project synchronization bindings",
+				"affected_projects": projects,
+				"confirm_with":      "confirm_project_sync=true",
+			})
+			return
+		}
+		if len(affected) > 0 {
+			if err := h.LarkProjectSync.RevokeInstallationBindings(r.Context(), wsUUID, instUUID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to stop project synchronization")
+				return
+			}
+		}
+	}
 	if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return

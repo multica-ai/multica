@@ -5,6 +5,128 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient project channel sync response schemas", () => {
+  const topicResponse = {
+    channel_topic_binding: {
+      id: "topic-1",
+      project_binding_id: "binding-1",
+      project_id: "project-1",
+      issue_id: "issue-1",
+      chat_id: "chat-1",
+      topic_root_message_id: "message-1",
+      thread_id: null,
+      binding_source: "project_backfill",
+      state: "active",
+      created_at: "2026-07-30T00:00:00Z",
+      updated_at: "2026-07-30T00:00:00Z",
+    },
+  };
+
+  const projectBinding = {
+    id: "binding-1",
+    workspace_id: "workspace-1",
+    project_id: "project-1",
+    installation_id: "installation-1",
+    state: "pending_group",
+    created_at: "2026-07-30T00:00:00Z",
+    updated_at: "2026-07-30T00:00:00Z",
+  };
+
+  it("parses valid topic, binding, retry, and installation-list responses", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(topicResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(topicResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            binding: projectBinding,
+            confirmation_code: "ABC123",
+            confirmation_command: "/project bind ABC123",
+            expires_in_seconds: 600,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ retried_dead_notifications: 2 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            project_bindings: [
+              {
+                ...projectBinding,
+                project_title: "Roadmap",
+                agent_name: "Planner",
+                bot_name: "Multica",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = new ApiClient("https://api.example.test");
+    await expect(api.getIssueChannelTopicBinding("issue-1")).resolves.toEqual(topicResponse);
+    await expect(api.enableIssueChannelTopicBinding("issue-1")).resolves.toEqual(topicResponse);
+    await expect(
+      api.beginProjectFeishuBinding("project-1", "installation-1"),
+    ).resolves.toMatchObject({ confirmation_code: "ABC123" });
+    await expect(api.retryProjectFeishuTopics("project-1")).resolves.toEqual({
+      retried_dead_notifications: 2,
+    });
+    await expect(
+      api.listLarkProjectBindings("workspace-1", "installation-1"),
+    ).resolves.toMatchObject({ project_bindings: [{ project_title: "Roadmap" }] });
+  });
+
+  it("degrades malformed reads and rejects malformed mutation success bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ unexpected: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+
+    const api = new ApiClient("https://api.example.test");
+    await expect(api.getIssueChannelTopicBinding("issue-1")).resolves.toEqual({
+      channel_topic_binding: null,
+    });
+    await expect(api.enableIssueChannelTopicBinding("issue-1")).rejects.toThrow(
+      "invalid issue topic binding response",
+    );
+    await expect(
+      api.beginProjectFeishuBinding("project-1", "installation-1"),
+    ).rejects.toThrow("invalid project Feishu binding response");
+    await expect(api.retryProjectFeishuTopics("project-1")).rejects.toThrow(
+      "invalid project topic retry response",
+    );
+    await expect(
+      api.listLarkProjectBindings("workspace-1", "installation-1"),
+    ).resolves.toEqual({ project_bindings: [] });
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",
