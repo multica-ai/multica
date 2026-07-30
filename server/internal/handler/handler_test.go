@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated" // CEREBRO-PATCH(handler-test-cerebro-queries): wire fork query set in handler tests.
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -342,6 +343,7 @@ func createHandlerTestTaskForAgentOnIssue(t *testing.T, agentID, issueID string)
 	`, agentID, handlerTestRuntimeID(t), issueArg).Scan(&taskID); err != nil {
 		t.Fatalf("failed to create handler test task: %v", err)
 	}
+	issueHandlerTestTaskMandate(t, taskID, agentID, "create_issue", "update_issue", "add_comment")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})
@@ -360,10 +362,25 @@ func createHandlerTestDelegatedTaskForAgent(t *testing.T, agentID, originalUserI
 	`, agentID, handlerTestRuntimeID(t), originalUserID).Scan(&taskID); err != nil {
 		t.Fatalf("failed to create delegated handler test task: %v", err)
 	}
+	issueHandlerTestTaskMandate(t, taskID, agentID, "add_comment")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})
 	return taskID
+}
+
+func issueHandlerTestTaskMandate(t *testing.T, taskID, agentID string, actions ...string) {
+	t.Helper()
+	if err := taskmandate.NewStore(testPool).Issue(
+		context.Background(),
+		parseUUID(taskID),
+		parseUUID(testWorkspaceID),
+		parseUUID(agentID),
+		actions,
+		time.Now().Add(time.Hour),
+	); err != nil {
+		t.Fatalf("failed to seed handler test task mandate: %v", err)
+	}
 }
 
 func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
@@ -1646,6 +1663,7 @@ func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
 	`, issueID, agentA).Scan(&taskID); err != nil {
 		t.Fatalf("load private autopilot task: %v", err)
 	}
+	issueHandlerTestTaskMandate(t, taskID, agentA, "add_comment")
 
 	comment := httptest.NewRecorder()
 	commentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
@@ -1730,6 +1748,7 @@ func TestPrivateAutopilotCommentAllowsSameOwnerPrivateAgentTask(t *testing.T) {
 	`, issueID, agentA).Scan(&taskID); err != nil {
 		t.Fatalf("load private autopilot task: %v", err)
 	}
+	issueHandlerTestTaskMandate(t, taskID, agentA, "add_comment")
 
 	comment := httptest.NewRecorder()
 	commentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
@@ -1822,6 +1841,7 @@ func TestCreateIssueAutopilotTaskCarriesHumanOriginForAgentHandoff(t *testing.T)
 	if source != "autopilot" {
 		t.Fatalf("create-issue task delegation_source = %q, want autopilot", source)
 	}
+	issueHandlerTestTaskMandate(t, taskID, agentA, "add_comment")
 
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
@@ -1913,6 +1933,7 @@ func TestRunOnlyAutopilotTaskCarriesHumanOriginForAgentHandoff(t *testing.T) {
 	if source != "autopilot" {
 		t.Fatalf("run-only task delegation_source = %q, want autopilot", source)
 	}
+	issueHandlerTestTaskMandate(t, taskID, agentA, "add_comment")
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
@@ -4529,6 +4550,7 @@ func TestAgentExplicitMentionFromDirectIssueTaskUsesIssueCreatorOrigin(t *testin
 	if originalUserID != nil {
 		t.Fatalf("test setup expected legacy direct task without original_user_id, got %s", *originalUserID)
 	}
+	issueHandlerTestTaskMandate(t, agentATask, agentA, "add_comment")
 
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{

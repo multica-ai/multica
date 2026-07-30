@@ -1065,6 +1065,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	if answer := h.authorizePlatformAction(r.Context(), r, issue.WorkspaceID, authorType, authorID, addCommentPlatformAction, "rest_api", map[string]any{"issue_id": uuidToString(issue.ID)}, req, false); !answer.Allowed { // CEREBRO-PATCH(comment-create-platform-action): FIR-4076 require Task Mandate + Permissions before agent mutation.
+		writePlatformAction(w, addCommentPlatformAction, answer)
+		return
+	}
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same

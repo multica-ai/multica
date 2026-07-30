@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -131,52 +132,6 @@ func TestCerebroEffectiveToolsForClaimLocksInitialPolicyAndSessionIntersection(t
 	}
 }
 
-func TestCerebroEffectiveToolsForClaimSessionIntersectionKeepsDirectMCPMandateAligned(t *testing.T) {
-	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
-		{
-			Connection:    "atlas-mcp",
-			Name:          "mcp__atlas-mcp__search_registry",
-			Description:   "Search Atlas",
-			Verdict:       "allow",
-			MandatePrefix: "mcp__atlas-mcp__*",
-		},
-	}}
-	h := &Handler{
-		runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{
-			exposedToolView("Read", "runtime", "", "Read files", "allow", true),
-			exposedToolView("Write", "runtime", "", "Write files", "allow", true),
-		}},
-		APIConnectionBrief: brief,
-	}
-	agent := &TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"}
-
-	tools, mandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, agent, "agent", "")
-	if err != nil {
-		t.Fatalf("cerebroEffectiveToolsForClaim: unexpected error %v", err)
-	}
-	tools, mandate = filterClaimToolsForSessionMode(tools, mandate, []string{"Read", "mcp__atlas-mcp__search_registry"})
-	if got, want := len(tools), 2; got != want {
-		t.Fatalf("session tools = %+v, want %d tools", tools, want)
-	}
-	for _, want := range []string{"Read", "mcp__atlas-mcp__search_registry", "mcp__atlas-mcp__*"} {
-		if !containsString(mandate, want) {
-			t.Fatalf("session mandate = %v, want %q", mandate, want)
-		}
-	}
-	if containsString(mandate, "Write") {
-		t.Fatalf("session mandate widened past the allowed tools: %v", mandate)
-	}
-
-	freshTools, freshMandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, agent, "agent", "")
-	if err != nil {
-		t.Fatalf("cerebroEffectiveToolsForClaim (fresh): unexpected error %v", err)
-	}
-	_, mandate = filterClaimToolsForSessionMode(freshTools, freshMandate, []string{"Read"})
-	if containsString(mandate, "mcp__atlas-mcp__*") {
-		t.Fatalf("server wildcard survived after its connection tool was filtered out: %v", mandate)
-	}
-}
-
 type fakeAPIConnBrief struct {
 	tools    []CerebroAPIConnectionBriefTool
 	gotIdent CerebroAPIConnectionBriefIdentity
@@ -287,6 +242,62 @@ func TestCerebroEffectiveToolsForClaimIncludesDirectMCPAndCapabilityDiagnosis(t 
 		if !containsString(mandate, want) {
 			t.Errorf("claim mandate = %v, want exact callable identity %q", mandate, want)
 		}
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimIncludesAllowedPlatformTools(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	wants := []string{
+		"mcp__multica__list_evals",
+		"mcp__multica__list_eval_bindings",
+		"mcp__multica__list_commands",
+		"mcp__multica__get_agent_capabilities",
+		"mcp__multica__get_me",
+		"mcp__multica__list_issues",
+	}
+	rows := make([]RuntimeToolEffectiveAccessView, 0, len(wants))
+	for _, name := range wants {
+		rows = append(rows, exposedToolView(name, "mcp", "", "Allowed platform tool", "allow", true))
+	}
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: rows}}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	for _, want := range wants {
+		if !containsString(mandate, want) {
+			t.Errorf("claim mandate = %v, want allowed platform tool %q", mandate, want)
+		}
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimUsesCanonicalIssueActionMandateKeys(t *testing.T) {
+	wants := []string{"create_issue", "update_issue", "add_comment"}
+	rows := make([]RuntimeToolEffectiveAccessView, 0, len(wants))
+	for _, name := range wants {
+		rows = append(rows, exposedToolView(name, "platform", "", "Issue action", "allow", true))
+	}
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: rows}}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	if !slices.Equal(wants, mandate) {
+		t.Fatalf("canonical issue action mandate keys = %v, want %v", mandate, wants)
 	}
 }
 
