@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,8 @@ const (
 	companyBrainRollbackDownMigration          = "../../../migrations/9165_cerebro_company_brain_rollback_tombstones.down.sql"
 	companyBrainMigrationDecisionUpMigration   = "../../../migrations/9166_cerebro_company_brain_migration_decisions.up.sql"
 	companyBrainMigrationDecisionDownMigration = "../../../migrations/9166_cerebro_company_brain_migration_decisions.down.sql"
+	companyBrainParityProofUpMigration         = "../../../migrations/9167_cerebro_company_brain_parity_proof.up.sql"
+	companyBrainParityProofDownMigration       = "../../../migrations/9167_cerebro_company_brain_parity_proof.down.sql"
 )
 
 func TestLogicalCompanyBrainMigrationDefinesOneCatalogOwningConnection(t *testing.T) {
@@ -1038,6 +1041,239 @@ func TestCompanyBrainMigrationDecisionConstraints(t *testing.T) {
 	}
 }
 
+func TestCompanyBrainParityProofDefinesExactPreCutoverEvidence(t *testing.T) {
+	up := readLogicalCompanyBrainMigration(t, companyBrainParityProofUpMigration)
+
+	for _, contract := range []string{
+		"CREATE TABLE IF NOT EXISTS cerebro_company_brain_parity_proof",
+		"company_brain_connection_id",
+		"target_permission_id",
+		"agent_id",
+		"census_version",
+		"access_version",
+		"legacy_access_sha256",
+		"target_access_sha256",
+		"legacy_approval_sha256",
+		"target_approval_sha256",
+		"legacy_tool_calls_sha256",
+		"target_tool_calls_sha256",
+		"legacy_tool_count",
+		"target_tool_count",
+		"legacy_write_source",
+		"target_write_source",
+		"status",
+		"blocker_code",
+		"evidence_sha256",
+		"evidence_at",
+		"legacy_access_sha256 = target_access_sha256",
+		"legacy_approval_sha256 = target_approval_sha256",
+		"legacy_tool_calls_sha256 = target_tool_calls_sha256",
+		"legacy_tool_count = target_tool_count",
+		"legacy_write_source = target_write_source",
+		"FOREIGN KEY (workspace_id, company_brain_connection_id)",
+		"FOREIGN KEY (workspace_id, agent_id)",
+		"workspace_id, target_permission_id, agent_id,",
+	} {
+		if !strings.Contains(up, contract) {
+			t.Errorf("parity-proof migration missing %q", contract)
+		}
+	}
+
+	upper := strings.ToUpper(up)
+	for _, line := range strings.Split(upper, "\n") {
+		statement := strings.TrimSpace(line)
+		for _, mutation := range []string{"INSERT INTO", "UPDATE ", "DELETE FROM"} {
+			if strings.HasPrefix(statement, mutation) {
+				t.Errorf(
+					"schema-only migration must not mutate existing rows: found %q in %q",
+					mutation,
+					statement,
+				)
+			}
+		}
+	}
+}
+
+func TestCompanyBrainParityProofConstraints(t *testing.T) {
+	pool := openConnectionMigrationPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, migration := range []string{
+		logicalCompanyBrainUpMigration,
+		companyBrainPermissionScopeUpMigration,
+		companyBrainParityProofUpMigration,
+	} {
+		if _, err := tx.Exec(ctx, readLogicalCompanyBrainMigration(t, migration)); err != nil {
+			t.Fatalf("apply %s: %v", migration, err)
+		}
+	}
+	if _, err := tx.Exec(
+		ctx,
+		readLogicalCompanyBrainMigration(t, companyBrainParityProofUpMigration),
+	); err != nil {
+		t.Fatalf("reapply idempotent parity-proof migration: %v", err)
+	}
+
+	workspaceID := insertMigrationWorkspace(t, tx, "company-brain-parity-proof")
+	otherWorkspaceID := insertMigrationWorkspace(t, tx, "company-brain-parity-proof-other")
+	agentID := insertMigrationAgent(t, tx, workspaceID)
+	otherAgentID := insertMigrationAgent(t, tx, otherWorkspaceID)
+	connectionID := insertMigrationConnection(t, tx, workspaceID, "company-brain")
+	logicalID := insertLogicalCompanyBrainConnection(t, tx, workspaceID, connectionID)
+	otherConnectionID := insertMigrationConnection(t, tx, otherWorkspaceID, "company-brain")
+	otherLogicalID := insertLogicalCompanyBrainConnection(t, tx, otherWorkspaceID, otherConnectionID)
+	permissionID := insertMigrationCompanyBrainPermission(
+		t, tx, workspaceID, logicalID, agentID, 7,
+	)
+	otherPermissionID := insertMigrationCompanyBrainPermission(
+		t, tx, otherWorkspaceID, otherLogicalID, otherAgentID, 7,
+	)
+
+	var seeded int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM cerebro_company_brain_parity_proof
+	`).Scan(&seeded); err != nil {
+		t.Fatal(err)
+	}
+	if seeded != 0 {
+		t.Fatalf("migration seeded %d parity proofs, want 0", seeded)
+	}
+
+	const insertProof = `
+		INSERT INTO cerebro_company_brain_parity_proof (
+			workspace_id, company_brain_connection_id,
+			target_permission_id, agent_id, census_version, access_version,
+			legacy_access_sha256, target_access_sha256,
+			legacy_approval_sha256, target_approval_sha256,
+			legacy_tool_calls_sha256, target_tool_calls_sha256,
+			legacy_tool_count, target_tool_count,
+			legacy_write_source, target_write_source,
+			status, blocker_code, evidence_sha256, evidence_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12,
+			$13, $14, $15, $16, $17, $18, $19, $20
+		)
+	`
+	valid := []any{
+		workspaceID, logicalID, permissionID, agentID, int64(1), int64(7),
+		strings.Repeat("a", 64), strings.Repeat("a", 64),
+		strings.Repeat("b", 64), strings.Repeat("b", 64),
+		strings.Repeat("c", 64), strings.Repeat("c", 64),
+		94, 94, "commercial", "commercial",
+		"matched", nil, strings.Repeat("d", 64), time.Now().UTC(),
+	}
+	if _, err := tx.Exec(ctx, insertProof, valid...); err != nil {
+		t.Fatalf("insert matched parity proof: %v", err)
+	}
+
+	blocked := append([]any(nil), valid...)
+	blocked[4] = int64(2)
+	blocked[7] = strings.Repeat("e", 64)
+	blocked[16] = "blocked"
+	blocked[17] = "CB-ACCESS-MISMATCH"
+	if _, err := tx.Exec(ctx, insertProof, blocked...); err != nil {
+		t.Fatalf("insert blocking parity proof: %v", err)
+	}
+
+	expectMigrationConstraintFailure(
+		t, tx, "duplicate agent census proof", insertProof, valid...,
+	)
+
+	for _, tc := range []struct {
+		name   string
+		index  int
+		value  any
+		index2 int
+		value2 any
+	}{
+		{name: "matched access mismatch", index: 7, value: strings.Repeat("e", 64)},
+		{name: "matched approval mismatch", index: 9, value: strings.Repeat("e", 64)},
+		{name: "matched tool-call mismatch", index: 11, value: strings.Repeat("e", 64)},
+		{name: "matched tool-count mismatch", index: 13, value: 93},
+		{name: "matched write destination mismatch", index: 15, value: "shared"},
+		{name: "matched proof carries blocker", index: 17, value: "CB-FALSE-BLOCKER"},
+		{name: "blocked proof missing blocker", index: 16, value: "blocked"},
+		{name: "invalid blocker code", index: 16, value: "blocked", index2: 17, value2: "not stable"},
+		{name: "zero census version", index: 4, value: int64(0)},
+		{name: "zero access version", index: 5, value: int64(0)},
+		{name: "invalid hash", index: 6, value: "not-a-sha256"},
+		{name: "zero legacy tool count", index: 12, value: 0},
+		{name: "invalid legacy write source", index: 14, value: "Commercial Data"},
+		{name: "future evidence", index: 19, value: time.Now().UTC().Add(24 * time.Hour)},
+	} {
+		args := append([]any(nil), valid...)
+		args[4] = int64(100 + tc.index)
+		args[tc.index] = tc.value
+		if tc.index2 > 0 {
+			args[tc.index2] = tc.value2
+		}
+		expectMigrationConstraintFailure(t, tx, tc.name, insertProof, args...)
+	}
+
+	crossLogical := append([]any(nil), valid...)
+	crossLogical[4] = int64(201)
+	crossLogical[1] = otherLogicalID
+	expectMigrationConstraintFailure(
+		t, tx, "cross-workspace logical connection", insertProof, crossLogical...,
+	)
+
+	crossAgent := append([]any(nil), valid...)
+	crossAgent[4] = int64(202)
+	crossAgent[3] = otherAgentID
+	expectMigrationConstraintFailure(
+		t, tx, "cross-workspace agent", insertProof, crossAgent...,
+	)
+
+	crossPermission := append([]any(nil), valid...)
+	crossPermission[4] = int64(203)
+	crossPermission[2] = otherPermissionID
+	expectMigrationConstraintFailure(
+		t, tx, "cross-workspace target permission", insertProof, crossPermission...,
+	)
+
+	wrongPermissionVersion := append([]any(nil), valid...)
+	wrongPermissionVersion[4] = int64(204)
+	wrongPermissionVersion[5] = int64(8)
+	expectMigrationConstraintFailure(
+		t, tx, "target permission access-version mismatch",
+		insertProof, wrongPermissionVersion...,
+	)
+
+	parityDown := readLogicalCompanyBrainMigration(t, companyBrainParityProofDownMigration)
+	if _, err := tx.Exec(ctx, parityDown); err != nil {
+		t.Fatalf("apply parity-proof down migration: %v", err)
+	}
+	var tableName *string
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT to_regclass('cerebro_company_brain_parity_proof')::text`,
+	).Scan(&tableName); err != nil {
+		t.Fatal(err)
+	}
+	if tableName != nil {
+		t.Fatalf("down migration left table %q", *tableName)
+	}
+
+	var permissionCount int
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM cerebro_tool_policy WHERE id = $1`,
+		permissionID,
+	).Scan(&permissionCount); err != nil {
+		t.Fatal(err)
+	}
+	if permissionCount != 1 {
+		t.Fatalf("down migration preserved target permission rows = %d, want 1", permissionCount)
+	}
+}
+
 func readLogicalCompanyBrainMigration(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -1155,6 +1391,32 @@ func insertMigrationLegacyConnectionPermission(
 		VALUES ($1, $2, 'agent', $3, 'allow', '')
 		RETURNING id
 	`, workspaceID, toolKey, agentID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func insertMigrationCompanyBrainPermission(
+	t *testing.T,
+	tx pgx.Tx,
+	workspaceID, logicalConnectionID, agentID string,
+	accessVersion int64,
+) string {
+	t.Helper()
+	var id string
+	if err := tx.QueryRow(context.Background(), `
+		INSERT INTO cerebro_tool_policy (
+			workspace_id, tool_key, layer, subject_id, setting, resource_pattern,
+			company_brain_connection_id, company_brain_allowed_read_sources,
+			company_brain_write_source, company_brain_access_version,
+			company_brain_lifecycle_state
+		)
+		VALUES (
+			$1, 'connection:company-brain', 'agent', $3, 'allow', '',
+			$2, ARRAY['commercial', 'shared'], 'commercial', $4, 'draft'
+		)
+		RETURNING id
+	`, workspaceID, logicalConnectionID, agentID, accessVersion).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id

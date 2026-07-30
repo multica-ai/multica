@@ -22,6 +22,14 @@ documents one named patch + its rationale + the file location(s).
   legacy Connection, permission, approval/audit record, and tool alias. Foreign
   keys prevent those rollback inputs from being deleted while referenced; the
   migration creates no rows and does not copy credentials or secret values.
+- `server/migrations/9166_cerebro_company_brain_migration_decisions.{up,down}.sql`
+  stores versioned per-agent automatic, owner-decision, cannot-migrate, and
+  do-not-migrate outcomes without classifying or changing any live agent.
+- `server/migrations/9167_cerebro_company_brain_parity_proof.{up,down}.sql`
+  stores the versioned pre-cutover equality proof for one target permission:
+  access, approval outcomes, canonical tool calls, tool count, and write
+  destination must all match the frozen legacy state before status can be
+  `matched`; any mismatch remains `blocked` with a stable code.
 - **Why:** prior to consolidation, Company Brain source claims only existed behind
   each legacy connection credential. The report invokes `whoami` server-side,
   returns only `write_source` and `allowed_read_sources`, and attaches that
