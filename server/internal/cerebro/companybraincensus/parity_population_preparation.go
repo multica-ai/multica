@@ -11,12 +11,12 @@ import (
 // request a later one-shot population authorization. It is not an
 // authorization and cannot invoke population.
 type ParityPopulationInputs struct {
-	WorkspaceID                     string
-	FrozenCensusSHA256              string
-	CensusVersion                   int64
-	CompanyBrainConnectionID        string
-	ExpectedEligibleAgentCount      int
-	ExpectedTargetPermissionsSHA256 string
+	WorkspaceID                     string `json:"workspace_id"`
+	FrozenCensusSHA256              string `json:"frozen_census_sha256"`
+	CensusVersion                   int64  `json:"census_version"`
+	CompanyBrainConnectionID        string `json:"company_brain_connection_id"`
+	ExpectedEligibleAgentCount      int    `json:"eligible_agent_count"`
+	ExpectedTargetPermissionsSHA256 string `json:"target_permissions_sha256"`
 }
 
 // ParityPopulationPreparer reads the frozen census and current target

@@ -54,15 +54,14 @@ type ParityPopulationRequest struct {
 }
 
 // ParityPopulationAuthorizationGate atomically consumes one authorization
-// bound to the complete population request. No production implementation is
-// registered until the population slice is separately authorised.
+// bound to the complete population request.
 type ParityPopulationAuthorizationGate interface {
 	AuthorizeOnce(context.Context, ParityPopulationRequest) error
 }
 
 // ParityPopulationCoordinator joins the isolated parity evaluator and proof
-// writer. It is intentionally not registered with any API, CLI, scheduler, or
-// feature flag.
+// writer. It is only wired to the explicit one-shot parityproof command; no
+// API, scheduler, feature flag, or runtime path can invoke it.
 type ParityPopulationCoordinator struct {
 	gate    ParityPopulationAuthorizationGate
 	frozen  FrozenCensusLoader

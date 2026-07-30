@@ -40,9 +40,16 @@
 > allowed read sources containing the write source, positive access version,
 > and lifecycle state (`draft`, `active`, `disabled`, or `revoked`). Ordinary
 > policy rows keep all fields null and resolve exactly as before. The
-> migrations seed no rows, and the parity preparation code has no live caller;
-> current Connection resolution and enforcement therefore remain the row 2b
-> contract below until a separately authorized cutover.
+> migrations seed no rows. The internal `companybraincensus/cmd/parityproof`
+> command is the only population caller: dry-run returns the immutable census
+> and target-permission fingerprints plus the exact approval request; apply
+> requires a live, unused, single-use approval bound to every fingerprint and
+> decided by a workspace owner or admin. Apply writes only versioned parity
+> proofs, verifies one proof per eligible agent, and fingerprints Connections
+> and permissions before and after so either changing keeps cutover blocked.
+> There is no API, scheduler, feature flag, or runtime caller. Current Connection
+> resolution and enforcement therefore remain the row 2b contract below until
+> the explicit population and separately authorized cutover.
 
 **Read this before you touch anything that grants, denies, gates, or approves an
 agent action.** Permission enforcement in this codebase is spread across many
