@@ -44,7 +44,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      SPECS: e2e/fir-1317-live-collab.spec.ts e2e/fir-3212-agent-configuration.spec.ts e2e/fir-3199-permission-detail-link.spec.ts e2e/fir-3388-capabilities.spec.ts e2e/fir-3755-service-tokens.spec.ts e2e/fir3778-agent-document-edit.spec.ts
+      SPECS: e2e/fir-1317-live-collab.spec.ts e2e/fir-3212-agent-configuration.spec.ts e2e/fir-3199-permission-detail-link.spec.ts e2e/fir-3388-capabilities.spec.ts e2e/fir-3755-service-tokens.spec.ts e2e/fir3778-agent-document-edit.spec.ts e2e/fir-4139-floating-comment-composer.spec.ts
       DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
       # 64 bytes — satisfies the >= 32-byte requirement enforced by auth.JWTSecret().
       JWT_SECRET: ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad
