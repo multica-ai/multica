@@ -82,8 +82,10 @@ a pointer.
 | --- | --- |
 | agent archived / no runtime → `continue` (`RuntimeID` invalid or `ArchivedAt` set) | `server/internal/handler/comment.go:1451-1452` |
 | squad leader archived / no runtime → `continue` | `server/internal/handler/comment.go:1417-1423` |
-| private agent the actor cannot access → `continue` (`canAccessPrivateAgent`) | `server/internal/handler/comment.go:1454-1458` |
-| private squad leader the actor cannot trigger → `continue` (`canAccessPrivateAgent`) | `server/internal/handler/comment.go:1425-1428` |
+| private agent the actor cannot INVOKE → blocked mention, reason `invocation_not_allowed` (`canInvokeAgent`, not `canAccessPrivateAgent` — MUL-3963 split see-vs-run) | `server/internal/handler/comment.go` (search `resolveMentionedAgentCommentTriggers`, the agent-branch `canInvokeAgent` call) |
+| private squad leader the actor cannot INVOKE → blocked mention, reason `invocation_not_allowed` (`canInvokeAgent`) | `server/internal/handler/comment.go` (search `resolveMentionedAgentCommentTriggers`, the squad-branch `canInvokeAgent` call) |
+| well-formed mention uuid that resolves to no agent in this workspace → `invocation_not_allowed`, the SAME code as a private agent, so a blocked reason can never confirm existence | `server/internal/handler/comment.go` (search `Do not reveal whether the id exists`) |
+| mention id that is not a valid uuid at all (`mention://agent/-`) → `target_unavailable` on BOTH the agent and squad branch: a non-uuid names no entity anywhere, so it hides nothing and must not be blamed on permission (MUL-5548) | `server/internal/handler/comment.go` (search `cannot name an entity in ANY workspace`) |
 | already-pending dedup (agent) → shared pending-task helper → `continue` | `server/internal/handler/comment.go:1459-1463` |
 | already-pending dedup (squad leader) → shared pending-task helper → `continue` | `server/internal/handler/comment.go:1429-1433` |
 | `canAccessPrivateAgent` definition | `server/internal/handler/agent_access.go` (search `func (h *Handler) canAccessPrivateAgent`) |

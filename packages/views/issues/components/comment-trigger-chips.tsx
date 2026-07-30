@@ -174,8 +174,9 @@ export function CommentTriggerChips({
 }
 
 // One blocked mention: named like an allowed chip ("Go"), but with an error
-// indicator and a short reason ("No permission") instead of "will start", so a
-// refused @mention reads as a clear, specific error rather than a vague count.
+// indicator and a short reason ("Not found or no permission") instead of "will
+// start", so a refused @mention reads as a clear, specific error rather than a
+// vague count.
 function BlockedTriggerChip({
   outcome,
   label,

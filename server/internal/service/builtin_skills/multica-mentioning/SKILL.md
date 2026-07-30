@@ -113,18 +113,28 @@ evaluated BEFORE the `@all` short-circuit.
 
 ## What does NOT happen (so the result doesn't surprise you)
 
-These are all silent no-ops — no error, no run:
+None of these produce an error response, and none of them run. They differ in
+whether you get told: a mention that never parsed is a truly silent no-op, while
+one that parsed and was then refused comes back in the response's
+`trigger_outcomes` as `status: "blocked"` with a `reason_code`. Read that array
+after posting — it is the only place a refused mention is visible.
 
 - **A name where a UUID belongs.** `mention://member/Alice` is dead. The id
   group accepts only hex+dashes or `all`; the non-hex letters in a typical name
   make the whole pattern fail to match, so the parser returns nothing.
 - **A hex-ish but wrong UUID.** A well-formed-looking UUID that no entity owns
   DOES parse, then no-ops at lookup: the workspace-scoped query finds no agent
-  and the loop `continue`s. Same agent-visible result (nothing fires), but the
-  mechanism is the lookup miss, not a parse failure. An id that matches the
-  pattern but is NOT a valid UUID at all (`mention://agent/-`) is rejected by
-  the id parser itself and reported as a blocked mention with the same
-  enumeration-safe reason code — never an error response.
+  and the mention is reported blocked with `invocation_not_allowed`. That code
+  is deliberately ambiguous — **a typo'd UUID and a genuine permission denial
+  look identical on purpose**, because the id you typed could name a private
+  agent in another workspace and the reason must not confirm that it exists.
+  **So when you see `invocation_not_allowed`, check the UUID against the live
+  roster BEFORE you touch any visibility or invocation setting** (MUL-5548);
+  `multica squad member list <squad-id> --output json` returns the `member_id`
+  to build the mention from. An id that matches the pattern but is NOT a valid
+  UUID at all (`mention://agent/-`) is rejected by the id parser and blocked
+  with `target_unavailable` instead — a non-UUID names no entity anywhere, so
+  it conceals nothing. Neither case is ever an error response.
 - **An already-pending task.** Even a correct `@agent`/`@squad` is skipped when
   the target already has a pending task on this issue
   (`HasPendingTaskForIssueAndAgent` → `continue`). Edit preview is the only
@@ -133,10 +143,13 @@ These are all silent no-ops — no error, no run:
   triggers. It is still comment-scoped, not an agent-wide bypass.
 - **An archived agent**, or a squad whose leader is archived: skipped
   (`RuntimeID` invalid or `ArchivedAt` set).
-- **A private agent you cannot access:** skipped — the mention path gates on
-  `canAccessPrivateAgent` directly for both `@agent` and `@squad` (the
-  `canEnqueueSquadLeader` wrapper is the squad assignment/promote path, not this
-  one; the child-done wake is ungated — see the multica-squads skill).
+- **A private agent you cannot invoke:** blocked — the mention path gates on
+  `canInvokeAgent` for both `@agent` and `@squad`. That is the *run* gate, not
+  the *see* gate: since MUL-3963 a workspace admin who can open a private agent
+  in the UI still may not trigger it, so being able to view the target says
+  nothing about being able to mention it. (The `canEnqueueSquadLeader` wrapper
+  is the squad assignment/promote path, not this one; the child-done wake is
+  ungated — see the multica-squads skill.)
 
 One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
 schedule/webhook dispatch has no human originator, so the A2A gate has no human

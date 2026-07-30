@@ -2575,9 +2575,13 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		agentUUID, err := util.ParseUUID(m.ID)
 		if err != nil {
 			// Untrusted comment text: MentionRe matches any hex/dash run, so a
-			// malformed id must not reach the panicking Must* parser. It gets
-			// the same enumeration-safe outcome as an id that owns no agent.
-			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
+			// malformed id must not reach the panicking Must* parser. A string
+			// that is not a UUID at all cannot name an entity in ANY workspace,
+			// so there is no existence to conceal here and the invoke-permission
+			// code would be a false cause (MUL-5548): report the same
+			// target_unavailable the squad path above already uses. Only the
+			// well-formed-but-unresolved case below stays enumeration-safe.
+			blockTarget("agent", m.ID, ReasonTargetUnavailable)
 			continue
 		}
 		// Load the agent scoped to the current issue's workspace. Using the
