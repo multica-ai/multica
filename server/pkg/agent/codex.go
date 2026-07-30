@@ -1541,6 +1541,84 @@ const codexResumeUnavailableNotice = "[System notice] You were expected to conti
 // prior context was lost instead of the run silently continuing as new. The
 // notice is folded into the same text block as the prompt to stay within the
 // single-text-block turn input Codex already accepts.
+// codexFileChangeInput lifts a `fileChange` item's edits into the tool-use
+// payload. Codex sends one entry per touched file:
+//
+//	changes: [ { path, kind: { type, move_path }, diff } ]
+//
+// where `diff` is already a unified diff. Without this the event records only
+// that a patch happened, which is the one thing the transcript does not need to
+// be told. Shape confirmed against codex-cli 0.145.0 driving
+// `app-server --listen stdio://` (both item/started and item/completed carry
+// the same `changes` array; only `status` differs).
+//
+// Kept faithful rather than reshaped: the renderer decides how to present a
+// unified diff, and a lossy translation here would throw away the rename target
+// and the add/delete/update distinction.
+func codexFileChangeInput(item map[string]any) map[string]any {
+	raw, ok := item["changes"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	changes := make([]any, 0, len(raw))
+	for _, entry := range raw {
+		change, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		normalized := map[string]any{}
+		if path, ok := change["path"].(string); ok && path != "" {
+			normalized["path"] = path
+		}
+		if diff, ok := change["diff"].(string); ok && diff != "" {
+			normalized["diff"] = diff
+		}
+		// `kind` is an object ({type: "update", move_path: null}); flatten the
+		// discriminator and keep the rename target only when there is one.
+		if kind, ok := change["kind"].(map[string]any); ok {
+			if kindType, ok := kind["type"].(string); ok && kindType != "" {
+				normalized["kind"] = kindType
+			}
+			if movePath, ok := kind["move_path"].(string); ok && movePath != "" {
+				normalized["move_path"] = movePath
+			}
+		}
+		if len(normalized) > 0 {
+			changes = append(changes, normalized)
+		}
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	return map[string]any{"changes": changes}
+}
+
+// codexFileChangeSummary is the result line for a completed `fileChange`. The
+// item carries no stdout of its own, so report what landed: the status Codex
+// reports plus one path per change. The diffs stay on the tool-use side rather
+// than being repeated here.
+func codexFileChangeSummary(item map[string]any) string {
+	status, _ := item["status"].(string)
+	if status == "" {
+		status = "completed"
+	}
+	raw, _ := item["changes"].([]any)
+	paths := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		change, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if path, ok := change["path"].(string); ok && path != "" {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) == 0 {
+		return status
+	}
+	return status + ": " + strings.Join(paths, ", ")
+}
+
 func codexTurnInput(prompt string, resumeExpected, resumed bool) []map[string]any {
 	text := prompt
 	if resumeExpected && !resumed {
@@ -2598,6 +2676,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Type:   MessageToolUse,
 				Tool:   "patch_apply",
 				CallID: itemID,
+				Input:  codexFileChangeInput(item),
 			})
 		}
 
@@ -2607,6 +2686,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Type:   MessageToolResult,
 				Tool:   "patch_apply",
 				CallID: itemID,
+				Output: codexFileChangeSummary(item),
 			})
 		}
 
