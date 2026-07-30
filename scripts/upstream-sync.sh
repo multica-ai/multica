@@ -10,6 +10,11 @@
 # Override the target with UPSTREAM_TAG=v0.4.12 to pin a specific release
 # (used to land the fork on a tag boundary the first time, and to walk one
 # release at a time when a hop is too large to review).
+#
+# Optional JIRA_REF=AIPLAT-123 stamps that key into the PR title. The org-level
+# required check `jira-ref-check-and-description` ("Rule PR Title semantics")
+# demands a bracketed ref there and fails without one, so the title carries
+# `[NO JIRA]` when JIRA_REF is unset — see step 14b.
 set -euo pipefail
 
 UPSTREAM_URL="https://github.com/multica-ai/multica.git"
@@ -282,8 +287,41 @@ git add -- "${BAKEFILE}"
 } > "${CURSOR_FILE}"
 git add "${CURSOR_FILE}"
 
-# 12. Seal the merge.
-git commit -m "chore: sync upstream multica-ai/multica ${FROM_LABEL}..${TARGET_TAG}"
+# 11b. Resolve the JIRA reference the PR title must carry.
+#
+#      `jira-ref-check-and-description` is an org-injected required check on this
+#      repo. It reads the PR TITLE, and unless the title carries a bracketed
+#      exclusion tag it resolves the key against Atlassian and fails when it
+#      finds none. Every tick-generated sync PR failed that gate until a human
+#      edited its title by hand — the loop advertised itself as autonomous up to
+#      the merge while in practice needing a manual edit at exactly that point,
+#      because the check does not gate dev.yml and the pipeline still went green
+#      in dev (observed on PR #248: `failure` at 04:46:08Z, `success` at
+#      06:56:41Z only after the title was edited).
+#
+#      `[NO JIRA]` is the fallback rather than the intent: sync-tick.sh passes
+#      the per-hop AIPLAT key as JIRA_REF, and JIRA is allowed to fail there
+#      without blocking a sync, so the default has to stand on its own.
+normalize_jira_ref() {
+  local raw="${1:-}"
+  # Tolerate `[AIPLAT-1]`, ` AIPLAT-1 ` and multi-line input: the caller may be
+  # piping through metadata this script does not control.
+  raw="$(printf '%s' "${raw}" | tr -d '[]' | tr '\n\t' '  ')"
+  raw="$(printf '%s' "${raw}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g')"
+  if [ -z "${raw}" ]; then
+    printf 'NO JIRA'
+  else
+    printf '%s' "${raw}"
+  fi
+}
+
+SYNC_SUBJECT="chore: sync upstream multica-ai/multica ${FROM_LABEL}..${TARGET_TAG}"
+PR_TITLE="${SYNC_SUBJECT} [$(normalize_jira_ref "${JIRA_REF:-}")]"
+
+# 12. Seal the merge. The commit message carries the same ref as the PR title, so
+#     a rebase-merge lands a compliant subject too (squash-merge takes the PR
+#     title regardless).
+git commit -m "${PR_TITLE}"
 
 # 13. Local verification.
 #     `go build ./...` does NOT compile _test.go cross-file references — use go vet.
@@ -344,7 +382,7 @@ gh api -X POST "repos/${FORK_SLUG}/pulls" \
   --jq '.html_url' \
   -f base=main \
   -f head="${BRANCH}" \
-  -f title="chore: sync upstream multica-ai/multica ${FROM_LABEL}..${TARGET_TAG}" \
+  -f title="${PR_TITLE}" \
   -f body="$(cat <<BODY
 Sync upstream multica-ai/multica from \`${FROM_LABEL}\` to release \`${TARGET_TAG}\` (\`${UPSTREAM_SHORT}\`).
 

@@ -42,6 +42,39 @@
 #   SYNC_ENGINEER_AGENT           default Engineer — runs the dispatched tools smoke
 #   SYNC_TICK_DRY_RUN=1           read every source, mutate nothing, report the
 #                                 action that would have been taken
+#   SYNC_SWEEP_AGE_MIN            default 60 — age gate for the opportunistic
+#                                 throwaway sweep on the quiet no-op path
+#   SYNC_JIRA_PROJECT             default AIPLAT — project the per-hop item lands in
+#   SYNC_JIRA_TYPE                default Task
+#   SYNC_JIRA_UMBRELLA            default AIPLAT-166 — referenced in the item body.
+#                                 It is a Story with no parent, so per-hop Tasks
+#                                 cannot be --parent'ed under it.
+#   SYNC_JIRA_TIMEOUT             default 30 — seconds per acli call
+#   SYNC_JIRA_DISABLE=1           skip the JIRA mirror entirely
+#
+# ── Throwaway smoke tickets (ANK-43 scope 2) ──────────────────────────────────
+# A hop leaves two disposable Multica issues behind: the tools-smoke dispatch
+# ticket this script creates, and the inner agent-claim check the smoke script
+# creates to prove an agent can claim work. Neither may be cancelled inline by
+# the script that made it — the claiming agent's runtime posts its Ownership-mode
+# `status in_review` AFTER its final comment, so an inline cancel always races the
+# agent it just waited on and always loses (measured on the v0.4.14 hop: cancel at
+# ~07:44:34Z, agent's in_review write at 07:44:42Z). Both are therefore swept from
+# a LATER tick, at every terminal transition, which is strictly after that write.
+#   * inner agent-claim checks → `cancelled` (they prove nothing once read)
+#   * the tools-smoke dispatch ticket → `done` (it did real work; its result is on
+#     the sync ticket)
+# The work list is explicit: `tools_smoke_issue_id` plus the CSV
+# `smoke_throwaway_issue_ids` the smoke script appends to. Title matching is only
+# the belt-and-braces backstop on the quiet path.
+#
+# ── JIRA mirror (ANK-43 scope 3) ──────────────────────────────────────────────
+# One AIPLAT work item per hop, mirroring the one Multica sync ticket, with a
+# comment per transition. Multica's `sync-*` labels are deliberately NOT mirrored.
+# JIRA is a mirror, never a source of truth: every acli call is wrapped in
+# `timeout` and its failure is swallowed, `jira_key` is never a precondition for
+# anything, and a JIRA outage costs the hop nothing but one degradation note on
+# the Multica audit thread.
 #
 # ── GitHub capability notes, verified from the tools agentrunner pod ───────────
 # The GitHub App CANNOT reach GraphQL mutations: `gh pr create`, `gh pr comment`
@@ -56,6 +89,14 @@ SYNC_REQUESTER_ID="${SYNC_REQUESTER_ID:-b97bf628-51c0-417a-8d15-b5bdd8789ceb}"
 SYNC_ROLLOUT_DEADLINE_MIN="${SYNC_ROLLOUT_DEADLINE_MIN:-45}"
 SYNC_ENGINEER_AGENT="${SYNC_ENGINEER_AGENT:-Engineer}"
 DRY_RUN="${SYNC_TICK_DRY_RUN:-}"
+SWEEP_AGE_MIN="${SYNC_SWEEP_AGE_MIN:-60}"
+SWEEP_MAX="${SYNC_SWEEP_MAX:-20}"
+
+JIRA_PROJECT="${SYNC_JIRA_PROJECT:-AIPLAT}"
+JIRA_TYPE="${SYNC_JIRA_TYPE:-Task}"
+JIRA_UMBRELLA="${SYNC_JIRA_UMBRELLA:-AIPLAT-166}"
+JIRA_TIMEOUT="${SYNC_JIRA_TIMEOUT:-30}"
+JIRA_DISABLE="${SYNC_JIRA_DISABLE:-}"
 
 DEV_HOST="https://agentfarm.development.g2.com"
 TOOLS_HOST="https://agentfarm.g2.com"
@@ -75,9 +116,13 @@ log()  { printf '[sync-tick] %s\n' "$*" >&2; }
 say()  { printf '%s\n' "$*"; }
 die()  { log "ERROR: $*"; exit 1; }
 
-command -v jq >/dev/null 2>&1 || die "jq is required"
-command -v gh >/dev/null 2>&1 || die "gh is required"
-command -v multica >/dev/null 2>&1 || die "multica is required"
+# Checked in main() rather than here so scripts/sync-pipeline.test.sh can source
+# this file and exercise the pure helpers on a host that has no agent runtime.
+require_deps() {
+  command -v jq >/dev/null 2>&1 || die "jq is required"
+  command -v gh >/dev/null 2>&1 || die "gh is required"
+  command -v multica >/dev/null 2>&1 || die "multica is required"
+}
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
@@ -97,6 +142,7 @@ if ! grep -qxF '/.sync-tick-tmp/' "${EXCLUDE_FILE}" 2>/dev/null; then
 fi
 mkdir -p "${TMPD}"
 trap 'rm -rf "${TMPD}"' EXIT
+JIRA_FAIL_FILE="${TMPD}/jira-failures"
 
 now_epoch() { date -u +%s; }
 
@@ -184,6 +230,238 @@ notify_once() {
   mset "notified_${key}" true bool || true
 }
 
+# ── Throwaway smoke-ticket sweep ──────────────────────────────────────────────
+issue_status() {
+  multica issue get "$1" --output json 2>/dev/null | jq -r '.status // empty'
+}
+
+# Drive one throwaway to a terminal status. Idempotent, and never downgrades a
+# status a human already set: an issue that is already done/cancelled is left be.
+retire_throwaway() {
+  local id="$1" want="$2" cur
+  [[ -z "${id}" ]] && return 0
+  cur="$(issue_status "${id}")"
+  [[ -z "${cur}" ]] && { log "sweep: ${id} not readable — skipping"; return 0; }
+  case "${cur}" in done|cancelled) return 0 ;; esac
+  if [[ -n "${DRY_RUN}" ]]; then log "DRY: sweep ${id} (${cur}) → ${want}"; return 0; fi
+  if multica issue status "${id}" "${want}" >/dev/null 2>&1; then
+    log "sweep: ${id} ${cur} → ${want}"
+  else
+    log "sweep: could not set ${id} → ${want}"
+  fi
+  return 0
+}
+
+# Explicit work list for the current hop. Called at every terminal transition, so
+# it always runs at least one tick after the smoke agent's own exit write.
+sweep_throwaways() {
+  local ids id dispatch
+  ids="$(mget smoke_throwaway_issue_ids)"
+  if [[ -n "${ids}" ]]; then
+    while IFS= read -r id; do
+      id="${id//[[:space:]]/}"
+      [[ -n "${id}" ]] && retire_throwaway "${id}" cancelled
+    done < <(printf '%s' "${ids}" | tr ',' '\n')
+  fi
+  dispatch="$(mget tools_smoke_issue_id)"
+  [[ -n "${dispatch}" ]] && retire_throwaway "${dispatch}" done
+  return 0
+}
+
+# Terminal status a throwaway title should end at, or empty when the title is not
+# a throwaway shape. The two live shapes are
+#   `Tools smoke for <tag> (<sha>)`                 — dispatch_tools_smoke()
+#   `<label> agent-claim check <sha> (<ts>)`        — smoke-test-agentrunner.sh
+# plus the pre-rework `Smoke <timestamp>` inner issues, kept so the backstop can
+# still tidy legacy litter.
+sweep_want_status() {
+  local title="$1"
+  case "${title}" in
+    *"agent-claim check "*)   printf 'cancelled' ;;
+    Smoke\ 20[0-9][0-9]*)     printf 'cancelled' ;;
+    "Tools smoke for "*)      printf 'done' ;;
+    *)                        : ;;
+  esac
+}
+
+# Belt and braces for the quiet no-active-sync path: tidy anything the explicit
+# list missed (a hop whose ticket was deleted, a manual smoke run, the dev-side
+# equivalent when this script happens to run in that workspace). Age-gated so it
+# can never touch a smoke that is still in flight, bounded so a workspace full of
+# litter cannot turn a tick into a long-running job, and silent — nothing is
+# printed to stdout, so the caller still posts no comment.
+sweep_stale_throwaways() {
+  local cutoff id title want n=0
+  cutoff=$(( $(now_epoch) - SWEEP_AGE_MIN * 60 ))
+  while IFS=$'\t' read -r id title; do
+    [[ -z "${id}" ]] && continue
+    want="$(sweep_want_status "${title}")"
+    [[ -z "${want}" ]] && continue
+    retire_throwaway "${id}" "${want}"
+    n=$(( n + 1 ))
+    (( n >= SWEEP_MAX )) && { log "sweep: hit SYNC_SWEEP_MAX=${SWEEP_MAX}, stopping"; break; }
+  done < <(multica issue list --limit 100 --output json 2>/dev/null \
+    | jq -r --argjson cut "${cutoff}" '
+        (.issues // [])[]
+        | select(.status != "done" and .status != "cancelled")
+        | select((.updated_at // "") != "")
+        | select((.updated_at | fromdateiso8601) < $cut)
+        | "\(.id)\t\(.title)"' 2>/dev/null)
+  return 0
+}
+
+# ── JIRA mirror (acli) ────────────────────────────────────────────────────────
+# Every call goes through jira_run, which is the whole failure-isolation story:
+# a bounded timeout, stderr captured to the log, non-zero swallowed. Nothing
+# below may abort a tick, change a stage or block a hop.
+jira_available() {
+  [[ -z "${JIRA_DISABLE}" ]] || return 1
+  command -v acli >/dev/null 2>&1 || return 1
+  command -v timeout >/dev/null 2>&1 || return 1
+}
+
+# Atlassian hanging is the failure mode that would actually hurt: a stalled tick
+# holds its task slot and the next tick fires 15 minutes later regardless. Hence
+# `timeout` on every call rather than trusting acli to give up.
+#
+# Failures are recorded in a FILE, not a variable: jira_run is called inside
+# command substitution (`out="$(jira_run …)"`), and a subshell cannot set a global
+# — noting the degradation from in here would lose the "already noted" flag and
+# re-post the note on every tick. jira_degraded_flush drains the file at the end
+# of the tick, in the parent shell. (JIRA_FAIL_FILE is set next to TMPD above.)
+jira_run() {
+  local out rc=0
+  out="$(timeout "${JIRA_TIMEOUT}" acli "$@" 2>&1)" || rc=$?
+  if (( rc != 0 )); then
+    log "acli ${1:-} ${2:-} ${3:-} failed (exit ${rc}): $(printf '%s' "${out}" | tr '\n' ' ' | tail -c 300)"
+    [[ -n "${JIRA_FAIL_FILE}" ]] \
+      && printf '`acli %s %s %s` exited %s\n' "${1:-}" "${2:-}" "${3:-}" "${rc}" >> "${JIRA_FAIL_FILE}"
+    return 1
+  fi
+  printf '%s' "${out}"
+  return 0
+}
+
+# Surface degradation once per hop, the same way notify_once works — a mirror that
+# is behind is worth saying, but not every 15 minutes.
+jira_degraded_flush() {
+  local detail
+  [[ -z "${TICKET}" || -z "${JIRA_FAIL_FILE}" ]] && return 0
+  [[ -s "${JIRA_FAIL_FILE}" ]] || return 0
+  [[ -n "$(mget jira_degraded_noted)" ]] && return 0
+  detail="$(head -n1 "${JIRA_FAIL_FILE}")"
+  mset jira_degraded_noted true bool || true
+  audit "_The JIRA mirror is behind._ ${detail}
+
+JIRA is a mirror, not a gate: this hop continues unaffected, and this thread plus the PR body remain the complete record. Later transitions may be missing from the AIPLAT item."
+  return 0
+}
+
+# acli takes plain text or ADF, so the Markdown used in the Multica audit thread
+# would render literally. Flatten links to `text (url)` and drop the emphasis and
+# table pipes rather than shipping the raw markup.
+jira_flatten() {
+  printf '%s\n' "$1" \
+    | sed -E 's#\[([^]]*)\]\(([^)]+)\)#\1 (\2)#g' \
+    | sed -E 's/`//g; s/\*\*//g' \
+    | sed -E '/^[[:space:]]*\|.*\|[[:space:]]*$/ {
+                s/^[[:space:]]*\|[[:space:]]*//
+                s/[[:space:]]*\|[[:space:]]*$//
+                s/[[:space:]]*\|[[:space:]]*/ — /g
+              }' \
+    | sed -E 's/^-{3,}( — -{3,})*$//'
+}
+
+jira_key_from() {
+  local out="$1" key
+  key="$(printf '%s' "${out}" \
+    | jq -r 'if type=="object" then (.key // .issue.key // empty)
+             elif type=="array" then (.[0].key // empty)
+             else empty end' 2>/dev/null)"
+  # acli's create output is not guaranteed to be JSON on every version, so fall
+  # back to the key shape itself rather than losing a work item we just created.
+  [[ -z "${key}" ]] && key="$(printf '%s' "${out}" \
+    | grep -oE '[A-Z][A-Z0-9_]+-[0-9]+' | head -n1)"
+  printf '%s' "${key}"
+}
+
+# Create the per-hop item, or recover the one an earlier tick created. Prints the
+# key on success and returns non-zero on every failure path — callers treat that
+# as "no mirror this tick", never as an error.
+jira_ensure_item() {
+  local from="$1" to="$2" key summary attempts out descf
+  key="$(mget jira_key)"
+  [[ -n "${key}" ]] && { printf '%s' "${key}"; return 0; }
+  jira_available || return 1
+  summary="Upstream sync ${from} → ${to}"
+
+  # Idempotency, second line of defence: a tick that created the item but died
+  # before writing metadata must not create a second one. The JQL matches loosely
+  # (tags and the arrow tokenize unpredictably) and the exact summary is compared
+  # here, where it is cheap and exact.
+  out="$(jira_run jira workitem search \
+    --jql "project = ${JIRA_PROJECT} AND summary ~ \"Upstream sync\" ORDER BY created DESC" \
+    --limit 50 --fields "key,summary" --json)" || out=""
+  key="$(printf '%s' "${out}" | jq -r --arg s "${summary}" \
+    'if type=="array" then (.[] | select(.fields.summary == $s) | .key) else empty end' 2>/dev/null \
+    | head -n1)"
+
+  if [[ -z "${key}" ]]; then
+    attempts="$(mget jira_create_attempts)"; attempts="${attempts:-0}"
+    if (( attempts >= 2 )); then
+      log "JIRA item creation already failed ${attempts}×; not retrying for this hop"
+      return 1
+    fi
+    if [[ -n "${DRY_RUN}" ]]; then log "DRY: would create a ${JIRA_PROJECT} ${JIRA_TYPE} '${summary}'"; return 1; fi
+    mset jira_create_attempts "$(( attempts + 1 ))" number || true
+    descf="${TMPD}/jira-desc.txt"
+    {
+      printf 'Autonomous upstream sync hop %s -> %s, driven by scripts/sync-tick.sh in g2crowd/agentfarm.\n\n' "${from}" "${to}"
+      printf 'Multica sync ticket (source of truth): %s\n' "${TICKET}"
+      printf 'Umbrella item for this effort: %s\n\n' "${JIRA_UMBRELLA}"
+      printf 'Each pipeline state change is mirrored here as a comment. The pipeline is autonomous up to a green dev smoke, then parks for a human to merge to main.\n'
+    } > "${descf}"
+    out="$(jira_run jira workitem create --project "${JIRA_PROJECT}" --type "${JIRA_TYPE}" \
+      --summary "${summary}" --description-file "${descf}" --json)" || out=""
+    rm -f "${descf}"
+    key="$(jira_key_from "${out}")"
+  fi
+
+  [[ -z "${key}" ]] && return 1
+  mset jira_key "${key}" string || true
+  log "JIRA mirror: ${key}"
+  printf '%s' "${key}"
+}
+
+jira_comment() {
+  local body="$1" key f
+  key="$(mget jira_key)"
+  [[ -z "${key}" ]] && return 0
+  jira_available || return 0
+  if [[ -n "${DRY_RUN}" ]]; then log "DRY: JIRA comment on ${key}"; return 0; fi
+  f="${TMPD}/jira-comment.txt"
+  {
+    jira_flatten "${body}"
+    printf '\n--\nMirrored from Multica sync ticket %s by scripts/sync-tick.sh.\n' "${TICKET}"
+  } > "${f}"
+  jira_run jira workitem comment create --key "${key}" --body-file "${f}" --json >/dev/null || true
+  rm -f "${f}"
+  return 0
+}
+
+# An unrecognised status name must degrade to a warning, never a failure: the
+# AIPLAT workflow is not owned here and its transition names can change.
+jira_transition() {
+  local status="$1" key
+  key="$(mget jira_key)"
+  [[ -z "${key}" ]] && return 0
+  jira_available || return 0
+  if [[ -n "${DRY_RUN}" ]]; then log "DRY: JIRA transition ${key} → ${status}"; return 0; fi
+  jira_run jira workitem transition --key "${key}" --status "${status}" --yes >/dev/null \
+    || log "JIRA transition of ${key} to '${status}' was not accepted — leaving its status alone"
+  return 0
+}
+
 # ── GitHub helpers (REST for every write) ─────────────────────────────────────
 gh_pr_json() { gh api "repos/${FORK_SLUG}/pulls/$1" 2>/dev/null; }
 
@@ -198,6 +476,27 @@ gh_remove_label() {
   local pr="$1" label="$2"
   [[ -n "${DRY_RUN}" ]] && { log "DRY: remove PR label ${label} ← #${pr}"; return 0; }
   gh api -X DELETE "repos/${FORK_SLUG}/issues/${pr}/labels/${label}" >/dev/null 2>&1 || true
+}
+
+# `jira-ref-check-and-description` reads the PR TITLE and fails when it carries no
+# bracketed ref. upstream-sync.sh now stamps one in at creation time, so this only
+# repairs the two paths where the title predates the ref: an orphan PR opened
+# before that change and then adopted, and a hop whose JIRA item only appeared on
+# a later tick. A title that already carries a ref — including one a human typed —
+# is never rewritten.
+ensure_pr_jira_ref() {
+  local pr="$1" title key
+  [[ -z "${pr}" ]] && return 0
+  title="$(gh_pr_json "${pr}" | jq -r '.title // empty')"
+  [[ -z "${title}" ]] && return 0
+  if printf '%s' "${title}" | grep -qE '\[([A-Z][A-Z0-9_]+-[0-9]+|NO JIRA)\]'; then
+    return 0
+  fi
+  key="$(mget jira_key)"; key="${key:-NO JIRA}"
+  if [[ -n "${DRY_RUN}" ]]; then log "DRY: retitle #${pr} → ... [${key}]"; return 0; fi
+  gh api -X PATCH "repos/${FORK_SLUG}/pulls/${pr}" -f title="${title} [${key}]" >/dev/null 2>&1 \
+    || { log "could not add the JIRA ref to the title of #${pr}"; return 0; }
+  log "added [${key}] to the title of #${pr}"
 }
 
 gh_pr_comment() {
@@ -251,9 +550,10 @@ pr_body_update() {
 }
 
 render_state_table() {
-  local f="${TMPD}/state.md" msha br
+  local f="${TMPD}/state.md" msha br jkey
   msha="$(mget merge_sha)"
   br="$(mget blocked_reason)"
+  jkey="$(mget jira_key)"
   {
     echo '### Upstream sync pipeline'
     echo
@@ -264,6 +564,7 @@ render_state_table() {
     printf '| pr_sha | `%s` |\n' "$(mget pr_sha)"
     printf '| merge_sha | %s |\n' "${msha:+\`${msha}\`}"
     printf '| blocked_reason | %s |\n' "${br:+\`${br}\`}"
+    printf '| jira | %s |\n' "${jkey:+[${jkey}](https://g2crowd.atlassian.net/browse/${jkey})}"
     echo
     printf '_Maintained by `scripts/sync-tick.sh`. Ticket: %s_\n' "${TICKET}"
   } > "${f}"
@@ -276,7 +577,21 @@ advance() {
   mset pipeline_stage "${stage}" string || true
   mset stage_entered_at "$(now_epoch)" number || true
   log "stage → ${stage}"
-  [[ -n "${note}" ]] && audit "${note}"
+  if [[ -n "${note}" ]]; then
+    audit "${note}"
+    # The JIRA comment mirrors the text already appended to the Multica thread,
+    # so the mirror can never become a second source of truth: there is exactly
+    # one place the transition text is written.
+    jira_comment "Pipeline stage: ${stage}
+
+${note}"
+  fi
+  # Status mirroring, per ANK-43 scope 3. `blocked` deliberately gets a comment
+  # and no transition — the AIPLAT workflow has no Blocked status.
+  case "${stage}" in
+    awaiting_merge) jira_transition "In Review" ;;
+    done)           jira_transition "Done" ;;
+  esac
   local pr; pr="$(mget sync_pr)"
   [[ -n "${pr}" ]] && pr_body_update "${pr}" "$(render_state_table)"
   return 0
@@ -400,6 +715,7 @@ stage_idle() {
     open_ticket "${cursor:-unknown}" "${latest}" "adopted open PR #${onum}"
     mset sync_pr "${onum}" number || true
     mset pr_sha "${osha}" string || true
+    ensure_pr_jira_ref "${onum}"
     advance dev_deploying "Adopted the already-open sync PR [#${onum}](https://github.com/${FORK_SLUG}/pull/${onum}) (\`${ohead}\`) instead of opening a second one."
     say "Adopted orphaned sync PR #${onum} into new sync ticket ${TICKET}."
     return 0
@@ -459,15 +775,29 @@ open_ticket() {
   else
     log "could not create the audit root comment — transitions will not be threaded"
   fi
+
+  # JIRA mirror. Deliberately before run_sync: the key becomes JIRA_REF on the PR
+  # title, which is what satisfies `jira-ref-check-and-description` properly
+  # rather than suppressing it with `[NO JIRA]`. A failure here is a no-op — the
+  # sync proceeds and falls back to the suppression tag.
+  if jira_ensure_item "${from}" "${to}" >/dev/null; then
+    jira_transition "In Progress"
+  fi
+
   advance syncing ""
 }
 
 run_sync() {
-  local to="$1" out rc
+  local to="$1" out rc jref
   out="${TMPD}/sync.log"
   log "running ${SYNC_SCRIPT} → ${to}"
   rc=0
-  UPSTREAM_TAG="${to}" FORK_SLUG="${FORK_SLUG}" bash "${SYNC_SCRIPT}" > "${out}" 2>&1 || rc=$?
+  # JIRA_REF is what keeps `jira-ref-check-and-description` green without a human
+  # editing the title. Empty is fine and expected when the mirror is unavailable:
+  # upstream-sync.sh then stamps `[NO JIRA]`, which the gate also accepts.
+  jref="$(mget jira_key)"
+  UPSTREAM_TAG="${to}" FORK_SLUG="${FORK_SLUG}" JIRA_REF="${jref}" \
+    bash "${SYNC_SCRIPT}" > "${out}" 2>&1 || rc=$?
 
   local tail_out; tail_out="$(tail -40 "${out}")"
 
@@ -498,6 +828,9 @@ ${tail_out}
     # bakefile bump has merged and the pod has not rolled yet. Retire the ticket
     # quietly rather than leaving the mutex held.
     log "sync reported nothing to do; retiring the ticket"
+    jira_comment "Nothing to sync for this hop — the fork is already on the target release. Retiring the hop."
+    jira_transition "Done"
+    sweep_throwaways
     clear_guard
     set_sync_label sync-passed
     [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" done >/dev/null 2>&1 || true
@@ -635,7 +968,9 @@ stage_awaiting_merge() {
     # Abandon path: the human closed it without merging. Release the mutex so a
     # later hop can start.
     audit "PR [#${pr}](https://github.com/${FORK_SLUG}/pull/${pr}) was **closed without merging**. Treating this hop as abandoned and releasing the single-flight guard."
+    jira_comment "Hop abandoned: PR #${pr} was closed without merging. Status left as-is for a human to decide."
     set_sync_label sync-failed
+    sweep_throwaways
     clear_guard
     [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" cancelled >/dev/null 2>&1 || true
     say "Sync PR #${pr} was closed unmerged; hop abandoned and the guard released."
@@ -762,6 +1097,9 @@ stage_tools_smoke_pending() {
 
 Hop \`$(mget sync_from)\` → \`$(mget sync_to)\` complete: merged, deployed, rolled and smoked. The single-flight guard is released, so the next tick may open the following hop."
       set_sync_label sync-passed
+      # The tools smoke agent has long since exited by the time this tick runs, so
+      # the throwaways it left can now be retired without racing it.
+      sweep_throwaways
       clear_guard
       [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" done >/dev/null 2>&1 || true
       say "Sync $(mget sync_from) → $(mget sync_to) complete — tools smoke PASS. Guard released."
@@ -779,9 +1117,25 @@ Hop \`$(mget sync_from)\` → \`$(mget sync_to)\` complete: merged, deployed, ro
 # Everything else — conflicts, invariant breaches, deploy failures, rollout_stale
 # — parks until a human clears blocked_reason.
 stage_blocked() {
-  local reason pr verdict
+  local reason pr verdict tstatus
   reason="$(mget blocked_reason)"
   pr="$(mget sync_pr)"
+
+  # A human who gives up on a blocked hop closes the ticket rather than editing
+  # metadata, and that is the third terminal transition: sweep the throwaways it
+  # left and release the guard so the next tick is not wedged behind a dead hop.
+  # The label is deliberately left alone — whatever the human set is their intent.
+  tstatus="$(issue_status "${TICKET}")"
+  case "${tstatus}" in
+    cancelled|done)
+      log "ticket is ${tstatus} while blocked — sweeping throwaways and releasing the guard"
+      jira_comment "The Multica sync ticket was moved to ${tstatus} while blocked on ${reason:-unknown}. Releasing the single-flight guard; no further pipeline updates for this hop."
+      sweep_throwaways
+      clear_guard
+      return 0
+      ;;
+  esac
+
   case "${reason}" in
     dev_smoke)
       verdict="$(smoke_verdict "${pr}" pr_sha "$(mget pr_sha)")"
@@ -825,6 +1179,7 @@ recover_missing_pr() {
     osha="$(printf '%s' "${orphan}" | jq -r '.head.sha')"
     mset sync_pr "${onum}" number || true
     mset pr_sha "${osha}" string || true
+    ensure_pr_jira_ref "${onum}"
     advance dev_deploying "Recovered: adopted open sync PR [#${onum}](https://github.com/${FORK_SLUG}/pull/${onum}) for this hop."
     say "Recovered sync ${TICKET} by adopting open PR #${onum}."
     return 0
@@ -847,6 +1202,7 @@ stage_syncing() {
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 main() {
   local active count stage
+  require_deps
 
   # Single-flight, Multica side. `sync_active` is a metadata boolean rather than a
   # label because `issue list` can filter on metadata but not on labels; the
@@ -857,7 +1213,14 @@ main() {
 
   if (( count == 0 )); then
     log "no active sync"
+    # Quiet path: tidy leftovers nobody is waiting on before deciding on a hop.
+    # Silent by contract — sweeping writes nothing to stdout, so a tick that only
+    # swept still reads as a no-op to the caller.
+    sweep_stale_throwaways
     stage_idle
+    # stage_idle may have opened a ticket (and with it a JIRA item), so the
+    # degradation note has somewhere to land on this path too.
+    jira_degraded_flush
     return 0
   fi
 
@@ -873,6 +1236,17 @@ main() {
   stage="$(mget pipeline_stage)"
   log "active sync ${TICKET} at stage ${stage:-unset}"
 
+  # A hop whose JIRA item was never created — Atlassian was down when the ticket
+  # was opened, or acli was unauthenticated — retries here, bounded to two attempts
+  # per hop by jira_create_attempts. Missed transitions are simply not mirrored;
+  # nothing waits on the key.
+  if [[ -z "$(mget jira_key)" && "${stage}" != "done" ]]; then
+    if jira_ensure_item "$(mget sync_from)" "$(mget sync_to)" >/dev/null; then
+      jira_transition "In Progress"
+      ensure_pr_jira_ref "$(mget sync_pr)"
+    fi
+  fi
+
   case "${stage}" in
     syncing)             stage_syncing ;;
     dev_deploying)       stage_dev_deploying ;;
@@ -881,9 +1255,12 @@ main() {
     tools_deploying)     stage_tools_deploying ;;
     tools_smoke_pending) stage_tools_smoke_pending ;;
     blocked)             stage_blocked ;;
-    done)                log "stage done but guard still held — releasing"; clear_guard ;;
+    done)                log "stage done but guard still held — releasing"
+                         sweep_throwaways; clear_guard ;;
     *)                   block unknown_stage "Sync ticket is \`sync_active\` but \`pipeline_stage\` is \`${stage:-unset}\`, which this script does not recognise." ;;
   esac
+
+  jira_degraded_flush
 }
 
 # Guarded so the file can be sourced to exercise a single function against live

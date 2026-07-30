@@ -33,6 +33,12 @@
 #   SMOKE_ARTIFACT_SHA            Full SHA of that artifact
 #   SMOKE_LABEL                   Human label for the banner (default: "Smoke")
 #
+# Optional — throwaway cleanup (ANK-43 scope 2):
+#   SMOKE_SWEEP_AGE_MIN           default 60. Minimum age before a leftover
+#                                 throwaway from an EARLIER run is retired.
+#   SMOKE_SWEEP_MAX               default 20. Upper bound on one sweep.
+#   SMOKE_SWEEP_DISABLE=1         skip the sweep entirely.
+#
 # Optional — other:
 #   ATLASSIAN_SITE         Atlassian Cloud site URL. NOT an SSM key — plain env in
 #                          gitops/base/agent-runtime/deployment.yaml, default
@@ -61,9 +67,29 @@
 #     API. Keying to the SHA is what lets sync-tick.sh tell which artifact a PASS
 #     attests, and therefore which blocked gate a later PASS may auto-clear;
 #   * the inner marker-reply issue stays (it is the only thing that proves an agent
-#     can actually claim and execute work) but is cancelled on the way out and its
-#     result rolled onto the sync ticket, so it stops accumulating as litter;
+#     can actually claim and execute work) and its result is rolled onto the sync
+#     ticket, but it is NOT cancelled inline — see below;
 #   * SMOKE_STATUS_ISSUE_ID is gone.
+#
+# ── Why the inner issue is not cancelled in teardown (ANK-43 scope 2) ─────────
+# It used to be, and the cancel never stuck. The inner issue is claimed by a real
+# agent, and that agent's runtime writes `status in_review` as its Ownership-mode
+# exit — AFTER its final comment, which is the very thing phase 9 waits for. So an
+# inline cancel always races the agent it just waited on, and always loses:
+# measured on the v0.4.14 hop, the cancel landed at ~07:44:34Z and the agent's
+# in_review write at 07:44:42Z, 8 s later. Retrying or sleeping here would only
+# move the race. Instead:
+#
+#   1. the id is recorded on the sync ticket (metadata `smoke_throwaway_issue_ids`,
+#      a CSV) so the sweeper has an explicit work list, not a title guess; and
+#   2. scripts/sync-tick.sh retires it from a LATER tick, at a terminal transition
+#      — strictly after the agent has exited, so there is no race left to lose.
+#
+# Recording needs SMOKE_SYNC_ISSUE_ID, which only the tools side can supply: the
+# dev workspace is a different namespace behind a different token and cannot write
+# to a tools ticket. So the dev side is covered by the age-gated sweep in phase 1b
+# instead — every run tidies what PREVIOUS runs left in whatever workspace it is
+# pointed at, which is late enough by construction.
 #
 # Those three back `acli`: agentfarm-bootstrap.sh runs `acli jira auth login` from
 # them at pod startup. Phase 6 probes the resulting session and reports a WARNING
@@ -93,6 +119,10 @@ SMOKE_PR_NUMBER="${SMOKE_PR_NUMBER:-}"
 SMOKE_ARTIFACT_KIND="${SMOKE_ARTIFACT_KIND:-}"
 SMOKE_ARTIFACT_SHA="${SMOKE_ARTIFACT_SHA:-}"
 SMOKE_LABEL="${SMOKE_LABEL:-Smoke}"
+
+SMOKE_SWEEP_AGE_MIN="${SMOKE_SWEEP_AGE_MIN:-60}"
+SMOKE_SWEEP_MAX="${SMOKE_SWEEP_MAX:-20}"
+SMOKE_SWEEP_DISABLE="${SMOKE_SWEEP_DISABLE:-}"
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NONCE="$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8 || true)"
@@ -141,6 +171,67 @@ if _exclude="$(git rev-parse --git-path info/exclude 2>/dev/null)"; then
 fi
 mkdir -p "${SMOKE_TMPD}"
 
+# ── Throwaway bookkeeping ──────────────────────────────────────────────────
+# Hand the sweeper an explicit work list. Read-modify-write on a CSV is safe here
+# because there is exactly one smoke run per hop, and a duplicate id would be
+# harmless anyway (retiring is idempotent).
+record_throwaway_issue() {
+  local id="$1" cur next
+  [[ -z "${SMOKE_SYNC_ISSUE_ID}" || -z "${id}" ]] && return 0
+  cur="$(
+    multica issue metadata list "${SMOKE_SYNC_ISSUE_ID}" --output json 2>/dev/null \
+      | jq -r '.smoke_throwaway_issue_ids // empty' 2>/dev/null
+  )" || cur=""
+  case ",${cur}," in *",${id},"*) return 0 ;; esac
+  next="${cur:+${cur},}${id}"
+  multica issue metadata set "${SMOKE_SYNC_ISSUE_ID}" \
+    --key smoke_throwaway_issue_ids --value "${next}" --type string >/dev/null 2>&1 \
+    || log "could not record throwaway ${id} on the sync ticket — the age-gated sweep is the fallback"
+}
+
+# Terminal status a leftover title should end at, or empty when it is not a
+# throwaway shape. The body is kept byte-identical to sweep_want_status() in
+# scripts/sync-tick.sh, and scripts/sync-pipeline.test.sh fails if they drift.
+smoke_sweep_want_status() {
+  local title="$1"
+  case "${title}" in
+    *"agent-claim check "*)   printf 'cancelled' ;;
+    Smoke\ 20[0-9][0-9]*)     printf 'cancelled' ;;
+    "Tools smoke for "*)      printf 'done' ;;
+    *)                        : ;;
+  esac
+}
+
+# Retire throwaways left by EARLIER runs in whatever workspace this pod points at.
+# The age gate is the whole safety argument: anything younger than
+# SMOKE_SWEEP_AGE_MIN might still be in flight (including this run's own issue,
+# which does not exist yet), and anything older has long since had its claiming
+# agent exit. Advisory throughout — a sweep failure never affects the verdict.
+sweep_stale_throwaways() {
+  local cutoff id title want n=0
+  [[ -n "${SMOKE_SWEEP_DISABLE}" ]] && return 0
+  cutoff=$(( $(date -u +%s) - SMOKE_SWEEP_AGE_MIN * 60 ))
+  while IFS=$'\t' read -r id title; do
+    [[ -z "${id}" ]] && continue
+    want="$(smoke_sweep_want_status "${title}")"
+    [[ -z "${want}" ]] && continue
+    multica issue status "${id}" "${want}" >/dev/null 2>&1 \
+      && log "swept leftover throwaway ${id} → ${want}" \
+      || log "could not sweep ${id} → ${want}"
+    n=$(( n + 1 ))
+    (( n >= SMOKE_SWEEP_MAX )) && break
+  done < <(
+    multica issue list --limit 100 --output json 2>/dev/null \
+      | jq -r --argjson cut "${cutoff}" '
+          (.issues // [])[]
+          | select(.status != "done" and .status != "cancelled")
+          | select((.updated_at // "") != "")
+          | select((.updated_at | fromdateiso8601) < $cut)
+          | "\(.id)\t\(.title)"' 2>/dev/null
+  )
+  return 0
+}
+
 # ── Teardown (EXIT trap) ───────────────────────────────────────────────────
 teardown() {
   log "=== phase 10: teardown ==="
@@ -168,15 +259,19 @@ teardown() {
   fi
 
   # 1 · The inner marker-reply issue. It exists only to prove an agent can claim
-  #     and execute work, so it is a throwaway: record the verdict on it, then
-  #     cancel it so it stops reading as an open task nobody owns.
+  #     and execute work, so it is a throwaway: record the verdict on it and leave
+  #     the status alone. Cancelling here would race the claiming agent's own
+  #     Ownership-mode exit write and lose — see the header. It is retired later by
+  #     scripts/sync-tick.sh from the recorded id, or by the phase 1b sweep of a
+  #     subsequent run.
   if [[ -n "${SMOKE_ISSUE_ID}" ]]; then
     _f="${SMOKE_TMPD}/inner.md"
-    printf '%s\n' "${_body}" > "${_f}"
+    {
+      printf '%s\n' "${_body}"
+      printf '\nThrowaway task — retired by the sync pipeline sweep, not here (cancelling inline races this issue'"'"'s own claiming agent).\n'
+    } > "${_f}"
     multica issue comment add "${SMOKE_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
       || log "inner result comment skipped"
-    multica issue status "${SMOKE_ISSUE_ID}" cancelled >/dev/null 2>&1 \
-      || log "inner issue status update skipped"
     rm -f "${_f}"
   fi
 
@@ -186,7 +281,7 @@ teardown() {
     {
       printf '%s\n' "${_body}"
       if [[ -n "${SMOKE_ISSUE_ID}" ]]; then
-        printf '\nInner agent-claim task (throwaway, cancelled): `%s`\n' "${SMOKE_ISSUE_ID}"
+        printf '\nInner agent-claim task (throwaway, swept by `scripts/sync-tick.sh` at the next terminal transition): `%s`\n' "${SMOKE_ISSUE_ID}"
       fi
     } > "${_f}"
     if [[ -n "${SMOKE_AUDIT_ROOT_COMMENT_ID}" ]]; then
@@ -242,6 +337,13 @@ for cmd in multica jq; do
     || fail "pre-flight — required command not found: ${cmd}"
 done
 log "pre-flight ok — marker: ${MARKER}"
+
+# ── Phase 1b · Sweep leftover throwaways — advisory, never a gate ──────────
+# Deliberately here rather than in teardown: the things worth sweeping are older
+# runs' issues, and doing it on the way IN means this run's own issue (created in
+# phase 8) is never a candidate.
+log "=== phase 1b: sweep leftover throwaways (advisory) ==="
+sweep_stale_throwaways
 
 # ── Phase 2 · API + auth ───────────────────────────────────────────────────
 log "=== phase 2: api + auth ==="
@@ -331,6 +433,10 @@ ISSUE_RESP="$(
 SMOKE_ISSUE_ID="$(printf '%s' "${ISSUE_RESP}" | jq -r '.id // empty')"
 [[ -n "${SMOKE_ISSUE_ID}" ]] || fail "smoke-task — issue creation failed"
 log "smoke issue created: ${SMOKE_ISSUE_ID} — marker: ${MARKER}"
+
+# Record it before phase 9 waits, not after: a run that times out or is killed
+# mid-wait still leaves a swept-up issue behind rather than litter.
+record_throwaway_issue "${SMOKE_ISSUE_ID}"
 
 # ── Phase 9 · Wait for agent reply ─────────────────────────────────────────
 log "=== phase 9: waiting for agent reply (${SMOKE_TASK_TIMEOUT}s) ==="
