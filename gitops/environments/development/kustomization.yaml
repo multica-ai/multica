@@ -41,4 +41,4 @@ images:
     newTag: "f551caa9"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "2ebba5b8"
+    newTag: "f551caa9"
