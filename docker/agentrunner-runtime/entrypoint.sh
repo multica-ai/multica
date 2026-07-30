@@ -44,6 +44,27 @@ fi
 chmod 600 "${SSH_KEY}" 2>/dev/null || true
 chmod 644 "${SSH_KEY}.pub" 2>/dev/null || true
 
+# ── Hermes provider default ───────────────────────────────────────────────────
+# Hermes' provider auto-detection (hermes_cli.auth.resolve_provider) treats a
+# set OPENAI_API_KEY as "use openrouter", not "use the native OpenAI
+# provider" — and OPENAI_API_KEY is exported unconditionally above for the
+# claude/codex runtimes. Without an explicit model.provider, Hermes always
+# mis-resolves to openrouter, finds no OPENROUTER_API_KEY, and every call
+# fails with "HTTP 401: Missing Authentication header" (upstream issue
+# #42130). Seed config.yaml with the OpenAI-native provider — which does
+# read OPENAI_API_KEY — before Hermes gets a chance to self-create an empty
+# one. Skipped if a config already exists so a hand-customized provider
+# choice is never overwritten.
+hermes_config_dir="${HOME}/.hermes"
+hermes_config="${hermes_config_dir}/config.yaml"
+if [ ! -f "${hermes_config}" ]; then
+  mkdir -p "${hermes_config_dir}"
+  cat > "${hermes_config}" <<'YAML'
+model:
+  provider: openai-api
+YAML
+fi
+
 # ── Warm hermes's update-check cache ──────────────────────────────────────────
 # `hermes --version` is not a pure version print: cmd_version() in hermes_cli
 # also runs check_for_updates(), which shells out to `git fetch origin`
