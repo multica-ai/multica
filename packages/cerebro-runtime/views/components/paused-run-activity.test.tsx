@@ -1,29 +1,30 @@
 // FIR-4073 — the grey "waiting on a paused machine" row. It replaces the issue
 // comment the auto-pause used to write, so the wording carries the whole fact:
-// what state we are in, and when it ends.
+// what state we are in, whose run it was, and when it ends.
 
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { DeadFailedRun } from "../dead-failed-runs";
 
 const mockListTasksByIssue = vi.hoisted(() => vi.fn());
-const mockTranscriptButton = vi.hoisted(() => vi.fn());
+const mockListTaskMessages = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
-  api: { listTasksByIssue: mockListTasksByIssue },
+  api: {
+    listTasksByIssue: mockListTasksByIssue,
+    listTaskMessages: mockListTaskMessages,
+  },
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getAgentName: (id: string) => `Agent ${id}` }),
+  useActorName: () => ({ getAgentName: () => "Sara" }),
 }));
 
 vi.mock("@multica/views/common/task-transcript", () => ({
-  TranscriptButton: (props: { title?: string }) => {
-    mockTranscriptButton(props);
-    return <button type="button">{props.title ?? "Open run log"}</button>;
-  },
+  AgentTranscriptDialog: () => <div data-testid="run-log-dialog">run log</div>,
+  buildTimeline: (msgs: unknown[]) => msgs,
 }));
 
 import { PausedRunActivityRow, pausedRunLabel } from "./paused-run-activity";
@@ -71,6 +72,7 @@ describe("pausedRunLabel", () => {
 describe("PausedRunActivityRow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListTaskMessages.mockResolvedValue([]);
     mockListTasksByIssue.mockResolvedValue([
       { id: "task-1", issue_id: "issue-1", status: "failed" },
     ]);
@@ -81,16 +83,24 @@ describe("PausedRunActivityRow", () => {
 
     expect(screen.getByTestId("paused-run-row")).toBeInTheDocument();
     expect(screen.getByText(/^Paused/)).toBeInTheDocument();
-    expect(screen.getByText("sara-mac")).toBeInTheDocument();
+    expect(screen.getByText(/sara-mac/)).toBeInTheDocument();
+  });
+
+  it("says which agent is waiting", () => {
+    render(<PausedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
+
+    expect(screen.getByText(/Sara/)).toBeInTheDocument();
+    // One attempt is not a retry series, so counting them would be noise.
+    expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
   it("offers the run log but no retry buttons", async () => {
     render(<PausedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
 
-    await waitFor(() => expect(mockTranscriptButton).toHaveBeenCalled());
+    await screen.findByRole("button", { name: /open run log/i });
     // Retrying against a paused machine would fail the same way, so the row
-    // deliberately does not offer it.
-    expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
+    // deliberately offers nothing but the log.
+    expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /start over/i })).toBeNull();
   });
 });
