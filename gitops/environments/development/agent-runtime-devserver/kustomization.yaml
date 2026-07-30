@@ -18,7 +18,7 @@ resources:
 images:
   - name: ghcr.io/g2crowd/agentrunner-runtime-prod
     newName: ghcr.io/g2crowd/agentrunner-runtime-dev
-    newTag: "9a17b785"
+    newTag: "2ebba5b8"
 patches:
   # Repoint both the per-workspace (dataFrom/0, PLACEHOLDER kept for the appset)
   # and the shared (dataFrom/1) secret sweeps to the dev-server subtree. The
