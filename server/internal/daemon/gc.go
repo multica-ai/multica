@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,7 +88,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 
 	stats := &gcStats{byPattern: map[string]int{}}
 	for _, wsEntry := range entries {
-		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" || wsEntry.Name() == gcTrashDirName {
+		if !wsEntry.IsDir() || wsEntry.Name() == repoCacheDirName || wsEntry.Name() == gcTrashDirName {
 			continue
 		}
 		d.gcWorkspace(ctx, filepath.Join(root, wsEntry.Name()), stats)
@@ -96,8 +97,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 		d.logger.Warn("gc: quarantine retry failed", "error", err)
 	}
 
-	// Repo pruning still takes pathname arguments. Keep it out of the pinned
-	// cycle until repocache accepts an fd-relative root.
+	d.pruneRepoWorktrees(rootHandle, root)
 
 	if storesRemoved, storeBytes := execenv.PruneCodexSessionStores(d.cfg.Profile, d.cfg.GCCodexSessionTTL, time.Now(), d.reserveCodexStoreForDeletion, d.logger); storesRemoved > 0 {
 		stats.storesReclaimed += storesRemoved
@@ -292,6 +292,9 @@ func recordArtifactCleanup(stats *gcStats, removed int, bytes int64, perPattern 
 type gcAction int
 
 const gcTrashDirName = ".gc-trash"
+
+// repoCacheDirName is the bare-repo cache directory inside the workspaces root.
+const repoCacheDirName = ".repos"
 
 const (
 	gcActionSkip                  gcAction = iota
@@ -898,9 +901,29 @@ const (
 )
 
 // pruneRepoWorktrees runs `git worktree prune` on all bare repos in the cache.
-func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
-	reposRoot := filepath.Join(workspacesRoot, ".repos")
-	wsEntries, err := os.ReadDir(reposRoot)
+//
+// Directory traversal stays inside the cycle's pinned root: `.repos` is opened
+// fd-relative from rootHandle, so a symlinked or retargeted `.repos` cannot
+// walk GC into a foreign tree. git itself only accepts pathnames, so every
+// pathname handed to it is first proven — via os.SameFile against the pinned
+// handle — to name the same object the pinned root resolves to. A retarget of
+// any ancestor loses that identity and the repo is skipped instead of pruned
+// somewhere else. The residual window between the identity proof and the git
+// exec cannot be closed while git is pathname-only; it is bounded to one repo
+// and requires an attacker to win a race against an fd-verified path, whereas
+// the unguarded version pruned whatever the retargeted pathname pointed at.
+func (d *Daemon) pruneRepoWorktrees(rootHandle *os.Root, workspacesRoot string) {
+	reposHandle, err := rootHandle.OpenRoot(repoCacheDirName)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.logger.Warn("gc: open repo cache root failed", "error", err)
+		}
+		return
+	}
+	defer reposHandle.Close()
+	reposRoot := filepath.Join(workspacesRoot, repoCacheDirName)
+
+	wsEntries, err := fs.ReadDir(reposHandle.FS(), ".")
 	if err != nil {
 		return
 	}
@@ -910,7 +933,7 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 			continue
 		}
 		wsRepoDir := filepath.Join(reposRoot, wsEntry.Name())
-		repoEntries, err := os.ReadDir(wsRepoDir)
+		repoEntries, err := fs.ReadDir(reposHandle.FS(), wsEntry.Name())
 		if err != nil {
 			continue
 		}
@@ -919,12 +942,32 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 				continue
 			}
 			barePath := filepath.Join(wsRepoDir, repoEntry.Name())
+			if !pinnedDirMatchesPathname(reposHandle, path.Join(wsEntry.Name(), repoEntry.Name()), barePath) {
+				d.logger.Warn("gc: skipping repo outside pinned cache root", "repo", barePath)
+				continue
+			}
 			if !isBareRepo(barePath) {
 				continue
 			}
 			d.pruneWorktree(barePath)
 		}
 	}
+}
+
+// pinnedDirMatchesPathname reports whether pathname resolves to the very same
+// directory object that root reaches at rel. Both lookups must succeed and
+// refer to one inode, so an ancestor symlink swap between the pinned walk and
+// a pathname-only consumer is detected instead of silently followed.
+func pinnedDirMatchesPathname(root *os.Root, rel, pathname string) bool {
+	pinnedInfo, err := root.Stat(rel)
+	if err != nil || !pinnedInfo.IsDir() {
+		return false
+	}
+	pathInfo, err := os.Stat(pathname)
+	if err != nil || !pathInfo.IsDir() {
+		return false
+	}
+	return os.SameFile(pinnedInfo, pathInfo)
 }
 
 func (d *Daemon) pruneWorktree(barePath string) {

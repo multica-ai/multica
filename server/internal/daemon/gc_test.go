@@ -2589,3 +2589,57 @@ func TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean(t *testing.T
 		t.Fatalf("expected gcActionClean for normal task, got %d", got)
 	}
 }
+
+// TestRunGC_PrunesRepoWorktreesFromProductionEntryPoint pins that repo
+// worktree pruning is reachable from runGC again. The pinned-root traversal
+// added for the GC race must not silently drop the pruning step: without the
+// call, stale `agent/` branches accumulate in the bare cache forever.
+func TestRunGC_PrunesRepoWorktreesFromProductionEntryPoint(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(d.cfg.WorkspacesRoot, repoCacheDirName, "ws-1", "cache.git")
+	if err := os.MkdirAll(filepath.Dir(barePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	staleBranch := "agent/stale/87654321"
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.runGC(context.Background())
+
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected runGC to prune stale branch %q from the repo cache", staleBranch)
+	}
+}
+
+// TestRunGC_SkipsRepoCacheOutsidePinnedRoot is the regression for the pathname
+// escape: git only takes pathnames, so the repo cache must be reached
+// fd-relative from the cycle's pinned root. With `.repos` replaced by a
+// symlink to a foreign tree, GC must skip pruning entirely instead of deleting
+// branches in whatever the link points at.
+func TestRunGC_SkipsRepoCacheOutsidePinnedRoot(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	externalCache := t.TempDir()
+	barePath := filepath.Join(externalCache, "ws-1", "cache.git")
+	if err := os.MkdirAll(filepath.Dir(barePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	staleBranch := "agent/stale/87654321"
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	if err := os.Symlink(externalCache, filepath.Join(d.cfg.WorkspacesRoot, repoCacheDirName)); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	d.runGC(context.Background())
+
+	if !gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("branch %q outside the pinned root was pruned through a symlinked repo cache", staleBranch)
+	}
+}
