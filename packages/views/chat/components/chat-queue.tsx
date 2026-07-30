@@ -28,7 +28,7 @@ export function ChatQueue({ tasks, onRemove }: ChatQueueProps) {
 
   return (
     <div className="mx-3 mb-2 rounded-lg border bg-muted/30 p-2" aria-live="polite">
-      <div className="mb-1 px-1 text-xs font-medium text-muted-foreground">
+      <div className="mb-1 px-1 text-caption font-medium text-muted-foreground">
         {t(($) => $.queue.title, { count: tasks.length })}
       </div>
       <div className="space-y-0.5">
@@ -37,9 +37,9 @@ export function ChatQueue({ tasks, onRemove }: ChatQueueProps) {
           return (
             <div
               key={task.task_id}
-              className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm"
+              className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-body"
             >
-              <span className="w-4 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
+              <span className="w-4 shrink-0 text-center text-caption tabular-nums text-muted-foreground">
                 {index + 1}
               </span>
               <span className="min-w-0 flex-1 truncate">
