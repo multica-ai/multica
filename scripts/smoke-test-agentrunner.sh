@@ -22,13 +22,48 @@
 #   ANTHROPIC_API_KEY      LiteLLM virtual key (confirms LLM path is wired)
 #   SMOKE_TASK_TIMEOUT     Seconds to wait for agent reply (default: 300)
 #
-# Optional:
-#   SMOKE_STATUS_ISSUE_ID  If set, pin last_smoke_status metadata on this issue
+# Optional — sync-pipeline reporting (all unset ⇒ behaves exactly as before):
+#   SMOKE_SYNC_ISSUE_ID           Sync ticket to report the verdict onto. One ticket
+#                                 per sync hop, created by scripts/sync-tick.sh.
+#   SMOKE_AUDIT_ROOT_COMMENT_ID   Root comment of that ticket's audit thread; the
+#                                 verdict is posted as a reply under it.
+#   SMOKE_PR_REPO                 owner/repo of the sync PR (e.g. g2crowd/agentfarm)
+#   SMOKE_PR_NUMBER               Sync PR to comment the machine-readable verdict on
+#   SMOKE_ARTIFACT_KIND           pr_sha | merge_sha — which artifact this run attests
+#   SMOKE_ARTIFACT_SHA            Full SHA of that artifact
+#   SMOKE_LABEL                   Human label for the banner (default: "Smoke")
+#
+# Optional — other:
 #   ATLASSIAN_SITE         Atlassian Cloud site URL. NOT an SSM key — plain env in
 #                          gitops/base/agent-runtime/deployment.yaml, default
 #                          https://g2crowd.atlassian.net.
 #   JIRA_EMAIL             Atlassian account email.
 #   JIRA_PAT               Atlassian API token.
+#
+# GitHub credentials are needed ONLY when SMOKE_PR_NUMBER is set. ANK-38 correctly
+# rejected listing them as required env when this script made no GitHub calls; the
+# opt-in PR report below is the first one, so they are documented here as
+# conditional rather than required. `gh` in the agentrunner authenticates as a
+# GitHub App via GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY_FILE — GITHUB_TOKEN and
+# GH_TOKEN are both unset, so any doc claiming a GitHub PAT env var is wrong.
+#
+# ── Why the reporting shape is what it is ─────────────────────────────────────
+# This script used to leave an orphaned `Smoke <timestamp>` issue behind on every
+# invocation, and pin `last_smoke_status` on one permanent issue via
+# SMOKE_STATUS_ISSUE_ID. Both were rejected by ANK-34 constraint 1: pipeline state
+# belongs to one ticket per sync, not to a single ticket forever, and a smoke result
+# that is not attached to the sync it attests cannot be reasoned about. So:
+#
+#   * the verdict goes to the SYNC ticket, threaded under the audit root;
+#   * a machine-readable marker goes on the PR, keyed to the artifact SHA. The PR
+#     is the only bus between the dev and tools workspaces — they are separate
+#     namespaces with separate tokens, and neither can call the other's Multica
+#     API. Keying to the SHA is what lets sync-tick.sh tell which artifact a PASS
+#     attests, and therefore which blocked gate a later PASS may auto-clear;
+#   * the inner marker-reply issue stays (it is the only thing that proves an agent
+#     can actually claim and execute work) but is cancelled on the way out and its
+#     result rolled onto the sync ticket, so it stops accumulating as litter;
+#   * SMOKE_STATUS_ISSUE_ID is gone.
 #
 # Those three back `acli`: agentfarm-bootstrap.sh runs `acli jira auth login` from
 # them at pod startup. Phase 6 probes the resulting session and reports a WARNING
@@ -48,7 +83,16 @@ MULTICA_PAT="${MULTICA_PAT:-${MULTICA_TOKEN:-}}"
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
 
 SMOKE_TASK_TIMEOUT="${SMOKE_TASK_TIMEOUT:-300}"
-SMOKE_STATUS_ISSUE_ID="${SMOKE_STATUS_ISSUE_ID:-}"
+
+# Sync-pipeline reporting. Every one of these is optional: with none set the
+# script runs exactly as it did before and reports only to its own log.
+SMOKE_SYNC_ISSUE_ID="${SMOKE_SYNC_ISSUE_ID:-}"
+SMOKE_AUDIT_ROOT_COMMENT_ID="${SMOKE_AUDIT_ROOT_COMMENT_ID:-}"
+SMOKE_PR_REPO="${SMOKE_PR_REPO:-}"
+SMOKE_PR_NUMBER="${SMOKE_PR_NUMBER:-}"
+SMOKE_ARTIFACT_KIND="${SMOKE_ARTIFACT_KIND:-}"
+SMOKE_ARTIFACT_SHA="${SMOKE_ARTIFACT_SHA:-}"
+SMOKE_LABEL="${SMOKE_LABEL:-Smoke}"
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NONCE="$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8 || true)"
@@ -81,6 +125,22 @@ poll() {
   fail "${label} — timeout"
 }
 
+# Scratch dir for --content-file bodies. multica rejects a --content-file outside
+# the current working directory (MUL-4252), and inlining a multi-line body via
+# --content lets the shell rewrite backticks and quotes in it (MUL-2904) — which
+# matters here because the verdict contains both. So it must live under CWD; and
+# when CWD is a checkout it must stay out of `git status`, because a sibling
+# upstream-sync.sh run in the same checkout refuses to start on a dirty tree.
+# .git/info/exclude covers that. `git rev-parse --git-path` rather than a literal
+# .git/ because an agent checkout is a linked worktree: .git is a FILE there.
+SMOKE_TMPD=".smoke-tmp"
+if _exclude="$(git rev-parse --git-path info/exclude 2>/dev/null)"; then
+  mkdir -p "$(dirname "${_exclude}")" 2>/dev/null || true
+  grep -qxF '/.smoke-tmp/' "${_exclude}" 2>/dev/null \
+    || printf '/.smoke-tmp/\n' >> "${_exclude}" 2>/dev/null || true
+fi
+mkdir -p "${SMOKE_TMPD}"
+
 # ── Teardown (EXIT trap) ───────────────────────────────────────────────────
 teardown() {
   log "=== phase 10: teardown ==="
@@ -88,26 +148,87 @@ teardown() {
     multica project delete "${SMOKE_PROJECT_ID}" 2>/dev/null \
       || log "smoke project cleanup skipped"
   fi
+
+  local _status _headline _body _f
+  if [[ "${SMOKE_RESULT}" == "pass" ]]; then
+    _status="PASS"
+    _headline="**${SMOKE_LABEL} PASS** — ${MULTICA_SERVER_URL}"
+  else
+    _status="FAIL"
+    _headline="**${SMOKE_LABEL} FAIL** — ${MULTICA_SERVER_URL}: \`${SMOKE_RESULT#fail:}\`"
+  fi
+
+  _body="${_headline}"
+  [[ -n "${MARKER}" ]] && _body+=$'\n'"marker: \`${MARKER}\`"
+  if [[ -n "${SMOKE_ARTIFACT_KIND}" && -n "${SMOKE_ARTIFACT_SHA}" ]]; then
+    _body+=$'\n'"${SMOKE_ARTIFACT_KIND}: \`${SMOKE_ARTIFACT_SHA}\`"
+  fi
+  if [[ -n "${SMOKE_WARNINGS}" ]]; then
+    _body+=$'\n\nWarnings (non-blocking):\n'"${SMOKE_WARNINGS}"
+  fi
+
+  # 1 · The inner marker-reply issue. It exists only to prove an agent can claim
+  #     and execute work, so it is a throwaway: record the verdict on it, then
+  #     cancel it so it stops reading as an open task nobody owns.
   if [[ -n "${SMOKE_ISSUE_ID}" ]]; then
-    if [[ "${SMOKE_RESULT}" == "pass" ]]; then
-      _comment="PASS — smoke test completed successfully."
+    _f="${SMOKE_TMPD}/inner.md"
+    printf '%s\n' "${_body}" > "${_f}"
+    multica issue comment add "${SMOKE_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
+      || log "inner result comment skipped"
+    multica issue status "${SMOKE_ISSUE_ID}" cancelled >/dev/null 2>&1 \
+      || log "inner issue status update skipped"
+    rm -f "${_f}"
+  fi
+
+  # 2 · The sync ticket — one ticket per hop, threaded under its audit root.
+  if [[ -n "${SMOKE_SYNC_ISSUE_ID}" ]]; then
+    _f="${SMOKE_TMPD}/sync.md"
+    {
+      printf '%s\n' "${_body}"
+      if [[ -n "${SMOKE_ISSUE_ID}" ]]; then
+        printf '\nInner agent-claim task (throwaway, cancelled): `%s`\n' "${SMOKE_ISSUE_ID}"
+      fi
+    } > "${_f}"
+    if [[ -n "${SMOKE_AUDIT_ROOT_COMMENT_ID}" ]]; then
+      multica issue comment add "${SMOKE_SYNC_ISSUE_ID}" \
+        --parent "${SMOKE_AUDIT_ROOT_COMMENT_ID}" --content-file "${_f}" >/dev/null 2>&1 \
+        || log "sync ticket audit reply skipped"
     else
-      _comment="FAIL — ${SMOKE_RESULT#fail:}"
+      multica issue comment add "${SMOKE_SYNC_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
+        || log "sync ticket comment skipped"
     fi
-    if [[ -n "${SMOKE_WARNINGS}" ]]; then
-      _comment+=$'\n\nWarnings (non-blocking):\n'"${SMOKE_WARNINGS}"
+    rm -f "${_f}"
+  fi
+
+  # 3 · The PR — the machine-readable verdict, and the only signal that crosses
+  #     the workspace boundary. The marker must stay on the FIRST line and keep
+  #     this exact shape: scripts/sync-tick.sh greps for
+  #     `smoke-result <kind>=<sha>` and captures `status=(PASS|FAIL)`.
+  if [[ -n "${SMOKE_PR_NUMBER}" && -n "${SMOKE_PR_REPO}" ]]; then
+    if command -v gh &>/dev/null; then
+      _f="${SMOKE_TMPD}/pr.md"
+      {
+        if [[ -n "${SMOKE_ARTIFACT_KIND}" && -n "${SMOKE_ARTIFACT_SHA}" ]]; then
+          printf '<!-- smoke-result %s=%s; status=%s -->\n' \
+            "${SMOKE_ARTIFACT_KIND}" "${SMOKE_ARTIFACT_SHA}" "${_status}"
+        else
+          printf '<!-- smoke-result status=%s -->\n' "${_status}"
+        fi
+        printf '%s\n' "${_body}"
+      } > "${_f}"
+      # REST, not `gh pr comment`: that is a GraphQL mutation and the agentrunner's
+      # GitHub App cannot reach GraphQL mutations ("Resource not accessible by
+      # integration").
+      gh api -X POST "repos/${SMOKE_PR_REPO}/issues/${SMOKE_PR_NUMBER}/comments" \
+        -f body="$(cat "${_f}")" >/dev/null 2>&1 \
+        || log "PR result comment skipped"
+      rm -f "${_f}"
+    else
+      log "gh not on PATH — PR result comment skipped"
     fi
-    multica issue comment add "${SMOKE_ISSUE_ID}" \
-      --content "${_comment}" 2>/dev/null \
-      || log "result comment skipped"
-    multica issue status "${SMOKE_ISSUE_ID}" in_review 2>/dev/null \
-      || log "smoke issue status update skipped"
   fi
-  if [[ -n "${SMOKE_STATUS_ISSUE_ID}" ]]; then
-    multica issue metadata set "${SMOKE_STATUS_ISSUE_ID}" \
-      --key last_smoke_status --value "${SMOKE_RESULT}" 2>/dev/null \
-      || log "metadata pin skipped"
-  fi
+
+  rmdir "${SMOKE_TMPD}" 2>/dev/null || true
   log "teardown complete"
 }
 trap teardown EXIT
@@ -191,9 +312,17 @@ log "agent ok: Engineer (${AGENT_ID})"
 log "=== phase 8: smoke task create ==="
 DESCRIPTION="Automated smoke task (${TIMESTAMP}). Reply with a comment containing exactly this token and nothing else: ${MARKER}"
 
+# Titled with the artifact it attests when there is one, so this throwaway is
+# traceable to its sync at a glance instead of reading as an orphan. Teardown
+# cancels it and rolls its verdict onto the sync ticket.
+INNER_TITLE="Smoke ${TIMESTAMP}"
+if [[ -n "${SMOKE_ARTIFACT_SHA}" ]]; then
+  INNER_TITLE="${SMOKE_LABEL} agent-claim check ${SMOKE_ARTIFACT_SHA:0:8} (${TIMESTAMP})"
+fi
+
 ISSUE_RESP="$(
   multica issue create \
-    --title "Smoke ${TIMESTAMP}" \
+    --title "${INNER_TITLE}" \
     --description "${DESCRIPTION}" \
     --assignee-id "${AGENT_ID}" \
     --status todo \
