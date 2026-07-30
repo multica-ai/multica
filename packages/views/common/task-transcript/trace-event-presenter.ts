@@ -203,8 +203,16 @@ export interface TraceDiffLine {
  * plain content, because nothing was compared — marking all of it `+` adds
  * noise, not information. Everything else is text.
  */
+/** One file's worth of change inside an edit event. */
+export interface TraceDiffFile {
+  path: string;
+  lines: TraceDiffLine[];
+  /** Rename target, when the change moves the file. */
+  movePath?: string;
+}
+
 export type TraceEventDetail =
-  | { kind: "diff"; path: string; lines: TraceDiffLine[] }
+  | { kind: "diff"; files: TraceDiffFile[] }
   | { kind: "file"; path: string; text: string; lineCount: number }
   | { kind: "text"; text: string };
 
@@ -312,12 +320,73 @@ export function collapseDiffContext(
  * providers call this Edit, patch_apply, str_replace, write_file… and the
  * presenter's contract is to keep provider-native names verbatim.
  */
+/**
+ * Parse a unified diff hunk into rows. Providers that apply patches (Codex's
+ * `patch_apply`) hand over a ready-made unified diff rather than before/after
+ * text, so there is nothing to diff — only to read.
+ *
+ * `@@` headers become a `gap`, since that is exactly what they mark: skipped
+ * context. `\ No newline at end of file` is dropped; it describes the file, not
+ * a line of it.
+ */
+export function parseUnifiedDiff(diff: string): TraceDiffLine[] {
+  const out: TraceDiffLine[] = [];
+  for (const raw of diff.split("\n")) {
+    if (raw.startsWith("\\")) continue;
+    if (raw.startsWith("@@")) {
+      // Only mark a break between hunks, not before the first one.
+      if (out.length > 0) out.push({ kind: "gap", text: "" });
+      continue;
+    }
+    // File headers appear when a diff carries more than its hunks.
+    if (raw.startsWith("+++") || raw.startsWith("---")) continue;
+    if (raw.startsWith("+")) {
+      out.push({ kind: "add", text: raw.slice(1) });
+    } else if (raw.startsWith("-")) {
+      out.push({ kind: "remove", text: raw.slice(1) });
+    } else if (raw.startsWith(" ")) {
+      out.push({ kind: "context", text: raw.slice(1) });
+    } else if (raw.length > 0) {
+      // A hunk body line should always carry a marker; keep an unmarked one as
+      // context rather than dropping evidence.
+      out.push({ kind: "context", text: raw });
+    }
+  }
+  // A trailing newline in the diff yields one empty context row; drop it.
+  while (out.length > 0 && out[out.length - 1]?.kind === "context" && out[out.length - 1]?.text === "") {
+    out.pop();
+  }
+  return out;
+}
+
 type FileMutation =
   | { mode: "replace"; path: string; before: string[]; after: string[] }
-  | { mode: "write"; path: string; content: string };
+  | { mode: "write"; path: string; content: string }
+  | { mode: "patch"; files: TraceDiffFile[] };
 
 function readFileMutation(input: Record<string, unknown>): FileMutation | null {
   const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+  // A patch-applying provider sends one entry per touched file, each with its
+  // own ready-made unified diff.
+  if (Array.isArray(input.changes)) {
+    const files: TraceDiffFile[] = [];
+    for (const entry of input.changes) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const change = entry as Record<string, unknown>;
+      const changePath = str(change.path);
+      const diff = str(change.diff);
+      if (changePath === null || diff === null) continue;
+      const movePath = str(change.move_path);
+      files.push({
+        path: changePath,
+        lines: parseUnifiedDiff(diff),
+        ...(movePath !== null ? { movePath } : {}),
+      });
+    }
+    if (files.length > 0) return { mode: "patch", files };
+  }
+
   const path = str(input.file_path) ?? str(input.path);
   if (path === null) return null;
 
@@ -346,11 +415,18 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
     case "tool_use": {
       if (!event.input) return { kind: "text", text: "" };
       const mutation = readFileMutation(event.input);
+      if (mutation?.mode === "patch") {
+        return { kind: "diff", files: mutation.files };
+      }
       if (mutation?.mode === "replace") {
         return {
           kind: "diff",
-          path: mutation.path,
-          lines: collapseDiffContext(diffTraceLines(mutation.before, mutation.after)),
+          files: [
+            {
+              path: mutation.path,
+              lines: collapseDiffContext(diffTraceLines(mutation.before, mutation.after)),
+            },
+          ],
         };
       }
       if (mutation?.mode === "write") {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collapseDiffContext,
+  parseUnifiedDiff,
   stripShellWrapper,
   traceEventCopyText,
   traceEventDefaultExpanded,
@@ -170,8 +171,9 @@ describe("traceEventDetail", () => {
     });
     expect(detail.kind).toBe("diff");
     if (detail.kind !== "diff") return;
-    expect(detail.path).toBe("/repo/src/counter.rs");
-    expect(detail.lines).toEqual([
+    expect(detail.files).toHaveLength(1);
+    expect(detail.files[0]?.path).toBe("/repo/src/counter.rs");
+    expect(detail.files[0]?.lines).toEqual([
       { kind: "context", text: "let a = 1;" },
       { kind: "remove", text: "let b = 2;" },
       { kind: "add", text: "let b = 3;" },
@@ -202,7 +204,7 @@ describe("traceEventDetail", () => {
     });
     expect(detail.kind).toBe("diff");
     if (detail.kind !== "diff") return;
-    expect(detail.lines).toEqual([{ kind: "add", text: "added" }]);
+    expect(detail.files[0]?.lines).toEqual([{ kind: "add", text: "added" }]);
   });
 
   it("keeps a deletion visible when new_string is empty", () => {
@@ -212,7 +214,7 @@ describe("traceEventDetail", () => {
     });
     expect(detail.kind).toBe("diff");
     if (detail.kind !== "diff") return;
-    expect(detail.lines).toEqual([{ kind: "remove", text: "gone" }]);
+    expect(detail.files[0]?.lines).toEqual([{ kind: "remove", text: "gone" }]);
   });
 
   it("falls back to pretty JSON for a tool call that is not an edit", () => {
@@ -286,5 +288,98 @@ describe("collapseDiffContext", () => {
       { kind: "add" as const, text: "b" },
     ];
     expect(collapseDiffContext(lines)).toEqual(lines);
+  });
+});
+
+describe("parseUnifiedDiff", () => {
+  // Fixture captured from codex-cli 0.145.0: a `fileChange` item hands over a
+  // ready-made unified diff rather than before/after text.
+  const codexDiff =
+    '@@ -1,2 +1,2 @@\n def greet(name):\n-    return f"Hello, {name}!"\n+    return f"Hey, {name}!"\n';
+
+  it("reads a hunk into rows without re-diffing anything", () => {
+    expect(parseUnifiedDiff(codexDiff)).toEqual([
+      { kind: "context", text: "def greet(name):" },
+      { kind: "remove", text: '    return f"Hello, {name}!"' },
+      { kind: "add", text: '    return f"Hey, {name}!"' },
+    ]);
+  });
+
+  it("marks a hunk boundary as a gap, but not before the first hunk", () => {
+    const kinds = parseUnifiedDiff("@@ -1 +1 @@\n-a\n+b\n@@ -9 +9 @@\n-y\n+z\n").map(
+      (l) => l.kind,
+    );
+    expect(kinds).toEqual(["remove", "add", "gap", "remove", "add"]);
+  });
+
+  it("drops file headers and the no-newline marker", () => {
+    const out = parseUnifiedDiff("--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n");
+    expect(out).toEqual([
+      { kind: "remove", text: "a" },
+      { kind: "add", text: "b" },
+    ]);
+  });
+
+  it("keeps an unmarked body line as context rather than dropping evidence", () => {
+    expect(parseUnifiedDiff("@@ -1 +1 @@\nunmarked\n")).toEqual([
+      { kind: "context", text: "unmarked" },
+    ]);
+  });
+
+  it("survives an empty or marker-only diff", () => {
+    expect(parseUnifiedDiff("")).toEqual([]);
+    expect(parseUnifiedDiff("@@ -0,0 +0,0 @@\n")).toEqual([]);
+  });
+});
+
+describe("traceEventDetail — patch-applying providers", () => {
+  const change = (path: string, diff: string, movePath?: string) => ({
+    path,
+    diff,
+    ...(movePath ? { move_path: movePath } : {}),
+  });
+
+  it("renders a patch_apply payload as one diff per touched file", () => {
+    const detail = traceEventDetail({
+      type: "tool_use",
+      tool: "patch_apply",
+      input: {
+        changes: [
+          change("/repo/a.py", "@@ -1 +1 @@\n-old\n+new\n"),
+          change("/repo/b.py", "@@ -1 +1 @@\n-x\n+y\n"),
+        ],
+      },
+    });
+    expect(detail.kind).toBe("diff");
+    if (detail.kind !== "diff") return;
+    expect(detail.files.map((f) => f.path)).toEqual(["/repo/a.py", "/repo/b.py"]);
+    expect(detail.files[0]?.lines).toEqual([
+      { kind: "remove", text: "old" },
+      { kind: "add", text: "new" },
+    ]);
+  });
+
+  it("carries a rename target through", () => {
+    const detail = traceEventDetail({
+      type: "tool_use",
+      input: { changes: [change("/repo/old.py", "@@ -1 +1 @@\n-a\n+b\n", "/repo/new.py")] },
+    });
+    expect(detail.kind).toBe("diff");
+    if (detail.kind !== "diff") return;
+    expect(detail.files[0]?.movePath).toBe("/repo/new.py");
+  });
+
+  it("skips entries with no usable path or diff, and falls back when none are usable", () => {
+    const partial = traceEventDetail({
+      type: "tool_use",
+      input: { changes: [{ path: "/only-path" }, change("/repo/ok.py", "@@ -1 +1 @@\n+ok\n")] },
+    });
+    expect(partial.kind).toBe("diff");
+    if (partial.kind !== "diff") return;
+    expect(partial.files.map((f) => f.path)).toEqual(["/repo/ok.py"]);
+
+    // Nothing usable: the JSON view is more honest than an empty diff.
+    const none = traceEventDetail({ type: "tool_use", input: { changes: [{ path: "/p" }] } });
+    expect(none.kind).toBe("text");
   });
 });

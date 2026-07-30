@@ -64,8 +64,9 @@ import {
   traceEventLabel,
   traceEventSummary,
   traceEventSummaryIsMono,
+  shortenTracePath,
 } from "./trace-event-presenter";
-import type { TraceDiffLine } from "./trace-event-presenter";
+import type { TraceDiffFile, TraceDiffLine } from "./trace-event-presenter";
 import { highlightBlock, highlightToLines, languageForPath } from "./diff-highlight";
 import { useT } from "../../i18n";
 import "../../editor/styles/code.css";
@@ -1220,7 +1221,7 @@ const TranscriptEventRow = ({
             <div className="px-4 pb-3">
               <div className="ml-[72px] rounded-md bg-muted/40">
                 {detail.kind === "diff" ? (
-                  <DiffDetailSurface lines={detail.lines} path={detail.path} />
+                  <DiffDetailSurface files={detail.files} />
                 ) : detail.kind === "file" ? (
                   <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
                 ) : (
@@ -1334,32 +1335,40 @@ function FileWriteSurface({
  * fade/"show all" shell as the text surface so both bodies behave alike inside
  * the virtualized list.
  */
-function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; path: string }) {
+function DiffDetailSurface({ files }: { files: TraceDiffFile[] }) {
   const { t } = useT("agents");
   const [showAll, setShowAll] = useState(false);
+  const lines = files.flatMap((f) => f.lines);
   const isLong = lines.length > 14;
   const added = lines.filter((l) => l.kind === "add").length;
   const removed = lines.filter((l) => l.kind === "remove").length;
+  // A patch can touch several files; the row label only names one, so each
+  // file's own path has to be visible when there is more than one.
+  const showPaths = files.length > 1;
 
   // Each side is highlighted as one block so multi-line strings and comments
   // keep their grammar, then split back per line to sit in the diff gutter.
   // Runs only when the row is expanded, which is where this component mounts.
-  const highlighted = useMemo(() => {
-    const language = languageForPath(path);
-    if (!language) return null;
-    const sides: Record<"add" | "remove" | "context", string[] | null> = {
-      add: null,
-      remove: null,
-      context: null,
-    };
-    for (const kind of ["add", "remove", "context"] as const) {
-      const side = lines.filter((l) => l.kind === kind);
-      if (side.length > 0) {
-        sides[kind] = highlightToLines(side.map((l) => l.text).join("\n"), language);
-      }
-    }
-    return sides;
-  }, [lines, path]);
+  const highlighted = useMemo(
+    () =>
+      files.map((file) => {
+        const language = languageForPath(file.path);
+        if (!language) return null;
+        const sides: Record<"add" | "remove" | "context", string[] | null> = {
+          add: null,
+          remove: null,
+          context: null,
+        };
+        for (const kind of ["add", "remove", "context"] as const) {
+          const side = file.lines.filter((l) => l.kind === kind);
+          if (side.length > 0) {
+            sides[kind] = highlightToLines(side.map((l) => l.text).join("\n"), language);
+          }
+        }
+        return sides;
+      }),
+    [files],
+  );
 
   return (
     <div className="relative">
@@ -1373,7 +1382,18 @@ function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; path: stri
           isLong && !showAll && "max-h-52 overflow-hidden",
         )}
       >
-        {renderDiffRows(lines, highlighted)}
+        {files.map((file, fileIndex) => (
+          // Transcript events are immutable once persisted, so index is stable.
+          <div key={fileIndex}>
+            {showPaths && (
+              <div className="pt-1 pb-0.5 text-[10px] text-muted-foreground/70">
+                {shortenTracePath(file.path)}
+                {file.movePath ? ` → ${shortenTracePath(file.movePath)}` : ""}
+              </div>
+            )}
+            {renderDiffRows(file.lines, highlighted[fileIndex] ?? null)}
+          </div>
+        ))}
       </pre>
       {isLong && !showAll && (
         <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">

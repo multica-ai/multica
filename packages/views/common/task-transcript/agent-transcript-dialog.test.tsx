@@ -505,6 +505,32 @@ describe("AgentTranscriptDialog", () => {
     expect(css).toContain(".transcript-code");
   });
 
+  it("renders a patch-applying provider's changes as diffs, one per file", () => {
+    useTranscriptViewStore.setState({ density: "expanded" });
+    const { container } = renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        // Provider-native name and payload shape — nothing Claude-specific.
+        tool: "patch_apply",
+        input: {
+          changes: [
+            { path: "/repo/a.py", diff: '@@ -1 +1 @@\n-old = 1\n+new = 2\n' },
+            { path: "/repo/b.py", diff: "@@ -1 +1 @@\n-x\n+y\n" },
+          ],
+        },
+      },
+    ]);
+
+    const rows = (selector: string) =>
+      Array.from(container.querySelectorAll(selector)).map((el) => el.textContent?.trim());
+    expect(rows(".bg-destructive\\/10")).toEqual(["- old = 1", "- x"]);
+    expect(rows(".bg-success\\/10")).toEqual(["+ new = 2", "+ y"]);
+    // Both paths are named, since the row label can only name one.
+    expect(container.textContent).toContain("repo/a.py");
+    expect(container.textContent).toContain("repo/b.py");
+  });
+
   it("leaves an unknown extension unhighlighted rather than guessing", () => {
     useTranscriptViewStore.setState({ density: "expanded" });
     const { container } = renderDialog([
