@@ -83,6 +83,63 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+// TestBuildDaemonStartArgsForwardsNoAutoReload matters because `daemon start`
+// re-execs itself as a foreground child: a flag the parent parsed but doesn't
+// forward is silently dropped, so the opt-out would appear to work and not.
+func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("no-auto-reload", false, "")
+	if err := cmd.Flags().Set("no-auto-reload", "true"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--no-auto-reload"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+// TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
+// every `daemon start` flag, and a knob registered on only one of them fails at
+// parse time for users who restart rather than start.
+func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
+		if cmd.Flags().Lookup("no-auto-reload") == nil {
+			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
+		}
+	}
+}
+
+// TestPrintDaemonStatusExplainsDeferredRestart: when the daemon has confirmed a
+// version change but is still busy, `daemon status` is where a user finds out.
+// The row is absent otherwise so it reads as an explanation, not a status line.
+func TestPrintDaemonStatusExplainsDeferredRestart(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]any{
+		"status":      "running",
+		"pid":         float64(1234),
+		"uptime":      "1h2m3s",
+		"cli_version": "0.3.7",
+	}
+
+	var idle bytes.Buffer
+	printDaemonStatusReport(&idle, "Daemon", base)
+	if strings.Contains(idle.String(), "Restart pending") {
+		t.Errorf("status output = %q, want no restart row when nothing is pending", idle.String())
+	}
+
+	base["reload_pending_reason"] = "multica binary on disk reports 0.3.8, running 0.3.7"
+	var pending bytes.Buffer
+	printDaemonStatusReport(&pending, "Daemon", base)
+	if !strings.Contains(pending.String(), "0.3.8") {
+		t.Errorf("status output = %q, want the pending restart reason", pending.String())
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead
