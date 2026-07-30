@@ -300,6 +300,7 @@
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
+    "scroll_to_latest": "Scroll to latest activity",
     "sidebar_tooltip": "Toggle sidebar",
     "find": {
       "placeholder": "Find in issue...",
