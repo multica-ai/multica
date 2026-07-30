@@ -23,7 +23,8 @@ func TestFrozenCensusSnapshotLoaderReturnsVerifiedImmutableSnapshot(t *testing.T
 	)
 	raw := marshalFrozenCensusSnapshot(t, workspaceID, connectionID, 12, report)
 	sum := sha256.Sum256(raw)
-	loader := NewFrozenCensusSnapshotLoader(raw, hex.EncodeToString(sum[:]))
+	checksum := hex.EncodeToString(sum[:])
+	loader := NewFrozenCensusSnapshotLoader(raw, checksum)
 
 	loaded, err := loader.LoadFrozenCensus(context.Background(), workspaceID)
 	if err != nil {
@@ -31,6 +32,7 @@ func TestFrozenCensusSnapshotLoaderReturnsVerifiedImmutableSnapshot(t *testing.T
 	}
 	if loaded.Version != 12 ||
 		loaded.CompanyBrainConnectionID != connectionID ||
+		loaded.SnapshotSHA256 != checksum ||
 		!reflect.DeepEqual(loaded.Report, report) {
 		t.Fatalf("loaded snapshot = %#v, want versioned frozen report", loaded)
 	}

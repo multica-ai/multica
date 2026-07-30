@@ -90,6 +90,7 @@ func (l *FrozenCensusSnapshotLoader) LoadFrozenCensus(
 		Report:                   snapshot.Report,
 		Version:                  snapshot.CensusVersion,
 		CompanyBrainConnectionID: snapshot.CompanyBrainConnectionID,
+		SnapshotSHA256:           l.expectedSHA256,
 	}, nil
 }
 

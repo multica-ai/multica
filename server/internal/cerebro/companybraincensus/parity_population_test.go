@@ -11,14 +11,35 @@ import (
 
 func TestParityPopulationCoordinatorLoadsFrozenEvidenceAndWritesOneEvaluationBatch(t *testing.T) {
 	report, target := parityFixture()
+	target.CompanyBrainConnectionID = populationConnectionID
 	now := time.Date(2026, 7, 30, 9, 45, 0, 0, time.UTC)
 	const (
-		workspaceID = "workspace-1"
+		workspaceID = populationWorkspaceID
 		censusID    = int64(12)
-		connection  = "logical-company-brain"
+		connection  = populationConnectionID
 	)
+	targetSHA256, err := TargetPermissionsSHA256([]TargetPermission{target})
+	if err != nil {
+		t.Fatalf("hash target permissions: %v", err)
+	}
+	request := ParityPopulationRequest{
+		AuthorizationID:                 populationAuthorizationID,
+		WorkspaceID:                     workspaceID,
+		FrozenCensusSHA256:              populationSnapshotSHA256,
+		CensusVersion:                   censusID,
+		CompanyBrainConnectionID:        connection,
+		ExpectedEligibleAgentCount:      1,
+		ExpectedTargetPermissionsSHA256: targetSHA256,
+	}
 
 	var calls []string
+	gate := parityPopulationAuthorizationGateFunc(func(
+		_ context.Context,
+		_ ParityPopulationRequest,
+	) error {
+		calls = append(calls, "authorization")
+		return nil
+	})
 	frozen := frozenCensusLoaderFunc(func(_ context.Context, gotWorkspaceID string) (FrozenCensus, error) {
 		calls = append(calls, "frozen-census")
 		if gotWorkspaceID != workspaceID {
@@ -28,6 +49,7 @@ func TestParityPopulationCoordinatorLoadsFrozenEvidenceAndWritesOneEvaluationBat
 			Report:                   report,
 			Version:                  censusID,
 			CompanyBrainConnectionID: connection,
+			SnapshotSHA256:           populationSnapshotSHA256,
 		}, nil
 	})
 	current := currentTargetPermissionLoaderFunc(func(
@@ -66,13 +88,14 @@ func TestParityPopulationCoordinatorLoadsFrozenEvidenceAndWritesOneEvaluationBat
 		return nil
 	})
 
-	coordinator := NewParityPopulationCoordinator(frozen, current, writer)
+	coordinator := NewParityPopulationCoordinator(gate, frozen, current, writer)
 	coordinator.now = func() time.Time { return now }
-	if err := coordinator.Populate(context.Background(), workspaceID); err != nil {
+	if err := coordinator.Populate(context.Background(), request); err != nil {
 		t.Fatalf("populate parity proofs: %v", err)
 	}
 
 	wantCalls := []string{
+		"authorization",
 		"frozen-census",
 		"current-target-permissions",
 		"parity-proof-writer",
@@ -91,6 +114,8 @@ func TestParityPopulationCoordinatorLoadsFrozenEvidenceAndWritesOneEvaluationBat
 
 func TestParityPopulationCoordinatorStopsAtTheFirstFailedBoundary(t *testing.T) {
 	report, target := parityFixture()
+	target.CompanyBrainConnectionID = populationConnectionID
+	request := validParityPopulationRequest(t)
 	frozenErr := errors.New("frozen census unavailable")
 	currentErr := errors.New("current target permissions unavailable")
 	writerErr := errors.New("proof write failed")
@@ -106,19 +131,19 @@ func TestParityPopulationCoordinatorStopsAtTheFirstFailedBoundary(t *testing.T) 
 		{
 			name:      "frozen census",
 			frozenErr: frozenErr,
-			wantCalls: []string{"frozen-census"},
+			wantCalls: []string{"authorization", "frozen-census"},
 			wantError: frozenErr.Error(),
 		},
 		{
 			name:       "current target permissions",
 			currentErr: currentErr,
-			wantCalls:  []string{"frozen-census", "current-target-permissions"},
+			wantCalls:  []string{"authorization", "frozen-census", "current-target-permissions"},
 			wantError:  currentErr.Error(),
 		},
 		{
 			name:      "parity proof writer",
 			writerErr: writerErr,
-			wantCalls: []string{"frozen-census", "current-target-permissions", "parity-proof-writer"},
+			wantCalls: []string{"authorization", "frozen-census", "current-target-permissions", "parity-proof-writer"},
 			wantError: writerErr.Error(),
 		},
 	}
@@ -126,12 +151,20 @@ func TestParityPopulationCoordinatorStopsAtTheFirstFailedBoundary(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var calls []string
+			gate := parityPopulationAuthorizationGateFunc(func(
+				context.Context,
+				ParityPopulationRequest,
+			) error {
+				calls = append(calls, "authorization")
+				return nil
+			})
 			frozen := frozenCensusLoaderFunc(func(context.Context, string) (FrozenCensus, error) {
 				calls = append(calls, "frozen-census")
 				return FrozenCensus{
 					Report:                   report,
 					Version:                  12,
-					CompanyBrainConnectionID: "logical-company-brain",
+					CompanyBrainConnectionID: populationConnectionID,
+					SnapshotSHA256:           populationSnapshotSHA256,
 				}, test.frozenErr
 			})
 			current := currentTargetPermissionLoaderFunc(func(
@@ -152,11 +185,11 @@ func TestParityPopulationCoordinatorStopsAtTheFirstFailedBoundary(t *testing.T) 
 				return test.writerErr
 			})
 
-			coordinator := NewParityPopulationCoordinator(frozen, current, writer)
+			coordinator := NewParityPopulationCoordinator(gate, frozen, current, writer)
 			coordinator.now = func() time.Time {
 				return time.Date(2026, 7, 30, 9, 45, 0, 0, time.UTC)
 			}
-			err := coordinator.Populate(context.Background(), "workspace-1")
+			err := coordinator.Populate(context.Background(), request)
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("Populate() error = %v, want %q", err, test.wantError)
 			}
