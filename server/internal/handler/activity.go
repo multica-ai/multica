@@ -25,8 +25,9 @@ type TimelineEntry struct {
 	Details json.RawMessage `json:"details,omitempty"`
 
 	// Comment-only fields
-	Content        *string              `json:"content,omitempty"`
-	ParentID       *string              `json:"parent_id,omitempty"`
+	Content          *string              `json:"content,omitempty"`
+	ContentTruncated *bool                `json:"content_truncated,omitempty"`
+	ParentID         *string              `json:"parent_id,omitempty"`
 	UpdatedAt      *string              `json:"updated_at,omitempty"`
 	CommentType    *string              `json:"comment_type,omitempty"`
 	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
@@ -103,10 +104,25 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	wantWrapped := q.Get("limit") != "" || q.Get("before") != "" ||
 		q.Get("after") != "" || q.Get("around") != ""
 
+	summary := false
+	if summaryStr := q.Get("summary"); summaryStr != "" {
+		switch summaryStr {
+		case "true":
+			summary = true
+		case "false":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid summary parameter; expected boolean")
+			return
+		}
+	}
+
 	if wantWrapped {
 		entries := h.mergeTimeline(r, comments, activities, false)
 		if entries == nil {
 			entries = []TimelineEntry{}
+		}
+		if summary {
+			applySummaryToEntries(entries)
 		}
 		resp := timelinePaginatedResponse{Entries: entries}
 		// `around=<id>`: locate the anchor in the DESC slice so the legacy
@@ -127,6 +143,9 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	entries := h.mergeTimeline(r, comments, activities, true)
 	if entries == nil {
 		entries = []TimelineEntry{}
+	}
+	if summary {
+		applySummaryToEntries(entries)
 	}
 	writeJSON(w, http.StatusOK, entries)
 }
@@ -209,6 +228,20 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Action:    &action,
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
+	}
+}
+
+// applySummaryToEntries clips comment content in-place to summaryContentRunes
+// for the timeline summary projection. Activity entries are left unchanged —
+// only comment-type entries with non-nil Content are clipped.
+func applySummaryToEntries(entries []TimelineEntry) {
+	for i := range entries {
+		if entries[i].Type != "comment" || entries[i].Content == nil {
+			continue
+		}
+		clipped, truncated := summarizeContent(*entries[i].Content)
+		entries[i].Content = &clipped
+		entries[i].ContentTruncated = &truncated
 	}
 }
 
