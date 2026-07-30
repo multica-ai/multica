@@ -25,7 +25,7 @@ import (
 // Returning an error aborts the migration run. The corresponding
 // migration is NOT recorded in schema_migrations, so the next run will
 // retry the hook + migration.
-type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
+type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) (skipSQL bool, err error)
 
 // preMigrationHooks wires migration version → hook. The version key is
 // the file basename without the `.up.sql` suffix, matching what
@@ -51,41 +51,99 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 var preMigrationHooks = map[string]preMigrationHook{
 	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
+	"213_comment_idempotency_index":                         runCommentIdempotencyIndexHook,
 }
 
-func runTaskUsageHourlyHook(ctx context.Context, pool *pgxpool.Pool) error {
+func runTaskUsageHourlyHook(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	res, err := taskusagebackfill.Hook(ctx, pool, taskusagebackfill.HookOptions{})
 	if err != nil {
-		return fmt.Errorf("task_usage_hourly pre-103 hook: %w", err)
+		return false, fmt.Errorf("task_usage_hourly pre-103 hook: %w", err)
 	}
 	if res.Skipped != "" {
 		slog.Info("task_usage hourly rollup hook: skipped",
 			"reason", res.Skipped,
 			"watermark_stamped", res.WatermarkStamped)
-		return nil
+		return false, nil
 	}
 	slog.Info("task_usage hourly rollup hook: backfill complete",
 		"slices", res.SlicesProcessed,
 		"rows_touched", res.RowsTouched,
 		"from", res.From.Format("2006-01-02T15:04:05Z07:00"),
 		"to", res.To.Format("2006-01-02T15:04:05Z07:00"))
-	return nil
+	return false, nil
 }
 
 // runAttributionStrictHook backfills accountable_user_id from
 // originator_user_id before migration 198 validates the strict attribution
 // constraint, so self-hosted upgrades that never ran the out-of-band
 // backfill recover automatically (GH #5544 / MUL-4897).
-func runAttributionStrictHook(ctx context.Context, pool *pgxpool.Pool) error {
+func runAttributionStrictHook(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	res, err := attributionbackfill.Hook(ctx, pool, attributionbackfill.HookOptions{})
 	if err != nil {
-		return fmt.Errorf("attribution strict-constraint pre-198 hook: %w", err)
+		return false, fmt.Errorf("attribution strict-constraint pre-198 hook: %w", err)
 	}
 	slog.Info("attribution backfill hook: complete",
 		"rows_backfilled", res.RowsBackfilled,
 		"batches", res.Batches,
 		"mismatch_normalized", res.MismatchNormalized)
-	return nil
+	return false, nil
+}
+
+// runCommentIdempotencyIndexHook makes migration 213 recoverable when a
+// previous CREATE INDEX CONCURRENTLY attempt stopped after PostgreSQL had
+// created the catalog entry but before the migration version was recorded.
+func runCommentIdempotencyIndexHook(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+	return reconcileConcurrentIndex(ctx, pool,
+		"public.comment_author_idempotency_key_idx", "public.comment")
+}
+
+// reconcileConcurrentIndex returns skipSQL only for a valid, ready index whose
+// table, ordered plain keys, uniqueness, and predicate exactly match the
+// runtime ON CONFLICT arbiter. An invalid/not-ready artifact from a failed
+// concurrent build is removed outside a transaction so the migration SQL can
+// create it again. A same-name index on another table (or a non-unique one)
+// fails closed instead of silently accepting an unexpected schema object.
+func reconcileConcurrentIndex(ctx context.Context, pool *pgxpool.Pool, indexName, tableName string) (bool, error) {
+	var valid, ready, semanticMatch bool
+	err := pool.QueryRow(ctx, `
+		SELECT i.indisvalid, i.indisready,
+		       i.indisunique
+		       AND i.indrelid = to_regclass($2)
+		       AND i.indnkeyatts = 4
+		       AND i.indnatts = 4
+		       AND i.indexprs IS NULL
+		       AND i.indkey[0] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'workspace_id' AND NOT attisdropped)
+		       AND i.indkey[1] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'author_type' AND NOT attisdropped)
+		       AND i.indkey[2] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'author_id' AND NOT attisdropped)
+		       AND i.indkey[3] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'idempotency_key' AND NOT attisdropped)
+		       AND pg_get_expr(i.indpred, i.indrelid) = '(idempotency_key IS NOT NULL)'
+		FROM pg_index i
+		WHERE i.indexrelid = to_regclass($1)
+	`, indexName, tableName).Scan(&valid, &ready, &semanticMatch)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect concurrent index %q: %w", indexName, err)
+	}
+
+	if valid && ready {
+		if !semanticMatch {
+			return false, fmt.Errorf("index %q is valid but does not exactly match the expected idempotency arbiter on %q", indexName, tableName)
+		}
+		slog.Info("concurrent index already valid; skipping migration SQL", "index", indexName)
+		return true, nil
+	}
+
+	indexIdent, err := quoteQualifiedIdentifier(indexName)
+	if err != nil {
+		return false, fmt.Errorf("invalid concurrent index name %q: %w", indexName, err)
+	}
+	if _, err := pool.Exec(ctx, "DROP INDEX CONCURRENTLY "+indexIdent); err != nil {
+		return false, fmt.Errorf("drop invalid concurrent index %q: %w", indexName, err)
+	}
+	slog.Info("removed invalid concurrent index before retry", "index", indexName)
+	return false, nil
 }
 
 // migrationAdvisoryLockKey is the int64 identifier used with Postgres
@@ -290,17 +348,21 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 		// colliding with migrationAdvisoryLockKey. Hook failures
 		// abort the run before schema_migrations is updated, so the
 		// same version retries cleanly on the next invocation.
+		skipSQL := false
 		if opts.Direction == "up" {
 			if hook, ok := opts.Hooks[version]; ok && hook != nil {
 				slog.Info("running pre-migration hook", "version", version)
-				if err := hook(ctx, pool); err != nil {
+				skipSQL, err = hook(ctx, pool)
+				if err != nil {
 					return fmt.Errorf("pre-migration hook for %q: %w", version, err)
 				}
 			}
 		}
 
-		if _, err := conn.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("apply migration %q: %w", file, err)
+		if !skipSQL {
+			if _, err := conn.Exec(ctx, string(sql)); err != nil {
+				return fmt.Errorf("apply migration %q: %w", file, err)
+			}
 		}
 
 		if opts.Direction == "up" {

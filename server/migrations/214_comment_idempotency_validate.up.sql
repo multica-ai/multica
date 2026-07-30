@@ -1,0 +1,2 @@
+ALTER TABLE comment VALIDATE CONSTRAINT comment_idempotency_pair_check;
+ALTER TABLE comment VALIDATE CONSTRAINT comment_idempotency_key_length_check;

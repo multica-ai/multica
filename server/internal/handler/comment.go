@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -13,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -103,6 +106,18 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		SourceTaskID:   uuidToPtr(c.SourceTaskID),
 		Reactions:      reactions,
 		Attachments:    attachments,
+	}
+}
+
+func idempotentRowToComment(row db.CreateCommentIdempotentRow) db.Comment {
+	return db.Comment{
+		ID: row.ID, IssueID: row.IssueID, AuthorType: row.AuthorType,
+		AuthorID: row.AuthorID, Content: row.Content, Type: row.Type,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ParentID: row.ParentID,
+		WorkspaceID: row.WorkspaceID, ResolvedAt: row.ResolvedAt,
+		ResolvedByType: row.ResolvedByType, ResolvedByID: row.ResolvedByID,
+		SourceTaskID: row.SourceTaskID, IdempotencyKey: row.IdempotencyKey,
+		IdempotencyHash: row.IdempotencyHash,
 	}
 }
 
@@ -996,6 +1011,43 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	IdempotencyKey   string   `json:"idempotency_key"`
+}
+
+// commentIdempotencyHash binds a key to the normalized request that first
+// claimed it. Reusing a key with different content, thread, attachments, or
+// trigger suppression is a client error rather than an accidental replay of
+// stale data. Actor/workspace are part of the unique index; issue and task are
+// included here so a key cannot silently cross either boundary.
+func commentIdempotencyHash(issueID, sourceTaskID, content, commentType string, parentID pgtype.UUID, attachmentIDs, suppressAgentIDs []pgtype.UUID) []byte {
+	ids := func(values []pgtype.UUID) []string {
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			out = append(out, uuidToString(value))
+		}
+		sort.Strings(out)
+		return out
+	}
+	payload := struct {
+		IssueID          string   `json:"issue_id"`
+		SourceTaskID     string   `json:"source_task_id,omitempty"`
+		Content          string   `json:"content"`
+		Type             string   `json:"type"`
+		ParentID         string   `json:"parent_id,omitempty"`
+		AttachmentIDs    []string `json:"attachment_ids"`
+		SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	}{
+		IssueID:          issueID,
+		SourceTaskID:     sourceTaskID,
+		Content:          content,
+		Type:             commentType,
+		ParentID:         uuidToString(parentID),
+		AttachmentIDs:    ids(attachmentIDs),
+		SuppressAgentIDs: ids(suppressAgentIDs),
+	}
+	encoded, _ := json.Marshal(payload) // fixed data-only struct cannot fail
+	sum := sha256.Sum256(encoded)
+	return sum[:]
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1259,6 +1311,24 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	headerKey := r.Header.Get("Idempotency-Key")
+	if headerKey != "" && req.IdempotencyKey != "" && headerKey != req.IdempotencyKey {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key header and idempotency_key body field must match")
+		return
+	}
+	if headerKey != "" {
+		req.IdempotencyKey = headerKey
+	}
+	if req.IdempotencyKey != "" {
+		if strings.TrimSpace(req.IdempotencyKey) == "" {
+			writeError(w, http.StatusBadRequest, "idempotency key must not be blank")
+			return
+		}
+		if len([]rune(req.IdempotencyKey)) > 255 {
+			writeError(w, http.StatusBadRequest, "idempotency key must not exceed 255 characters")
+			return
+		}
+	}
 
 	// Strip bytes PostgreSQL's TEXT column rejects before the empty check. The
 	// case reachable over the JSON API is an embedded NUL (0x00, SQLSTATE
@@ -1382,7 +1452,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	createParams := db.CreateCommentParams{
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   authorType,
@@ -1391,7 +1461,52 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		Type:         req.Type,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
-	})
+	}
+	var comment db.Comment
+	var err error
+	if req.IdempotencyKey == "" {
+		comment, err = h.Queries.CreateComment(r.Context(), createParams)
+	} else {
+		requestHash := commentIdempotencyHash(
+			issueID, uuidToString(sourceTaskID), req.Content, req.Type, parentID,
+			attachmentIDs, suppressAgentIDs,
+		)
+		var created db.CreateCommentIdempotentRow
+		created, err = h.Queries.CreateCommentIdempotent(r.Context(), db.CreateCommentIdempotentParams{
+			IssueID:         createParams.IssueID,
+			WorkspaceID:     createParams.WorkspaceID,
+			AuthorType:      createParams.AuthorType,
+			AuthorID:        createParams.AuthorID,
+			Content:         createParams.Content,
+			Type:            createParams.Type,
+			ParentID:        createParams.ParentID,
+			SourceTaskID:    createParams.SourceTaskID,
+			IdempotencyKey:  pgtype.Text{String: req.IdempotencyKey, Valid: true},
+			IdempotencyHash: requestHash,
+		})
+		if err == nil {
+			comment = idempotentRowToComment(created)
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			comment, err = h.Queries.GetCommentByIdempotencyKey(r.Context(), db.GetCommentByIdempotencyKeyParams{
+				WorkspaceID:    issue.WorkspaceID,
+				AuthorType:     authorType,
+				AuthorID:       parseUUID(authorID),
+				IdempotencyKey: pgtype.Text{String: req.IdempotencyKey, Valid: true},
+			})
+			if err == nil && !bytes.Equal(comment.IdempotencyHash, requestHash) {
+				writeError(w, http.StatusConflict, "idempotency key was already used for a different comment request")
+				return
+			}
+			if err == nil {
+				groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+				resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
+				slog.Info("comment request deduplicated", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
+				writeJSON(w, http.StatusOK, resp)
+				return
+			}
+		}
+	}
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())

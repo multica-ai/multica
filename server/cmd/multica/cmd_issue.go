@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -541,6 +543,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent task must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
+	issueCommentAddCmd.Flags().String("idempotency-key", "", "Reuse this key when retrying an ambiguous comment request; omitted keys are generated per invocation")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -1970,7 +1973,22 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
-	body := map[string]any{"content": content}
+	idempotencyKey, _ := cmd.Flags().GetString("idempotency-key")
+	if idempotencyKey == "" {
+		// Agent retries are often a second CLI process, so a random per-process
+		// key cannot connect them. For attachment-free task comments, derive the
+		// default from stable request identity. A deliberate repeated comment can
+		// still opt out by supplying a different explicit --idempotency-key.
+		// Attachment uploads currently mint new IDs per attempt; keep their key
+		// random until upload idempotency can bind the complete request safely.
+		if client.TaskID != "" && len(attachmentIDs) == 0 {
+			parentID, _ := cmd.Flags().GetString("parent")
+			idempotencyKey = defaultCommentIdempotencyKey(client.TaskID, issueID, parentID, content, false)
+		} else {
+			idempotencyKey = defaultCommentIdempotencyKey(client.TaskID, issueID, "", content, len(attachmentIDs) > 0)
+		}
+	}
+	body := map[string]any{"content": content, "idempotency_key": idempotencyKey}
 	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
 		body["parent_id"] = parentID
 	}
@@ -1979,6 +1997,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "Comment outcome unknown. Retry with --idempotency-key %q to avoid a duplicate.\n", idempotencyKey)
 		return fmt.Errorf("add comment: %w", err)
 	}
 
@@ -1989,6 +2008,14 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func defaultCommentIdempotencyKey(taskID, issueID, parentID, content string, hasAttachments bool) string {
+	if taskID == "" || hasAttachments {
+		return uuid.NewString()
+	}
+	sum := sha256.Sum256([]byte(taskID + "\x00" + issueID + "\x00" + parentID + "\x00" + content))
+	return "task-comment-v1:" + fmt.Sprintf("%x", sum[:])
 }
 
 func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
