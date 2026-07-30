@@ -383,3 +383,24 @@ describe("traceEventDetail — patch-applying providers", () => {
     expect(none.kind).toBe("text");
   });
 });
+
+describe("traceToolArgSummary — patch payloads", () => {
+  it("names the patched file, so the collapsed row is not blank", () => {
+    expect(
+      traceToolArgSummary({ changes: [{ path: "/repo/src/greet.py", diff: "@@ -1 +1 @@\n-a\n+b\n" }] }),
+    ).toBe(".../src/greet.py");
+  });
+
+  it("counts the rest when a patch touches several files", () => {
+    expect(
+      traceToolArgSummary({
+        changes: [{ path: "/repo/a.py" }, { path: "/repo/b.py" }, { path: "/repo/c.py" }],
+      }),
+    ).toBe("/repo/a.py +2 more");
+  });
+
+  it("falls through to the string ladder when changes carries no path", () => {
+    expect(traceToolArgSummary({ changes: [{ diff: "@@" }], command: "ls" })).toBe("ls");
+    expect(traceToolArgSummary({ changes: "not-an-array", command: "ls" })).toBe("ls");
+  });
+});

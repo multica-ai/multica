@@ -103,6 +103,11 @@ function clip(value: string, max: number): string {
 export function traceToolArgSummary(input: Record<string, unknown> | undefined): string {
   if (!input) return "";
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  // A patch payload names its files in an array, so the string-field ladder
+  // below would leave the collapsed row blank — the one line that reads without
+  // a click.
+  const patched = patchedPathsSummary(input);
+  if (patched) return patched;
   if (str(input.query)) return str(input.query);
   if (str(input.file_path)) return shortenTracePath(str(input.file_path));
   if (str(input.path)) return shortenTracePath(str(input.path));
@@ -115,6 +120,20 @@ export function traceToolArgSummary(input: Record<string, unknown> | undefined):
     if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
   }
   return "";
+}
+
+/** "…/a.py" for one file, "…/a.py +2 more" beyond that. */
+function patchedPathsSummary(input: Record<string, unknown>): string {
+  if (!Array.isArray(input.changes)) return "";
+  const paths: string[] = [];
+  for (const entry of input.changes) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const path = (entry as Record<string, unknown>).path;
+    if (typeof path === "string" && path.length > 0) paths.push(shortenTracePath(path));
+  }
+  if (paths.length === 0) return "";
+  const first = paths[0] ?? "";
+  return paths.length === 1 ? first : `${first} +${paths.length - 1} more`;
 }
 
 function firstLine(value: string | undefined): string {
