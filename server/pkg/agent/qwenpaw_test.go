@@ -25,8 +25,9 @@ func TestNewReturnsQwenpawBackend(t *testing.T) {
 // fakeQwenpawACPScript impersonates `qwenpaw acp` for unit tests.
 // Wire format mirrors other Multica ACP fakes (grok/kimi):
 // session/new returns sessionId, session/load accepts an existing session,
-// session/prompt returns stopReason=end_turn, session/set_model returns
-// success or error based on QWENPAW_SET_MODEL_FAIL env var.
+// session/prompt returns stopReason=end_turn.
+// session/set_model is also handled for backward compatibility with older
+// scripts but is no longer called by the qwenpaw backend.
 func fakeQwenpawACPScript() string {
 	return `#!/bin/sh
 while IFS= read -r line; do
@@ -195,42 +196,6 @@ func TestQwenpawSessionLoadNotFound(t *testing.T) {
 	}
 }
 
-func TestQwenpawSetModelFail(t *testing.T) {
-	t.Parallel()
-	bin := writeFakeQwenpawScript(t, fakeQwenpawACPScript())
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	b, err := New("qwenpaw", Config{
-		ExecutablePath: bin,
-		Logger:         logger,
-		Env:            map[string]string{"QWENPAW_SET_MODEL_FAIL": "1"},
-	})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-
-	ctx := context.Background()
-	session, err := b.Execute(ctx, "test prompt", ExecOptions{
-		Cwd:    t.TempDir(),
-		Model:  "qwen-max",
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-
-	// Drain messages
-	for range session.Messages {
-	}
-
-	result := <-session.Result
-	if result.Status != "failed" {
-		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
-	}
-	if !strings.Contains(result.Error, "could not switch to model") {
-		t.Fatalf("expected could not switch to model error, got %q", result.Error)
-	}
-}
-
 func TestQwenpawListModels(t *testing.T) {
 	t.Parallel()
 	models, err := ListModels(context.Background(), "qwenpaw", "")
@@ -255,12 +220,6 @@ func TestQwenpawBlockedArgs(t *testing.T) {
 	}
 	if qwenpawBlockedArgs["--workspace"] != blockedWithValue {
 		t.Fatalf("expected --workspace to be blockedWithValue, got %v", qwenpawBlockedArgs["--workspace"])
-	}
-	if _, ok := qwenpawBlockedArgs["--agent"]; !ok {
-		t.Fatal("expected --agent to be in qwenpawBlockedArgs")
-	}
-	if qwenpawBlockedArgs["--agent"] != blockedWithValue {
-		t.Fatalf("expected --agent to be blockedWithValue, got %v", qwenpawBlockedArgs["--agent"])
 	}
 }
 
@@ -401,66 +360,6 @@ func TestQwenpawBackendUsage(t *testing.T) {
 	}
 	if usage.OutputTokens != 20 {
 		t.Fatalf("expected 20 output tokens, got %d", usage.OutputTokens)
-	}
-}
-
-// TestQwenpawSetModelReturnsNull verifies that a null result from
-// session/set_model (which is what the real QwenPaw server returns
-// on failure) is treated as a failure, not silently ignored.
-func TestQwenpawSetModelReturnsNull(t *testing.T) {
-	t.Parallel()
-
-	// This script returns result:null (not an RPC error) for set_model,
-	// matching the real QwenPaw v2.0.1 server behaviour.
-	script := `#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
-      ;;
-    *'"method":"session/new"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_qwenpaw_null"}}\n' "$id"
-      ;;
-    *'"method":"session/set_model"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":null}\n' "$id"
-      exit 0
-      ;;
-    *)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-  esac
-done
-`
-	bin := writeFakeQwenpawScript(t, script)
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	b, err := New("qwenpaw", Config{
-		ExecutablePath: bin,
-		Logger:         logger,
-	})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-
-	ctx := context.Background()
-	session, err := b.Execute(ctx, "test prompt", ExecOptions{
-		Cwd:   t.TempDir(),
-		Model: "nonexistent-model",
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-
-	for range session.Messages {
-	}
-
-	result := <-session.Result
-	if result.Status != "failed" {
-		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
-	}
-	if !strings.Contains(result.Error, "could not switch to model") {
-		t.Fatalf("expected could not switch to model error, got %q", result.Error)
 	}
 }
 
@@ -621,9 +520,9 @@ func TestQwenpawSessionLoadSendsCodingProjectDir(t *testing.T) {
 	}
 }
 
-// TestQwenpawWorkspaceAndAgentArgs verifies that --workspace and --agent
-// flags are passed to the qwenpaw acp command when set in ExecOptions.
-func TestQwenpawWorkspaceAndAgentArgs(t *testing.T) {
+// TestQwenpawWorkspaceArgs verifies that --workspace flag is passed to the
+// qwenpaw acp command when set in ExecOptions.
+func TestQwenpawWorkspaceArgs(t *testing.T) {
 	t.Parallel()
 
 	// Fake script that writes its command-line args to a file and then
@@ -665,7 +564,6 @@ done
 	session, err := b.Execute(ctx, "test prompt", ExecOptions{
 		Cwd:              t.TempDir(),
 		QwenpawWorkspace: "/tmp/test-qwenpaw-workspace",
-		QwenpawAgentID:   "multica-agent-123-issue-456",
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -686,12 +584,6 @@ done
 	}
 	if !strings.Contains(args, "/tmp/test-qwenpaw-workspace") {
 		t.Fatalf("expected workspace path in command args, got:\n%s", args)
-	}
-	if !strings.Contains(args, "--agent") {
-		t.Fatalf("expected --agent in command args, got:\n%s", args)
-	}
-	if !strings.Contains(args, "multica-agent-123-issue-456") {
-		t.Fatalf("expected agent ID in command args, got:\n%s", args)
 	}
 }
 
@@ -739,7 +631,6 @@ done
 		Cwd:              t.TempDir(),
 		CustomArgs:       []string{"--workspace", "/evil/path", "--agent", "evil-agent"},
 		QwenpawWorkspace: "/tmp/correct-workspace",
-		QwenpawAgentID:   "multica-correct-agent",
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -755,19 +646,15 @@ done
 	}
 	args := string(raw)
 
-	// User-defined --workspace and --agent must be stripped by the filter
+	// User-defined --workspace must be stripped by the filter
 	if strings.Contains(args, "/evil/path") {
 		t.Fatal("user-defined --workspace value should be blocked")
 	}
-	if strings.Contains(args, "evil-agent") {
-		t.Fatal("user-defined --agent value should be blocked")
-	}
-	// Daemon-injected --workspace and --agent must be present
+	// --agent is no longer blocked by the daemon, so user-defined --agent
+	// passes through.
+	// Daemon-injected --workspace must be present
 	if !strings.Contains(args, "/tmp/correct-workspace") {
 		t.Fatalf("expected daemon-injected workspace path in command args, got:\n%s", args)
-	}
-	if !strings.Contains(args, "multica-correct-agent") {
-		t.Fatalf("expected daemon-injected agent ID in command args, got:\n%s", args)
 	}
 }
 

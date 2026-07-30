@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -16,12 +15,10 @@ import (
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport; overriding it
 // would break the daemon↔QwenPaw communication contract. `--workspace`
-// and `--agent` are set per-task by the daemon for skill isolation and
-// agent identity isolation respectively.
+// is set per-task by the daemon for skill isolation.
 var qwenpawBlockedArgs = map[string]blockedArgMode{
 	"acp":         blockedStandalone,
 	"--workspace": blockedWithValue,
-	"--agent":     blockedWithValue,
 }
 
 // qwenpawBackend implements Backend by spawning `qwenpaw acp` and
@@ -57,15 +54,11 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	// a safe granting option for each session/request_permission request.
 	qwenpawArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, qwenpawBlockedArgs, b.cfg.Logger)...)
 
-	// Inject --workspace and --agent for per-task isolation. These are
-	// blocked in qwenpawBlockedArgs so user-defined custom_args cannot
-	// override them. The daemon sets them via opts.QwenpawWorkspace and
-	// opts.QwenpawAgentID.
+	// Inject --workspace for per-task isolation. This is blocked in
+	// qwenpawBlockedArgs so user-defined custom_args cannot override it.
+	// The daemon sets it via opts.QwenpawWorkspace.
 	if opts.QwenpawWorkspace != "" {
 		qwenpawArgs = append(qwenpawArgs, "--workspace", opts.QwenpawWorkspace)
-	}
-	if opts.QwenpawAgentID != "" {
-		qwenpawArgs = append(qwenpawArgs, "--agent", opts.QwenpawAgentID)
 	}
 
 	cmd := exec.CommandContext(runCtx, execPath, qwenpawArgs...)
@@ -271,43 +264,13 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("qwenpaw session created", "session_id", sessionID)
 
-		// 3. Optional model override via session/set_model.
-		if opts.Model != "" {
-			setModelResult, err := c.request(runCtx, "session/set_model", map[string]any{
-				"sessionId": sessionID,
-				"modelId":   opts.Model,
-			})
-			// QwenPaw's real server returns result: null (not an RPC error)
-			// when the model switch fails (swallows the exception and returns
-			// None), so we must check for a nil result as well.
-			// json.RawMessage("null") is a non-nil 4-byte slice, so we
-			// must also check for the JSON null literal.
-			if err != nil || setModelResult == nil || bytes.Equal(setModelResult, []byte("null")) {
-				if err == nil {
-					err = fmt.Errorf("model %q not available (server returned null)", opts.Model)
-				}
-				b.cfg.Logger.Warn("qwenpaw set_session_model failed", "error", err, "requested_model", opts.Model)
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("qwenpaw could not switch to model %q: %v", opts.Model, err)
-				resCh <- Result{
-					Status:         finalStatus,
-					Error:          finalError,
-					DurationMs:     time.Since(startTime).Milliseconds(),
-					SessionID:      sessionID,
-					ResumeRejected: resumeRejected,
-				}
-				return
-			}
-			b.cfg.Logger.Info("qwenpaw session model set", "model", opts.Model)
-		}
-
-		// 4. Build the prompt content. If we have a system prompt, prepend it.
+		// 3. Build the prompt content. If we have a system prompt, prepend it.
 		userText := prompt
 		if opts.SystemPrompt != "" {
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		// 5. Send the prompt and wait for PromptResponse.
+		// 4. Send the prompt and wait for PromptResponse.
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{

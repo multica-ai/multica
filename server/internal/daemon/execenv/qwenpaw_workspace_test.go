@@ -31,8 +31,8 @@ func TestPrepareQwenpawWorkspace(t *testing.T) {
 		t.Fatalf("prepareQwenpawWorkspace failed: %v", err)
 	}
 
-	// Check that skills dir exists
-	skillsDir := filepath.Join(workspaceDir, "skills")
+	// Check that skill_pool dir exists
+	skillsDir := filepath.Join(workspaceDir, "skill_pool")
 	if fi, err := os.Stat(skillsDir); err != nil {
 		t.Fatalf("skills dir not created: %v", err)
 	} else if !fi.IsDir() {
@@ -97,7 +97,7 @@ func TestPrepareQwenpawWorkspace(t *testing.T) {
 }
 
 // TestPrepareQwenpawWorkspaceEmpty verifies that an empty skills list creates
-// the workspace directory but no skills dir or manifest.
+// the workspace directory but removes any existing skill_pool dir and manifest.
 func TestPrepareQwenpawWorkspaceEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -113,9 +113,9 @@ func TestPrepareQwenpawWorkspaceEmpty(t *testing.T) {
 		t.Fatal("workspace dir is not a directory")
 	}
 
-	// No skills dir should exist
-	if _, err := os.Stat(filepath.Join(workspaceDir, "skills")); !os.IsNotExist(err) {
-		t.Error("skills dir should not be created for empty skills list")
+	// No skill_pool dir should exist
+	if _, err := os.Stat(filepath.Join(workspaceDir, "skill_pool")); !os.IsNotExist(err) {
+		t.Error("skill_pool dir should not be created for empty skills list")
 	}
 
 	// No skill.json should exist
@@ -146,7 +146,7 @@ func TestPrepareQwenpawWorkspaceWithFiles(t *testing.T) {
 		t.Fatalf("prepareQwenpawWorkspace failed: %v", err)
 	}
 
-	skillDir := filepath.Join(workspaceDir, "skills", "data-analyzer")
+	skillDir := filepath.Join(workspaceDir, "skill_pool", "data-analyzer")
 
 	// Check SKILL.md
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
@@ -189,5 +189,173 @@ func TestPrepareQwenpawWorkspacePermissions(t *testing.T) {
 		t.Fatalf("stat workspace: %v", err)
 	} else if fi.Mode().Perm() != 0o700 {
 		t.Errorf("workspace perms = %o, want 0700", fi.Mode().Perm())
+	}
+}
+
+// TestPrepareQwenpawWorkspaceRevokeAll verifies that unbinding every skill
+// (A → ∅) properly removes the skill_pool dir and manifest so the agent
+// no longer has access to previously bound skills.
+func TestPrepareQwenpawWorkspaceRevokeAll(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+
+	// Step 1: prepare with skills (A)
+	skills := []SkillContextForEnv{
+		{Name: "Deploy Helper", Content: "# Deploy Helper\n\nHelps deploy."},
+	}
+	if err := prepareQwenpawWorkspace(workspaceDir, skills, testLogger()); err != nil {
+		t.Fatalf("first prepare failed: %v", err)
+	}
+
+	// Verify skill_pool and manifest exist
+	if _, err := os.Stat(filepath.Join(workspaceDir, "skill_pool")); err != nil {
+		t.Fatalf("skill_pool should exist after first prepare: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceDir, "skill.json")); err != nil {
+		t.Fatalf("skill.json should exist after first prepare: %v", err)
+	}
+
+	// Step 2: prepare with no skills (A → ∅)
+	if err := prepareQwenpawWorkspace(workspaceDir, nil, testLogger()); err != nil {
+		t.Fatalf("revoke prepare failed: %v", err)
+	}
+
+	// Verify skill_pool and manifest are gone
+	if _, err := os.Stat(filepath.Join(workspaceDir, "skill_pool")); !os.IsNotExist(err) {
+		t.Error("skill_pool should be removed after revoking all skills")
+	}
+	if _, err := os.Stat(filepath.Join(workspaceDir, "skill.json")); !os.IsNotExist(err) {
+		t.Error("skill.json should be removed after revoking all skills")
+	}
+}
+
+// TestPrepareQwenpawWorkspaceReplace verifies that replacing skills (A → B)
+// correctly removes old skills and writes new ones without collision suffixes.
+func TestPrepareQwenpawWorkspaceReplace(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+
+	// Step 1: prepare with skill A
+	skillsA := []SkillContextForEnv{
+		{Name: "Deploy Helper", Content: "# Deploy Helper\n\nHelps deploy."},
+	}
+	if err := prepareQwenpawWorkspace(workspaceDir, skillsA, testLogger()); err != nil {
+		t.Fatalf("first prepare (A) failed: %v", err)
+	}
+
+	// Verify deploy-helper exists
+	skillsDir := filepath.Join(workspaceDir, "skill_pool")
+	if _, err := os.Stat(filepath.Join(skillsDir, "deploy-helper")); err != nil {
+		t.Fatalf("deploy-helper dir should exist: %v", err)
+	}
+
+	// Step 2: prepare with skill B (different set)
+	skillsB := []SkillContextForEnv{
+		{Name: "Bug Finder", Content: "# Bug Finder\n\nFinds bugs."},
+		{Name: "Review Helper", Content: "# Review Helper\n\nReviews code."},
+	}
+	if err := prepareQwenpawWorkspace(workspaceDir, skillsB, testLogger()); err != nil {
+		t.Fatalf("second prepare (B) failed: %v", err)
+	}
+
+	// Verify old skill is gone
+	if _, err := os.Stat(filepath.Join(skillsDir, "deploy-helper")); !os.IsNotExist(err) {
+		t.Error("deploy-helper should be removed after replacing skills")
+	}
+
+	// Verify new skills exist with natural slugs (no collision suffix)
+	for _, slug := range []string{"bug-finder", "review-helper"} {
+		dir := filepath.Join(skillsDir, slug)
+		if _, err := os.Stat(dir); err != nil {
+				t.Fatalf("new skill dir %q should exist: %v", slug, err)
+		}
+		// Verify no collision suffix
+		if _, err := os.Stat(filepath.Join(skillsDir, slug+"-multica")); !os.IsNotExist(err) {
+			t.Errorf("slug %q should not have a collision suffix after replace", slug)
+		}
+	}
+
+	// Verify manifest has exactly 2 skills
+	manifestPath := filepath.Join(workspaceDir, "skill.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read skill.json: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("unmarshal skill.json: %v", err)
+	}
+	skillsMap, ok := manifest["skills"].(map[string]any)
+	if !ok {
+		t.Fatal("skills is not a map")
+	}
+	if len(skillsMap) != 2 {
+		t.Errorf("expected 2 skills in manifest after replace, got %d", len(skillsMap))
+	}
+}
+
+// TestPrepareQwenpawWorkspaceRepeatedReuse verifies that preparing the same
+// workspace with the same skill set multiple times (A → A) is idempotent —
+// no collision suffixes, no duplicate entries, manifest unchanged.
+func TestPrepareQwenpawWorkspaceRepeatedReuse(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	skills := []SkillContextForEnv{
+		{Name: "Deploy Helper", Content: "# Deploy Helper\n\nHelps deploy."},
+		{Name: "Bug Finder", Content: "# Bug Finder\n\nFinds bugs."},
+	}
+
+	// Prepare three times with the same set
+	for i := 0; i < 3; i++ {
+		if err := prepareQwenpawWorkspace(workspaceDir, skills, testLogger()); err != nil {
+			t.Fatalf("prepare iteration %d failed: %v", i, err)
+		}
+	}
+
+	skillsDir := filepath.Join(workspaceDir, "skill_pool")
+
+	// Verify each skill exists exactly once (no collision suffixes)
+	for _, slug := range []string{"deploy-helper", "bug-finder"} {
+		dir := filepath.Join(skillsDir, slug)
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("skill dir %q should exist: %v", slug, err)
+		}
+		// No collision suffix
+		if _, err := os.Stat(filepath.Join(skillsDir, slug+"-multica")); !os.IsNotExist(err) {
+			t.Errorf("slug %q should not have a collision suffix after repeated reuse", slug)
+		}
+		if _, err := os.Stat(filepath.Join(skillsDir, slug+"-multica-2")); !os.IsNotExist(err) {
+			t.Errorf("slug %q should not have a collision suffix after repeated reuse", slug)
+		}
+	}
+
+	// Verify only the two expected dirs exist in skill_pool
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		t.Fatalf("read skill_pool dir: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries in skill_pool, got %d", len(entries))
+	}
+
+	// Verify manifest has exactly 2 skills
+	manifestPath := filepath.Join(workspaceDir, "skill.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read skill.json: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("unmarshal skill.json: %v", err)
+	}
+	skillsMap, ok := manifest["skills"].(map[string]any)
+	if !ok {
+		t.Fatal("skills is not a map")
+	}
+	if len(skillsMap) != 2 {
+		t.Errorf("expected 2 skills in manifest after repeated reuse, got %d", len(skillsMap))
 	}
 }

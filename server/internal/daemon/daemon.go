@@ -5397,7 +5397,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		OpenclawMode:       openclawMode,
 		ClaudeSettingsPath: env.ClaudeSettingsPath,
 		QwenpawWorkspace:   env.QwenpawWorkspace,
-		QwenpawAgentID:     deriveQwenpawAgentID(task),
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -6685,23 +6684,6 @@ func hermesLaunchArgs(customArgs []string, overlayActive bool) []string {
 	// stripping never diverge.
 	sel := agent.ParseHermesProfileArgs(customArgs)
 	return agent.StripHermesProfileArgs(customArgs, sel)
-}
-
-// deriveQwenpawAgentID returns a unique QwenPaw agent ID for this task, so
-// session/set_model and other stateful RPCs are scoped to the task rather than
-// mutating the user's shared agent config. The ID is derived from the task's
-// issue ID and agent ID to produce a deterministic, human-readable identifier.
-func deriveQwenpawAgentID(task Task) string {
-	agentID := task.AgentID
-	if agentID == "" {
-		agentID = "default"
-	}
-	issueID := task.IssueID
-	if issueID == "" {
-		return ""
-	}
-	// Format: multica-<agent_id>-<issue_id>
-	return fmt.Sprintf("multica-%s-%s", agentID, issueID)
 }
 
 func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {

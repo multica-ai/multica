@@ -4763,37 +4763,3 @@ func TestExecuteAndDrain_RedactsNestedToolInputBeforeSending(t *testing.T) {
 		t.Fatalf("redaction destroyed the change metadata: %s", blob)
 	}
 }
-
-func TestDeriveQwenpawAgentID(t *testing.T) {
-	t.Parallel()
-
-	t.Run("with agent and issue IDs", func(t *testing.T) {
-		id := deriveQwenpawAgentID(Task{AgentID: "agent-1", IssueID: "issue-123"})
-		want := "multica-agent-1-issue-123"
-		if id != want {
-			t.Fatalf("got %q, want %q", id, want)
-		}
-	})
-
-	t.Run("empty agent ID uses default", func(t *testing.T) {
-		id := deriveQwenpawAgentID(Task{IssueID: "issue-456"})
-		want := "multica-default-issue-456"
-		if id != want {
-			t.Fatalf("got %q, want %q", id, want)
-		}
-	})
-
-	t.Run("empty issue ID returns empty", func(t *testing.T) {
-		id := deriveQwenpawAgentID(Task{AgentID: "agent-1"})
-		if id != "" {
-			t.Fatalf("expected empty string, got %q", id)
-		}
-	})
-
-	t.Run("empty task returns empty", func(t *testing.T) {
-		id := deriveQwenpawAgentID(Task{})
-		if id != "" {
-			t.Fatalf("expected empty string, got %q", id)
-		}
-	})
-}

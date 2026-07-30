@@ -234,10 +234,8 @@ type Environment struct {
 	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
 	// (set only for the qwenpaw provider). It is populated with the bound skills
 	// and their skill.json manifest with enabled: true, so the skills are
-	// immediately effective. The daemon passes --workspace <dir> and
-	// --agent <task-id> to `qwenpaw acp` so the QwenPaw agent discovers the
-	// skills natively and uses a per-task agent identity (preventing model
-	// override mutations from affecting the user's shared agent config).
+	// immediately effective. The daemon passes --workspace <dir> to
+	// `qwenpaw acp` so the QwenPaw agent discovers the skills natively.
 	// See qwenpaw_workspace.go.
 	QwenpawWorkspace string
 
