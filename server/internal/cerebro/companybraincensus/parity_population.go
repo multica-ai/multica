@@ -23,7 +23,7 @@ type FrozenCensusLoader interface {
 // CurrentTargetPermissionLoader returns the exact current source-scoped
 // permission evidence for the frozen census's logical Company Brain connection.
 type CurrentTargetPermissionLoader interface {
-	LoadCurrentTargetPermissions(context.Context, string, string) ([]TargetPermission, error)
+	LoadCurrentTargetPermissions(context.Context, string, string, Report) ([]TargetPermission, error)
 }
 
 // ParityProofBatchWriter accepts one complete deterministic EvaluateParity
@@ -81,6 +81,7 @@ func (c *ParityPopulationCoordinator) Populate(
 		ctx,
 		workspaceID,
 		frozen.CompanyBrainConnectionID,
+		frozen.Report,
 	)
 	if err != nil {
 		return fmt.Errorf("load current Company Brain target permissions: %w", err)

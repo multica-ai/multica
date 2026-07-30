@@ -34,6 +34,7 @@ func TestParityPopulationCoordinatorLoadsFrozenEvidenceAndWritesOneEvaluationBat
 		_ context.Context,
 		gotWorkspaceID string,
 		gotConnectionID string,
+		gotReport Report,
 	) ([]TargetPermission, error) {
 		calls = append(calls, "current-target-permissions")
 		if gotWorkspaceID != workspaceID || gotConnectionID != connection {
@@ -44,6 +45,9 @@ func TestParityPopulationCoordinatorLoadsFrozenEvidenceAndWritesOneEvaluationBat
 				workspaceID,
 				connection,
 			)
+		}
+		if !reflect.DeepEqual(gotReport, report) {
+			t.Fatalf("target permission report = %#v, want frozen report", gotReport)
 		}
 		return []TargetPermission{target}, nil
 	})
@@ -134,6 +138,7 @@ func TestParityPopulationCoordinatorStopsAtTheFirstFailedBoundary(t *testing.T) 
 				context.Context,
 				string,
 				string,
+				Report,
 			) ([]TargetPermission, error) {
 				calls = append(calls, "current-target-permissions")
 				return []TargetPermission{target}, test.currentErr
@@ -175,14 +180,16 @@ type currentTargetPermissionLoaderFunc func(
 	context.Context,
 	string,
 	string,
+	Report,
 ) ([]TargetPermission, error)
 
 func (f currentTargetPermissionLoaderFunc) LoadCurrentTargetPermissions(
 	ctx context.Context,
 	workspaceID string,
 	companyBrainConnectionID string,
+	report Report,
 ) ([]TargetPermission, error) {
-	return f(ctx, workspaceID, companyBrainConnectionID)
+	return f(ctx, workspaceID, companyBrainConnectionID, report)
 }
 
 type parityProofBatchWriterFunc func(context.Context, string, []ParityEvaluation) error
