@@ -1437,6 +1437,37 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("marks a reply-resolved thread as resolved on the quick-jump rail", async () => {
+    // A resolution on a REPLY leaves the thread expanded, so it flattens to a
+    // plain `comment` item, not a `resolved-bar`. The rail must still read it
+    // as resolved — proof the flag comes from deriveThreadResolution and not
+    // from the fold state.
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "reply-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "That fixed it",
+        parent_id: "comment-1",
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+        resolved_at: "2026-01-19T00:00:00Z",
+      } as TimelineEntry,
+    ]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Started working on this (resolved)" }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "I can help with this" })).toBeInTheDocument();
+  });
+
   it("sends empty description when editor is cleared", async () => {
     renderIssueDetail();
 

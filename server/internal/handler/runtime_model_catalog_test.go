@@ -194,6 +194,86 @@ func TestInMemoryModelCatalogCache_ExpiresAndInvalidates(t *testing.T) {
 	}
 }
 
+// TestModelCatalogServeWindow_ServesDayOldSnapshotAndRevalidates pins the
+// day-scale serve window (MUL-5444). Nothing keeps a snapshot warm in the
+// background and the browser's own react-query cache dies with the tab, so a
+// minutes-scale window turned every first-open-of-the-day into a cold daemon
+// round trip — the multi-second wait this cache exists to remove. Freshness is
+// not traded away for it: a snapshot past modelCatalogRevalidateAfter is still
+// served, but serving it queues the refresh that makes the next open correct.
+func TestModelCatalogServeWindow_ServesDayOldSnapshotAndRevalidates(t *testing.T) {
+	ctx := context.Background()
+
+	if modelCatalogRevalidateAfter >= modelCatalogServeWindow {
+		t.Fatalf("revalidate threshold %s must stay well below the serve window %s, otherwise nothing refreshes",
+			modelCatalogRevalidateAfter, modelCatalogServeWindow)
+	}
+	if modelCatalogServeWindow < 12*time.Hour {
+		t.Fatalf("serve window %s is not day-scale; agent CLIs are upgraded on a scale of days, so a shorter window only makes the first open of each day slow",
+			modelCatalogServeWindow)
+	}
+
+	cache := NewInMemoryModelCatalogCache()
+	store := NewInMemoryModelListStore()
+	rec := &pendingWorkRecorder{}
+	h := &Handler{ModelCatalogCache: cache, ModelListStore: store, DaemonPendingWork: rec}
+
+	seed := func(runtimeID string, age time.Duration) {
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		cache.entries[runtimeID] = ModelCatalogSnapshot{
+			RuntimeID: runtimeID,
+			Models:    sampleCatalog(),
+			Supported: true,
+			StoredAt:  time.Now().Add(-age),
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		age    time.Duration
+		served bool
+	}{
+		{name: "hours old is still served", age: 2 * time.Hour, served: true},
+		{name: "just inside the window is served", age: modelCatalogServeWindow - time.Minute, served: true},
+		{name: "past the window is a miss", age: modelCatalogServeWindow + time.Minute, served: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtimeID := "rt-" + tc.name
+			seed(runtimeID, tc.age)
+			got := h.cachedModelCatalog(ctx, runtimeID)
+			if tc.served && got == nil {
+				t.Fatalf("snapshot aged %s should still answer without waiting for the daemon", tc.age)
+			}
+			if !tc.served && got != nil {
+				t.Fatalf("snapshot aged %s is past the serve window and must not be served: %+v", tc.age, got)
+			}
+		})
+	}
+
+	// Serving an aged snapshot must still queue the refresh — the whole reason a
+	// long window is safe.
+	seed("rt-revalidate", 2*time.Hour)
+	served := h.cachedModelCatalog(ctx, "rt-revalidate")
+	if served == nil {
+		t.Fatal("expected the aged snapshot to be served")
+	}
+	if age := served.Age(time.Now()); age < modelCatalogRevalidateAfter {
+		t.Fatalf("test fixture is younger than the revalidate threshold (%s < %s)", age, modelCatalogRevalidateAfter)
+	}
+	h.revalidateModelCatalog(ctx, "rt-revalidate")
+	pending, err := store.HasPending(ctx, "rt-revalidate")
+	if err != nil {
+		t.Fatalf("has pending: %v", err)
+	}
+	if !pending {
+		t.Fatal("serving an aged snapshot must enqueue a background refresh")
+	}
+	if rec.count() != 1 {
+		t.Fatalf("expected exactly 1 pending-work hint, got %d", rec.count())
+	}
+}
+
 // failingModelCatalogCache reports a backend error on every read.
 type failingModelCatalogCache struct{}
 

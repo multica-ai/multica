@@ -2,6 +2,17 @@
  * Multica shared base styles — imported by all apps
  * ============================================================================= */
 
+/* The chat launcher overlays the dashboard's bottom-right corner on every
+ * workspace page, so a page-level bar that runs to that corner has to stop
+ * short of it. Named rather than spelled out at each site: the intent is
+ * legible, every site that yields to the launcher is findable by this class,
+ * and the distance stays derived from the launcher's own geometry. Centred
+ * floating toolbars and dialog footers do not need it — nothing else reaches
+ * that corner. */
+@utility pe-chat-launcher {
+  padding-inline-end: var(--chat-launcher-clearance);
+}
+
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
 /* @see https://shiki.style/guide/dual-themes */
 .shiki,

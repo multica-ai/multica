@@ -1087,8 +1087,9 @@ func (h *Handler) ListChatDraftRestores(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "failed to load draft restore attachments")
 			return
 		}
+		attachmentMode := attachmentURLModeFromRequest(r)
 		for _, a := range attRows {
-			attachmentsByID[uuidToString(a.ID)] = h.attachmentToResponse(a)
+			attachmentsByID[uuidToString(a.ID)] = h.attachmentToResponse(a, attachmentMode)
 		}
 	}
 
@@ -1446,8 +1447,9 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.AgentTaskResponse.Attribution})
 	if cancelled.CancelledChatMessage != nil {
 		attachments := make([]AttachmentResponse, 0, len(cancelled.CancelledChatMessage.Attachments))
+		attachmentMode := attachmentURLModeFromRequest(r)
 		for _, a := range cancelled.CancelledChatMessage.Attachments {
-			attachments = append(attachments, h.attachmentToResponse(a))
+			attachments = append(attachments, h.attachmentToResponse(a, attachmentMode))
 		}
 		resp.CancelledChatMessage = &CancelledChatMessageResponse{
 			ChatSessionID:  cancelled.CancelledChatMessage.ChatSessionID,

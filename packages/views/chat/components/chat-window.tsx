@@ -50,6 +50,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
+import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
@@ -171,14 +172,9 @@ export function ChatWindow() {
   const appForeground = useAppForeground();
   const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
     useChatDraftRestore(activeSessionId, isOpen && appForeground);
-  // Nonce handed to ChatInput to pull focus into the compose box when a new
-  // chat starts (⊕ or switching agent). 0 is inert so opening the window on an
-  // existing session never steals focus.
-  const [focusRequest, setFocusRequest] = useState(0);
-  const requestInputFocus = useCallback(
-    () => setFocusRequest((n) => n + 1),
-    [],
-  );
+  // Nonce handed to ChatInput to pull focus into the compose box: when a new
+  // chat starts (⊕ or switching agent), and whenever the window itself opens.
+  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
 
   // Legacy archived sessions (the old soft-archive feature was removed but
   // pre-existing rows with status='archived' may still exist) are excluded
@@ -726,7 +722,10 @@ export function ChatWindow() {
 
   const isVisible = isOpen && (isExpanded || boundsReady);
 
-  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col overflow-hidden rounded-xl bg-surface-raised shadow-[var(--floating-shadow)] ring-1 ring-surface-border";
+  // `@container`: the window is user-resizable from 360px to 90% of the
+  // viewport, so the chat body's gutter (CHAT_GUTTER) has to key off the
+  // window's own width, not the page behind it.
+  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col overflow-hidden rounded-xl bg-surface-raised shadow-[var(--floating-shadow)] ring-1 ring-surface-border @container";
   const containerStyle: React.CSSProperties = {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",

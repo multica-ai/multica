@@ -523,12 +523,12 @@ function RuntimeWelcome({
               )}
             </DialogDescription>
             <div className="mt-1 flex flex-col gap-1.5 max-w-sm">
-              <p className="text-center text-caption text-muted-foreground/80 leading-relaxed">
+              <p className="text-center text-caption text-muted-foreground leading-relaxed">
                 {t(
                   ($) => $.welcome_after_onboarding.runtime.success.tip_inbox,
                 )}
               </p>
-              <p className="text-center text-caption text-muted-foreground/80 leading-relaxed">
+              <p className="text-center text-caption text-muted-foreground leading-relaxed">
                 {t(
                   ($) => $.welcome_after_onboarding.runtime.success.tip_chat,
                 )}

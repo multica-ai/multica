@@ -60,12 +60,18 @@ function ProjectMention({
   const projectPath = p.projectDetail(projectId);
 
   const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
     e.stopPropagation();
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
-      if (openInNewTab) openInNewTab(projectPath, fallbackLabel);
+      if (openInNewTab) {
+        e.preventDefault();
+        openInNewTab(projectPath, fallbackLabel);
+      }
+      // Web: no adapter — leave the event alone so the browser's native
+      // modifier-click on the anchor opens the tab (or window for shift),
+      // preserving background/foreground semantics window.open would flatten.
       return;
     }
+    e.preventDefault();
     push(projectPath);
   };
 

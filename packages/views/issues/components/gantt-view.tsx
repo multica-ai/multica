@@ -160,7 +160,7 @@ function GanttAxis({
         {monthBlocks.map((b, i) => (
           <div
             key={i}
-            className="absolute top-0 bottom-0 flex items-center px-2 text-caption font-medium text-foreground/80"
+            className="absolute top-0 bottom-0 flex items-center px-2 text-caption font-medium text-foreground"
             style={{ left: b.left, width: b.width }}
           >
             {b.width > 40 && <span className="truncate">{b.label}</span>}
@@ -195,7 +195,7 @@ function GanttAxis({
                   {zoom === "day" && (
                     <>
                       <span className="tabular-nums">{date.getUTCDate()}</span>
-                      <span className="text-micro opacity-70">
+                      <span className="text-micro">
                         {date.toLocaleDateString(locale, {
                           weekday: "short",
                           timeZone: "UTC",
@@ -408,7 +408,7 @@ function ScheduledRow({
                     style={{ left: bar.left, width: bar.width }}
                   >
                     {!bar.isMarker && bar.width > 60 && (
-                      <span className="block truncate px-2 py-[2px] text-micro leading-4 text-white/95">
+                      <span className="block truncate px-2 py-[2px] text-micro leading-4 text-white">
                         {issue.title}
                       </span>
                     )}

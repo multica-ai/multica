@@ -1,127 +1,154 @@
 ---
 title: Create and configure an agent
-description: The minimum fields to create an agent, plus every optional setting — system instructions, environment variables, visibility, concurrency limit, and archiving.
+description: Choose a starting point, then define the agent's responsibilities, capabilities, execution setup, and Access.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Creating an [agent](/agents) takes only two things: **a name** and **a choice of [AI coding tool](/providers)**. Everything else is optional — system instructions, model, environment variables, CLI arguments, visibility, concurrency limit — the defaults work fine. Get it running first and tune later; every field can be changed at any time.
+Creating an agent requires a working [runtime](/daemon-runtimes) first. The runtime decides which computer and which AI coding tool the agent uses; the agent holds the long-lived identity, instructions, and capabilities.
 
-## Create an agent
+On the workspace **Agents** page, click **New agent**.
 
-Prerequisite: you already have at least one supported [AI coding tool](/providers) installed on your machine (Claude Code, Codex, etc.) and a [daemon](/daemon-runtimes) running. If you're not there yet, start with [Cloud quickstart](/cloud-quickstart) or [Self-host quickstart](/self-host-quickstart).
+## Starting points
 
-Once that's in place, go to the **Agents** page in your workspace and click **+ New**, or use the CLI:
+The creation page offers two options:
 
-```bash
-multica agent create
-```
-
-The form has only two required fields: **name** (unique within the workspace) and **runtime** (= pick an AI coding tool). Every other field is covered section by section below.
-
-## Pick an AI coding tool
-
-Each runtime is backed by a specific AI coding tool. Multica supports 16 of them. The most common choices:
-
-| Tool | Good for |
+| Option | When it fits |
 |---|---|
-| **Claude Code** | Anthropic's official tool, most complete feature set; **best first pick** |
-| **Codex** | OpenAI, the mainstream alternative |
-| **Cursor** | Users in the Cursor editor ecosystem |
-| **Copilot** | Teams leveraging their GitHub account entitlements |
-| **CodeBuddy** | Teams using Tencent's Claude Code-compatible CLI |
+| **Start blank** | You already know the agent's responsibilities and want to fill in every field yourself. |
+| **Build with AI** | Describe the goal first and let the Agent Builder ask the key questions and generate a draft. |
 
-The other nine (Antigravity, Hermes, Kimi, Kiro CLI, OpenCode, Pi, OpenClaw, Qoder, Trae CLI), along with each tool's full capability matrix (session resume, MCP, skill injection path, model selection), are covered in [AI coding tools comparison](/providers).
+Build with AI needs an online runtime for the Builder conversation. Either way, you can review and edit the final configuration before creating.
 
-## Writing system instructions
+![Agent creation starting points: Start blank and Build with AI](/images/docs/quickstart-new-agent.png)
 
-**System instructions** (`instructions`) are prepended to every task, telling the agent what role it plays and what rules to follow:
+## Required fields
+
+Creating an agent requires only two things:
+
+- **Name** — must be unique within the workspace.
+- **Runtime** — the environment that actually executes tasks.
+
+Every other field can start with its default and be adjusted after creation. By default, only the creator can run a new agent.
+
+## Description and instructions
+
+The **description** is a short introduction for the team. It appears only in the agent list and detail page, and never enters the AI coding tool's prompt.
+
+**Instructions** are provided to the agent on every run and usually cover:
+
+- what it is and isn't responsible for;
+- what to check first when work arrives;
+- what it is allowed to modify;
+- how to deliver results;
+- when to check with a member before proceeding.
+
+For example:
 
 ```text
-You're a frontend code-review agent. When an issue comes in, read the diff first. Focus only on:
-- Styling issues (tailwind class names, box model)
-- Accessibility (a11y)
-Don't change code — leave suggestions in a comment.
+You review frontend pull requests.
+
+Read the diff and related tests first, and check only:
+- React and TypeScript correctness
+- Accessibility
+- Consistency with existing component patterns
+
+Do not modify code directly. Post findings in an issue comment,
+ordered by severity; when nothing blocks, state clearly that the change can merge.
 ```
 
-When left blank (the default), the agent uses the native behavior of its underlying AI coding tool with no extra constraints.
+## Adding skills
 
-## Picking a model
+During creation you can pick one or more [skills](/skills) from the workspace.
 
-Most AI coding tools support model selection (for example, Claude Code lets you pick between Sonnet and Opus). Leave it blank and the tool's own default is used; pick one explicitly and that's what runs. Each tool's supported models are listed in [AI coding tools comparison](/providers).
+Skills suit methods and material reused across agents; long-lived requirements that belong only to this agent go in the instructions.
 
-Changing the model **only applies to new tasks**. Already-dispatched tasks continue with the model that was locked in at dispatch time.
+## Runtime, model, and thinking level
 
-## Custom environment variables (custom_env)
+Each runtime already maps to one AI coding tool. After picking a runtime, you can pick a model and thinking level the tool supports; some tools (such as Codex) also offer a service tier:
 
-**Custom environment variables** (`custom_env`) let you inject extra env vars at task execution time — typical uses are API keys or switching the upstream endpoint:
+- Left blank, the runtime or local CLI default applies.
+- With a model set, the agent uses that override for tasks it picks up afterwards.
+- Some runtimes manage models themselves, so no model picker is shown.
 
-```
-ANTHROPIC_API_KEY = sk-...
-ANTHROPIC_BASE_URL = https://my-proxy.example.com
-```
+Tools differ in supported models, session resume, skills, and MCP capabilities — see [AI coding tools comparison](/providers).
 
-System-critical variables cannot be overridden: `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME`, and any key starting with `MULTICA_*` are silently ignored by the daemon (with a warn log — no error).
+## Access
+
+Access decides which members can run this agent (assign, @-mention, or chat):
+
+| Access | Meaning |
+|---|---|
+| **Only me** | Only you can run it. The default. |
+| **Entire workspace** | Every workspace member can run it. |
+| **Specific people** | Only you and the selected members can run it. |
+
+![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.png)
+
+Only the agent owner can change Access — workspace admins cannot. Workspace `owner`s and `admin`s can manage the rest of the configuration, but cannot use their admin role to run agents they aren't granted.
+
+## Configuration after creation
+
+On the agent's detail page you can keep adjusting:
+
+| Setting | What it does |
+|---|---|
+| **Concurrency limit** | How many tasks the agent can run at the same time. The default is 6; tasks beyond the cap keep queuing. |
+| **Environment variables** | Inject variables when the AI coding tool starts. |
+| **Custom arguments** | Appended item by item to the AI coding tool's CLI arguments. |
+| **MCP** | Provide MCP server configuration for AI coding tools that support it. |
+| **Integrations** | Connect external services this agent can use. |
+
+The daemon hosting the runtime also has a global concurrency cap (default 20); the effective concurrency is the smaller of the two.
+
+Editing configuration does not change tasks already running. Later tasks use the agent configuration saved at the time the runtime picks them up.
+
+## Environment variables and credentials
+
+Environment variables suit limited-privilege credentials the agent needs at run time, such as a read-only API key or a single-scope token.
 
 <Callout type="warning">
-**Values in `custom_env` are stored in plaintext in Multica's server database.** Agent list/get responses no longer carry env values at all — only an opaque count. Reading values requires the agent's own owner — or a workspace owner/admin — to hit the dedicated, audited `GET /api/agents/{id}/env` endpoint (CLI: `multica agent env get <id>`). Agents running tasks can NOT use their host's owner credentials to reveal env on other agents, not even on an agent the same human owns — the endpoint denies agent-actor sessions.
-
-**Don't put high-value secrets in `custom_env`** (production database passwords, root-level tokens, etc.). Use **dedicated, limited-scope credentials** for agents (read-only API keys, single-scope PATs), and rotate them regularly. Database backups and DB audits remain a meaningful exposure surface.
+**`custom_env` values are stored in plaintext in the Multica server database** — they are not "stays on this machine" data. Agent list and detail endpoints no longer return any env values, only an opaque count; only workspace `owner`s and `admin`s can unlock and modify values, and every read or change leaves an audit record. A running agent cannot call the admin endpoints to read another agent's variables.
 </Callout>
 
-## Custom CLI arguments (custom_args)
+Do not use production database admin passwords or other high-value long-lived credentials.
 
-**Custom CLI arguments** (`custom_args`) is a string array appended one-by-one to the AI coding tool's command line:
+Critical runtime variables such as `PATH`, `HOME`, and `MULTICA_*` cannot be overridden here.
 
-```json
-["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
-```
+## Custom arguments and MCP
 
-The final command comes out as:
+Custom arguments are passed to the AI coding tool as an array, item by item, without shell expansion. Whether an argument is valid is up to the tool; model configuration that already has a dedicated field doesn't need to be repeated here.
+
+MCP configuration may contain tokens; its storage and display rules match environment variables. Only runtimes that support managed MCP configuration show this section; tools without MCP support don't gain it just because a configuration is saved.
+
+## Duplicating an agent
+
+Duplicating carries over most working configuration except the name, including instructions, skills, custom arguments, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
+
+Environment variable values and MCP configuration are never copied and must be set again on the new agent. Duplication keeps the original agent's runtime binding and Access settings.
+
+## Creating with the CLI
 
 ```bash
-claude --model <model> --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
+multica agent create \
+  --name "Frontend Reviewer" \
+  --runtime-id <runtime-id> \
+  --description "Reviews frontend pull requests" \
+  --instructions "Read the diff and tests first; post review conclusions only as issue comments."
 ```
 
-Arguments are passed as-is, not through a shell (no injection risk), but whether a given flag is recognized is up to the AI coding tool itself — tools differ substantially here.
+Plaintext in command-line arguments ends up in shell history; stdin and permission-restricted files do not.
 
-<Callout type="tip">
-`custom_env` and `custom_args` have no hard caps, but in practice **keep each under 10 entries**. Too many makes the command line long, slows startup, and gets harder to maintain.
-</Callout>
+When a similarly configured agent already exists, copy it directly:
 
-## Visibility
+```bash
+multica agent copy <agent-id>
+```
 
-- **Workspace** (`workspace`) — any member of the workspace can assign it
-- **Private** (`private`) — only workspace owners, admins, or the agent's creator can assign it
-
-New agents default to `private`.
-
-**Private does not mean hidden** — every member sees a private agent's name and description in the list, they just can't read sensitive config (env values never appear in agent list/get responses; MCP config is masked for non-owners). Full meaning in [Agents → Who can assign an agent](/agents#who-can-assign-an-agent).
-
-## Concurrency limit
-
-**Concurrency limit** (`max_concurrent_tasks`) controls how many tasks this agent can run in parallel at once. The default is **6**. New tasks that hit the cap queue up — they aren't rejected.
-
-This is only the "agent layer" of a two-tier limit — the daemon itself enforces a broader cap (default 20), and whichever is tighter wins. Details in [Daemon and runtimes → How many tasks can run in parallel](/daemon-runtimes#how-many-tasks-can-run-in-parallel).
-
-Changing this value **does not cancel tasks already running** — it only applies to the next task about to be picked up.
-
-## Attaching domain expertise: Skills
-
-A created agent can have **Skills** attached — **knowledge packs** (`SKILL.md` + supporting files) automatically delivered to the AI coding tool at task execution time. You can create a new skill, import from GitHub or ClawHub, or scan one from an existing skill directory on your machine. See [Skills](/skills).
-
-## Archive and restore
-
-Agents you no longer use can be **archived** — they disappear from everyday views, but their historical data (tasks run, comments posted) is fully preserved. **Restore** them anytime to put them back to work.
-
-<Callout type="warning">
-**Archiving immediately cancels every unfinished task belonging to the agent** — running, dispatched, and queued tasks are all marked `cancelled` and won't continue. If you have an important task in flight, let it finish before archiving.
-</Callout>
-
-Archived agents can't be assigned new tasks.
+By default the copy stays on the same runtime; add `--runtime-id` to move it to another runtime, which also requires `--model`. Environment variables, MCP configuration, and `runtime_config` are never copied; the runtime binding itself is kept. Full flags in [Using the CLI](/cli).
 
 ## Next steps
 
-- [Skills](/skills) — attach knowledge packs to an agent
-- [AI coding tools comparison](/providers) — full capability matrix across all 16 tools
-- [Assigning issues to agents](/assigning-issues) — put your new agent to work
+- [Assign issues to agents](/assigning-issues) — validate the configuration with real work.
+- [Skills](/skills) — create, import, and reuse team methods.
+- [Daemon and runtimes](/daemon-runtimes) — troubleshoot online status and where execution happens.

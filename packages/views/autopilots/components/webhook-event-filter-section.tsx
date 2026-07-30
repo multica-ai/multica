@@ -51,7 +51,7 @@ export function WebhookEventFilterSection({
           rel="noopener noreferrer"
           aria-label={t(($) => $.dialog.event_filter_docs_link_label)}
           title={t(($) => $.dialog.event_filter_docs_link_label)}
-          className="ml-0.5 inline-flex items-center text-muted-foreground/80 hover:text-foreground transition-colors"
+          className="ml-0.5 inline-flex items-center text-faint-foreground hover:text-foreground transition-colors"
         >
           <ExternalLink className="size-3" />
         </a>

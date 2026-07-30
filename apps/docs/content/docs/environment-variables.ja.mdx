@@ -1,287 +1,267 @@
 ---
 title: 環境変数
-description: セルフホストの Multica サーバーを実行するための環境変数の完全な一覧です。
+description: セルフホスト Multica でよく使うサーバー、ストレージ、連携、ランタイムの設定。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-セルフホストの Multica [サーバー](/self-host-quickstart)は、起動時に環境変数から設定を読み込みます — データベース、サインイン、メール、ストレージ、サインアップ許可リストはすべてここにあります。このページでは、すべての変数を用途別にグループ化しています。各セクションでは、**設定しないと何が起きるか**、そして**プロダクションで必ず設定すべきものはどれか**を明確に説明します。auth 関連の変数を実際にどう設定するかについては、[サインインとサインアップの設定](/auth-setup)を参照してください。
+Multica はプロセス起動時に環境変数を読み込みます。変更後は、該当する API・Web・デーモンのプロセスを再起動してください。Docker Compose の `docker compose restart` は `.env` を再読み込みしません。`up -d` でコンテナを再作成して初めて反映されます。
 
-## コアサーバー変数
+このページにはデプロイ運用者向けの設定のみを載せています。テスト用変数や内部タスク用の変数は扱いません。グループ別のリファレンスとして使い、完全なデプロイ手順は[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
 
-デプロイ前に必ず検討すべきコア変数です — 一部はサーバーを起動できるようにするデフォルト値を持っていますが、プロダクションでは必須項目を明示的に設定すべきです。
+## プロダクションの最小構成
 
-| 変数 | デフォルト | プロダクションで必須？ |
-|---|---|---|
-| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **はい** |
-| `PORT` | `8080` | いいえ（ポートを変更する場合を除く） |
-| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **はい**（デフォルトは安全ではありません） |
-| `APP_ENV` | 空 | **はい**（`production` である必要があります） |
-| `FRONTEND_ORIGIN` | 空 | **はい**（セルフホストは自身のドメインを設定する必要があります） |
-| `MULTICA_DEV_VERIFICATION_CODE` | 空 | いいえ（プロダクションでは必ず空のままにしてください） |
-| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | いいえ。`SIGTERM`/`SIGINT` の受信後、グレースフルシャットダウンを開始する前の任意の待機時間。`300s` や `5m` などの非負の Go duration を受け付けます。空または `0` の場合は直ちにシャットダウンを開始します |
+```dotenv
+DATABASE_URL=postgres://user:password@postgres:5432/multica?sslmode=require
+JWT_SECRET=<long-random-secret>
+APP_ENV=production
+FRONTEND_ORIGIN=https://multica.example.com
+MULTICA_APP_URL=https://multica.example.com
+MULTICA_PUBLIC_URL=https://api.multica.example.com
+```
 
-Kubernetes で `MULTICA_SHUTDOWN_HOLD_DURATION` を使用する場合、`terminationGracePeriodSeconds` は hold 時間とその後のグレースフルシャットダウン時間の合計より長く設定してください。両方を同じ時間にすると、クリーンアップが完了する前に kubelet が `SIGKILL` を送信する可能性があります。
+さらにメールサービスを 1 つ選ぶ必要があります。選ばない場合、認証コードと招待はサーバーログに書き込まれるだけです。
 
 <Callout type="warning">
-**プロダクションでは `MULTICA_DEV_VERIFICATION_CODE` を空のままにしてください。** 固定のローカルテストコードはデフォルトで無効になっていますが、`MULTICA_DEV_VERIFICATION_CODE=888888` で有効にすると、`APP_ENV` が production 以外の間は、コードを要求できる誰もがその固定値でサインインできてしまいます。このショートカットは `APP_ENV=production` のときには無視されます。
+プロダクションでデフォルトの `JWT_SECRET` を使わないでください。`MULTICA_DEV_VERIFICATION_CODE` も設定しないでください。
 </Callout>
 
-### データベース接続プール
+## API とデータベース
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `DATABASE_MAX_CONNS` | `25` | pgxpool の最大接続数。デーモンは頻繁に（3 秒ごとに）ポーリングして接続を使用するため、規模の大きいデプロイではより高い値が必要になる場合があります |
-| `DATABASE_MIN_CONNS` | `5` | 最小アイドル接続数 |
+| `DATABASE_URL` | ローカルの `multica` データベース | PostgreSQL 接続文字列 |
+| `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
+| `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
+| `PORT` | `8080` | API のリッスンポート |
+| `JWT_SECRET` | 開発用の固定値 | ログイン JWT と一部の署名フローに使うシークレット |
+| `APP_ENV` | 空 | プロダクションでは `production` を設定 |
+| `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます |
+| `LOG_LEVEL` | アプリのデフォルト | ログレベル |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 
-**設定しない場合**、上記の値が使われます — 以前プロダクションでプール枯渇を引き起こした pgx 組み込みの 4/NumCPU デフォルトでは**ありません**。
+Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
 
-## メール設定
+## 公開アドレスとブラウザアクセス
 
-Multica は 2 つの配信バックエンドをサポートします — クラウドデプロイ向けの [Resend](https://resend.com/) と、内部 / オンプレミスネットワーク向けの SMTP relay です。両方が設定されている場合は `SMTP_HOST` が `RESEND_API_KEY` より優先されます。
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `FRONTEND_ORIGIN` | 空 | ユーザーがアクセスするフロントエンドの origin。CORS、cookie、招待リンクに使われます |
+| `MULTICA_APP_URL` | `FRONTEND_ORIGIN` にフォールバック | ユーザーが到達できる Web アドレス。CLI ログインとアカウント連携リンクが使います |
+| `MULTICA_PUBLIC_URL` | 空 | 公開 API アドレス。webhook URL とランタイム接続案内に使われます |
+| `CORS_ALLOWED_ORIGINS` | 空 | 追加で許可する HTTP origin。カンマ区切り |
+| `ALLOWED_ORIGINS` | CORS / フロントエンド設定にフォールバック | WebSocket origin の許可リスト。カンマ区切り |
+| `COOKIE_DOMAIN` | 空 | フロントエンドと API の host が異なり、ブラウザが API ドメインへ直接アクセスする場合は必須。単一ドメイン構成では空のまま |
+
+フロントエンドと API が異なる host を使い、ブラウザが API ドメインへ直接アクセスする構成では、`COOKIE_DOMAIN` の設定が必須です。設定しないとブラウザが CSRF cookie を読めず、すべての書き込みリクエストが `403 CSRF validation failed` を返す一方、読み取りは正常に動きます。値には、両方の host を同時にカバーできる最も狭い親ドメインを使ってください（`.example.com` より `.agent.example.com`）。この設定はログインセッション cookie をそのドメイン配下のすべての host に広げるため、それらの host がすべて同一の信頼できる運用主体のものである場合にのみ使えます。変更後は両方の host で古い cookie を削除し、再ログインしてください。[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)の同一オリジン構成（ブラウザは app ドメインのみアクセス）に従う場合は、空のままで構いません。IP アドレスは指定しないでください。ブラウザは Domain が IP の cookie を無視します。
+
+<Callout type="warning">
+セルフホストのデプロイでは `FRONTEND_ORIGIN` の設定が必須です。設定しないと、招待リンク、cookie のセキュリティ属性、WebSocket の origin 検証が実際のドメインと食い違うおそれがあります。
+</Callout>
+
+## メールとログイン
 
 ### Resend
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Resend の送信元アドレス（Resend アカウントで検証済みのドメインである必要があります）。`SMTP_FROM_EMAIL` が未設定の場合、SMTP でも使われます |
+| `RESEND_API_KEY` | 空 | 設定すると Resend が有効になります |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 送信元アドレス。検証済みドメインに属している必要があります |
 
-### SMTP relay
+### SMTP
 
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `SMTP_HOST` | 空 | SMTP relay のホスト名。これを設定すると SMTP モードが有効になり、Resend を上書きします |
-| `SMTP_PORT` | `25` | SMTP ポート。STARTTLS サブミッションには `587` を、SMTPS（暗黙的 TLS、自動有効化）には `465` を使用します |
-| `SMTP_USERNAME` | 空 | SMTP ユーザー名。認証なしの relay の場合は空のままにしてください |
-| `SMTP_PASSWORD` | 空 | SMTP パスワード |
-| `SMTP_FROM_EMAIL` | 空 | SMTP の `MAIL FROM` と `From:` に使う送信元アドレス。未設定の場合は `RESEND_FROM_EMAIL` にフォールバックします |
-| `SMTP_TLS` | `starttls` | TLS モード。`implicit`（別名 `smtps`、`ssl`）は接続時に即座に TLS ハンドシェイクを行います（SMTPS）。`465` ポートでは自動的に有効になります。未設定 / `starttls` の場合は接続後に STARTTLS でアップグレードします |
-| `SMTP_TLS_INSECURE` | `false` | TLS 証明書の検証をスキップするには `true` に設定（プライベート CA / 自己署名証明書のみ） |
-| `SMTP_EHLO_NAME` | マシンのホスト名 | relay に通知する EHLO/HELO 名。厳格な relay（例: Google Workspace `smtp-relay.gmail.com`）が公開 IP からのデフォルトの挨拶を拒否する場合は、実際の FQDN を設定してください — そうしないと relay が接続を切断し、後続のコマンドで不明瞭な `EOF` として表面化します |
-
-サーバーが STARTTLS を通知すると自動的にアップグレードされます。dial タイムアウトは 10 秒で、SMTP セッション全体には 30 秒のデッドラインがあるため、ブラックホール化した relay が auth ハンドラーをハングさせることはできません。
-
-**どちらも設定していない場合の動作**: サーバーはエラーを出しませんが、送信されるはずだったすべてのメール（検証コード、招待リンク）は**サーバーの stdout にのみ記録されます**。ローカル開発には便利です — サーバーログからコードをコピーして使ってください。**プロダクションでこれを設定し忘れると、静かなブラックホールが生まれ**、ユーザーはメールをまったく受け取れず、エラーも一切表面化しません。
-
-## Google OAuth 設定
-
-任意です。メール + 検証コードのみを使用する場合は設定しないままにし、サインインページに「Sign in with Google」を追加する場合は設定してください。
+`SMTP_HOST` が空でない限り、SMTP が Resend より優先されます。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `GOOGLE_CLIENT_ID` | 空 | Google Cloud OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | 空 | Google Cloud OAuth secret |
-| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth コールバック URL（セルフホスト: 自身のフロントエンドドメインに置き換えてください） |
+| `SMTP_HOST` | 空 | SMTP ホスト。設定すると SMTP が有効になります |
+| `SMTP_PORT` | `25` | よく使う値: 25、587、465 |
+| `SMTP_USERNAME` | 空 | ユーザー名。匿名 relay では空のまま |
+| `SMTP_PASSWORD` | 空 | パスワード |
+| `SMTP_FROM_EMAIL` | `RESEND_FROM_EMAIL` にフォールバック | Envelope From とメールの From |
+| `SMTP_TLS` | `starttls` | `implicit`、`smtps`、`ssl` は暗黙的 TLS を意味します。465 では自動的に有効 |
+| `SMTP_TLS_INSECURE` | `false` | 証明書検証をスキップ。信頼できる内部ネットワーク専用 |
+| `SMTP_EHLO_NAME` | ホスト名 | 厳格な relay が要求する EHLO/FQDN |
 
-**ランタイムで適用されます**: フロントエンドはこれらの設定をランタイムに `/api/config` 経由で読み込むため、**変更してもフロントエンドのリビルドや再デプロイは不要です** — サーバーを再起動すれば適用されます。
-
-完全なセットアップ（Google Cloud Console の手順を含む）は[サインインとサインアップの設定](/auth-setup#google-oauth-configuration)にあります。
-
-## ファイルストレージ設定
-
-Multica はユーザーがアップロードした添付ファイル（コメント内の画像やファイル）を保存します。**S3 が推奨されます**。S3 が設定されていない場合はローカルディスクにフォールバックします。
-
-### S3 / S3 互換ストレージ
+### Google OAuth
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `S3_BUCKET` | 空 | **バケット名のみ**（例: `my-bucket`）。`.s3.<region>.amazonaws.com` サフィックスは含め**ないでください** — サーバーが `S3_BUCKET` + `S3_REGION` から公開ホストを構築します。これを設定すると S3 ストレージが有効になります |
-| `S3_REGION` | `us-west-2` | AWS リージョン。バケットの実際のリージョンと一致する必要があります — SDK 署名と公開 URL の構築の両方に使われます |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 空 | 静的な認証情報。両方を設定しない場合は AWS SDK のデフォルト認証情報チェーン（IAM role / 環境認証情報）が使われます |
-| `AWS_ENDPOINT_URL` | 空 | カスタムの S3 互換エンドポイント（例: [MinIO](https://min.io/)）。これを設定すると path-style URL に切り替わります |
-| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | 添付ファイルのダウンロード方式: `auto`、`cloudfront`、`presign`、`proxy`。`auto` では CloudFront が完全に設定されている場合は優先し、内部/プライベート endpoint host は server proxy、公開 S3 互換 endpoint は対応時に presigned GET を使います |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | CloudFront signed URL と S3 presigned download URL の有効期間。Go duration 形式を受け付けます |
+| `GOOGLE_CLIENT_ID` | 空 | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | 空 | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Google Console のコールバックアドレスと完全に一致している必要があります |
 
-**`S3_BUCKET` を設定しない場合**: サーバーは起動時に `"S3_BUCKET not set, cloud upload disabled"` をログに記録し、すべてのアップロードはローカルディスクにフォールバックします。
-
-**保存されるオブジェクト URL** は次の優先順位で構築されます。
-
-1. `CLOUDFRONT_DOMAIN` が設定されている場合は `https://<CLOUDFRONT_DOMAIN>/<key>`。
-2. `AWS_ENDPOINT_URL` が設定されている場合は `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>`（path-style）。
-3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>`（virtual-hosted-style）。`S3_BUCKET` にドットが含まれる場合、AWS が発行するワイルドカード TLS 証明書がドットを含むバケットホストを検証できないため、サーバーは `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>`（path-style）にフォールバックします。
-
-API の `download_url` は、CloudFront 署名が設定されていない場合 `GET /api/attachments/{id}/download` を使います。この endpoint は安全な場合 CloudFront/S3 presigned URL にリダイレクトし、`http://rustfs:9000` のようなプライベート/内部 endpoint では server がストリーミングします。Docker/VPC 内部のオブジェクトストアでは `ATTACHMENT_DOWNLOAD_MODE=proxy` を明示できます。
-
-### ローカルディスク（S3 が設定されていない場合）
+### サインアップ範囲
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `LOCAL_UPLOAD_DIR` | `./data/uploads` | ローカルストレージのディレクトリ |
-| `LOCAL_UPLOAD_BASE_URL` | 空（相対パスを返します） | 公開 base URL — 設定しないとフロントエンドが添付ファイルの完全な URL を解決できません |
+| `ALLOW_SIGNUP` | `true` | allowlist が一つも設定されていない場合に新規登録を許可するか |
+| `ALLOWED_EMAILS` | 空 | 登録を許可する完全なメールアドレス。カンマ区切り |
+| `ALLOWED_EMAIL_DOMAINS` | 空 | 登録を許可するメールドメイン。カンマ区切り |
+| `DISABLE_WORKSPACE_CREATION` | `false` | すべてのユーザーのワークスペース新規作成を禁止。owner/admin の例外はありません |
+| `MULTICA_DEV_VERIFICATION_CODE` | 空 | 非 production 環境で使う固定 6 桁のテスト認証コード |
 
-### CloudFront（任意）
+allowlist の正確な判定順序は[ログインとサインアップ](/auth-setup#サインアップ制限)を参照してください。
 
-S3 の前段に CloudFront を置く場合、3 つの変数が適用されます: `CLOUDFRONT_DOMAIN`、`CLOUDFRONT_KEY_PAIR_ID`、`CLOUDFRONT_PRIVATE_KEY`（または Secrets Manager から読み込むには `CLOUDFRONT_PRIVATE_KEY_SECRET`）。CloudFront を使わない場合はスキップしてください — S3 設定とは競合しません。
+## 添付ファイルストレージ
 
-### Cookie ドメイン
+`S3_BUCKET` が未設定の場合、Multica はローカルディスクを使います。
 
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `COOKIE_DOMAIN` | 空 | セッション cookie のスコープ |
-
-- **空**: cookie は訪問した正確なホストでのみ有効です（単一ホストのデプロイに適切）
-- **`.example.com` に設定**: cookie がサブドメイン間で共有されます（そのため `app.example.com` と `api.example.com` がサインインセッションを共有します）
-- **フロントエンドとバックエンドが別のホストにある場合は任意ではなく必須です**: ブラウザがページ自身の origin から `multica_csrf` cookie を読める必要があり、読み取りは動作したまま書き込みリクエストがすべて `403 CSRF validation failed` で失敗します
-- 両方のホストを含む**最も狭い**親ドメインを使ってください（`.example.com` ではなく `.agent.example.com`）。この値は `multica_auth` セッション cookie もそのドメイン配下のすべてのホストに広げるため、それらがすべて同一の信頼できる主体によって運用されている場合にのみこの構成を使ってください — 詳細な設定は [Self-Hosting](/getting-started/self-hosting) を参照してください
-- 警告: IP アドレスにはできません（ブラウザは無視します）
-
-## 誰がサインアップできるかを制限する
-
-3 つの許可リストの層が優先順位に従って組み合わされます。**いずれか 1 つの層でも空でない値に設定されると、一致しないメールは拒否されます** — `ALLOW_SIGNUP=true` でさえこれを上書きできません。
+### S3 または互換ストレージ
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `ALLOWED_EMAILS` | 空 | 明示的なメール許可リスト（カンマ区切り）。空でない場合、リストにあるメールのみがサインアップできます |
-| `ALLOWED_EMAIL_DOMAINS` | 空 | ドメイン許可リスト（カンマ区切り）。空でない場合、リストにあるドメインのみがサインアップできます |
-| `ALLOW_SIGNUP` | `true` | サインアップのマスタースイッチ。サインアップを完全に無効にするには `false` に設定 |
+| `S3_BUCKET` | 空 | バケット名。完全な hostname は指定しないでください |
+| `S3_REGION` | `us-west-2` | バケットのあるリージョン |
+| `AWS_ACCESS_KEY_ID` | SDK デフォルトの資格情報チェーン | 静的な access key |
+| `AWS_SECRET_ACCESS_KEY` | SDK デフォルトの資格情報チェーン | 静的な secret key |
+| `AWS_ENDPOINT_URL` | 空 | MinIO などの S3 互換 endpoint |
+| `S3_USE_PATH_STYLE` | カスタム endpoint 時は `true` | path-style アドレスを使うか |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign`、`proxy` |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 署名付きダウンロード URL の有効期間 |
 
-**直感に反する部分**: `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` は「company.io または全員を許可」という意味では**なく**、**company.io のみを許可**という意味です。許可リストの層は AND セマンティクスです — 完全な決定木は[サインインとサインアップの設定 → サインアップ許可リスト](/auth-setup#restricting-who-can-sign-up)にあります。
+内部ネットワークの MinIO など、ブラウザから endpoint に直接到達できない場合は `ATTACHMENT_DOWNLOAD_MODE=proxy` を使ってください。
 
-**招待フロー自体はサインアップ許可リストをチェックしません** — ただし、招待された人は招待を承諾する前に依然として**サインイン**できる必要があります。すでに Multica アカウントを持っている場合（例: 別のワークスペースから）、許可リストの影響を受けずに直接承諾できます。**一度もサインアップしたことがない場合**、サインインの最初のステップ（検証コードの要求）は依然として許可リストのチェックを通過し、`ALLOW_SIGNUP=false` や `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` によって拒否されたメールは**サインアップを完了できず、したがって招待を承諾できません**。
-
-## ワークスペース作成をロックダウンする
-
-`ALLOW_SIGNUP=false` は新しいアカウントをブロックしますが、すでにサインイン済みのユーザーが `POST /api/workspaces` 経由で別のワークスペースを作成することは**ブロックしません**。すべてのイシュー、リポジトリ、エージェントがプラットフォーム管理者に見えなければならないセルフホストインスタンスでは、そのギャップを塞ぐために `DISABLE_WORKSPACE_CREATION=true` を設定してください。
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `DISABLE_WORKSPACE_CREATION` | `false` | `true` の場合、`POST /api/workspaces` へのすべての呼び出しが `403 workspace creation is disabled for this instance` を返します。Web UI は `/api/config` 経由ですべての「ワークスペース作成」要素を非表示にします。役割 / owner の例外はありません — このゲートはインスタンス単位で全体に適用されます |
-
-推奨されるブートストラップ手順:
-
-1. `DISABLE_WORKSPACE_CREATION` を設定しないまま（デフォルト）インスタンスを起動します。
-2. 管理者としてサインインし、共有ワークスペースを作成します。
-3. `DISABLE_WORKSPACE_CREATION=true` を設定してバックエンドを再起動します。この時点から、ユーザーは招待によってのみ参加できます。
-
-招待されたユーザーが最初の検証コードでサインアップを完了できるよう `ALLOW_SIGNUP=true` を維持したい場合は、`DISABLE_WORKSPACE_CREATION=true` を `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS` と組み合わせて、どのアドレスがサインアップできるかの範囲を指定してください。`ALLOW_SIGNUP=false` を設定すると、保留中の招待対象者がアカウントを作成すること自体も追加でブロックされます — すべてのメンバーがすでに Multica アカウントを持っているインスタンスでのみ有用です。
-
-## レート制限（任意の Redis）
-
-公開 auth エンドポイント — `/auth/send-code`、`/auth/verify-code`、`/auth/google` — の前段には、IP ごとの固定ウィンドウのレート制限があります。リミッターは Redis によって支えられています。`REDIS_URL` を設定しない場合、ミドルウェアは **no-op**（fail-open）になり、バックエンドは起動時に `rate limiting disabled: REDIS_URL not configured` をログに記録します。
+### ローカルディスク
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `REDIS_URL` | 空 | Redis 接続 URL（例: `redis://localhost:6379/0`）。設定しないと auth エンドポイントのレート制限が無効になります。同じ Redis はリアルタイムハブの fan-out、PAT キャッシュ、デーモントークンキャッシュでも使われます — 設定しない場合はすべてインメモリ / 直接 DB モードにフォールバックします |
-| `REDIS_DISABLE_CLIENT_NAME` | `false` | `true` に設定すると、すべての Redis 接続で `CLIENT SETNAME` ハンドシェイクをスキップします。`CLIENT` コマンドをブロックするマネージド Redis プロバイダー（GCP Memorystore や ACL 制限付きの AWS ElastiCache など）を使用する場合に**必須**です。有効にすると `CLIENT LIST` 出力で接続の説明的な名前が失われますが、制限付きプロバイダーとの互換性が得られます |
-| `RATE_LIMIT_AUTH` | `5` | `/auth/send-code` および `/auth/google` に対する IP あたり毎分の最大リクエスト数 |
-| `RATE_LIMIT_AUTH_VERIFY` | `20` | `/auth/verify-code` に対する IP あたり毎分の最大リクエスト数 |
-| `RATE_LIMIT_TRUSTED_PROXIES` | 空 | リミッターがその `X-Forwarded-For` ヘッダーを信頼することを許可する、カンマ区切りの CIDR。空（デフォルト）は **XFF を決して信頼しない**ことを意味します — リミッターは直接接続の `RemoteAddr` のみを使用します |
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | ファイルと metadata の保存ディレクトリ。永続ボリュームが必要です |
+| `LOCAL_UPLOAD_BASE_URL` | 空 | 任意の公開 base URL。空の場合はアプリ内の相対アドレスを返します |
 
-リクエストが制限を超えると、サーバーは `429 Too Many Requests`、`Retry-After: 60`、そして本文 `{"error":"too many requests"}` で応答します。
+### CloudFront
 
-<Callout type="warning">
-**リバースプロキシの背後では `RATE_LIMIT_TRUSTED_PROXIES` を必ず設定する必要があります。** そうしないと、バックエンドの観点ではすべての実際のユーザーがプロキシの IP を共有することになり、デプロイ全体が 1 つのバケットに入り、`/auth/send-code` がサイト全体で毎分 5 リクエストになってしまいます。一般的な値: 同一ホストの Caddy / Nginx には `127.0.0.1/32,::1/128`、Cloudflare / ALB / CloudFront には該当 CDN が公開している IP 範囲。`RemoteAddr` がこれらの CIDR のいずれかに含まれる IP のみが、`X-Forwarded-For` を使ってクライアントを識別できます。
-</Callout>
+| 変数 | 説明 |
+|---|---|
+| `CLOUDFRONT_DOMAIN` | CDN ドメイン |
+| `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID |
+| `CLOUDFRONT_PRIVATE_KEY` | 完全な秘密鍵 |
+| `CLOUDFRONT_PRIVATE_KEY_SECRET` | Secrets Manager から秘密鍵を読み込む場合に使用 |
 
-この独立した `RATE_LIMIT_TRUSTED_PROXIES` は、オートパイロット webhook リミッター（`/api/webhooks/autopilots/{token}`）を制御する `MULTICA_TRUSTED_PROXIES` とは**異なります**。各リミッターは自身のリストをパースするため、プロキシの背後にあるデプロイは両方を設定すべきです。
-
-## デーモンのチューニングパラメータ
-
-デーモンはユーザーのローカルマシン上で実行され、その設定もローカル環境変数から読み込まれます。一般的なものは次のとおりです。
+## Redis とレート制限
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | サーバーアドレス（セルフホスト: 自身のドメインに置き換えてください） |
-| `MULTICA_DAEMON_DEVICE_NAME` | ホスト名 | Runtimes 画面に表示されるデバイス名 |
-| `MULTICA_AGENT_RUNTIME_NAME` | 組み込みデフォルト | ランタイムの表示名 |
+| `REDIS_URL` | 空 | 認証レート制限、リアルタイムイベント、token cache に使用。未設定の場合、リアルタイムイベントはプロセス内メモリにフォールバックし、認証レート制限は無効になります |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | マネージド Redis が `CLIENT SETNAME` を禁止している場合に `true` を設定 |
+| `RATE_LIMIT_AUTH` | `5` | 認証コード送信または Google ログイン開始の、IP あたり毎分の回数 |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | 認証コード検証の、IP あたり毎分の回数 |
+| `RATE_LIMIT_TRUSTED_PROXIES` | 空 | `X-Forwarded-For` の提供を許可するプロキシ CIDR。カンマ区切り |
+| `MULTICA_TRUSTED_PROXIES` | 空 | オートパイロット webhook とリアルタイム接続が使う信頼済みプロキシ CIDR |
+
+リバースプロキシ配下のデプロイでは、実際のプロキシのネットワーク範囲を設定してください。すべての送信元を無条件に信頼してはいけません。クライアントが転送元 IP を偽装できてしまいます。
+
+上記の `RATE_LIMIT_*` は `REDIS_URL` を設定した場合にのみ有効です。未設定の場合、起動ログに rate limiting disabled と表示されます。Redis が一時的に利用できないときは、レート制限はリクエストを通す側に倒れ、通常のログインを妨げません。
+
+## 外部連携
+
+| 連携 | 変数 | 説明 |
+|---|---|---|
+| GitHub | `GITHUB_APP_SLUG` | GitHub App の slug |
+| GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC と接続 state の署名シークレット |
+| GitHub | `GITHUB_APP_ID` | PR カードの CI ステータス・マージ可否と「GitHub から選択」リポジトリに必要です |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID と対になる完全な PEM 秘密鍵。用途は同上 |
+| Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
+| Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
+| Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
+| Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |
+| Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
+| セルフホスト Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 連携のスイッチ。compose ではデフォルトで有効 |
+| セルフホスト Git | `MULTICA_VCS_SECRET_KEY` | base64 エンコードされた 32 バイトの暗号化キー（`openssl rand -base64 32`）。未設定の場合、この機能全体が利用できません |
+
+`GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージによる done への遷移は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
+
+設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)を参照してください。
+
+## サーバーサイド LLM
+
+このグループは、会話タイトルなどサーバー側の補助生成機能の設定です。エージェントがタスクを実行するときに使う AI コーディングツールの資格情報ではありません。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_LLM_API_KEY` | 空 | OpenAI 互換の API key |
+| `MULTICA_LLM_BASE_URL` | 空 | OpenAI 互換の endpoint |
+| `MULTICA_LLM_DEFAULT_MODEL` | 組み込みデフォルト | リクエストがモデルを指定しない場合に使用 |
+
+API key と base URL の両方が空の場合、サーバーサイド LLM 生成は無効になり、呼び出し側はローカルのフォールバックロジックを使います。
+
+## デーモン設定
+
+以下の変数は、エージェントを実行するコンピューター上で読み込まれます。API コンテナ内ではありません。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket アドレス。`http(s)` も受け付けます |
+| `MULTICA_DAEMON_DEVICE_NAME` | ホスト名 | ランタイム一覧に表示されるデバイス名 |
+| `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | ランタイムの表示名 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | ウェイクイベントがないときのタスクポーリング間隔 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | タスクのポーリング間隔 |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 最大同時タスク数 |
-| `MULTICA_AGENT_TIMEOUT` | `0` | エージェント実行あたりの絶対壁時計上限。`0` は上限なしを意味し、実行時間は inactivity watchdog のみで抑えられます。ハードなリソース／コスト上限が欲しい場合は正の Go 期間を設定してください |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 固有の inactivity watchdog の待ち時間 |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` 起動 RPC のタイムアウト |
-| `MULTICA_DAEMON_AUTO_UPDATE` | cloud: `true`, self-host: `false` | `false`/`0`/`no`/`off` でデーモンの CLI 自動アップデートを無効化。`true`/`1`/`yes`/`on` はセルフホストのデーモンにアップストリーム更新を購読させます |
-| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | デーモンが CLI の新リリースを GitHub でチェックする間隔 |
-| `MULTICA_<PROVIDER>_PATH` | CLI 名に一致 | 各 AI コーディングツールの実行ファイルへのパス（例: `MULTICA_CLAUDE_PATH`） |
-| `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI コーディングツールのデフォルトモデル |
-| `MULTICA_<PROVIDER>_ARGS` | 空 | バックエンドごとのデーモン全体のデフォルト CLI 引数。各タスクに対し、各エージェント自身の `custom_args` より前に適用される。`MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` をサポート |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | デーモン 1 つあたりの同時実行タスク上限 |
+| `MULTICA_AGENT_TIMEOUT` | `0` | 1 回の実行の絶対時間上限。`0` は上限なし |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 出力もツール実行もない状態の静穏上限 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 単一のツール呼び出しが静穏なままでいられる上限 |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex のセマンティック静穏しきい値 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 起動ハンドシェイクの上限 |
+| `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | タスク作業ディレクトリのルート |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用にタスクディレクトリを保持 |
 
-### デーモン設定を `config.json` に永続化する
+各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` と `MULTICA_<PROVIDER>_MODEL` でコマンドパスとデフォルトモデルを上書きできます。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code の 4 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` です。例:
 
-上表の各デーモンキー — `device_name`、`runtime_name`、`max_concurrent_tasks`、`poll_interval`、`heartbeat_interval`、`agent_timeout`、`codex_semantic_inactivity_timeout`、`codex_handshake_timeout`、`disable_auto_update`、`auto_update_check_interval` — は、プロファイルの `~/.multica/config.json`（もしくは `~/.multica/profiles/<name>/config.json`）に永続化することもできます。これにより、`daemon start` のたびにフラグを再指定したり環境変数を export したりする必要がなくなります。
-
-```bash
-multica config set device_name my-vm-custom-name
-multica config set runtime_name worker-a
-multica config set max_concurrent_tasks 8
-multica config set poll_interval 10s          # Go の期間、必ず > 0
-multica config set heartbeat_interval 30s
-multica config set agent_timeout 1h           # 0s を渡すと壁時計上限を明示的に無効化
-multica config set codex_semantic_inactivity_timeout 15m
-multica config set codex_handshake_timeout 45s
-multica config set disable_auto_update true   # 単方向: 自動アップデートを無効化する用途のみ
-multica config set auto_update_check_interval 12h
+```dotenv
+MULTICA_CLAUDE_PATH=/opt/bin/claude
+MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
 
-期間系キーは正の Go 期間（`500ms`、`10s`、`1m30s` など）のみを受け付けます。`0s`、負値、パース不能な文字列は `config set` の時点で拒否されます。**ただし `agent_timeout` は例外で、ここでは `0s` は「壁時計上限を明示的に無効化する」意味を持つ有効値**です（負値はやはり拒否されます）。永続化した値をクリアして環境変数 / 組み込みデフォルトに戻すには空文字を渡してください: `multica config set poll_interval ""`。
+優先順位はコマンドラインフラグ → 環境変数 → `~/.multica/config.json` → 組み込みデフォルトです。watchdog の動作は[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
-`disable_auto_update` は単方向のブール値です。`true` にするとデーモンの CLI 自動アップデートを無効化し、`false`（もしくは `""` でクリア）にすると判定を `MULTICA_DAEMON_AUTO_UPDATE` / cloud-vs-self-host のデフォルトに委ねます。config ファイルから自動アップデートを *強制的に有効化* することはできません。
+### デーモン設定の永続化
 
-優先順位は上から順に: `daemon start` の `--flag` > `MULTICA_…` 環境変数 > `config.json` > 組み込みデフォルト。systemd unit などで環境変数を設定するとファイルより優先され、明示的な CLI フラグは両者よりさらに優先されます。
+デーモン側のよく使う設定は、シェルの環境変数に頼らず `~/.multica/config.json` に書き込むこともできます。名前付きプロファイルの設定ファイルは `~/.multica/profiles/<name>/config.json` にあります:
 
-`--profile <name>` で同一ホスト上に複数のデーモンを走らせるときに特に有用です。プロファイルごとに `device_name` を独立して設定すれば、Runtimes 画面でも共有ホスト名で潰れることなく別々の行として区別できます。
+```bash
+multica config set poll_interval 10s
+multica config show
+```
 
-各パラメータがデーモンの動作にどう影響するかの完全な説明は、[デーモンとランタイム](/daemon-runtimes)を参照してください。
+サポートされるキー:
 
-### デフォルトのエージェント引数（`MULTICA_<PROVIDER>_ARGS`）
+| キー | デフォルト | 説明 |
+|---|---|---|
+| `server_url` | `ws://localhost:8080/ws` | Multica API / WebSocket アドレス |
+| `app_url` | 空 | ブラウザログインに使う Web アドレス |
+| `workspace_id` | 空 | デフォルトのワークスペース |
+| `device_name` | ホスト名 | ランタイム一覧に表示されるデバイス名 |
+| `runtime_name` | `Local Agent` | ランタイムの表示名 |
+| `max_concurrent_tasks` | `20` | 同時実行タスク上限。`0` または空は未設定を意味します |
+| `poll_interval` | `30s` | タスクのポーリング間隔 |
+| `heartbeat_interval` | `15s` | ハートビート間隔 |
+| `agent_timeout` | 無制限 | 1 回の実行の絶対時間上限 |
+| `codex_semantic_inactivity_timeout` | `10m` | Codex のセマンティック静穏しきい値 |
+| `codex_handshake_timeout` | `30s` | Codex app-server ハンドシェイクの上限 |
+| `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
+| `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 
-バックエンドに対して**フリート全体のデフォルト**となる CLI フラグの層を設定します。各エージェントの `custom_args` を個別に編集することなく、デーモン上のすべてのエージェントにデフォルトのコスト・リソースのベースライン（例: `--max-turns`）を適用できる便利な手段です。これはデフォルトの層であり、超えられない上限ではありません。各エージェント自身の `custom_args` が後から追加され、これを上書きできます（下記の**優先順位**を参照）。
+値のルール:
 
-- **優先順位：** デフォルト引数が先に適用され、その後に各エージェント自身の `custom_args` が追加されます。値を取るフラグについては、下流 CLI 自身の引数パーサーが最終的な勝者を決めます（多くのツールでは最後の出現が優先）。そのため個々のエージェントはデーモンのデフォルトを引き上げられますが、エージェントが上書きしない箇所ではデフォルトが引き続き有効です。
-- **パース：** 値は POSIX シェルワード規則で分割されるため、クォートが使えます——`MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` は 2 つのトークンに解析されます。
-- **安全性：** デフォルト引数の層と各エージェントの `custom_args` の層は、いずれも同じ blocked-flags フィルターを通過します。そのためプロトコル上重要なフラグ（Claude の `-p`、`--output-format`、`--input-format`、`--permission-mode`、`--mcp-config`、および Codex の `--listen` など）はどちらの層からも注入できません。
-- **未設定・空** の場合は動作に変化はありません。
+- duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、`0s` と負の値は拒否されます。唯一の例外は `agent_timeout` で、`0s` は有効な値として実行時間上限を明示的に無効化します。
+- 空文字列を渡すと永続化された値がクリアされ、環境変数または組み込みデフォルトに戻ります。例: `multica config set poll_interval ""`。
+- `max_concurrent_tasks` には非負の整数が必要です。
 
-## フロントエンドのアクセス制御
+## 可観測性と分析
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FRONTEND_ORIGIN` | 空 | フロントエンドアドレス。招待メールのリンク、CORS 許可リスト、cookie ドメインはすべてこの値から派生します。設定しない場合、招待メールのリンクはホスト型ドメイン `https://multica.ai` にフォールバックします — セルフホストはこれを明示的に設定する必要があります |
-| `CORS_ALLOWED_ORIGINS` | 空 | 追加で許可する CORS origin（カンマ区切り） |
-| `ALLOWED_ORIGINS` | 空 | WebSocket 専用の origin 許可リスト（カンマ区切り）。設定しない場合、フォールバック順序は `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` です |
+| `ANALYTICS_DISABLED` | `false` | `true` で PostHog への送信を無効化 |
+| `POSTHOG_API_KEY` | 空 | 未設定の場合は分析送信が無効。自前の PostHog プロジェクトを使う場合に設定 |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog アドレス |
+| `METRICS_ADDR` | 空 | Prometheus metrics のリッスンアドレス。空なら起動しません |
+| `REALTIME_METRICS_TOKEN` | 空 | `/health/realtime` を保護する bearer token |
 
-<Callout type="warning">
-**`FRONTEND_ORIGIN` を設定しないと 2 つの静かな失敗が発生します**: (1) 招待メールのリンクが `https://multica.ai`（ホスト型ドメイン）を指し、クリックしてもユーザーがセルフホストインスタンスに戻ってこない。(2) WebSocket の Origin チェックが `localhost:3000 / 5173 / 5174` にフォールバックするため、プロダクションデプロイのすべての WebSocket 接続が拒否され、フロントエンドが「リアルタイム更新を受け取れない」ように見える。
-</Callout>
+## 次のステップ
 
-## GitHub 連携
-
-[GitHub PR ↔ イシュー連携](/github-integration)には、設定で Connect GitHub を有効にし受信 webhook を受け付けるために `GITHUB_APP_SLUG` と `GITHUB_WEBHOOK_SECRET` が必要です。`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` は、PR カードの CI ステータスとマージ可否に**必須**です — これらがなくても連携は PR をミラーリングしイシューを自動で紐づけますが、カードには CI やマージ状態が表示されません。
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `GITHUB_APP_SLUG` | 空 | GitHub App の slug（`https://github.com/apps/<slug>` の末尾部分）。設定 → GitHub のインストールボタン URL を構成します |
-| `GITHUB_WEBHOOK_SECRET` | 空 | GitHub App に設定した Webhook secret。すべての `pull_request` / `installation` delivery の HMAC-SHA256 検証に使われ、setup コールバックの state token の HMAC キーとしても使われます |
-| `GITHUB_APP_ID` | 空 | App 設定ページに表示される数値の App ID。`GITHUB_APP_PRIVATE_KEY` と併せて、PR カードの CI ステータスとマージ可否、Settings → Repositories → GitHub から選択する機能、インストール時の連携先アカウント名取得に使われます |
-| `GITHUB_APP_PRIVATE_KEY` | 空 | App の RSA 秘密鍵の完全な PEM ブロック（`-----BEGIN/END-----` 行を含み、改行を保持）。`GITHUB_APP_ID` と併せて、App 認証による PR スナップショットとリポジトリ参照に使われます |
-
-**いずれかの必須変数が設定されていない場合の動作:**
-
-- 設定 → GitHub の `Connect GitHub` が**無効**になり、admin に「not configured」というヒントを表示します。
-- `/api/webhooks/github` エンドポイントは **`503 github webhooks not configured`** を返します — Multica はすべての署名を有効として扱うのではなく、secret なしではイベント処理を拒否します。
-
-**`GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` が設定されていない場合の動作:**
-
-- PR カードに **CI ステータスもマージ可否も表示されません** — 連携はきれいに縮退します: PR は引き続きミラーリングされ、イシューは引き続き自動で紐づき、マージ時に Done へ移動します。
-- インストール直後、接続カードには一時的に `Connected to unknown` とも表示されます。GitHub から `installation.created` webhook が届くと（通常は数秒以内）、Multica は行を実際の組織名/ユーザー名に更新し、リアルタイムブロードキャストを発行するため、開いている Settings → GitHub タブは手動更新なしで反映されます。
-- サーバーがリポジトリ一覧に必要な installation token を発行できないため、Settings → Repositories → GitHub から選択する機能は無効になります。
-
-**注:** `GITHUB_WEBHOOK_SECRET` はインストールフローの state token の署名キーとして再利用されるため、運用者は secret を 1 つだけ管理すればよいです。これは GitHub App の *Client* secret では**ありません** — Client secret は OAuth 関連であり、この連携では使われません。完全な手順は [GitHub 連携 → セルフホストのセットアップ](/github-integration#self-host-setup)を参照してください。
-
-## 使用量分析
-
-デフォルトでは、サーバーは Multica の公式 PostHog インスタンスにレポートします。オプトアウトするには `ANALYTICS_DISABLED=true` を設定してください。
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `ANALYTICS_DISABLED` | `false` | バックエンド分析を完全に無効にするには `true` に設定 |
-| `POSTHOG_API_KEY` | 組み込みのデフォルトキー | 自身の PostHog インスタンスを指す場合に設定 |
-| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog をセルフホストする場合は自身のホストに変更 |
-
-## 次へ
-
-- [サインインとサインアップの設定](/auth-setup) — 上記の auth 関連変数を実際にどう設定するか、そして落とし穴がどこにあるか
-- [GitHub 連携](/github-integration) — `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET` を支える GitHub App をどうセットアップするか
-- [トラブルシューティング](/troubleshooting) — よくある設定ミスの症状と対処法
-- [デーモンとランタイム](/daemon-runtimes) — `MULTICA_DAEMON_*` パラメータが実際に何をするか
+- [ログインとサインアップ](/auth-setup) — ログイン方式とサインアップ制限。
+- [トラブルシューティング](/troubleshooting) — デプロイ問題の症状別診断。
+- [デーモンとランタイム](/daemon-runtimes) — デーモン側の対応する設定。

@@ -4620,3 +4620,86 @@ func TestConvertDisabledRuntimeSkillsForEnvScopesToClaimedRuntime(t *testing.T) 
 		t.Fatalf("unexpected scoped runtime skill policy: %+v", got)
 	}
 }
+
+// nestedPatchSecretBackend emits a Codex-shaped file-edit payload carrying a
+// credential nested inside changes[] — the legacy protocol reports a deletion
+// as the whole outgoing file, so deleting a .env puts its contents here.
+type nestedPatchSecretBackend struct{}
+
+func (nestedPatchSecretBackend) Execute(
+	_ context.Context,
+	_ string,
+	_ agent.ExecOptions,
+) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 2)
+	resCh := make(chan agent.Result, 1)
+
+	msgCh <- agent.Message{
+		Type:   agent.MessageToolUse,
+		Tool:   "patch_apply",
+		CallID: "patch-1",
+		Input: map[string]any{
+			"changes": []any{
+				map[string]any{
+					"path":    ".env",
+					"kind":    "delete",
+					"content": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn\n",
+				},
+			},
+		},
+	}
+	close(msgCh)
+	resCh <- agent.Result{Status: "completed", Output: "done"}
+	close(resCh)
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// TestExecuteAndDrain_RedactsNestedToolInputBeforeSending pins the daemon side
+// of the redaction contract. The server scrubs again on ingest, but that is the
+// remote end: a daemon that self-updated ahead of the server, or one talking to
+// a server mid-rollout, must not put whole-file edit contents on the wire in
+// cleartext. Deployment order is not a control we have, so this side has to be
+// safe on its own.
+func TestExecuteAndDrain_RedactsNestedToolInputBeforeSending(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+
+	if _, _, err := d.executeAndDrain(
+		context.Background(),
+		nestedPatchSecretBackend{},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"task-redact",
+		"",
+		new(atomic.Int32),
+	); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	msgs := rec.snapshot()
+	var toolUse *TaskMessageData
+	for i := range msgs {
+		if msgs[i].Type == "tool_use" {
+			toolUse = &msgs[i]
+			break
+		}
+	}
+	if toolUse == nil {
+		t.Fatalf("no tool_use message reported: %+v", msgs)
+	}
+
+	blob, err := json.Marshal(toolUse.Input)
+	if err != nil {
+		t.Fatalf("marshal reported input: %v", err)
+	}
+	if strings.Contains(string(blob), "ghp_ABCDEFGH") {
+		t.Fatalf("nested token left the daemon unredacted: %s", blob)
+	}
+	// The surrounding structure must survive, or the transcript loses the edit.
+	if !strings.Contains(string(blob), ".env") {
+		t.Fatalf("redaction destroyed the change metadata: %s", blob)
+	}
+}

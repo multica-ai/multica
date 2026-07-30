@@ -6,6 +6,8 @@ import {
   isReservedShortcut,
   parseLegacyShortcut,
   SHORTCUT_ACTIONS,
+  SHORTCUT_ACTION_BY_ID,
+  shortcutChordEquals,
   shortcutFromEvent,
   shortcutMatchesEvent,
 } from "./definitions";
@@ -56,6 +58,39 @@ describe("keyboard shortcut definitions", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("ships at most one action per default binding", () => {
+    const seen: { id: string; shortcut: ReturnType<typeof createShortcutChord> }[] = [];
+    for (const action of SHORTCUT_ACTIONS) {
+      const shortcut = action.defaultShortcut;
+      if (!shortcut) continue;
+      const clash = seen.find((other) => shortcutChordEquals(other.shortcut, shortcut));
+      expect(clash?.id, `${action.id} duplicates ${clash?.id}`).toBeUndefined();
+      seen.push({ id: action.id, shortcut });
+    }
+  });
+
+  it("keeps the floating chat toggle usable on every platform and runtime", () => {
+    const action = SHORTCUT_ACTION_BY_ID.toggleChat;
+    expect(action.defaultShortcut).toEqual(
+      createShortcutChord("J", { primary: true }),
+    );
+    for (const platform of ["macos", "windows", "linux"] as const) {
+      for (const runtime of ["web", "desktop"] as const) {
+        expect(
+          isShortcutAllowedForAction(
+            "toggleChat",
+            createShortcutChord("J", { primary: true }),
+            platform,
+            runtime,
+          ),
+          `Mod+J must stay assignable on ${platform}/${runtime}`,
+        ).toBe(true);
+      }
+    }
+    // Dismissing chat has to work with the caret inside its own composer.
+    expect(action.allowInEditable).toBe(true);
   });
 
   it("strictly distinguishes Command and Control on macOS", () => {

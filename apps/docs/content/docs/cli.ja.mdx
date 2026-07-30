@@ -1,178 +1,303 @@
 ---
-title: CLI コマンドリファレンス
-description: すべてのトップレベル Multica CLI コマンドを 1 ページにまとめた概要です。完全な使い方は `multica <command> --help` を実行してください。
+title: CLI を使う
+description: Multica CLI をインストールしてサインインし、ターミナルからワークスペース、イシュー、エージェント、ランタイムを管理します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica CLI は、Web UI でできるほぼすべての操作をそのまま提供します（[イシュー](/issues)の作成、[エージェント](/agents)の割り当て、[デーモン](/daemon-runtimes)の起動など）。このページでは、すべてのトップレベルコマンドを 1 行の説明とともに一覧します。フラグや例の完全な一覧は `multica <command> --help` を実行してください。
+Multica CLI は、ローカルのランタイムを接続する役割と、ターミナルからワークスペース、イシュー、エージェント、オートパイロットを管理する役割の両方を担います。このページではよく使う操作の流れを紹介します。現在のバージョンがサポートするフラグは、常に各コマンド自身の `--help` が正です。
 
-## 認証する
+## インストール
 
-CLI を初めて使うときにこのコマンドを実行して、**パーソナルアクセストークン（PAT）**を取得します。
+**macOS / Linux**
 
 ```bash
-multica login
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-ブラウザが自動的に開きます。Web アプリで承認すると、CLI が PAT（`mul_` プレフィックス付き）を `~/.multica/config.json` に保存します。これ以降のすべてのコマンドはこの PAT で認証されます。
+Homebrew がインストールされていれば、次のコマンドでもインストールできます:
 
-<Callout type="tip">
-CI やヘッドレス環境では、ブラウザフローをスキップできます。Web アプリの **Settings → Personal Access Tokens** で PAT を作成し、`multica login --token <mul_...>` で直接渡してください。
-</Callout>
+```bash
+brew install multica-ai/tap/multica
+```
 
-トークンの種類による違いについては、[認証とトークン](/auth-tokens)を参照してください。
+**Windows PowerShell**
 
-## 認証とセットアップ
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
 
-| コマンド | 用途 |
-|---|---|
-| `multica login` | ログインして PAT を保存 |
-| `multica auth status` | 現在のログイン状態、ユーザー、ワークスペースを表示 |
-| `multica auth logout` | ローカルの PAT を削除 |
-| `multica setup cloud` | Multica Cloud のワンショットセットアップ（ログイン + デーモンのインストール） |
-| `multica setup self-host` | セルフホストバックエンドのワンショットセットアップ |
+インストールを確認します:
 
-## ワークスペースとメンバー
+```bash
+multica version
+```
 
-| コマンド | 用途 |
-|---|---|
-| `multica workspace list` | アクセスできるすべてのワークスペースを一覧 |
-| `multica workspace create --name "..." --slug "..." [--issue-prefix "..."] [--description "..."] [--context "..."]` | ワークスペースを作成（作成者が owner になります）。`--name` と `--slug` は必須で、slug は作成後に変更できません。現在のワークスペースは切り替わりません。 |
-| `multica workspace get <slug>` | 1 つのワークスペースの詳細を表示 |
-| `multica workspace member list` | 現在のワークスペースのメンバーを一覧 |
-| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | ワークスペースのメタデータを更新（admin/owner）。長いフィールドは `--description-stdin` / `--context-stdin` を使用できます。 |
+## 初回接続
 
-## イシューとプロジェクト
+Multica Cloud に接続する:
 
-<Callout type="info">
-`list` 系のコマンド（`multica issue list`、`autopilot list`、`project list` など）は、デフォルトで短く**そのままコピー＆ペーストできる** ID を出力します。イシューは `MUL-123` のようなイシューキー、それ以外のリソースは短い UUID プレフィックスです。以下の後続コマンドの `<id>` 引数は短い ID と完全な UUID のどちらも受け取るため、一般的な流れは `multica issue list` → キーをコピー → `multica issue get MUL-123` となります。正式な UUID が必要なときは `list` コマンドに `--full-id` を渡してください。
-</Callout>
+```bash
+multica setup
+```
 
-| コマンド | 用途 |
-|---|---|
-| `multica issue list` | イシューを一覧（コピー＆ペーストできるイシューキーを出力） |
-| `multica issue get <id>` | 単一のイシューを表示（イシューキーまたは UUID を受け取る） |
-| `multica issue create --title "..."` | 新しいイシューを作成 |
-| `multica issue update <id> ...` | イシューを更新（ステータス、優先度、担当者など） |
-| `multica issue assign <id> --to <name>` | メンバー、エージェント、またはスクワッドに割り当て（エージェントへの割り当ては実行をトリガー） |
-| `multica issue status <id> <status>` | ステータス変更のショートカット |
-| `multica issue search <query>` | キーワード検索 |
-| `multica issue children <id>` | サブイシューを stage ごとに一覧 |
-| `multica issue pull-requests <id>` | 紐付いた pull request と状態を一覧 |
-| `multica issue runs <id>` | イシュー上のエージェント実行を表示 |
-| `multica issue run-messages <task-id>` | 1 回の実行メッセージを表示 |
-| `multica issue usage <id>` | イシュー単位の集計 token 使用量を表示 |
-| `multica issue rerun <id>` | イシューの現在のエージェント担当者向けに新しいタスクを再キューイング |
-| `multica issue cancel-task <task-id>` | キュー中または実行中のタスクをキャンセル |
-| `multica issue comment <id> ...` | ネスト: コメントの表示 / 投稿 |
-| `multica issue comment resolve/unresolve <comment-id>` | コメントスレッドを解決済み / 未解決にする |
-| `multica issue subscriber <id> ...` | ネスト: 購読 / 購読解除 |
-| `multica issue metadata <id> ...` | ネスト: イシューメタデータの読み書き |
-| `multica issue label <id> ...` | ネスト: イシューのラベルを管理 |
-| `multica project list/get/create/update/delete/status` | プロジェクトの CRUD |
-| `multica label list/create/update/delete` | ワークスペースラベルの CRUD |
+セルフホストインスタンスに接続する:
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+`setup` はサーバーアドレスを保存し、ブラウザを開いてサインインを完了し、デーモンを起動します。完了したら確認します:
+
+```bash
+multica auth status
+multica daemon status
+```
+
+他の設定を上書きせずにサインインだけやり直したい場合は、`multica login` を実行します。ブラウザのない環境では、先に Web の設定で個人アクセストークンを作成しておき、次のコマンドで入力します:
+
+```bash
+multica login --token
+```
+
+このコマンドはターミナル上でトークンの貼り付けを促すため、完全な値が shell history に残りません。
+
+## ワークスペースを選ぶ
+
+ワークスペースを一覧し、デフォルトを切り替えます:
+
+```bash
+multica workspace list
+multica workspace switch <slug>
+```
+
+以降のコマンドはこのワークスペースを使います。単発のコマンドでは `--workspace-id` で一時的に上書きでき、`MULTICA_WORKSPACE_ID` を設定することもできます。
+
+メンバーを招待する:
+
+```bash
+multica workspace member invite teammate@example.com
+multica workspace member invite admin@example.com --role admin
+```
+
+## よく使うイシュー操作
+
+```bash
+# 表示と検索
+multica issue list
+multica issue get MUL-123
+multica issue search "ログイン失敗"
+
+# 作成と更新
+multica issue create --title "ログイン失敗を修正"
+multica issue status MUL-123 in_progress
+multica issue assign MUL-123 --to "Backend Agent"
+
+# コメントと実行履歴
+multica issue comment list MUL-123
+multica issue comment add MUL-123 --content "まず回帰テストを確認してください"
+multica issue runs MUL-123
+```
+
+長い説明やコメントは stdin から読み込むと、改行や引用符の扱いに悩まずに済みます:
+
+```bash
+multica issue create --title "アップグレードメモ" --description-stdin < notes.md
+multica issue comment add MUL-123 --content-stdin < review.md
+```
+
+1 回の実行のメッセージを表示する、またはタスクを停止する:
+
+```bash
+multica issue run-messages <task-id> --issue MUL-123
+multica issue cancel-task <task-id> --issue MUL-123
+```
 
 ## エージェントとスキル
 
-| コマンド | 用途 |
-|---|---|
-| `multica agent list` | ワークスペースのエージェントを一覧 |
-| `multica agent get <slug>` | エージェントの構成を表示 |
-| `multica agent create ...` | エージェントを作成 |
-| `multica agent update <slug> ...` | エージェントを更新 |
-| `multica agent archive <slug>` | アーカイブ |
-| `multica agent restore <slug>` | アーカイブ済みのエージェントを復元 |
-| `multica agent tasks <slug>` | エージェントのタスク履歴を表示 |
-| `multica agent avatar <slug>` | エージェントのアバターをアップロード |
-| `multica agent env <slug> ...` | エージェントの custom environment variables を読み取り / 置換 |
-| `multica agent skills ...` | ネスト: スキルのアタッチ / デタッチ |
-| `multica skill list/get/create/update/delete` | スキルの CRUD |
-| `multica skill import ...` | GitHub、ClawHub、またはローカルマシンからスキルをインポート |
-| `multica skill files ...` | ネスト: スキルのファイルを管理 |
-
-### スキルインポートの競合
-
-`multica skill import --url <url>` の既定値は `--on-conflict fail` です。同じ名前のスキルがすでに存在する場合、コマンドは構造化された `conflict` 結果で終了し、ワークスペースは変更されません。
-
-既存スキルの作成者で、スキル ID とエージェントの紐付けを維持したまま内容を置き換える場合は `--on-conflict overwrite` を使います。既存スキルを残してコピーを取り込む場合は `--on-conflict rename` を使うと、`-2` のような接尾辞が自動で付きます。同名の項目を単に飛ばす場合は `--on-conflict skip` を使います。
-
 ```bash
-multica skill import --url https://skills.sh/acme/repo/review-helper
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+multica agent list
+multica agent get <agent-id>
+multica agent create --help
+multica agent update <agent-id> --help
+
+multica skill list
+multica skill get <skill-id>
+multica skill import --url <skill-url>
+multica agent skills add <agent-id> --skill-ids <skill-id>
 ```
 
-## スクワッド
+インポートで同名のスキルに当たった場合、デフォルトでは既存の内容を変更せずに停止します。意図に応じて選択してください:
 
-| コマンド | 用途 |
-|---|---|
-| `multica squad list` | ワークスペースのスクワッドを一覧 |
-| `multica squad get <id>` | 単一のスクワッドを表示 |
-| `multica squad create --name "..." --leader <agent>` | スクワッドを作成（owner / admin） |
-| `multica squad update <id> ...` | 名前、説明、指示、リーダー、またはアバターを更新 |
-| `multica squad delete <id>` | アーカイブ（ソフト削除） — 割り当て済みのイシューをリーダーに移管 |
-| `multica squad member list/add/remove <squad-id>` | スクワッドメンバーを管理 |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | スクワッドリーダーエージェントがターンごとに評価を記録するために使用 |
+```bash
+multica skill import --url <skill-url> --on-conflict overwrite
+multica skill import --url <skill-url> --on-conflict rename
+multica skill import --url <skill-url> --on-conflict skip
+```
 
-完全なモデルについては[スクワッド](/squads)を参照してください。
-
-## オートパイロット
-
-| コマンド | 用途 |
-|---|---|
-| `multica autopilot list` | ワークスペースのすべてのオートパイロットを一覧 |
-| `multica autopilot get <id>` | 単一のオートパイロットを表示 |
-| `multica autopilot create ...` | オートパイロットを作成 |
-| `multica autopilot update <id> ...` | 更新 |
-| `multica autopilot delete <id>` | 削除 |
-| `multica autopilot runs <id>` | 実行履歴を表示 |
-| `multica autopilot trigger <id>` | 手動で実行をトリガー |
-| `multica autopilot trigger-add/update/delete <id>` | schedule または webhook trigger を管理 |
-| `multica autopilot trigger-rotate-url <id> <trigger-id>` | webhook trigger URL をローテート |
-
-`multica autopilot create/update` は、`create_issue` モードの autopilot が作成するイシューの既定購読者を設定する `--subscriber` も受け取ります。`update` では `--clear-subscribers` で削除できます。
+`overwrite` はスキルの作成者だけが使え、元の ID とエージェントの紐付けを維持します。
 
 ## デーモンとランタイム
 
-| コマンド | 用途 |
-|---|---|
-| `multica daemon start` | デーモンを起動（デフォルトはバックグラウンド。`--foreground` を追加するとフォアグラウンドで実行） |
-| `multica daemon stop` | デーモンを停止 |
-| `multica daemon restart` | デーモンを再起動 |
-| `multica daemon status` | デーモンがオンラインかどうかと同時実行数を確認 |
-| `multica daemon logs` | デーモンのログを表示 |
-| `multica runtime list` | 現在のワークスペースのランタイムを一覧 |
-| `multica runtime usage` | リソース使用量を表示 |
-| `multica runtime activity` | 最近のアクティビティログ |
-| `multica runtime update <id> ...` | ランタイム上で CLI 更新を開始 |
-| `multica runtime delete <id> [--cascade]` | ランタイムを削除し、必要なら紐付くエージェントもアーカイブ |
-| `multica runtime profile ...` | カスタム runtime profile とローカルパス上書きを管理 |
-
-## その他
-
-| コマンド | 用途 |
-|---|---|
-| `multica repo checkout <url>` | エージェントが使用できるようにリポジトリをローカルにクローン |
-| `multica config` | ローカルの CLI 構成を表示または編集 |
-| `multica version` | CLI のバージョンを出力 |
-| `multica update` | CLI を最新のリリースにアップグレード |
-| `multica attachment download <id>` | イシューまたはコメントから添付ファイルをダウンロード |
-
-## 完全なフラグを確認する
-
-すべてのコマンドが `--help` をサポートしています。
-
 ```bash
-multica issue create --help
-multica agent update --help
+multica daemon start
+multica daemon stop
+multica daemon restart
+multica daemon status --output json
+multica daemon logs --follow
+
+multica runtime list
+multica runtime rename <runtime-id> "Office Mac"
+multica runtime usage <runtime-id>
+multica runtime activity <runtime-id>
 ```
 
-v2 では、各コマンドごとに専用の詳細なリファレンスページを提供する予定です。
+アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをアーカイブし、アクティブなタスクもキャンセルします。
+
+仕組みとカスタムプロファイルについては[デーモンとランタイム](/daemon-runtimes)を参照してください。
+
+## コマンド概要
+
+| コマンド | 用途 |
+| --- | --- |
+| `issue` | イシューの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、実行履歴の管理 |
+| `project` | プロジェクトとそのリソースを管理 |
+| `label`、`property` | ワークスペースのラベルとカスタムプロパティを管理 |
+| `agent`、`skill`、`squad` | エージェント、スキル、スクワッドを管理 |
+| `autopilot` | オートパイロット、トリガー、実行履歴を管理 |
+| `workspace` | ワークスペースの作成、表示、切り替えとメンバーの招待 |
+| `repo` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト |
+| `daemon`、`runtime` | ローカルデーモンの起動と停止。ランタイムの表示と管理 |
+| `attachment` | 添付ファイルのアップロードとダウンロード |
+| `user profile` | 現在のユーザーのプロフィールを表示・更新 |
+| `auth`、`login`、`setup` | サインイン、認証状態の確認、接続の初期化 |
+| `config` | 現在の CLI プロファイルのローカル設定を表示・編集 |
+| `update`、`version` | CLI の更新とバージョンの表示 |
+
+`multica chat` が読み取るのは、**エージェントが現在処理している外部チャットセッション**です。主にチャット統合の中のエージェントが使うもので、任意のワークスペースの会話を閲覧するための汎用コマンドではありません。
+
+## ID と出力形式
+
+イシューには `MUL-123` のようなキーまたは完全な UUID を使います。UUID の短いプレフィックスは受け付けません。
+
+その他のリソースの `list` コマンドは通常、コピーできる短い ID を表示し、`--full-id` で完全な UUID を出力できます。短い ID が一意に定まらない場合、CLI は文字の追加か完全な UUID への切り替えを求めます。タスクの短い ID は、所属するイシューを `--issue` で指定する必要もあります。
+
+多くのコマンドが構造化出力をサポートします:
+
+```bash
+multica issue list --output json
+multica agent list --output json
+```
+
+スクリプトでは、ターミナル向けの表を解析せず JSON 出力を使ってください。各コマンドがサポートする出力形式とページネーションのフラグは `multica <command> --help` が正です。
+
+## プロファイルと設定
+
+デフォルトの設定は `~/.multica/config.json` に保存されます。`--profile <name>` を使うと、サーバーアドレス、トークン、デフォルトワークスペース、デーモン状態を別のセットとして分離できます:
+
+```bash
+multica setup self-host --profile staging \
+  --server-url https://api.staging.example.com \
+  --app-url https://app.staging.example.com
+
+multica issue list --profile staging
+```
+
+名前付きプロファイルは `~/.multica/profiles/<name>/config.json` に保存されます。現在の値を確認する:
+
+```bash
+multica config show
+multica config show --profile staging
+```
+
+<Callout type="warning">
+CLI の設定ファイルには、あなたとして Multica にアクセスできるトークンが含まれます。リポジトリにコミットしたり、ログにアップロードしたり、他人と共有したりしないでください。
+</Callout>
+
+## コマンドリファレンス
+
+以下の表は、現在のすべてのトップレベルコマンドを CLI 自身のグループ分けに沿って掲載しています。すべてのコマンドがグローバルフラグ `--server-url`、`--workspace-id`、`--profile`、`--debug` を受け付けます。`--output` はコマンドごとに登録されるフラグで、デフォルトの形式はコマンドによって異なります: `list` 系は表、`get` や `create` 系は多くが JSON です。完全なフラグは `multica <command> --help` が正です。
+
+### Core
+
+| コマンド | サブコマンド | 用途 | 主なフラグ |
+| --- | --- | --- | --- |
+| `issue` | `list` | イシューを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--limit`、`--offset`、`--sort`、`--full-id` |
+| | `get <id>` | 単一のイシューを表示 | |
+| | `create` | イシューを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
+| | `update <id>` | イシューのフィールドを更新 | `create` と同系のフィールドに加え `--position` |
+| | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign` |
+| | `status <id> <status>` | ステータスを変更 | |
+| | `reorder <id>` | カラム内で移動 | |
+| | `search <query>` | イシューを検索 | `--limit`、`--include-closed` |
+| | `children <id>` | サブイシューをステージごとに一覧 | |
+| | `pull-requests <id>` | 関連付けられた PR を一覧 | |
+| | `comment list/add/delete/resolve/unresolve` | コメントを管理 | `add`: `--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`list`: `--since`、`--thread`、`--tail` |
+| | `subscriber list/add/remove <issue-id>` | 購読者を管理 | `--user`、`--user-id`（省略時は現在のユーザー） |
+| | `label list/add/remove <issue-id>` | イシューのラベルを管理 | |
+| | `metadata list/get/set/delete <issue-id>` | イシューレベルのキー・バリューメタデータを管理 | |
+| | `property list/set/unset <issue-id>` | カスタムプロパティの値を設定 | `set`: `--name`、`--value` |
+| | `runs <issue-id>` | 実行履歴を表示 | `--full-id` |
+| | `run-messages <task-id>` | 1 回の実行のメッセージを表示 | `--since`、`--issue` |
+| | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
+| | `rerun <id>` | 現在の担当者で実行を再キューイング | |
+| | `cancel-task <task-id>` | 実行中またはキュー中のタスクをキャンセル | `--issue` |
+| `project` | `list/get/create/update/delete` | プロジェクトを管理 | |
+| | `status <id> <status>` | プロジェクトのステータスを変更 | |
+| | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url` |
+| `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | |
+| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`、`--option`（繰り返し可）；`list`: `--include-archived`；タイプは作成後に変更できません |
+| `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
+| | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
+| | `tasks <id>` | エージェントのタスクを表示 | |
+| | `avatar <id>` | アバターをアップロード | |
+| | `env get/set <agent-id>` | カスタム環境変数の読み書き（owner と admin のみ） | |
+| | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
+| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--agent`、`--mode`（いずれも必須）、`--priority`、`--project`、`--subscriber`（繰り返し可） |
+| | `trigger <id>` | 手動で 1 回トリガー | |
+| | `runs <id>` | 実行履歴を表示 | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | |
+| `workspace` | `list/get/create/update/switch` | ワークスペースを管理。`switch` は現在のプロファイルのデフォルトワークスペースを設定 | |
+| | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |
+| `repo` | `list/add/remove/checkout` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト | `--url`（繰り返し可）；`checkout`: `--ref` |
+| `skill` | `list/get/create/update/delete` | スキルを管理 | |
+| | `import` | URL またはローカルファイルからスキルをインポート | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`。デフォルトは `fail`） |
+| | `search <query>` | スキルを検索 | |
+| | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | |
+| `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
+| | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
+| | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
+| `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+
+### Runtime
+
+| コマンド | サブコマンド | 用途 | 主なフラグ |
+| --- | --- | --- | --- |
+| `daemon` | `start` | ローカルデーモンを起動 | `--foreground`、`--device-name`、`--runtime-name`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` は上限なし）、`--max-concurrent-tasks`、`--no-auto-update`；それぞれに対応する `MULTICA_*` 環境変数があります |
+| | `stop` / `status` / `restart` | 停止、状態の確認、再起動（`restart` は `start` と同じフラグ） | |
+| | `logs` | デーモンのログを表示 | `--follow`、`--lines` |
+| | `disk-usage` | ローカルのディスク使用量を表示 | `--by-workspace`、`--by-task`、`--top` |
+| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントをアーカイブし、そのタスクもキャンセル） |
+| | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | |
+| | `profile set-path/unset-path <profile-id>` | ローカルの実行ファイルパスを固定（ローカルのみ有効。サーバーには送信されません） | |
+
+### Additional
+
+| コマンド | サブコマンド | 用途 | 主なフラグ |
+| --- | --- | --- | --- |
+| `auth` | `status` / `logout` | 認証状態を確認。`logout` はローカルに保存されたトークンを削除するだけで、サーバー側のトークンは失効させません | |
+| `user` | `profile get/update` | 現在のユーザーのプロフィールを表示・更新 | |
+| `login` | — | ブラウザでサインインし、すべてのワークスペースを自動設定 | `--token`（値なしで渡すとターミナルで対話的に入力） |
+| `setup` | `cloud`（デフォルト）、`self-host` | サーバーアドレスを保存し、サインインを完了してデーモンを起動 | `self-host`: `--server-url`、`--app-url`、`--port`、`--frontend-port` |
+| `attachment` | `download <attachment-id>`、`upload <path>` | 添付ファイルのダウンロードとアップロード | `download`: `--output-dir`；`upload`: `--task` |
+| `config` | `show`、`set <key> <value>` | 現在のプロファイルのローカル設定を表示・編集 | 優先順位: コマンドラインフラグ > 環境変数 > `config.json` > 組み込みデフォルト。空文字列を設定すると値をクリア |
+| `update` | — | CLI を最新バージョンに更新 | |
+| `version` | — | バージョン情報を表示 | `--output`（`text` または `json`） |
 
 ## 次のステップ
 
-- [認証とトークン](/auth-tokens) — PAT vs. JWT vs. デーモントークン
-- [デーモンとランタイム](/daemon-runtimes) — `daemon` コマンドが内部でどう動作するか
-- [エージェントの作成と構成](/agents-create) — `multica agent create` のすべてのオプション
+- [認証とトークン](/auth-tokens) — PAT の作成、更新、失効。
+- [トラブルシューティング](/troubleshooting) — コマンドのエラーと、いつまでも開始しないタスクの診断。
+- [エージェントの作成と設定](/agents-create) — `agent create` 各フィールドの完全な意味。

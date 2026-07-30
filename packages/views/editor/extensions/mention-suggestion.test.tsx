@@ -362,6 +362,86 @@ describe("createMentionSuggestion", () => {
     expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
   });
 
+  // MUL-5495: the command bar (cmdk) navigates on Ctrl+N/J and Ctrl+P/K as well
+  // as the arrows. The mention picker used to accept arrows only, so the same
+  // muscle memory silently did nothing here.
+  it("navigates with Ctrl+N/J and Ctrl+P/K, like the command bar", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+      { id: "i-3", label: "MUL-3", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+    let handled: boolean | undefined;
+    const press = (init: KeyboardEventInit) =>
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+
+    expect(highlightedLabel()).toBe("MUL-1");
+
+    press({ key: "n", ctrlKey: true });
+    expect(handled).toBe(true);
+    expect(highlightedLabel()).toBe("MUL-2");
+
+    press({ key: "j", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-3");
+
+    press({ key: "p", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-2");
+
+    press({ key: "k", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-1");
+
+    // The highlight the aliases moved is the row Enter commits.
+    press({ key: "n", ctrlKey: true });
+    press({ key: "Enter" });
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
+  });
+
+  // Without Ctrl these letters are ordinary query characters; swallowing them
+  // would make "@nick" unsearchable.
+  it("leaves bare n/j/p/k to the query instead of moving the highlight", () => {
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={vi.fn()} />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+
+    for (const key of ["n", "j", "p", "k"]) {
+      let handled: boolean | undefined;
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key }) });
+      });
+      expect(handled).toBe(false);
+    }
+    expect(highlightedLabel()).toBe("MUL-1");
+  });
+
   it("hides personal agents owned by someone else from a regular member", () => {
     const qc = fakeQc({
       members: [

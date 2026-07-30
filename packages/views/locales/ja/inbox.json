@@ -9,6 +9,12 @@
     "archive_all_read": "既読の項目をすべてアーカイブ",
     "archive_completed": "完了した項目をアーカイブ"
   },
+  "context_menu": {
+    "mark_read": "既読にする",
+    "mark_unread": "未読にする",
+    "archive": "アーカイブ",
+    "unarchive": "アーカイブ解除"
+  },
   "list": {
     "empty": "通知はありません",
     "mark_done_tooltip": "完了にする",
@@ -67,6 +73,7 @@
   },
   "errors": {
     "mark_read_failed": "既読にできませんでした",
+    "mark_unread_failed": "未読にできませんでした",
     "archive_failed": "アーカイブできませんでした",
     "mark_done_failed": "完了にできませんでした",
     "mark_all_read_failed": "すべて既読にできませんでした",

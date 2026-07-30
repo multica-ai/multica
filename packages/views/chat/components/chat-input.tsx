@@ -19,6 +19,7 @@ import {
 } from "../../editor/use-coordinated-uploads";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
+import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
@@ -555,7 +556,8 @@ export function ChatInput({
         // user resizes or expands the window. The wrapper must be a flex
         // column for the card below to shrink into that cap instead of
         // spilling out of it.
-        "flex max-h-[50%] min-h-0 flex-col px-5 pb-3 pt-0",
+        "flex max-h-[50%] min-h-0 flex-col pb-3 pt-0",
+        CHAT_GUTTER,
         // Outer wrapper carries the disabled cursor. Inner card sets
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
@@ -571,7 +573,8 @@ export function ChatInput({
           // once, and it keeps the cap finite if a future host ever mounts the
           // composer without a definite height (percentage max-height would
           // then resolve to none).
-          "relative mx-auto flex min-h-16 max-h-96 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          CHAT_COLUMN,
+          "relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead

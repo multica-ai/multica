@@ -16,6 +16,8 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (id: string) => `/test/agents/${id}`,
   }),
+  // The runtime badge on the card's avatar resolves the provider per workspace.
+  useCurrentWorkspace: () => ({ id: "ws-1", slug: "test" }),
 }));
 
 vi.mock("@multica/core/api", () => ({

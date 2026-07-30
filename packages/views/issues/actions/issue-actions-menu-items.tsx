@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  ExternalLink,
   FolderOpen,
   Link2,
   Network,
@@ -104,6 +105,7 @@ export function IssueActionsMenuItems({
   const {
     isPinned,
     updateField,
+    openInNewTab,
     togglePin,
     copyLink,
     openCreateSubIssue,
@@ -254,6 +256,13 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {/* Leads the "do something with this issue itself" group: the only
+          discoverable way to open an issue elsewhere for users who don't know
+          modifier-click, so it sits above the copy actions. */}
+      <P.Item onClick={openInNewTab}>
+        <ExternalLink className="h-3.5 w-3.5" />
+        {t(($) => $.actions.open_in_new_tab)}
+      </P.Item>
       <P.Item onClick={togglePin}>
         {isPinned ? (
           <PinOff className="h-3.5 w-3.5" />

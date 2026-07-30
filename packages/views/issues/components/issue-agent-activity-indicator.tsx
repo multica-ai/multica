@@ -125,9 +125,12 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
         opacity={opacity}
         max={3}
       />
+      {/* No leading-none: the shimmer paints glyphs via background-clip:
+          text, and the background only covers the line box — a squeezed
+          line box leaves descenders transparent. */}
       <span
         className={cn(
-          "text-micro leading-none",
+          "text-micro",
           isRunning
             ? "animate-chat-text-shimmer"
             : "text-muted-foreground",

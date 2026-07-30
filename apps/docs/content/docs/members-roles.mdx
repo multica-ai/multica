@@ -1,60 +1,55 @@
 ---
 title: Members and roles
-description: What each of the three workspace roles — owner, admin, member — can do, and how to bring people in.
+description: Invite members and manage workspace permissions with the owner, admin, and member roles.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Everyone in a [workspace](/workspaces) has a role, and the role decides what they can do. Multica has three: **owner** (the workspace's owner), **admin**, and **member**. Most day-to-day work — creating [issues](/issues), writing [comments](/comments), using [agents](/agents) — is available to all three roles. **The differences cluster around team management.**
+Everyone who joins a [workspace](/workspaces) is a member, and each member has one role: `owner`, `admin`, or `member`. Roles only control workspace settings and team management; day-to-day collaboration — creating issues, writing comments — is open to all members.
 
-## Permissions at a glance
-
-The table below lists the most important differences across team-management actions:
+## The three roles
 
 | Action | owner | admin | member |
-|---|---|---|---|
-| Invite a new admin or member | ✓ | ✓ | ✗ |
-| **Invite a new owner** | ✓ | ✗ | ✗ |
-| Demote / remove an admin or member | ✓ | ✓ | ✗ |
-| **Demote / remove another owner** | ✓ | ✗ | ✗ |
-| Delete the workspace | ✓ | ✗ | ✗ |
+|---|:---:|:---:|:---:|
+| View the workspace and collaborate day to day | ✓ | ✓ | ✓ |
+| Change workspace settings | ✓ | ✓ | — |
+| Invite an `admin` or `member` | ✓ | ✓ | — |
+| Change or remove an `admin` or `member` | ✓ | ✓ | — |
+| Grant, revoke, or remove `owner` | ✓ | — | — |
+| Delete the workspace | ✓ | — | — |
 
-**Members can't invite anyone** — inviting is an admin-tier permission. **Only owners can promote someone to owner** — admins can promote and demote members or other admins, but they can't create a new owner. Likewise, admins can remove members or other admins but **can't touch existing owners**. The point is to make sure the highest tier can only be granted by someone who already holds it — permissions don't leak upward.
+A workspace must always keep at least one `owner`: the last `owner` cannot be demoted, removed, or leave.
 
 <Callout type="info">
-Agent visibility comes in two flavors: "workspace" and "private." Private agents can only be assigned to issues by owners and admins — this protects configurations meant for a specific set of people. See [Agents](/agents).
+Roles do not decide who can run an agent. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
 </Callout>
 
-## Inviting a new member
+## Invite members
 
-Multica invites new members by email:
+`owner` and `admin` send invitations from Settings → Members by entering an email and picking a role. Invitations can only grant `admin` or `member`; an `owner` must join the workspace first and then be promoted by an existing `owner`.
 
-1. On the workspace settings page, click **Invite member**, enter the email, and pick a role.
-2. Multica sends an invitation email containing a unique link.
-3. The recipient clicks the link, logs in (or signs up), and **accepts the invitation** to join the workspace.
+![Member management: the invite form and the roster with roles](/images/docs/members-roster.png)
 
-The invited email **does not need to be registered with Multica in advance** — if no account exists, one is created when the invitation is accepted.
+The invitee accepts by logging in with that email — no prior signup is needed. Invitations are valid for 7 days; resend after they expire. On self-hosted instances that restrict signup, invitees who do not yet have an account are still subject to the signup rules when registering — see [Auth setup](/auth-setup#invitations-and-signup-restrictions).
 
-If the invitation email fails to deliver (wrong address, mail service hiccup), the invitation record is still retained; you can resend the email from workspace settings, or share the invitation link through another channel.
+The invitation link appears only in the email; there is no place in the product to view or copy it. If the email fails to send, the invitation record still exists — revoke it and send a new one.
 
-Invitations are **valid for 7 days**. After that, clicking the link shows an "expired" message, and the inviter needs to send a new one.
+## Change roles
 
-## Always at least one owner
+An `admin` can move roles between `admin` and `member`, and can remove members holding those two roles. Any change involving `owner` — promoting, changing, or removing — can only be performed by an `owner`.
 
-Every workspace **must have at least one owner at all times**. This constraint automatically blocks two operations:
+Role changes take effect immediately.
 
-- The last owner can't demote themselves.
-- Other owners or admins can't remove the last owner.
+## Remove a member
+
+A removed member loses workspace access immediately. Issues, comments, and other collaboration records they created stay in the workspace.
 
 <Callout type="warning">
-If you're the last owner and about to leave the team, **transfer the owner role to another member first**, then try to leave or hand off the workspace. Otherwise the operation will be rejected.
+Removing a member also deactivates the runtimes they own, archives the agents bound to them, and cancels tasks that have not finished. Grants the member received in agent Access scopes are cleared as well and are not restored automatically if they rejoin.
 </Callout>
 
-## Removing a member
+## Next steps
 
-Owners and admins can remove other members from a workspace. A removed member loses access immediately; issues, comments, and other content they created are retained in the workspace.
-
-## Next
-
-- [Issues and projects](/issues) — what members work on
-- [Comments and mentions](/comments) — collaborating under an issue
+- [Issues](/issues) — the work members and agents handle together.
+- [Agents](/agents) — how workspace roles differ from agent Access.
+- [Daemon and runtimes](/daemon-runtimes) — who owns runtimes and where they run.

@@ -500,7 +500,7 @@ function NewTabButton() {
       aria-label="New tab"
       title="New tab"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-      className="mb-1 flex size-7 shrink-0 items-center justify-center self-end rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/50 hover:text-muted-foreground"
+      className="mb-1 flex size-7 shrink-0 items-center justify-center self-end rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
     >
       <Plus className="size-3.5" />
     </button>

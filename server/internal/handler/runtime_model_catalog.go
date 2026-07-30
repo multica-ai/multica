@@ -22,12 +22,22 @@ import (
 // stale-while-revalidate candidate: answer from the last known good snapshot
 // immediately, and refresh in the background so the NEXT open is also warm.
 //
-// Windows are deliberately conservative:
-//   - modelCatalogServeWindow bounds how stale an answer the API will hand a
-//     client without waiting for the daemon.
-//   - modelCatalogRevalidateAfter bounds how long a snapshot can be served
-//     without triggering a background refresh, so a CLI upgrade converges
-//     within one open instead of lingering for the whole serve window.
+// The two windows do different jobs, and only one of them governs freshness:
+//   - modelCatalogRevalidateAfter is the freshness knob. Serving a snapshot
+//     older than this also queues a background refresh, so a CLI upgrade
+//     converges after one open no matter how long the serve window is.
+//   - modelCatalogServeWindow only bounds how long an UNUSED snapshot survives,
+//     and how stale the answer is for someone who opens the picker exactly once
+//     and never returns. It is deliberately day-scale: nothing keeps an entry
+//     warm in the background, the browser's own react-query cache dies with the
+//     tab, and agent CLIs are upgraded on a scale of days — so a minutes-scale
+//     window made every first-open-of-the-day a cold miss (the exact multi-second
+//     wait this cache exists to remove) while buying no real freshness.
+//
+// The window is not unbounded because a *failed* report deliberately leaves the
+// snapshot in place (a transient discovery failure must not empty the picker).
+// For a runtime whose discovery keeps failing — CLI uninstalled, logged out —
+// expiry is the only thing that eventually retires the stale catalog.
 //
 // Only successful, non-empty, `supported` catalogs are cached. An empty list is
 // almost always a transient discovery failure (CLI not logged in, timeout) —
@@ -36,10 +46,15 @@ import (
 
 const (
 	// modelCatalogServeWindow is how long a cached catalog may answer a
-	// list-models request without waiting for the daemon.
-	modelCatalogServeWindow = 15 * time.Minute
+	// list-models request without waiting for the daemon. Day-scale on purpose
+	// (MUL-5444): see the freshness discussion above — every served snapshot
+	// past modelCatalogRevalidateAfter queues its own refresh, so this bounds
+	// unused-entry lifetime and the open-once worst case, not staleness for an
+	// active user.
+	modelCatalogServeWindow = 24 * time.Hour
 	// modelCatalogRevalidateAfter is the age past which serving from cache also
-	// enqueues a background refresh.
+	// enqueues a background refresh. This is the knob that actually keeps the
+	// catalog honest; keep it short.
 	modelCatalogRevalidateAfter = 60 * time.Second
 )
 

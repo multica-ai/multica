@@ -325,7 +325,7 @@ export function RuntimeDetailPage({
             <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
               <Server
                 aria-hidden="true"
-                className="h-7 w-7 text-muted-foreground/40"
+                className="h-7 w-7 text-faint-foreground"
               />
               <p className="mt-3 text-body font-medium">
                 {bootstrapping

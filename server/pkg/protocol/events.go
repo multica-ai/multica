@@ -43,6 +43,7 @@ const (
 	// Inbox events
 	EventInboxNew           = "inbox:new"
 	EventInboxRead          = "inbox:read"
+	EventInboxUnread        = "inbox:unread"
 	EventInboxArchived      = "inbox:archived"
 	EventInboxUnarchived    = "inbox:unarchived"
 	EventInboxBatchRead     = "inbox:batch-read"

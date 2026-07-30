@@ -28,6 +28,7 @@
     "./workspace/avatar-url": "./workspace/avatar-url.ts",
     "./issues": "./issues/index.ts",
     "./issues/batch": "./issues/batch.ts",
+    "./issues/canonical-id": "./issues/canonical-id.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",

@@ -5,28 +5,6 @@ import type { ReactNode } from "react";
 import { useDocsLocale } from "@/components/locale-link";
 import { prefixLocale } from "@/lib/locale-link";
 
-/**
- * Byline — editorial metadata strip with ruled top + bottom borders.
- *
- * Sits below DocsHero on showpiece pages (welcome). Carries the small
- * uppercase metadata: section · updated · read time. Mirrors the v2
- * editorial pattern of a "by-line" between title and body, separating
- * the heading hero from the article proper.
- */
-export function Byline({ items }: { items: string[] }) {
-  return (
-    <div className="not-prose mb-9 flex items-center gap-3.5 border-y border-[var(--docs-rule)] py-3.5 text-xs uppercase tracking-[0.08em] text-muted-foreground">
-      {items.map((item, i) => (
-        <span key={i} className="flex items-center gap-3.5">
-          {i > 0 ? (
-            <span className="size-[3px] rounded-full bg-[var(--docs-faint)]" />
-          ) : null}
-          <span>{item}</span>
-        </span>
-      ))}
-    </div>
-  );
-}
 
 /**
  * NumberedCards — three-column ruled-divider grid with No.01/02/03 serif

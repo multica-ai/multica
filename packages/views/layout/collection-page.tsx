@@ -49,7 +49,7 @@ export function CollectionPageHeader({
         />
         <h1 className="truncate text-body font-medium">{title}</h1>
         {typeof count === "number" && count > 0 ? (
-          <span className="shrink-0 font-mono text-caption tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 font-mono text-caption tabular-nums text-muted-foreground">
             {count}
           </span>
         ) : null}

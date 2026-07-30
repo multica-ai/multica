@@ -49,10 +49,10 @@ export function RuntimeSettingsPage({
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
         <Server
           aria-hidden="true"
-          className="h-10 w-10 text-muted-foreground/30"
+          className="h-10 w-10 text-faint-foreground"
         />
         <p className="mt-3 text-body">{t(($) => $.detail_page.not_found_title)}</p>
-        <p className="mt-1 text-caption text-muted-foreground/70">
+        <p className="mt-1 text-caption text-muted-foreground">
           {t(($) => $.detail_page.not_found_hint)}
         </p>
       </div>

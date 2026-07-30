@@ -22,6 +22,17 @@ import {
 import { useT } from "../i18n";
 import { LabelChip } from "./label-chip";
 
+/**
+ * Whether agent- and skill-scoped labels are available. The server gates the
+ * attach/detach routes on the same release flag, so with it off the picker has
+ * no working endpoint to call — and callers need to know that before they lay
+ * out a row for it, since a row whose only control renders nothing reads as a
+ * broken field rather than an absent feature.
+ */
+export function useResourceLabelsEnabled() {
+  return useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
+}
+
 export function ResourceLabelPicker({
   resourceType,
   resourceId,
@@ -33,7 +44,7 @@ export function ResourceLabelPicker({
 }) {
   const { t } = useT("labels");
   const wsId = useWorkspaceId();
-  const resourceLabelsEnabled = useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
+  const resourceLabelsEnabled = useResourceLabelsEnabled();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { data: catalog = [] } = useQuery({

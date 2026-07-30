@@ -444,7 +444,7 @@ export function RuntimePicker({
                     </span>
                   )}
                   {owner && machine.providerNames.length > 0 && (
-                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-faint-foreground">·</span>
                   )}
                   {machine.providerNames.length > 0 && (
                     <span className="flex shrink-0 items-center gap-1">
@@ -472,7 +472,7 @@ export function RuntimePicker({
               {containsSelection && (
                 <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
             </button>
           );
         })

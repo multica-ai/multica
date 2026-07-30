@@ -9,6 +9,7 @@ export type ShortcutActionId =
   | "openSearch"
   | "createIssue"
   | "toggleSidebar"
+  | "toggleChat"
   | "findInIssue"
   | "send"
   | "goInbox"
@@ -75,6 +76,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "openSearch", category: "general", defaultShortcut: primary("K"), allowInEditable: true },
   { id: "createIssue", category: "general", defaultShortcut: createShortcutChord("C"), allowInEditable: false },
   { id: "toggleSidebar", category: "general", defaultShortcut: primary("B"), allowInEditable: false },
+  // Mod+J follows the "toggle a docked panel" convention, and is one of the few
+  // letters this module's own policy leaves free on every platform and runtime:
+  // it is neither app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
+  // (BROWSER_ONLY_PRIMARY_RESERVED_KEYS). `allowInEditable` because the point of
+  // the binding is reaching — and dismissing — chat without a mouse, which has
+  // to keep working while the caret sits in the chat composer itself.
+  { id: "toggleChat", category: "general", defaultShortcut: primary("J"), allowInEditable: true },
   { id: "findInIssue", category: "general", defaultShortcut: primary("F"), allowInEditable: true },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },

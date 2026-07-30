@@ -33,6 +33,7 @@ export type WSEventType =
   | "task:cancelled"
   | "inbox:new"
   | "inbox:read"
+  | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
   | "inbox:batch-read"
@@ -158,6 +159,12 @@ export interface InboxNewPayload {
 }
 
 export interface InboxReadPayload {
+  item_id: string;
+  recipient_id: string;
+}
+
+/** Emitted when a recipient flips a notification back to unread. */
+export interface InboxUnreadPayload {
   item_id: string;
   recipient_id: string;
 }
@@ -493,6 +500,7 @@ export interface WSEventPayloadMap {
   "task:progress": unknown;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
+  "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
   "inbox:batch-read": InboxBatchReadPayload;

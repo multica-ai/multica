@@ -42,6 +42,9 @@
     /* Kept in lockstep with the light value in tokens.css — see the AA
        reasoning there before changing this number. */
     --muted-foreground: oklch(0.505 0.016 285.938);
+    /* Same lockstep rule. Without this line the landing chevrons would inherit
+       the .dark value of --faint-foreground while sitting on a white surface. */
+    --faint-foreground: oklch(0.606 0.016 285.938);
     --accent: oklch(0.967 0.001 286.375);
     --accent-foreground: oklch(0.21 0.006 285.885);
     --destructive: oklch(0.577 0.245 27.325);

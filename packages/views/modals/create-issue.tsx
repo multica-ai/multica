@@ -172,7 +172,7 @@ function CreateRunHint({
       <div className="overflow-hidden">
         <div
           aria-live="polite"
-          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-[0.6875rem] text-muted-foreground"
+          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground"
         >
           {avatarId && (
             <ActorAvatar
@@ -805,7 +805,7 @@ export function ManualCreatePanel({
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
-                <ChevronRight className="size-3 text-muted-foreground/50" />
+                <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
               <div className="flex items-center gap-1">
@@ -1246,7 +1246,7 @@ export function ManualCreatePanel({
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
                   className="border-beam group flex shrink-0 items-center gap-1.5 text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
+                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
                 </button>
                 <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">

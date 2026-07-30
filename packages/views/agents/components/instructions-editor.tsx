@@ -65,14 +65,14 @@ export function InstructionsEditor({
           <div className="min-w-0 flex-1">
             {value.trim() ? (
               // Preview: first 2 lines of markdown, ellipsised.
-              <div className="line-clamp-2 whitespace-pre-wrap text-body text-foreground/80">
+              <div className="line-clamp-2 whitespace-pre-wrap text-body text-foreground">
                 {value}
               </div>
             ) : (
               <div className="text-body text-muted-foreground">{resolvedPlaceholder}</div>
             )}
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
         </button>
       </div>
     );

@@ -63,7 +63,7 @@ export function SkillMultiSelect({
                 })
               : t(($) => $.create_dialog.skills_section.placeholder)}
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
         </button>
       </div>
     );
@@ -75,7 +75,7 @@ export function SkillMultiSelect({
         <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {label}
           {selectedIds.size > 0 ? (
-            <span className="ml-2 text-foreground/60">({selectedIds.size})</span>
+            <span className="ml-2 text-muted-foreground">({selectedIds.size})</span>
           ) : null}
         </div>
         <Button

@@ -32,6 +32,55 @@ export function isPickerAcceptKey(event: KeyboardEvent): boolean {
   );
 }
 
+/** Which way a key press moves the highlight in a suggestion list. */
+export type PickerNavigationDirection = "next" | "prev";
+
+/**
+ * Resolves a key press to a suggestion-list move, or `null` when the key is not
+ * navigation.
+ *
+ * Arrow keys are the canonical bindings. `Ctrl+N`/`Ctrl+J` (down) and
+ * `Ctrl+P`/`Ctrl+K` (up) are additive Emacs/readline aliases that the command
+ * bar already accepts for free: it is built on cmdk, whose `vimBindings` option
+ * (on by default) maps exactly this set. Mirroring it here means the pickers
+ * stop being the one place in the product where that muscle memory dies
+ * (MUL-5495).
+ *
+ * `Cmd`-based aliases are deliberately absent. cmdk does not bind them either,
+ * so the command bar never supported them, and `Cmd+P`/`Cmd+N` are browser and
+ * OS accelerators (print, new window) that a web page cannot own — the same
+ * rule `isReservedShortcut` in `@multica/core/shortcuts` already encodes.
+ *
+ * The letter aliases require Ctrl *alone*. With another modifier the chord
+ * belongs to the browser or OS (`Ctrl+Shift+N` opens an incognito window), so
+ * those fall through untouched. Arrow keys stay modifier-agnostic, exactly as
+ * before.
+ *
+ * Centralizing this next to `isPickerAcceptKey` keeps every picker built on
+ * `createSuggestionPopupRender` navigating identically instead of each list
+ * re-deciding what counts as "move down".
+ */
+export function pickerNavigationDirection(
+  event: KeyboardEvent,
+): PickerNavigationDirection | null {
+  if (event.key === "ArrowDown") return "next";
+  if (event.key === "ArrowUp") return "prev";
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+    return null;
+  }
+  // Lowercase because Caps Lock reports "N" without setting shiftKey.
+  switch (event.key.toLowerCase()) {
+    case "n":
+    case "j":
+      return "next";
+    case "p":
+    case "k":
+      return "prev";
+    default:
+      return null;
+  }
+}
+
 interface SuggestionPopupRenderOptions<
   TItem,
   TSelected = TItem,

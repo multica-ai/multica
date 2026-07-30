@@ -90,7 +90,7 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
               {t(($) => $.create.method_card[`${titleKey}_desc`])}
             </div>
           </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
         </button>
       ))}
     </div>
@@ -463,7 +463,7 @@ export function CreateSkillDialog({
                     <button
                       type="button"
                       onClick={() => setMethod("chooser")}
-                      className="-ml-1 rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
+                      className="-ml-1 rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
                       aria-label={t(($) => $.create.back_aria)}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />
@@ -488,7 +488,7 @@ export function CreateSkillDialog({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
+                  className="rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
                   aria-label={t(($) => $.create.close_aria)}
                 >
                   <XIcon className="h-3.5 w-3.5" />

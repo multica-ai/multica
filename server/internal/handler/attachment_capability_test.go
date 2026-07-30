@@ -300,7 +300,7 @@ func TestAttachmentToResponse_ProxyModeDoesNotMintCapability(t *testing.T) {
 		t.Fatalf("GetAttachmentByIDOnly: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	if want := "/api/attachments/" + id + "/download"; resp.DownloadURL != want {
 		t.Fatalf("download_url = %q, want stable %q (no capability in list responses)", resp.DownloadURL, want)
 	}

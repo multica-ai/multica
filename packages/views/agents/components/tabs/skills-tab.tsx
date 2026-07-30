@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import {
-  FileText,
   Loader2,
   Plus,
   RefreshCw,
   Server,
   Trash2,
 } from "lucide-react";
+import { SkillIcon } from "../../../skills/lib/skill-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
@@ -162,7 +162,7 @@ export function SkillsTab({
       >
         {agent.skills.length === 0 ? (
           <EmptyState
-            icon={<FileText className="h-6 w-6" />}
+            icon={<SkillIcon className="h-6 w-6" />}
             title={t(($) => $.tab_body.skills.empty_title)}
             hint={t(($) => $.tab_body.skills.empty_hint)}
           />
@@ -181,10 +181,10 @@ export function SkillsTab({
                     <span
                       className={cn(
                         "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
-                        !enabled && "opacity-50",
+                        !enabled && "text-faint-foreground",
                       )}
                     >
-                      <FileText className="h-4 w-4" />
+                      <SkillIcon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className={cn("block text-body font-medium", !enabled && "text-muted-foreground")}>

@@ -32,6 +32,47 @@ export function useMarkInboxRead() {
   });
 }
 
+/**
+ * Flip a notification back to unread — the inverse of {@link useMarkInboxRead}.
+ *
+ * Same optimistic shape as marking read (predictable outcome, no navigation,
+ * trivial rollback), and it patches BOTH caches for the same reason: an item
+ * can be actioned from either list, and leaving the other one stale would show
+ * two different read states for one notification after a view switch.
+ *
+ * The unread badge is derived from the main list's cache (`useInboxUnreadCount`
+ * dedupes it client-side), so the optimistic patch raises the badge without
+ * waiting for the round-trip; `onSettled` re-pulls the cross-workspace summary,
+ * which is server-computed and cannot be patched here.
+ */
+export function useMarkInboxUnread() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.markInboxUnread(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const prevArchived = qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId));
+      const markUnread = (old: InboxItem[] | undefined) =>
+        old?.map((item) => (item.id === id ? { ...item, read: false } : item));
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), markUnread);
+      qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), markUnread);
+      return { prev, prevArchived };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      // The switcher dot must light again when the workspace goes back to
+      // having unread items — that count lives on the server.
+      qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+    },
+  });
+}
+
 export function useArchiveInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

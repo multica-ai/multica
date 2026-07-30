@@ -1610,7 +1610,7 @@ function DraggableSwimLane({
       >
         {!lane.isPinned && (
           <GripVertical
-            className="!size-3 shrink-0 cursor-grab text-muted-foreground/60"
+            className="!size-3 shrink-0 cursor-grab text-faint-foreground"
             aria-hidden
           />
         )}

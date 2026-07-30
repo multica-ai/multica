@@ -42,7 +42,11 @@ import {
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import {
+  createSuggestionPopupRender,
+  isPickerAcceptKey,
+  pickerNavigationDirection,
+} from "./suggestion-popup";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 
 // ---------------------------------------------------------------------------
@@ -277,15 +281,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // IME is composing — don't intercept Enter/Arrow as picker actions;
         // those keys belong to the IME (Enter commits composition, etc).
         if (isImeComposing(event)) return false;
-        if (event.key === "ArrowUp") {
+        // Arrow keys plus the Ctrl+N/J/P/K aliases the command bar accepts —
+        // see pickerNavigationDirection.
+        const direction = pickerNavigationDirection(event);
+        if (direction !== null) {
           if (orderedItems.length === 0) return true;
-          const next = (selectedIndex + orderedItems.length - 1) % orderedItems.length;
-          setSelectedKey(mentionItemKey(orderedItems[next]!));
-          return true;
-        }
-        if (event.key === "ArrowDown") {
-          if (orderedItems.length === 0) return true;
-          const next = (selectedIndex + 1) % orderedItems.length;
+          const delta = direction === "next" ? 1 : orderedItems.length - 1;
+          const next = (selectedIndex + delta) % orderedItems.length;
           setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
@@ -366,7 +368,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       >
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="px-3 py-2 text-micro font-semibold uppercase tracking-wide text-muted-foreground/80">
+            <div className="px-3 py-2 text-micro font-semibold uppercase tracking-wide text-muted-foreground">
               {groupLabel(group.label)}
             </div>
             {renderRows(group)}

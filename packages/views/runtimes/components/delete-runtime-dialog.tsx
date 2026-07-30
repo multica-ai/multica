@@ -522,7 +522,7 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
   const { t } = useT("runtimes");
   if (!presence) {
     return (
-      <span className="text-muted-foreground/60">
+      <span className="text-muted-foreground">
         {t(($) => $.detail.delete_dialog.cascade.table.presence_unknown)}
       </span>
     );
@@ -556,7 +556,7 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
           t(($) => $.detail.delete_dialog.cascade.table.workload_queued)}
       </span>
       {counts && (
-        <span className="font-mono tabular-nums text-muted-foreground/80">
+        <span className="font-mono tabular-nums text-muted-foreground">
           {counts}
         </span>
       )}

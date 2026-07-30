@@ -783,8 +783,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          <JoinDiscordCard />
-          <div className="flex justify-end">
+          {/* One utility strip: the Discord link takes the leading space the
+              help trigger was leaving empty. `justify-end` keeps the trigger
+              right-aligned once the Discord link is dismissed. */}
+          <div className="flex items-center justify-end gap-1">
+            <JoinDiscordCard />
             <HelpLauncher />
           </div>
         </SidebarFooter>

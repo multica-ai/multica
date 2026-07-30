@@ -233,13 +233,13 @@ export function ChatThreadList({
       );
     } else if (last) {
       previewNode = (
-        <span className={cn("block truncate", unread > 0 ? "text-foreground/80" : "text-muted-foreground")}>
+        <span className={cn("block truncate", unread > 0 ? "text-foreground" : "text-muted-foreground")}>
           {last.role === "user" ? t(($) => $.list.you_prefix) : ""}
           {toPreview(last.content)}
         </span>
       );
     } else {
-      previewNode = <span className="block truncate text-muted-foreground/60">{t(($) => $.list.no_messages)}</span>;
+      previewNode = <span className="block truncate text-muted-foreground">{t(($) => $.list.no_messages)}</span>;
     }
 
     return (
@@ -395,7 +395,7 @@ export function ChatThreadList({
         >
           <ChevronLeft className="size-4 shrink-0" />
           <span className="truncate">{t(($) => $.list.archived_title)}</span>
-          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
             {archivedSessions.length}
           </span>
         </button>
@@ -415,8 +415,8 @@ export function ChatThreadList({
         <Archive className="size-4" />
       </span>
       <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/70">{archivedSessions.length}</span>
-      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+      <span className="shrink-0 tabular-nums text-muted-foreground">{archivedSessions.length}</span>
+      <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
     </button>
   );
 

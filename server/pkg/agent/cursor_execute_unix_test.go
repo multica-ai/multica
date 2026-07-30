@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+// A real cursor-agent reads the prompt from stdin to EOF (see buildCursorArgs).
+// A fake that exits without reading it leaves the prompt write racing the
+// child's exit: win and the ~64 KiB pipe buffer swallows it, lose and the read
+// end is already closed and the write fails with EPIPE.
+//
+// That matters because writeErr outranks both `exitErr` and the generic
+// "stream ended without terminal result" when finalizing the error (cursor.go),
+// so a lost race replaces the failure the test is asserting on with
+// "cursor-agent prompt write failed: broken pipe" — the flake that turned main
+// red on 2026-07-30 (MUL-5536).
+//
+// Draining stdin first makes the fake honour the same contract as the real CLI,
+// which removes the race instead of papering over it. Only fixtures whose
+// expected error ranks below writeErr need it; the scanner-overflow and
+// structured-stream-error cases rank above it and are unaffected.
+const drainStdin = "cat > /dev/null"
+
 func TestCursorExecuteStopsAfterTerminalResult(t *testing.T) {
 	t.Parallel()
 
@@ -108,6 +125,7 @@ func TestCursorExecuteReportsSanitizedStderrOnProcessFailure(t *testing.T) {
 	}
 
 	script := `#!/bin/sh
+` + drainStdin + `
 dd if=/dev/zero bs=4096 count=1 2>/dev/null | tr '\000' x >&2
 printf '\nAuthorization: Bearer cursor-secret-token-value\npath=%s/private\n' "$HOME" >&2
 exit 1
@@ -196,6 +214,7 @@ printf '\n'
 
 func TestCursorExecuteFailsOnCleanEOFWithoutResult(t *testing.T) {
 	script := `#!/bin/sh
+` + drainStdin + `
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-no-result"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"partial answer"}]}}'
 `

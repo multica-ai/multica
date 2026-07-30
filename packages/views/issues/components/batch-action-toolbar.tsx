@@ -277,7 +277,7 @@ export function BatchActionToolbar({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t(($) => $.batch.delete_dialog_desc, { count })}
-              <span className="mt-2 block text-caption text-muted-foreground/80">
+              <span className="mt-2 block text-caption text-muted-foreground">
                 {t(($) => $.batch.delete_dialog_warning)}
               </span>
             </AlertDialogDescription>

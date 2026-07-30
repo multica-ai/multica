@@ -19,7 +19,11 @@ import { isImeComposing } from "@multica/core/utils";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import {
+  createSuggestionPopupRender,
+  isPickerAcceptKey,
+  pickerNavigationDirection,
+} from "./suggestion-popup";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 
 const MAX_ITEMS = 20;
@@ -86,14 +90,13 @@ export const SlashCommandList = forwardRef<
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }) => {
       if (isImeComposing(event)) return false;
-      if (event.key === "ArrowUp") {
+      // Arrow keys plus the Ctrl+N/J/P/K aliases the command bar accepts —
+      // see pickerNavigationDirection.
+      const direction = pickerNavigationDirection(event);
+      if (direction !== null) {
         if (items.length === 0) return false;
-        setSelectedIndex((i) => (i + items.length - 1) % items.length);
-        return true;
-      }
-      if (event.key === "ArrowDown") {
-        if (items.length === 0) return false;
-        setSelectedIndex((i) => (i + 1) % items.length);
+        const delta = direction === "next" ? 1 : items.length - 1;
+        setSelectedIndex((i) => (i + delta) % items.length);
         return true;
       }
       // Enter is the canonical accept; plain Tab is an additive alias (see

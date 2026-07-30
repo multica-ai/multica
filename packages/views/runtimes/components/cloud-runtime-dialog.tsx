@@ -184,7 +184,7 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                 </div>
               ) : sortedNodes.length === 0 ? (
                 <div className="flex h-40 flex-col items-center justify-center px-5 text-center">
-                  <Cloud className="h-7 w-7 text-muted-foreground/50" />
+                  <Cloud className="h-7 w-7 text-faint-foreground" />
                   <p className="mt-3 text-body font-medium">
                     {t(($) => $.cloud_runtime.nodes_empty)}
                   </p>
@@ -313,11 +313,11 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
             <span>{node.instance_type}</span>
-            <span className="text-muted-foreground/40">/</span>
+            <span className="text-faint-foreground">/</span>
             <span>{node.region}</span>
             {created && (
               <>
-                <span className="text-muted-foreground/40">/</span>
+                <span className="text-faint-foreground">/</span>
                 <span>{created}</span>
               </>
             )}
@@ -351,7 +351,7 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
         </Button>
       </div>
       {node.instance_id && (
-        <div className="mt-2 truncate font-mono text-micro text-muted-foreground/80">
+        <div className="mt-2 truncate font-mono text-micro text-muted-foreground">
           {node.instance_id}
         </div>
       )}

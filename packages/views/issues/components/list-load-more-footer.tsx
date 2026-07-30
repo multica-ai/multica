@@ -61,7 +61,7 @@ export function ListLoadMoreFooter({
 
   if (total > PAGINATED_THRESHOLD) {
     return (
-      <div className="py-2 text-center text-caption text-muted-foreground/70">
+      <div className="py-2 text-center text-caption text-muted-foreground">
         {t(($) => $.table.no_more)}
       </div>
     );

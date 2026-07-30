@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -312,6 +312,60 @@ describe("SlashCommandList keyboard handling", () => {
         event: new KeyboardEvent("keydown", { key: "Enter" }),
       }),
     ).toBe(true);
+    expect(command).toHaveBeenCalledWith(selectableItems[0]);
+  });
+
+  // MUL-5495: same Ctrl aliases the command bar (cmdk) accepts, so the slash
+  // picker navigates like every other list in the product.
+  it("navigates with Ctrl+N/J and Ctrl+P/K, and leaves the bare letters alone", () => {
+    const ref = createRef<SlashCommandListRef>();
+    const command = vi.fn();
+    const selectableItems: SlashCommandItem[] = [
+      { id: "s1", label: "deploy", description: "Ship changes" },
+      { id: "s2", label: "review", description: "Review code" },
+      { id: "s3", label: "note", description: "Leave a note" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <SlashCommandList
+          ref={ref}
+          items={selectableItems}
+          query=""
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+    let handled: boolean | undefined;
+    const press = (init: KeyboardEventInit) =>
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+
+    press({ key: "n", ctrlKey: true });
+    expect(handled).toBe(true);
+    expect(highlightedLabel()).toContain("/review");
+
+    press({ key: "j", ctrlKey: true });
+    expect(highlightedLabel()).toContain("/note");
+
+    press({ key: "p", ctrlKey: true });
+    expect(highlightedLabel()).toContain("/review");
+
+    press({ key: "k", ctrlKey: true });
+    expect(highlightedLabel()).toContain("/deploy");
+
+    // Bare letters stay query characters — "/note" must remain typeable.
+    press({ key: "n" });
+    expect(handled).toBe(false);
+    expect(highlightedLabel()).toContain("/deploy");
+
+    press({ key: "Enter" });
     expect(command).toHaveBeenCalledWith(selectableItems[0]);
   });
 

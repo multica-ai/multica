@@ -1,290 +1,219 @@
 ---
 title: 문제 해결
-description: Multica를 자체 호스팅할 때 흔히 겪는 문제 — 증상, 원인, 진단 방법, 해결 방법.
+description: 연결, 실행, 실시간 업데이트, 이메일, 자체 호스팅 서비스의 일반적인 문제를 해결합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-증상으로 문제를 찾아보세요. 각 항목은 **증상 / 가능한 원인 / 진단 방법 / 해결 방법**을 제공합니다. 여러분의 상황이 목록에 없다면 [GitHub](https://github.com/multica-ai/multica/issues)에 이슈를 등록하세요.
-
-## 데몬이 서버에 연결되지 않음
-
-**증상**: [`multica daemon`](/cli)의 `status` 명령이 `offline` 또는 `connection refused`를 표시합니다. 서버 로그에 `/api/daemon/register`나 `/api/daemon/heartbeat` 요청이 보이지 않습니다. 데몬 메커니즘이 어떻게 동작하는지는 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
-
-**가능한 원인**:
-
-1. **`MULTICA_SERVER_URL`이 잘못된 주소를 가리킴** — 기본값은 `ws://localhost:8080/ws`이며, 자체 호스팅 시 여러분의 서버 주소로 변경해야 합니다
-2. **네트워크 / 방화벽 차단** — 데몬과 서버가 같은 네트워크에 있지 않거나, 아웃바운드 트래픽이 차단됨
-3. **토큰이 만료되었거나 유효하지 않음** — `multica login`을 한 번도 실행하지 않았거나, PAT이 취소됨
-4. **서버가 등록을 거부함** — 로그인한 계정이 대상 워크스페이스에 속해 있지 않음(register가 403을 반환)
-5. **DNS 해석 실패** — 데몬 기기에서 호스트명이 해석되지 않음
-
-**진단 방법**:
+먼저 문제가 Multica 서비스, 데몬, 런타임, AI 코딩 도구 중 어느 계층에서 발생하는지 확인하세요. 다음 명령만으로도 첫 번째 유효한 오류를 찾을 수 있는 경우가 많습니다.
 
 ```bash
-multica daemon logs --lines 100    # look for daemon-side errors
-echo $MULTICA_SERVER_URL          # confirm the address is set
-curl -i http://<server-host>:8080/health   # hit the server directly
-curl -i http://<server-host>:8080/readyz  # include DB + migration readiness
-cat ~/.multica/config.json        # verify api_token exists
-multica workspace list            # confirm you're a member of the target workspace
+multica version
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
 ```
 
-**해결 방법**: 위의 각 원인을 하나씩 처리하세요. 가장 흔한 두 가지 해결책은 **`MULTICA_SERVER_URL`을 변경하고 데몬을 재시작**하는 것(`multica daemon restart`)과 **다시 로그인**하는 것(`multica logout && multica login`)입니다.
-
-## 작업이 `queued`에서 멈춤
-
-**증상**: 에이전트에게 이슈를 할당한 뒤 이슈 상태가 곧바로 `in_progress`로 바뀌지만, 오랜 시간이 지나도 페이지에 에이전트 실행의 흔적이 보이지 않습니다. `multica daemon status`는 데몬을 `online`으로 표시합니다.
-
-**가능한 원인**(빈도순):
-
-1. **에이전트 동시 실행 상한 도달** — 이 에이전트의 `max_concurrent_tasks`(기본값 6)가 이미 다른 실행 중인 작업들로 가득 참
-2. **같은 이슈에서 같은 에이전트의 다른 작업이 아직 실행 중** — 같은 에이전트 × 같은 이슈는 순차 실행이 강제됩니다(중복 실행 방지)
-3. **에이전트가 보관됨** — 보관 후에도 새 작업은 여전히 대기열에 들어가지만 클레임될 수 없으며, 5분 뒤 타임아웃됩니다(code-issue G-01)
-4. **데몬이 현재 워크스페이스에 이 런타임을 등록하지 않음** — 데몬을 재시작하거나 UI에서 런타임을 다시 선택하세요
-5. **데몬 연결 끊김** — 최근 45초 동안 하트비트가 없었습니다. `daemon status`가 `online`으로 보이는 것은 방금 끊긴 상태를 반영한 것일 수 있습니다
-
-**진단 방법**:
+자체 호스팅 인스턴스에서는 서비스를 직접 확인할 수도 있습니다.
 
 ```bash
-multica daemon status --output json       # runtime list + last_seen_at
-multica agent list                         # check agent archived state
-multica issue show <issue-id>             # inspect task history
+curl -i https://api.example.com/health
+curl -i https://api.example.com/readyz
 ```
 
-서버 측(자체 호스팅)에서는 `"no_tasks"` / `"no_capacity"`를 grep하여 클레임 결과를 확인할 수 있습니다.
+`/health`는 API 프로세스가 응답한다는 것만 확인하고, `/readyz`는 데이터베이스와 migration도 확인합니다. 문제를 신고할 때는 오류, 관련 로그, CLI 버전, 운영체제를 포함하고 token과 이메일 같은 민감 정보는 제출 전에 제거하세요.
 
-**해결 방법**:
+## 데몬 연결 실패
 
-- 동시 실행 가득 참 → 실행 중인 작업이 끝나기를 기다리거나, `multica agent update <id> --max-concurrent-tasks 10`으로 상한을 올리세요
-- 같은 이슈 순차 실행 → 이전 작업이 끝나기를 기다리거나, 다른 에이전트에게 다시 할당하세요
-- 에이전트 보관됨 → `multica agent restore <id>`
-- 런타임 미등록 → `multica daemon restart`하면 데몬이 다시 등록합니다
-
-## WebSocket이 연결되지 않음
-
-**증상**: 브라우저 콘솔에 `WebSocket is closed`가 기록됩니다. 페이지에 실시간 업데이트(작업 진행 상황, 댓글, 인박스)가 표시되지 않아 새로고침해야 보입니다. 백엔드 작업은 여전히 실행됩니다.
-
-**가능한 원인**:
-
-1. **Origin 검사 실패** — 여러분의 프런트엔드 도메인이 서버의 CORS 허용 목록에 없습니다. 기본 허용 목록에는 `localhost:3000/5173/5174`만 포함되며, 공개 인터넷에서 자체 호스팅하려면 `FRONTEND_ORIGIN`이 필요합니다
-2. **프로토콜 불일치** — `https://` 프런트엔드에는 `wss://`가 필요하고, HTTP는 `ws://`를 사용합니다
-3. **리버스 프록시가 WebSocket 업그레이드를 활성화하지 않음** — Nginx / Envoy / HAProxy는 기본적으로 `Upgrade` 헤더를 전달하지 않습니다
-4. **JWT 쿠키 만료 또는 누락** — 30일 만료 후 다시 로그인하지 않음
-
-**진단 방법**:
-
-- 브라우저 DevTools → Network → "WS"로 필터링하여 연결 상태와 상태 코드를 확인하세요
-- 서버 로그에서 `"rejected origin"` / `"websocket"`을 grep하세요 — origin 문제라면 명시적으로 표기됩니다
-- `curl -i http://<server-host>:8080/ws`는 `101 Switching Protocols`를 반환해야 합니다(`Upgrade` 헤더 포함)
-
-**해결 방법**:
-
-- Origin 오류 → 서버의 `.env`에 `FRONTEND_ORIGIN=https://multica.yourdomain.com`을 설정(또는 쉼표로 구분한 `CORS_ALLOWED_ORIGINS`)하고 서버를 재시작하세요
-- 프로토콜 불일치 → `FRONTEND_ORIGIN`의 프로토콜이 프런트엔드와 일치하는지 확인하세요
-- 리버스 프록시 → Nginx에 `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`를 추가하세요
-- 쿠키 만료 → 페이지를 새로고침하고 다시 로그인하세요
-
-## 이메일이 수신되지 않음
-
-**증상**: 로그인 또는 초대 수락 중 이메일을 제출했는데, 인박스에도 스팸 폴더에도 인증 코드가 없습니다.
-
-**먼저 서버가 어떤 제공자를 활성 상태로 인식하는지 확인하세요.** 시작 시 백엔드는 다음 중 하나를 출력합니다:
-
-- `EmailService: SMTP relay <host>:<port> from=<addr>` — SMTP 사용(`SMTP_HOST`가 비어 있지 않으면 Resend보다 우선)
-- `EmailService: Resend API from=<addr>` — Resend 사용
-- `EmailService: DEV mode — codes printed to stdout …` — 제공자가 구성되지 않음
+먼저 다음을 실행합니다.
 
 ```bash
-docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
 ```
 
-기대했던 줄이 보이지 않는다면 환경 변수가 프로세스에 도달하지 않은 것입니다 — `.env`와 `docker compose -f docker-compose.selfhost.yml exec backend env | grep -E 'RESEND_|SMTP_'`를 확인하세요. 이 시작 로그 줄에는 자격 증명이 절대 기록되지 않습니다.
+일반적인 원인은 다음과 같습니다.
 
-### Resend가 활성 제공자일 때
+- CLI에 아직 로그인하지 않았거나 로컬에 저장된 token이 만료됨
+- 데몬이 잘못된 Multica 서비스에 연결됨
+- 실행 컴퓨터에서 API에 접근할 수 없거나 DNS, TLS, 방화벽이 연결을 차단함
+- 현재 계정이 대상 워크스페이스에서 나감
+- 로컬에 지원되는 AI 코딩 도구가 하나도 설치되지 않아 데몬을 시작할 수 없음
 
-**가능한 원인**:
-
-1. **`RESEND_API_KEY`가 설정되지 않음** — 서버는 조용히 폴백하여 **코드를 자체 stdout에 기록**하며 오류를 내지 않습니다. 프로덕션에서 쉽게 빠질 수 있는 함정입니다
-2. **Resend API 키가 유효하지 않거나 할당량 소진** — 서버 로그에 `"failed to send verification code"`가 표시됩니다
-3. **`RESEND_FROM_EMAIL`의 도메인이 Resend에서 검증되지 않음** — Resend가 발송을 거부합니다
-4. **이메일은 발송되었으나 수신자 ISP가 스팸으로 표시** — Resend 대시보드와 스팸 폴더를 확인하세요
-
-**진단 방법**:
-
-- 서버 로그에서 `"[DEV] Verification code for"`를 grep하세요 — 있다면 Resend가 구성되지 않았고 코드가 stdout에 기록된 것입니다
-- [Resend 대시보드](https://resend.com/) → Emails에서 발송 이력을 확인하세요
-- `RESEND_FROM_EMAIL`의 도메인이 Resend 콘솔의 "Verified Domains" 목록에 나타나는지 확인하세요
-
-**해결 방법**:
-
-- API 키 누락 → [로그인 및 회원가입 구성 → 이메일 동작 방식](/auth-setup#how-email--verification-code-sign-in-works)을 따라 구성한 뒤 서버를 재시작하세요
-- 도메인 미검증 → Resend 콘솔에서 DNS 검증 절차를 진행하세요(SPF / DKIM 레코드 추가)
-- 긴급 상황(내부 테스트) → 서버 로그에서 `[DEV]` 아래에 출력된 코드를 복사하세요
-
-### SMTP가 활성 제공자일 때
-
-SMTP 경로는 모든 실패를 실패한 단계와 함께 감싸므로, 서버 로그가 이미 relay가 어느 단계에서 세션을 거부했는지 알려줍니다. `"failed to send verification email"` / `"failed to send invitation email"`을 grep하고 감싸진 오류를 확인하세요:
-
-| 기록된 오류 | 의미 | 해결 방법 |
-|---|---|---|
-| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | 백엔드 컨테이너가 relay에 도달할 수 없음 — 잘못된 host, 잘못된 port, 방화벽, 또는 relay가 수신 대기 중이 아님 | 컨테이너 내부에서 `SMTP_HOST` / `SMTP_PORT`가 해석되는지 확인하세요(`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` 및 `nc -vz <host> <port>`). Multica를 실행하는 호스트에서 relay로 향하는 방화벽을 여세요 |
-| `smtp starttls: x509: certificate signed by unknown authority`(또는 `certificate is not valid for any names`) | relay가 사설 CA / 자체 서명 인증서를 사용하며, 컨테이너의 신뢰 저장소가 이를 거부함 | CA를 컨테이너에 설치하거나, relay가 신뢰할 수 있는 네트워크 구간에서 도달 가능함을 확인한 후에만 `SMTP_TLS_INSECURE=true`를 설정하세요 |
-| `smtp auth: 535 5.7.8 Authentication credentials invalid`(또는 `534`/`530`) | `SMTP_USERNAME` / `SMTP_PASSWORD`가 잘못되었거나, relay가 `PLAIN`이 아닌 다른 인증 방식을 요구함 | 메일 관리자에게 서비스 계정 자격 증명을 다시 확인하세요. Exchange 익명 내부 relay의 경우 둘 다 비워 두세요(`SMTP_USERNAME=`, `SMTP_PASSWORD=`) |
-| `smtp MAIL FROM: 550 5.7.1 Client does not have permissions to send as this sender` | relay가 `RESEND_FROM_EMAIL`을 봉투 발신자로 수락하지 않음 — 전형적인 Exchange "anonymous users not allowed" 또는 DMARC 정렬 문제 | `RESEND_FROM_EMAIL`을 relay가 수락하는 도메인으로 설정하세요. Exchange에서는 receive connector에서 원본 IP에 `ms-Exch-SMTP-Accept-Any-Sender`를 부여하세요 |
-| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | relay의 receive connector가 여러분의 서브넷이 외부 수신자에게 중계하는 것을 허용하지 않음(외부 도메인과 통신하는 익명 내부 relay에서 가장 흔함) | 초대를 내부 수신자로 제한하거나, Multica 호스트의 서브넷을 Exchange "Anonymous Users → Relay" 권한 목록에 추가하세요 |
-| `smtp DATA` / `smtp write body` / `smtp end data` | 세션은 수락되었으나 relay가 본문을 폐기함 — 보통 메시지 크기 제한, 콘텐츠 필터링, 또는 전송 중 연결 재설정 때문 | relay 로그에서 동일한 `Message-ID`(로그에는 `<unixnano>@<host>` 형식)를 확인하세요. 필요하면 메시지 크기 제한을 높이세요 |
-
-`MAIL FROM`, `RCPT TO`, `DATA` 오류는 항상 relay의 응답 코드와 함께 기록되므로 반대편의 Exchange / Postfix 로그와 대조할 수 있습니다. 인증 코드와 초대 토큰은 감싸진 오류에 **절대** 포함되지 않습니다.
-
-**진단 방법**:
-
-- 시작 시 `"EmailService: SMTP relay"`를 한 번 grep하고, 런타임 실패에 대해서는 `"failed to send"`를 grep하세요
-- 백엔드 컨테이너 내부에서 연결성을 점검하세요: `docker compose -f docker-compose.selfhost.yml exec backend sh -c 'nc -vz $SMTP_HOST $SMTP_PORT'`
-- 환경 변수가 프로세스에 도달했는지 확인하세요: `docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP_`(출력에 비밀번호가 포함되므로 신뢰할 수 있는 셸에서만 실행하세요)
-
-**해결 방법**:
-
-- 잘못된 host / port → `SMTP_HOST` / `SMTP_PORT`를 조정하고 백엔드를 재시작하세요. 지원되는 relay 모드는 [인증 설정 → Option B: SMTP relay](/auth-setup)를 참고하세요
-- 인증서 불일치 → relay의 CA를 컨테이너에 설치하거나, 신뢰할 수 있는 네트워크 구간에서 임시로 `SMTP_TLS_INSECURE=true`를 설정하세요
-- 인증 실패 → 자격 증명을 다시 확인하세요. 익명 내부 relay의 경우 `SMTP_USERNAME`과 `SMTP_PASSWORD`를 비워 두세요
-- `Unable to relay` → 내부 수신자로 제한하거나, Exchange receive connector에서 Multica 호스트의 IP에 중계 권한을 부여하세요
-
-## 고정 로컬 테스트 코드가 동작하지 않음
-
-**증상**: 자체 호스팅 인스턴스에서 `888888` 같은 고정 로컬 테스트 코드로 로그인하려 했지만 `invalid or expired code`로 거부됩니다.
-
-**가능한 원인**(상호 배타적):
-
-1. **`MULTICA_DEV_VERIFICATION_CODE`가 비어 있음** — 고정 코드는 기본적으로 비활성화되어 있습니다
-2. **`APP_ENV=production`** — 이것은 **올바른** 프로덕션 구성입니다. 고정 로컬 테스트 코드는 프로덕션에서 무시됩니다
-3. **구성된 코드가 6자리가 아님** — 이 단축 코드는 6자리 값만 허용합니다
-
-**진단 방법**:
+다시 로그인하고 데몬을 다시 시작합니다.
 
 ```bash
-cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
-docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+multica login
+multica daemon restart
 ```
 
-인박스(스팸 포함)에서 실제 인증 코드를 확인하세요.
+자체 호스팅 환경에서는 **실행 컴퓨터**에서 API의 `/health`도 요청해야 합니다. 서버 컴퓨터에서의 테스트만으로는 실행 컴퓨터 측 DNS, TLS, 방화벽 문제를 찾을 수 없습니다. 주소를 바꿔야 하면 `multica setup self-host`를 다시 실행하거나 현재 profile의 `server_url`을 확인하세요.
 
-**해결 방법**:
+```bash
+multica config show
+```
 
-- 프로덕션에서는 `MULTICA_DEV_VERIFICATION_CODE`를 비워 두고, Resend를 구성하여 실제 코드를 사용하세요
-- 로컬 개발이나 내부 테스트의 경우 서버 로그에서 생성된 코드를 복사하거나, `APP_ENV=development`와 `MULTICA_DEV_VERIFICATION_CODE=888888`을 설정하세요 — 공개 인스턴스에서는 고정 코드를 절대 활성화하지 마세요(자세한 내용은 [로그인 및 회원가입 구성 → 고정 로컬 테스트 코드](/auth-setup#fixed-local-testing-codes) 참고)
+## 이슈 실행이 시작되지 않음
 
-## 사용량 대시보드가 0으로 유지됨
+이슈의 **실행 로그**를 열고 실행 태스크의 현재 상태와 대기 이유를 먼저 확인합니다.
 
-**증상**: 에이전트가 작업을 완료하고 원시 토큰 사용량이 데이터베이스에 기록되지만, **설정 → 사용량**과 **설정 → 런타임**에서 입력 / 출력 / 비용이 전부 0으로 표시됩니다. 이것은 조용히 발생하는 현상으로 — 백엔드 로그에 오류가 없습니다.
+### `queued` 상태
 
-**가능한 원인**:
+`queued`는 실행 태스크가 런타임에 수령되기를 기다리고 있다는 뜻입니다. 다음 순서로 확인하세요.
 
-1. **`rollup_task_usage_hourly()`가 클레임되지 않음** — 사용량 / 런타임 대시보드는 파생 테이블 `task_usage_hourly`에서 읽으며, 이 테이블은 해당 함수로 채워집니다. MUL-2957부터 백엔드는 DB 기반 스케줄러(`sys_cron_executions`)를 통해 인프로세스로 rollup을 실행합니다. 오래된 빌드, 적용되지 않은 migration `113`, 또는 레플리카가 남아있지 않은 장기간의 백엔드 중단이 있으면 최근 SUCCESS 행이 없는 테이블이 남을 수 있습니다.
-2. **`pg_cron`이 호환성 용도로 구성되었지만 잘못된 데이터베이스를 가리킴** — `pg_cron.database_name`의 기본값은 `postgres`입니다. Multica 데이터베이스 이름이 다르면 스케줄된 작업이 `rollup_task_usage_hourly()`를 전혀 보지 못합니다. 인프로세스 스케줄러는 이에 의존하지 않지만, 인프로세스 스케줄러를 제거하고 `pg_cron`에 의존한다면 DB 이름이 일치해야 합니다.
-3. **핸들러가 클레임되지만 조용히 오류를 냄** — 예: 마이그레이션이 일부만 적용되어 SQL 함수가 누락되었거나, DB 역할 / search_path가 잘못 구성됨. `sys_cron_executions`의 FAILED 감사 행을 확인하세요.
+1. 에이전트에 연결된 런타임이 온라인인지
+2. 런타임이 에이전트에 설정된 AI 코딩 도구를 감지했는지
+3. 에이전트에 사용 가능한 동시 실행 용량이 남아 있는지
+4. 데몬에 전체 실행 용량이 남아 있는지
 
-**진단 방법**:
+에이전트 한 명은 기본적으로 실행 태스크를 최대 6개까지 동시에 실행하고 데몬 하나는 최대 20개까지 실행합니다. 상한에 도달하면 새 실행 태스크는 큐에 남아 기존 실행이 끝난 뒤 시작됩니다. 런타임이 오프라인이어도 실행 태스크는 계속 대기하며 2시간 넘게 수령되지 않을 때만 실패합니다.
+
+```bash
+multica daemon status --output json
+multica agent get <agent-id>
+multica issue runs <issue-id>
+```
+
+런타임 목록에 예상한 도구가 없다면 같은 시스템 계정과 `PATH`에서 도구가 실행되고 로그인되어 있는지 확인한 뒤 `multica daemon restart`를 실행합니다.
+
+### `waiting_local_directory` 상태
+
+다른 실행 중 태스크가 같은 로컬 디렉터리를 사용하고 있다는 뜻입니다. Multica는 두 에이전트가 같은 파일을 동시에 수정하지 않도록 디렉터리 잠금이 해제되기를 기다립니다.
+
+일반적으로 앞선 실행 태스크가 끝날 때까지 기다리면 됩니다. 앞선 태스크가 멈췄다면 해당 실행 로그에서 중지할 수 있고, 현재 에이전트에 다른 로컬 디렉터리를 선택할 수도 있습니다. 이 디렉터리 상호 배제는 데몬이 메모리에서 관리하며 디스크에 lock 파일을 쓰지 않습니다. 잠금 상태가 비정상이라고 의심되면 `multica daemon restart`를 실행해 해제하세요. 직접 삭제해야 할 파일은 없습니다.
+
+## AI 코딩 도구 시작 실패
+
+데몬이 온라인이어도 도구 자체를 사용할 수 있다는 뜻은 아닙니다. 이번 실행의 상세 기록을 열고 다음 항목을 중점적으로 확인하세요.
+
+- 도구 로그인이 완료되었는지
+- API key, 사용량, 모델 권한을 사용할 수 있는지
+- 에이전트가 선택한 모델과 사고 단계가 해당 도구에서 지원되는지
+- 로컬 작업 디렉터리가 존재하고 쓰기 가능한지
+- 에이전트의 사용자 지정 인수와 환경 변수가 유효한지
+
+먼저 실행 컴퓨터의 터미널에서 같은 도구를 직접 실행하세요. 도구 자체도 시작할 수 없다면 도구 로그인 또는 설정을 먼저 수정하고 실행 로그에서 실행 태스크를 재시도합니다.
+
+## 실시간 업데이트가 작동하지 않음
+
+태스크는 실행되지만 댓글과 상태가 실시간으로 나타나지 않는다면 일반적으로 WebSocket이 연결되지 않은 것입니다.
+
+브라우저 개발자 도구의 **Network → WS**에서 `/ws` 연결을 확인합니다. 자체 호스팅 환경에서는 특히 다음 항목을 확인하세요.
+
+- `FRONTEND_ORIGIN`이 브라우저에서 실제로 연 주소와 같은지
+- HTTPS 페이지가 `wss://`로 연결되는지
+- reverse proxy가 WebSocket Upgrade 요청을 전달하는지
+- 브라우저 로그인이 만료되었는지
+
+컨테이너는 생성될 때만 `.env`를 읽으므로 수정 후 다시 생성해야 합니다.
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+전체 reverse proxy 예시는 [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)을 참고하세요.
+
+## 인증 코드 및 초대 이메일이 도착하지 않음
+
+먼저 backend 시작 로그를 확인합니다. 로그에는 현재 `SMTP relay`, `Resend API`, `DEV mode` 중 무엇을 사용하는지 표시됩니다.
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend \
+  | grep "EmailService:"
+```
+
+- **DEV mode**: 이메일을 보내지 않고 인증 코드와 초대 링크를 backend 로그에만 기록합니다.
+- **Resend**: API key가 유효하고 발신 주소의 도메인이 인증되었는지 확인합니다.
+- **SMTP**: host, port, 자격 증명, 발신 주소를 확인하고 오류 로그에서 연결, TLS, 인증, 전달 중 어느 단계에서 실패했는지 판단합니다.
+
+`SMTP_HOST`와 Resend를 함께 설정하면 Multica가 SMTP를 우선 사용합니다. 설정 방법은 [로그인과 가입](/auth-setup#이메일-인증-코드)을 참고하세요.
+
+<Callout type="warning">
+프로덕션 환경에서는 로그의 인증 코드에 의존하거나 고정된 로컬 테스트 인증 코드를 활성화하지 마세요.
+</Callout>
+
+## 첨부 파일 업로드 또는 다운로드 실패
+
+먼저 backend 로그와 응답 status code를 확인합니다. 일반적인 원인은 다음과 같습니다.
+
+- reverse proxy의 요청 body 크기 제한
+- 로컬 업로드 디렉터리에 쓸 수 없거나 persistent volume을 mount하지 않음
+- S3 bucket, region, endpoint, 자격 증명이 일치하지 않음
+- 다운로드 주소가 proxy를 통과한 뒤 잘못된 공개 도메인 또는 프로토콜을 사용함
+
+Docker Compose를 사용하면 기본 `backend_uploads` volume에 로컬 첨부 파일이 저장됩니다. 컨테이너를 다시 만들어도 삭제되지 않지만 `docker compose down -v`는 data volume을 삭제합니다. S3 설정은 [환경 변수](/environment-variables#첨부-파일-저장소)를 참고하세요.
+
+## 사용량(Usage)이 0으로 표시됨
+
+Usage 페이지는 각 실행 태스크의 원본 사용량을 직접 읽지 않고 시간별 집계 데이터를 읽습니다. 먼저 원본 데이터와 집계 테이블을 확인합니다.
 
 ```sql
--- Confirm raw events exist but the hourly table is empty.
-SELECT count(*) AS raw_rows FROM task_usage;
-SELECT count(*) AS hourly_rows FROM task_usage_hourly;
+SELECT count(*) FROM task_usage;
+SELECT count(*) FROM task_usage_hourly;
 
--- Inspect the in-process scheduler's audit log.
-SELECT plan_time, status, attempt, runner_id,
-       error_code, error_msg, started_at, finished_at
-  FROM sys_cron_executions
- WHERE job_name = 'rollup_task_usage_hourly'
- ORDER BY plan_time DESC
- LIMIT 20;
-
--- Watermark — if this is 1970-01-01, the rollup has never run.
-SELECT watermark_at FROM task_usage_hourly_rollup_state;
-
--- Compatibility path: if you previously registered pg_cron, confirm
--- it is (or isn't) available and pointing at the right database.
-SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
-SHOW shared_preload_libraries;
-SELECT jobname, schedule, database, active FROM cron.job;
+SELECT plan_time, status, error_code, error_msg
+FROM sys_cron_executions
+WHERE job_name = 'rollup_task_usage_hourly'
+ORDER BY plan_time DESC
+LIMIT 20;
 ```
 
-**해결 방법**:
+`task_usage`에 데이터가 있지만 집계 테이블이 비어 있고 스케줄 기록에 실패가 표시된다면 migration이 모두 적용되었는지 먼저 확인하세요. 업그레이드가 migration 103에서 거부되는 경우는 다음 절을 참고하세요. 집계 함수를 직접 한 번 실행해 SQL 문제인지 스케줄 문제인지 구분할 수도 있습니다.
 
-- 적어도 하나의 백엔드 레플리카에서 스케줄러가 실제로 실행 중인지 확인하세요 — 30초마다 `sys_cron_executions`의 `rollup_task_usage_hourly`에 SUCCESS 행이 추가되어야 합니다.
-- SQL 경로를 검증하기 위해 rollup을 수동으로 한 번 호출하세요: `SELECT rollup_task_usage_hourly();` — 대시보드를 새로고침하세요. 숫자가 나타나면 SQL 함수는 정상이며, 문제는 스케줄러 클레임 경로에 있습니다.
-- migration `113_sys_cron_executions`가 아직 적용되지 않았다면 백엔드를 재시작해 마이그레이션을 실행하거나 수동으로 `migrate up`을 호출하세요.
-- 인프로세스 스케줄러 이전의 레거시 `pg_cron` 이력이 있어도 SQL 함수가 내부적으로 advisory lock 4246을 잡고 있어 두 경로가 이중 쓰기할 수 없습니다 — 선택적 `cron.unschedule` 정리는 [자체 호스팅 빠른 시작 → 사용량 롤업](/self-host-quickstart#7-usage-rollup-no-operator-action-required)을 참고하세요.
-
-## 마이그레이션 `103`이 `refusing to drop legacy daily rollups`로 실패함
-
-**증상**: `v0.3.4`에서 `v0.3.5+`로 업그레이드할 때 백엔드 컨테이너가 시작되지 않거나(또는 `migrate up`이 중단됨) 다음과 같은 오류가 발생합니다:
-
-```text
-ERROR: refusing to drop legacy daily rollups:
-  task_usage_hourly_rollup_state.watermark_at (1970-01-01 ...) trails
-  task_usage latest event (...) by more than 01:00:00 — backfill is
-  incomplete or pg_cron is not running. Run cmd/backfill_task_usage_hourly
-  (and let pg_cron catch up) before re-running migrate
+```sql
+SELECT rollup_task_usage_hourly();
 ```
 
-**가능한 원인**: 이것은 마이그레이션 `103`의 fail-closed 가드입니다. `task_usage_hourly`가 원시 `task_usage`를 따라잡을 때까지 레거시 daily rollup 삭제를 거부합니다. 기존 행이 존재하고 rollup 워터마크가 여전히 epoch에 머물러 있을 때 — 즉 아직 어떤 이력도 hourly 테이블로 rollup되지 않았을 때 — 이 가드가 발동합니다.
+수동 실행 후 숫자가 정상이라면 집계 함수는 사용할 수 있고 backend 정기 스케줄에 문제가 있는 것입니다. 수동 SQL은 집계를 한 번만 보충하며 스케줄을 복구하지 않습니다. 시간별 집계는 backend 내장 스케줄러가 실행하므로 pg_cron을 직접 설정할 필요가 없습니다.
 
-MUL-2957부터 migrate 명령은 migration `103`을 적용하기 직전에 멱등한 월별 슬라이스 backfill(advisory lock 4246 보호)을 자동으로 실행하므로, v0.3.4 → v0.3.5+ 직접 업그레이드는 단일 `migrate up` 호출로 완료됩니다. 그래도 이 오류가 보인다면, MUL-2957 이전 바이너리를 사용 중이거나 훅 자체가 실패한 것입니다 — migrate 로그에서 `task_usage hourly rollup hook` 로그를 확인하세요.
+## 업그레이드할 때 migration 103이 실행을 거부함
 
-**해결 방법**:
+정상 업그레이드에서는 migration 103을 위해 따로 할 일이 없습니다. `migrate up`은 migration을 적용하기 전에 이전 사용량 데이터를 자동으로 backfill합니다. 빈 데이터베이스는 바로 통과하고 이전 데이터가 있는 인스턴스는 월별로 자동 보충한 뒤 계속 진행합니다.
 
-1. MUL-2957 이전 바이너리를 사용 중이고 바이너리를 먼저 업그레이드할 수 없다면, 같은 데이터베이스에 대해 스탠드얼론 backfill을 실행하세요(멱등하며, 중단해도 안전하고, 다시 실행해도 안전합니다):
-
-   ```bash
-   # Docker Compose
-   docker compose -f docker-compose.selfhost.yml exec backend \
-     ./backfill_task_usage_hourly --sleep-between-slices=2s
-
-   # Kubernetes
-   kubectl -n multica exec deploy/multica-backend -- \
-     ./backfill_task_usage_hourly --sleep-between-slices=2s
-   ```
-
-2. 업그레이드를 다시 실행하세요 — 백엔드 컨테이너를 재시작하는 것으로 충분하며, 마이그레이션은 시작 시 실행됩니다. 이제 가드가 최신 워터마크를 확인하고 `103`을 적용하도록 허용합니다.
-3. 인프로세스 스케줄러가 이후 워터마크를 계속 진행시킵니다 — [자체 호스팅 빠른 시작 → 사용량 롤업](/self-host-quickstart#7-usage-rollup-no-operator-action-required)을 참고하세요.
-
-`--sleep-between-slices=2s`는 수년 치 이력이 있는 프로덕션 데이터베이스에서 적절한 기본값입니다. 최근 N개월만 보관하고 더 오래된 버킷을 영구히 포기해도 괜찮다면 `--months-back N --force-partial`을 사용하세요.
-
-## 포트 충돌
-
-**증상**: `multica server`나 `multica daemon start`가 `address already in use`로 실패합니다.
-
-**가능한 원인**:
-
-1. **서버 포트 점유됨**(기본값 `8080`)
-2. **데몬 health 포트 점유됨**(기본값 `19514`, 프로필마다 해시로 오프셋됨)
-3. **Web dev 서버 포트 충돌**(`3000` / `5173`)
-4. **포트에 대한 권한 부족**(`< 1024` 특권 포트 바인딩에는 sudo 필요)
-
-**진단 방법**:
+backend 시작 중 `refusing to drop legacy daily rollups` 오류가 계속 발생하면 자동 backfill이 완료되지 않은 것입니다. 예를 들어 도중에 실패했거나 `migrate up`을 사용하지 않고 SQL을 직접 적용했을 수 있습니다. 이때는 backfill 명령을 직접 실행하고 완료된 뒤 backend를 다시 시작하세요.
 
 ```bash
-lsof -i :8080        # macOS / Linux
-netstat -ano | findstr :8080    # Windows
+cd server
+DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
 ```
 
-**해결 방법**:
+자주 쓰는 flag: `--dry-run`은 쓰지 않고 미리 보기만 하며, `--sleep-between-slices`는 slice 사이에 간격을 두어 사용량이 많은 인스턴스의 읽기 부하를 낮춥니다. 명령은 월별 slice로 실행되고 멱등성을 가지므로 중단 후 바로 다시 실행할 수 있습니다. advisory lock을 보유해 서버의 정기 집계와 상호 배제되므로 중복되거나 일관되지 않은 집계 데이터가 생기지 않습니다. 완료 후 backend를 다시 시작하고 `/readyz`에서 `migrations`가 `ok`인지 확인하세요.
 
-- 충돌하는 프로세스를 종료하거나(`kill -9 <PID>`), `PORT=9000`으로 포트를 변경하세요
-- 80 / 443을 사용하려면 → 직접 바인딩하지 말고, 앞에 리버스 프록시(Nginx / Caddy)를 두어 높은 포트로 전달하세요
+## 포트 사용 중
 
-## 로그를 찾는 위치
+로컬에서 자주 사용하는 port는 API의 `8080`, Web의 `3000`, 데몬 health check port입니다. 먼저 사용 중인 프로세스를 찾습니다.
 
-| 구성 요소 | 위치 | 명령 |
-|---|---|---|
-| **데몬** | `~/.multica/daemon.log`(백그라운드 모드) 또는 포그라운드 stdout | `multica daemon logs -f --lines 100` |
-| **데몬(크래시)** | `~/.multica/daemon.err.log` | 직접 열기 — 패닉/초기 시작 오류가 여기에 기록됩니다 |
-| **서버(Docker)** | 컨테이너 stdout | `docker logs -f <container>` |
-| **서버(systemd)** | journal | `journalctl -u multica-server -f` |
-| **프런트엔드(dev)** | `pnpm dev`를 실행 중인 터미널 | 직접 확인 |
-| **프런트엔드(브라우저)** | DevTools → Console | `F12`를 누르세요 |
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
+netstat -ano | findstr :8080       # Windows
+```
 
-백그라운드 모드에서 `daemon.log`는 크기 기준으로 로테이션되므로(기본값 20MB × gzip 백업 5개; `MULTICA_DAEMON_LOG_MAX_SIZE_MB` / `_MAX_BACKUPS` / `_MAX_AGE_DAYS`로 조정 가능) 열 수 없을 만큼 커지지 않습니다. Go 런타임 패닉과 logger 초기화 이전 오류는 별도의 상한이 있는 `daemon.err.log`에 기록됩니다.
+다른 Multica checkout이 사용 중이라면 해당 디렉터리에서 `make stop`을 먼저 실행합니다. 그렇지 않다면 port를 사용 중인 프로그램을 정상적으로 중지하거나 현재 서비스 port를 변경합니다. 공개 인터넷의 80/443은 Caddy, Nginx 같은 reverse proxy가 사용합니다.
 
-더 자세한 데몬 로그가 필요하면, 데몬을 백그라운드에서 포그라운드로 옮기세요: `multica daemon stop && multica daemon start --foreground`. 포그라운드로 실행하면 로그가 로테이션 파일이 아니라 터미널에 실시간으로 출력됩니다.
+## 로그 위치
+
+| 컴포넌트 | 확인 방법 |
+| --- | --- |
+| 백그라운드 데몬 | `multica daemon logs --lines 100` |
+| 데몬 로그 실시간 확인 | `multica daemon logs --follow` |
+| 기본 profile 로그 파일 | `~/.multica/daemon.log` |
+| 기본 profile 시작 또는 crash 로그 | `~/.multica/daemon.err.log` |
+| 이름 있는 profile | `~/.multica/profiles/<name>/` 아래의 해당 로그 |
+| Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
+| 브라우저 | 개발자 도구의 Console과 Network |
+
+데몬 시작 과정을 직접 확인해야 한다면 foreground에서 실행합니다.
+
+```bash
+multica daemon stop
+multica daemon start --foreground
+```
+
+그래도 원인을 찾지 못하면 [GitHub Issues](https://github.com/multica-ai/multica/issues)에서 기존 문제를 검색하거나 새 이슈를 제출하세요.
+
+## 다음 단계
+
+- [데몬과 런타임](/daemon-runtimes) — 런타임 등록과 온라인 상태 메커니즘을 알아봅니다.
+- [실행 태스크](/tasks) — 상태, timeout, 실패 원인을 확인합니다.
+- [환경 변수](/environment-variables) — 자체 호스팅 설정 전체를 참고합니다.
