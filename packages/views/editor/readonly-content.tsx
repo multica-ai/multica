@@ -158,7 +158,16 @@ function urlTransform(url: string): string {
 // window or breaks out into the system browser — both lose thread context.
 // Use SPA push so the browser back-button restores scroll + tiptap draft via
 // the Next.js router cache, matching mobile-native patterns.
-function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
+// CEREBRO-PATCH(inbox-trigger-stable-scroll): allow bare issue identifiers to resolve without changing message height (FIR-4188).
+function IssueMentionLink({
+  issueId,
+  label,
+  identifierOnly = false,
+}: {
+  issueId: string;
+  label?: string;
+  identifierOnly?: boolean;
+}) {
   const { openInNewTab, push } = useNavigation();
   const isMobile = useIsMobile();
   const openMode = useIssueLinkOpenMode();
@@ -171,7 +180,12 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
       target={opensInNewTab ? "_blank" : undefined}
       rel={opensInNewTab ? "noopener noreferrer" : undefined}
       // CEREBRO-PATCH(issue-chip-inline-link-wrap): inline (not inline-flex) so box-decoration-clone wraps across lines (JEH-1593)
-      className="issue-mention not-prose inline"
+      // CEREBRO-PATCH(inbox-trigger-stable-scroll): preserve the unresolved identifier's inline text footprint (FIR-4188).
+      className={
+        identifierOnly
+          ? "not-prose inline text-inherit underline decoration-dotted underline-offset-2"
+          : "issue-mention not-prose inline"
+      }
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -188,11 +202,16 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
         else window.open(path, "_blank", "noopener,noreferrer");
       }}
     >
-      <IssueChip
-        issueId={issueId}
-        fallbackLabel={label}
-        className="cursor-pointer hover:bg-accent transition-colors"
-      />
+      {/* CEREBRO-PATCH(inbox-trigger-stable-scroll): render resolved bare identifiers as text, not height-changing chips (FIR-4188). */}
+      {identifierOnly ? (
+        label
+      ) : (
+        <IssueChip
+          issueId={issueId}
+          fallbackLabel={label}
+          className="cursor-pointer hover:bg-accent transition-colors"
+        />
+      )}
     </a>
   );
 }
@@ -200,13 +219,16 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
 /**
  * Autolinked bare identifier (e.g. `MUL-123`) routed through
  * `mention://issue/<identifier>` by the readonly preprocessor. Resolves to a
- * real issue in the current workspace; renders a navigable mention on a hit,
- * plain text on a miss / while loading / cross-workspace.
+ * real issue in the current workspace. The resolved link deliberately keeps
+ * the same text footprint as the unresolved identifier: expanding it into an
+ * IssueChip after the Inbox target scroll moved that target when content above
+ * it grew (FIR-4188).
  */
 function AutolinkedIssueMentionLink({ identifier }: { identifier: string }) {
+  // CEREBRO-PATCH(inbox-trigger-stable-scroll): keep async issue resolution from moving the Inbox target (FIR-4188).
   const issue = useResolveIssueIdentifier(identifier);
   if (!issue) return <>{identifier}</>;
-  return <IssueMentionLink issueId={issue.id} label={identifier} />;
+  return <IssueMentionLink issueId={issue.id} label={identifier} identifierOnly />;
 }
 
 function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
