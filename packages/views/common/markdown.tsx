@@ -60,13 +60,23 @@ function ProjectMentionCard({ projectId }: { projectId: string }): React.ReactNo
 /**
  * Autolinked bare identifier (e.g. `MUL-123`) routed through
  * `mention://issue/<identifier>`. Resolves the identifier to a real issue in
- * the current workspace; renders a navigable chip on a hit, plain text on a
- * miss / while loading / cross-workspace.
+ * the current workspace. The resolved link deliberately keeps the same text
+ * footprint as the unresolved identifier: expanding it into an IssueChip
+ * after the Inbox target scroll moved that target when content above it grew
+ * (FIR-4188).
  */
 function AutolinkedIssueMention({ identifier }: { identifier: string }): React.ReactNode {
   const issue = useResolveIssueIdentifier(identifier);
+  const p = useWorkspacePaths();
   if (!issue) return identifier;
-  return <IssueMentionCard issueId={issue.id} fallbackLabel={identifier} />;
+  return (
+    <AppLink
+      href={p.issueDetail(issue.id)}
+      className="not-prose inline text-inherit underline decoration-dotted underline-offset-2"
+    >
+      {identifier}
+    </AppLink>
+  );
 }
 
 function defaultRenderMention({
