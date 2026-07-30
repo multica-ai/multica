@@ -163,6 +163,16 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	feishuSyncMap := make(map[string]ProjectFeishuSyncResponse)
+	if h.LarkProjectSync != nil {
+		summaries, err := h.LarkProjectSync.ProjectSummaries(r.Context(), wsUUID)
+		if err == nil {
+			for _, summary := range summaries {
+				feishuSyncMap[uuidToString(summary.Binding.ProjectID)] = projectFeishuSyncToResponse(summary)
+			}
+		}
+	}
+
 	resp := make([]ProjectResponse, len(projects))
 	for i, p := range projects {
 		resp[i] = projectToResponse(p)
@@ -171,6 +181,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+		if sync, ok := feishuSyncMap[resp[i].ID]; ok {
+			resp[i].FeishuSync = &sync
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }

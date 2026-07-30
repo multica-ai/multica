@@ -2,7 +2,6 @@ package lark
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -364,15 +363,21 @@ func TestBeginProjectBindingSwitchesBotWithoutTouchingDirectTopics(t *testing.T)
 		t.Fatalf("Bot switch changed direct topic state to %q", stillDirect.State)
 	}
 
-	_, _, err = service.BeginProjectBinding(
+	same, confirmationCode, err := service.BeginProjectBinding(
 		ctx,
 		util.MustParseUUID(workspaceID),
 		util.MustParseUUID(projectID),
 		util.MustParseUUID(installationBID),
 		util.MustParseUUID(userID),
 	)
-	if !errors.Is(err, ErrProjectSyncConflict) {
-		t.Fatalf("selecting current Bot error = %v, want conflict", err)
+	if err != nil {
+		t.Fatalf("select current Bot idempotently: %v", err)
+	}
+	if confirmationCode != "" {
+		t.Fatalf("idempotent selection returned confirmation code %q", confirmationCode)
+	}
+	if same.ID != second.ID {
+		t.Fatalf("idempotent selection binding = %v, want %v", same.ID, second.ID)
 	}
 
 	current, err := store.getCurrentProjectBinding(
@@ -386,7 +391,7 @@ func TestBeginProjectBindingSwitchesBotWithoutTouchingDirectTopics(t *testing.T)
 	}
 	if current.ID != second.ID || current.InstallationID != util.MustParseUUID(installationBID) {
 		t.Fatalf(
-			"current Project binding changed after conflict: id=%v installation=%v",
+			"current Project binding changed after idempotent selection: id=%v installation=%v",
 			current.ID,
 			current.InstallationID,
 		)

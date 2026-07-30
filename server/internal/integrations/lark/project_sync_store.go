@@ -34,6 +34,40 @@ const notificationOutboxColumnsCNO = `cno.id, cno.event_id, cno.workspace_id, cn
 	cno.attempts, cno.next_attempt_at, cno.locked_at, cno.locked_by, cno.last_error,
 	cno.created_at, cno.sent_at`
 
+const projectSyncSummarySelect = `
+	SELECT ` + projectBindingColumnsCPB + `,
+	       ci.agent_id,
+	       a.name,
+	       COALESCE(ci.config ->> 'bot_name', a.name || ' Bot'),
+	       (SELECT count(*) FROM issue i
+	        WHERE i.workspace_id = cpb.workspace_id AND i.project_id = cpb.project_id),
+	       (SELECT count(*) FROM channel_issue_topic_binding active
+	        WHERE active.workspace_id = cpb.workspace_id
+	          AND active.project_binding_id = cpb.id AND active.state = 'active'),
+	       (SELECT count(*)
+	        FROM issue i
+	        WHERE i.workspace_id = cpb.workspace_id AND i.project_id = cpb.project_id
+	          AND EXISTS (
+	              SELECT 1 FROM channel_issue_topic_binding latest
+	              WHERE latest.id = (
+	                  SELECT l.id FROM channel_issue_topic_binding l
+	                  WHERE l.issue_id = i.id
+	                  ORDER BY l.created_at DESC LIMIT 1
+	              )
+	                AND latest.state = 'manual_unbound'
+	          )),
+	       (SELECT count(*) FROM channel_notification_outbox pending
+	        WHERE pending.workspace_id = cpb.workspace_id
+	          AND pending.project_binding_id = cpb.id
+	          AND pending.status IN ('pending', 'sending')),
+	       (SELECT max(sent_at) FROM channel_notification_outbox sent
+	        WHERE sent.project_binding_id = cpb.id AND sent.status = 'sent')
+	FROM channel_project_binding cpb
+	JOIN channel_installation ci ON ci.id = cpb.installation_id
+	  AND ci.workspace_id = cpb.workspace_id
+	JOIN agent a ON a.id = ci.agent_id AND a.workspace_id = cpb.workspace_id
+`
+
 type projectSyncDB interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	Query(context.Context, string, ...any) (pgx.Rows, error)
@@ -501,43 +535,9 @@ func (s *projectSyncStore) retryDeadNotifications(ctx context.Context, q project
 	return tag.RowsAffected(), err
 }
 
-func (s *projectSyncStore) getProjectSyncSummary(ctx context.Context, workspaceID, projectID pgtype.UUID) (ChannelProjectSyncSummary, error) {
+func scanProjectSyncSummary(scanner interface{ Scan(...any) error }) (ChannelProjectSyncSummary, error) {
 	var summary ChannelProjectSyncSummary
-	err := s.pool.QueryRow(ctx, `
-		SELECT `+projectBindingColumnsCPB+`,
-		       ci.agent_id,
-		       a.name,
-		       COALESCE(ci.config ->> 'bot_name', a.name || ' Bot'),
-		       (SELECT count(*) FROM issue i
-		        WHERE i.workspace_id = cpb.workspace_id AND i.project_id = cpb.project_id),
-		       (SELECT count(*) FROM channel_issue_topic_binding active
-		        WHERE active.workspace_id = cpb.workspace_id
-		          AND active.project_binding_id = cpb.id AND active.state = 'active'),
-		       (SELECT count(*)
-		        FROM issue i
-		        WHERE i.workspace_id = cpb.workspace_id AND i.project_id = cpb.project_id
-		          AND EXISTS (
-		              SELECT 1 FROM channel_issue_topic_binding latest
-		              WHERE latest.id = (
-		                  SELECT l.id FROM channel_issue_topic_binding l
-		                  WHERE l.issue_id = i.id
-		                  ORDER BY l.created_at DESC LIMIT 1
-		              )
-		                AND latest.state = 'manual_unbound'
-		          )),
-		       (SELECT count(*) FROM channel_notification_outbox pending
-		        WHERE pending.workspace_id = cpb.workspace_id
-		          AND pending.project_binding_id = cpb.id
-		          AND pending.status IN ('pending', 'sending')),
-		       (SELECT max(sent_at) FROM channel_notification_outbox sent
-		        WHERE sent.project_binding_id = cpb.id AND sent.status = 'sent')
-		FROM channel_project_binding cpb
-		JOIN channel_installation ci ON ci.id = cpb.installation_id
-		  AND ci.workspace_id = cpb.workspace_id
-		JOIN agent a ON a.id = ci.agent_id AND a.workspace_id = cpb.workspace_id
-		WHERE cpb.workspace_id = $1 AND cpb.project_id = $2
-		  AND cpb.state IN ('pending_group', 'active')
-		ORDER BY cpb.created_at DESC LIMIT 1`, workspaceID, projectID).Scan(
+	err := scanner.Scan(
 		&summary.Binding.ID, &summary.Binding.WorkspaceID, &summary.Binding.ProjectID,
 		&summary.Binding.InstallationID, &summary.Binding.ChannelType,
 		&summary.Binding.ChannelChatID, &summary.Binding.ChannelChatName,
@@ -552,6 +552,34 @@ func (s *projectSyncStore) getProjectSyncSummary(ctx context.Context, workspaceI
 		&summary.LastSyncedAt,
 	)
 	return summary, err
+}
+
+func (s *projectSyncStore) getProjectSyncSummary(ctx context.Context, workspaceID, projectID pgtype.UUID) (ChannelProjectSyncSummary, error) {
+	return scanProjectSyncSummary(s.pool.QueryRow(ctx, projectSyncSummarySelect+`
+		WHERE cpb.workspace_id = $1 AND cpb.project_id = $2
+		  AND cpb.state IN ('pending_group', 'active')
+		ORDER BY cpb.created_at DESC LIMIT 1`, workspaceID, projectID))
+}
+
+func (s *projectSyncStore) listProjectSyncSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ChannelProjectSyncSummary, error) {
+	rows, err := s.pool.Query(ctx, projectSyncSummarySelect+`
+		WHERE cpb.workspace_id = $1
+		  AND cpb.state IN ('pending_group', 'active')
+		ORDER BY cpb.created_at`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	summaries := make([]ChannelProjectSyncSummary, 0)
+	for rows.Next() {
+		summary, err := scanProjectSyncSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
 }
 
 func isNoRows(err error) bool {

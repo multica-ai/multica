@@ -140,11 +140,20 @@ func (h *Handler) BeginProjectFeishuBinding(w http.ResponseWriter, r *http.Reque
 	if h.writeProjectSyncError(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	status := http.StatusCreated
+	confirmationCommand := ""
+	expiresInSeconds := 0
+	if code != "" {
+		confirmationCommand = "/project bind " + code
+		expiresInSeconds = 600
+	} else {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, map[string]any{
 		"binding":              projectFeishuBindingMap(binding),
 		"confirmation_code":    code,
-		"confirmation_command": "/project bind " + code,
-		"expires_in_seconds":   600,
+		"confirmation_command": confirmationCommand,
+		"expires_in_seconds":   expiresInSeconds,
 	})
 }
 

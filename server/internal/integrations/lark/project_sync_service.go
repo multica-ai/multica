@@ -616,7 +616,7 @@ func (s *ProjectSyncService) BeginProjectBinding(ctx context.Context, workspaceI
 	current, err := s.store.getCurrentProjectBinding(ctx, tx, workspaceID, projectID)
 	if err == nil {
 		if current.InstallationID == installationID {
-			return ChannelProjectBinding{}, "", ErrProjectSyncConflict
+			return current, "", nil
 		}
 		replaced, unbindErr := s.store.unbindProject(ctx, tx, workspaceID, current.ID, userID)
 		if unbindErr != nil {
@@ -695,6 +695,10 @@ func (s *ProjectSyncService) ProjectSummary(ctx context.Context, workspaceID, pr
 		return ChannelProjectSyncSummary{}, ErrProjectSyncNotFound
 	}
 	return summary, err
+}
+
+func (s *ProjectSyncService) ProjectSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ChannelProjectSyncSummary, error) {
+	return s.store.listProjectSyncSummaries(ctx, workspaceID)
 }
 
 func (s *ProjectSyncService) ListInstallationProjects(ctx context.Context, workspaceID, installationID pgtype.UUID) ([]ChannelProjectBindingListItem, error) {

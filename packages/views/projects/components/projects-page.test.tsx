@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
+  queryOptions: <T,>(options: T) => options,
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     const key = options.queryKey?.[0];
     if (key === "projects") {
@@ -307,19 +308,25 @@ describe("ProjectsPage compact row navigation", () => {
     expect(push).toHaveBeenCalledTimes(1);
   });
 
-  it("binds a Project to the selected Feishu Bot without navigating", async () => {
+  it("binds a Project from the assignee-style Feishu Bot picker without navigating", async () => {
     const user = userEvent.setup();
     const push = vi.fn();
     mocks.installations = [
       { id: "installation-1", agent_id: "agent-1", status: "active" },
     ];
+    mocks.agents = [
+      { id: "agent-1", name: "Frontend Bot", archived_at: null },
+    ];
     renderProjects(makeAdapter({ push }));
 
     expect(screen.getByText("Feishu sync Bot")).toBeInTheDocument();
-    await user.selectOptions(
-      within(projectRow()).getByRole("combobox", { name: "Agent Bot" }),
-      "installation-1",
-    );
+    expect(
+      within(projectRow()).getByRole("button", { name: "Agent Bot" }),
+    ).toHaveTextContent("No Bot");
+    const frontendBotOptions = within(projectRow()).getAllByRole("button", {
+      name: /Frontend Bot/,
+    });
+    await user.click(frontendBotOptions[frontendBotOptions.length - 1]!);
 
     expect(mocks.beginFeishuBinding).toHaveBeenCalledWith(
       { projectId: "project-1", installationId: "installation-1" },
@@ -329,6 +336,47 @@ describe("ProjectsPage compact row navigation", () => {
       }),
     );
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("shows the active Feishu Bot and does not bind it again", async () => {
+    const user = userEvent.setup();
+    mocks.installations = [
+      { id: "installation-1", agent_id: "agent-1", status: "active" },
+    ];
+    mocks.agents = [
+      { id: "agent-1", name: "Leader Bot", archived_at: null },
+    ];
+    mocks.projects = [
+      {
+        ...PROJECT,
+        feishu_sync: {
+          state: "active",
+          project_binding_id: "binding-1",
+          installation_id: "installation-1",
+          bot_name: "Leader Bot",
+          agent_id: "agent-1",
+          agent_name: "Leader Bot",
+          chat_id: "chat-1",
+          chat_name: "Project Group",
+          bound_issue_count: 0,
+          manual_unbound_issue_count: 0,
+          total_issue_count: 3,
+          pending_notification_count: 0,
+          last_synced_at: null,
+        },
+      },
+    ];
+    renderProjects();
+
+    expect(
+      within(projectRow()).getByRole("button", { name: "Agent Bot" }),
+    ).toHaveTextContent("Leader Bot");
+    const leaderBotOptions = within(projectRow()).getAllByRole("button", {
+      name: /Leader Bot/,
+    });
+    await user.click(leaderBotOptions[leaderBotOptions.length - 1]!);
+
+    expect(mocks.beginFeishuBinding).not.toHaveBeenCalled();
   });
 
   it("does not navigate when inline controls are clicked", async () => {
