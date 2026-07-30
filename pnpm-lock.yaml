@@ -3444,6 +3444,9 @@ importers:
 
   packages/cerebro-notes:
     dependencies:
+      '@floating-ui/dom':
+        specifier: ^1.7.6
+        version: 1.7.6
       '@multica/cerebro-artifacts':
         specifier: workspace:*
         version: link:../cerebro-artifacts
