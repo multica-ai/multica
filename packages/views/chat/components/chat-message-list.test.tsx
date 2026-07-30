@@ -20,16 +20,21 @@ vi.mock("react-virtuoso", () => ({
     computeItemKey,
     components,
     context,
+    atBottomStateChange,
   }: {
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
     components?: { Footer?: (p: { context?: unknown }) => ReactElement | null };
     context?: unknown;
+    atBottomStateChange?: (atBottom: boolean) => void;
   }) => {
     const Footer = components?.Footer;
     return (
       <div>
+        <button type="button" onClick={() => atBottomStateChange?.(false)}>
+          Simulate scroll away
+        </button>
         {data.map((item, i) => (
           <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
             {itemContent(i, item)}
@@ -89,6 +94,37 @@ function pushTaskMessage(qc: QueryClient, msg: TaskMessagePayload) {
 }
 
 describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
+  it("offers a one-click return to the latest message after the user scrolls up", async () => {
+    const qc = new QueryClient();
+    renderList(qc);
+
+    const scroller = document.querySelector<HTMLElement>("[data-tab-scroll-root]");
+    expect(scroller).not.toBeNull();
+    const scrollTo = vi.fn();
+    Object.defineProperties(scroller!, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    expect(
+      screen.queryByRole("button", { name: enChat.message_list.scroll_to_latest }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      screen.getByRole("button", { name: "Simulate scroll away" }).click();
+    });
+
+    const jumpButton = screen.getByRole("button", {
+      name: enChat.message_list.scroll_to_latest,
+    });
+    act(() => {
+      jumpButton.click();
+    });
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: "smooth" });
+  });
+
   // The live footer is passed to Virtuoso through `components`. If that prop
   // is rebuilt inline on render, every streamed task:message unmounts and
   // remounts the whole footer subtree — re-parsing all Markdown and rebuilding

@@ -61,6 +61,7 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "copy_failed_toast": "Copy failed",
+    "scroll_to_latest": "Scroll to latest message",
     "loading_older": "Loading older messages…"
   },
   "session_history": {

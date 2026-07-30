@@ -58,6 +58,7 @@
     "copy_action": "复制",
     "copied_toast": "已复制",
     "copy_failed_toast": "复制失败",
+    "scroll_to_latest": "滚动到最新消息",
     "loading_older": "正在加载更早的消息…"
   },
   "session_history": {
