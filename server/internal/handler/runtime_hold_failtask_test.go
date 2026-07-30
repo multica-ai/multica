@@ -70,7 +70,7 @@ func TestFailTaskSessionLimitHoldsRuntimeAndRetries(t *testing.T) {
 	// exercises the Classify("...session limit...resets...") == session_limit
 	// path that the detection block keys off.
 	const msg = "You've hit your session limit · resets 11:59pm (UTC)"
-	if _, err := svc.FailTask(ctx, parseUUID(taskID), msg, "", "", "", false); err != nil {
+	if _, err := svc.FailTask(ctx, parseUUID(taskID), msg, "", "", "", false, ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestFailTaskSessionLimitUnparseableResetDoesNotRetry(t *testing.T) {
 	// "session limit" + "reset" classifies as session_limit, but there is no
 	// "resets H:MM am/pm (UTC)" token for ParseSessionLimitResetTime to read.
 	const msg = "You've hit your session limit · reset time unavailable"
-	if _, err := svc.FailTask(ctx, parseUUID(taskID), msg, "", "", "", false); err != nil {
+	if _, err := svc.FailTask(ctx, parseUUID(taskID), msg, "", "", "", false, ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
