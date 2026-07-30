@@ -183,9 +183,17 @@ jobs:
         run: |
           echo "agentrunner_runtime_tag=${AGENTRUNNER_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
+  # agent-runtime-devserver bumps g2crowd/agentfarm at a DIFFERENT path than the
+  # server bump, so the reusable workflow's repo+path concurrency group does NOT
+  # serialize it against the server commits. It is chained after
+  # commit-to-gitops-web to avoid a concurrent push to the PR head branch, which
+  # the shared gitops-deploy workflow does not rebase/retry — the loser of that
+  # race is rejected non-fast-forward and fails the whole dev deploy. By the time
+  # the agentrunner image (last in the build chain) is ready, the server commits
+  # have long finished, so this dependency adds no real latency.
   commit-to-gitops-agent-runtime-devserver:
     if: contains(github.event.pull_request.labels.*.name, 'Development')
-    needs: [extract-agentrunner-runtime-tag]
+    needs: [extract-agentrunner-runtime-tag, commit-to-gitops-web]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
