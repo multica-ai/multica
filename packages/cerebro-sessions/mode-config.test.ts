@@ -23,7 +23,7 @@ describe("Mode configuration API schemas", () => {
         allowed_tools: ["graphify"],
         data_sources: ["Company Brain"],
         approval_policy: "require",
-        extra_skill_ids: ["skill-1"],
+        eval_ids: ["7e767171-6a19-41d5-b3e6-edfdc97eedf7"],
       },
       draft: null,
       versions: [{ id: "v2", version: "2", config: {}, description: "Safer Plan", created_at: "2026-07-15T08:00:00Z" }],
@@ -57,7 +57,7 @@ describe("Mode configuration API schemas", () => {
         allowed_tools: null,
         data_sources: null,
         approval_policy: "inherit",
-        extra_skill_ids: null,
+        eval_ids: null,
       },
       versions: [],
       updated_at: "2026-07-15T08:00:00Z",
@@ -67,10 +67,10 @@ describe("Mode configuration API schemas", () => {
     if (!result.success) return;
     expect(result.data.active.allowed_tools).toEqual([]);
     expect(result.data.active.data_sources).toEqual([]);
-    expect(result.data.active.extra_skill_ids).toEqual([]);
+    expect(result.data.active.eval_ids).toEqual([]);
   });
 
-  it("defaults the plan-write scope off when an older server omits it", () => {
+  it("defaults the evaluations list empty when an older server omits it", () => {
     const result = modeRecordSchema.safeParse({
       mode: "review",
       active_version: "1",
@@ -90,6 +90,6 @@ describe("Mode configuration API schemas", () => {
 
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.active.allows_plan_write).toBe(false);
+    expect(result.data.active.eval_ids).toEqual([]);
   });
 });

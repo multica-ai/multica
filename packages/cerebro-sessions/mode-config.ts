@@ -15,11 +15,10 @@ export interface ModeConfig {
   timeout_minutes: number;
   max_turns: number;
   allows_write: boolean;
-  allows_plan_write: boolean;
   allowed_tools: string[];
   data_sources: string[];
   approval_policy: ApprovalPolicy;
-  extra_skill_ids: string[];
+  eval_ids: string[];
 }
 
 export interface ModeVersion {
@@ -51,11 +50,10 @@ export const modeConfigSchema = z.object({
   timeout_minutes: z.number().default(30),
   max_turns: z.number().default(20),
   allows_write: z.boolean().default(false),
-  allows_plan_write: z.boolean().default(false),
   allowed_tools: nullableStringListSchema,
   data_sources: nullableStringListSchema,
   approval_policy: z.enum(["inherit", "require", "deny_external"]).default("inherit"),
-  extra_skill_ids: nullableStringListSchema,
+  eval_ids: nullableStringListSchema,
 }).loose();
 
 const modeVersionSchema = z.object({

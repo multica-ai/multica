@@ -908,6 +908,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroSessionModeStore := cerebrosessionmode.NewStore(pool)
 	cerebroSessionModeHandler := cerebrosessionmode.NewHandler(cerebroSessionModeStore) // CEREBRO-PATCH(session-mode-config): FIR-3111 Settings-managed version registry.
 	h.SessionModeProfiles = cerebroSessionModeStore
+	h.SessionModeEvalRunner = cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor) // CEREBRO-PATCH(session-mode-evals): FIR-4047 run a Mode's evaluations through the shared Run-now executor.
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
 	cerebroSavedFiltersHandler := cerebrosavedfilters.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance

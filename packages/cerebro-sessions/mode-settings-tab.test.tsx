@@ -6,9 +6,9 @@ import type { ModeConfig } from "./mode-config";
 const config: ModeConfig = {
   mode: "plan", version: "3", instruction: "Plan first", model: "gpt-5.4",
   thinking_level: "high", timeout_minutes: 30, max_turns: 20,
-  allows_write: false, allows_plan_write: true,
+  allows_write: false,
   allowed_tools: ["graphify"], data_sources: ["Company Brain"],
-  approval_policy: "require", extra_skill_ids: ["skill-1"],
+  approval_policy: "require", eval_ids: ["7e767171-6a19-41d5-b3e6-edfdc97eedf7"],
 };
 
 describe("ModeConfigEditor", () => {
@@ -21,10 +21,10 @@ describe("ModeConfigEditor", () => {
 
     expect(screen.getByLabelText("Instructions")).toHaveValue("Plan first");
     expect(screen.getByLabelText("Model")).toHaveValue("gpt-5.4");
-    expect(screen.getByText("Extra skills for this Mode")).toBeInTheDocument();
+    expect(screen.getByText("Evaluations for this Mode")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Core behavior" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Access and approvals" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Extra skills" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Evaluations" })).toBeInTheDocument();
     expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Use the new Plan contract" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ instruction: "Use the new Plan contract" }));
@@ -32,32 +32,28 @@ describe("ModeConfigEditor", () => {
     expect(onPublish).toHaveBeenCalledOnce();
   });
 
-  // FIR-4047: one write switch made Plan Mode unable to save the plan it was told to write.
-  it("separates saving plans from writing code, and locks plan writes on when writes are on", () => {
+  // FIR-4047: a Mode carries evaluations from the workspace eval catalog, not
+  // extra skills. The server runs them against the issue when the session ends.
+  it("picks evaluations from the workspace catalog and never offers extra skills", () => {
     const onChange = vi.fn();
-    const { unmount } = render(
-      <ModeConfigEditor config={config} onChange={onChange} onSave={() => undefined} onPublish={() => undefined} canManage />,
-    );
-
-    const planWrite = screen.getByRole("switch", { name: "Allow saving plans and notes" });
-    expect(planWrite).not.toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(planWrite);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ allows_plan_write: false }));
-    unmount();
-
     render(
       <ModeConfigEditor
-        config={{ ...config, allows_write: true, allows_plan_write: false }}
-        onChange={() => undefined}
+        config={{ ...config, eval_ids: [] }}
+        onChange={onChange}
         onSave={() => undefined}
         onPublish={() => undefined}
         canManage
+        evals={[{ id: "7e767171-6a19-41d5-b3e6-edfdc97eedf7", name: "Plan completeness", description: "active" }]}
       />,
     );
 
-    const lockedPlanWrite = screen.getByRole("switch", { name: "Allow saving plans and notes" });
-    expect(lockedPlanWrite).toHaveAttribute("aria-disabled", "true");
-    expect(lockedPlanWrite).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText("Extra skills")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Allow saving plans and notes" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ eval_ids: ["7e767171-6a19-41d5-b3e6-edfdc97eedf7"] }),
+    );
   });
 
   it("allows unlimited or large runtime limits and blocks negative values", () => {
@@ -136,7 +132,7 @@ describe("ModeConfigEditor", () => {
     );
 
     expect(screen.getByText("Balanced")).toBeInTheDocument();
-    expect(screen.getByLabelText("Search extra skills")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search evaluations")).toBeInTheDocument();
     expect(screen.getByText("Graphify")).toBeInTheDocument();
     expect(screen.getAllByText("Company Brain").length).toBeGreaterThan(0);
     expect(screen.queryByPlaceholderText("One tool key per line")).not.toBeInTheDocument();

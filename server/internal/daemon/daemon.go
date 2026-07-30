@@ -3676,8 +3676,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		SessionModeAllowedTools:          modeProfile.AllowedTools,
 		SessionModeDataSources:           modeProfile.DataSources,
 		SessionModeApprovalPolicy:        modeProfile.ApprovalPolicy,
-		SessionModePlanWrite:             modeProfile.AllowsPlanWrite, // CEREBRO-PATCH(session-mode-write-scopes): FIR-4047 carry the plan/note scope.
-		SessionModeExtraSkillIDs:         modeProfile.ExtraSkillIDs,
+		SessionModeEvalIDs:               modeProfile.EvalIDs, // CEREBRO-PATCH(session-mode-evals): FIR-4047 carry the Mode's evaluations into the brief.
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",

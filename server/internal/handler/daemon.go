@@ -1842,18 +1842,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("session mode profile resolution failed; using daemon defaults",
 					"workspace_id", resp.WorkspaceID, "mode", mode, "error", err)
 			} else {
-				resp.SessionModeConfig = &config
-				if resp.Agent != nil && h.TaskService != nil && len(config.ExtraSkillIDs) > 0 { // CEREBRO-PATCH(session-mode-extra-skills): FIR-4047 a Mode adds skills, it does not run checks.
-					existing := make(map[string]struct{}, len(resp.Agent.Skills))
-					for _, skill := range resp.Agent.Skills {
-						existing[skill.ID] = struct{}{}
-					}
-					for _, skill := range h.TaskService.LoadWorkspaceSkillsByID(r.Context(), parseUUID(resp.WorkspaceID), config.ExtraSkillIDs) {
-						if _, ok := existing[skill.ID]; !ok {
-							resp.Agent.Skills = append(resp.Agent.Skills, skill)
-						}
-					}
-				}
+				resp.SessionModeConfig = &config // CEREBRO-PATCH(session-mode-config): FIR-4047 a Mode carries evaluations, not skills, so nothing is merged into the agent here.
 			}
 		}
 	}
@@ -2369,6 +2358,8 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
+
+	h.runSessionModeEvals(r.Context(), workspaceID, task) // CEREBRO-PATCH(session-mode-evals): FIR-4047 run the Mode's evaluations against the issue.
 
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
