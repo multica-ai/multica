@@ -297,6 +297,7 @@
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
     "thread_nav_label": "스레드로 이동",
+    "thread_nav_resolved_label": "{{title}} (해결됨)",
     "sidebar_tooltip": "사이드바 열기/닫기",
     "find": {
       "placeholder": "이슈에서 찾기...",
@@ -397,6 +398,7 @@
       "resolve_with_comment_action": "이 댓글로 스레드 해결",
       "unresolve_action": "해결 취소",
       "resolution_badge": "해결",
+      "thread_resolved_badge": "해결됨",
       "collapse": "접기",
       "bar_other": "{{authors}}님의 해결된 댓글 {{count}}개",
       "fold_other": "{{authors}}님의 댓글 {{count}}개",

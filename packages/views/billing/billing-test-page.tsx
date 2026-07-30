@@ -398,7 +398,7 @@ function TierButton({
         {baseLine}
         {bonusLine}
       </div>
-      <div className="mt-1 font-mono text-micro text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.buy.tier_id, { id: tier.id })}
       </div>
     </button>
@@ -475,7 +475,7 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
       {row.description && (
         <div className="mt-1 text-caption text-muted-foreground">{row.description}</div>
       )}
-      <div className="mt-1 font-mono text-micro text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.transactions.row_meta, {
           date: formatDate(row.created_at, t),
           balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(),
@@ -631,7 +631,7 @@ function TopupRow({ row }: { row: BillingTopup }) {
               })}
         </span>
       </div>
-      <div className="mt-1 font-mono text-micro text-muted-foreground/70">
+      <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.topups.row_meta, {
           date: formatDate(row.created_at, t),
           checkout: row.stripe_checkout_id || t(($) => $.topups.stripe_empty),

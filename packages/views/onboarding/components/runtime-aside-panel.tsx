@@ -21,7 +21,7 @@ export function RuntimeAsidePanel() {
         <div className="mb-3 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
           {t(($) => $.runtime_aside.what_eyebrow)}
         </div>
-        <p className="text-body leading-[1.6] text-foreground/80">
+        <p className="text-body leading-[1.6] text-foreground">
           {t(($) => $.runtime_aside.what_prefix)}
           <strong className="font-medium text-foreground">{t(($) => $.runtime_aside.what_term)}</strong>
           {t(($) => $.runtime_aside.what_suffix)}

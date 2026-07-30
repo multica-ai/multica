@@ -181,7 +181,7 @@ export function SkillsTab({
                     <span
                       className={cn(
                         "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
-                        !enabled && "opacity-50",
+                        !enabled && "text-faint-foreground",
                       )}
                     >
                       <SkillIcon className="h-4 w-4" />

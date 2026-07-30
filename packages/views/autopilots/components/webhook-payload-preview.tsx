@@ -91,7 +91,7 @@ export function WebhookPayloadPreview({
           {event ?? t(($) => $.webhook_payload.unknown_event)}
         </code>
         {receivedAt && (
-          <span className="ml-auto shrink-0 text-muted-foreground/70">
+          <span className="ml-auto shrink-0 text-muted-foreground">
             {receivedAt}
           </span>
         )}
@@ -129,7 +129,7 @@ export function WebhookPayloadPreview({
           <pre className="max-h-64 overflow-auto bg-muted/40 px-3 py-2 text-caption font-mono leading-relaxed">
             {displayJSON}
             {isTruncated && (
-              <span className="block pt-2 text-muted-foreground/70">
+              <span className="block pt-2 text-muted-foreground">
                 {t(($) => $.webhook_payload.truncated_marker)}
               </span>
             )}

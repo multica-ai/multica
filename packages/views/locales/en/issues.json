@@ -300,6 +300,7 @@
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
+    "thread_nav_resolved_label": "{{title}} (resolved)",
     "sidebar_tooltip": "Toggle sidebar",
     "find": {
       "placeholder": "Find in issue...",
@@ -407,6 +408,7 @@
       "resolve_with_comment_action": "Resolve thread with comment",
       "unresolve_action": "Unresolve",
       "resolution_badge": "Resolution",
+      "thread_resolved_badge": "Resolved",
       "collapse": "Collapse",
       "bar_one": "{{count}} resolved comment from {{authors}}",
       "bar_other": "{{count}} resolved comments from {{authors}}",

@@ -110,7 +110,7 @@ export function InboxListItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
             <InboxDetailLabel item={item} />
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -125,7 +125,7 @@ export function InboxListItem({
                 hoverCard={false}
               />
             )}
-            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
               {timeAgo(item.created_at)}
             </span>
           </div>

@@ -188,7 +188,7 @@ function columnTrackVars(
 
 function ProgressRing({ project }: { project: Project }) {
   if (project.issue_count === 0) {
-    return <span className="text-caption text-muted-foreground/40">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const pct = Math.round((project.done_count / project.issue_count) * 100);
   return (

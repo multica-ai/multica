@@ -297,6 +297,7 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "thread_nav_label": "快速跳转到讨论",
+    "thread_nav_resolved_label": "{{title}}（已解决）",
     "sidebar_tooltip": "切换侧边栏",
     "find": {
       "placeholder": "在 issue 中查找...",
@@ -397,6 +398,7 @@
       "resolve_with_comment_action": "以此评论解决讨论",
       "unresolve_action": "重新打开",
       "resolution_badge": "结论",
+      "thread_resolved_badge": "已解决",
       "collapse": "收起",
       "bar_other": "来自 {{authors}} 的 {{count}} 条已解决评论",
       "fold_other": "来自 {{authors}} 的 {{count}} 条评论",

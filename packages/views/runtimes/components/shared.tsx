@@ -84,7 +84,7 @@ export function HealthIcon({
   className?: string;
 }) {
   if (health === "loading") {
-    return <Wifi className={`${className} text-muted-foreground/40`} />;
+    return <Wifi className={`${className} text-faint-foreground`} />;
   }
   const { Icon, tone } = HEALTH_ICON[health];
   return <Icon className={`${className} ${tone}`} />;

@@ -559,7 +559,7 @@ function MessageCopyButton({
           <Button
             variant="ghost"
             size="icon-xs"
-            className="text-muted-foreground/70 hover:text-foreground"
+            className="text-faint-foreground hover:text-foreground"
             onClick={handleCopy}
             aria-label={t(($) => $.message_list.copy_action)}
           />
@@ -597,7 +597,7 @@ function ElapsedCaption({
         ? t(($) => $.message_list.finished_in, { elapsed })
         : t(($) => $.message_list.failed_after, { elapsed });
   return (
-    <div className={cn("text-caption text-muted-foreground/80", className)}>
+    <div className={cn("text-caption text-muted-foreground", className)}>
       {text}
     </div>
   );
@@ -670,9 +670,9 @@ function FailureBubble({
        *  error. The icon + muted destructive text are signal enough,
        *  the rest stays in the normal reply rhythm. */}
       <div className="flex items-start gap-1.5 text-body">
-        <AlertTriangle className="size-3.5 shrink-0 text-destructive/80 mt-0.5" />
+        <AlertTriangle className="size-3.5 shrink-0 text-destructive mt-0.5" />
         <div className="flex-1 min-w-0">
-          <div className="text-destructive/90">{label}</div>
+          <div className="text-destructive">{label}</div>
           {rawError.trim() && (
             <Collapsible open={open} onOpenChange={setOpen}>
               <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
@@ -927,7 +927,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
-        <span className="text-muted-foreground/70 truncate">
+        <span className="text-muted-foreground truncate">
           {labelPrefix}{preview}
         </span>
       </CollapsibleTrigger>
@@ -950,7 +950,7 @@ function ThinkingRow({ item }: { item: ChatTimelineItem }) {
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
-        <Brain className="h-3 w-3 shrink-0 text-muted-foreground/60 mt-0.5" />
+        <Brain className="h-3 w-3 shrink-0 text-faint-foreground mt-0.5" />
         <span className="text-muted-foreground italic truncate">{preview}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>

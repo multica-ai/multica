@@ -390,7 +390,7 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
   if (usage.length === 0) {
     return (
       <div className="w-full text-right">
-        <span className="text-caption text-muted-foreground/50">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </div>
     );
   }
@@ -451,7 +451,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
     const command = pendingRuntimeCommandName(runtime);
     if (!command) {
       return (
-        <span className="text-caption text-muted-foreground/50">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.list.pending_cli_unknown)}
         </span>
       );
@@ -469,7 +469,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   }
 
   if (runtime.runtime_mode === "cloud") {
-    return <span className="text-caption text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const meta = runtime.metadata as Record<string, unknown> | null;
   // `version` is the agent's own underlying CLI tool version — distinct per
@@ -483,7 +483,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
     meta && typeof meta.version === "string" ? meta.version : null;
 
   if (!version) {
-    return <span className="text-caption text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
 
   return (
@@ -500,7 +500,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
 // surfaces AgentProfileCard.
 function AgentStack({ agentIds }: { agentIds: string[] }) {
   if (agentIds.length === 0) {
-    return <span className="text-caption text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const visible = agentIds.slice(0, 3);
   const extra = agentIds.length - visible.length;
@@ -774,7 +774,7 @@ export function RuntimeList({
                       </span>
                     </>
                   ) : (
-                    <span className="text-caption text-muted-foreground/50">—</span>
+                    <span className="text-caption text-faint-foreground">—</span>
                   )}
                 </ListGridCell>
               ) : (
@@ -786,7 +786,7 @@ export function RuntimeList({
               <ListGridCell className="hidden @2xl:flex">
                 {pending ? (
                   <div className="w-full text-right">
-                    <span className="text-caption text-muted-foreground/50">—</span>
+                    <span className="text-caption text-faint-foreground">—</span>
                   </div>
                 ) : (
                   <CostCell runtimeId={row.runtime.id} />

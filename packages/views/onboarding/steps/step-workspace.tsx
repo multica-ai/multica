@@ -326,7 +326,7 @@ export function StepWorkspace({
                   ? t(($) => $.step_workspace.headline_first)
                   : t(($) => $.step_workspace.creation_disabled_headline)}
             </h1>
-            <p className="mt-4 text-body-lg leading-[1.55] text-foreground/80">
+            <p className="mt-4 text-body-lg leading-[1.55] text-foreground">
               {reusing
                 ? workspaceCreationAllowed
                   ? t(($) => $.step_workspace.lede_resume)
@@ -591,7 +591,7 @@ function WorkspacePreviewCard({
         </div>
         <Lock
           aria-hidden
-          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+          className="h-3.5 w-3.5 shrink-0 text-faint-foreground"
         />
       </div>
       <div className="flex flex-col">
@@ -659,7 +659,7 @@ function EntityRow({
         aria-hidden
         className={cn(
           "shrink-0",
-          dim ? "text-muted-foreground/60" : "text-muted-foreground",
+          dim ? "text-faint-foreground" : "text-muted-foreground",
         )}
       >
         {icon}
@@ -675,7 +675,7 @@ function EntityRow({
       <span
         className={cn(
           "font-mono text-micro",
-          dim ? "text-muted-foreground/70" : "text-muted-foreground",
+          dim ? "text-muted-foreground" : "text-muted-foreground",
         )}
       >
         {meta}
@@ -691,7 +691,7 @@ function PerkRow({ children }: { children: ReactNode }) {
         aria-hidden
         className="mt-[11px] h-px w-3 shrink-0 bg-muted-foreground/40"
       />
-      <div className="text-label leading-[1.55] text-foreground/85">
+      <div className="text-label leading-[1.55] text-foreground">
         {children}
       </div>
     </div>

@@ -368,7 +368,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       >
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="px-3 py-2 text-micro font-semibold uppercase tracking-wide text-muted-foreground/80">
+            <div className="px-3 py-2 text-micro font-semibold uppercase tracking-wide text-muted-foreground">
               {groupLabel(group.label)}
             </div>
             {renderRows(group)}

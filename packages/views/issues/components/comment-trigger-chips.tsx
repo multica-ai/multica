@@ -252,7 +252,6 @@ function SingleTriggerChip({
               // Sidebar-style resting state: muted until hover so the strip
               // reads as metadata, not content (see app-sidebar nav items).
               "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground",
-              suppressed && "opacity-60",
             )}
           >
             <TriggerAgentAvatar agent={agent} suppressed={suppressed} />
@@ -303,7 +302,6 @@ function MultiTriggerChip({
           type="button"
           className={cn(
             "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
-            activeCount === 0 && "opacity-60",
           )}
         />
       }
@@ -369,7 +367,6 @@ function MultiTriggerChip({
                       onClick={() => onToggle(agent.id)}
                       className={cn(
                         "flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted",
-                        suppressed && "opacity-60",
                       )}
                     >
                       <TriggerAgentAvatar agent={agent} suppressed={suppressed} />

@@ -117,7 +117,7 @@
       "origin_clawhub": "가져옴 · ClawHub",
       "origin_skills_sh": "가져옴 · Skills.sh",
       "origin_github": "가져옴 · GitHub",
-      "origin_workspace": "워크스페이스"
+      "origin_workspace": "직접 생성"
     },
     "conflict_banner": {
       "title": "다른 사람이 이 스킬을 업데이트했습니다",

@@ -234,7 +234,7 @@ export function AgentListToolbar({
               onClick={() => onScopeChange(s)}
             >
               {SCOPE_LABELS[s]}
-              <span className="tabular-nums text-caption text-muted-foreground/70">
+              <span className="tabular-nums text-caption text-muted-foreground">
                 {scopeCounts[s]}
               </span>
             </Button>
@@ -262,7 +262,7 @@ export function AgentListToolbar({
               {AGENT_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-caption text-muted-foreground/70">
+                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>

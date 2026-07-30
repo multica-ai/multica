@@ -159,7 +159,7 @@ export function LabelsTab() {
             </div>
           ) : filteredLabels.length === 0 ? (
             <div className="px-4 py-12 text-center">
-              <Tag className="mx-auto size-6 text-muted-foreground/60" />
+              <Tag className="mx-auto size-6 text-faint-foreground" />
               <p className="mt-3 text-body font-medium">
                 {query
                   ? t(($) => $.labels.no_results)

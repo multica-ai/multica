@@ -394,7 +394,7 @@ export function InboxPage() {
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate">{t(($) => $.list.archived_title)}</span>
-      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
         {archivedItems.length}
       </span>
     </button>
@@ -403,7 +403,7 @@ export function InboxPage() {
   const list = archivedError && isArchivedView ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Archive className="mb-3 h-8 w-8 text-muted-foreground/50" />
+        <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
         <p className="text-body">{t(($) => $.errors.archived_load_failed)}</p>
       </div>
     </div>
@@ -458,7 +458,7 @@ export function InboxPage() {
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
       </p>
       {selected.body && (
-        <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground/80">
+        <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {selected.body}
         </div>
       )}
@@ -618,7 +618,7 @@ export function InboxPage() {
       <div className="flex flex-col min-h-0 h-full">
         {detailContent ?? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+            <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
             <p className="text-body">
               {visibleItems.length === 0
                 ? t(($) => $.detail.empty)

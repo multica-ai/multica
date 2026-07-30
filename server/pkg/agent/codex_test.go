@@ -735,6 +735,37 @@ func TestCodexFirstTurnProgressActivity(t *testing.T) {
 	}
 }
 
+// TestCodexFirstTurnNoProgressTimeoutClamp pins both halves of the first-turn
+// window: the 60s ceiling that a healthy gpt-5.5 turn has to fit under
+// (MUL-5542), and the fact that the configured semantic inactivity timeout can
+// only ever shrink it, never raise it. The second half is easy to misread as a
+// knob for the ceiling — it is not, and GH #5959 proposed removing the ceiling
+// entirely on that reading.
+func TestCodexFirstTurnNoProgressTimeoutClamp(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		semantic time.Duration
+		want     time.Duration
+	}{
+		{name: "unset falls back to the ceiling", semantic: 0, want: 60 * time.Second},
+		{name: "negative falls back to the ceiling", semantic: -1 * time.Second, want: 60 * time.Second},
+		{name: "default 10m is capped at the ceiling", semantic: 10 * time.Minute, want: 60 * time.Second},
+		{name: "raising semantic cannot raise the ceiling", semantic: 2 * time.Minute, want: 60 * time.Second},
+		{name: "equal to the ceiling scales to 4/5", semantic: 60 * time.Second, want: 48 * time.Second},
+		{name: "below the ceiling scales to 4/5", semantic: 30 * time.Second, want: 24 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s) = %s, want %s", tc.semantic, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCodexSetTurnErrorFirstWins(t *testing.T) {
 	t.Parallel()
 

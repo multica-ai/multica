@@ -430,6 +430,7 @@ function DetailHeader({
               actorId={agent.id}
               size="2xl"
               profileLink={false}
+              showRuntimeBadge
               className="ring-1 ring-border"
             />
             <div className="min-w-0 pt-0.5">

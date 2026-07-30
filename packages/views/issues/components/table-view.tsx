@@ -432,7 +432,7 @@ function SortableColumnHeader({
           type="button"
           aria-label={reorderLabel}
           className={cn(
-            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground/50 opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
+            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
             isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
           )}
           {...attributes}
@@ -768,7 +768,7 @@ export function InlineTitle({
             <button
               type="button"
               aria-label={createSubIssueLabel}
-              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 onCreateSubIssue();
@@ -779,7 +779,7 @@ export function InlineTitle({
             <button
               type="button"
               aria-label={renameLabel}
-              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 setDraft(row.issue.title);

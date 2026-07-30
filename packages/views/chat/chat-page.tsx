@@ -342,7 +342,7 @@ export function ChatPage() {
             conversation
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-              <MessageSquare className="h-10 w-10 text-muted-foreground/30" />
+              <MessageSquare className="h-10 w-10 text-faint-foreground" />
               <p className="text-body">{t(($) => $.page.select_prompt)}</p>
             </div>
           )}
