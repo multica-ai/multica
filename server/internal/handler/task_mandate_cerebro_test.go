@@ -30,6 +30,9 @@ func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1`, issueID)
 	})
 	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("clear seeded task mandate: %v", err)
+	}
 	expiresAt := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
 	if _, err := testPool.Exec(context.Background(), `
 		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)

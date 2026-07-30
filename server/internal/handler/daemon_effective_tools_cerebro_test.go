@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -274,6 +275,29 @@ func TestCerebroEffectiveToolsForClaimIncludesAllowedPlatformTools(t *testing.T)
 		if !containsString(mandate, want) {
 			t.Errorf("claim mandate = %v, want allowed platform tool %q", mandate, want)
 		}
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimUsesCanonicalIssueActionMandateKeys(t *testing.T) {
+	wants := []string{"create_issue", "update_issue", "add_comment"}
+	rows := make([]RuntimeToolEffectiveAccessView, 0, len(wants))
+	for _, name := range wants {
+		rows = append(rows, exposedToolView(name, "platform", "", "Issue action", "allow", true))
+	}
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: rows}}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	if !slices.Equal(wants, mandate) {
+		t.Fatalf("canonical issue action mandate keys = %v, want %v", mandate, wants)
 	}
 }
 

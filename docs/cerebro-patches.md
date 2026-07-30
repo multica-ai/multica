@@ -1700,6 +1700,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `handler-test-platform-action-gate` | `server/internal/handler/handler_test.go` | Wire the real floor into shared REST and Workspace MCP tests. |
 | `create-issue-permission-skill` | `server/internal/service/builtin_skills/multica-working-on-issues/SKILL.md` | Document Allow, Ask and Deny behavior for agents. |
 | `create-issue-permission-source-map` | `server/internal/service/builtin_skills/multica-working-on-issues/references/working-on-issues-source-map.md` | Link skill guidance to enforcement sources. |
+| `issue-update-platform-action` | `server/internal/handler/issue.go` | FIR-4076 keeps the upstream update handler unchanged except for one pre-mutation call into the Cerebro-owned Task Mandate + Permissions gate. |
+| `comment-create-platform-action` | `server/internal/handler/comment.go` | FIR-4076 keeps the upstream comment handler unchanged except for one pre-mutation call into the same Cerebro-owned gate. |
 
 Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7ad6198f15bf`.
 

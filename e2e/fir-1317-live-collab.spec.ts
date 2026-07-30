@@ -49,10 +49,13 @@ async function openNoteAs(
 
 /** The editor body as one string, used for the convergence assertion. */
 async function bodyText(page: Page): Promise<string> {
-  return (await page.locator('[contenteditable="true"]').first().innerText()).replace(
-    /\s+/g,
-    " ",
-  );
+  return await page.locator(".rich-text-editor").evaluate((root) => {
+    const clone = root.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(".cerebro-remote-caret").forEach((node) => {
+      node.remove();
+    });
+    return (clone.textContent ?? "").replace(/\s+/g, " ").trim();
+  });
 }
 
 test.describe("FIR-1317 live co-editing", () => {

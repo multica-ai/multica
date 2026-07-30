@@ -112,7 +112,7 @@ host conditions, workspace membership, target scope, self-target protection,
 and credential checks remain independent safety intersections; they do not
 select a second permission resolver for the same key.
 
-### Create issue is an always-on platform action
+### Issue writes are always-on platform actions
 
 `create_issue` is enforced before mutation for authoritative agent/task actors
 by `server/internal/cerebro/platformaction` on REST/CLI, workspace HTTP MCP, and
@@ -141,6 +141,14 @@ either `cerebro_approvals` or `cerebro_approval_gate` is enabled: navigation,
 inline query and realtime subscriptions use that same combined condition. This
 prevents an active Ask gate from hiding the human decision path. Neither flag
 disables the server permission floor.
+
+`update_issue` and `add_comment` use the same pre-mutation intersection on
+task-token REST routes: the immutable Task Mandate must contain the canonical
+platform action, the current Permissions decision must admit it, and
+`AllowTaskScopeForIssue` must still bind the URL target to the task's issue.
+A missing/expired mandate or absent capability returns `task_mandate_denied`;
+a Permissions Deny returns `platform_action_denied`. Human member calls are
+unchanged.
 
 > **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
 > gate IS deciding a call (question 1), a workspace uses the

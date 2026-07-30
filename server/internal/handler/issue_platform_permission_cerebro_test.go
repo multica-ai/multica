@@ -7,15 +7,21 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-const createIssuePermissionToolKey = "create_issue"
+const (
+	createIssuePermissionToolKey = "create_issue"
+	updateIssuePermissionToolKey = "update_issue"
+	addCommentPermissionToolKey  = "add_comment"
+)
 
-func setCreateIssueWorkspacePolicy(t *testing.T, setting toolpolicy.Setting) {
+func setPlatformActionWorkspacePolicy(t *testing.T, toolKey string, setting toolpolicy.Setting) {
 	t.Helper()
 	ctx := context.Background()
 	workspaceID, err := util.ParseUUID(testWorkspaceID)
@@ -23,20 +29,51 @@ func setCreateIssueWorkspacePolicy(t *testing.T, setting toolpolicy.Setting) {
 		t.Fatalf("parse workspace id: %v", err)
 	}
 	store := toolpolicy.NewStore(testPool)
-	if _, err := testPool.Exec(ctx, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = $2`, workspaceID, createIssuePermissionToolKey); err != nil {
-		t.Fatalf("clear create_issue policy: %v", err)
+	if _, err := testPool.Exec(ctx, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = $2`, workspaceID, toolKey); err != nil {
+		t.Fatalf("clear %s policy: %v", toolKey, err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = $2`, workspaceID, createIssuePermissionToolKey)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = $2`, workspaceID, toolKey)
 	})
 	if _, err := store.Set(ctx, toolpolicy.SetParams{
 		WorkspaceID: workspaceID,
-		ToolKey:     createIssuePermissionToolKey,
+		ToolKey:     toolKey,
 		Layer:       toolpolicy.LayerWorkspace,
 		SubjectID:   workspaceID,
 		Setting:     setting,
 	}); err != nil {
-		t.Fatalf("set create_issue workspace policy: %v", err)
+		t.Fatalf("set %s workspace policy: %v", toolKey, err)
+	}
+}
+
+func setCreateIssueWorkspacePolicy(t *testing.T, setting toolpolicy.Setting) {
+	t.Helper()
+	setPlatformActionWorkspacePolicy(t, createIssuePermissionToolKey, setting)
+}
+
+func issuePlatformActionMandate(t *testing.T, taskID, agentID string, actions ...string) {
+	t.Helper()
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		t.Fatalf("parse task id: %v", err)
+	}
+	workspaceUUID, err := util.ParseUUID(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("parse workspace id: %v", err)
+	}
+	agentUUID, err := util.ParseUUID(agentID)
+	if err != nil {
+		t.Fatalf("parse agent id: %v", err)
+	}
+	if err := taskmandate.NewStore(testPool).Issue(
+		context.Background(),
+		taskUUID,
+		workspaceUUID,
+		agentUUID,
+		actions,
+		time.Now().Add(time.Hour),
+	); err != nil {
+		t.Fatalf("issue task mandate: %v", err)
 	}
 }
 
@@ -60,11 +97,24 @@ func agentCreateIssueRequest(t *testing.T, title string, parentID string) *http.
 	t.Helper()
 	agentID := createHandlerTestAgent(t, "create-issue-permission-"+uuid.NewString(), []byte(`{}`))
 	taskID := createHandlerTestTaskForAgent(t, agentID)
+	issuePlatformActionMandate(t, taskID, agentID, createIssuePermissionToolKey)
 	body := map[string]any{"title": title, "allow_duplicate": true}
 	if parentID != "" {
 		body["parent_issue_id"] = parentID
 	}
 	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, body)
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	return req
+}
+
+func agentIssueActionRequest(t *testing.T, method, issueID string, body map[string]any, actions ...string) *http.Request {
+	t.Helper()
+	agentID := createHandlerTestAgent(t, "issue-action-permission-"+uuid.NewString(), []byte(`{}`))
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+	issuePlatformActionMandate(t, taskID, agentID, actions...)
+	req := withURLParam(newRequest(method, "/api/issues/"+issueID, body), "id", issueID)
 	req.Header.Set("X-Actor-Source", "task_token")
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
@@ -104,6 +154,135 @@ func TestCreateIssuePermission_RESTDenyBlocksAgentIssueWithoutMutation(t *testin
 	if got := issueCountByTitle(t, title); got != 0 {
 		t.Fatalf("REST agent create under Workspace Deny mutated %d issue rows, want 0", got)
 	}
+}
+
+func TestCreateIssuePermission_RESTTaskMandateDenyBlocksBeforeMutation(t *testing.T) {
+	setCreateIssueWorkspacePolicy(t, toolpolicy.SettingAllow)
+	title := "REST mandate denied issue " + uuid.NewString()
+	cleanupIssuesByTitle(t, title)
+
+	agentID := createHandlerTestAgent(t, "create-issue-mandate-"+uuid.NewString(), []byte(`{}`))
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+	issuePlatformActionMandate(t, taskID, agentID)
+	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": title, "allow_duplicate": true,
+	})
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, req)
+
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "task_mandate_denied") {
+		t.Fatalf("REST agent create outside Task Mandate: status=%d body=%s, want 403 task_mandate_denied", w.Code, w.Body.String())
+	}
+	if got := issueCountByTitle(t, title); got != 0 {
+		t.Fatalf("REST agent create outside Task Mandate mutated %d issue rows, want 0", got)
+	}
+}
+
+func TestUpdateIssuePermission_TaskMandateAndPermissionsBothRequired(t *testing.T) {
+	issueID := createPermissionTestParent(t)
+	var originalTitle string
+	if err := testPool.QueryRow(context.Background(), `SELECT title FROM issue WHERE id = $1`, issueID).Scan(&originalTitle); err != nil {
+		t.Fatalf("load original issue title: %v", err)
+	}
+
+	t.Run("Task Mandate denies before mutation", func(t *testing.T) {
+		setPlatformActionWorkspacePolicy(t, updateIssuePermissionToolKey, toolpolicy.SettingAllow)
+		req := agentIssueActionRequest(t, http.MethodPut, issueID, map[string]any{"title": "mandate must block"})
+		w := httptest.NewRecorder()
+		testHandler.UpdateIssue(w, req)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "task_mandate_denied") {
+			t.Fatalf("update outside Task Mandate: status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("Permissions deny before mutation", func(t *testing.T) {
+		setPlatformActionWorkspacePolicy(t, updateIssuePermissionToolKey, toolpolicy.SettingDeny)
+		req := agentIssueActionRequest(t, http.MethodPut, issueID, map[string]any{"title": "permission must block"}, updateIssuePermissionToolKey)
+		w := httptest.NewRecorder()
+		testHandler.UpdateIssue(w, req)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "platform_action_denied") {
+			t.Fatalf("update denied by Permissions: status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	var title string
+	if err := testPool.QueryRow(context.Background(), `SELECT title FROM issue WHERE id = $1`, issueID).Scan(&title); err != nil {
+		t.Fatalf("load issue title: %v", err)
+	}
+	if title != originalTitle {
+		t.Fatalf("denied updates changed title from %q to %q", originalTitle, title)
+	}
+
+	t.Run("Task Mandate and Permissions allow mutation", func(t *testing.T) {
+		setPlatformActionWorkspacePolicy(t, updateIssuePermissionToolKey, toolpolicy.SettingAllow)
+		allowedTitle := "allowed update " + uuid.NewString()
+		req := agentIssueActionRequest(t, http.MethodPut, issueID, map[string]any{"title": allowedTitle}, updateIssuePermissionToolKey)
+		w := httptest.NewRecorder()
+		testHandler.UpdateIssue(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("allowed update: status=%d body=%s", w.Code, w.Body.String())
+		}
+		if err := testPool.QueryRow(context.Background(), `SELECT title FROM issue WHERE id = $1`, issueID).Scan(&title); err != nil {
+			t.Fatalf("load allowed issue title: %v", err)
+		}
+		if title != allowedTitle {
+			t.Fatalf("allowed update title=%q, want %q", title, allowedTitle)
+		}
+	})
+}
+
+func TestCreateCommentPermission_TaskMandateAndPermissionsBothRequired(t *testing.T) {
+	issueID := createPermissionTestParent(t)
+
+	t.Run("Task Mandate denies before mutation", func(t *testing.T) {
+		setPlatformActionWorkspacePolicy(t, addCommentPermissionToolKey, toolpolicy.SettingAllow)
+		req := agentIssueActionRequest(t, http.MethodPost, issueID, map[string]any{"content": "mandate must block"})
+		w := httptest.NewRecorder()
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "task_mandate_denied") {
+			t.Fatalf("comment outside Task Mandate: status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("Permissions deny before mutation", func(t *testing.T) {
+		setPlatformActionWorkspacePolicy(t, addCommentPermissionToolKey, toolpolicy.SettingDeny)
+		req := agentIssueActionRequest(t, http.MethodPost, issueID, map[string]any{"content": "permission must block"}, addCommentPermissionToolKey)
+		w := httptest.NewRecorder()
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "platform_action_denied") {
+			t.Fatalf("comment denied by Permissions: status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `SELECT COUNT(*) FROM comment WHERE issue_id = $1 AND content IN ($2, $3)`,
+		issueID, "mandate must block", "permission must block").Scan(&count); err != nil {
+		t.Fatalf("count denied comments: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("denied comment actions created %d rows, want 0", count)
+	}
+
+	t.Run("Task Mandate and Permissions allow mutation", func(t *testing.T) {
+		setPlatformActionWorkspacePolicy(t, addCommentPermissionToolKey, toolpolicy.SettingAllow)
+		content := "allowed comment " + uuid.NewString()
+		req := agentIssueActionRequest(t, http.MethodPost, issueID, map[string]any{"content": content}, addCommentPermissionToolKey)
+		w := httptest.NewRecorder()
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("allowed comment: status=%d body=%s", w.Code, w.Body.String())
+		}
+		if err := testPool.QueryRow(context.Background(), `SELECT COUNT(*) FROM comment WHERE issue_id = $1 AND content = $2`, issueID, content).Scan(&count); err != nil {
+			t.Fatalf("count allowed comment: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("allowed comment created %d rows, want 1", count)
+		}
+	})
 }
 
 func TestCreateIssuePermission_RESTDenyBlocksAgentSubIssueWithoutMutation(t *testing.T) {
