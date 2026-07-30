@@ -30,6 +30,9 @@ const TERMINOLOGY = {
   strategy_map: "Strategy Map",
 } as const;
 
+/** A cold dev-server route can take far longer to appear than a built one. */
+const FIRST_PAINT = 30000;
+
 const OS_PAGES = [
   { route: "rocks", navLabel: "Rocks", title: TERMINOLOGY.rocks },
   { route: "strategy", navLabel: "Strategy", title: TERMINOLOGY.strategy_map },
@@ -63,7 +66,9 @@ test.describe("Cerebro operating system page shell", () => {
       // The name must be the page's own top-line heading, not a sidebar link
       // that every operating-system page renders identically.
       const header = page.getByRole("heading", { name: title, exact: true, level: 1 });
-      await expect(header, `${route} must show its own page header`).toBeVisible();
+      // FIRST_PAINT covers a dev server compiling this route on its first hit;
+      // CI serves a production build, where it resolves immediately.
+      await expect(header, `${route} must show its own page header`).toBeVisible({ timeout: FIRST_PAINT });
       await expect(header).toBeInViewport();
       // The header also carries the phone-width sidebar trigger, which is the
       // other half of item 5 — without it a phone cannot reach navigation.
@@ -83,7 +88,7 @@ test.describe("Cerebro operating system page shell", () => {
       await page.setViewportSize({ width: 1280, height: 600 });
       await gotoOsPage(page, `/${slug}/org-chart`);
       const heading = page.getByRole("heading", { name: "Roles", exact: true, level: 1 });
-      await expect(heading).toBeVisible();
+      await expect(heading).toBeVisible({ timeout: FIRST_PAINT });
       await expect(page.getByText("Seat 1", { exact: true }).first()).toBeVisible();
 
       const shell = await readShellBody(page);
@@ -109,7 +114,7 @@ test.describe("Cerebro operating system page shell", () => {
     await gotoOsPage(page, `/${slug}/rocks`);
 
     const settings = page.getByRole("link", { name: "Settings", exact: true });
-    await expect(settings).toHaveCount(1);
+    await expect(settings).toHaveCount(1, { timeout: FIRST_PAINT });
     await settings.scrollIntoViewIfNeeded();
     await expect(settings).toBeInViewport();
 
