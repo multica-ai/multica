@@ -13,6 +13,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 const (
@@ -76,17 +78,33 @@ func (w *ProjectIssueSyncWorker) ProcessOnce(ctx context.Context) error {
 }
 
 type projectNotificationPayload struct {
-	IssueID        string `json:"issue_id"`
-	Number         int32  `json:"number"`
-	Title          string `json:"title"`
-	Status         string `json:"status"`
-	PreviousStatus string `json:"previous_status"`
-	IssueStatus    string `json:"issue_status"`
-	TaskID         string `json:"task_id"`
-	AgentID        string `json:"agent_id"`
-	Reason         string `json:"reason"`
-	Backfill       bool   `json:"backfill"`
-	OccurredAt     string `json:"occurred_at"`
+	IssueID               string          `json:"issue_id"`
+	Number                int32           `json:"number"`
+	Title                 string          `json:"title"`
+	Status                string          `json:"status"`
+	PreviousStatus        string          `json:"previous_status"`
+	IssueStatus           string          `json:"issue_status"`
+	TaskID                string          `json:"task_id"`
+	AgentID               string          `json:"agent_id"`
+	TaskStatus            string          `json:"task_status"`
+	Reason                string          `json:"reason"`
+	Result                json.RawMessage `json:"result"`
+	CommentID             string          `json:"comment_id"`
+	CommentType           string          `json:"comment_type"`
+	AuthorType            string          `json:"author_type"`
+	AuthorID              string          `json:"author_id"`
+	Content               string          `json:"content"`
+	PreviousContent       string          `json:"previous_content"`
+	AssigneeType          string          `json:"assignee_type"`
+	AssigneeID            string          `json:"assignee_id"`
+	PreviousAssigneeType  string          `json:"previous_assignee_type"`
+	PreviousAssigneeID    string          `json:"previous_assignee_id"`
+	Priority              string          `json:"priority"`
+	PreviousPriority      string          `json:"previous_priority"`
+	BlockedReason         any             `json:"blocked_reason"`
+	PreviousBlockedReason any             `json:"previous_blocked_reason"`
+	Backfill              bool            `json:"backfill"`
+	OccurredAt            string          `json:"occurred_at"`
 }
 
 func (w *ProjectIssueSyncWorker) processItem(ctx context.Context, item ChannelNotificationOutbox) error {
@@ -266,19 +284,37 @@ func (w *ProjectIssueSyncWorker) renderIssueCreated(ctx context.Context, issue d
 
 func (w *ProjectIssueSyncWorker) renderNotification(ctx context.Context, item ChannelNotificationOutbox, issue db.Issue, payload projectNotificationPayload) (string, error) {
 	identifier := w.sync.issueIdentifier(ctx, issue)
+	taskID := safeTaskID(payload.TaskID, item.TaskID)
+	agentName := w.actorName(ctx, "agent", payload.AgentID)
 	switch item.EventType {
 	case "issue_created":
 		return w.renderIssueCreated(ctx, issue), nil
 	case "issue_status_changed":
 		return fmt.Sprintf("🔄 %s status updated\n%s → %s", identifier, payload.PreviousStatus, payload.Status), nil
+	case "comment_created":
+		return fmt.Sprintf("💬 %s comment by %s\n%s", identifier, w.actorName(ctx, payload.AuthorType, payload.AuthorID), safeNotificationText(payload.Content, 1200)), nil
+	case "comment_updated":
+		return fmt.Sprintf("✏️ %s comment updated by %s\n%s", identifier, w.actorName(ctx, payload.AuthorType, payload.AuthorID), safeNotificationText(payload.Content, 1200)), nil
+	case "task_started":
+		return fmt.Sprintf("▶️ %s execution started\nAgent: %s\nTask: %s", identifier, agentName, taskID), nil
+	case "task_completed", "completed":
+		return fmt.Sprintf("✅ %s execution completed\nAgent: %s\nTask: %s\nCurrent Issue status: %s", identifier, agentName, taskID, issue.Status), nil
+	case "task_result":
+		return fmt.Sprintf("📋 %s execution result\nAgent: %s\nTask: %s\n%s", identifier, agentName, taskID, safeTaskResult(payload.Result)), nil
 	case "task_failed":
-		text := fmt.Sprintf("🔴 %s execution failed\nTask: %s\nReason: %s", identifier, safeTaskID(payload.TaskID, item.TaskID), safeFailureReason(payload.Reason))
+		text := fmt.Sprintf("🔴 %s execution failed\nAgent: %s\nTask: %s\nReason: %s", identifier, agentName, taskID, safeFailureReason(payload.Reason))
 		if w.sync.appURL != "" {
 			text += "\nView: " + w.sync.appURL + "/issues/" + util.UUIDToString(issue.ID)
 		}
 		return text, nil
 	case "task_cancelled":
-		return fmt.Sprintf("⏹ %s execution stopped\nTask: %s\nCurrent Issue status: %s", identifier, safeTaskID(payload.TaskID, item.TaskID), issue.Status), nil
+		return fmt.Sprintf("⏹ %s execution stopped\nAgent: %s\nTask: %s\nCurrent Issue status: %s", identifier, agentName, taskID, issue.Status), nil
+	case "assignee_changed":
+		return fmt.Sprintf("👤 %s assignee updated\n%s → %s", identifier, w.assigneeName(ctx, payload.PreviousAssigneeType, payload.PreviousAssigneeID), w.assigneeName(ctx, payload.AssigneeType, payload.AssigneeID)), nil
+	case "priority_changed":
+		return fmt.Sprintf("🔺 %s priority updated\n%s → %s", identifier, safeScalar(payload.PreviousPriority), safeScalar(payload.Priority)), nil
+	case "blocked_reason_changed":
+		return fmt.Sprintf("🚧 %s blocked reason updated\n%s → %s", identifier, safeScalar(payload.PreviousBlockedReason), safeScalar(payload.BlockedReason)), nil
 	default:
 		return "", permanentSyncError{"unsupported_event_type"}
 	}
@@ -327,6 +363,104 @@ func projectSyncRetryDelay(attempt int32) time.Duration {
 	}
 }
 
+func (w *ProjectIssueSyncWorker) actorName(ctx context.Context, actorType, actorID string) string {
+	id, err := util.ParseUUID(strings.TrimSpace(actorID))
+	if err != nil {
+		if actorType == "" {
+			return "Unknown actor"
+		}
+		return actorType
+	}
+	switch actorType {
+	case "agent":
+		if agent, err := w.sync.queries.GetAgent(ctx, id); err == nil && strings.TrimSpace(agent.Name) != "" {
+			return agent.Name
+		}
+	case "member":
+		if user, err := w.sync.queries.GetUser(ctx, id); err == nil && strings.TrimSpace(user.Name) != "" {
+			return user.Name
+		}
+	}
+	if actorType == "" {
+		actorType = "actor"
+	}
+	return actorType + " " + shortUUID(actorID)
+}
+
+func (w *ProjectIssueSyncWorker) assigneeName(ctx context.Context, assigneeType, assigneeID string) string {
+	if strings.TrimSpace(assigneeID) == "" {
+		return "Unassigned"
+	}
+	id, err := util.ParseUUID(strings.TrimSpace(assigneeID))
+	if err != nil {
+		return safeScalar(assigneeID)
+	}
+	if assigneeType == "squad" {
+		if squad, err := w.sync.queries.GetSquad(ctx, id); err == nil && strings.TrimSpace(squad.Name) != "" {
+			return squad.Name
+		}
+	}
+	return w.actorName(ctx, assigneeType, assigneeID)
+}
+
+func safeTaskResult(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "Result recorded in Multica."
+	}
+	var result protocol.TaskCompletedPayload
+	if err := json.Unmarshal(raw, &result); err == nil {
+		parts := make([]string, 0, 2)
+		if strings.TrimSpace(result.Output) != "" {
+			parts = append(parts, safeNotificationText(result.Output, 1200))
+		}
+		if strings.TrimSpace(result.PRURL) != "" {
+			parts = append(parts, "PR: "+safeNotificationText(result.PRURL, 300))
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n")
+		}
+	}
+	return "Result recorded in Multica."
+}
+
+func safeNotificationText(text string, maxRunes int) string {
+	text = strings.TrimSpace(redact.Text(text))
+	if text == "" {
+		return "(empty)"
+	}
+	runes := []rune(text)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return text
+}
+
+func safeScalar(value any) string {
+	if value == nil {
+		return "Not set"
+	}
+	var text string
+	switch typed := value.(type) {
+	case string:
+		text = typed
+	default:
+		text = fmt.Sprint(typed)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "Not set"
+	}
+	return safeNotificationText(text, 300)
+}
+
+func shortUUID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 8 {
+		return value
+	}
+	return value[:8]
+}
+
 func sanitizeSyncError(err error) string {
 	if err == nil {
 		return ""
@@ -340,7 +474,7 @@ func sanitizeSyncError(err error) string {
 }
 
 func safeFailureReason(reason string) string {
-	reason = strings.TrimSpace(reason)
+	reason = strings.TrimSpace(redact.Text(reason))
 	if reason == "" || len(reason) > 160 {
 		return "Task execution failed"
 	}

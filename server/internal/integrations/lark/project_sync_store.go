@@ -454,10 +454,10 @@ func (s *projectSyncStore) claimNotifications(ctx context.Context, workerID stri
 			  AND NOT EXISTS (
 			      SELECT 1 FROM channel_notification_outbox earlier
 			      WHERE earlier.issue_id = cno.issue_id
-			        AND earlier.created_at < cno.created_at
+			        AND (earlier.created_at, earlier.event_order) < (cno.created_at, cno.event_order)
 			        AND earlier.status IN ('pending', 'sending')
 			  )
-			ORDER BY cno.created_at
+			ORDER BY cno.created_at, cno.event_order
 			FOR UPDATE SKIP LOCKED
 			LIMIT $2
 		)

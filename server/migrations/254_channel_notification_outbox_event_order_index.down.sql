@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_channel_notification_outbox_issue_event_order;
