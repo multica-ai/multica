@@ -103,7 +103,9 @@ const (
 //     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
 //   - Hermes: ~/.hermes/skills is Hermes Agent's primary skill directory
 //     (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
-//   - Kimi: ~/.kimi/skills mirrors Kimi CLI's project-level .kimi/skills layout
+//   - Kimi: $KIMI_CODE_HOME/skills (default ~/.kimi-code/skills), Kimi Code
+//     CLI's User-tier scan location
+//     (https://www.kimi.com/code/docs/en/kimi-code-cli/customization/skills.html)
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
 //   - Qoder: ~/.qoder/skills mirrors Qoder CLI's project-level .qoder/skills layout
 //   - Antigravity: ~/.gemini/antigravity-cli/skills user-level skill root
@@ -159,7 +161,16 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	case "hermes":
 		providerRoot = filepath.Join(home, ".hermes", "skills")
 	case "kimi":
-		providerRoot = filepath.Join(home, ".kimi", "skills")
+		// KIMI_CODE_HOME replaces the default ~/.kimi-code home for config,
+		// credentials, and user-level skills. The CLI/directory were renamed
+		// from kimi-cli/.kimi to Kimi Code CLI/.kimi-code; ~/.kimi/skills is
+		// not scanned by any current Kimi Code CLI tier. See
+		// https://www.kimi.com/code/docs/en/kimi-code-cli/customization/skills.html
+		kimiHome := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+		if kimiHome == "" {
+			kimiHome = filepath.Join(home, ".kimi-code")
+		}
+		providerRoot = filepath.Join(kimiHome, "skills")
 	case "kiro":
 		providerRoot = filepath.Join(home, ".kiro", "skills")
 	case "qoder":

@@ -544,15 +544,19 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	b.WriteString("## Skills\n\n")
 	switch provider {
 	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "qwen":
-		// Hermes discovers these from its per-task HERMES_HOME/skills (seeded by
-		// the daemon), so it needs the same "discovered automatically" framing
-		// as the other native-discovery runtimes rather than a path pointer.
+		// Kimi's skills are hydrated into its per-task KIMI_CODE_HOME/skills
+		// (seeded by the daemon at Prepare/Reuse — see kimi_code_home.go),
+		// which is Kimi Code CLI's own User-tier skill scan location. That
+		// placement is what makes discovery work by construction, so Kimi
+		// gets the same "discovered automatically" framing as the other
+		// native-discovery runtimes instead of a special-cased path pointer.
 		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 	default:
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}
 	for _, skill := range skills {
-		if desc := strings.TrimSpace(skill.Description); desc != "" {
+		desc := strings.TrimSpace(skill.Description)
+		if desc != "" {
 			fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, desc)
 		} else {
 			fmt.Fprintf(b, "- **%s**\n", skill.Name)

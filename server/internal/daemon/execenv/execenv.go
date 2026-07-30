@@ -239,6 +239,14 @@ type Environment struct {
 	// .agent_context/skills/ fallback was never read (issue #5242). See
 	// hermes_home.go.
 	HermesHome string
+	// KimiCodeHome is the path to the per-task KIMI_CODE_HOME directory (set
+	// only for the kimi provider). Kimi Code CLI's User-tier skill scan reads
+	// $KIMI_CODE_HOME/skills/, so placing bound skills there — rather than
+	// any workdir-relative path — is what makes discovery work by
+	// construction. config.toml/credentials/mcp.json are symlinked in from
+	// the shared home so auth and MCP servers keep working. See
+	// kimi_code_home.go.
+	KimiCodeHome string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -367,6 +375,22 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare claude skill settings: %w", err)
 		}
 		env.ClaudeSettingsPath = settingsPath
+	}
+
+	// For Kimi, set up a per-task KIMI_CODE_HOME with the shared
+	// config/credentials/mcp.json symlinked in and bound skills hydrated into
+	// its skills/ dir — the CLI's own User-tier skill scan location. See
+	// kimi_code_home.go for why this (not any workdir-relative path) is what
+	// makes discovery work by construction.
+	if params.Provider == "kimi" {
+		kimiHome := filepath.Join(envRoot, "kimi-code-home")
+		if err := prepareKimiCodeHome(kimiHome, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare kimi-code-home: %w", err)
+		}
+		if err := hydrateKimiSkills(kimiHome, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: hydrate kimi skills: %w", err)
+		}
+		env.KimiCodeHome = kimiHome
 	}
 
 	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
@@ -592,6 +616,23 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
 		} else {
 			env.ClaudeSettingsPath = settingsPath
+		}
+	}
+
+	// Refresh the per-task KIMI_CODE_HOME on reuse: re-symlink the shared
+	// config/credentials/mcp.json (picks up e.g. an OAuth token refresh) and
+	// rebuild skills/ from the task's current bound skills. Warn-and-continue
+	// like Codex, not fail-closed like Hermes — a refresh failure here still
+	// leaves a usable (if stale) home rather than forcing a fresh Prepare.
+	if params.Provider == "kimi" && env.RootDir != "" {
+		kimiHome := filepath.Join(env.RootDir, "kimi-code-home")
+		if err := prepareKimiCodeHome(kimiHome, logger); err != nil {
+			logger.Warn("execenv: refresh kimi-code-home failed", "error", err)
+		} else {
+			env.KimiCodeHome = kimiHome
+			if err := hydrateKimiSkills(kimiHome, params.Task.AgentSkills, logger); err != nil {
+				logger.Warn("execenv: refresh kimi skills failed", "error", err)
+			}
 		}
 	}
 
