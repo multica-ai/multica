@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Mode string
@@ -28,12 +30,16 @@ type Profile struct {
 	AllowedTools   []string
 	DataSources    []string
 	ApprovalPolicy string
-	WorkflowID     string
-	EvalSkillIDs   []string
+	EvalIDs        []string
 }
 
 // Config is the persisted, interface-editable shape of a Mode profile.
 // Durations are stored as minutes so snapshots stay provider-neutral JSON.
+//
+// EvalIDs names evaluations from the workspace eval catalog (cerebro_eval).
+// They are evaluators, not skills: each one is executed against the issue when
+// a session in this Mode completes, and the run is recorded in the eval history
+// like any other eval run (FIR-4047).
 type Config struct {
 	Mode           Mode     `json:"mode"`
 	Version        string   `json:"version,omitempty"`
@@ -46,8 +52,7 @@ type Config struct {
 	AllowedTools   []string `json:"allowed_tools"`
 	DataSources    []string `json:"data_sources"`
 	ApprovalPolicy string   `json:"approval_policy"`
-	WorkflowID     string   `json:"workflow_id,omitempty"`
-	EvalSkillIDs   []string `json:"eval_skill_ids"`
+	EvalIDs        []string `json:"eval_ids"`
 }
 
 var defaultConfigs = map[Mode]Config{
@@ -75,7 +80,7 @@ func (c Config) Profile() Profile {
 		ThinkingLevel: c.ThinkingLevel, Timeout: time.Duration(c.TimeoutMinutes) * time.Minute,
 		MaxTurns: c.MaxTurns, AllowsWrite: c.AllowsWrite, Instruction: c.Instruction,
 		AllowedTools: append([]string(nil), c.AllowedTools...), DataSources: append([]string(nil), c.DataSources...),
-		ApprovalPolicy: c.ApprovalPolicy, WorkflowID: c.WorkflowID, EvalSkillIDs: append([]string(nil), c.EvalSkillIDs...),
+		ApprovalPolicy: c.ApprovalPolicy, EvalIDs: append([]string(nil), c.EvalIDs...),
 	}
 }
 
@@ -84,7 +89,7 @@ func DefaultConfigs() map[Mode]Config {
 	for mode, config := range defaultConfigs {
 		config.AllowedTools = append([]string(nil), config.AllowedTools...)
 		config.DataSources = append([]string(nil), config.DataSources...)
-		config.EvalSkillIDs = append([]string(nil), config.EvalSkillIDs...)
+		config.EvalIDs = append([]string(nil), config.EvalIDs...)
 		out[mode] = config
 	}
 	return out
@@ -112,6 +117,14 @@ func ValidateConfig(config Config) error {
 	case "inherit", "require", "deny_external":
 	default:
 		return fmt.Errorf("invalid approval policy %q", config.ApprovalPolicy)
+	}
+	// An eval ID must name a real row in the workspace eval catalog. Rejecting
+	// non-UUIDs here stops a Mode from being published with an evaluation that
+	// can never run.
+	for _, id := range config.EvalIDs {
+		if _, err := uuid.Parse(strings.TrimSpace(id)); err != nil {
+			return fmt.Errorf("invalid eval id %q", id)
+		}
 	}
 	return nil
 }

@@ -89,8 +89,7 @@ type TaskContextForEnv struct {
 	SessionModeAllowedTools   []string
 	SessionModeDataSources    []string
 	SessionModeApprovalPolicy string
-	SessionModeWorkflowID     string
-	SessionModeEvalSkillIDs   []string
+	SessionModeEvalIDs        []string // CEREBRO-PATCH(session-mode-evals): FIR-4047 evaluations the server runs at completion.
 	// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks are platform activity, not synthetic comments.
 	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup
 	WakeupTriggerType       string // time, issue_status, or github_ci for wakeup tasks

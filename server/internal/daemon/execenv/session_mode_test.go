@@ -32,8 +32,7 @@ func TestRenderIssueContextUsesPublishedModeInstructionAndVersion(t *testing.T) 
 		SessionModeAllowedTools:   []string{"graphify", "multica issue get"},
 		SessionModeDataSources:    []string{"Company Brain"},
 		SessionModeApprovalPolicy: "require",
-		SessionModeWorkflowID:     "workflow-1",
-		SessionModeEvalSkillIDs:   []string{"skill-1"},
+		SessionModeEvalIDs:        []string{"7e767171-6a19-41d5-b3e6-edfdc97eedf7"}, // CEREBRO-PATCH(session-mode-evals): FIR-4047 evaluations, not skills.
 	})
 	if !strings.Contains(out, "PLAN MODE · v7") {
 		t.Fatalf("published version missing: %s", out)
@@ -41,9 +40,39 @@ func TestRenderIssueContextUsesPublishedModeInstructionAndVersion(t *testing.T) 
 	if !strings.Contains(out, "Use the workspace Plan contract.") {
 		t.Fatalf("published instruction missing: %s", out)
 	}
-	for _, want := range []string{"Writes are disabled", "graphify", "Company Brain", "Approval is required", "workflow-1", "skill-1"} {
+	for _, want := range []string{"Writes are disabled", "graphify", "Company Brain", "Approval is required", "1 evaluation(s) configured on this Mode"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Mode policy %q missing: %s", want, out)
 		}
+	}
+}
+
+// CEREBRO-PATCH(session-mode-evals): FIR-4047 the brief must not claim a
+// prohibition the tool-policy chain is not enforcing. Plan Mode is instructed to
+// save a plan, so the write line stays silent about plans and notes.
+func TestRenderIssueContextWriteLineDoesNotForbidSavingAPlan(t *testing.T) {
+	planOut := renderIssueContext("codex", TaskContextForEnv{IssueID: "issue-1", SessionMode: "plan"})
+	if !strings.Contains(planOut, "Writes are disabled. Do not edit code or data and do not make external mutations.") {
+		t.Fatalf("code-write prohibition missing: %s", planOut)
+	}
+	if strings.Contains(planOut, "do not save plans") {
+		t.Fatalf("brief forbids the one deliverable Plan Mode exists to produce: %s", planOut)
+	}
+
+	buildOut := renderIssueContext("codex", TaskContextForEnv{
+		IssueID:                "issue-1",
+		SessionMode:            "build",
+		SessionModeAllowsWrite: true,
+	})
+	if !strings.Contains(buildOut, "Writes are enabled") {
+		t.Fatalf("build mode lost its write permission: %s", buildOut)
+	}
+}
+
+// A Mode with no evaluations must not mention evaluations at all.
+func TestRenderIssueContextOmitsEvaluationLineWhenNoneConfigured(t *testing.T) {
+	out := renderIssueContext("codex", TaskContextForEnv{IssueID: "issue-1", SessionMode: "review"})
+	if strings.Contains(out, "evaluation(s) configured") {
+		t.Fatalf("evaluation line rendered for a Mode with no evaluations: %s", out)
 	}
 }

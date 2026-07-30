@@ -715,6 +715,8 @@ These constrain agents but along a different axis than "is this action allowed":
 - **auto-pause / ratelimit / codexlimit** (`runtime/auto_pause.go`, `ratelimit/`, `codexlimit/`) — resilience against provider rate limits.
 - **permguard** (`permguard/permguard.go`) — test-time inventory / regression guard, not a runtime gate.
 - **Infisical secret folders** (`infisical/client.go`) — enforced by the external Infisical ACL; can only be mirrored, not moved here.
+- **Session Modes** (`cerebro/sessionmode/`) — a Mode shapes *how* a session works (instruction, model, thinking level, timeout, turn cap) and its policy fields (`allows_write`, `allowed_tools`, `data_sources`, `approval_policy`) render as **brief text only**. Nothing in `execenv/`, `daemon/`, or the tool-policy chain gates a tool call on a Mode field — the runtime still asks the tool-policy chain, and a Mode can neither widen nor narrow that answer. Treat a Mode as instruction, never as a gate; if a session must be prevented from doing something, author it in the tool-policy chain (see `permission-architecture.md` §1–2), not on the Mode.
+  - FIR-4047 removed the one path where a Mode *did* change capability: `ClaimTaskByRuntime` used to merge the Mode's skill IDs into the claimed agent's skill list. A Mode now carries evaluation IDs from the workspace eval catalog instead, which the server runs against the issue at task completion (advisory — recorded in eval history, never fails the task). No skills are granted at claim time.
 
 ---
 

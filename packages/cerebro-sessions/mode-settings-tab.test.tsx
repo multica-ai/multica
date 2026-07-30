@@ -6,8 +6,9 @@ import type { ModeConfig } from "./mode-config";
 const config: ModeConfig = {
   mode: "plan", version: "3", instruction: "Plan first", model: "gpt-5.4",
   thinking_level: "high", timeout_minutes: 30, max_turns: 20,
-  allows_write: false, allowed_tools: ["graphify"], data_sources: ["Company Brain"],
-  approval_policy: "require", workflow_id: "workflow-1", eval_skill_ids: ["skill-1"],
+  allows_write: false,
+  allowed_tools: ["graphify"], data_sources: ["Company Brain"],
+  approval_policy: "require", eval_ids: ["7e767171-6a19-41d5-b3e6-edfdc97eedf7"],
 };
 
 describe("ModeConfigEditor", () => {
@@ -20,15 +21,39 @@ describe("ModeConfigEditor", () => {
 
     expect(screen.getByLabelText("Instructions")).toHaveValue("Plan first");
     expect(screen.getByLabelText("Model")).toHaveValue("gpt-5.4");
-    expect(screen.getByText("Required evaluations")).toBeInTheDocument();
-    expect(screen.getByText("Workflow")).toBeInTheDocument();
+    expect(screen.getByText("Evaluations for this Mode")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Core behavior" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Access and approvals" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Workflow and quality" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Evaluations" })).toBeInTheDocument();
+    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Use the new Plan contract" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ instruction: "Use the new Plan contract" }));
     fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     expect(onPublish).toHaveBeenCalledOnce();
+  });
+
+  // FIR-4047: a Mode carries evaluations from the workspace eval catalog, not
+  // extra skills. The server runs them against the issue when the session ends.
+  it("picks evaluations from the workspace catalog and never offers extra skills", () => {
+    const onChange = vi.fn();
+    render(
+      <ModeConfigEditor
+        config={{ ...config, eval_ids: [] }}
+        onChange={onChange}
+        onSave={() => undefined}
+        onPublish={() => undefined}
+        canManage
+        evals={[{ id: "7e767171-6a19-41d5-b3e6-edfdc97eedf7", name: "Plan completeness", description: "active" }]}
+      />,
+    );
+
+    expect(screen.queryByText("Extra skills")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Allow saving plans and notes" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ eval_ids: ["7e767171-6a19-41d5-b3e6-edfdc97eedf7"] }),
+    );
   });
 
   it("allows unlimited or large runtime limits and blocks negative values", () => {
@@ -107,7 +132,7 @@ describe("ModeConfigEditor", () => {
     );
 
     expect(screen.getByText("Balanced")).toBeInTheDocument();
-    expect(screen.getByLabelText("Search required evaluations")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search evaluations")).toBeInTheDocument();
     expect(screen.getByText("Graphify")).toBeInTheDocument();
     expect(screen.getAllByText("Company Brain").length).toBeGreaterThan(0);
     expect(screen.queryByPlaceholderText("One tool key per line")).not.toBeInTheDocument();
