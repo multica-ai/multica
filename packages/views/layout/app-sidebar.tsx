@@ -81,6 +81,7 @@ import {
 } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useAppForeground } from "../common/use-app-foreground";
+import { requestLatestUnreadInboxScroll } from "../inbox/inbox-scroll-event";
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -670,6 +671,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
+                        onDoubleClick={
+                          item.key === "inbox" && isActive
+                            ? requestLatestUnreadInboxScroll
+                            : undefined
+                        }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <Icon />

@@ -63,6 +63,12 @@ import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
 import { useT } from "../../i18n";
+import { INBOX_SCROLL_TO_LATEST_UNREAD_EVENT } from "../inbox-scroll-event";
+
+interface UnreadScrollRequest {
+  itemId: string;
+  sequence: number;
+}
 
 export function InboxPage() {
   const { t } = useT("inbox");
@@ -74,6 +80,8 @@ export function InboxPage() {
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
   const [view, setViewState] = useState<InboxView>(() => urlView);
+  const [unreadScrollRequest, setUnreadScrollRequest] =
+    useState<UnreadScrollRequest | null>(null);
 
   // Sync from URL when searchParams change (e.g. navigation)
   useEffect(() => {
@@ -147,6 +155,30 @@ export function InboxPage() {
   // Stable identity: InboxList memoizes the archive entry on this callback, so
   // an inline arrow here would rebuild (and remount) the entry every render.
   const openArchived = useCallback(() => setView("archived"), [setView]);
+
+  useEffect(() => {
+    const handleLatestUnreadScroll = () => {
+      const latestUnread = items.find((item) => item.read !== true);
+      if (!latestUnread) return;
+
+      if (isArchivedView) setView("inbox");
+      setUnreadScrollRequest((current) => ({
+        itemId: latestUnread.id,
+        sequence: (current?.sequence ?? 0) + 1,
+      }));
+    };
+
+    window.addEventListener(
+      INBOX_SCROLL_TO_LATEST_UNREAD_EVENT,
+      handleLatestUnreadScroll,
+    );
+    return () => {
+      window.removeEventListener(
+        INBOX_SCROLL_TO_LATEST_UNREAD_EVENT,
+        handleLatestUnreadScroll,
+      );
+    };
+  }, [isArchivedView, items, setView]);
 
   // Whether the list currently on screen has finished its first load. The
   // fallback and drain effects below both key on this, and getting it wrong in
@@ -416,6 +448,7 @@ export function InboxPage() {
       onSelect={handleSelect}
       onAction={isArchivedView ? handleUnarchive : handleArchive}
       onOpenArchived={openArchived}
+      scrollRequest={unreadScrollRequest}
     />
   );
 
