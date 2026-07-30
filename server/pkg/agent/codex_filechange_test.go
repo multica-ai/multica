@@ -1,6 +1,11 @@
 package agent
 
-import "testing"
+import (
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
 
 // Payloads captured from codex-cli 0.145.0 driving
 // `app-server --listen stdio://`, so these fixtures document the real schema
@@ -102,5 +107,70 @@ func TestCodexFileChangeSummaryReportsStatusAndPaths(t *testing.T) {
 	// which the transcript renders as "no output".
 	if got := codexFileChangeSummary(map[string]any{"changes": []any{}}); got != "completed" {
 		t.Errorf("fallback status = %q", got)
+	}
+}
+
+// End-to-end through the app-server client: the notification lines below are the
+// ones codex-cli 0.145.0 actually emits for an edit, so this covers the wiring
+// (params.item -> handler -> Message) and not just the extraction helpers.
+func TestCodexAppServerFileChangeMessagesCarryTheDiff(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const changes = `[{"path":"/tmp/probe/sample.py","kind":{"type":"update","move_path":null},` +
+		`"diff":"@@ -1,2 +1,2 @@\n def greet(name):\n-    return f\"Hello\"\n+    return f\"Hey\"\n"}]`
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fc"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-fc","turn":{"id":"turn-fc"}}}'`+"\n"+
+		// printf, not echo: /bin/sh's echo expands the `\n` inside the diff and
+		// splits the JSON across lines, which the client then drops.
+		`printf '%s\n' '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-fc","item":{"type":"fileChange","id":"call-1","status":"inProgress","changes":`+changes+`}}}'`+"\n"+
+		`printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fc","item":{"type":"fileChange","id":"call-1","status":"completed","changes":`+changes+`}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fc","item":{"type":"agentMessage","id":"msg-1","text":"Done","phase":"final_answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fc","turn":{"id":"turn-fc","status":"completed"}}}'`+"\n")
+
+	_, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout: 10 * time.Second,
+	}, 15*time.Second)
+
+	var use, result *Message
+	for i := range messages {
+		if messages[i].Tool != "patch_apply" {
+			continue
+		}
+		switch messages[i].Type {
+		case MessageToolUse:
+			use = &messages[i]
+		case MessageToolResult:
+			result = &messages[i]
+		}
+	}
+
+	if use == nil || result == nil {
+		t.Fatalf("expected a patch_apply use and result, got %d messages", len(messages))
+	}
+
+	changeList, ok := use.Input["changes"].([]any)
+	if !ok || len(changeList) != 1 {
+		t.Fatalf("tool_use input should carry the changes, got %#v", use.Input)
+	}
+	change, _ := changeList[0].(map[string]any)
+	if change["path"] != "/tmp/probe/sample.py" || change["kind"] != "update" {
+		t.Errorf("change = %#v", change)
+	}
+	if diff, _ := change["diff"].(string); !strings.Contains(diff, `-    return f"Hello"`) {
+		t.Errorf("diff should survive verbatim, got %q", diff)
+	}
+	if result.Output != "completed: /tmp/probe/sample.py" {
+		t.Errorf("result output = %q", result.Output)
 	}
 }
