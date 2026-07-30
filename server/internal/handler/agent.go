@@ -606,6 +606,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			ID:          uuidToString(row.ID),
 			Name:        row.Name,
 			Description: row.Description,
+			AlwaysOn:    row.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-4002 the agent page renders the Skills tab from the LIST response, not GET /agents/{id} — dropping the flag here made every checkbox read back unchecked.
 		})
 	}
 
