@@ -42,11 +42,10 @@ const (
 // rejects). Kept as its own constant so bumping codex independently of
 // other agents stays easy if codex starts shipping longer failure traces.
 const (
-	codexStderrTailBytes                   = 2048
-	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
-	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
-	defaultCodexHandshakeTimeout           = 30 * time.Second
-	codexVersionDiagnosticTimeout          = 2 * time.Second
+	codexStderrTailBytes                  = 2048
+	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	defaultCodexHandshakeTimeout          = 30 * time.Second
+	codexVersionDiagnosticTimeout         = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -1733,9 +1732,16 @@ func stopTimer(timer *time.Timer) {
 }
 
 func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout time.Duration) time.Duration {
-	if semanticInactivityTimeout <= 0 || semanticInactivityTimeout > defaultCodexFirstTurnNoProgressTimeout {
-		return defaultCodexFirstTurnNoProgressTimeout
+	// The first turn can legitimately be quiet while Codex assembles the
+	// task context and establishes its upstream response stream. It must use
+	// the configured semantic-inactivity budget rather than a hidden 30-second
+	// cap; otherwise the public timeout setting cannot help the exact startup
+	// stall it is meant to control.
+	if semanticInactivityTimeout <= 0 {
+		return defaultCodexSemanticInactivityTimeout
 	}
+	// Keep a small distinction between a quiet first turn and a later semantic
+	// stall, while preserving the caller's configured budget at every scale.
 	scaled := semanticInactivityTimeout * 4 / 5
 	if scaled <= 0 {
 		return semanticInactivityTimeout

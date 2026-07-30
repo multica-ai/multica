@@ -2875,6 +2875,16 @@ func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	}
 }
 
+func TestCodexFirstTurnNoProgressTimeoutScalesConfiguredBudget(t *testing.T) {
+	t.Parallel()
+
+	const configured = 2 * time.Minute
+	const want = 96 * time.Second
+	if got := codexFirstTurnNoProgressTimeout(configured); got != want {
+		t.Fatalf("codexFirstTurnNoProgressTimeout(%s) = %s, want %s", configured, got, want)
+	}
+}
+
 func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
 	// The model catalog signal below makes both attempts retry safe, so this
