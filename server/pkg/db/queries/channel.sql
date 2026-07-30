@@ -1012,11 +1012,11 @@ GROUP BY cpb.id, cpb.installation_id, cpb.state, cpb.channel_chat_id,
 
 -- name: CreateChannelIssueTopicBinding :one
 INSERT INTO channel_issue_topic_binding (
-    workspace_id, project_binding_id, project_id, issue_id,
+    workspace_id, installation_id, project_binding_id, project_id, issue_id,
     channel_chat_id, topic_root_message_id, channel_thread_id,
     binding_source, state, created_by_user_id
 ) VALUES (
-    @workspace_id, @project_binding_id, @project_id, @issue_id,
+    @workspace_id, @installation_id, @project_binding_id, @project_id, @issue_id,
     @channel_chat_id, @topic_root_message_id, @channel_thread_id,
     @binding_source, 'active', @created_by_user_id
 )
@@ -1037,7 +1037,8 @@ LIMIT 1;
 
 -- name: GetActiveChannelIssueTopicByRoot :one
 SELECT * FROM channel_issue_topic_binding
-WHERE project_binding_id = @project_binding_id
+WHERE installation_id = @installation_id
+  AND channel_chat_id = @channel_chat_id
   AND topic_root_message_id = @topic_root_message_id
   AND workspace_id = @workspace_id
   AND state = 'active';
@@ -1069,8 +1070,7 @@ SET state = 'manual_unbound',
     unbound_by_user_id = @unbound_by_user_id,
     unbound_at = now(),
     updated_at = now()
-WHERE project_binding_id = @project_binding_id
-  AND topic_root_message_id = @topic_root_message_id
+WHERE id = @id
   AND workspace_id = @workspace_id
   AND state = 'active'
 RETURNING *;

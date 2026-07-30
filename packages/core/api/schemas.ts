@@ -34,6 +34,8 @@ import type {
   IssueTableGroupsResponse,
   IssueTableRowsResponse,
   ListIssuesResponse,
+  ListProjectsResponse,
+  ListLarkInstallationsResponse,
   ListLarkProjectBindingsResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
@@ -631,6 +633,22 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   total: 0,
 };
 
+const ProjectFeishuSyncSchema = z.object({
+  state: z.string(),
+  project_binding_id: z.string(),
+  installation_id: z.string(),
+  bot_name: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string(),
+  chat_id: z.string().nullable(),
+  chat_name: z.string().nullable(),
+  bound_issue_count: z.number(),
+  manual_unbound_issue_count: z.number(),
+  total_issue_count: z.number(),
+  pending_notification_count: z.number(),
+  last_synced_at: z.string().nullable(),
+}).loose();
+
 const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -651,7 +669,20 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
+  // Older backends omit the integration summary. A malformed optional summary
+  // must not blank the entire Project list; degrade just this cell to unbound.
+  feishu_sync: ProjectFeishuSyncSchema.nullable().optional().catch(null),
 }).loose();
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [],
+  total: 0,
+};
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
@@ -1830,8 +1861,9 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
 // success bodies so the UI never reports a binding/retry that did not parse.
 export const ChannelIssueTopicBindingSchema = z.object({
   id: z.string(),
-  project_binding_id: z.string(),
-  project_id: z.string(),
+  installation_id: z.string(),
+  project_binding_id: z.string().nullable(),
+  project_id: z.string().nullable(),
   issue_id: z.string(),
   chat_id: z.string(),
   topic_root_message_id: z.string(),
@@ -1848,6 +1880,33 @@ export const ChannelIssueTopicBindingResponseSchema = z.object({
 
 export const EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE: ChannelIssueTopicBindingResponse = {
   channel_topic_binding: null,
+};
+
+export const LarkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  agent_id: z.string(),
+  app_id: z.string(),
+  tenant_key: z.string().nullable().optional(),
+  bot_open_id: z.string(),
+  installer_user_id: z.string(),
+  status: z.string(),
+  region: z.string().optional(),
+  installed_at: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema),
+  configured: z.boolean(),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
+  installations: [],
+  configured: false,
+  install_supported: false,
 };
 
 export const ProjectFeishuBindingSchema = z.object({

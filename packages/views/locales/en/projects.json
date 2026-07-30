@@ -25,6 +25,7 @@
     "status": "Status",
     "progress": "Progress",
     "lead": "Lead",
+    "feishu_bot": "Feishu sync Bot",
     "created": "Created",
     "issues": "Issues"
   },
@@ -86,6 +87,8 @@
     "empty_description": "Create one Issue topic per Project Issue and keep status and task failures synchronized.",
     "no_bots": "Connect an Agent Bot in Settings before binding this Project.",
     "bot_select_label": "Agent Bot",
+    "no_bot_option": "No Bot",
+    "copy_command": "Copy",
     "bot_fallback": "Feishu Agent Bot",
     "bind": "Start binding",
     "unbind": "Unbind",

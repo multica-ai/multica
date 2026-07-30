@@ -24,6 +24,7 @@
     "status": "ステータス",
     "progress": "進捗",
     "lead": "リード",
+    "feishu_bot": "Feishu 同期 Bot",
     "created": "作成日",
     "issues": "Issue 数"
   },
@@ -85,6 +86,8 @@
     "empty_description": "Project の各 Issue にトピックを作成し、ステータスとタスク失敗を同期します。",
     "no_bots": "この Project を接続する前に、設定で Agent Bot を接続してください。",
     "bot_select_label": "Agent Bot",
+    "no_bot_option": "Bot なし",
+    "copy_command": "コピー",
     "bot_fallback": "Feishu Agent Bot",
     "bind": "接続を開始",
     "unbind": "接続解除",

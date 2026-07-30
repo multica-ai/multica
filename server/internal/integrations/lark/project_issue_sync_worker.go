@@ -90,17 +90,6 @@ type projectNotificationPayload struct {
 }
 
 func (w *ProjectIssueSyncWorker) processItem(ctx context.Context, item ChannelNotificationOutbox) error {
-	if !item.ProjectBindingID.Valid {
-		return permanentSyncError{"project_unbound"}
-	}
-	binding, err := w.store.getProjectBindingByID(ctx, w.store.pool, item.WorkspaceID, item.ProjectBindingID)
-	if isNoRows(err) || (err == nil && binding.State != "active") {
-		return permanentSyncError{"project_unbound"}
-	}
-	if err != nil {
-		return err
-	}
-
 	issue, err := w.sync.queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 		ID: item.IssueID, WorkspaceID: item.WorkspaceID,
 	})
@@ -110,17 +99,51 @@ func (w *ProjectIssueSyncWorker) processItem(ctx context.Context, item ChannelNo
 	if err != nil {
 		return err
 	}
-	if !issue.ProjectID.Valid || issue.ProjectID != binding.ProjectID {
-		return permanentSyncError{"project_or_topic_unbound"}
-	}
 
 	var payload projectNotificationPayload
 	if err := json.Unmarshal(item.Payload, &payload); err != nil {
 		return permanentSyncError{"invalid_payload"}
 	}
 
+	var (
+		topic          ChannelIssueTopicBinding
+		projectBinding ChannelProjectBinding
+		installationID pgtype.UUID
+		directRoute    = item.IssueTopicBindingID.Valid
+	)
+	if directRoute {
+		topic, err = w.store.getIssueTopicByID(
+			ctx, w.store.pool, item.WorkspaceID, item.IssueTopicBindingID,
+		)
+		if isNoRows(err) || (err == nil &&
+			(topic.State != "active" || topic.IssueID != item.IssueID)) {
+			return permanentSyncError{"project_or_topic_unbound"}
+		}
+		if err != nil {
+			return err
+		}
+		installationID = topic.InstallationID
+	} else {
+		if !item.ProjectBindingID.Valid {
+			return permanentSyncError{"project_unbound"}
+		}
+		projectBinding, err = w.store.getProjectBindingByID(
+			ctx, w.store.pool, item.WorkspaceID, item.ProjectBindingID,
+		)
+		if isNoRows(err) || (err == nil && projectBinding.State != "active") {
+			return permanentSyncError{"project_unbound"}
+		}
+		if err != nil {
+			return err
+		}
+		if !issue.ProjectID.Valid || issue.ProjectID != projectBinding.ProjectID {
+			return permanentSyncError{"project_or_topic_unbound"}
+		}
+		installationID = projectBinding.InstallationID
+	}
+
 	inst, err := NewChannelStore(w.sync.queries).GetLarkInstallationInWorkspace(ctx, GetInstallationInWorkspaceParams{
-		ID: binding.InstallationID, WorkspaceID: binding.WorkspaceID,
+		ID: installationID, WorkspaceID: item.WorkspaceID,
 	})
 	if isNoRows(err) || (err == nil && InstallationStatus(inst.Status) != InstallationActive) {
 		return permanentSyncError{"bot_revoked"}
@@ -136,17 +159,23 @@ func (w *ProjectIssueSyncWorker) processItem(ctx context.Context, item ChannelNo
 		return err
 	}
 
-	topic, _, err := w.ensureIssueTopic(ctx, item, binding, issue, payload, creds)
-	if err != nil {
-		return err
-	}
-	if item.EventType == "issue_created" {
-		return w.store.markNotificationSent(ctx, item.ID, w.workerID)
+	if directRoute {
+		if item.EventType == "issue_created" {
+			return w.store.markNotificationSent(ctx, item.ID, w.workerID)
+		}
+	} else {
+		topic, _, err = w.ensureIssueTopic(ctx, item, projectBinding, issue, payload, creds)
+		if err != nil {
+			return err
+		}
+		if item.EventType == "issue_created" {
+			return w.store.markNotificationSent(ctx, item.ID, w.workerID)
+		}
+		if topic.State != "active" || topic.ProjectBindingID != item.ProjectBindingID {
+			return permanentSyncError{"project_or_topic_unbound"}
+		}
 	}
 
-	if topic.State != "active" || topic.ProjectBindingID != item.ProjectBindingID {
-		return permanentSyncError{"project_or_topic_unbound"}
-	}
 	text, err := w.renderNotification(ctx, item, issue, payload)
 	if err != nil {
 		return err
@@ -205,7 +234,7 @@ func (w *ProjectIssueSyncWorker) ensureIssueTopic(ctx context.Context, item Chan
 		source = "project_backfill"
 	}
 	topic, err := w.store.createIssueTopic(
-		ctx, w.store.pool, item.WorkspaceID, projectBinding.ID,
+		ctx, w.store.pool, item.WorkspaceID, projectBinding.InstallationID, projectBinding.ID,
 		projectBinding.ProjectID, issue.ID, projectBinding.ChannelChatID.String,
 		rootID, "", source, pgtype.UUID{},
 	)

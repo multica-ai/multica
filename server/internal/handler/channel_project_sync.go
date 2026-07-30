@@ -32,8 +32,9 @@ type ProjectFeishuSyncResponse struct {
 
 type ChannelIssueTopicBindingResponse struct {
 	ID                 string  `json:"id"`
-	ProjectBindingID   string  `json:"project_binding_id"`
-	ProjectID          string  `json:"project_id"`
+	InstallationID     string  `json:"installation_id"`
+	ProjectBindingID   *string `json:"project_binding_id"`
+	ProjectID          *string `json:"project_id"`
 	IssueID            string  `json:"issue_id"`
 	ChatID             string  `json:"chat_id"`
 	TopicRootMessageID string  `json:"topic_root_message_id"`
@@ -75,8 +76,7 @@ func projectFeishuSyncToResponse(summary lark.ChannelProjectSyncSummary) Project
 func channelIssueTopicToResponse(binding lark.ChannelIssueTopicBinding) ChannelIssueTopicBindingResponse {
 	resp := ChannelIssueTopicBindingResponse{
 		ID:                 uuidToString(binding.ID),
-		ProjectBindingID:   uuidToString(binding.ProjectBindingID),
-		ProjectID:          uuidToString(binding.ProjectID),
+		InstallationID:     uuidToString(binding.InstallationID),
 		IssueID:            uuidToString(binding.IssueID),
 		ChatID:             binding.ChannelChatID,
 		TopicRootMessageID: binding.TopicRootMessageID,
@@ -84,6 +84,14 @@ func channelIssueTopicToResponse(binding lark.ChannelIssueTopicBinding) ChannelI
 		State:              binding.State,
 		CreatedAt:          timestampToString(binding.CreatedAt),
 		UpdatedAt:          timestampToString(binding.UpdatedAt),
+	}
+	if binding.ProjectBindingID.Valid {
+		value := uuidToString(binding.ProjectBindingID)
+		resp.ProjectBindingID = &value
+	}
+	if binding.ProjectID.Valid {
+		value := uuidToString(binding.ProjectID)
+		resp.ProjectID = &value
 	}
 	if binding.ChannelThreadID.Valid {
 		value := binding.ChannelThreadID.String

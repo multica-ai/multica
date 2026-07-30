@@ -24,6 +24,7 @@
     "status": "상태",
     "progress": "진행률",
     "lead": "리드",
+    "feishu_bot": "Feishu 동기화 Bot",
     "created": "생성일",
     "issues": "이슈 수"
   },
@@ -85,6 +86,8 @@
     "empty_description": "Project의 각 Issue에 토픽을 만들고 상태 및 작업 실패를 동기화합니다.",
     "no_bots": "이 Project를 연결하기 전에 설정에서 Agent Bot을 연결하세요.",
     "bot_select_label": "Agent Bot",
+    "no_bot_option": "Bot 없음",
+    "copy_command": "복사",
     "bot_fallback": "Feishu Agent Bot",
     "bind": "연결 시작",
     "unbind": "연결 해제",

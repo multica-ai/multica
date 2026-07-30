@@ -270,7 +270,7 @@ SET status = 'sending',
     locked_by = $1
 FROM candidates
 WHERE cno.id = candidates.id
-RETURNING cno.id, cno.event_id, cno.workspace_id, cno.project_id, cno.project_binding_id, cno.issue_id, cno.task_id, cno.event_type, cno.payload, cno.status, cno.attempts, cno.next_attempt_at, cno.locked_at, cno.locked_by, cno.last_error, cno.created_at, cno.sent_at
+RETURNING cno.id, cno.event_id, cno.workspace_id, cno.project_id, cno.project_binding_id, cno.issue_id, cno.task_id, cno.event_type, cno.payload, cno.status, cno.attempts, cno.next_attempt_at, cno.locked_at, cno.locked_by, cno.last_error, cno.created_at, cno.sent_at, cno.issue_topic_binding_id
 `
 
 type ClaimChannelNotificationOutboxParams struct {
@@ -306,6 +306,7 @@ func (q *Queries) ClaimChannelNotificationOutbox(ctx context.Context, arg ClaimC
 			&i.LastError,
 			&i.CreatedAt,
 			&i.SentAt,
+			&i.IssueTopicBindingID,
 		); err != nil {
 			return nil, err
 		}
@@ -678,19 +679,20 @@ func (q *Queries) CreateChannelChatSessionBinding(ctx context.Context, arg Creat
 
 const createChannelIssueTopicBinding = `-- name: CreateChannelIssueTopicBinding :one
 INSERT INTO channel_issue_topic_binding (
-    workspace_id, project_binding_id, project_id, issue_id,
+    workspace_id, installation_id, project_binding_id, project_id, issue_id,
     channel_chat_id, topic_root_message_id, channel_thread_id,
     binding_source, state, created_by_user_id
 ) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7,
-    $8, 'active', $9
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, 'active', $10
 )
-RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at
+RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at, installation_id
 `
 
 type CreateChannelIssueTopicBindingParams struct {
 	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	InstallationID     pgtype.UUID `json:"installation_id"`
 	ProjectBindingID   pgtype.UUID `json:"project_binding_id"`
 	ProjectID          pgtype.UUID `json:"project_id"`
 	IssueID            pgtype.UUID `json:"issue_id"`
@@ -704,6 +706,7 @@ type CreateChannelIssueTopicBindingParams struct {
 func (q *Queries) CreateChannelIssueTopicBinding(ctx context.Context, arg CreateChannelIssueTopicBindingParams) (ChannelIssueTopicBinding, error) {
 	row := q.db.QueryRow(ctx, createChannelIssueTopicBinding,
 		arg.WorkspaceID,
+		arg.InstallationID,
 		arg.ProjectBindingID,
 		arg.ProjectID,
 		arg.IssueID,
@@ -730,6 +733,7 @@ func (q *Queries) CreateChannelIssueTopicBinding(ctx context.Context, arg Create
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnboundAt,
+		&i.InstallationID,
 	)
 	return i, err
 }
@@ -906,7 +910,7 @@ SET status = 'dead',
     locked_by = NULL
 WHERE id = $2
   AND status IN ('pending', 'sending')
-RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at
+RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at, issue_topic_binding_id
 `
 
 type DeadChannelNotificationParams struct {
@@ -935,6 +939,7 @@ func (q *Queries) DeadChannelNotification(ctx context.Context, arg DeadChannelNo
 		&i.LastError,
 		&i.CreatedAt,
 		&i.SentAt,
+		&i.IssueTopicBindingID,
 	)
 	return i, err
 }
@@ -1240,7 +1245,7 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 }
 
 const getActiveChannelIssueTopicByIssue = `-- name: GetActiveChannelIssueTopicByIssue :one
-SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at FROM channel_issue_topic_binding
+SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at, installation_id FROM channel_issue_topic_binding
 WHERE issue_id = $1
   AND workspace_id = $2
   AND state = 'active'
@@ -1270,26 +1275,34 @@ func (q *Queries) GetActiveChannelIssueTopicByIssue(ctx context.Context, arg Get
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnboundAt,
+		&i.InstallationID,
 	)
 	return i, err
 }
 
 const getActiveChannelIssueTopicByRoot = `-- name: GetActiveChannelIssueTopicByRoot :one
-SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at FROM channel_issue_topic_binding
-WHERE project_binding_id = $1
-  AND topic_root_message_id = $2
-  AND workspace_id = $3
+SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at, installation_id FROM channel_issue_topic_binding
+WHERE installation_id = $1
+  AND channel_chat_id = $2
+  AND topic_root_message_id = $3
+  AND workspace_id = $4
   AND state = 'active'
 `
 
 type GetActiveChannelIssueTopicByRootParams struct {
-	ProjectBindingID   pgtype.UUID `json:"project_binding_id"`
+	InstallationID     pgtype.UUID `json:"installation_id"`
+	ChannelChatID      string      `json:"channel_chat_id"`
 	TopicRootMessageID string      `json:"topic_root_message_id"`
 	WorkspaceID        pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) GetActiveChannelIssueTopicByRoot(ctx context.Context, arg GetActiveChannelIssueTopicByRootParams) (ChannelIssueTopicBinding, error) {
-	row := q.db.QueryRow(ctx, getActiveChannelIssueTopicByRoot, arg.ProjectBindingID, arg.TopicRootMessageID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, getActiveChannelIssueTopicByRoot,
+		arg.InstallationID,
+		arg.ChannelChatID,
+		arg.TopicRootMessageID,
+		arg.WorkspaceID,
+	)
 	var i ChannelIssueTopicBinding
 	err := row.Scan(
 		&i.ID,
@@ -1307,6 +1320,7 @@ func (q *Queries) GetActiveChannelIssueTopicByRoot(ctx context.Context, arg GetA
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnboundAt,
+		&i.InstallationID,
 	)
 	return i, err
 }
@@ -1806,7 +1820,7 @@ func (q *Queries) GetCurrentChannelProjectBindingByProject(ctx context.Context, 
 }
 
 const getLatestChannelIssueTopicByIssue = `-- name: GetLatestChannelIssueTopicByIssue :one
-SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at FROM channel_issue_topic_binding
+SELECT id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at, installation_id FROM channel_issue_topic_binding
 WHERE issue_id = $1
   AND workspace_id = $2
 ORDER BY created_at DESC
@@ -1837,6 +1851,7 @@ func (q *Queries) GetLatestChannelIssueTopicByIssue(ctx context.Context, arg Get
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnboundAt,
+		&i.InstallationID,
 	)
 	return i, err
 }
@@ -2212,7 +2227,7 @@ SET state = 'manual_unbound',
 WHERE issue_id = $2
   AND workspace_id = $3
   AND state = 'active'
-RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at
+RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at, installation_id
 `
 
 type ManualUnbindChannelIssueTopicByIssueParams struct {
@@ -2240,6 +2255,7 @@ func (q *Queries) ManualUnbindChannelIssueTopicByIssue(ctx context.Context, arg 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnboundAt,
+		&i.InstallationID,
 	)
 	return i, err
 }
@@ -2250,27 +2266,20 @@ SET state = 'manual_unbound',
     unbound_by_user_id = $1,
     unbound_at = now(),
     updated_at = now()
-WHERE project_binding_id = $2
-  AND topic_root_message_id = $3
-  AND workspace_id = $4
+WHERE id = $2
+  AND workspace_id = $3
   AND state = 'active'
-RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at
+RETURNING id, workspace_id, project_binding_id, project_id, issue_id, channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state, created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at, installation_id
 `
 
 type ManualUnbindChannelIssueTopicByRootParams struct {
-	UnboundByUserID    pgtype.UUID `json:"unbound_by_user_id"`
-	ProjectBindingID   pgtype.UUID `json:"project_binding_id"`
-	TopicRootMessageID string      `json:"topic_root_message_id"`
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	UnboundByUserID pgtype.UUID `json:"unbound_by_user_id"`
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) ManualUnbindChannelIssueTopicByRoot(ctx context.Context, arg ManualUnbindChannelIssueTopicByRootParams) (ChannelIssueTopicBinding, error) {
-	row := q.db.QueryRow(ctx, manualUnbindChannelIssueTopicByRoot,
-		arg.UnboundByUserID,
-		arg.ProjectBindingID,
-		arg.TopicRootMessageID,
-		arg.WorkspaceID,
-	)
+	row := q.db.QueryRow(ctx, manualUnbindChannelIssueTopicByRoot, arg.UnboundByUserID, arg.ID, arg.WorkspaceID)
 	var i ChannelIssueTopicBinding
 	err := row.Scan(
 		&i.ID,
@@ -2288,6 +2297,7 @@ func (q *Queries) ManualUnbindChannelIssueTopicByRoot(ctx context.Context, arg M
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnboundAt,
+		&i.InstallationID,
 	)
 	return i, err
 }
@@ -2352,7 +2362,7 @@ SET status = 'sent',
 WHERE id = $1
   AND status = 'sending'
   AND locked_by = $2
-RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at
+RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at, issue_topic_binding_id
 `
 
 type MarkChannelNotificationSentParams struct {
@@ -2381,6 +2391,7 @@ func (q *Queries) MarkChannelNotificationSent(ctx context.Context, arg MarkChann
 		&i.LastError,
 		&i.CreatedAt,
 		&i.SentAt,
+		&i.IssueTopicBindingID,
 	)
 	return i, err
 }
@@ -2778,7 +2789,7 @@ SET status = 'pending',
 WHERE id = $3
   AND status = 'sending'
   AND locked_by = $4
-RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at
+RETURNING id, event_id, workspace_id, project_id, project_binding_id, issue_id, task_id, event_type, payload, status, attempts, next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at, issue_topic_binding_id
 `
 
 type RetryChannelNotificationParams struct {
@@ -2814,6 +2825,7 @@ func (q *Queries) RetryChannelNotification(ctx context.Context, arg RetryChannel
 		&i.LastError,
 		&i.CreatedAt,
 		&i.SentAt,
+		&i.IssueTopicBindingID,
 	)
 	return i, err
 }

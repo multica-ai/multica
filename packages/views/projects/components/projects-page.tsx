@@ -108,6 +108,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
+import { ProjectFeishuBotPicker } from "./project-feishu-bot-picker";
 
 // Sort order maps for the enum columns (header sort needs a total order).
 const PRIORITY_ORDER: Record<ProjectPriority, number> = {
@@ -149,19 +150,21 @@ const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
   created: 104,
 };
 
+const FEISHU_BOT_COLUMN_WIDTH = 168;
+
 // Fixed tracks: edges 12+12, checkbox 16, name min 200, status 116,
-// kebab 28 = 384, plus the 10 gap-x-3 gaps between the wide template's
-// 11 tracks.
-const FIXED_TRACKS_WIDTH = 384 + 10 * 12;
+// Feishu Bot 168, kebab 28 = 552, plus the 11 gap-x-3 gaps between the
+// 12 tracks.
+const FIXED_TRACKS_WIDTH = 552 + 11 * 12;
 
 // Render/track order: checkbox, name, status (core, fixed 116px), priority,
-// progress, lead, issues, created, kebab. MUST be a literal string —
+// progress, lead, Feishu Bot, issues, created, kebab. MUST be a literal string —
 // Tailwind can't see interpolated `grid-cols-[...]` arbitrary values, so an
 // interpolated width silently drops the whole template and the grid
 // collapses to one column.
 const GRID_COLS =
   "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_116px_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-feishu-bot)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0.75rem]";
 
 const stopRowNavigation = (e: MouseEvent) => e.stopPropagation();
 
@@ -180,6 +183,7 @@ function columnTrackVars(
     "--pjc-priority": width("priority"),
     "--pjc-progress": width("progress"),
     "--pjc-lead": width("lead"),
+    "--pjc-feishu-bot": `${FEISHU_BOT_COLUMN_WIDTH}px`,
     "--pjc-issues": width("issues"),
     "--pjc-created": width("created"),
     "--pjc-minw": `${minWidth}px`,
@@ -347,6 +351,7 @@ function ProjectTableRow({
   project,
   pinned,
   canDelete,
+  canManageFeishu,
   isColVisible,
   selected,
   onToggleSelect,
@@ -356,6 +361,7 @@ function ProjectTableRow({
   project: Project;
   pinned: boolean;
   canDelete: boolean;
+  canManageFeishu: boolean;
   isColVisible: (key: ProjectColumnKey) => boolean;
   selected: boolean;
   onToggleSelect: () => void;
@@ -429,6 +435,17 @@ function ProjectTableRow({
       ) : (
         <ListGridCell className="hidden px-0 @2xl:flex" />
       )}
+
+      <ListGridCell
+        className="hidden @2xl:flex"
+        onClick={stopRowNavigation}
+        onAuxClick={stopRowNavigation}
+      >
+        <ProjectFeishuBotPicker
+          project={project}
+          canManage={canManageFeishu}
+        />
+      </ListGridCell>
 
       {isColVisible("issues") ? (
         <ListGridCell className="hidden justify-end font-mono text-xs tabular-nums text-muted-foreground @2xl:flex">
@@ -530,6 +547,9 @@ function ProjectTableHeader({
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
+      <ListGridHeaderCell className="hidden @2xl:flex">
+        {t(($) => $.table.feishu_bot)}
+      </ListGridHeaderCell>
       {isColVisible("issues") ? (
         <ListGridHeaderCell className="hidden justify-end @2xl:flex" align="right">
           {t(($) => $.table.issues)}
@@ -1237,6 +1257,7 @@ export function ProjectsPage() {
                     project={project}
                     pinned={pinnedProjectIds.has(project.id)}
                     canDelete={isWorkspaceAdmin}
+                    canManageFeishu={isWorkspaceAdmin}
                     isColVisible={isColVisible}
                     selected={selectedIds.has(project.id)}
                     onToggleSelect={() => toggleSelected(project.id)}

@@ -24,6 +24,7 @@
     "status": "状态",
     "progress": "进度",
     "lead": "负责人",
+    "feishu_bot": "飞书同步 Bot",
     "created": "创建时间",
     "issues": "Issue 数"
   },
@@ -85,6 +86,8 @@
     "empty_description": "为项目中的每个 Issue 创建独立话题，并同步状态和任务失败通知。",
     "no_bots": "请先在设置中连接一个 Agent Bot，再绑定此项目。",
     "bot_select_label": "Agent Bot",
+    "no_bot_option": "不绑定",
+    "copy_command": "复制",
     "bot_fallback": "飞书 Agent Bot",
     "bind": "开始绑定",
     "unbind": "解除绑定",

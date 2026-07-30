@@ -216,6 +216,7 @@ import {
   EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
   EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
@@ -238,6 +239,7 @@ import {
   CronPreviewResponseSchema,
   UNREADABLE_CRON_PREVIEW_RESPONSE,
   ListIssuesResponseSchema,
+  ListProjectsResponseSchema,
   CreateIssueResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -296,6 +298,7 @@ import {
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
+  ListLarkInstallationsResponseSchema,
   ChannelIssueTopicBindingResponseSchema,
   BeginProjectFeishuBindingResponseSchema,
   RetryProjectFeishuTopicsResponseSchema,
@@ -305,6 +308,7 @@ import {
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
+  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
 } from "./schemas";
@@ -2452,7 +2456,13 @@ export class ApiClient {
   async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    const raw = await this.fetch<unknown>(`/api/projects?${search}`);
+    return parseWithFallback(
+      raw,
+      ListProjectsResponseSchema,
+      EMPTY_LIST_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/projects" },
+    );
   }
 
   async getProject(id: string): Promise<Project> {
@@ -3075,7 +3085,15 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/lark/installations`,
+    );
+    return parseWithFallback(
+      raw,
+      ListLarkInstallationsResponseSchema,
+      EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/lark/installations" },
+    );
   }
 
   async listLarkProjectBindings(

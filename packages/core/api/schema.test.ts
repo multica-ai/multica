@@ -223,6 +223,84 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listProjects", () => {
+    const project = {
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Roadmap",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "high",
+      lead_type: null,
+      lead_id: null,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-07-30T00:00:00Z",
+      updated_at: "2026-07-30T00:00:00Z",
+      issue_count: 4,
+      done_count: 1,
+      resource_count: 0,
+    };
+
+    it("preserves a valid Feishu Bot binding summary", async () => {
+      stubFetchJson({
+        projects: [
+          {
+            ...project,
+            feishu_sync: {
+              state: "pending_group",
+              project_binding_id: "binding-1",
+              installation_id: "installation-1",
+              bot_name: "Planner Bot",
+              agent_id: "agent-1",
+              agent_name: "Planner",
+              chat_id: null,
+              chat_name: null,
+              bound_issue_count: 0,
+              manual_unbound_issue_count: 0,
+              total_issue_count: 4,
+              pending_notification_count: 0,
+              last_synced_at: null,
+            },
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      const res = await client.listProjects();
+
+      expect(res.projects[0]?.feishu_sync).toMatchObject({
+        installation_id: "installation-1",
+        agent_name: "Planner",
+      });
+    });
+
+    it("degrades only a malformed optional Feishu summary", async () => {
+      stubFetchJson({
+        projects: [{ ...project, feishu_sync: { state: 42 } }],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      const res = await client.listProjects();
+
+      expect(res.projects).toHaveLength(1);
+      expect(res.projects[0]?.feishu_sync).toBeNull();
+    });
+
+    it("falls back to an empty result when the Project list is malformed", async () => {
+      stubFetchJson({ projects: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listProjects()).resolves.toEqual({
+        projects: [],
+        total: 0,
+      });
+    });
+  });
+
   describe("searchProjects", () => {
     it("falls back to an empty result when the response is malformed", async () => {
       stubFetchJson({ projects: "not-an-array", total: 0 });

@@ -62,6 +62,7 @@ export function useBeginProjectFeishuBinding() {
       api.beginProjectFeishuBinding(projectId, installationId),
     onSettled: (_data, _error, variables) => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, variables.projectId) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
     },
   });
 }
@@ -73,6 +74,7 @@ export function useDeleteProjectFeishuBinding() {
     mutationFn: (projectId: string) => api.deleteProjectFeishuBinding(projectId),
     onSettled: (_data, _error, projectId) => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, projectId) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
     },
   });
 }

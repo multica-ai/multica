@@ -11,8 +11,15 @@ const mocks = vi.hoisted(() => ({
   projects: [] as Project[],
   members: [] as Array<{ user_id: string; name: string; role: string }>,
   agents: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+  installations: [] as Array<{
+    id: string;
+    agent_id: string;
+    status: string;
+  }>,
   pins: [] as Array<{ item_type: string; item_id: string }>,
   updateProject: vi.fn(),
+  beginFeishuBinding: vi.fn(),
+  deleteFeishuBinding: vi.fn(),
   deleteProject: vi.fn(),
   createPin: vi.fn(),
   deletePin: vi.fn(),
@@ -45,6 +52,16 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agents") {
       return { data: mocks.agents, isLoading: false };
     }
+    if (key === "lark") {
+      return {
+        data: {
+          installations: mocks.installations,
+          configured: true,
+          install_supported: true,
+        },
+        isLoading: false,
+      };
+    }
     if (key === "pins") {
       return { data: mocks.pins, isLoading: false };
     }
@@ -60,6 +77,21 @@ vi.mock("@multica/core/projects", () => ({
     selector(mocks.projectViewState),
 }));
 
+vi.mock("@multica/core/lark", () => ({
+  larkInstallationsOptions: () => ({ queryKey: ["lark"] }),
+}));
+
+vi.mock("@multica/core/projects/mutations", () => ({
+  useBeginProjectFeishuBinding: () => ({
+    mutate: mocks.beginFeishuBinding,
+    isPending: false,
+  }),
+  useDeleteProjectFeishuBinding: () => ({
+    mutate: mocks.deleteFeishuBinding,
+    isPending: false,
+  }),
+}));
+
 vi.mock("@multica/core/pins", () => ({
   pinListOptions: () => ({ queryKey: ["pins"] }),
   useCreatePin: () => ({ mutate: mocks.createPin }),
@@ -71,6 +103,7 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => null,
   useWorkspacePaths: () => ({
     projectDetail: (id: string) => `/test-workspace/projects/${id}`,
     memberDetail: (id: string) => `/test-workspace/members/${id}`,
@@ -236,8 +269,11 @@ beforeEach(() => {
     { user_id: "user-1", name: "User One", role: "admin" },
   ];
   mocks.agents = [];
+  mocks.installations = [];
   mocks.pins = [];
   mocks.updateProject.mockClear();
+  mocks.beginFeishuBinding.mockClear();
+  mocks.deleteFeishuBinding.mockClear();
   mocks.deleteProject.mockClear();
   mocks.createPin.mockClear();
   mocks.deletePin.mockClear();
@@ -269,6 +305,30 @@ describe("ProjectsPage compact row navigation", () => {
 
     expect(push).toHaveBeenCalledWith("/test-workspace/projects/project-1");
     expect(push).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds a Project to the selected Feishu Bot without navigating", async () => {
+    const user = userEvent.setup();
+    const push = vi.fn();
+    mocks.installations = [
+      { id: "installation-1", agent_id: "agent-1", status: "active" },
+    ];
+    renderProjects(makeAdapter({ push }));
+
+    expect(screen.getByText("Feishu sync Bot")).toBeInTheDocument();
+    await user.selectOptions(
+      within(projectRow()).getByRole("combobox", { name: "Agent Bot" }),
+      "installation-1",
+    );
+
+    expect(mocks.beginFeishuBinding).toHaveBeenCalledWith(
+      { projectId: "project-1", installationId: "installation-1" },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("does not navigate when inline controls are clicked", async () => {

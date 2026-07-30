@@ -337,6 +337,7 @@ type ChannelIssueTopicBinding struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	UnboundAt          pgtype.Timestamptz `json:"unbound_at"`
+	InstallationID     pgtype.UUID        `json:"installation_id"`
 }
 
 type ChannelMediaPendingObject struct {
@@ -356,23 +357,24 @@ type ChannelMediaPendingObject struct {
 }
 
 type ChannelNotificationOutbox struct {
-	ID               pgtype.UUID        `json:"id"`
-	EventID          pgtype.UUID        `json:"event_id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	ProjectBindingID pgtype.UUID        `json:"project_binding_id"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	TaskID           pgtype.UUID        `json:"task_id"`
-	EventType        string             `json:"event_type"`
-	Payload          []byte             `json:"payload"`
-	Status           string             `json:"status"`
-	Attempts         int32              `json:"attempts"`
-	NextAttemptAt    pgtype.Timestamptz `json:"next_attempt_at"`
-	LockedAt         pgtype.Timestamptz `json:"locked_at"`
-	LockedBy         pgtype.Text        `json:"locked_by"`
-	LastError        pgtype.Text        `json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	SentAt           pgtype.Timestamptz `json:"sent_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	EventID             pgtype.UUID        `json:"event_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	ProjectBindingID    pgtype.UUID        `json:"project_binding_id"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	EventType           string             `json:"event_type"`
+	Payload             []byte             `json:"payload"`
+	Status              string             `json:"status"`
+	Attempts            int32              `json:"attempts"`
+	NextAttemptAt       pgtype.Timestamptz `json:"next_attempt_at"`
+	LockedAt            pgtype.Timestamptz `json:"locked_at"`
+	LockedBy            pgtype.Text        `json:"locked_by"`
+	LastError           pgtype.Text        `json:"last_error"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	SentAt              pgtype.Timestamptz `json:"sent_at"`
+	IssueTopicBindingID pgtype.UUID        `json:"issue_topic_binding_id"`
 }
 
 type ChannelOutboundCardMessage struct {

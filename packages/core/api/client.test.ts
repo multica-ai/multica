@@ -9,8 +9,9 @@ describe("ApiClient project channel sync response schemas", () => {
   const topicResponse = {
     channel_topic_binding: {
       id: "topic-1",
-      project_binding_id: "binding-1",
-      project_id: "project-1",
+      installation_id: "installation-1",
+      project_binding_id: null,
+      project_id: null,
       issue_id: "issue-1",
       chat_id: "chat-1",
       topic_root_message_id: "message-1",
@@ -78,6 +79,31 @@ describe("ApiClient project channel sync response schemas", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            installations: [
+              {
+                id: "installation-1",
+                workspace_id: "workspace-1",
+                agent_id: "agent-1",
+                app_id: "app-1",
+                tenant_key: null,
+                bot_open_id: "bot-1",
+                installer_user_id: "user-1",
+                status: "active",
+                region: "feishu",
+                installed_at: "2026-07-30T00:00:00Z",
+                created_at: "2026-07-30T00:00:00Z",
+                updated_at: "2026-07-30T00:00:00Z",
+              },
+            ],
+            configured: true,
+            install_supported: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -93,6 +119,10 @@ describe("ApiClient project channel sync response schemas", () => {
     await expect(
       api.listLarkProjectBindings("workspace-1", "installation-1"),
     ).resolves.toMatchObject({ project_bindings: [{ project_title: "Roadmap" }] });
+    await expect(api.listLarkInstallations("workspace-1")).resolves.toMatchObject({
+      installations: [{ agent_id: "agent-1", status: "active" }],
+      configured: true,
+    });
   });
 
   it("degrades malformed reads and rejects malformed mutation success bodies", async () => {
@@ -124,6 +154,11 @@ describe("ApiClient project channel sync response schemas", () => {
     await expect(
       api.listLarkProjectBindings("workspace-1", "installation-1"),
     ).resolves.toEqual({ project_bindings: [] });
+    await expect(api.listLarkInstallations("workspace-1")).resolves.toEqual({
+      installations: [],
+      configured: false,
+      install_supported: false,
+    });
   });
 });
 

@@ -16,8 +16,9 @@ export type IssueAssigneeType = "member" | "agent" | "squad";
 
 export interface ChannelIssueTopicBinding {
   id: string;
-  project_binding_id: string;
-  project_id: string;
+  installation_id: string;
+  project_binding_id: string | null;
+  project_id: string | null;
   issue_id: string;
   chat_id: string;
   topic_root_message_id: string;

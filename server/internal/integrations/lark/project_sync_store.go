@@ -21,17 +21,18 @@ const projectBindingColumnsCPB = `cpb.id, cpb.workspace_id, cpb.project_id, cpb.
 	cpb.created_by_user_id, cpb.bound_by_user_id, cpb.unbound_by_user_id, cpb.created_at, cpb.bound_at,
 	cpb.unbound_at, cpb.updated_at`
 
-const issueTopicBindingColumns = `id, workspace_id, project_binding_id, project_id, issue_id,
+const issueTopicBindingColumns = `id, workspace_id, installation_id, project_binding_id, project_id, issue_id,
 	channel_chat_id, topic_root_message_id, channel_thread_id, binding_source, state,
 	created_by_user_id, unbound_by_user_id, created_at, updated_at, unbound_at`
 
 const notificationOutboxColumns = `id, event_id, workspace_id, project_id, project_binding_id,
-	issue_id, task_id, event_type, payload, status, attempts, next_attempt_at,
-	locked_at, locked_by, last_error, created_at, sent_at`
+	issue_topic_binding_id, issue_id, task_id, event_type, payload, status, attempts,
+	next_attempt_at, locked_at, locked_by, last_error, created_at, sent_at`
 
 const notificationOutboxColumnsCNO = `cno.id, cno.event_id, cno.workspace_id, cno.project_id, cno.project_binding_id,
-	cno.issue_id, cno.task_id, cno.event_type, cno.payload, cno.status, cno.attempts, cno.next_attempt_at,
-	cno.locked_at, cno.locked_by, cno.last_error, cno.created_at, cno.sent_at`
+	cno.issue_topic_binding_id, cno.issue_id, cno.task_id, cno.event_type, cno.payload, cno.status,
+	cno.attempts, cno.next_attempt_at, cno.locked_at, cno.locked_by, cno.last_error,
+	cno.created_at, cno.sent_at`
 
 type projectSyncDB interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
@@ -62,6 +63,7 @@ type ChannelProjectBinding struct {
 type ChannelIssueTopicBinding struct {
 	ID                 pgtype.UUID
 	WorkspaceID        pgtype.UUID
+	InstallationID     pgtype.UUID
 	ProjectBindingID   pgtype.UUID
 	ProjectID          pgtype.UUID
 	IssueID            pgtype.UUID
@@ -78,23 +80,24 @@ type ChannelIssueTopicBinding struct {
 }
 
 type ChannelNotificationOutbox struct {
-	ID               pgtype.UUID
-	EventID          pgtype.UUID
-	WorkspaceID      pgtype.UUID
-	ProjectID        pgtype.UUID
-	ProjectBindingID pgtype.UUID
-	IssueID          pgtype.UUID
-	TaskID           pgtype.UUID
-	EventType        string
-	Payload          []byte
-	Status           string
-	Attempts         int32
-	NextAttemptAt    pgtype.Timestamptz
-	LockedAt         pgtype.Timestamptz
-	LockedBy         pgtype.Text
-	LastError        pgtype.Text
-	CreatedAt        pgtype.Timestamptz
-	SentAt           pgtype.Timestamptz
+	ID                  pgtype.UUID
+	EventID             pgtype.UUID
+	WorkspaceID         pgtype.UUID
+	ProjectID           pgtype.UUID
+	ProjectBindingID    pgtype.UUID
+	IssueTopicBindingID pgtype.UUID
+	IssueID             pgtype.UUID
+	TaskID              pgtype.UUID
+	EventType           string
+	Payload             []byte
+	Status              string
+	Attempts            int32
+	NextAttemptAt       pgtype.Timestamptz
+	LockedAt            pgtype.Timestamptz
+	LockedBy            pgtype.Text
+	LastError           pgtype.Text
+	CreatedAt           pgtype.Timestamptz
+	SentAt              pgtype.Timestamptz
 }
 
 type ChannelProjectBindingListItem struct {
@@ -130,7 +133,7 @@ func scanProjectBinding(row pgx.Row) (ChannelProjectBinding, error) {
 func scanIssueTopicBinding(row pgx.Row) (ChannelIssueTopicBinding, error) {
 	var b ChannelIssueTopicBinding
 	err := row.Scan(
-		&b.ID, &b.WorkspaceID, &b.ProjectBindingID, &b.ProjectID, &b.IssueID,
+		&b.ID, &b.WorkspaceID, &b.InstallationID, &b.ProjectBindingID, &b.ProjectID, &b.IssueID,
 		&b.ChannelChatID, &b.TopicRootMessageID, &b.ChannelThreadID, &b.BindingSource, &b.State,
 		&b.CreatedByUserID, &b.UnboundByUserID, &b.CreatedAt, &b.UpdatedAt, &b.UnboundAt,
 	)
@@ -141,7 +144,7 @@ func scanNotificationOutbox(row pgx.Row) (ChannelNotificationOutbox, error) {
 	var item ChannelNotificationOutbox
 	err := row.Scan(
 		&item.ID, &item.EventID, &item.WorkspaceID, &item.ProjectID, &item.ProjectBindingID,
-		&item.IssueID, &item.TaskID, &item.EventType, &item.Payload, &item.Status,
+		&item.IssueTopicBindingID, &item.IssueID, &item.TaskID, &item.EventType, &item.Payload, &item.Status,
 		&item.Attempts, &item.NextAttemptAt, &item.LockedAt, &item.LockedBy,
 		&item.LastError, &item.CreatedAt, &item.SentAt,
 	)
@@ -315,8 +318,8 @@ func (s *projectSyncStore) enqueueProjectBackfill(ctx context.Context, q project
 		WHERE i.workspace_id = $2 AND i.project_id = $3
 		  AND NOT EXISTS (
 		      SELECT 1 FROM channel_issue_topic_binding active
-		      WHERE active.issue_id = i.id
-		        AND active.project_binding_id = $1
+		      WHERE active.workspace_id = i.workspace_id
+		        AND active.issue_id = i.id
 		        AND active.state = 'active'
 		  )
 		  AND NOT EXISTS (
@@ -339,15 +342,15 @@ func (s *projectSyncStore) enqueueProjectBackfill(ctx context.Context, q project
 	return err
 }
 
-func (s *projectSyncStore) createIssueTopic(ctx context.Context, q projectSyncDB, workspaceID, projectBindingID, projectID, issueID pgtype.UUID, chatID, rootMessageID, threadID, source string, userID pgtype.UUID) (ChannelIssueTopicBinding, error) {
+func (s *projectSyncStore) createIssueTopic(ctx context.Context, q projectSyncDB, workspaceID, installationID, projectBindingID, projectID, issueID pgtype.UUID, chatID, rootMessageID, threadID, source string, userID pgtype.UUID) (ChannelIssueTopicBinding, error) {
 	return scanIssueTopicBinding(q.QueryRow(ctx, `
 		INSERT INTO channel_issue_topic_binding (
-			workspace_id, project_binding_id, project_id, issue_id,
+			workspace_id, installation_id, project_binding_id, project_id, issue_id,
 			channel_chat_id, topic_root_message_id, channel_thread_id,
 			binding_source, state, created_by_user_id
-		) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, 'active', $9)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, 'active', $10)
 		RETURNING `+issueTopicBindingColumns,
-		workspaceID, projectBindingID, projectID, issueID,
+		workspaceID, installationID, projectBindingID, projectID, issueID,
 		chatID, rootMessageID, threadID, source, userID))
 }
 
@@ -368,13 +371,21 @@ func (s *projectSyncStore) getLatestIssueTopicByIssue(ctx context.Context, q pro
 		LIMIT 1`, workspaceID, issueID))
 }
 
-func (s *projectSyncStore) getActiveIssueTopicByRoot(ctx context.Context, q projectSyncDB, workspaceID, projectBindingID pgtype.UUID, rootMessageID string) (ChannelIssueTopicBinding, error) {
+func (s *projectSyncStore) getIssueTopicByID(ctx context.Context, q projectSyncDB, workspaceID, id pgtype.UUID) (ChannelIssueTopicBinding, error) {
 	return scanIssueTopicBinding(q.QueryRow(ctx, `
 		SELECT `+issueTopicBindingColumns+`
 		FROM channel_issue_topic_binding
-		WHERE workspace_id = $1 AND project_binding_id = $2
-		  AND topic_root_message_id = $3 AND state = 'active'`,
-		workspaceID, projectBindingID, rootMessageID))
+		WHERE workspace_id = $1 AND id = $2`, workspaceID, id))
+}
+
+func (s *projectSyncStore) getActiveIssueTopicByRoot(ctx context.Context, q projectSyncDB, workspaceID, installationID pgtype.UUID, chatID, rootMessageID string) (ChannelIssueTopicBinding, error) {
+	return scanIssueTopicBinding(q.QueryRow(ctx, `
+		SELECT `+issueTopicBindingColumns+`
+		FROM channel_issue_topic_binding
+		WHERE workspace_id = $1 AND installation_id = $2
+		  AND channel_chat_id = $3 AND topic_root_message_id = $4
+		  AND state = 'active'`,
+		workspaceID, installationID, chatID, rootMessageID))
 }
 
 func (s *projectSyncStore) replaceActiveIssueTopic(ctx context.Context, q projectSyncDB, workspaceID, issueID, userID pgtype.UUID) error {
@@ -387,15 +398,14 @@ func (s *projectSyncStore) replaceActiveIssueTopic(ctx context.Context, q projec
 	return err
 }
 
-func (s *projectSyncStore) manualUnbindIssueTopic(ctx context.Context, q projectSyncDB, workspaceID, projectBindingID pgtype.UUID, rootMessageID string, userID pgtype.UUID) (ChannelIssueTopicBinding, error) {
+func (s *projectSyncStore) manualUnbindIssueTopic(ctx context.Context, q projectSyncDB, workspaceID, bindingID, userID pgtype.UUID) (ChannelIssueTopicBinding, error) {
 	return scanIssueTopicBinding(q.QueryRow(ctx, `
 		UPDATE channel_issue_topic_binding
 		SET state = 'manual_unbound', unbound_by_user_id = $1,
 		    unbound_at = now(), updated_at = now()
-		WHERE workspace_id = $2 AND project_binding_id = $3
-		  AND topic_root_message_id = $4 AND state = 'active'
+		WHERE workspace_id = $2 AND id = $3 AND state = 'active'
 		RETURNING `+issueTopicBindingColumns,
-		userID, workspaceID, projectBindingID, rootMessageID))
+		userID, workspaceID, bindingID))
 }
 
 func (s *projectSyncStore) claimNotifications(ctx context.Context, workerID string, staleBefore time.Time, batchSize int32) ([]ChannelNotificationOutbox, error) {

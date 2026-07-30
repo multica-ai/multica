@@ -331,7 +331,7 @@ func (s *ProjectSyncService) commandIssueCreate(ctx context.Context, p engine.Pr
 	if p.Message.Source.ChatType == channel.ChatTypeGroup && topicRoot != "" {
 		opts.WithinTransaction = func(hookCtx context.Context, tx pgx.Tx, issue db.Issue) error {
 			_, err := s.store.createIssueTopic(
-				hookCtx, tx, binding.WorkspaceID, binding.ID, binding.ProjectID,
+				hookCtx, tx, binding.WorkspaceID, binding.InstallationID, binding.ID, binding.ProjectID,
 				issue.ID, p.Message.Source.ChatID, topicRoot,
 				p.Message.Source.ThreadID, "issue_created_in_topic", p.UserID,
 			)
@@ -385,21 +385,18 @@ func (s *ProjectSyncService) commandIssueBind(ctx context.Context, p engine.Proj
 	if len(p.Command.Arguments) == 0 {
 		return commandReply("Usage: /issue bind MUL-123"), nil
 	}
-	binding, err := s.store.getActiveProjectBindingByGroup(ctx, s.store.pool, p.Installation.ID, p.Message.Source.ChatID)
-	if isNoRows(err) {
-		return commandReply("This Bot and group are not bound to a Project."), nil
-	}
-	if err != nil {
-		return engine.ProjectCommandResult{}, err
-	}
-	issue, reply, err := s.resolveIssueForCommand(ctx, binding.WorkspaceID, p.Command.Arguments[0])
+	issue, reply, err := s.resolveIssueForCommand(ctx, p.Installation.WorkspaceID, p.Command.Arguments[0])
 	if err != nil || reply != "" {
 		return commandReply(reply), err
 	}
-	if !issue.ProjectID.Valid || issue.ProjectID != binding.ProjectID {
-		return commandReply("That Issue does not belong to the Project bound to this group."), nil
-	}
-	if err := s.bindIssueTopic(ctx, binding, issue, rootID, p.Message.Source.ThreadID, p.UserID); err != nil {
+
+	// A manual /issue bind is an installation-scoped direct route. Keep it
+	// independent from any Project binding in the group so Project rebinds or
+	// unbinds cannot silently tear down the explicitly selected Issue topic.
+	if err := s.bindIssueTopic(
+		ctx, p.Installation.WorkspaceID, p.Installation.ID, pgtype.UUID{}, issue.ProjectID,
+		p.Message.Source.ChatID, issue, rootID, p.Message.Source.ThreadID, p.UserID,
+	); err != nil {
 		return commandReply(projectSyncErrorText(err)), nil
 	}
 	return commandReply(fmt.Sprintf("Bound this topic to %s — %s.", s.issueIdentifier(ctx, issue), issue.Title)), nil
@@ -416,14 +413,17 @@ func (s *ProjectSyncService) commandIssueUnbind(ctx context.Context, p engine.Pr
 	if rootID == "" {
 		return commandReply("Run /issue unbind inside a Feishu topic."), nil
 	}
-	binding, err := s.store.getActiveProjectBindingByGroup(ctx, s.store.pool, p.Installation.ID, p.Message.Source.ChatID)
+	topic, err := s.store.getActiveIssueTopicByRoot(
+		ctx, s.store.pool, p.Installation.WorkspaceID, p.Installation.ID,
+		p.Message.Source.ChatID, rootID,
+	)
 	if isNoRows(err) {
-		return commandReply("This group has no active Project binding."), nil
+		return commandReply("This topic is not bound to an Issue."), nil
 	}
 	if err != nil {
 		return engine.ProjectCommandResult{}, err
 	}
-	_, err = s.store.manualUnbindIssueTopic(ctx, s.store.pool, binding.WorkspaceID, binding.ID, rootID, p.UserID)
+	_, err = s.store.manualUnbindIssueTopic(ctx, s.store.pool, p.Installation.WorkspaceID, topic.ID, p.UserID)
 	if isNoRows(err) {
 		return commandReply("This topic is not bound to an Issue."), nil
 	}
@@ -604,21 +604,39 @@ func (s *ProjectSyncService) BeginProjectBinding(ctx context.Context, workspaceI
 	if err != nil || InstallationStatus(inst.Status) != InstallationActive {
 		return ChannelProjectBinding{}, "", ErrProjectSyncInvalidInput
 	}
-	if _, err := s.store.getCurrentProjectBinding(ctx, s.store.pool, workspaceID, projectID); err == nil {
-		return ChannelProjectBinding{}, "", ErrProjectSyncConflict
-	} else if !isNoRows(err) {
-		return ChannelProjectBinding{}, "", err
-	}
 	code, err := newProjectBindingCode()
 	if err != nil {
 		return ChannelProjectBinding{}, "", err
 	}
+	tx, err := s.store.begin(ctx)
+	if err != nil {
+		return ChannelProjectBinding{}, "", err
+	}
+	defer tx.Rollback(ctx)
+	current, err := s.store.getCurrentProjectBinding(ctx, tx, workspaceID, projectID)
+	if err == nil {
+		if current.InstallationID == installationID {
+			return ChannelProjectBinding{}, "", ErrProjectSyncConflict
+		}
+		replaced, unbindErr := s.store.unbindProject(ctx, tx, workspaceID, current.ID, userID)
+		if unbindErr != nil {
+			return ChannelProjectBinding{}, "", unbindErr
+		}
+		if err := s.store.finishProjectUnbind(ctx, tx, replaced, "project_binding_replaced"); err != nil {
+			return ChannelProjectBinding{}, "", err
+		}
+	} else if !isNoRows(err) {
+		return ChannelProjectBinding{}, "", err
+	}
 	binding, err := s.store.createPendingProjectBinding(
-		ctx, s.store.pool, workspaceID, projectID, installationID,
+		ctx, tx, workspaceID, projectID, installationID,
 		projectBindingCodeHash(code), time.Now().Add(projectBindingCodeTTL), userID,
 	)
 	if err != nil {
 		return ChannelProjectBinding{}, "", translateProjectSyncConstraint(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ChannelProjectBinding{}, "", err
 	}
 	return binding, code, nil
 }
@@ -709,6 +727,22 @@ func (s *ProjectSyncService) RevokeInstallationBindings(ctx context.Context, wor
 			return err
 		}
 	}
+	if _, err := tx.Exec(ctx, `
+		WITH revoked_topics AS (
+			UPDATE channel_issue_topic_binding
+			SET state = 'bot_revoked', unbound_at = now(), updated_at = now()
+			WHERE workspace_id = $1 AND installation_id = $2 AND state = 'active'
+			RETURNING id
+		)
+		UPDATE channel_notification_outbox
+		SET status = 'dead', last_error = 'bot_revoked',
+		    locked_at = NULL, locked_by = NULL
+		WHERE workspace_id = $1
+		  AND issue_topic_binding_id IN (SELECT id FROM revoked_topics)
+		  AND status IN ('pending', 'sending')`,
+		workspaceID, installationID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -732,8 +766,7 @@ func (s *ProjectSyncService) UnbindIssueTopic(ctx context.Context, workspaceID, 
 		return err
 	}
 	_, err = s.store.manualUnbindIssueTopic(
-		ctx, s.store.pool, workspaceID, active.ProjectBindingID,
-		active.TopicRootMessageID, userID,
+		ctx, s.store.pool, workspaceID, active.ID, userID,
 	)
 	return err
 }
@@ -755,7 +788,7 @@ func (s *ProjectSyncService) EnableIssueTopic(ctx context.Context, workspaceID, 
 	}
 	defer tx.Rollback(ctx)
 	binding, err := s.store.createIssueTopic(
-		ctx, tx, latest.WorkspaceID, latest.ProjectBindingID, latest.ProjectID,
+		ctx, tx, latest.WorkspaceID, latest.InstallationID, latest.ProjectBindingID, latest.ProjectID,
 		latest.IssueID, latest.ChannelChatID, latest.TopicRootMessageID,
 		latest.ChannelThreadID.String, "manual_topic_bind", userID,
 	)
@@ -768,13 +801,22 @@ func (s *ProjectSyncService) EnableIssueTopic(ctx context.Context, workspaceID, 
 	return binding, nil
 }
 
-func (s *ProjectSyncService) bindIssueTopic(ctx context.Context, binding ChannelProjectBinding, issue db.Issue, rootID, threadID string, userID pgtype.UUID) error {
+func (s *ProjectSyncService) bindIssueTopic(
+	ctx context.Context,
+	workspaceID, installationID, projectBindingID, projectID pgtype.UUID,
+	chatID string,
+	issue db.Issue,
+	rootID, threadID string,
+	userID pgtype.UUID,
+) error {
 	tx, err := s.store.begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if existing, err := s.store.getActiveIssueTopicByRoot(ctx, tx, binding.WorkspaceID, binding.ID, rootID); err == nil {
+	if existing, err := s.store.getActiveIssueTopicByRoot(
+		ctx, tx, workspaceID, installationID, chatID, rootID,
+	); err == nil {
 		if existing.IssueID == issue.ID {
 			return tx.Commit(ctx)
 		}
@@ -782,19 +824,21 @@ func (s *ProjectSyncService) bindIssueTopic(ctx context.Context, binding Channel
 	} else if !isNoRows(err) {
 		return err
 	}
-	if existing, err := s.store.getActiveIssueTopicByIssue(ctx, tx, binding.WorkspaceID, issue.ID); err == nil {
-		if existing.TopicRootMessageID == rootID {
+	if existing, err := s.store.getActiveIssueTopicByIssue(ctx, tx, workspaceID, issue.ID); err == nil {
+		if existing.InstallationID == installationID &&
+			existing.ChannelChatID == chatID &&
+			existing.TopicRootMessageID == rootID {
 			return tx.Commit(ctx)
 		}
-		if err := s.store.replaceActiveIssueTopic(ctx, tx, binding.WorkspaceID, issue.ID, userID); err != nil {
+		if err := s.store.replaceActiveIssueTopic(ctx, tx, workspaceID, issue.ID, userID); err != nil {
 			return err
 		}
 	} else if !isNoRows(err) {
 		return err
 	}
 	if _, err := s.store.createIssueTopic(
-		ctx, tx, binding.WorkspaceID, binding.ID, binding.ProjectID, issue.ID,
-		binding.ChannelChatID.String, rootID, threadID, "manual_topic_bind", userID,
+		ctx, tx, workspaceID, installationID, projectBindingID, projectID, issue.ID,
+		chatID, rootID, threadID, "manual_topic_bind", userID,
 	); err != nil {
 		return translateProjectSyncConstraint(err)
 	}
@@ -830,14 +874,10 @@ func (s *ProjectSyncService) issueFromTopic(ctx context.Context, p engine.Projec
 	if rootID == "" {
 		return db.Issue{}, "Run this command inside a bound Feishu topic or specify an Issue identifier.", nil
 	}
-	projectBinding, err := s.store.getActiveProjectBindingByGroup(ctx, s.store.pool, p.Installation.ID, p.Message.Source.ChatID)
-	if isNoRows(err) {
-		return db.Issue{}, "This group has no active Project binding.", nil
-	}
-	if err != nil {
-		return db.Issue{}, "", err
-	}
-	topic, err := s.store.getActiveIssueTopicByRoot(ctx, s.store.pool, projectBinding.WorkspaceID, projectBinding.ID, rootID)
+	topic, err := s.store.getActiveIssueTopicByRoot(
+		ctx, s.store.pool, p.Installation.WorkspaceID, p.Installation.ID,
+		p.Message.Source.ChatID, rootID,
+	)
 	if isNoRows(err) {
 		return db.Issue{}, "This topic is not bound to an Issue.", nil
 	}
