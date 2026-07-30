@@ -297,7 +297,7 @@ export function ChatMessageList({
                 size="icon"
                 aria-label={t(($) => $.message_list.scroll_to_latest)}
                 onClick={handleScrollToLatest}
-                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-background shadow-md"
+                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-background shadow-md touch-manipulation size-11 md:size-8"
               />
             }
           >
