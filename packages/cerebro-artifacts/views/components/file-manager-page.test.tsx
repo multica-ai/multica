@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Artifact, ArtifactFolder } from "@multica/core/types";
 
@@ -159,6 +159,28 @@ const artifacts: Artifact[] = [
     created_at: "2026-04-28T00:00:00Z",
     updated_at: "2026-04-28T00:00:00Z",
   },
+  // Lives inside "Sales" and only mentions "budget" in its body — the fixture
+  // the FIR-4163 search-scope and Location tests below need.
+  {
+    id: "art-3",
+    workspace_id: "ws-1",
+    project_id: null,
+    issue_id: null,
+    folder_id: "folder-a",
+    origin_issue_id: null,
+    kind: "report",
+    format: "md",
+    title: "Quarterly numbers",
+    body: "The budget is on track.",
+    file_url: null,
+    file_size_bytes: null,
+    metadata: {},
+    author_type: "agent",
+    author_id: "agent-1",
+    requester_user_id: null,
+    created_at: "2026-04-28T00:00:00Z",
+    updated_at: "2026-04-28T00:00:00Z",
+  },
 ];
 
 vi.mock("@multica/cerebro-artifacts/core/queries", () => ({
@@ -228,7 +250,7 @@ describe("FileManagerPage drag-and-drop", () => {
   it("renders the documents search as a browser search field with autofill disabled", () => {
     renderPage();
 
-    const search = screen.getByPlaceholderText("Search documents…");
+    const search = screen.getByPlaceholderText("Search names…");
 
     expect(search).toHaveAttribute("type", "search");
     expect(search).toHaveAttribute("autocomplete", "off");
@@ -284,7 +306,9 @@ describe("FileManagerPage drag-and-drop", () => {
 
   it("dropping an artifact on the sidebar root moves it back to root", () => {
     renderPage();
-    const root = screen.getByRole("button", { name: /all documents/i });
+    // Exact name: the Location column also renders per-row buttons, but those
+    // are named "Go to All documents".
+    const root = screen.getByRole("button", { name: "All documents" });
     const dataTransfer = makeDataTransfer({
       "text/multica-artifact": "art-1",
     });
@@ -384,5 +408,101 @@ describe("FileManagerPage artifact row menu actions", () => {
     fireEvent.click(del);
 
     expect(screen.getByText("Delete document?")).toBeTruthy();
+  });
+});
+
+// FIR-4163: you have to be able to see which folder a document sits in, search
+// folder names as well as document names, opt into searching the contents, and
+// choose which columns the list shows.
+describe("FileManagerPage folder visibility, search scope and columns", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    moveArtifactMutate.mockReset();
+  });
+
+  function search(term: string) {
+    fireEvent.change(screen.getByPlaceholderText("Search names…"), {
+      target: { value: term },
+    });
+  }
+
+  it("shows the containing folder in the Location column", () => {
+    renderPage();
+
+    // Both root-level documents say they sit outside any folder.
+    expect(
+      screen.getAllByRole("button", { name: "Go to All documents" }).length,
+    ).toBe(2);
+
+    // A hit from elsewhere in the workspace names its folder.
+    search("Quarterly");
+    expect(
+      screen.getByRole("button", { name: "Go to Sales" }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking a Location cell opens that folder and leaves the search", () => {
+    renderPage();
+    search("Quarterly");
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to Sales" }));
+
+    // Landing in Sales means the search is over and its contents are listed —
+    // not the workspace-wide result set that got us here.
+    expect(screen.getByPlaceholderText("Search names…")).toHaveValue("");
+    expect(screen.getByLabelText("Select Quarterly numbers")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Select Daily sales report")).toBeNull();
+  });
+
+  it("matches folder names, not just document names", () => {
+    renderPage();
+    search("Reports");
+
+    // The folder matches; no document title contains "Reports".
+    expect(screen.getByLabelText("Select Reports")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Select Daily sales report")).toBeNull();
+  });
+
+  it("finds a document that lives in another folder", () => {
+    renderPage();
+    search("Quarterly");
+
+    // Standing at "All documents", so under the old folder-scoped filter this
+    // row was invisible.
+    expect(screen.getByLabelText("Select Quarterly numbers")).toBeInTheDocument();
+  });
+
+  it("only matches contents once the Contents toggle is on", () => {
+    renderPage();
+    search("budget");
+
+    // "budget" appears only in a body, so names-only finds nothing. Exact name:
+    // the empty state offers its own "Search contents too" shortcut.
+    const toggle = screen.getByRole("button", { name: "Contents" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByLabelText("Select Quarterly numbers")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Select Quarterly numbers")).toBeInTheDocument();
+  });
+
+  it("hiding a column removes its header and remembers the choice", () => {
+    renderPage();
+    expect(screen.getByText("Location")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Location" }));
+
+    expect(
+      JSON.parse(window.localStorage.getItem("documents:columns") ?? "[]"),
+    ).not.toContain("location");
+
+    // Re-mount rather than assert against the still-open menu: this proves the
+    // remembered choice survives a page load, which is the point of storing it.
+    cleanup();
+    renderPage();
+    expect(screen.queryByText("Location")).toBeNull();
   });
 });

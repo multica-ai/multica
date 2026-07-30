@@ -21,6 +21,20 @@ export {
   type EntityMetaHeaderProps,
 } from "./entity-meta-header";
 export { FindReplaceBar } from "./find-replace-bar";
+export {
+  DOCUMENT_COLUMNS,
+  DOCUMENT_COLUMNS_STORAGE_KEY,
+  useDocumentColumns,
+  type DocumentColumn,
+  type DocumentColumnKey,
+  type DocumentColumnsState,
+} from "./document-columns";
+export {
+  FolderMoveDialog,
+  buildFolderChoices,
+  type FolderChoice,
+  type FolderMoveDialogProps,
+} from "./folder-move-dialog";
 export { FolderAccessControl } from "./folder-access-control";
 export { FolderSuggestionBanner } from "./folder-suggestion-banner";
 export { KindIcon, KIND_LABELS } from "./kind-icon";

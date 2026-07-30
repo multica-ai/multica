@@ -17,7 +17,6 @@ import {
   Link2,
   ListPlus,
   ExternalLink,
-  User,
   Pencil,
   Replace,
   Check,
@@ -44,7 +43,9 @@ import {
   EditorActionsMenu,
   EntityMetaHeader,
   FindReplaceBar,
+  FolderMoveDialog,
   FolderSuggestionBanner,
+  buildFolderChoices,
 } from "@multica/cerebro-artifacts/views/components";
 import { FolderAccessColumn } from "@multica/cerebro-collections/views";
 import {
@@ -100,7 +101,12 @@ import {
   useDeleteArtifactFolder,
   useUpdateArtifactFolder,
 } from "@multica/cerebro-artifacts/core";
-import type { ArtifactFolder, MemberWithUser } from "@multica/core/types";
+import type { ArtifactFolder } from "@multica/core/types";
+import {
+  NoteListSection,
+  NOTE_DND_TYPE,
+  type OwnerInfo,
+} from "./note-list-section";
 import { NoteReferences, NoteAddReferenceDialog } from "./note-references";
 import { NoteCreateIssueDialog } from "./note-create-issue-dialog";
 import { NoteFolderCreateDialog } from "./note-folder-create-dialog";
@@ -122,24 +128,6 @@ import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
 } from "./comment-anchor-plugin";
-
-// drag-and-drop payload type for moving a note row onto a folder.
-const NOTE_DND_TYPE = "application/x-note-id";
-
-// A note carries an owner_id but no owner name (the wire shape is lightweight),
-// so resolve the display name from the workspace member list (FIR-1460). Used by
-// the list rows and the editor so you can always see who owns a note.
-type OwnerInfo = Pick<MemberWithUser, "user_id" | "name">;
-
-function ownerName(
-  ownerId: string,
-  myId: string | undefined,
-  members: OwnerInfo[],
-): string {
-  if (ownerId && ownerId === myId) return "You";
-  const m = members.find((x) => x.user_id === ownerId);
-  return m?.name?.trim() || "Unknown";
-}
 
 // NotesPage is the fast Notes surface: a search + capture header, a pinned-first
 // list on the left, and the selected note's editor on the right. Private by
@@ -256,6 +244,13 @@ export function NotesPage({
     () => new Set(folders.map((f) => f.id)),
     [folders],
   );
+  // FIR-4163: folder name per id for the list rows, plus the note whose folder
+  // the user is changing from a row (null = the picker is closed).
+  const folderNameById = React.useMemo(
+    () => new Map(folders.map((f) => [f.id, f.name])),
+    [folders],
+  );
+  const [moveNote, setMoveNote] = React.useState<Note | null>(null);
   const searching = search.trim().length > 0;
   const visibleNotes = React.useMemo(() => {
     // While searching, show flat matches across every folder. Otherwise the
@@ -418,6 +413,9 @@ export function NotesPage({
                   onSelect={setSelectedId}
                   myId={myId}
                   members={members}
+                  folderNameById={folderNameById}
+                  currentFolderId={folderId}
+                  onMove={setMoveNote}
                 />
               )}
               <NoteListSection
@@ -427,6 +425,9 @@ export function NotesPage({
                 onSelect={setSelectedId}
                 myId={myId}
                 members={members}
+                folderNameById={folderNameById}
+                currentFolderId={folderId}
+                onMove={setMoveNote}
               />
             </>
           )}
@@ -461,6 +462,23 @@ export function NotesPage({
         onOpenChange={setCreatingFolder}
         parentId={folderId}
         onCreated={(folder) => setFolderId(folder.id)}
+      />
+
+      {/* FIR-4163: dragging a note onto a folder row still works, but it only
+          reaches folders that happen to be on screen. This is the same picker
+          Documents uses, so a note can be moved anywhere from its own row. */}
+      <FolderMoveDialog
+        open={moveNote !== null}
+        onOpenChange={(open) => !open && setMoveNote(null)}
+        folders={folders}
+        subject={moveNote ? firstLineTitle(moveNote) : ""}
+        currentFolderId={moveNote?.folder_id ?? null}
+        rootLabel="All notes"
+        onMove={(target) => {
+          if (!moveNote) return;
+          setNoteFolder.mutate({ id: moveNote.id, folderId: target });
+          setMoveNote(null);
+        }}
       />
 
       {noteTypesEnabled && (
@@ -760,79 +778,6 @@ function FolderRail({
   );
 }
 
-function NoteListSection({
-  label,
-  notes,
-  selectedId,
-  onSelect,
-  myId,
-  members,
-}: {
-  label: string;
-  notes: Note[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  myId: string | undefined;
-  members: OwnerInfo[];
-}) {
-  if (notes.length === 0) return null;
-  return (
-    <div>
-      {label && (
-        <div className="px-4 pb-1.5 pt-3 text-[11px] uppercase tracking-wide text-muted-foreground">
-          {label}
-        </div>
-      )}
-      {notes.map((n) => (
-        <button
-          key={n.id}
-          onClick={() => onSelect(n.id)}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(NOTE_DND_TYPE, n.id);
-            e.dataTransfer.effectAllowed = "move";
-          }}
-          className={cn(
-            "block w-full cursor-grab border-b px-4 py-2.5 text-left hover:bg-muted/50 active:cursor-grabbing",
-            selectedId === n.id && "bg-muted",
-          )}
-        >
-          <div className="flex items-center gap-1.5 text-[13px] font-medium">
-            {n.pinned && <Pin className="size-3 text-amber-500" />}
-            <span className="truncate">{firstLineTitle(n)}</span>
-          </div>
-          <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-            {previewBody(n)}
-          </div>
-          <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-            {/* FIR-2595: per-note visibility ("Only you" / share) is removed —
-                folders drive who can open and edit a note. Show the owner when
-                it isn't you (FIR-1460, request 1). */}
-            {n.owner_id && n.owner_id !== myId && (
-              <>
-                <User className="size-3" />
-                <span className="truncate">
-                  {ownerName(n.owner_id, myId, members)}
-                </span>
-              </>
-            )}
-            {/* FIR-2145: comment count indicator — only shown when > 0. */}
-            {n.comment_count > 0 && (
-              <>
-                {n.owner_id && n.owner_id !== myId && (
-                  <span className="opacity-50">·</span>
-                )}
-                <MessageSquare className="size-3" />
-                <span>{n.comment_count}</span>
-              </>
-            )}
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // FIR-2826 — the desktop comments rail is wider by default and drag-resizable.
 // Width is clamped and remembered per browser so it survives reloads.
 const COMMENTS_WIDTH_KEY = "note:comments-width";
@@ -1083,20 +1028,9 @@ export function NoteEditor({
   const currentFolder = folders.find((f) => f.id === note.folder_id) ?? null;
   const [folderSearch, setFolderSearch] = React.useState("");
   const folderChoices = React.useMemo(() => {
-    const byParent = new Map<string | null, ArtifactFolder[]>();
-    for (const folder of folders) {
-      const parent = folder.parent_id ?? null;
-      byParent.set(parent, [...(byParent.get(parent) ?? []), folder]);
-    }
-    const out: Array<{ folder: ArtifactFolder; depth: number; path: string }> = [];
-    const walk = (parent: string | null, depth: number, prefix: string) => {
-      for (const folder of (byParent.get(parent) ?? []).sort((a, b) => a.name.localeCompare(b.name))) {
-        const path = prefix ? `${prefix} / ${folder.name}` : folder.name;
-        out.push({ folder, depth, path });
-        walk(folder.id, depth + 1, path);
-      }
-    };
-    walk(null, 0, "");
+    // Same depth-ordered, path-carrying list the shared move picker uses, so
+    // this menu and the picker can never disagree about nesting or order.
+    const out = buildFolderChoices(folders);
     const query = folderSearch.trim().toLowerCase();
     return query ? out.filter((choice) => choice.path.toLowerCase().includes(query)) : out;
   }, [folders, folderSearch]);
@@ -1757,11 +1691,3 @@ export function NoteEditor({
   );
 }
 
-function previewBody(note: Note): string {
-  const lines = note.body.split("\n").filter((l) => l.trim().length > 0);
-  // Drop the first line when it doubled as the title, so the preview shows the
-  // body rather than repeating the heading.
-  const startsWithTitle =
-    !note.title.trim() && lines.length > 0 ? 1 : 0;
-  return lines.slice(startsWithTitle).join(" ") || "Empty note";
-}
