@@ -102,6 +102,28 @@ function AvatarFallback({
 }
 
 /**
+ * Runs the caller's persistence callback and reports whether it succeeded.
+ *
+ * A rejection is deliberately swallowed rather than toasted: the caller that
+ * performed the write already owns that feedback. `AgentDetailPage.handleUpdate`
+ * toasts and then rethrows so autosave can render a failed state, and the
+ * settings tabs toast their own; the create flows only stash the value in
+ * local state and cannot fail at all. Reporting it here too would show the
+ * same failure twice. The upload this control runs itself has no other owner,
+ * so that one is still announced.
+ */
+async function persistedByCaller(
+  save: () => void | Promise<unknown>,
+): Promise<boolean> {
+  try {
+    await save();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Shared click-to-upload avatar control for web/desktop. Renders the current
  * avatar with a hover "change" affordance; on pick it opens {@link
  * AvatarCropDialog} for reposition/zoom, then uploads the cropped image
@@ -168,11 +190,12 @@ export function AvatarUploadControl({
     try {
       const result = await upload(cropped);
       if (!result) return;
-      await onUploaded(result.link);
+      if (!(await persistedByCaller(() => onUploaded(result.link)))) return;
       setDialogOpen(false);
       setPickedFile(null);
       toast.success(t(($) => $.avatar_upload.updated));
     } catch (err) {
+      // Only the upload above can land here — see persistedByCaller.
       toast.error(
         err instanceof Error ? err.message : t(($) => $.avatar_upload.failed),
       );
@@ -181,17 +204,24 @@ export function AvatarUploadControl({
     }
   };
 
-  // No success toast here on purpose: the avatar swaps to the chosen emoji in
-  // place, so the change is already visible. Only a failure needs announcing.
+  // Busy for the whole save, same as an upload: an edit caller PATCHes on every
+  // pick, so leaving the trigger live would let a second pick race the first.
+  // Both writes are last-one-to-arrive-wins on the server, and the loser can be
+  // the one the user chose last — a permanently wrong avatar, since the
+  // invalidate that follows only converges on whatever the server kept.
+  //
+  // No success toast on purpose: the avatar swaps to the chosen emoji in place,
+  // so the change is already visible.
   const handleEmojiSelected = async (picked: string) => {
     closePicker();
     setPreviewError(false);
+    setBusy(true);
     try {
-      await onEmojiSelected?.(formatAvatarEmoji(picked));
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t(($) => $.avatar_upload.failed),
+      await persistedByCaller(() =>
+        onEmojiSelected?.(formatAvatarEmoji(picked)),
       );
+    } finally {
+      setBusy(false);
     }
   };
 

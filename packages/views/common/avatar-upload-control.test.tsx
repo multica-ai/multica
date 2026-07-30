@@ -1,34 +1,73 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../test/i18n";
+
+const uploadMock = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+const toastSuccess = vi.hoisted(() => vi.fn());
+
+vi.mock("sonner", () => ({
+  toast: { error: toastError, success: toastSuccess },
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: { getBaseUrl: () => "https://api.test" },
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ upload: vi.fn() }),
+  useFileUpload: () => ({ upload: uploadMock }),
 }));
 
-// The crop dialog only matters after a file is picked; nothing here picks one.
+// Stands in for the crop UI so the upload path is reachable without a real
+// canvas; the cropping itself is covered by avatar-crop.test.ts.
 vi.mock("./avatar-crop-dialog", () => ({
-  AvatarCropDialog: () => null,
+  AvatarCropDialog: ({
+    open,
+    onCropped,
+  }: {
+    open: boolean;
+    onCropped: (file: File) => void;
+  }) =>
+    open ? (
+      <button type="button" onClick={() => onCropped(imageFile())}>
+        crop
+      </button>
+    ) : null,
 }));
 
 import { AvatarUploadControl } from "./avatar-upload-control";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function imageFile() {
+  return new File(["x"], "avatar.png", { type: "image/png" });
+}
 
 function openPicker() {
   fireEvent.click(screen.getByRole("button", { name: "Change avatar" }));
 }
 
-function spyOnFileDialog(container: HTMLElement) {
+function fileInput(container: HTMLElement) {
   const input = container.querySelector<HTMLInputElement>('input[type="file"]');
   if (!input) throw new Error("file input not rendered");
-  return vi.spyOn(input, "click").mockImplementation(() => {});
+  return input;
+}
+
+function spyOnFileDialog(container: HTMLElement) {
+  return vi.spyOn(fileInput(container), "click").mockImplementation(() => {});
+}
+
+// Drives the whole image path: choose a file, then crop-and-save.
+function uploadImage(container: HTMLElement) {
+  fireEvent.change(fileInput(container), {
+    target: { files: [imageFile()] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "crop" }));
 }
 
 describe("AvatarUploadControl", () => {
@@ -122,6 +161,94 @@ describe("AvatarUploadControl", () => {
       "aria-pressed",
       "false",
     );
+  });
+
+  // An edit caller PATCHes on every pick. Two in flight at once are
+  // last-one-to-arrive-wins on the server, so the user's newer choice can lose
+  // to the older one and stick — the avatar has to be locked until the save
+  // settles.
+  it("locks the avatar until a pick has finished saving", async () => {
+    let settle = () => {};
+    const onEmojiSelected = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value={null}
+        onUploaded={vi.fn()}
+        onEmojiSelected={onEmojiSelected}
+      />,
+    );
+
+    openPicker();
+    fireEvent.click(await screen.findByRole("button", { name: "🦊" }));
+
+    const trigger = screen.getByRole("button", { name: "Change avatar" });
+    await waitFor(() => expect(trigger).toBeDisabled());
+
+    // A second pick must not even be reachable while the first is in flight.
+    fireEvent.click(trigger);
+    expect(screen.queryByText("Upload image")).not.toBeInTheDocument();
+    expect(onEmojiSelected).toHaveBeenCalledTimes(1);
+
+    await act(async () => settle());
+    await waitFor(() => expect(trigger).not.toBeDisabled());
+  });
+
+  // The caller that performed the write reports its own failure and rethrows so
+  // autosave can show a failed state; toasting here too would double it up.
+  it("leaves a failed save to the caller that performed it", async () => {
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value={null}
+        onUploaded={vi.fn()}
+        onEmojiSelected={() => Promise.reject(new Error("nope"))}
+      />,
+    );
+
+    openPicker();
+    fireEvent.click(await screen.findByRole("button", { name: "🦊" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Change avatar" })).not
+        .toBeDisabled(),
+    );
+    expect(toastError).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("leaves a failed image save to the caller too", async () => {
+    uploadMock.mockResolvedValueOnce({ link: "https://cdn.test/a.png" });
+    const { container } = renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value={null}
+        onUploaded={() => Promise.reject(new Error("nope"))}
+      />,
+    );
+
+    uploadImage(container);
+
+    await waitFor(() => expect(uploadMock).toHaveBeenCalled());
+    await waitFor(() => expect(toastSuccess).not.toHaveBeenCalled());
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  // The upload is the one failure this control owns — nothing else reports it.
+  it("reports an upload failure itself", async () => {
+    uploadMock.mockRejectedValueOnce(new Error("network down"));
+    const { container } = renderWithI18n(
+      <AvatarUploadControl variant="agent" value={null} onUploaded={vi.fn()} />,
+    );
+
+    uploadImage(container);
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("network down"));
   });
 
   it("cannot be opened when the caller lacks edit permission", () => {
