@@ -2784,7 +2784,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   size="icon"
                   aria-label={t(($) => $.detail.scroll_to_latest)}
                   onClick={jumpToLatestActivity}
-                  className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-full bg-background shadow-md"
+                  className="absolute bottom-24 left-1/2 z-20 size-11 -translate-x-1/2 rounded-full bg-background shadow-md"
                 />
               }
             >
