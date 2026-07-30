@@ -24,6 +24,19 @@
 #
 # Optional:
 #   SMOKE_STATUS_ISSUE_ID  If set, pin last_smoke_status metadata on this issue
+#   ATLASSIAN_SITE         Atlassian Cloud site URL. NOT an SSM key — plain env in
+#                          gitops/base/agent-runtime/deployment.yaml, default
+#                          https://g2crowd.atlassian.net.
+#   JIRA_EMAIL             Atlassian account email.
+#   JIRA_PAT               Atlassian API token.
+#
+# Those three back `acli`: agentfarm-bootstrap.sh runs `acli jira auth login` from
+# them at pod startup. Phase 6 probes the resulting session and reports a WARNING
+# when acli is absent, the session is missing or expired, or Atlassian is
+# unreachable — never a failure, and never an early exit. They are optional because
+# JIRA is not on the agentrunner path this script gates, so neither an Atlassian
+# outage nor an unprovisioned JIRA credential may read as an agentfarm smoke
+# failure. Do not make phase 6 fatal again.
 
 set -euo pipefail
 
@@ -45,10 +58,16 @@ MARKER="SMOKE_OK_${TIMESTAMP//[^0-9A-Za-z]/_}_${NONCE}"
 SMOKE_ISSUE_ID=""
 SMOKE_PROJECT_ID=""
 SMOKE_RESULT="fail:unknown"
+# Newline-joined bullet list of non-blocking findings. A string rather than an
+# array so the EXIT trap can read it under `set -u` without an empty-array guard.
+SMOKE_WARNINGS=""
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 log()  { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 fail() { SMOKE_RESULT="fail:$*"; log "FAIL: $*"; exit 1; }
+# Degraded but not disqualifying: recorded, surfaced in the banner and the result
+# comment, and deliberately does not touch SMOKE_RESULT or the exit code.
+warn() { SMOKE_WARNINGS+="${SMOKE_WARNINGS:+$'\n'}- $*"; log "WARN: $*"; }
 
 # poll <label> <timeout_s> <check_cmd>
 poll() {
@@ -75,6 +94,9 @@ teardown() {
     else
       _comment="FAIL — ${SMOKE_RESULT#fail:}"
     fi
+    if [[ -n "${SMOKE_WARNINGS}" ]]; then
+      _comment+=$'\n\nWarnings (non-blocking):\n'"${SMOKE_WARNINGS}"
+    fi
     multica issue comment add "${SMOKE_ISSUE_ID}" \
       --content "${_comment}" 2>/dev/null \
       || log "result comment skipped"
@@ -92,7 +114,9 @@ trap teardown EXIT
 
 # ── Phase 1 · Pre-flight ───────────────────────────────────────────────────
 log "=== phase 1: pre-flight ==="
-for cmd in multica jq acli; do
+# `acli` is deliberately absent: it backs only the advisory phase 6, so a pod
+# without it is degraded, not broken, and must still run phases 7-9.
+for cmd in multica jq; do
   command -v "$cmd" &>/dev/null \
     || fail "pre-flight — required command not found: ${cmd}"
 done
@@ -136,11 +160,20 @@ multica project resource add "${SMOKE_PROJECT_ID}" \
   || fail "repo-attach — failed to attach github repo to smoke project"
 log "repo attach ok"
 
-# ── Phase 6 · JIRA connectivity (acli) ────────────────────────────────────
-log "=== phase 6: jira connectivity ==="
-acli jira workitem search --jql "project = AIPLAT" > /dev/null 2>&1 \
-  || fail "jira-connectivity — acli jira workitem search failed (check acli credentials)"
-log "jira connectivity ok"
+# ── Phase 6 · JIRA connectivity (acli) — advisory, never a gate ────────────
+# JIRA is not on the agentrunner path this script validates (auth → workspace →
+# agent exists → smoke task → agent reply). Making this fatal meant an Atlassian
+# outage — or a JIRA credential that was simply never provisioned in this pod's
+# secret bag — reported as an agentfarm smoke failure, and aborted the run before
+# phases 7-9 tested the thing actually under test. It reports instead.
+log "=== phase 6: jira connectivity (advisory) ==="
+if ! command -v acli &>/dev/null; then
+  warn "jira-connectivity — acli not on PATH"
+elif acli jira workitem search --jql "project = AIPLAT" > /dev/null 2>&1; then
+  log "jira connectivity ok"
+else
+  warn "jira-connectivity — acli jira workitem search failed (check ATLASSIAN_SITE / JIRA_EMAIL / JIRA_PAT and whether the pod-startup acli session is visible here)"
+fi
 
 # ── Phase 7 · Agent exists ─────────────────────────────────────────────────
 log "=== phase 7: agent exists ==="
@@ -184,5 +217,9 @@ log "║       SMOKE TEST PASSED              ║"
 log "╚══════════════════════════════════════╝"
 log "  server:  ${MULTICA_SERVER_URL}"
 log "  marker:  ${MARKER}"
+if [[ -n "${SMOKE_WARNINGS}" ]]; then
+  log "  warnings (non-blocking):"
+  while IFS= read -r _w; do log "    ${_w}"; done <<< "${SMOKE_WARNINGS}"
+fi
 log ""
 # EXIT trap runs teardown automatically.
