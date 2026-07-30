@@ -294,12 +294,38 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.12",
+        date: "2026-07-27",
+        title: "Lark media, image zoom, and steadier agent tasks",
+        changes: [],
+        features: [
+          "Pull request cards now show live CI status and whether a PR is ready to merge.",
+          "Lark now brings in images and videos from chat as attachments.",
+          "You can now pan and zoom image attachment previews.",
+          "The project picker now has search and shows more projects at once.",
+          "You can now copy an agent to another runtime from the command line.",
+        ],
+        improvements: [
+          "The thread quick-jump rail now sits on the right edge.",
+          "The transcript now follows live task output as it streams in.",
+        ],
+        fixes: [
+          "Searching for someone to mention now works even with spaces in the name.",
+          "When quick-create fails, you now see the real reason instead of a generic error.",
+          "Repeating the same action quickly no longer causes an error.",
+          "Issue lists now stay up to date when you return to them.",
+          "Codex agents now resume their sessions reliably.",
+          "Images and other media now display correctly in the desktop app.",
+          "Cancelling a task now fully stops the agent.",
+          "Agent tasks now recover on their own when an earlier session can't be resumed.",
+        ],
+      },
+      {
         version: "0.4.11",
         date: "2026-07-25",
         title: "Live PR status and Claude Opus 5",
         changes: [],
         features: [
-          "Pull request cards now show live CI status and whether a PR is ready to merge.",
           "You can now build agents on Claude Opus 5.",
         ],
         improvements: [

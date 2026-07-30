@@ -127,7 +127,8 @@
   "picker": {
     "no_project": "No project",
     "remove": "Remove from project",
-    "empty": "No projects yet"
+    "empty": "No projects yet",
+    "search_placeholder": "Search projects..."
   },
   "chip": {
     "fallback_label": "Project"

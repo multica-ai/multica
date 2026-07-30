@@ -7,6 +7,20 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
+// freshSessionRetryPrompt prefixes an explicit context-loss disclosure onto the
+// (already cold-rebuilt) prompt used for the daemon's single fresh-session
+// retry. When a resumed run is refused — the transcript is gone, belongs to
+// another account, or (GH #5975) carries history the provider now rejects —
+// the retry starts a brand-new provider session with none of the prior
+// conversation. Stating that up front stops the agent from assuming continuity
+// (e.g. "as I said earlier", relying on files/state it never created) and steers
+// it to re-read the issue and triggering thread before acting. The current user
+// prompt is preserved verbatim below the notice.
+func freshSessionRetryPrompt(prompt string) string {
+	const notice = "⚠️ Note: a previous provider session for this task could not be resumed, so this is a brand-new session. None of the earlier provider conversation context is available to you now. Do not assume any prior back-and-forth, in-memory state, or uncommitted work carried over — re-read the issue and the triggering thread to reconstruct what you need before acting.\n\n"
+	return notice + prompt
+}
+
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig. The provider string is threaded

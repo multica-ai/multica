@@ -1,11 +1,13 @@
 /**
- * Pan/zoom math for the Mermaid diagram viewer.
+ * Pan/zoom math for the shared zoom canvas — Mermaid diagrams and image
+ * previews both drive their viewer through this module.
  *
- * The diagram itself lives inside an empty-sandbox iframe, which cannot run
- * scripts and therefore cannot implement its own pan/zoom. All interaction is
- * driven from the host document by transforming the wrapper around that
- * iframe, so this module stays pure DOM-free math: it is the single place
- * where "where is the diagram and how big is it" is decided.
+ * Content is never asked to zoom itself: a Mermaid diagram lives inside an
+ * empty-sandbox iframe that cannot run scripts, and an `<img>` has no zoom of
+ * its own either. All interaction is driven from the host document by
+ * transforming the wrapper around the content, so this module stays pure
+ * DOM-free math: it is the single place where "where is the content and how
+ * big is it" is decided.
  *
  * Coordinate model: the content wrapper has `transform-origin: 0 0` and is
  * positioned at the viewport's top-left, so a transform is applied as
@@ -23,16 +25,18 @@ export interface Point {
   y: number;
 }
 
-export interface DiagramTransform {
+export interface ZoomTransform {
   scale: number;
   x: number;
   y: number;
 }
 
+// Default lower zoom bound. Only a default: `computeMinScale` lowers it for
+// content that cannot fit at 25% — see the comment there.
 export const MIN_SCALE = 0.25;
 export const MAX_SCALE = 4;
 
-// How much of the diagram must stay inside the viewport. Panning is clamped so
+// How much of the content must stay inside the viewport. Panning is clamped so
 // the user can never fling the canvas out of sight and be left staring at an
 // empty viewport with no way back other than Reset.
 const MIN_VISIBLE_PX = 48;
@@ -44,9 +48,9 @@ export const ZOOM_STEP = 1.2;
 // Keyboard pan step, in viewport pixels per arrow-key press.
 export const PAN_STEP_PX = 48;
 
-export function clampScale(scale: number): number {
+export function clampScale(scale: number, minScale: number = MIN_SCALE): number {
   if (!Number.isFinite(scale)) return 1;
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+  return Math.min(MAX_SCALE, Math.max(minScale, scale));
 }
 
 function hasArea(size: Size): boolean {
@@ -60,15 +64,34 @@ function hasArea(size: Size): boolean {
 
 /**
  * Scale that makes the content fit the viewport, never magnifying past natural
- * size. A small diagram opened in a large viewer should read at 100%, not be
- * blown up until its strokes look broken — same convention as macOS Preview.
+ * size. A small diagram or thumbnail opened in a large viewer should read at
+ * 100%, not be blown up until it looks broken — same convention as macOS
+ * Preview.
+ *
+ * Deliberately NOT floored at MIN_SCALE: a full-page screenshot ten times
+ * taller than the canvas fits at ~0.1, and returning 0.25 instead would open
+ * it already cropped.
  */
 export function computeFitScale(content: Size, viewport: Size): number {
   if (!hasArea(content) || !hasArea(viewport)) return 1;
 
-  return clampScale(
+  return Math.min(
+    MAX_SCALE,
     Math.min(1, viewport.width / content.width, viewport.height / content.height),
   );
+}
+
+/**
+ * Lower zoom bound for a given content/viewport pair: MIN_SCALE normally, but
+ * never above the fit scale.
+ *
+ * Without this, "fit to view" is unreachable for content more than 4x the
+ * canvas in either axis — exactly the long-screenshot case — because every
+ * clamp would snap the scale back up to 25% and leave the content cropped
+ * with no way to see all of it.
+ */
+export function computeMinScale(content: Size, viewport: Size): number {
+  return Math.min(MIN_SCALE, computeFitScale(content, viewport));
 }
 
 /** Centers `content` at `scale` inside `viewport`. */
@@ -76,7 +99,7 @@ export function centerTransform(
   content: Size,
   viewport: Size,
   scale: number,
-): DiagramTransform {
+): ZoomTransform {
   return {
     scale,
     x: (viewport.width - content.width * scale) / 2,
@@ -85,23 +108,23 @@ export function centerTransform(
 }
 
 /** Default view: fit to viewport, centered. */
-export function computeFitTransform(content: Size, viewport: Size): DiagramTransform {
+export function computeFitTransform(content: Size, viewport: Size): ZoomTransform {
   return centerTransform(content, viewport, computeFitScale(content, viewport));
 }
 
 /**
- * Keeps at least `MIN_VISIBLE_PX` of the diagram inside the viewport (or all of
- * it, when the diagram is smaller than that margin), so the canvas can never be
+ * Keeps at least `MIN_VISIBLE_PX` of the content inside the viewport (or all of
+ * it, when the content is smaller than that margin), so the canvas can never be
  * panned into nothing.
  */
 export function clampTransform(
-  transform: DiagramTransform,
+  transform: ZoomTransform,
   content: Size,
   viewport: Size,
-): DiagramTransform {
+): ZoomTransform {
   if (!hasArea(content) || !hasArea(viewport)) return transform;
 
-  const scale = clampScale(transform.scale);
+  const scale = clampScale(transform.scale, computeMinScale(content, viewport));
   const scaledWidth = content.width * scale;
   const scaledHeight = content.height * scale;
   const marginX = Math.min(MIN_VISIBLE_PX, scaledWidth);
@@ -126,13 +149,13 @@ export function clampTransform(
  * zoom track the cursor/fingers instead of drifting toward a corner.
  */
 export function zoomToAt(
-  transform: DiagramTransform,
+  transform: ZoomTransform,
   nextScale: number,
   anchor: Point,
   content: Size,
   viewport: Size,
-): DiagramTransform {
-  const scale = clampScale(nextScale);
+): ZoomTransform {
+  const scale = clampScale(nextScale, computeMinScale(content, viewport));
   if (scale === transform.scale) return transform;
 
   const ratio = scale / transform.scale;
@@ -150,22 +173,22 @@ export function zoomToAt(
 
 /** Multiplicative zoom (wheel notch, +/- key, toolbar button) about `anchor`. */
 export function zoomByAt(
-  transform: DiagramTransform,
+  transform: ZoomTransform,
   factor: number,
   anchor: Point,
   content: Size,
   viewport: Size,
-): DiagramTransform {
+): ZoomTransform {
   return zoomToAt(transform, transform.scale * factor, anchor, content, viewport);
 }
 
 /** Zoom about the viewport center — the anchor to use for keyboard/buttons. */
 export function zoomByAtCenter(
-  transform: DiagramTransform,
+  transform: ZoomTransform,
   factor: number,
   content: Size,
   viewport: Size,
-): DiagramTransform {
+): ZoomTransform {
   return zoomByAt(
     transform,
     factor,
@@ -176,12 +199,12 @@ export function zoomByAtCenter(
 }
 
 export function panBy(
-  transform: DiagramTransform,
+  transform: ZoomTransform,
   deltaX: number,
   deltaY: number,
   content: Size,
   viewport: Size,
-): DiagramTransform {
+): ZoomTransform {
   return clampTransform(
     { scale: transform.scale, x: transform.x + deltaX, y: transform.y + deltaY },
     content,

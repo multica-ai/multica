@@ -128,6 +128,33 @@ describe("ThreadMinimap", () => {
     }
   });
 
+  it("hugs the scrollbar side: ticks are right-aligned and the card opens inward", () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    try {
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={vi.fn()} />,
+      );
+
+      // The rail sits in the right gutter, so ticks flush right and the wave
+      // grows them inward (away from the scrollbar) rather than over it.
+      const tick = screen.getByRole("button", { name: "First thread opener" });
+      expect(tick).toHaveClass("justify-end");
+      expect(tick.firstElementChild).toHaveClass("origin-right");
+
+      const nav = screen.getByRole("navigation", { name: "Jump to comment thread" });
+      fireEvent.pointerMove(nav, { clientY: 0 });
+      act(() => vi.advanceTimersByTime(30 + 150)); // rAF flush + intent delay
+
+      const card = screen.getByText("with details").closest("div");
+      expect(card).toHaveClass("right-8");
+      expect(card?.className).not.toMatch(/(?:^|\s)left-/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("jumps to the clicked thread", () => {
     const onJump = vi.fn();
     renderWithI18n(

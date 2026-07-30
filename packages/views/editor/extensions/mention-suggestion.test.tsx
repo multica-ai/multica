@@ -136,6 +136,25 @@ describe("createMentionSuggestion", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
+  it("keeps the mention query active across spaces for multi-word search", () => {
+    const qc = fakeQc({
+      issues: [
+        {
+          id: "i-login",
+          identifier: "MUL-1",
+          title: "Login redirect bug",
+          status: "todo",
+        },
+      ],
+    });
+    const config = createMentionSuggestion(qc);
+
+    expect(config.allowSpaces).toBe(true);
+    expect(config.items!(itemArgs("login redirect"))).toEqual([
+      expect.objectContaining({ id: "i-login", type: "issue" }),
+    ]);
+  });
+
   it("returns members and agents synchronously without waiting for the server search", () => {
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],

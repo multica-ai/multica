@@ -94,7 +94,7 @@ func TestDirectChat_TaskOwnsItsOwnInputBatch(t *testing.T) {
 	// coalesced pair. The claim leaves T1 dispatched; move it to running so the
 	// completion CAS (WHERE status='running') applies.
 	markTaskRunning(t, ctx, t1)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "上海晴"), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "上海晴"), "", "", false); err != nil {
 		t.Fatalf("complete first task: %v", err)
 	}
 	claimed2 := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
@@ -152,7 +152,7 @@ func TestCompleteTask_ChatEmptyOutputWritesNoResponse(t *testing.T) {
 	markTaskRunning(t, ctx, taskID)
 
 	// Whitespace-only output trims to empty → no_response.
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "   "), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "   "), "", "", false); err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestCompleteTask_ChatNonEmptyOutputWritesMessage(t *testing.T) {
 	taskID := sendDirectChat(t, ctx, agentID, sessionID, "hello")
 	markTaskRunning(t, ctx, taskID)
 
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "hi there"), "sess-1", "/tmp/wd"); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, "hi there"), "sess-1", "/tmp/wd", false); err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
 	rows := assistantRows(t, ctx, sessionID)
@@ -208,11 +208,11 @@ func TestCompleteTask_ChatCallbackIdempotent(t *testing.T) {
 	markTaskRunning(t, ctx, taskID)
 
 	res := completeResult(t, "reply")
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", "", false); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
 	// Replay: the status CAS fails, so this is an idempotent no-op success.
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), res, "", "", false); err != nil {
 		t.Fatalf("replayed complete must be idempotent success, got %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 1 {
@@ -233,7 +233,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	rootID := sendDirectChat(t, ctx, agentID, sessionID, "root question")
 	markTaskRunning(t, ctx, rootID)
 
-	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "runtime_offline"); err != nil {
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "runtime_offline", false); err != nil {
 		t.Fatalf("fail task: %v", err)
 	}
 
@@ -349,12 +349,40 @@ func insertChannelChatTask(t *testing.T, ctx context.Context, agentID, runtimeID
 	return taskID
 }
 
-// TestCompleteTask_ChannelEmptyOutputWritesNoRow pins the MUL-4351 review fix:
-// a legacy/channel task (chat_input_task_id NULL) that completes with empty
-// output must NOT write an assistant row — so chat:done carries empty content
-// and the Slack/Lark outbound keeps silently dropping it. The no_response
-// fallback body must never reach an external channel. A non-empty channel
-// completion still writes an ordinary message.
+// insertSealedChannelChatTask creates a running channel-shaped chat task the
+// way EnqueueChatTask now does: the task owns its input batch
+// (chat_input_task_id = id) and the sealed user message carries the immutable
+// channel_ingested stamp.
+func insertSealedChannelChatTask(t *testing.T, ctx context.Context, agentID, runtimeID, sessionID, content string) string {
+	t.Helper()
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, dispatched_at)
+		VALUES ($1, $2, $3, 'running', 2, now(), now())
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create sealed channel chat task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("setup: set input owner: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id, channel_ingested)
+		VALUES ($1, 'user', $2, $3, TRUE)
+	`, sessionID, content, taskID); err != nil {
+		t.Fatalf("setup: seal channel user message: %v", err)
+	}
+	return taskID
+}
+
+// TestCompleteTask_ChannelEmptyOutputWritesNoRow pins the MUL-4351 review fix
+// for the LEGACY channel shape (chat_input_task_id NULL): an empty completion
+// must NOT write an assistant row — so chat:done carries empty content and the
+// Slack/Lark outbound keeps silently dropping it. The no_response fallback
+// body must never reach an external channel. A non-empty channel completion
+// still writes an ordinary message.
 func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -364,7 +392,7 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 
 	// Empty output → no row at all.
 	emptyTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false); err != nil {
 		t.Fatalf("complete channel task (empty): %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
@@ -373,7 +401,7 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 
 	// Non-empty output → one ordinary message (kind 'message', not no_response).
 	textTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "channel reply"), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "channel reply"), "", "", false); err != nil {
 		t.Fatalf("complete channel task (text): %v", err)
 	}
 	rows := assistantRows(t, ctx, sessionID)
@@ -382,5 +410,67 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 	}
 	if rows[0].MessageKind != protocol.ChatMessageKindMessage || rows[0].Content != "channel reply" {
 		t.Fatalf("channel message = kind %q content %q, want message/'channel reply'", rows[0].MessageKind, rows[0].Content)
+	}
+}
+
+// TestCompleteTask_SealedChannelEmptyOutputWritesNoRow pins the silent-drop
+// contract for the NEW channel shape: sealed channel tasks own their input
+// batch (chat_input_task_id = id), so the discriminator is the immutable
+// channel_ingested stamp, not a NULL owner. An empty completion must write no
+// assistant row — the outbound patcher forwards any non-empty content
+// verbatim, so a no_response fallback row would be pushed to Feishu/Slack.
+func TestCompleteTask_SealedChannelEmptyOutputWritesNoRow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "sealed channel chat")
+
+	emptyTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "[Image]")
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false); err != nil {
+		t.Fatalf("complete sealed channel task (empty): %v", err)
+	}
+	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
+		t.Fatalf("sealed channel empty completion must write NO assistant row, got %d", len(rows))
+	}
+
+	// Non-empty output still writes one ordinary message.
+	textTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "hello")
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "sealed channel reply"), "", "", false); err != nil {
+		t.Fatalf("complete sealed channel task (text): %v", err)
+	}
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 || rows[0].MessageKind != protocol.ChatMessageKindMessage || rows[0].Content != "sealed channel reply" {
+		t.Fatalf("sealed channel non-empty completion = %+v, want one ordinary message", rows)
+	}
+}
+
+// TestCompleteTask_SealedChannelRetryEmptyOutputWritesNoRow: an auto-retry
+// clone inherits its parent's chat_input_task_id while the sealed messages
+// stay tagged with the parent's id. The provenance check must follow the
+// inherited owner — keying it off the retry's own id would misread the task
+// as direct and push the no_response fallback to the external channel.
+func TestCompleteTask_SealedChannelRetryEmptyOutputWritesNoRow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "sealed channel retry chat")
+
+	parentTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "[Video]")
+	var retryTask string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, dispatched_at, parent_task_id, retry_of_task_id, chat_input_task_id)
+		VALUES ($1, $2, $3, 'running', 2, now(), now(), $4, $4, $4)
+		RETURNING id
+	`, agentID, runtimeID, sessionID, parentTask).Scan(&retryTask); err != nil {
+		t.Fatalf("setup: create retry clone: %v", err)
+	}
+
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(retryTask), completeResult(t, ""), "", "", false); err != nil {
+		t.Fatalf("complete sealed channel retry (empty): %v", err)
+	}
+	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
+		t.Fatalf("sealed channel retry empty completion must write NO assistant row, got %d", len(rows))
 	}
 }

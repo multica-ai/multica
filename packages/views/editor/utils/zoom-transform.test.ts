@@ -7,14 +7,15 @@ import {
   clampTransform,
   computeFitScale,
   computeFitTransform,
+  computeMinScale,
   distanceBetween,
   midpointOf,
   panBy,
   wheelZoomFactor,
   zoomByAtCenter,
   zoomToAt,
-  type DiagramTransform,
-} from "./diagram-transform";
+  type ZoomTransform,
+} from "./zoom-transform";
 
 const VIEWPORT = { width: 1000, height: 600 };
 
@@ -43,8 +44,14 @@ describe("computeFitScale", () => {
     expect(computeFitScale({ width: 100, height: 80 }, VIEWPORT)).toBe(1);
   });
 
-  it("clamps a diagram too large for even the minimum zoom", () => {
-    expect(computeFitScale({ width: 100000, height: 100000 }, VIEWPORT)).toBe(MIN_SCALE);
+  it("goes below the default minimum for content that cannot fit at 25%", () => {
+    // A full-page screenshot is routinely 10x taller than the canvas. Flooring
+    // the fit at MIN_SCALE would open it already cropped, with no zoom level
+    // that shows all of it.
+    const fit = computeFitScale({ width: 1600, height: 8000 }, VIEWPORT);
+
+    expect(fit).toBeLessThan(MIN_SCALE);
+    expect(fit).toBeCloseTo(VIEWPORT.height / 8000, 10);
   });
 
   it("returns 1 when either size is unknown, so a 0x0 measure never divides by zero", () => {
@@ -91,7 +98,7 @@ describe("clampTransform", () => {
   });
 
   it("leaves an in-bounds transform untouched", () => {
-    const transform: DiagramTransform = { scale: 1, x: 100, y: 50 };
+    const transform: ZoomTransform = { scale: 1, x: 100, y: 50 };
 
     expect(clampTransform(transform, content, VIEWPORT)).toEqual(transform);
   });
@@ -101,7 +108,7 @@ describe("zoomToAt", () => {
   const content = { width: 1000, height: 1000 };
 
   it("pins the content point under the anchor so zoom tracks the cursor", () => {
-    const start: DiagramTransform = { scale: 1, x: 0, y: 0 };
+    const start: ZoomTransform = { scale: 1, x: 0, y: 0 };
     const anchor = { x: 200, y: 100 };
 
     const zoomed = zoomToAt(start, 2, anchor, content, VIEWPORT);
@@ -129,7 +136,7 @@ describe("zoomToAt", () => {
   });
 
   it("is a no-op once already at the limit, so held keys/wheel do not drift the diagram", () => {
-    const atMax: DiagramTransform = { scale: MAX_SCALE, x: 10, y: 20 };
+    const atMax: ZoomTransform = { scale: MAX_SCALE, x: 10, y: 20 };
 
     expect(zoomToAt(atMax, MAX_SCALE * 2, { x: 100, y: 100 }, content, VIEWPORT)).toBe(atMax);
   });
@@ -137,7 +144,7 @@ describe("zoomToAt", () => {
 
 describe("zoomByAtCenter", () => {
   it("zooms about the viewport center for button/keyboard input", () => {
-    const start: DiagramTransform = { scale: 1, x: 0, y: 0 };
+    const start: ZoomTransform = { scale: 1, x: 0, y: 0 };
     const center = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
 
     const zoomed = zoomByAtCenter(start, 2, { width: 1000, height: 1000 }, VIEWPORT);
@@ -196,5 +203,36 @@ describe("pinch helpers", () => {
 
   it("finds the midpoint used as the pinch anchor", () => {
     expect(midpointOf({ x: 0, y: 0 }, { x: 10, y: 20 })).toEqual({ x: 5, y: 10 });
+  });
+});
+
+describe("computeMinScale", () => {
+  it("is the default floor for content that fits comfortably", () => {
+    expect(computeMinScale({ width: 800, height: 400 }, VIEWPORT)).toBe(MIN_SCALE);
+  });
+
+  it("drops to the fit scale for content too large to fit at the default floor", () => {
+    const content = { width: 1600, height: 8000 };
+
+    expect(computeMinScale(content, VIEWPORT)).toBe(computeFitScale(content, VIEWPORT));
+  });
+
+  it("keeps the fitted transform of a long screenshot intact through a clamp", () => {
+    // Regression guard: with a hard 0.25 floor, clampTransform snapped the fit
+    // scale back up and the image opened cropped.
+    const content = { width: 1600, height: 8000 };
+    const fitted = computeFitTransform(content, VIEWPORT);
+
+    expect(clampTransform(fitted, content, VIEWPORT)).toEqual(fitted);
+    expect(content.height * fitted.scale).toBeLessThanOrEqual(VIEWPORT.height);
+  });
+
+  it("lets zoomToAt reach the fit scale of a long screenshot", () => {
+    const content = { width: 1600, height: 8000 };
+    const fitScale = computeFitScale(content, VIEWPORT);
+
+    const zoomed = zoomToAt({ scale: 1, x: 0, y: 0 }, 0.0001, { x: 0, y: 0 }, content, VIEWPORT);
+
+    expect(zoomed.scale).toBe(fitScale);
   });
 });

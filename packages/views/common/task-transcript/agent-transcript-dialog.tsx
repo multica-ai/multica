@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo, forwardRef } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
@@ -49,6 +49,11 @@ import {
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { runtimeDisplayName } from "@multica/core/runtimes";
 import { redactSecrets } from "./redact";
+import {
+  createNewestFirstFollow,
+  FOLLOW_EDGE_THRESHOLD,
+  LINE_SCROLL_PX,
+} from "./transcript-follow";
 import type { TimelineItem } from "./build-timeline";
 import {
   traceEventCopyText,
@@ -234,6 +239,86 @@ export function AgentTranscriptDialog({
   const density = useTranscriptViewStore((s) => s.density);
   const setDensity = useTranscriptViewStore((s) => s.setDensity);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Newest-first live follow (#5921): all latch decisions live in the pure
+  // controller (see transcript-follow.ts for the model); this component only
+  // wires DOM events to it. A stable instance, never re-rendered by scroll
+  // traffic.
+  const followCtl = useMemo(() => createNewestFirstFollow(), []);
+  const detachScrollerRef = useRef<(() => void) | null>(null);
+
+  const handleScrollerRef = useCallback(
+    (el: HTMLElement | Window | null) => {
+      detachScrollerRef.current?.();
+      detachScrollerRef.current = null;
+      if (!(el instanceof HTMLElement)) return;
+      const onWheel = (e: WheelEvent) => {
+        const scale =
+          e.deltaMode === 1 ? LINE_SCROLL_PX : e.deltaMode === 2 ? el.clientHeight : 1;
+        followCtl.input(e.deltaY * scale);
+      };
+      let lastTouchY: number | null = null;
+      const onTouchStart = (e: TouchEvent) => {
+        lastTouchY = e.touches[0]?.clientY ?? null;
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        const y = e.touches[0]?.clientY;
+        if (y === undefined) return;
+        // Finger moving up scrolls the content down (away from the live end).
+        if (lastTouchY !== null) followCtl.input(lastTouchY - y);
+        lastTouchY = y;
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        // Only keys aimed at the scroller itself; Space/arrows bubbling from
+        // row controls (e.g. a collapsible trigger) are not scroll intent.
+        if (e.target !== el) return;
+        if (e.key === "ArrowDown") followCtl.input(LINE_SCROLL_PX);
+        else if (e.key === "ArrowUp") followCtl.input(-LINE_SCROLL_PX);
+        else if (e.key === "PageDown" || e.key === " ") followCtl.input(el.clientHeight);
+        else if (e.key === "PageUp") followCtl.input(-el.clientHeight);
+        else if (e.key === "End") followCtl.disengage();
+      };
+      // Scrollbar drags hit the scroller element itself; clicks on row
+      // content hit children (tracked too — enforcement must not fight text
+      // selection autoscroll while the button is held).
+      const onPointerDown = (e: MouseEvent) => {
+        followCtl.pointerDown(e.target === el);
+      };
+      const onPointerUp = () => {
+        followCtl.pointerUp();
+      };
+      const onScroll = () => {
+        // Enforce the follow here, on the scroll event itself: Virtuoso's
+        // prepend compensation lands after React effects, so an effect-timed
+        // snap alone stays one flush behind. NOTE: this direct write staying
+        // ahead of Virtuoso's own state relies on react-virtuoso registering
+        // its scroll listener after calling scrollerRef (true in 4.18.7); if
+        // that inverts, route the write through virtuosoRef.scrollTo instead.
+        if (followCtl.onScroll(el.scrollTop)) el.scrollTop = 0;
+      };
+      el.addEventListener("wheel", onWheel, { passive: true });
+      el.addEventListener("touchstart", onTouchStart, { passive: true });
+      el.addEventListener("touchmove", onTouchMove, { passive: true });
+      el.addEventListener("keydown", onKeyDown);
+      el.addEventListener("mousedown", onPointerDown);
+      window.addEventListener("mouseup", onPointerUp, { capture: true });
+      el.addEventListener("scroll", onScroll, { passive: true });
+      detachScrollerRef.current = () => {
+        el.removeEventListener("wheel", onWheel);
+        el.removeEventListener("touchstart", onTouchStart);
+        el.removeEventListener("touchmove", onTouchMove);
+        el.removeEventListener("keydown", onKeyDown);
+        el.removeEventListener("mousedown", onPointerDown);
+        window.removeEventListener("mouseup", onPointerUp, { capture: true });
+        el.removeEventListener("scroll", onScroll);
+        // The scroller can detach mid-drag (listEpoch remount); a stuck
+        // held-mouse flag would suppress enforcement forever.
+        followCtl.pointerUp();
+      };
+    },
+    [followCtl],
+  );
+
+  useEffect(() => () => detachScrollerRef.current?.(), []);
 
   useEffect(() => {
     setRowOverrides(new Map());
@@ -311,6 +396,31 @@ export function AgentTranscriptDialog({
     [sortDirection, setSortDirection],
   );
 
+  useLayoutEffect(() => {
+    followCtl.setActive(isLive && sortDirection === "newest_first");
+  }, [followCtl, isLive, sortDirection]);
+
+  // A new list instance (task/sort/filter change) mounts at its live end with
+  // the follow engaged — the same contract as first open.
+  useLayoutEffect(() => {
+    followCtl.reset();
+  }, [followCtl, listEpoch]);
+
+  // Live follow for newest-first (#5921): while the latch is engaged, every
+  // flush snaps back to the newest row — prepend anchoring would otherwise
+  // hold the viewport on the previous first row. Instant (not smooth): a
+  // smooth animation spans multiple flushes and its in-flight position reads
+  // as user displacement. The scroll-event enforcement in handleScrollerRef
+  // is the authoritative pin (Virtuoso's prepend compensation lands after
+  // React effects); this effect just shortens the first-paint gap.
+  // Chronological live follow is handled natively by Virtuoso's followOutput
+  // below; this pair is its prepend-side counterpart.
+  const displayCount = displayItems.length;
+  useLayoutEffect(() => {
+    if (!followCtl.isFollowing()) return;
+    virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "auto" });
+  }, [followCtl, displayCount]);
+
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
     if (!open) return;
@@ -350,9 +460,13 @@ export function AgentTranscriptDialog({
       setSelectedSeq(seq);
       const index = displayItems.findIndex((item) => item.seq === seq);
       if (index < 0) return;
+      // Explicit navigation away from the live end unlatches the newest-first
+      // follow — otherwise the scroll-event enforcement would pin the viewport
+      // straight back to the top. Scrolling back re-engages it as usual.
+      if (index > 0) followCtl.disengage();
       virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
     },
-    [displayItems],
+    [displayItems, followCtl],
   );
 
   // Copy all events as text. Use the displayed order so users get the same
@@ -801,6 +915,33 @@ export function AgentTranscriptDialog({
               style={{ height: "100%" }}
               data={displayItems}
               firstItemIndex={firstItemIndex}
+              // Open a live chronological transcript pinned to the newest
+              // event (#5921); the per-listEpoch remount re-applies this after
+              // task / sort / filter changes. Completed tasks keep reading
+              // from the top, and newest-first has its live end there already.
+              initialTopMostItemIndex={
+                isLive && sortDirection !== "newest_first"
+                  ? { index: "LAST", align: "end" }
+                  : 0
+              }
+              // Follow appended events while the reader is at the bottom;
+              // scrolling up suspends the follow until they return (#5921).
+              // Instant, not smooth: transcript flushes append several rows at
+              // a time and a still-animating scroll makes the next evaluation
+              // read "not at bottom", permanently dropping the follow.
+              // Newest-first opts out — its growth is prepends, handled by the
+              // scrollToIndex effect above.
+              followOutput={(atBottom) =>
+                isLive && sortDirection !== "newest_first" && atBottom ? "auto" : false
+              }
+              atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+              atTopThreshold={FOLLOW_EDGE_THRESHOLD}
+              // Back within the top zone (any way you got there) re-engages
+              // the newest-first follow. Leaving it does NOT disengage:
+              // anchored prepends leave the top zone on their own — only
+              // accumulated user input may break the latch (transcript-follow.ts).
+              atTopStateChange={(atTop) => followCtl.onAtTopChange(atTop)}
+              scrollerRef={handleScrollerRef}
               computeItemKey={(_, item) => item.seq}
               components={LIST_COMPONENTS}
               itemContent={(_, item) => (

@@ -625,7 +625,7 @@ func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
 		t.Fatalf("dispatch original leader task: %v", err)
 	}
 
-	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(originalID), "task preparation timed out after 5m0s", "", "", "timeout"); err != nil {
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(originalID), "task preparation timed out after 5m0s", "", "", "timeout", false); err != nil {
 		t.Fatalf("fail original leader task: %v", err)
 	}
 

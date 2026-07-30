@@ -30,12 +30,15 @@ const SVG = '<svg viewBox="0 0 1000 500"><text>mock diagram</text></svg>';
 const VIEWER_DOC = "<!doctype html><html><body>mock</body></html>";
 const LAYOUT = { width: 1000, height: 500 };
 
-// The canvas measures itself with getBoundingClientRect, which jsdom always
-// reports as 0x0. Without a real viewport the transform math has nothing to
-// fit against and every gesture is a no-op, so pin a deterministic size.
+// The canvas measures itself from its layout box and converts pointer
+// coordinates through its client rect; jsdom reports both as 0. Without a real
+// viewport the transform math has nothing to fit against and every gesture is
+// a no-op, so pin a deterministic size for both.
 const VIEWPORT = { width: 800, height: 400 };
 
 function stubViewportSize() {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(VIEWPORT.width);
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(VIEWPORT.height);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
     bottom: VIEWPORT.height,
     height: VIEWPORT.height,
@@ -75,7 +78,7 @@ function canvas(): HTMLElement {
 }
 
 function content(): HTMLElement {
-  return document.querySelector<HTMLElement>(".mermaid-viewer-content")!;
+  return document.querySelector<HTMLElement>(".zoom-canvas-content")!;
 }
 
 /** Reads the applied scale back out of the inline transform. */
@@ -230,7 +233,7 @@ describe("MermaidViewer zoom controls", () => {
     expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
-  it("restores the fitted view with Reset after panning away", () => {
+  it("restores the fitted view with Fit to view after panning away", () => {
     render(<Harness />);
     const fitted = currentTranslate();
 
@@ -239,19 +242,10 @@ describe("MermaidViewer zoom controls", () => {
     fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 200, clientY: 120 });
     expect(currentTranslate()).not.toEqual(fitted);
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
 
     expect(currentTranslate().x).toBeCloseTo(fitted.x, 5);
     expect(currentTranslate().y).toBeCloseTo(fitted.y, 5);
-  });
-
-  it("disables Reset when the view is already fitted, and enables it once moved", () => {
-    render(<Harness />);
-    expect(screen.getByRole("button", { name: "Reset view" })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-
-    expect(screen.getByRole("button", { name: "Reset view" })).toBeEnabled();
   });
 
   it("stops at 400% and disables Zoom in at the ceiling", () => {

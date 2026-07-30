@@ -665,8 +665,17 @@ WHERE id = $1 AND status = 'dispatched'
 RETURNING *;
 
 -- name: CompleteAgentTask :one
+-- session_rollout_missing (MUL-5305): when true the daemon withheld this task's
+-- Codex session because its rollout was never written to the store. Forcing
+-- session_id NULL and flagging the row happen in THIS terminal transaction so an
+-- auto-retry created and woken by the same commit can never observe the bad
+-- pointer or a missing gap flag.
 UPDATE agent_task_queue
-SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4, prepare_lease_expires_at = NULL
+SET status = 'completed', completed_at = now(), result = $2,
+    session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE $3 END,
+    work_dir = $4,
+    session_rollout_missing = sqlc.arg('session_rollout_missing'),
+    prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
 RETURNING *;
 
@@ -710,17 +719,76 @@ RETURNING *;
 -- error text. Migration 079 backfills the failure_reason column itself,
 -- so observability stays accurate; this clause guarantees session resume
 -- never picks up a bad session even when failure_reason hasn't caught up.
-SELECT session_id, work_dir, runtime_id FROM agent_task_queue
-WHERE agent_id = $1 AND issue_id = $2
-  AND (
+--
+-- Selection is per-session, not per-row: we first reduce to the single most
+-- recent terminal row FOR EACH session_id (DISTINCT ON), then apply the
+-- resume-unsafe filter. This closes a poisoning wormhole (GH #5975): when the
+-- SAME session_id has both an older 'completed' row (the turn that first baked
+-- in the bad history) and a newer poisoned 'failed' row, a plain row-level
+-- filter would drop the poisoned row and happily fall back to the older
+-- completed row — which points at the exact same dead session. Judging by each
+-- session's LATEST terminal state instead means:
+--   - a newer poisoned row invalidates the whole session, older completed rows
+--     included;
+--   - a different, healthy session (distinct id) is still eligible as a
+--     fallback;
+--   - if that same id later terminates cleanly again, the newer completed row
+--     restores its resumability.
+--
+-- The oversized-image ILIKE (dimension phrase AND image.source.base64.data) is
+-- the GH #5975 analogue of the api_invalid_request defense-in-depth above: a
+-- Kiro/ACP resume rejected for an oversized historical image is classified
+-- 'api_invalid_request' at write time, but this text clause also blocks a
+-- legacy/unclassified row (or a new-server + old-daemon deploy window) from
+-- resuming the poisoned session. Both markers are required so the clause stays
+-- exactly as narrow as classifyPoisonedError and the Kiro detector — an
+-- unrelated error that only mentions image dimensions is NOT excluded.
+WITH latest_per_session AS (
+    SELECT DISTINCT ON (session_id)
+        session_id, work_dir, runtime_id, status, failure_reason, error,
+        COALESCE(completed_at, started_at, dispatched_at, created_at) AS terminal_at
+    FROM agent_task_queue
+    WHERE agent_id = $1 AND issue_id = $2
+      AND session_id IS NOT NULL
+      AND status IN ('completed', 'failed')
+    ORDER BY session_id, COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+)
+SELECT session_id, work_dir, runtime_id FROM latest_per_session
+WHERE (
     status = 'completed'
     OR (
       status = 'failed'
       AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+      AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
     )
   )
-  AND session_id IS NOT NULL
+ORDER BY terminal_at DESC
+LIMIT 1;
+
+-- name: GetLatestTaskRolloutMissing :one
+-- Reports whether the most recent terminal task for (agent_id, issue_id)
+-- withheld its Codex session because the rollout was missing (MUL-5305). When
+-- true, GetLastTaskSession fell back to an older session, so the next run must
+-- disclose that the most recent turn's context could not be carried over. Any
+-- later task that records a real session resets this to FALSE by being the new
+-- most-recent row, so the disclosure fires once and then clears.
+SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
+WHERE agent_id = $1 AND issue_id = $2
+  AND status IN ('completed', 'failed')
+  AND started_at IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
+-- name: GetLatestChatTaskRolloutMissing :one
+-- Chat-session counterpart of GetLatestTaskRolloutMissing (MUL-5305): reports
+-- whether the most recent terminal task on this chat session withheld its Codex
+-- session because the rollout was missing. When true the next chat claim resumed
+-- an older session (or none), so it must disclose the continuity gap.
+SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
+WHERE chat_session_id = $1
+  AND status IN ('completed', 'failed')
+  AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1;
 
@@ -746,13 +814,20 @@ LIMIT 1;
 --
 -- failure_reason is a coarse classifier consumed by the auto-retry path;
 -- 'agent_error' is the safe default when the daemon doesn't supply one.
+--
+-- session_rollout_missing (MUL-5305): when true the daemon withheld this task's
+-- Codex session (its rollout was missing). Force session_id NULL — overriding
+-- the COALESCE that would otherwise preserve a stale mid-flight pin — and flag
+-- the row, in the SAME transaction that creates and wakes the auto-retry, so the
+-- retry can never claim the bad pointer or miss the continuity gap.
 UPDATE agent_task_queue
 SET status = 'failed',
     completed_at = now(),
     error = $2,
     failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
-    session_id = COALESCE(sqlc.narg('session_id'), session_id),
+    session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE COALESCE(sqlc.narg('session_id'), session_id) END,
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
+    session_rollout_missing = sqlc.arg('session_rollout_missing'),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
@@ -1047,6 +1122,59 @@ WHERE id = (
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
       AND t.status = 'queued'
+      -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
+      -- unique index is only (issue_id, agent_id), so an insert-race loser can
+      -- collide with a pending task stamped for a DIFFERENT head_sha; merging
+      -- into it would give a new-HEAD comment old-HEAD review coverage. Empty/
+      -- absent head_sha (no linked PR) matches any task, preserving coalescing.
+      AND (
+          COALESCE(sqlc.narg('head_sha')::text, '') = ''
+          OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
+      )
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+RETURNING id, coalesced_comment_ids;
+
+-- name: RegisterPlannedCommentForActiveTask :one
+-- #5914: durably register a comment that lost an enqueue race as a PLANNED
+-- (undelivered) input on the same-(issue, agent) ACTIVE task whose queued row
+-- MergeCommentIntoPendingTask could no longer target (it was claimed →
+-- dispatched/running). The losing comment can predate that task's created_at,
+-- so completion reconciliation's `created_at > since` window cannot see it;
+-- appending it to coalesced_comment_ids (the planned set) WITHOUT touching
+-- delivered_comment_ids makes reconcileCommentsOnCompletion replay it as a
+-- single bounded follow-up (planned-but-not-delivered ⇒ follow-up).
+--
+-- Head-scoped (TEN-356): only a task stamped with the SAME head_sha is a target,
+-- so a new-HEAD comment is never attached to an old-HEAD run. Returns
+-- pgx.ErrNoRows when no same-head active task exists (different HEAD, or the task
+-- just terminated) so the caller falls back to the active-task decision.
+--
+-- 'queued' is DELIBERATELY EXCLUDED (#5914, Elon round 3): a not-yet-claimed
+-- task has no claim receipt, so a comment merged into it WILL be recorded as
+-- delivered at claim time and never earns a completion follow-up under its own
+-- attribution. A queued target must therefore go through the ATOMIC
+-- MergeCommentIntoPendingTask (which re-stamps trigger/originator/accountable/
+-- overlay), never a bare planned append — otherwise a second member's comment
+-- could execute under the first member's identity/connected-apps (MUL-4302).
+-- Only claim-receipt statuses (already-built delivered set) are safe planned-id
+-- targets.
+UPDATE agent_task_queue
+SET coalesced_comment_ids = (
+        SELECT COALESCE(array_agg(DISTINCT e), '{}')
+        FROM unnest(array_append(coalesced_comment_ids, @comment_id::uuid)) AS e
+        WHERE e IS NOT NULL
+    )
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.issue_id = @issue_id
+      AND t.agent_id = @agent_id
+      AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
+      AND (
+          COALESCE(sqlc.narg('head_sha')::text, '') = ''
+          OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
+      )
     ORDER BY t.created_at DESC
     LIMIT 1
 )

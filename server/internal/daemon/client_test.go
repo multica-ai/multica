@@ -270,6 +270,34 @@ func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	}
 }
 
+// TestFailTask_RetriesOnTransient5xxThenSucceeds pins the callback half of
+// MUL-5305 Must-fix 1: FailTask's terminal transaction is now the sole
+// persistence point for the withheld session and continuity-gap flag, so if the
+// server returns a transient 5xx (the terminal tx rolled back), the daemon MUST
+// retry until it lands — a 400 would make it bail immediately
+// (TestPostJSONWithRetry_PermanentBailsImmediately) and drop the gap forever.
+func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", true); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts (2 transient 5xx + 1 success), got %d", got)
+	}
+}
+
 func TestPostJSONWithRetry_TransientExhausts(t *testing.T) {
 	defer noSleepRetry(t)()
 

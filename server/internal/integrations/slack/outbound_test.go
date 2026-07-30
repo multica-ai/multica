@@ -23,16 +23,21 @@ func uid(b byte) pgtype.UUID {
 }
 
 type fakeOutboundQueries struct {
-	binding    db.ChannelChatSessionBinding
-	bindingErr error
-	inst       db.ChannelInstallation
-	instErr    error
-	task       db.AgentTaskQueue
-	taskErr    error
+	binding             db.ChannelChatSessionBinding
+	bindingErr          error
+	inst                db.ChannelInstallation
+	instErr             error
+	task                db.AgentTaskQueue
+	taskErr             error
+	taskChannelIngested bool
 }
 
 func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
 	return f.task, f.taskErr
+}
+
+func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(context.Context, pgtype.UUID) (bool, error) {
+	return f.taskChannelIngested, nil
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -99,6 +104,29 @@ func TestOutbound_SkipsDirectChatTaskOnBoundSlackSession(t *testing.T) {
 
 	if fs.called != 0 {
 		t.Fatalf("sender called %d times, want 0 for a direct-chat task", fs.called)
+	}
+}
+
+// A sealed channel task owns an input batch exactly like a direct task; the
+// outbound gate must key on channel provenance, not owner presence, or every
+// Slack reply is silently dropped.
+func TestOutbound_PostsSealedChannelTaskReply(t *testing.T) {
+	q := &fakeOutboundQueries{
+		task:                db.AgentTaskQueue{ChatInputTaskID: uid(2)},
+		taskChannelIngested: true,
+		binding: db.ChannelChatSessionBinding{
+			InstallationID: uid(1),
+			ChannelChatID:  "C123",
+			Config:         []byte(`{"channel_id":"C123"}`),
+		},
+		inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fs := &fakeSender{}
+
+	newTestOutbound(q, fs).handleEvent(chatDoneEvent("00000000-0000-0000-0000-000000000001", "channel answer"))
+
+	if fs.called != 1 {
+		t.Fatalf("sender called %d times, want 1 for a sealed channel task", fs.called)
 	}
 }
 

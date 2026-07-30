@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -95,7 +96,7 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	}
 	before := countTasks()
 
-	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB)); result != commentMergeAttributionBlocked {
+	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB), pgtype.Text{}); result != commentMergeAttributionBlocked {
 		t.Fatalf("fail-closed merge result = %d, want commentMergeAttributionBlocked (refused, non-success)", result)
 	}
 	if after := countTasks(); after != before {
@@ -121,7 +122,7 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	if _, err := testPool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = false WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("clear fail-closed: %v", err)
 	}
-	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB)); result != commentMergeSucceeded {
+	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB), pgtype.Text{}); result != commentMergeSucceeded {
 		t.Fatalf("fail-open merge result = %d, want commentMergeSucceeded", result)
 	}
 	tc2, orig2, _, src2 := readSnapshot()
