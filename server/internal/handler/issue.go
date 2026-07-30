@@ -3061,8 +3061,8 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // shouldEnqueueAgentTask returns true when an issue creation or assignment
 // should trigger the assigned agent. Backlog issues are skipped — backlog
 // acts as a parking lot where issues can be pre-assigned without immediately
-// triggering execution. Moving out of backlog is handled separately in
-// UpdateIssue.
+// triggering execution. Moving out of backlog or blocked is handled separately
+// in UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
 	if issue.Status == "backlog" {
 		return false

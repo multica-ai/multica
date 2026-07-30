@@ -138,6 +138,82 @@ func TestPreviewIssueTrigger_BatchAggregates(t *testing.T) {
 	}
 }
 
+// TestBlockedToTodoRestartsSquad verifies that once a squad-assigned issue is
+// parked as blocked and its previous run has ended, moving it back to todo must
+// preview and enqueue a fresh leader task.
+func TestBlockedToTodoRestartsSquad(t *testing.T) {
+	ctx := context.Background()
+	leaderID := seededReadyAgentID(t)
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, "Blocked Recovery Squad", leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID) })
+
+	issue := createIssueForTest(t, map[string]any{
+		"title":  "blocked squad recovery",
+		"status": "blocked",
+	})
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue SET assignee_type = 'squad', assignee_id = $2 WHERE id = $1
+	`, issue.ID, squadID); err != nil {
+		t.Fatalf("assign blocked issue to squad: %v", err)
+	}
+
+	preview := previewIssueTrigger(t, map[string]any{
+		"issue_ids": []string{issue.ID},
+		"status":    "todo",
+	})
+	if preview.TotalCount != 1 || len(preview.Triggers) != 1 {
+		t.Fatalf("blocked->todo preview: expected 1 trigger, got %+v", preview)
+	}
+	if trigger := preview.Triggers[0]; trigger.AgentID != leaderID || trigger.Source != "status" {
+		t.Fatalf("blocked->todo preview: wrong trigger %+v", trigger)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"status": "todo",
+	}), "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue blocked->todo: %d %s", w.Code, w.Body.String())
+	}
+	if got := taskCountFor(t, issue.ID, leaderID); got != 1 {
+		t.Fatalf("blocked->todo: expected 1 squad-leader task, got %d", got)
+	}
+}
+
+func TestBlockedToNonRunnableStatusDoesNotRestart(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	for _, status := range []string{"backlog", "done", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			issue := createIssueForTest(t, map[string]any{
+				"title":  "blocked non-runnable " + status,
+				"status": "blocked",
+			})
+			if _, err := testPool.Exec(context.Background(), `
+				UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1
+			`, issue.ID, agentID); err != nil {
+				t.Fatalf("assign blocked issue: %v", err)
+			}
+
+			preview := previewIssueTrigger(t, map[string]any{
+				"issue_ids": []string{issue.ID},
+				"status":    status,
+			})
+			if preview.TotalCount != 0 {
+				t.Fatalf("blocked->%s: expected no trigger, got %+v", status, preview)
+			}
+		})
+	}
+}
+
 // TestPreviewIssueTrigger_MatchesWritePath is the core invariant: when preview
 // says a run will start, the real write path enqueues it; when preview says it
 // won't, the write path enqueues nothing.

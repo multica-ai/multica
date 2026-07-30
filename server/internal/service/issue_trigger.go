@@ -15,8 +15,8 @@ const (
 	// RunSourceAssign covers issue creation and assignee changes — the issue
 	// is being handed to an agent/squad. Parks silently on backlog.
 	RunSourceAssign RunEnqueueSource = "assign"
-	// RunSourceStatus covers promoting an already-assigned issue out of
-	// backlog into an active status.
+	// RunSourceStatus covers activating an already-assigned parked issue by
+	// moving it out of backlog or blocked into a runnable status.
 	RunSourceStatus RunEnqueueSource = "status"
 )
 
@@ -30,9 +30,9 @@ const (
 // gate so it never leaks a private agent's readiness to a member who cannot
 // see it. A nil func is treated as allow-all.
 //
-// IsSelfLoop reports whether promoting this issue out of backlog would be the
-// calling agent re-triggering its own running task. Only the status source
-// consults it; create and assign never do. A nil func means "not a self-loop".
+// IsSelfLoop reports whether activating this parked issue would be the calling
+// agent re-triggering its own running task. Only the status source consults it;
+// create and assign never do. A nil func means "not a self-loop".
 type IssueTriggerProbe struct {
 	CanAccessAgent func(agent db.Agent) bool
 	IsSelfLoop     func() bool
@@ -77,7 +77,7 @@ func allowAllAgents(db.Agent) bool { return true }
 // CreateAgentTask, guarded by the (issue_id, agent_id) partial unique index
 // over pending (queued/dispatched) tasks; the pending check below mirrors that
 // guard, and only the status source needs it:
-//   - status source (backlog → active) can re-fire against an assignee that
+//   - status source (parked → runnable) can re-fire against an assignee that
 //     already holds a pending task (e.g. one a @mention raised while the issue
 //     sat in backlog); the check keeps preview from promising a run the unique
 //     index would coalesce away.
@@ -104,8 +104,8 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && in.PrevStatus == "backlog" &&
-		issue.Status != "done" && issue.Status != "cancelled":
+	case in.StatusChanged && isParkedIssueStatus(in.PrevStatus) &&
+		isRunnableIssueStatus(issue.Status):
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}
@@ -163,6 +163,19 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 	}
 	return IssueRunTrigger{}, false
+}
+
+func isParkedIssueStatus(status string) bool {
+	return status == "backlog" || status == "blocked"
+}
+
+func isRunnableIssueStatus(status string) bool {
+	switch status {
+	case "todo", "in_progress", "in_review":
+		return true
+	default:
+		return false
+	}
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched
