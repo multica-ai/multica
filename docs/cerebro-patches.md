@@ -26,6 +26,29 @@ documents one named patch + its rationale + the file location(s).
 
 - `server/cmd/server/router.go` wires the Cerebro-owned, read-only
   `GET /api/workspaces/{id}/connections/company-brain-migration-census` report.
+- `server/migrations/9163_cerebro_company_brain_connection.{up,down}.sql`
+  defines one logical Company Brain Connection per workspace. It references an
+  existing `workspace_connection`, which remains the single storage location
+  for URL, tools, instructions, and scopable arguments, and records the
+  canonical tool-contract fingerprint without seeding or changing any rows.
+- `server/migrations/9164_cerebro_company_brain_permission_scope.{up,down}.sql`
+  keeps allowed read sources, the write source, access version, and lifecycle
+  on the existing agent-level Connection permission row. The fields are
+  nullable for ordinary permissions, and the migration neither seeds nor
+  changes permission assignments.
+- `server/migrations/9165_cerebro_company_brain_rollback_tombstones.{up,down}.sql`
+  adds a bounded rollback window and non-secret tombstone references for each
+  legacy Connection, permission, approval/audit record, and tool alias. Foreign
+  keys prevent those rollback inputs from being deleted while referenced; the
+  migration creates no rows and does not copy credentials or secret values.
+- `server/migrations/9166_cerebro_company_brain_migration_decisions.{up,down}.sql`
+  stores versioned per-agent automatic, owner-decision, cannot-migrate, and
+  do-not-migrate outcomes without classifying or changing any live agent.
+- `server/migrations/9167_cerebro_company_brain_parity_proof.{up,down}.sql`
+  stores the versioned pre-cutover equality proof for one target permission:
+  access, approval outcomes, canonical tool calls, tool count, and write
+  destination must all match the frozen legacy state before status can be
+  `matched`; any mismatch remains `blocked` with a stable code.
 - **Why:** prior to consolidation, Company Brain source claims only existed behind
   each legacy connection credential. The report invokes `whoami` server-side,
   returns only `write_source` and `allowed_read_sources`, and attaches that
