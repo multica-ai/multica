@@ -1051,9 +1051,19 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 }
 
 const listChatMessages = `-- name: ListChatMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
-WHERE chat_session_id = $1
-ORDER BY created_at ASC, id ASC
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested FROM chat_message AS message
+WHERE message.chat_session_id = $1
+  AND NOT (
+    message.role = 'user'
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue AS task
+      WHERE task.chat_session_id = message.chat_session_id
+        AND task.status = 'queued'
+        AND task.id = message.task_id
+    )
+  )
+ORDER BY message.created_at ASC, message.id ASC
 `
 
 func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUID) ([]ChatMessage, error) {
@@ -1089,13 +1099,23 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
-WHERE chat_session_id = $1
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested FROM chat_message AS message
+WHERE message.chat_session_id = $1
+  AND NOT (
+    message.role = 'user'
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue AS task
+      WHERE task.chat_session_id = message.chat_session_id
+        AND task.status = 'queued'
+        AND task.id = message.task_id
+    )
+  )
   AND (
     $3::timestamptz IS NULL
-    OR (created_at, id) < ($3::timestamptz, $4::uuid)
+    OR (message.created_at, message.id) < ($3::timestamptz, $4::uuid)
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY message.created_at DESC, message.id DESC
 LIMIT $2
 `
 
@@ -1301,6 +1321,70 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 	return items, nil
 }
 
+const listPendingChatTasksForSession = `-- name: ListPendingChatTasksForSession :many
+SELECT
+    task.id,
+    task.status,
+    task.created_at,
+    message.id AS message_id,
+    COALESCE(message.content, '')::text AS content
+FROM agent_task_queue AS task
+LEFT JOIN LATERAL (
+    SELECT input.id, input.content
+    FROM chat_message AS input
+    WHERE input.task_id = COALESCE(task.chat_input_task_id, task.id)
+      AND input.role = 'user'
+    ORDER BY input.created_at ASC, input.id ASC
+    LIMIT 1
+) AS message ON TRUE
+WHERE task.chat_session_id = $1
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE WHEN task.status = 'queued' THEN 1 ELSE 0 END,
+    task.priority DESC,
+    task.created_at ASC,
+    task.id ASC
+`
+
+type ListPendingChatTasksForSessionRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	MessageID pgtype.UUID        `json:"message_id"`
+	Content   string             `json:"content"`
+}
+
+// Returns the active task first, followed by prioritized then FIFO follow-ups.
+// The message lateral join reads only the immutable input owned by each task;
+// it avoids loading the session's complete message history just to render a
+// one-line queue preview. GetPendingChatTask remains for legacy callers that
+// only need an existence check.
+func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessionID pgtype.UUID) ([]ListPendingChatTasksForSessionRow, error) {
+	rows, err := q.db.Query(ctx, listPendingChatTasksForSession, chatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingChatTasksForSessionRow{}
+	for rows.Next() {
+		var i ListPendingChatTasksForSessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.MessageID,
+			&i.Content,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockChatSessionForDelete = `-- name: LockChatSessionForDelete :one
 SELECT id FROM chat_session
 WHERE id = $1
@@ -1486,6 +1570,52 @@ WHERE id = $1
 func (q *Queries) MarkChatSessionRead(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markChatSessionRead, id)
 	return err
+}
+
+const prioritizeQueuedChatTask = `-- name: PrioritizeQueuedChatTask :one
+WITH demoted AS (
+  UPDATE agent_task_queue AS queued
+  SET priority = 3
+  WHERE queued.chat_session_id = $1
+    AND queued.id <> $2
+    AND queued.status = 'queued'
+    AND queued.priority >= 4
+), prioritized AS (
+  UPDATE agent_task_queue AS selected
+  SET priority = 4
+  WHERE selected.id = $2
+    AND selected.chat_session_id = $1
+    AND selected.status = 'queued'
+  RETURNING selected.id
+)
+SELECT
+  prioritized.id AS task_id,
+  (
+    SELECT active.id
+    FROM agent_task_queue AS active
+    WHERE active.chat_session_id = $1
+      AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+    ORDER BY active.created_at ASC, active.id ASC
+    LIMIT 1
+  )::uuid AS active_task_id
+FROM prioritized
+`
+
+type PrioritizeQueuedChatTaskParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+type PrioritizeQueuedChatTaskRow struct {
+	TaskID       pgtype.UUID `json:"task_id"`
+	ActiveTaskID pgtype.UUID `json:"active_task_id"`
+}
+
+func (q *Queries) PrioritizeQueuedChatTask(ctx context.Context, arg PrioritizeQueuedChatTaskParams) (PrioritizeQueuedChatTaskRow, error) {
+	row := q.db.QueryRow(ctx, prioritizeQueuedChatTask, arg.ChatSessionID, arg.ID)
+	var i PrioritizeQueuedChatTaskRow
+	err := row.Scan(&i.TaskID, &i.ActiveTaskID)
+	return i, err
 }
 
 const promoteChannelChatTasksIfMediaReady = `-- name: PromoteChannelChatTasksIfMediaReady :many

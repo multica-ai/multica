@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -141,6 +142,32 @@ func cancelTaskByUserRequest(t *testing.T, userID, taskID string) *http.Request 
 	req := newRequestAs(userID, "POST", "/api/tasks/"+taskID+"/cancel", nil)
 	req = withURLParam(req, "taskId", taskID)
 	return withChatTestWorkspaceCtx(t, req)
+}
+
+func TestCancelTaskByUser_QueuedOnlyDoesNotCancelPromotedTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelQueuedOnlyAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := insertPendingChatTask(t, agentID, sessionID, "running")
+	req := newRequestAs(
+		testUserID,
+		http.MethodPost,
+		"/api/tasks/"+taskID+"/cancel?expected_status=queued&chat_session_id="+sessionID,
+		nil,
+	)
+	req = withURLParam(req, "taskId", taskID)
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, withChatTestWorkspaceCtx(t, req))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "running" {
+		t.Fatalf("queued-only cancellation changed promoted task status to %q", got)
+	}
 }
 
 // createStartedEmptyChatTask seeds the exact shape the deferred cancel is about:
@@ -575,6 +602,89 @@ func TestCancelTaskByUser_ChatTaskWithoutTranscript_RestoresUserDraft(t *testing
 	}
 	if count != 0 {
 		t.Fatalf("expected linked user message to be deleted, got %d", count)
+	}
+}
+
+func TestCancelTaskByUser_ChatRetryRestoresRootInput(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatRetryAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	var rootTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, chat_session_id, completed_at
+		)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'completed', 0, $2, now())
+		RETURNING id
+	`, agentID, sessionID).Scan(&rootTaskID); err != nil {
+		t.Fatalf("create root chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, rootTaskID)
+	})
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1`,
+		rootTaskID,
+	); err != nil {
+		t.Fatalf("seal root chat input: %v", err)
+	}
+
+	var messageID string
+	const content = "restore the retry input"
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id)
+		VALUES ($1, 'user', $2, $3)
+		RETURNING id
+	`, sessionID, content, rootTaskID).Scan(&messageID); err != nil {
+		t.Fatalf("create root chat message: %v", err)
+	}
+
+	var retryTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, chat_session_id,
+			parent_task_id, retry_of_task_id, chat_input_task_id, attempt
+		)
+		VALUES (
+			$1, (SELECT runtime_id FROM agent WHERE id = $1), 'queued', 0, $2,
+			$3, $3, $3, 1
+		)
+		RETURNING id
+	`, agentID, sessionID, rootTaskID).Scan(&retryTaskID); err != nil {
+		t.Fatalf("create retry chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, retryTaskID)
+	})
+
+	transcript, err := testHandler.Queries.ListChatMessages(
+		context.Background(),
+		util.MustParseUUID(sessionID),
+	)
+	if err != nil {
+		t.Fatalf("list transcript with queued retry: %v", err)
+	}
+	if len(transcript) != 1 || transcript[0].Content != content {
+		t.Fatalf("queued retry hid its historical root input: %+v", transcript)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, retryTaskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode retry cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage == nil ||
+		resp.CancelledChatMessage.MessageID != messageID ||
+		resp.CancelledChatMessage.Content != content {
+		t.Fatalf("retry did not restore its root input: %#v", resp.CancelledChatMessage)
 	}
 }
 

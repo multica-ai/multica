@@ -100,6 +100,8 @@ export type {
   ChatMessage,
   ChatMessagesPage,
   ChatPendingTask,
+  ChatQueuedTask,
+  PrioritizeQueuedChatTaskResponse,
   PendingChatTaskItem,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,

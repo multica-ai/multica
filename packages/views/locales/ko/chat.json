@@ -16,6 +16,7 @@
     "placeholder_named": "{{name}}에게 메시지 보내기…",
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
+    "queue_send_tooltip": "대기열에 추가",
     "stop_tooltip": "중지",
     "send_failed_toast": "메시지를 보내지 못했습니다",
     "send_blocked_toast": "메시지가 전송되지 않았습니다 — 이 에이전트를 사용할 권한이 없습니다",
@@ -27,6 +28,15 @@
     "remove_project_context": "프로젝트 컨텍스트 제거",
     "no_projects": "아직 프로젝트가 없습니다",
     "project_context_unsupported": "프로젝트 설명이 적용되지 않습니다 — 이 에이전트의 데몬 업그레이드가 필요합니다"
+  },
+  "queue": {
+    "title_other": "대기 중인 메시지 {{count}}개",
+    "clear": "모두 지우기",
+    "send_now": "지금 보내기",
+    "edit": "대기 중인 메시지 편집",
+    "remove": "대기열에서 삭제",
+    "fallback": "대기 중인 메시지",
+    "action_failed_toast": "대기 중인 메시지를 업데이트하지 못했습니다"
   },
   "message_list": {
     "show_details": "세부 정보 보기",

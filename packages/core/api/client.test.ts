@@ -1351,6 +1351,26 @@ describe("ApiClient", () => {
       expect(init.headers["X-Client-Capabilities"]).toBe(CHAT_DRAFT_RESTORE_CAPABILITY);
     });
 
+    it("scopes queued-only cancellation to the expected chat session", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(taskResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await new ApiClient("https://api.example.test").cancelTaskById("task-1", {
+        queuedOnly: true,
+        sessionId: "session-1",
+      });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://api.example.test/api/tasks/task-1/cancel" +
+          "?expected_status=queued&chat_session_id=session-1",
+      );
+    });
+
     it("treats a null cancelled chat message as absent", async () => {
       vi.stubGlobal(
         "fetch",
@@ -1404,6 +1424,18 @@ describe("ApiClient", () => {
       expect(result.id).toBe("");
       expect(result.cancelled_chat_message).toBeUndefined();
     });
+  });
+
+  it("clears a chat queue with one session-scoped request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").clearQueuedChatTasks("session-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/chat/sessions/session-1/queued-tasks",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
   describe("chat attachment wiring", () => {

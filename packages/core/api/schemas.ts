@@ -15,6 +15,8 @@ import type {
   BillingTransactionsPage,
   CancelTaskResponse,
   ChatDraftRestoresResponse,
+  ChatPendingTask,
+  PrioritizeQueuedChatTaskResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -1112,6 +1114,43 @@ const ChatDraftRestoreSchema = z.object({
 export const ChatDraftRestoresResponseSchema = z.object({
   restores: z.array(ChatDraftRestoreSchema).default([]),
 }).loose();
+
+const ChatQueuedTaskSchema = z.object({
+  task_id: z.string(),
+  status: z.string().default("queued"),
+  created_at: z.string().default(""),
+  message_id: z.string().optional(),
+  content: z.string().optional(),
+}).loose();
+
+const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
+  tasks.flatMap((task) => {
+    const parsed = ChatQueuedTaskSchema.safeParse(task);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+
+// Root fields retain the legacy single-task response shape. Keep additive
+// fields optional so callers can distinguish an older server from an empty
+// queue. A malformed queue row is ignored without discarding a valid head.
+export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  task_id: z.string().optional(),
+  status: z.string().optional(),
+  created_at: z.string().optional(),
+  supports_queue: z.boolean().optional(),
+  queued_tasks: ChatQueuedTasksSchema.optional(),
+}).loose();
+
+export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
+
+export const PrioritizeQueuedChatTaskResponseSchema:
+  z.ZodType<PrioritizeQueuedChatTaskResponse> = z.object({
+    task_id: z.string(),
+    active_task_id: z.string().optional(),
+  }).loose();
+
+export const EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE:
+  PrioritizeQueuedChatTaskResponse = { task_id: "" };
 
 export const EMPTY_CHAT_DRAFT_RESTORES: ChatDraftRestoresResponse = {
   restores: [],

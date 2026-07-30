@@ -16,6 +16,7 @@
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
+    "queue_send_tooltip": "排队发送",
     "stop_tooltip": "停止",
     "send_failed_toast": "发送消息失败",
     "send_blocked_toast": "消息未发送——你已没有该智能体的使用权限",
@@ -27,6 +28,15 @@
     "remove_project_context": "移除项目上下文",
     "no_projects": "还没有项目",
     "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级"
+  },
+  "queue": {
+    "title_other": "{{count}} 条排队消息",
+    "clear": "全部清空",
+    "send_now": "立即发送",
+    "edit": "编辑排队消息",
+    "remove": "移除排队消息",
+    "fallback": "排队消息",
+    "action_failed_toast": "无法更新排队消息"
   },
   "message_list": {
     "show_details": "查看详情",

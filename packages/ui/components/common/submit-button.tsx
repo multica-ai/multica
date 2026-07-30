@@ -24,6 +24,8 @@ interface SubmitButtonProps {
   busy?: boolean;
   running?: boolean;
   onStop?: () => void;
+  /** Keep a send control beside Stop so callers can enqueue follow-up work. */
+  allowSubmitWhileRunning?: boolean;
   /**
    * Tooltip shown over the send button when idle. Pass a string or a node
    * (e.g. `Send · ⌘↵`). Omit to render no tooltip.
@@ -46,11 +48,13 @@ function SubmitButton({
   busy,
   running,
   onStop,
+  allowSubmitWhileRunning,
   tooltip,
   ariaLabel,
   stopTooltip,
   stopAriaLabel,
 }: SubmitButtonProps) {
+  let stopControl: ReactNode = null;
   if (running) {
     const stopButton = (
       <Button
@@ -62,13 +66,13 @@ function SubmitButton({
         <Square className="fill-current" aria-hidden="true" />
       </Button>
     );
-    if (!stopTooltip) return stopButton;
-    return (
+    stopControl = stopTooltip ? (
       <Tooltip>
         <TooltipTrigger render={stopButton} />
         <TooltipContent side="top">{stopTooltip}</TooltipContent>
       </Tooltip>
-    );
+    ) : stopButton;
+    if (!allowSubmitWhileRunning) return stopControl;
   }
 
   const submitButton = (
@@ -77,7 +81,7 @@ function SubmitButton({
       className="rounded-full"
       disabled={disabled || loading || busy}
       aria-disabled={busy || undefined}
-      aria-busy={busy || undefined}
+      aria-busy={loading || busy || undefined}
       onClick={onClick}
       aria-label={ariaLabel}
     >
@@ -93,12 +97,20 @@ function SubmitButton({
       )}
     </Button>
   );
-  if (!tooltip) return submitButton;
+  const submitControl = !tooltip
+    ? submitButton
+    : (
+        <Tooltip>
+          <TooltipTrigger render={submitButton} />
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      );
+  if (!stopControl) return submitControl;
   return (
-    <Tooltip>
-      <TooltipTrigger render={submitButton} />
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
+    <>
+      {stopControl}
+      {submitControl}
+    </>
   );
 }
 

@@ -48,11 +48,17 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import {
+  enqueuePendingChatTask,
+  hideQueuedChatMessages,
+} from "@multica/core/chat/pending";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
+import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
+import { ChatQueue } from "./chat-queue";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
@@ -138,24 +144,28 @@ export function ChatWindow() {
   // it starts from a large stable base and only subtracts the count of loaded
   // prepended rows, so concurrent server inserts cannot drift the scroll anchor.
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
-  const messages = [...messagePages].reverse().flatMap((page) => page.messages);
-  const olderMessageCount = messagePages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
-  const firstItemIndex = messages.length > 0
-    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
-    : 0;
+  const allMessages = [...messagePages].reverse().flatMap((page) => page.messages);
   // Skeleton only shows for an un-cached session fetch. Cached switches
   // return data synchronously — no flash. `enabled: false` (new chat)
   // keeps isLoading false so the starter prompts aren't hidden.
-  const showSkeleton = !!activeSessionId && messagesLoading;
-
   // Server-authoritative pending task. Survives refresh / reopen / session
   // switch because it's keyed on sessionId in the Query cache; WS events
   // (chat:message / chat:done / task:*) keep it invalidated in real time.
   //
   // This is the SOLE source for pendingTaskId — no mirror in the store.
-  const { data: pendingTask } = useQuery(
+  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery(
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
+  const showSkeleton =
+    !!activeSessionId && (messagesLoading || pendingTaskLoading);
+  const messages = hideQueuedChatMessages(allMessages, pendingTask);
+  const olderMessageCount = messagePages.slice(1).reduce(
+    (sum, page) => sum + page.messages.length,
+    0,
+  );
+  const firstItemIndex = messages.length > 0
+    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
+    : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
@@ -172,6 +182,13 @@ export function ChatWindow() {
   const appForeground = useAppForeground();
   const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
     useChatDraftRestore(activeSessionId, isOpen && appForeground);
+  const {
+    cancelChatTask,
+    handleEditQueuedTask,
+    handleRemoveQueuedTask,
+    handleClearQueuedTasks,
+    handleSendQueuedTaskNow,
+  } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
   // Nonce handed to ChatInput to pull focus into the compose box: when a new
   // chat starts (⊕ or switching agent), and whenever the window itself opens.
   const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
@@ -378,55 +395,6 @@ export function ChatWindow() {
   // remain workspace-scoped drafts — sending is still the point where a
   // session is created (if needed) and attachment_ids bind to the message.
 
-  const cancelChatTask = useCallback(
-    async (
-      taskId: string,
-      sessionId: string,
-      options: { restoreDraftToInput: boolean; source: string },
-    ) => {
-      apiLogger.info("cancelTask.start", {
-        taskId,
-        sessionId,
-        source: options.source,
-      });
-      qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-
-      try {
-        const result = await api.cancelTaskById(taskId);
-        const restored = result.cancelled_chat_message;
-        if (restored?.restore_to_input) {
-          removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
-          if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
-            enqueueLocalRestore({
-              id: restored.message_id,
-              content: restored.content,
-              attachments: restored.attachments,
-              sessionId: restored.chat_session_id,
-            });
-          }
-        }
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        apiLogger.info("cancelTask.success", {
-          taskId,
-          sessionId,
-          restoredToInput: !!restored?.restore_to_input && options.restoreDraftToInput,
-        });
-        return result;
-      } catch (err) {
-        apiLogger.warn("cancelTask.error (task may have already finished)", {
-          taskId,
-          sessionId,
-          err,
-        });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        return null;
-      }
-    },
-    [qc, enqueueLocalRestore],
-  );
-
   const handleSend = useCallback(
     async (
       content: string,
@@ -445,6 +413,12 @@ export function ChatWindow() {
         apiLogger.warn("sendChatMessage skipped: agent is archived", {
           sessionId: activeSessionId,
           agentId: activeAgent.id,
+        });
+        return false;
+      }
+      if (pendingTaskId && pendingTask?.supports_queue !== true) {
+        apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
+          sessionId: activeSessionId,
         });
         return false;
       }
@@ -518,11 +492,22 @@ export function ChatWindow() {
         chatKeys.messages(sessionId),
         (old) => (old ? [...old, sent] : [sent]),
       );
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: result.task_id,
-        status: "queued",
-        created_at: result.created_at,
-      });
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(sessionId),
+        (old) => {
+          const next = enqueuePendingChatTask(old, {
+            task_id: result.task_id,
+            status: "queued",
+            created_at: result.created_at,
+            message_id: result.message_id,
+            content: finalContent,
+          });
+          if (result.supports_queue === true || old?.supports_queue === true) {
+            next.supports_queue = true;
+          }
+          return next;
+        },
+      );
       // Cache primed → publish the new active session, but only if the user
       // hasn't navigated away mid-send. Compare the live store against the
       // closure-captured target; see isStillOnComposeTarget for the rule, which
@@ -568,6 +553,8 @@ export function ChatWindow() {
       activeSessionId,
       activeAgent,
       isAgentArchived,
+      pendingTask,
+      pendingTaskId,
       ensureSession,
       cancelChatTask,
       qc,
@@ -855,6 +842,14 @@ export function ChatWindow() {
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
+      <ChatQueue
+        tasks={pendingTask?.queued_tasks ?? []}
+        onSendNow={handleSendQueuedTaskNow}
+        onEdit={handleEditQueuedTask}
+        onRemove={handleRemoveQueuedTask}
+        onClear={handleClearQueuedTasks}
+      />
+
       {/* Input — disabled for legacy archived sessions and for sessions whose
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
@@ -865,6 +860,7 @@ export function ChatWindow() {
         uploadEnabled={!!activeAgent}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
+        allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         disabled={isSessionArchived || isAgentArchived}
         noAgent={noAgent}
         agentArchived={isAgentArchived}

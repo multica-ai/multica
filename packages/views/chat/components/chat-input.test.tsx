@@ -593,6 +593,30 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
+  it("keeps Stop and Queue Send available while the agent is running", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const onStop = vi.fn();
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "follow-up" },
+    });
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    const queueButton = screen.getByRole("button", { name: "Queue message" });
+    expect(queueButton).not.toBeDisabled();
+    fireEvent.click(queueButton);
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows only Stop while an older server is running", () => {
+    renderInput({ isRunning: true, onStop: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
     // A brand-new chat creates its session row lazily during send, bound to
     // the project selected at click time. If the user could switch project

@@ -16,6 +16,7 @@
     "placeholder_named": "{{name}} にメッセージ…",
     "placeholder_default": "メッセージを入力…",
     "send_tooltip": "送信",
+    "queue_send_tooltip": "キューに追加",
     "stop_tooltip": "停止",
     "send_failed_toast": "メッセージを送信できませんでした",
     "send_blocked_toast": "メッセージは送信されませんでした — このエージェントを使用する権限がありません",
@@ -27,6 +28,15 @@
     "remove_project_context": "プロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
     "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
+  },
+  "queue": {
+    "title_other": "キュー内のメッセージ {{count}} 件",
+    "clear": "すべて削除",
+    "send_now": "今すぐ送信",
+    "edit": "キュー内のメッセージを編集",
+    "remove": "キューから削除",
+    "fallback": "キュー内のメッセージ",
+    "action_failed_toast": "キュー内のメッセージを更新できませんでした"
   },
   "message_list": {
     "show_details": "詳細を表示",

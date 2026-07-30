@@ -312,9 +312,19 @@ WHERE task_id = $1 AND role = 'user'
 RETURNING *;
 
 -- name: ListChatMessages :many
-SELECT * FROM chat_message
-WHERE chat_session_id = $1
-ORDER BY created_at ASC, id ASC;
+SELECT message.* FROM chat_message AS message
+WHERE message.chat_session_id = $1
+  AND NOT (
+    message.role = 'user'
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue AS task
+      WHERE task.chat_session_id = message.chat_session_id
+        AND task.status = 'queued'
+        AND task.id = message.task_id
+    )
+  )
+ORDER BY message.created_at ASC, message.id ASC;
 
 -- name: ListChatInputMessages :many
 -- Loads the immutable user-message input batch owned by a direct-chat task.
@@ -329,13 +339,23 @@ WHERE task_id = $1 AND role = 'user'
 ORDER BY created_at ASC, id ASC;
 
 -- name: ListChatMessagesPage :many
-SELECT * FROM chat_message
-WHERE chat_session_id = $1
+SELECT message.* FROM chat_message AS message
+WHERE message.chat_session_id = $1
+  AND NOT (
+    message.role = 'user'
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue AS task
+      WHERE task.chat_session_id = message.chat_session_id
+        AND task.status = 'queued'
+        AND task.id = message.task_id
+    )
+  )
   AND (
     sqlc.narg('before_created_at')::timestamptz IS NULL
-    OR (created_at, id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
+    OR (message.created_at, message.id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY message.created_at DESC, message.id DESC
 LIMIT $2;
 
 -- name: GetChatMessage :one
@@ -463,6 +483,63 @@ SELECT id, status, created_at FROM agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ListPendingChatTasksForSession :many
+-- Returns the active task first, followed by prioritized then FIFO follow-ups.
+-- The message lateral join reads only the immutable input owned by each task;
+-- it avoids loading the session's complete message history just to render a
+-- one-line queue preview. GetPendingChatTask remains for legacy callers that
+-- only need an existence check.
+SELECT
+    task.id,
+    task.status,
+    task.created_at,
+    message.id AS message_id,
+    COALESCE(message.content, '')::text AS content
+FROM agent_task_queue AS task
+LEFT JOIN LATERAL (
+    SELECT input.id, input.content
+    FROM chat_message AS input
+    WHERE input.task_id = COALESCE(task.chat_input_task_id, task.id)
+      AND input.role = 'user'
+    ORDER BY input.created_at ASC, input.id ASC
+    LIMIT 1
+) AS message ON TRUE
+WHERE task.chat_session_id = $1
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE WHEN task.status = 'queued' THEN 1 ELSE 0 END,
+    task.priority DESC,
+    task.created_at ASC,
+    task.id ASC;
+
+-- name: PrioritizeQueuedChatTask :one
+WITH demoted AS (
+  UPDATE agent_task_queue AS queued
+  SET priority = 3
+  WHERE queued.chat_session_id = sqlc.arg('chat_session_id')
+    AND queued.id <> sqlc.arg('id')
+    AND queued.status = 'queued'
+    AND queued.priority >= 4
+), prioritized AS (
+  UPDATE agent_task_queue AS selected
+  SET priority = 4
+  WHERE selected.id = sqlc.arg('id')
+    AND selected.chat_session_id = sqlc.arg('chat_session_id')
+    AND selected.status = 'queued'
+  RETURNING selected.id
+)
+SELECT
+  prioritized.id AS task_id,
+  (
+    SELECT active.id
+    FROM agent_task_queue AS active
+    WHERE active.chat_session_id = sqlc.arg('chat_session_id')
+      AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+    ORDER BY active.created_at ASC, active.id ASC
+    LIMIT 1
+  )::uuid AS active_task_id
+FROM prioritized;
 
 -- name: ListPendingChatTasksByCreator :many
 -- Aggregate view of all in-flight chat tasks owned by a given creator in a
