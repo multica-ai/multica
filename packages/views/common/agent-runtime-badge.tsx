@@ -52,12 +52,19 @@ export function AgentRuntimeBadge({
   // Codex's ring) are airy line art with no silhouette of their own, and
   // without an edge the badge loses its anchor. Same treatment as ProviderChip.
   const disc = Math.round(px * 0.42);
+  // Push the badge out past the bounding box so its centre lands on the
+  // avatar's rim instead of inside it. Flush to the corner (`top-0 right-0`)
+  // looks correct on a square but not on a circle: at 45° the edge has already
+  // curved ~29% of the diameter away from that corner, so the badge ends up
+  // sitting over the face. Offsetting by (badge radius − rim inset) leaves
+  // roughly half of it overhanging, which is the usual platform-badge look.
+  const offset = Math.round(px * 0.064);
 
   return (
     <span
       aria-label={`Runtime: ${providerDisplayName(provider)}`}
-      className="absolute right-0 top-0 inline-flex items-center justify-center rounded-full bg-background ring-1 ring-border"
-      style={{ width: disc, height: disc }}
+      className="absolute inline-flex items-center justify-center rounded-full bg-background ring-1 ring-border"
+      style={{ width: disc, height: disc, top: -offset, right: -offset }}
     >
       <ProviderLogo provider={provider} className="h-[72%] w-[72%]" />
     </span>
