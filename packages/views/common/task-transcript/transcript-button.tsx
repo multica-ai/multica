@@ -36,6 +36,7 @@ interface TranscriptButtonProps {
   isLive?: boolean;
   className?: string;
   title?: string;
+  renderButton?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   /**
@@ -66,6 +67,7 @@ export function TranscriptButton({
   isLive = false,
   className,
   title = "View transcript",
+  renderButton = true,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   headerSlot,
@@ -139,25 +141,27 @@ export function TranscriptButton({
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger
-          render={<button type="button" />}
-          onClick={handleClick}
-          disabled={loading}
-          aria-label={title}
-          className={cn(
-            "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
-            className,
-          )}
-        >
-          {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ScrollText className="h-3.5 w-3.5" />
-          )}
-        </TooltipTrigger>
-        <TooltipContent>{title}</TooltipContent>
-      </Tooltip>
+      {renderButton ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={<button type="button" />}
+            onClick={handleClick}
+            disabled={loading}
+            aria-label={title}
+            className={cn(
+              "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
+              className,
+            )}
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ScrollText className="h-3.5 w-3.5" />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>{title}</TooltipContent>
+        </Tooltip>
+      ) : null}
 
       {open &&
         (liveSession ? (

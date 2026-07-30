@@ -12,6 +12,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
+import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { ActiveTaskRow } from "./execution-log-section";
 import { useT } from "../../i18n";
@@ -46,6 +47,7 @@ interface IssueAgentHeaderChipProps {
 export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   issueId,
 }: IssueAgentHeaderChipProps) {
+  const { t } = useT("issues");
   // Same query options as ExecutionLogSection so both observe one cache entry.
   const { data: tasks = [] } = useQuery({
     queryKey: issueKeys.tasks(issueId),
@@ -74,22 +76,55 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     return { running, queued };
   }, [tasks]);
 
-  // No active work → render nothing.
-  if (running.length === 0 && queued.length === 0) return null;
+  const [openedTranscriptTask, setOpenedTranscriptTask] = useState<AgentTask | null>(null);
 
-  return <ActiveChip issueId={issueId} running={running} queued={queued} />;
+  // No active work → render nothing.
+  if (running.length === 0 && queued.length === 0 && !openedTranscriptTask) return null;
+
+  return (
+    <>
+      {running.length > 0 || queued.length > 0 ? (
+        <ActiveChip
+          issueId={issueId}
+          running={running}
+          queued={queued}
+          onTranscriptOpenChange={(task, open) => {
+            setOpenedTranscriptTask(open ? task : null);
+          }}
+        />
+      ) : null}
+      {openedTranscriptTask ? (
+        <TranscriptButton
+          task={openedTranscriptTask}
+          agentName=""
+          isLive={openedTranscriptTask.status === "running"}
+          title={t(($) => $.execution_log.transcript_tooltip)}
+          renderButton={false}
+          open
+          onOpenChange={(open) => {
+            if (!open) setOpenedTranscriptTask(null);
+          }}
+        />
+      ) : null}
+    </>
+  );
 });
 
 interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
+  onTranscriptOpenChange: (task: AgentTask, open: boolean) => void;
 }
 
-function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
+function ActiveChip({
+  issueId,
+  running,
+  queued,
+  onTranscriptOpenChange,
+}: ActiveChipProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const [openTranscriptTaskId, setOpenTranscriptTaskId] = useState<string | null>(null);
 
   const activeTasks = [...running, ...queued];
   const agentIds = [...new Set(activeTasks.map((task) => task.agent_id))];
@@ -172,9 +207,8 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
                 key={task.id}
                 task={task}
                 issueId={issueId}
-                transcriptOpen={openTranscriptTaskId === task.id}
                 onTranscriptOpenChange={(open) => {
-                  setOpenTranscriptTaskId(open ? task.id : null);
+                  onTranscriptOpenChange(task, open);
                 }}
               />
             ))}

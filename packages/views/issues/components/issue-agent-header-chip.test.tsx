@@ -59,7 +59,6 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
 vi.mock("./execution-log-section", () => ({
   ActiveTaskRow: ({
     task,
-    transcriptOpen,
     onTranscriptOpenChange,
   }: {
     task: AgentTask;
@@ -75,9 +74,20 @@ vi.mock("./execution-log-section", () => ({
       >
         Open transcript
       </button>
-      {transcriptOpen ? <div role="dialog">Transcript for {task.id}</div> : null}
     </div>
   ),
+}));
+
+vi.mock("../../common/task-transcript", () => ({
+  TranscriptButton: ({
+    task,
+    open,
+  }: {
+    task: AgentTask;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+  }) =>
+    open ? <div role="dialog">Transcript for {task.id}</div> : null,
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -152,17 +162,19 @@ describe("IssueAgentHeaderChip", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
-  it("keeps the transcript open after the clicked task row unmounts", () => {
+  it("keeps the transcript open after the clicked task row disappears from the active list", () => {
     mockState.tasks = [makeTask({ id: "task-running" })];
 
     const { rerender } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
     fireEvent.click(screen.getByRole("button", { name: "open transcript task-running" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("Transcript for task-running");
+    expect(screen.getByTestId("active-task-row")).toHaveTextContent("task-running");
 
     mockState.tasks = [];
-    rerender(<IssueAgentHeaderChip issueId="issue-1" />);
+    rerender(<IssueAgentHeaderChip issueId="issue-2" />);
 
+    expect(screen.queryByTestId("active-task-row")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog")).toHaveTextContent("Transcript for task-running");
   });
 
