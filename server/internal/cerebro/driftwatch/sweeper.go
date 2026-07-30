@@ -176,6 +176,7 @@ func (s *Sweeper) scanWorkspace(ctx context.Context, workspaceID pgtype.UUID, au
 	now := time.Now()
 	findings := make([]agentFindings, 0, len(agents))
 	windowStart, windowEnd := time.Time{}, time.Time{}
+	autoCreated := 0
 
 	for _, agent := range agents {
 		result, err := s.scanAgentCapabilities(ctx, workspaceID, agent.ID, now)
@@ -196,7 +197,7 @@ func (s *Sweeper) scanWorkspace(ctx context.Context, workspaceID pgtype.UUID, au
 			continue
 		}
 		if autoPermission {
-			s.createPermissionRules(ctx, workspaceID, agent.ID, unpermitted)
+			autoCreated += s.createPermissionRules(ctx, workspaceID, agent.ID, unpermitted)
 		}
 		findings = append(findings, agentFindings{
 			AgentID:   util.UUIDToString(agent.ID),
@@ -216,7 +217,7 @@ func (s *Sweeper) scanWorkspace(ctx context.Context, workspaceID pgtype.UUID, au
 		)
 		return nil
 	}
-	return s.publishDigest(ctx, workspaceID, rows, recipients, windowStart, windowEnd, autoPermission)
+	return s.publishDigest(ctx, workspaceID, rows, recipients, windowStart, windowEnd, autoPermission, autoCreated)
 }
 
 // createPermissionRules writes an explicit rule for every capability that has no
@@ -234,9 +235,13 @@ func (s *Sweeper) scanWorkspace(ctx context.Context, workspaceID pgtype.UUID, au
 //
 // Failures are logged and skipped, never fatal: a missing rule costs visibility,
 // while aborting the sweep costs the whole digest.
-func (s *Sweeper) createPermissionRules(ctx context.Context, workspaceID, agentID pgtype.UUID, caps []observedCapability) {
+//
+// Returns how many rules were actually written, so the digest notification can
+// say that rules were created instead of leaving the reader to open the issue to
+// find out (FIR-4012).
+func (s *Sweeper) createPermissionRules(ctx context.Context, workspaceID, agentID pgtype.UUID, caps []observedCapability) int {
 	if s.ToolPolicy == nil {
-		return
+		return 0
 	}
 	created := 0
 	for _, key := range unmappedCapabilityKeys(caps) {
@@ -263,6 +268,7 @@ func (s *Sweeper) createPermissionRules(ctx context.Context, workspaceID, agentI
 			"agent_id", util.UUIDToString(agentID),
 			"rules", created)
 	}
+	return created
 }
 
 func (s *Sweeper) scanAgentCapabilities(ctx context.Context, workspaceID, agentID pgtype.UUID, now time.Time) (agentScanResult, error) {
@@ -389,6 +395,7 @@ func (s *Sweeper) publishDigest(
 	recipients []pgtype.UUID,
 	windowStart, windowEnd time.Time,
 	autoPermission bool,
+	autoCreated int,
 ) error {
 	signature := digestSignature(rows)
 	body := embedDigestSignature(
@@ -409,7 +416,7 @@ func (s *Sweeper) publishDigest(
 		return nil
 	}
 
-	s.notifyDigest(ctx, workspaceID, issue, rows, recipients, windowStart, windowEnd)
+	s.notifyDigest(ctx, workspaceID, issue, rows, recipients, windowStart, windowEnd, autoCreated)
 	return nil
 }
 
@@ -494,6 +501,11 @@ func (s *Sweeper) upsertDigestIssue(
 // notifyDigest writes one inbox card per owner/admin — one card for the whole
 // workspace, carrying the issue id so the row opens the repliable digest instead
 // of a dead-end alert. Best-effort per recipient.
+//
+// autoCreated is how many rules the auto-permission flag wrote during this scan.
+// It is stated on the card itself, not only inside the issue body: a write that
+// happened on the reader's behalf must be visible in the same message that tells
+// them a scan ran, otherwise they only learn about it by opening the issue.
 func (s *Sweeper) notifyDigest(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
@@ -501,25 +513,20 @@ func (s *Sweeper) notifyDigest(
 	rows []DigestRow,
 	recipients []pgtype.UUID,
 	windowStart, windowEnd time.Time,
+	autoCreated int,
 ) {
 	agentCount := countDigestAgents(rows)
 	title := digestTitle(rows)
-	suffix := ""
-	if agentCount != 1 {
-		suffix = "s"
-	}
-	body := fmt.Sprintf(
-		"%d capabilit%s across %d agent%s have no permission rule sanctioning them (%s). Open the issue to decide allow or block.",
-		len(rows), plural2(len(rows)), agentCount, suffix, strings.Join(topDigestNames(rows, 5), ", "),
-	)
+	body := renderDigestNotificationBody(rows, agentCount, autoCreated)
 	details, _ := json.Marshal(map[string]any{
-		"issue_id":         util.UUIDToString(issue.ID),
-		"capability_count": len(rows),
-		"agent_count":      agentCount,
-		"capabilities":     digestRowNames(rows),
-		"window_start_at":  windowStart.Format(time.RFC3339),
-		"window_end_at":    windowEnd.Format(time.RFC3339),
-		"reason":           "agent_capability_unpermitted",
+		"issue_id":           util.UUIDToString(issue.ID),
+		"capability_count":   len(rows),
+		"agent_count":        agentCount,
+		"capabilities":       digestRowNames(rows),
+		"auto_created_rules": autoCreated,
+		"window_start_at":    windowStart.Format(time.RFC3339),
+		"window_end_at":      windowEnd.Format(time.RFC3339),
+		"reason":             "agent_capability_unpermitted",
 	})
 
 	for _, userID := range recipients {
@@ -551,6 +558,7 @@ func (s *Sweeper) notifyDigest(
 		"issue_id", util.UUIDToString(issue.ID),
 		"capability_count", len(rows),
 		"agent_count", agentCount,
+		"auto_created_rules", autoCreated,
 		"recipients", len(recipients),
 	)
 }

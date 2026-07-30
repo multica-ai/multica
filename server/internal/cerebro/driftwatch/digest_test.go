@@ -198,6 +198,34 @@ func TestRenderDigestBody_ReportsTruncation(t *testing.T) {
 	}
 }
 
+func TestRenderDigestNotificationBody_StatesAutoCreatedRules(t *testing.T) {
+	rows := []DigestRow{
+		{Key: "webfetch", Name: "WebFetch", Status: statusUnmapped, Uses: 12,
+			Agents: []DigestAgent{{ID: "a", Name: "Mia", Uses: 12}}},
+		{Key: "bash", Name: "Bash", Status: statusUnmapped, Uses: 3,
+			Agents: []DigestAgent{{ID: "a", Name: "Mia", Uses: 3}}},
+	}
+
+	// A write done on the reader's behalf must be on the card itself, not only
+	// inside the issue the reader has to open first.
+	withRules := renderDigestNotificationBody(rows, 1, 2)
+	for _, want := range []string{"2 capabilities", "1 agent ", "2 rules were created automatically", "set to allow", "nothing changed about what the agents can do"} {
+		if !strings.Contains(withRules, want) {
+			t.Fatalf("notification body missing %q:\n%s", want, withRules)
+		}
+	}
+
+	if got := renderDigestNotificationBody(rows, 1, 1); !strings.Contains(got, "1 rule was created automatically") {
+		t.Fatalf("single rule must read in the singular:\n%s", got)
+	}
+
+	// Auto-permission off writes nothing, so there is nothing to disclose.
+	withoutRules := renderDigestNotificationBody(rows, 1, 0)
+	if strings.Contains(withoutRules, "created automatically") {
+		t.Fatalf("no rules written means no rule sentence:\n%s", withoutRules)
+	}
+}
+
 func TestUnmappedCapabilityKeys_ExcludesBlocked(t *testing.T) {
 	caps := []observedCapability{
 		{Key: "webfetch", Status: statusUnmapped},
