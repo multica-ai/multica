@@ -7,6 +7,12 @@ ALTER TABLE cerebro_tool_policy
     DROP CONSTRAINT IF EXISTS cerebro_tool_policy_company_brain_access_version_valid,
     DROP CONSTRAINT IF EXISTS cerebro_tool_policy_company_brain_lifecycle_known;
 
+ALTER TABLE IF EXISTS cerebro_company_brain_parity_proof
+    DROP CONSTRAINT IF EXISTS cerebro_company_brain_parity_proof_permission_fk;
+
+ALTER TABLE cerebro_tool_policy
+    DROP CONSTRAINT IF EXISTS cerebro_tool_policy_company_brain_parity_identity_unique;
+
 ALTER TABLE cerebro_tool_policy
     DROP COLUMN IF EXISTS company_brain_connection_id,
     DROP COLUMN IF EXISTS company_brain_allowed_read_sources,

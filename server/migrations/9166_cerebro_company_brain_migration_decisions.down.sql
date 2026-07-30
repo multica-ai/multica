@@ -2,6 +2,9 @@
 
 DROP TABLE IF EXISTS cerebro_company_brain_migration_decision;
 
+ALTER TABLE IF EXISTS cerebro_company_brain_parity_proof
+    DROP CONSTRAINT IF EXISTS cerebro_company_brain_parity_proof_agent_fk;
+
 ALTER TABLE agent
     DROP CONSTRAINT IF EXISTS agent_workspace_id_id_unique;
 
