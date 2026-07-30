@@ -33,6 +33,17 @@
 > assignments; it reports expired, orphaned, and unused access in severity
 > order. Permission audit rows use the same critical-to-low ordering.
 
+> **FIR-3924 inactive Company Brain parity schema.** Migrations 9163–9167 add
+> one logical Company Brain connection identity and optional source scope to
+> the existing `cerebro_tool_policy` row. Source scope is valid only as one
+> complete agent-layer, connection-wide Allow: logical connection, non-empty
+> allowed read sources containing the write source, positive access version,
+> and lifecycle state (`draft`, `active`, `disabled`, or `revoked`). Ordinary
+> policy rows keep all fields null and resolve exactly as before. The
+> migrations seed no rows, and the parity preparation code has no live caller;
+> current Connection resolution and enforcement therefore remain the row 2b
+> contract below until a separately authorized cutover.
+
 **Read this before you touch anything that grants, denies, gates, or approves an
 agent action.** Permission enforcement in this codebase is spread across many
 subsystems, and they are easy to confuse. This document is the map.
