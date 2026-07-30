@@ -117,7 +117,7 @@
       "origin_clawhub": "インポート済み · ClawHub",
       "origin_skills_sh": "インポート済み · Skills.sh",
       "origin_github": "インポート済み · GitHub",
-      "origin_workspace": "ワークスペース"
+      "origin_workspace": "手動で作成"
     },
     "conflict_banner": {
       "title": "他のユーザーがこのスキルを更新しました",

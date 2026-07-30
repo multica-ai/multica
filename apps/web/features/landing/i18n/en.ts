@@ -294,6 +294,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.15",
+        date: "2026-07-30",
+        title: "Sharper skills, clearer transcripts, and dependable workspaces",
+        changes: [],
+        features: [
+          "Skills now separate overview and files, with a clear Save prompt for unsaved edits.",
+          "Task transcripts now show file edits as readable diffs and clean command output.",
+          "You can now toggle the floating chat window with a keyboard shortcut.",
+          "Issue links use readable keys and can open in a new browser tab.",
+          "Mention and command pickers now support Ctrl+N/J/P/K navigation.",
+        ],
+        improvements: [
+          "Issue tables stay responsive when you switch workspaces.",
+          "Multica's interface and four-language docs are more consistent and readable.",
+          "Attachment-heavy CLI and agent workflows now transfer less data.",
+          "Self-hosted setup now carries your configuration into the daemon.",
+        ],
+        fixes: [
+          "Codex file changes are now preserved in task transcripts.",
+          "Hermes agents now recover from a lost resumed session.",
+          "Qoder CLI is now found when Multica starts from a desktop app.",
+          "Daemon updates no longer wait forever while the machine is idle.",
+          "Issue activity labels no longer clip letters below the baseline.",
+        ],
+      },
+      {
         version: "0.4.14",
         date: "2026-07-29",
         title: "Faster agents, safer files, and a smoother Issue table",

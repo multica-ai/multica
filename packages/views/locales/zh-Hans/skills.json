@@ -117,7 +117,7 @@
       "origin_clawhub": "导入自 · ClawHub",
       "origin_skills_sh": "导入自 · Skills.sh",
       "origin_github": "导入自 · GitHub",
-      "origin_workspace": "工作区"
+      "origin_workspace": "手动创建"
     },
     "conflict_banner": {
       "title": "其他人更新了这个 skill",

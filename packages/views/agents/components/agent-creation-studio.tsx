@@ -1249,6 +1249,7 @@ function ConfigurationPanel({
                 name={draft.name}
                 size={compact ? 52 : 56}
                 onUploaded={(url) => set("avatarUrl", url)}
+                onEmojiSelected={(value) => set("avatarUrl", value)}
                 onClear={() => set("avatarUrl", null)}
               />
             </div>

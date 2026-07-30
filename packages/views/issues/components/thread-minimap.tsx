@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2 } from "lucide-react";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
@@ -14,8 +15,10 @@ import { useT } from "../../i18n";
 // Ticks whose thread is currently inside the scroll viewport render darker, so
 // the rail doubles as a "you are here" minimap. Hovering magnifies ticks in a
 // Dock-style wave around the cursor (the hovered tick peaks, neighbours taper
-// off) and shows a preview card (bold first line + muted body excerpt);
-// clicking jumps the timeline to that thread.
+// off) and shows a preview card (bold first line + muted body excerpt, plus a
+// "Resolved" badge when the thread carries a resolution — the rail is the one
+// place a folded resolved thread is otherwise indistinguishable from an open
+// one); clicking jumps the timeline to that thread.
 //
 // It rides the scrollbar side on purpose: it looks and behaves like a scroll
 // affordance, and every precedent for that (the scrollbar itself, editor
@@ -109,6 +112,13 @@ export interface ThreadMinimapThread {
   id: string;
   /** The thread's root comment entry (preview text + author fallback). */
   entry: TimelineEntry;
+  /**
+   * Whether the thread carries a resolution — derived by the caller with
+   * `deriveThreadResolution`, so it covers both "Resolve thread" (root) and
+   * "Resolve thread with comment" (reply), and stays true while the user has
+   * a folded resolved thread expanded.
+   */
+  resolved: boolean;
 }
 
 interface ThreadMinimapProps {
@@ -424,18 +434,27 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
         // flex compresses the spacing (down to min-h) instead of overflowing.
         className="pointer-events-auto flex max-h-full flex-col overflow-hidden"
       >
-        {threads.map((thread, i) => (
-          <MinimapTick
-            key={thread.id}
-            label={
-              previews[i]!.title ||
-              getActorName(thread.entry.actor_type, thread.entry.actor_id)
-            }
-            inViewport={visibleIds.has(thread.id)}
-            isPreviewOpen={preview?.index === i}
-            onClick={() => onJump(thread.id)}
-          />
-        ))}
+        {threads.map((thread, i) => {
+          const title =
+            previews[i]!.title ||
+            getActorName(thread.entry.actor_type, thread.entry.actor_id);
+          return (
+            <MinimapTick
+              key={thread.id}
+              // The card is the visual channel for the resolved state, but a
+              // screen reader never sees it — the tick's name is the only
+              // thing announced on focus, so it carries the state too.
+              label={
+                thread.resolved
+                  ? t(($) => $.detail.thread_nav_resolved_label, { title })
+                  : title
+              }
+              inViewport={visibleIds.has(thread.id)}
+              isPreviewOpen={preview?.index === i}
+              onClick={() => onJump(thread.id)}
+            />
+          );
+        })}
       </nav>
 
       {/* The rail's single preview card. Mounted without an enter animation
@@ -444,7 +463,9 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
           and slid between ticks with a short transform transition. Hovering
           the card keeps it open so its text stays selectable. It opens
           inward (leftward, over the content) — the only direction with room
-          next to the scrollbar. */}
+          next to the scrollbar. The resolved badge leads so the state is read
+          before the content, in the same `text-success` CommentCard uses for
+          its Resolution badge. */}
       {preview && activeThread && activePreview && (
         <div
           ref={cardRef}
@@ -453,6 +474,12 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
           className="pointer-events-auto absolute right-8 top-0 w-72 rounded-lg bg-popover p-2.5 text-body text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-transform duration-150 ease-out motion-reduce:transition-none"
           style={{ transform: `translateY(${preview.y}px) translateY(-50%)` }}
         >
+          {activeThread.resolved && (
+            <p className="mb-1 flex items-center gap-1.5 text-caption font-medium text-success">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              {t(($) => $.comment.resolve.thread_resolved_badge)}
+            </p>
+          )}
           <p className="truncate text-body font-semibold text-foreground">{activeTitle}</p>
           {activePreview.body && (
             <p className="mt-1 line-clamp-3 text-body text-muted-foreground">{activePreview.body}</p>

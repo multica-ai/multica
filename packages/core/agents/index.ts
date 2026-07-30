@@ -4,6 +4,7 @@ export * from "./failure-reason";
 export * from "./effective-access";
 export * from "./queries";
 export * from "./use-agent-presence";
+export * from "./use-agent-runtime";
 export * from "./use-update-agent-allowlist";
 export * from "./use-agent-activity";
 export * from "./use-workspace-presence-prefetch";

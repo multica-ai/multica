@@ -298,6 +298,7 @@
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "scroll_to_latest": "最新のアクティビティまでスクロール",
+    "thread_nav_resolved_label": "{{title}}（解決済み）",
     "sidebar_tooltip": "サイドバーの開閉",
     "find": {
       "placeholder": "イシュー内を検索...",
@@ -398,6 +399,7 @@
       "resolve_with_comment_action": "このコメントでスレッドを解決",
       "unresolve_action": "解決を取り消す",
       "resolution_badge": "解決",
+      "thread_resolved_badge": "解決済み",
       "collapse": "折りたたむ",
       "bar_other": "{{authors}} による解決済みコメント {{count}} 件",
       "fold_other": "{{authors}} のコメント {{count}} 件",
