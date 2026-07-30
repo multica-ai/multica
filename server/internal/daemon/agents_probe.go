@@ -224,5 +224,10 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
+	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
+	// `qwenpaw acp serve`. MULTICA_QWENPAW_MODEL seeds the daemon-wide default.
+	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", "MULTICA_QWENPAW_MODEL"); ok {
+		agents["qwenpaw"] = e
+	}
 	return agents
 }
