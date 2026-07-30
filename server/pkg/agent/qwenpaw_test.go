@@ -198,12 +198,10 @@ func TestQwenpawSessionLoadNotFound(t *testing.T) {
 
 func TestQwenpawListModels(t *testing.T) {
 	t.Parallel()
-	models, err := ListModels(context.Background(), "qwenpaw", "")
-	if err != nil {
-		t.Fatalf("ListModels(qwenpaw) error: %v", err)
-	}
-	if len(models) != 0 {
-		t.Fatalf("expected empty list for qwenpaw, got %d models", len(models))
+	// qwenpaw is no longer a supported agent type; ListModels should reject it.
+	_, err := ListModels(context.Background(), "qwenpaw", "")
+	if err == nil {
+		t.Fatal("expected error for unknown agent type qwenpaw")
 	}
 }
 
