@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/projectspace"
 )
 
 const (
@@ -92,6 +93,7 @@ type Config struct {
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok, qwen
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
+	ProjectSpaceRoot               string                // shared server-managed project files (default: ./data/project-spaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -372,6 +374,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	projectSpaceRoot, err := projectspace.ResolveRoot(
+		os.Getenv("MULTICA_PROJECT_SPACE_ROOT"),
+		projectspace.DefaultRoot,
+	)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve project space root: %w", err)
+	}
 
 	// Health port: override > default
 	healthPort := DefaultHealthPort
@@ -447,6 +456,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Profile:                        profile,
 		Agents:                         agents,
 		WorkspacesRoot:                 workspacesRoot,
+		ProjectSpaceRoot:               projectSpaceRoot,
 		KeepEnvAfterTask:               keepEnv,
 		GCEnabled:                      gcEnabled,
 		GCInterval:                     gcInterval,

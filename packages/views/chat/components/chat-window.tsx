@@ -833,6 +833,7 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          projectId={activeProjectId}
         />
       ) : (
         <EmptyState

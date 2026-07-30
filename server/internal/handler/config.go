@@ -65,6 +65,11 @@ type AppConfig struct {
 	// which is continuously deployed so its users can't act on the version —
 	// and empty for dev builds that aren't stamped via -X main.version.
 	ServerVersion string `json:"server_version,omitempty"`
+
+	// ProjectSpace reports only frontend-safe readiness. The configured root
+	// is deliberately never exposed because /api/config is public.
+	ProjectSpaceAvailable  bool `json:"project_space_available"`
+	ProjectSpaceConfigured bool `json:"project_space_configured,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -81,6 +86,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
 	config.CdnSigned = h.CFSigner != nil
+	projectSpaceStatus := h.ProjectSpace.Status()
+	config.ProjectSpaceAvailable = projectSpaceStatus.Available
+	config.ProjectSpaceConfigured = projectSpaceStatus.Configured
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)

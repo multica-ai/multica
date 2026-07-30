@@ -58,7 +58,10 @@
     "copy_action": "コピー",
     "copied_toast": "コピーしました",
     "copy_failed_toast": "コピーに失敗しました",
-    "loading_older": "古いメッセージを読み込み中…"
+    "loading_older": "古いメッセージを読み込み中…",
+    "save_to_project": "プロジェクトスペースに保存",
+    "saved_to_project": "添付ファイルをプロジェクトスペースに保存しました",
+    "save_to_project_failed": "添付ファイルを保存できませんでした"
   },
   "session_history": {
     "untitled": "無題",

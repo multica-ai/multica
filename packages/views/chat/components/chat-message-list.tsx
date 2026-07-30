@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
-import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
+import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Archive, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
@@ -38,6 +38,7 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { useT } from "../../i18n";
+import { api } from "@multica/core/api";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ interface ChatMessageListProps {
   onLoadOlderMessages?: () => void;
   /** Transform assistant task text for embedded chat protocols before render/copy. */
   transformContent?: (content: string) => string;
+  projectId?: string | null;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ export function ChatMessageList({
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
   transformContent,
+  projectId,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -260,6 +263,7 @@ export function ChatMessageList({
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
               transformContent={transformContent}
+              projectId={projectId}
             />
           </div>
         )}
@@ -318,10 +322,12 @@ const MessageBubble = memo(function MessageBubble({
   item,
   isPending,
   transformContent,
+  projectId,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  projectId?: string | null;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -332,6 +338,7 @@ const MessageBubble = memo(function MessageBubble({
         taskId={item.taskId}
         isPending={isPending}
         transformContent={transformContent}
+        projectId={projectId}
       />
     );
   }
@@ -358,6 +365,10 @@ const MessageBubble = memo(function MessageBubble({
             content={message.content}
             className="mt-1.5"
           />
+          <SaveAttachmentsToProjectButton
+            projectId={projectId}
+            attachments={message.attachments}
+          />
         </div>
       </div>
     );
@@ -369,6 +380,7 @@ const MessageBubble = memo(function MessageBubble({
       message={message}
       isPending={isPending}
       transformContent={transformContent}
+      projectId={projectId}
     />
   );
 });
@@ -395,11 +407,13 @@ function AssistantMessage({
   message,
   isPending,
   transformContent,
+  projectId,
 }: {
   taskId: string | null;
   message?: ChatMessage;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  projectId?: string | null;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -470,6 +484,10 @@ function AssistantMessage({
             attachments={message.attachments}
             content={message.content}
           />
+          <SaveAttachmentsToProjectButton
+            projectId={projectId}
+            attachments={message.attachments}
+          />
           <MessageFooter
             message={message}
             timeline={timeline}
@@ -478,6 +496,49 @@ function AssistantMessage({
         </>
       )}
     </div>
+  );
+}
+
+function SaveAttachmentsToProjectButton({
+  projectId,
+  attachments,
+}: {
+  projectId?: string | null;
+  attachments?: import("@multica/core/types").Attachment[];
+}) {
+  const { t } = useT("chat");
+  const [saving, setSaving] = useState(false);
+  if (!projectId || !attachments || attachments.length === 0) return null;
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.saveAttachmentsToProjectSpace(
+        projectId,
+        attachments.map((attachment) => attachment.id),
+      );
+      toast.success(t(($) => $.message_list.saved_to_project));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.message_list.save_to_project_failed),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="mt-1 h-6 px-1.5 text-[10px] text-muted-foreground"
+      disabled={saving}
+      onClick={() => void save()}
+    >
+      <Archive className="size-3" />
+      {t(($) => $.message_list.save_to_project)}
+    </Button>
   );
 }
 

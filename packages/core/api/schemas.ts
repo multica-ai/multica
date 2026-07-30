@@ -296,6 +296,8 @@ export interface AppConfigResponse {
   vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
   server_version?: string;
+  project_space_available?: boolean;
+  project_space_configured?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +449,8 @@ export const AppConfigSchema = z.object({
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   server_version: OptionalStringSchema,
+  project_space_available: BooleanWithDefaultSchema(false).optional(),
+  project_space_configured: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -459,6 +463,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   workspace_creation_disabled: false,
   vcs_integration_available: false,
   feature_flags: {},
+  project_space_available: false,
+  project_space_configured: false,
 };
 
 // Preference keys may grow over time, so keep both the key and value spaces

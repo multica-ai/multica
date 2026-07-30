@@ -110,6 +110,21 @@ API `download_url` values use `GET /api/attachments/{id}/download` unless CloudF
 | `LOCAL_UPLOAD_DIR` | `./data/uploads` | Local storage directory |
 | `LOCAL_UPLOAD_BASE_URL` | empty (returns relative paths) | Public base URL — leave unset and the frontend can't resolve a full URL for attachments |
 
+### Project spaces
+
+Project spaces are durable project-level files, distinct from chat attachments.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_PROJECT_SPACE_ROOT` | `./data/project-spaces` | Root for per-workspace, per-project files. Configure the same shared path on the backend and daemons that run project agents |
+| `MULTICA_PROJECT_IMPORT_STAGING_ROOT` | `./data/project-imports` | Backend-only private staging for persistent file and folder imports |
+
+Relative values are normalized to absolute paths from each process working
+directory. Use an absolute shared path in production. If a custom project-space
+root is configured but is not writable or cannot perform an atomic rename, the
+feature fails closed instead of falling back to the default. See [Project
+spaces and folder uploads](/project-spaces).
+
 ### CloudFront (optional)
 
 If you front S3 with CloudFront, three variables apply: `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, `CLOUDFRONT_PRIVATE_KEY` (or `CLOUDFRONT_PRIVATE_KEY_SECRET` to read from Secrets Manager). Skip them if you don't use CloudFront — they don't conflict with S3 configuration.

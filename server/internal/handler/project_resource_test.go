@@ -78,11 +78,17 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if listResp.Total != 1 || len(listResp.Resources) != 1 {
-		t.Fatalf("list returned %d resources, want 1", listResp.Total)
+	if listResp.Total != 2 || len(listResp.Resources) != 2 {
+		t.Fatalf("list returned %d resources, want 2", listResp.Total)
 	}
-	if listResp.Resources[0].ID != created.ID {
-		t.Errorf("list[0].ID = %q, want %q", listResp.Resources[0].ID, created.ID)
+	foundCreated := false
+	for _, resource := range listResp.Resources {
+		if resource.ID == created.ID {
+			foundCreated = true
+		}
+	}
+	if !foundCreated {
+		t.Errorf("created resource %q was not returned", created.ID)
 	}
 
 	// Duplicate attach must conflict (UNIQUE on project_id + type + ref).
@@ -133,7 +139,7 @@ func TestProjectResourceLifecycle(t *testing.T) {
 		t.Fatalf("DeleteProjectResource: expected 204, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// After deletion the list should be empty.
+	// After deletion the immutable project space remains.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/projects/"+project.ID+"/resources", nil)
 	req = withURLParam(req, "id", project.ID)
@@ -141,8 +147,8 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatalf("decode post-delete list: %v", err)
 	}
-	if listResp.Total != 0 {
-		t.Errorf("post-delete list: total = %d, want 0", listResp.Total)
+	if listResp.Total != 1 || listResp.Resources[0].ResourceType != "project_space" {
+		t.Errorf("post-delete list should retain project_space: %+v", listResp)
 	}
 }
 
@@ -329,7 +335,7 @@ func TestProjectResourceLocalDirectoryLifecycle(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if listResp.Total != 1 || listResp.Resources[0].ID != created.ID {
+	if listResp.Total != 2 || listResp.Resources[1].ID != created.ID {
 		t.Fatalf("list mismatch: %+v", listResp)
 	}
 
@@ -491,7 +497,9 @@ func TestCreateProjectAttachesResources(t *testing.T) {
 		testHandler.DeleteProject(httptest.NewRecorder(), r)
 	}()
 
-	if len(resp.Resources) != 1 || resp.Resources[0].ResourceType != "github_repo" {
+	if len(resp.Resources) != 2 ||
+		resp.Resources[0].ResourceType != "project_space" ||
+		resp.Resources[1].ResourceType != "github_repo" {
 		t.Fatalf("response resources mismatch: %+v", resp.Resources)
 	}
 }
@@ -532,8 +540,8 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 		}
 		return resp.ResourceCount
 	}
-	if got := getCount(); got != 0 {
-		t.Errorf("initial GetProject ResourceCount = %d, want 0", got)
+	if got := getCount(); got != 1 {
+		t.Errorf("initial GetProject ResourceCount = %d, want 1", got)
 	}
 
 	w = httptest.NewRecorder()
@@ -547,8 +555,8 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 		t.Fatalf("CreateProjectResource: %d %s", w.Code, w.Body.String())
 	}
 
-	if got := getCount(); got != 1 {
-		t.Errorf("after attach GetProject ResourceCount = %d, want 1", got)
+	if got := getCount(); got != 2 {
+		t.Errorf("after attach GetProject ResourceCount = %d, want 2", got)
 	}
 
 	w = httptest.NewRecorder()
@@ -567,8 +575,8 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 	for _, p := range list.Projects {
 		if p.ID == project.ID {
 			found = true
-			if p.ResourceCount != 1 {
-				t.Errorf("ListProjects[%s].ResourceCount = %d, want 1", p.ID, p.ResourceCount)
+			if p.ResourceCount != 2 {
+				t.Errorf("ListProjects[%s].ResourceCount = %d, want 2", p.ID, p.ResourceCount)
 			}
 			break
 		}
@@ -615,8 +623,8 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode UpdateProject: %v", err)
 	}
-	if updated.ResourceCount != 1 {
-		t.Errorf("UpdateProject ResourceCount = %d, want 1", updated.ResourceCount)
+	if updated.ResourceCount != 2 {
+		t.Errorf("UpdateProject ResourceCount = %d, want 2", updated.ResourceCount)
 	}
 	if updated.IssueCount != 1 || updated.DoneCount != 1 {
 		t.Errorf("UpdateProject issue stats = %d/%d, want 1/1", updated.DoneCount, updated.IssueCount)
@@ -654,8 +662,8 @@ func TestCreateProjectWithResourcesEchoesCount(t *testing.T) {
 		r = withURLParam(r, "id", resp.ID)
 		testHandler.DeleteProject(httptest.NewRecorder(), r)
 	}()
-	if resp.ResourceCount != 1 || len(resp.Resources) != 1 {
-		t.Errorf("CreateProject echo: resource_count=%d resources=%d, want 1/1", resp.ResourceCount, len(resp.Resources))
+	if resp.ResourceCount != 2 || len(resp.Resources) != 2 {
+		t.Errorf("CreateProject echo: resource_count=%d resources=%d, want 2/2", resp.ResourceCount, len(resp.Resources))
 	}
 }
 
@@ -1098,7 +1106,7 @@ func TestCreateProjectBundledLocalDirectoryDaemonConflict(t *testing.T) {
 		r = withURLParam(r, "id", resp.ID)
 		testHandler.DeleteProject(httptest.NewRecorder(), r)
 	}()
-	if len(resp.Resources) != 2 {
-		t.Errorf("per-daemon bundle: expected 2 resources, got %d", len(resp.Resources))
+	if len(resp.Resources) != 3 {
+		t.Errorf("per-daemon bundle: expected 3 resources, got %d", len(resp.Resources))
 	}
 }
