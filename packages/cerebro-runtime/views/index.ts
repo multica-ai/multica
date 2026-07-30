@@ -45,6 +45,13 @@ export { isInterruptionReason } from "./task-failure-severity";
 export { resolveFailureReasonLabel } from "./failure-reason-label";
 // FIR-3782: failure summary card for a failed run's transcript.
 export { RunFailureCard } from "./components/run-failure-card";
+// FIR-4073: "which agent, which run" line under an alert row. Pure formatter,
+// so it is safe in this barrel.
+export {
+  formatRunIdentity,
+  formatRunTime,
+  type RunIdentityInput,
+} from "./run-identity";
 // FIR-4073: Resume / Start over for a failed run. The alert row itself
 // (FailedRunActivityRow) is imported from its direct entry, not re-exported
 // here — it pulls in @multica/views, which the barrel must stay clear of.

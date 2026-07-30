@@ -7,10 +7,15 @@ import type { DeadFailedRun } from "../dead-failed-runs";
 
 const mockRerunIssue = vi.hoisted(() => vi.fn());
 const mockListTasksByIssue = vi.hoisted(() => vi.fn());
-const mockTranscriptButton = vi.hoisted(() => vi.fn());
+const mockListTaskMessages = vi.hoisted(() => vi.fn());
+const mockTranscriptDialog = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
-  api: { rerunIssue: mockRerunIssue, listTasksByIssue: mockListTasksByIssue },
+  api: {
+    rerunIssue: mockRerunIssue,
+    listTasksByIssue: mockListTasksByIssue,
+    listTaskMessages: mockListTaskMessages,
+  },
 }));
 
 vi.mock("sonner", () => ({
@@ -18,16 +23,17 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getAgentName: (id: string) => `Agent ${id}` }),
+  useActorName: () => ({ getAgentName: () => "Sara" }),
 }));
 
-// The real button opens the run log dialog, which drags the whole transcript
-// tree into a unit test. Here we only need to know it was offered.
+// The real dialog drags the whole transcript tree into a unit test. Here we
+// only need to know it was opened, and with which run.
 vi.mock("@multica/views/common/task-transcript", () => ({
-  TranscriptButton: (props: { title?: string }) => {
-    mockTranscriptButton(props);
-    return <button type="button">{props.title ?? "Open run log"}</button>;
+  AgentTranscriptDialog: (props: { agentName: string }) => {
+    mockTranscriptDialog(props);
+    return <div data-testid="run-log-dialog">run log</div>;
   },
+  buildTimeline: (msgs: unknown[]) => msgs,
 }));
 
 import { FailedRunActivityRow } from "./failed-run-activity";
@@ -44,8 +50,8 @@ const run: DeadFailedRun = {
   agent_id: "agent-1",
   issue_id: "issue-1",
   failure_reason: "runtime_offline",
-  attempt: 1,
-  max_attempts: 1,
+  attempt: 2,
+  max_attempts: 3,
   resume_possible: true,
   runtime_name: "sara-mac",
 };
@@ -54,24 +60,45 @@ describe("FailedRunActivityRow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRerunIssue.mockResolvedValue(undefined);
+    mockListTaskMessages.mockResolvedValue([]);
     mockListTasksByIssue.mockResolvedValue([
       { id: "task-1", issue_id: "issue-1", status: "failed" },
     ]);
   });
 
-  it("names what broke and which runtime it ran on", async () => {
+  it("names what broke and which runtime it ran on", () => {
     render(<FailedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
 
     expect(screen.getByTestId("failed-run-row")).toBeInTheDocument();
-    expect(screen.getByText("sara-mac")).toBeInTheDocument();
+    expect(screen.getByText(/sara-mac/)).toBeInTheDocument();
     // A real, human failure label — not the raw reason code.
     expect(screen.queryByText("runtime_offline")).toBeNull();
+  });
+
+  it("says which agent failed and which attempt it was", () => {
+    render(<FailedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
+
+    expect(screen.getByText(/Sara/)).toBeInTheDocument();
+    expect(screen.getByText(/attempt 2 of 3/)).toBeInTheDocument();
+  });
+
+  it("opens the run log from the whole text block, not a stray icon", async () => {
+    render(<FailedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
+
+    const opener = await screen.findByRole("button", { name: /open run log/i });
+    await userEvent.click(opener);
+
+    await waitFor(() => expect(screen.getByTestId("run-log-dialog")).toBeInTheDocument());
+    expect(mockListTaskMessages).toHaveBeenCalledWith("task-1");
+    expect(mockTranscriptDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ agentName: "Sara" }),
+    );
   });
 
   it("offers the run log, Resume and Start over on one row", async () => {
     render(<FailedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
 
-    await waitFor(() => expect(mockTranscriptButton).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /open run log/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start over/i })).toBeInTheDocument();
   });
@@ -92,6 +119,8 @@ describe("FailedRunActivityRow", () => {
     render(<FailedRunActivityRow issueId="MUL-1" run={run} />, { wrapper });
 
     expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+    // No task to read a log for yet, so the text block is plain text.
+    expect(screen.queryByRole("button", { name: /open run log/i })).toBeNull();
   });
 
   it("disables Resume when the conversation cannot be picked back up", () => {
