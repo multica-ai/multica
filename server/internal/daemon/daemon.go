@@ -4744,6 +4744,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+	if task.Agent != nil && agent.ModelKnownIncompatibleWithProvider(provider, task.Agent.Model) {
+		return TaskResult{}, fmt.Errorf("refusing to invoke provider %q with incompatible agent model %q", provider, task.Agent.Model)
+	}
 
 	// A new turn on a chat session supersedes any background suggestion pass
 	// still running for the previous turn (see chat_suggest.go).

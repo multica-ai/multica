@@ -124,3 +124,61 @@ func TestTerminalTransitionsNotifyRuntime(t *testing.T) {
 		t.Fatalf("unexpected cancellation wakeups: %#v", recorder.calls)
 	}
 }
+
+func TestFailTask_ProviderFailureDoesNotCreateIssueComment(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'provider failure comment fixture', 'in_progress', 'none', $2, 'member', 999100, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '2 minutes', now() - interval '1 minute')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/fail", map[string]any{
+		"error":          `{"type":"error","status":400,"error":{"type":"invalid_request_error"}}`,
+		"failure_reason": "api_invalid_request",
+	}, testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	testHandler.FailTask(w, req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("FailTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var failureReason string
+	if err := testPool.QueryRow(ctx, `SELECT failure_reason FROM agent_task_queue WHERE id = $1`, taskID).Scan(&failureReason); err != nil {
+		t.Fatalf("read failed task: %v", err)
+	}
+	if failureReason != "api_invalid_request" {
+		t.Fatalf("failure_reason = %q, want api_invalid_request", failureReason)
+	}
+	var comments int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE source_task_id = $1`, taskID).Scan(&comments); err != nil {
+		t.Fatalf("count task comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("provider failure created %d issue comments, want 0", comments)
+	}
+}

@@ -473,6 +473,42 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 	})
 }
 
+func TestAgentModelProviderCompatibilityGuard(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	codexRuntimeID := createCodexProviderRuntime(t)
+	claudeRuntimeID := createClaudeProviderRuntime(t)
+
+	t.Run("create rejects a known foreign model", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", map[string]any{
+			"name":                 "provider-model-create-rejected",
+			"runtime_id":           codexRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"model":                "claude-opus-5",
+		}))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("create incompatible model: got %d, want 400: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("update rejects a known foreign model", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "provider-model-update-rejected", claudeRuntimeID, "claude-opus-5")
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+			"runtime_id": codexRuntimeID,
+			"model":      "claude-opus-5",
+		}), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("update incompatible model: got %d, want 400: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
 // createCodexProviderRuntime mirrors createClaudeProviderRuntime but for
 // the codex provider, so runtime-switch tests can exercise a real
 // cross-provider transition.

@@ -3537,7 +3537,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !suppressFailureIssueComment(failureReason) {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
@@ -3584,6 +3584,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
 
 	return &task, nil
+}
+
+// suppressFailureIssueComment keeps provider failures in the task record and
+// notifications instead of presenting untrusted provider payloads as an agent
+// reply on the issue. A provider rejection can include raw JSON, account
+// details, or transport diagnostics; none of that is useful issue-thread copy.
+func suppressFailureIssueComment(failureReason string) bool {
+	return failureReason == string(taskfailure.ReasonAPIInvalidRequest) ||
+		strings.HasPrefix(failureReason, "agent_error.provider_")
 }
 
 // resolveFailedRegenerateQuickActions resolves a refresh whose regeneration
