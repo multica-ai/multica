@@ -80,6 +80,8 @@ type ParityEvaluation struct {
 	BlockerCode              ParityBlockerCode `json:"blocker_code,omitempty"`
 	EvidenceSHA256           string            `json:"evidence_sha256,omitempty"`
 	EvidenceAt               time.Time         `json:"evidence_at"`
+	censusGeneratedAt        time.Time
+	evaluationBatchSHA256    string
 }
 
 type parityEvidence struct {
@@ -129,6 +131,7 @@ func EvaluateParity(
 			CensusVersion:            censusVersion,
 			Status:                   ParityBlocked,
 			EvidenceAt:               now.UTC(),
+			censusGeneratedAt:        report.GeneratedAt.UTC(),
 		}
 		if actor.AgentID == "" || censusVersion <= 0 ||
 			strings.TrimSpace(companyBrainConnectionID) == "" ||
@@ -201,6 +204,10 @@ func EvaluateParity(
 		}
 		result.EvidenceSHA256 = evaluationHash(report.GeneratedAt, result)
 		results = append(results, result)
+	}
+	batchSHA256 := canonicalHash(results)
+	for i := range results {
+		results[i].evaluationBatchSHA256 = batchSHA256
 	}
 	return results
 }
