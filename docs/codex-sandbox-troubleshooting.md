@@ -24,7 +24,9 @@ profile for `sandbox_mode = "workspace-write"` silently ignores the
 policy hard-codes `CODEX_SANDBOX_NETWORK_DISABLED=1`, which blocks DNS/UDP
 syscalls. Go's `net.LookupHost` surfaces that as `no such host`.
 
-Linux (Landlock) is **not** affected — only macOS Seatbelt.
+Linux (Landlock) is **not** affected by this DNS bug — only macOS Seatbelt.
+Linux still runs `danger-full-access` today for an unrelated reason; see the
+decision matrix below.
 
 [codex-10390]: https://github.com/openai/codex/issues/10390
 
@@ -37,11 +39,21 @@ untouched so users can still tune Codex behavior.
 
 Decision matrix (see [`server/internal/daemon/execenv/codex_sandbox.go`](../server/internal/daemon/execenv/codex_sandbox.go)):
 
-| Host OS   | Codex version                                    | Managed block emits                                                       |
-| --------- | ------------------------------------------------ | ------------------------------------------------------------------------- |
-| non-darwin | any                                              | `sandbox_mode = "workspace-write"` + `sandbox_workspace_write.network_access = true` (dotted-key form) |
-| darwin    | ≥ `CodexDarwinNetworkAccessFixedVersion`         | same as above (upstream fix in effect)                                    |
-| darwin    | older / unknown (current default)                | `sandbox_mode = "danger-full-access"` + warn-level log                     |
+| Host OS / config                                   | Codex version                            | Managed block emits                                                       |
+| -------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------- |
+| linux                                              | any                                      | `sandbox_mode = "danger-full-access"` + warn-level log                     |
+| darwin                                             | ≥ `CodexDarwinNetworkAccessFixedVersion` | `sandbox_mode = "workspace-write"` + `sandbox_workspace_write.network_access = true` (dotted-key form) |
+| darwin                                             | older / unknown (current default)        | `sandbox_mode = "danger-full-access"` + warn-level log                     |
+| windows, native `windows.sandbox` configured (or config undecidable — fails closed) | any | `sandbox_mode = "workspace-write"` + `sandbox_workspace_write.network_access = true` |
+| windows, no native sandbox (current default)       | any                                      | `sandbox_mode = "danger-full-access"` + warn-level log (MUL-4957)          |
+
+Linux earns its `danger-full-access` row for a reason unrelated to the macOS
+DNS bug: under `workspace-write` the daemon user's real HOME is read-only,
+which the daemon used to work around with a per-task redirected HOME. That
+redirect hid every piece of host CLI configuration outside a small symlink
+allowlist and was retired in favor of the real HOME (#6218). Linux therefore
+matches the macOS/Windows full-access fallbacks; containment comes from the
+boundary the daemon runs inside (VM, container, or dedicated user).
 
 The managed block is always hoisted to the top of `config.toml` and uses
 TOML dotted-key syntax rather than a `[sandbox_workspace_write]` section
@@ -53,10 +65,12 @@ as `permissions.multica.sandbox_mode` and Codex would silently ignore it.
 known fixed release yet*. Bump it once a tagged Codex release includes the
 upstream fix.
 
-When the daemon falls back to `danger-full-access`, it logs at `WARN`:
+Whenever the managed block selects `danger-full-access`, the daemon logs at
+`WARN` (macOS example shown; the Linux and Windows rows log the same shape
+with their own reason/hint):
 
 ```
-codex sandbox: falling back to danger-full-access on macOS
+codex sandbox: running unsandboxed with danger-full-access
   reason=codex on macOS: seatbelt ignores sandbox_workspace_write.network_access (openai/codex#10390) ...
   codex_version=0.121.0
   hint=upgrade Codex CLI (e.g. `brew upgrade codex` or `npm i -g @openai/codex`) ...
