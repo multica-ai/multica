@@ -91,7 +91,15 @@
     "add_confirm": "Add ({{num}})",
     "adding": "Adding...",
     "added_multi_toast_one": "Added to {{count}} agent",
-    "added_multi_toast_other": "Added to {{count}} agents"
+    "added_multi_toast_other": "Added to {{count}} agents",
+    "update": "Update",
+    "update_dialog_title": "Update from source?",
+    "update_dialog_desc": "This replaces \"{{name}}\" with the latest version from its source. Any local changes to this skill will be lost.",
+    "update_dialog_source": "Source: {{url}}",
+    "update_confirm": "Update",
+    "updating": "Updating...",
+    "updated_toast": "Updated {{name}} from source",
+    "update_failed_toast": "Failed to update skill"
   },
   "toolbar": {
     "result_count_title": "Matching skills / all skills",

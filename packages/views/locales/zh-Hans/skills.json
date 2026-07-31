@@ -87,7 +87,15 @@
     "cancel": "取消",
     "add_confirm": "添加（{{num}}）",
     "adding": "添加中...",
-    "added_multi_toast_other": "已添加到 {{count}} 个智能体"
+    "added_multi_toast_other": "已添加到 {{count}} 个智能体",
+    "update": "更新",
+    "update_dialog_title": "从来源更新这个 skill？",
+    "update_dialog_desc": "这会用来源的最新版本替换 \"{{name}}\"。对该 skill 的本地修改将会丢失。",
+    "update_dialog_source": "来源: {{url}}",
+    "update_confirm": "更新",
+    "updating": "更新中...",
+    "updated_toast": "已从来源更新 {{name}}",
+    "update_failed_toast": "更新 skill 失败"
   },
   "toolbar": {
     "result_count_title": "当前结果 / 全部 skill",

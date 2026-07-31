@@ -87,7 +87,15 @@
     "cancel": "キャンセル",
     "add_confirm": "追加（{{num}}）",
     "adding": "追加中...",
-    "added_multi_toast_other": "{{count}} 件のエージェントに追加しました"
+    "added_multi_toast_other": "{{count}} 件のエージェントに追加しました",
+    "update": "更新",
+    "update_dialog_title": "ソースから更新しますか？",
+    "update_dialog_desc": "「{{name}}」をソースの最新バージョンに置き換えます。このスキルへのローカルの変更は失われます。",
+    "update_dialog_source": "ソース: {{url}}",
+    "update_confirm": "更新",
+    "updating": "更新中...",
+    "updated_toast": "{{name}} をソースから更新しました",
+    "update_failed_toast": "スキルの更新に失敗しました"
   },
   "toolbar": {
     "result_count_title": "該当スキル / 全スキル",
