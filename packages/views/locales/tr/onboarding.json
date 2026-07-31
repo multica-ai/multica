@@ -41,8 +41,8 @@
     "continue": "Devam et",
     "skip": "Atla",
     "cancel": "İptal",
-    "close": "Close",
-    "log_out": "Log out"
+    "close": "Kapat",
+    "log_out": "Çıkış yap"
   },
   "questions": {
     "eyebrow_about_you": "Hakkınızda",
@@ -55,7 +55,7 @@
       "social_youtube": "YouTube",
       "social_github": "GitHub",
       "social_misc": "Diğer sosyal medya",
-      "blog_newsletter": "Blog / newsletter",
+      "blog_newsletter": "Blog / bülten",
       "ai_assistant": "ChatGPT / Claude / Cursor",
       "from_work": "İş yerinde",
       "event_conference": "Konferans / meetup",
@@ -65,13 +65,13 @@
     },
     "role": {
       "question": "Sizi en iyi hangisi tanımlar?",
-      "engineer": "Engineer / developer",
-      "product": "Product manager",
-      "designer": "Designer",
-      "founder": "Founder / exec",
-      "marketing": "Marketing / growth",
-      "writer": "Writer / content",
-      "research": "Researcher / analyst",
+      "engineer": "Mühendis / geliştirici",
+      "product": "Ürün yöneticisi",
+      "designer": "Tasarımcı",
+      "founder": "Kurucu / yönetici",
+      "marketing": "Pazarlama / büyüme",
+      "writer": "Yazar / içerik",
+      "research": "Araştırmacı / analist",
       "ops": "Operations / proje mgmt",
       "student": "Öğrenci / kişisel kullanım",
       "other": "Diğer",
@@ -90,7 +90,7 @@
       "other_placeholder": "örn. çalışma grubu koordinasyonu"
     },
     "about_you": {
-      "question": "Tell us a bit about you."
+      "question": "Bize biraz kendinizden bahsedin."
     }
   },
   "option_card": {
@@ -174,7 +174,7 @@
       "title": "Multica'ya hoş geldiniz!",
       "subtitle": "Sonraki adımda size yardımcı olması için iki task ekledik.",
       "got_it": "Anladım",
-      "status_in_progress": "In progress",
+      "status_in_progress": "Devam ediyor",
       "status_todo": "Yapılacak",
       "cards": {
         "install_runtime": {
@@ -268,9 +268,9 @@
     "runtime_count_other": "{{count}} ajan çalışma ortamı",
     "status_all_online": "hepsi online",
     "status_none_online": "hiçbiri online değil",
-    "status_n_online": "{{count}} online",
-    "online_label": "online",
-    "offline_label": "offline",
+    "status_n_online": "{{count}} çevrimiçi",
+    "online_label": "çevrimiçi",
+    "offline_label": "çevrimdışı",
     "empty_headline": "Bu bilgisayarda henüz ajan çalışma ortamı bulunamadı.",
     "empty_lede_prefix": "Ajan çalışma ortamı, bağlandığımız bir AI coding tool'dur; örneğin ",
     "empty_lede_suffix": ". Birini kurup yenileyin veya aşağıdan bir yol seçin.",
@@ -327,9 +327,9 @@
     "skip_failed": "Onboarding tamamlanamadı"
   },
   "source_backfill": {
-    "eyebrow": "Quick question",
-    "lede": "One quick question — it helps us understand who finds Multica useful. Answer once and you're back to your work.",
-    "submit": "Submit",
-    "hint_ready": "Looks good. Hit Submit when you're ready."
+    "eyebrow": "Kısa bir soru",
+    "lede": "Kısa bir soru: Multica'yı kimlerin faydalı bulduğunu anlamamıza yardımcı olur. Bir kez yanıtlayın, ardından işinize dönün.",
+    "submit": "Gönder",
+    "hint_ready": "Her şey iyi görünüyor. Hazır olduğunuzda Gönder'e basın."
   }
 }

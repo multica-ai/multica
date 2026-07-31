@@ -8,23 +8,23 @@
     "view_comfortable": "Rahat",
     "search_placeholder": "Proje ara...",
     "no_search_results": "Aramanızla eşleşen sonuç yok",
-    "view_table": "Table",
-    "view_cards": "Cards",
-    "row_menu": "Project actions",
-    "pin": "Pin to sidebar",
-    "unpin": "Unpin",
-    "delete": "Delete",
-    "no_matches": "No projects match",
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection"
+    "view_table": "Tablo",
+    "view_cards": "Kartlar",
+    "row_menu": "Proje işlemleri",
+    "pin": "Kenar çubuğuna sabitle",
+    "unpin": "Sabitlemeyi kaldır",
+    "delete": "Sil",
+    "no_matches": "Eşleşen proje yok",
+    "selected_one": "{{count}} seçildi",
+    "selected_other": "{{count}} seçildi",
+    "clear_selection": "Seçimi temizle"
   },
   "table": {
     "name": "Ad",
     "priority": "Öncelik",
     "status": "Durum",
     "progress": "İlerleme",
-    "lead": "Lead",
+    "lead": "Sorumlu",
     "created": "Oluşturuldu",
     "issues": "Issues"
   },
@@ -76,10 +76,10 @@
     "toast_link_copied": "Bağlantı kopyalandı",
     "toast_project_deleted": "Proje silindi",
     "toast_move_issue_failed": "Issue taşınamadı",
-    "prop_start_date": "Start date",
-    "prop_due_date": "Due date",
-    "clear_date": "Clear date",
-    "description_hint": "Shared with agents as context for every task in this project."
+    "prop_start_date": "Başlangıç tarihi",
+    "prop_due_date": "Bitiş tarihi",
+    "clear_date": "Tarihi temizle",
+    "description_hint": "Bu projedeki her task için bağlam olarak ajanlarla paylaşılır."
   },
   "resources": {
     "section_header": "Kaynaklar",
@@ -128,25 +128,25 @@
     "no_project": "Proje yok",
     "remove": "Projeden kaldır",
     "empty": "Henüz proje yok",
-    "search_placeholder": "Search projects..."
+    "search_placeholder": "Proje ara..."
   },
   "chip": {
     "fallback_label": "Proje"
   },
   "toolbar": {
-    "result_count_title": "Matching projects / all projects",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters",
-    "section_status": "Status",
-    "section_priority": "Priority",
-    "section_lead": "Lead",
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns",
-    "view": "View"
+    "result_count_title": "Eşleşen projeler / tüm projeler",
+    "filter_label": "Filtre",
+    "filter_active_count_one": "{{count}} filtre",
+    "filter_active_count_other": "{{count}} filtre",
+    "clear_filters": "Filtreleri temizle",
+    "section_status": "Durum",
+    "section_priority": "Öncelik",
+    "section_lead": "Sorumlu",
+    "display": "Görünüm",
+    "sort_by": "Sıralama ölçütü",
+    "direction_asc": "Artan",
+    "direction_desc": "Azalan",
+    "section_columns": "Sütunlar",
+    "view": "Görünüm"
   }
 }

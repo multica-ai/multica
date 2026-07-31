@@ -5,15 +5,15 @@
     "empty_no_squads": "Henüz ekip yok. Başlamak için bir tane oluşturun.",
     "empty_no_match": "Filtrelerinizle eşleşen ekip yok.",
     "table": {
-      "name": "Squad",
-      "leader": "Leader",
-      "members": "Members",
-      "creator": "Created by",
-      "created": "Created"
+      "name": "Ekip",
+      "leader": "Lider",
+      "members": "Üyeler",
+      "creator": "Oluşturan",
+      "created": "Oluşturulma"
     },
-    "no_matches": "No squads match",
-    "row_menu": "Squad actions",
-    "archive_action": "Archive"
+    "no_matches": "Eşleşen ekip yok",
+    "row_menu": "Ekip işlemleri",
+    "archive_action": "Arşivle"
   },
   "inspector": {
     "details_section": "Detaylar",
@@ -25,7 +25,7 @@
     "cancel": "İptal",
     "confirm": "Arşivle",
     "archiving": "Arşivleniyor...",
-    "success": "Squad archived"
+    "success": "Ekip arşivlendi"
   },
   "name_editor": {
     "cancel": "İptal"
@@ -62,7 +62,7 @@
     "remove_member_tooltip": "Ekipten kaldır",
     "status_working": "Çalışıyor",
     "status_idle": "Boşta",
-    "status_offline": "Offline",
+    "status_offline": "Çevrimdışı",
     "status_unstable": "Kararsız",
     "status_archived": "Arşivlendi",
     "issue_status_blocked": "blocked",
@@ -85,19 +85,19 @@
     "save_button": "Kaydet"
   },
   "scope": {
-    "mine": "Mine",
-    "all": "All"
+    "mine": "Benim",
+    "all": "Tümü"
   },
   "toolbar": {
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns",
-    "result_count_title": "Matching squads / all squads",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters"
+    "display": "Görünüm",
+    "sort_by": "Sıralama ölçütü",
+    "direction_asc": "Artan",
+    "direction_desc": "Azalan",
+    "section_columns": "Sütunlar",
+    "result_count_title": "Eşleşen ekipler / tüm ekipler",
+    "filter_label": "Filtre",
+    "filter_active_count_one": "{{count}} filtre",
+    "filter_active_count_other": "{{count}} filtre",
+    "clear_filters": "Filtreleri temizle"
   }
 }
