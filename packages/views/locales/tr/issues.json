@@ -371,6 +371,7 @@
     "status_running": "Çalışıyor",
     "status_queued": "Sırada",
     "empty_hover": "Şu anda çalışan ajan yok",
+    "unknown_hover": "Çalışan ajanlar: henüz yüklenmedi",
     "filter_active_label": "Yalnızca çalışan ajanlar görüntüleniyor",
     "hover_header_tasks_one": "{{count}} task çalışıyor",
     "hover_header_tasks_other": "{{count}} task çalışıyor",
@@ -383,6 +384,11 @@
     "issues_count_one": "{{count}} issue",
     "issues_count_other": "{{count}} issue",
     "chip_agents_working_unknown": "Çalışan ajanlar: —"
+  },
+  "filtered_empty": {
+    "title": "Bu filtrelerle eşleşen issue yok",
+    "hint": "Bu görünümdeki issue'ları görmek için filtreleri düzenleyin veya temizleyin.",
+    "clear_button": "Filtreleri temizle"
   },
   "agent_live": {
     "is_working": "{{name}} çalışıyor",
