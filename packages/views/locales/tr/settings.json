@@ -795,7 +795,7 @@
     "disconnect_failed": "Bağlantı kesilemedi. Lütfen tekrar deneyin.",
     "toast_disconnected": "Bağlantı kesildi",
     "disconnect_confirm_title": "Bu uygulamanın bağlantısı kesilsin mi?",
-    "disconnect_confirm_description": "Composio'daki bağlı hesabınızın yetkisi kaldırılacak.",
+    "disconnect_confirm_description": "Composio'daki bağlı hesabınızın yetkisi kaldırılır; ajanlarınız bu toolkit'e erişimini kaybeder. Daha sonra yeniden bağlanabilirsiniz.",
     "disconnect_confirm_cancel": "İptal",
     "connections_load_failed": "Mevcut bağlantılarınız yüklenemedi; bu nedenle bağlı durumu eksik olabilir.",
     "toast_connected": "Bağlandı",
