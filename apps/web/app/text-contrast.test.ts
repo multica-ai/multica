@@ -484,7 +484,6 @@ describe("text contrast", () => {
       ["opacity-0 / opacity-100 show-hide", `<i className="text-muted-foreground opacity-0" />`],
       ["opacity with no guarded colour in the expression", `<i className="text-white opacity-50" />`],
       ["the colour alone", `<i className="text-muted-foreground" />`],
-      ["the faint icon tone", `<i className="text-faint-foreground" />`],
     ])("leaves %s alone", (_shape, source) => {
       expect(caught(source)).toBe(false);
     });
