@@ -11,8 +11,11 @@ documents one named patch + its rationale + the file location(s).
 - `server/internal/daemon/execenv/execenv_test.go:3317` keeps the instruction in
   the generated runtime brief.
 - **Why:** agents handed off work without correlating the recipient agent's
-  `runtime_id` with `multica runtime list --output json`, so an offline recipient
-  was invisible to the sender. Approved by Jesper Hvejsel on 2026-07-31.
+  `runtime_id` with the runtime's status, so an offline recipient was invisible
+  to the sender. Approved by Jesper Hvejsel on 2026-07-31.
+- **Cost constraint:** the instruction must name `multica agent get <agent-id>
+  --output json` (~12 KB) + `multica runtime list` (~8 KB), never `multica agent
+  list --output json` (~780 KB — it embeds every agent's full instructions).
 
 ## FIR-3986 — Names are copied, never translated
 
