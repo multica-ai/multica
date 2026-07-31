@@ -42,6 +42,15 @@
     "hours_ago": "{{count}}h ago",
     "days_ago": "{{count}}d ago"
   },
+  "continue_in_chat": {
+    "tooltip": "Continue in chat",
+    "aria": "Continue this run in chat",
+    "no_session": "Opened a chat in the run's working directory, but this run left no resumable session — the agent starts without its context.",
+    "blocked": "Not opened — you don't have permission to use this agent",
+    "still_running": "This run is still going — stop it before continuing in chat",
+    "already_chat": "This run already belongs to a chat conversation",
+    "failed": "Failed to continue this run in chat"
+  },
   "lark_bind": {
     "page_title": "Bind your Lark account",
     "redeeming": "Redeeming binding token…",

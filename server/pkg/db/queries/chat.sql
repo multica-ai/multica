@@ -11,6 +11,53 @@ UPDATE chat_session
 SET project_id = NULL
 WHERE project_id = $1 AND workspace_id = $2;
 
+-- name: CreateChatSessionContinuingTask :one
+-- "Continue in chat": seed a chat session from a finished agent task so the
+-- first message resumes that task's provider session in its work_dir instead of
+-- cold-starting. Distinct from CreateChatSession because the resume pointer has
+-- to be written at INSERT time, and because runtime_id must come from the SOURCE
+-- TASK rather than from the agent's current binding.
+--
+-- That runtime distinction is the whole point: claim resolves a chat resume only
+-- when chat_session.runtime_id equals the claiming task's runtime
+-- (see the chat branch of the daemon claim handler). Copying the agent's current
+-- runtime_id instead would silently discard the session whenever the agent has
+-- since been re-bound, and copying the task's keeps the pointer meaningful and
+-- lets the existing gate degrade to a fresh start on mismatch rather than
+-- resuming a session that belongs to another machine.
+--
+-- session_id may be NULL while work_dir is not: several backends only report
+-- their session at completion, so a task can leave a reusable directory and no
+-- resumable conversation. The caller decides what to promise the user; this
+-- query just records what it was given.
+INSERT INTO chat_session (
+    workspace_id, agent_id, creator_id, title,
+    runtime_id, session_id, work_dir, continued_from_task_id, project_id
+)
+VALUES (
+    $1, $2, $3, $4,
+    sqlc.narg('runtime_id')::uuid,
+    sqlc.narg('session_id'),
+    sqlc.narg('work_dir'),
+    @continued_from_task_id::uuid,
+    sqlc.narg('project_id')
+)
+RETURNING *;
+
+-- name: GetChatSessionContinuingTask :one
+-- Idempotency lookup for "continue in chat": returns this member's existing
+-- continuation of the given task, so a second click reopens that conversation
+-- instead of forking another one onto the same provider session. Backed by
+-- idx_chat_session_continued_from_task (unique on (task, creator)).
+--
+-- Archived sessions are returned too, deliberately: silently minting a second
+-- session on the same provider session is worse than telling the caller the
+-- previous continuation exists.
+SELECT * FROM chat_session
+WHERE continued_from_task_id = $1
+  AND creator_id = $2
+  AND workspace_id = $3;
+
 -- name: GetChatSession :one
 SELECT * FROM chat_session
 WHERE id = $1;

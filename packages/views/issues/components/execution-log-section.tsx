@@ -16,6 +16,10 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
+import {
+  ContinueInChatButton,
+  canContinueTaskInChat,
+} from "../../common/continue-in-chat-button";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
@@ -414,6 +418,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       </RowStatus>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+        {canContinueTaskInChat(task) && <ContinueInChatButton task={task} />}
         {canRetry && (
           <Tooltip>
             <TooltipTrigger

@@ -1420,6 +1420,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
+			// Open a chat that continues a finished background task, inheriting
+			// its provider session + work_dir so the conversation picks up where
+			// the run left off instead of cold-starting.
+			r.Post("/api/tasks/{taskId}/continue-in-chat", h.ContinueTaskInChat)
 
 			// Workspace-wide agent task snapshot for presence derivation:
 			// every active task + each agent's most recent terminal task.
