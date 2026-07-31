@@ -2,16 +2,22 @@ import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import type { Agent, RuntimeDevice } from "@multica/core/types";
 import {
   AgentNameField,
   ModeChooser,
   StudioFooter,
+  applyDraftModelChange,
+  applyDraftRuntimeChange,
+  buildCreateAgentRequest,
+  buildDuplicateDraft,
   buildInvocationTargets,
   classifyAgentCreateError,
   decodeBuilderInput,
   deriveDuplicateAccess,
   encodeBuilderInput,
   getAgentCreationScreenKey,
+  isDraftDescriptionWithinLimit,
   mergeBuilderDraft,
   parseBuilderDraft,
   pickBuilderRestore,
@@ -187,6 +193,8 @@ const draft = (): AgentDraft => ({
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "model-1",
+  thinkingLevel: "",
+  serviceTier: "",
   skillIds: new Set(["skill-1"]),
   permissionScope: "private",
   memberIds: new Set(),
@@ -421,5 +429,259 @@ Return findings."}</agent_draft>`;
         invocation_targets: [{ target_type: "workspace", target_id: null }],
       }).permissionScope,
     ).toBe("workspace");
+  });
+});
+
+const CODEX_RUNTIME: RuntimeDevice = {
+  id: "runtime-1",
+  workspace_id: "ws-1",
+  name: "Codex laptop",
+  provider: "codex",
+  status: "online",
+  owner_id: "user-1",
+  visibility: "private",
+} as RuntimeDevice;
+
+const OTHER_RUNTIME: RuntimeDevice = {
+  ...CODEX_RUNTIME,
+  id: "runtime-2",
+  name: "Spare laptop",
+} as RuntimeDevice;
+
+const sourceAgent = (overrides: Partial<Agent> = {}): Agent =>
+  ({
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "runtime-1",
+    name: "Fast Codex",
+    description: "Ships quickly",
+    instructions: "Be quick",
+    avatar_url: null,
+    runtime_mode: "managed",
+    runtime_config: {},
+    custom_args: ["--verbose"],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 9,
+    model: "gpt-5.6-sol",
+    thinking_level: "high",
+    service_tier: "priority",
+    owner_id: "user-1",
+    skills: [{ id: "skill-1", name: "Review", description: "" }],
+    created_at: "2026-07-28T00:00:00Z",
+    updated_at: "2026-07-28T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+    ...overrides,
+  }) as Agent;
+
+// MUL-5390: thinking_level / service_tier are runtime + model scoped. The create
+// flow never exposed them, so a Fast Codex agent could only be configured after
+// the fact and a Duplicate silently dropped the setting.
+describe("Agent creation studio execution overrides", () => {
+  it("sends the selected thinking level and service tier", () => {
+    const request = buildCreateAgentRequest({
+      draft: {
+        ...draft(),
+        model: "gpt-5.6-sol",
+        thinkingLevel: "high",
+        serviceTier: "priority",
+      },
+      runtimeId: "runtime-1",
+    });
+
+    expect(request).toMatchObject({
+      runtime_id: "runtime-1",
+      model: "gpt-5.6-sol",
+      thinking_level: "high",
+      service_tier: "priority",
+    });
+  });
+
+  it("omits empty overrides instead of sending an empty string", () => {
+    const request = buildCreateAgentRequest({
+      draft: { ...draft(), model: "" },
+      runtimeId: "runtime-1",
+    });
+
+    expect(request.model).toBeUndefined();
+    expect(request.thinking_level).toBeUndefined();
+    expect(request.service_tier).toBeUndefined();
+    expect("thinking_level" in request).toBe(true);
+    expect(JSON.parse(JSON.stringify(request))).not.toHaveProperty(
+      "thinking_level",
+    );
+  });
+
+  it("carries the runtime-independent duplicate config", () => {
+    const request = buildCreateAgentRequest({
+      draft: { ...draft(), thinkingLevel: "high", serviceTier: "priority" },
+      runtimeId: "runtime-1",
+      duplicateSource: sourceAgent(),
+    });
+
+    expect(request.custom_args).toEqual(["--verbose"]);
+    expect(request.max_concurrent_tasks).toBe(9);
+    expect(request.thinking_level).toBe("high");
+  });
+
+  it.each([0, -1, 51])(
+    "omits an invalid historical duplicate concurrency of %i",
+    (maxConcurrentTasks) => {
+      const request = buildCreateAgentRequest({
+        draft: draft(),
+        runtimeId: "runtime-1",
+        duplicateSource: sourceAgent({
+          max_concurrent_tasks: maxConcurrentTasks,
+        }),
+      });
+
+      expect(request.max_concurrent_tasks).toBeUndefined();
+      expect(request).not.toHaveProperty("max_concurrent_tasks");
+    },
+  );
+
+  it("clears model, thinking level and service tier on a runtime change", () => {
+    const current = {
+      ...draft(),
+      thinkingLevel: "high",
+      serviceTier: "priority",
+    };
+
+    expect(applyDraftRuntimeChange(current, "runtime-2")).toMatchObject({
+      runtimeId: "runtime-2",
+      model: "",
+      thinkingLevel: "",
+      serviceTier: "",
+    });
+  });
+
+  it("clears only the per-model overrides on a model change", () => {
+    const current = {
+      ...draft(),
+      thinkingLevel: "high",
+      serviceTier: "priority",
+    };
+    const next = applyDraftModelChange(current, "gpt-5.4-mini");
+
+    expect(next).toMatchObject({
+      runtimeId: "runtime-1",
+      model: "gpt-5.4-mini",
+      thinkingLevel: "",
+      serviceTier: "",
+    });
+    // Re-selecting the same model must not wipe a choice the user just made.
+    expect(applyDraftModelChange(current, "model-1")).toBe(current);
+  });
+
+  it("copies the execution config when the duplicate stays on its runtime", () => {
+    const duplicate = buildDuplicateDraft(sourceAgent(), {
+      runtimes: [CODEX_RUNTIME],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-1",
+      nameSuffix: " copy",
+    });
+
+    expect(duplicate).toMatchObject({
+      name: "Fast Codex copy",
+      runtimeId: "runtime-1",
+      model: "gpt-5.6-sol",
+      thinkingLevel: "high",
+      serviceTier: "priority",
+    });
+    expect([...duplicate.skillIds]).toEqual(["skill-1"]);
+  });
+
+  it("drops the execution config when the duplicate falls back to another runtime", () => {
+    // Source runtime is gone from the list (deleted, or private to someone
+    // else), so the draft lands on the fallback. Keeping the source model here
+    // is what persisted a cross-provider model before MUL-5390.
+    const duplicate = buildDuplicateDraft(sourceAgent(), {
+      runtimes: [OTHER_RUNTIME],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-2",
+      nameSuffix: " copy",
+    });
+
+    expect(duplicate).toMatchObject({
+      runtimeId: "runtime-2",
+      model: "",
+      thinkingLevel: "",
+      serviceTier: "",
+    });
+  });
+
+  it("drops the execution config when the source runtime is private to someone else", () => {
+    const duplicate = buildDuplicateDraft(sourceAgent(), {
+      runtimes: [
+        { ...CODEX_RUNTIME, owner_id: "user-2" } as RuntimeDevice,
+        { ...OTHER_RUNTIME, owner_id: "user-1" } as RuntimeDevice,
+      ],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-2",
+      nameSuffix: " copy",
+    });
+
+    expect(duplicate).toMatchObject({
+      runtimeId: "runtime-2",
+      model: "",
+      thinkingLevel: "",
+      serviceTier: "",
+    });
+  });
+
+  it("keeps the overrides while the AI builder leaves the model alone", () => {
+    const current = {
+      ...draft(),
+      thinkingLevel: "high",
+      serviceTier: "priority",
+    };
+
+    expect(
+      mergeBuilderDraft(
+        current,
+        { name: "Renamed" },
+        new Set(),
+        new Set(),
+        new Set(["model-1"]),
+      ),
+    ).toMatchObject({
+      name: "Renamed",
+      model: "model-1",
+      thinkingLevel: "high",
+      serviceTier: "priority",
+    });
+  });
+
+  it("drops the overrides when the AI builder moves the model", () => {
+    const current = {
+      ...draft(),
+      thinkingLevel: "high",
+      serviceTier: "priority",
+    };
+
+    expect(
+      mergeBuilderDraft(
+        current,
+        { model: "gpt-5.4-mini" },
+        new Set(),
+        new Set(),
+        new Set(["model-1", "gpt-5.4-mini"]),
+      ),
+    ).toMatchObject({
+      model: "gpt-5.4-mini",
+      thinkingLevel: "",
+      serviceTier: "",
+    });
+  });
+
+  it("enforces the 255-rune description limit the create API applies", () => {
+    expect(isDraftDescriptionWithinLimit("a".repeat(255))).toBe(true);
+    expect(isDraftDescriptionWithinLimit("a".repeat(256))).toBe(false);
+    // Runes, not UTF-16 units: 255 CJK characters are exactly at the limit.
+    expect(isDraftDescriptionWithinLimit("汉".repeat(255))).toBe(true);
+    expect(isDraftDescriptionWithinLimit("汉".repeat(256))).toBe(false);
   });
 });

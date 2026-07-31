@@ -86,6 +86,14 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
+// Module-level flag toggled per-test: desktop implements `openInNewTab`,
+// web omits it and the menu has to fall back to a real browser tab.
+const { openInNewTabMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
+  openInNewTabMock: vi.fn(),
+  getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
+  navState: { hasOpenInNewTab: true },
+}));
+
 vi.mock("../../../navigation", () => ({
   useNavigation: () => ({
     push: vi.fn(),
@@ -93,6 +101,8 @@ vi.mock("../../../navigation", () => ({
     searchParams: new URLSearchParams(),
     back: vi.fn(),
     replace: vi.fn(),
+    ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
+    getShareableUrl: getShareableUrlMock,
   }),
 }));
 
@@ -145,6 +155,9 @@ function wrap(ui: React.ReactNode) {
 
 beforeEach(() => {
   mockOpenModal.mockReset();
+  openInNewTabMock.mockReset();
+  getShareableUrlMock.mockClear();
+  navState.hasOpenInNewTab = true;
 });
 
 describe("IssueActionsDropdown", () => {
@@ -165,6 +178,7 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+    expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
@@ -238,7 +252,7 @@ describe("IssueActionsDropdown", () => {
         <IssueActionsDropdown
           issue={mockIssue}
           trigger={<button data-testid="trigger">Menu</button>}
-          onDeletedNavigateTo="/test/issues"
+          onDeletedFallbackPath="/test/issues"
         />,
       ),
     );
@@ -250,8 +264,63 @@ describe("IssueActionsDropdown", () => {
     expect(mockOpenModal).toHaveBeenCalledWith("issue-delete-confirm", {
       issueId: "issue-1",
       identifier: "TES-1",
-      onDeletedNavigateTo: "/test/issues",
+      onDeletedFallbackPath: "/test/issues",
     });
+  });
+});
+
+describe("Open in new tab", () => {
+  async function openMenuAndClickOpenInNewTab() {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Open in new tab"));
+  }
+
+  it("uses the desktop adapter and focuses the new tab", async () => {
+    const windowOpen = vi
+      .spyOn(window, "open")
+      .mockReturnValue(null as unknown as Window);
+
+    await openMenuAndClickOpenInNewTab();
+
+    // `activate: true` — an explicit CTA moves the user into the new context,
+    // unlike modifier-click, which stashes a background tab. The path carries
+    // the identifier, matching copyLink, so the opened tab is already on the
+    // canonical URL instead of being rewritten off the UUID after it lands.
+    expect(openInNewTabMock).toHaveBeenCalledWith(
+      "/test/issues/TES-1",
+      "TES-1",
+      { activate: true },
+    );
+    expect(windowOpen).not.toHaveBeenCalled();
+
+    windowOpen.mockRestore();
+  });
+
+  it("falls back to a browser tab when the adapter is absent (web)", async () => {
+    navState.hasOpenInNewTab = false;
+    const windowOpen = vi
+      .spyOn(window, "open")
+      .mockReturnValue(null as unknown as Window);
+
+    await openMenuAndClickOpenInNewTab();
+
+    expect(openInNewTabMock).not.toHaveBeenCalled();
+    expect(getShareableUrlMock).toHaveBeenCalledWith("/test/issues/TES-1");
+    expect(windowOpen).toHaveBeenCalledWith(
+      "https://app.example/test/issues/TES-1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    windowOpen.mockRestore();
   });
 });
 
@@ -270,6 +339,9 @@ describe("IssueActionsContextMenu", () => {
     fireEvent.contextMenu(screen.getByTestId("row"));
 
     expect(await screen.findByText("Status")).toBeInTheDocument();
+    // The right-click surface is what list rows, board cards, gantt bars and
+    // sub-issue rows all share, so this one assertion covers them together.
+    expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./derive-presence";
+export * from "./failure-reason";
 export * from "./effective-access";
 export * from "./queries";
 export * from "./use-agent-presence";

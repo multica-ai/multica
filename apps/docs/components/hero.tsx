@@ -24,7 +24,9 @@ export function DocsHero({
           {eyebrow}
         </p>
       ) : null}
-      <h1 className="mb-5 font-[family-name:var(--font-serif)] text-[2.25rem] font-normal leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[2.75rem]">
+      <h1
+        className={`${subtitle ? "mb-5" : "mb-0"} font-[family-name:var(--font-serif)] text-[2.25rem] font-normal leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[2.75rem]`}
+      >
         {title}
       </h1>
       {subtitle ? (

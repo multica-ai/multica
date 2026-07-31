@@ -101,7 +101,7 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
         <div className="space-y-1.5">
           <Label htmlFor="ws-slug">{t(($) => $.create_form.url_label)}</Label>
           <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
-            <span className="pl-3 text-sm text-muted-foreground select-none">
+            <span className="pl-3 text-body text-muted-foreground select-none">
               {`${urlHost}/`}
             </span>
             <Input
@@ -118,7 +118,7 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
             />
           </div>
           {slugError && (
-            <p className="text-xs text-destructive">{slugError}</p>
+            <p className="text-caption text-destructive">{slugError}</p>
           )}
         </div>
         <Button

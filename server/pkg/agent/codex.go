@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -42,9 +44,20 @@ const (
 // rejects). Kept as its own constant so bumping codex independently of
 // other agents stays easy if codex starts shipping longer failure traces.
 const (
-	codexStderrTailBytes                   = 2048
-	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
-	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
+	codexStderrTailBytes                  = 2048
+	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	// defaultCodexFirstTurnNoProgressTimeout caps how long the first turn may
+	// stay completely silent after the app-server reports turn/started. Its only
+	// job is to fail fast instead of waiting out
+	// defaultCodexSemanticInactivityTimeout, so it only has to stay well under
+	// that 10 minute backstop.
+	//
+	// 30s turned out to sit inside the normal range rather than above it: two
+	// independent field reports measured the first progress event landing just
+	// past 30s on gpt-5.5, and ~39s for a WSL app-server (GH #5959). Both were
+	// healthy turns the watchdog killed. 60s clears that evidence with margin
+	// while keeping the fast-fail value (MUL-5542).
+	defaultCodexFirstTurnNoProgressTimeout = 60 * time.Second
 	defaultCodexHandshakeTimeout           = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
@@ -953,7 +966,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	semanticActivityCh := make(chan string, 256)
 
 	var outputMu sync.Mutex
-	var output strings.Builder
+	// Result.Output is "final user-facing output selected by the backend"
+	// (agent.go), so it holds the deliverable only. finalAnswer is the text the
+	// app-server labelled `phase: "final_answer"`; lastAgentMessage is the
+	// fallback for the legacy `agent_message` protocol, which carries no phase.
+	// Every agent message still flows to msgCh, so the transcript is unchanged —
+	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
+	var finalAnswer, lastAgentMessage string
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 
@@ -982,7 +1001,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			logCodexAgentMessage(b.cfg.Logger, msg)
 			if msg.Type == MessageText {
 				outputMu.Lock()
-				output.WriteString(msg.Content)
+				lastAgentMessage = msg.Content
 				outputMu.Unlock()
 			}
 			trySend(msgCh, msg)
@@ -990,6 +1009,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			if describeCodexSemanticActivity(msg) != "" {
 				semanticObserved.Store(true)
 			}
+		},
+		onFinalAnswer: func(text string) {
+			outputMu.Lock()
+			finalAnswer = text
+			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
 			semanticObserved.Store(true)
@@ -1471,7 +1495,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		outputMu.Lock()
-		finalOutput := output.String()
+		finalOutput := codexDeliverableOutput(finalAnswer, lastAgentMessage)
 		outputMu.Unlock()
 
 		// Build usage map from accumulated codex usage.
@@ -1550,11 +1574,13 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
+		// developerInstructions stays nil for the reason given on thread/start
+		// below.
 		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
-			"developerInstructions": nilIfEmpty(opts.SystemPrompt),
+			"developerInstructions": nil,
 		}
 		// Explicit override of the persisted reasoning effort: without
 		// this, a Codex resume silently reuses whatever level the prior
@@ -1578,6 +1604,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
+	// developerInstructions is always nil: a thread started with this cwd loads
+	// the per-task AGENTS.md the daemon wrote there, so the runtime brief is
+	// already in context and inlining it would duplicate it on every turn.
+	// Confirmed end-to-end against codex-cli 0.144.6 driving the real
+	// app-server (thread/start -> turn/start) with developerInstructions unset
+	// (MUL-5392).
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -1587,7 +1619,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"sandbox":                nil,
 		"config":                 nil,
 		"baseInstructions":       nil,
-		"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
+		"developerInstructions":  nil,
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
@@ -1809,6 +1841,19 @@ func trySendString(ch chan<- string, value string) {
 	}
 }
 
+// codexDeliverableOutput picks Result.Output from what the turn produced: the
+// message the app-server itself labelled `phase: "final_answer"`, or — for the
+// legacy `agent_message` protocol, which carries no phase — the most recent
+// agent message. Never every message joined: the intermediate ones narrate the
+// work between tool calls, which belongs to the transcript and not to a chat or
+// IM reply (GH #6006).
+func codexDeliverableOutput(finalAnswer, lastAgentMessage string) string {
+	if finalAnswer != "" {
+		return finalAnswer
+	}
+	return lastAgentMessage
+}
+
 func logCodexAgentMessage(logger *slog.Logger, msg Message) {
 	if logger == nil {
 		return
@@ -1862,6 +1907,12 @@ type codexClient struct {
 	onMessage          func(Message)
 	onSemanticActivity func(description string)
 	onTurnDone         func(aborted bool)
+	// onFinalAnswer fires only for an agent message the app-server itself
+	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
+	// the intermediate agent messages that narrate work between tool calls.
+	// Both still reach onMessage: the transcript keeps the whole timeline, only
+	// Result.Output is narrowed to the deliverable (GH #6006).
+	onFinalAnswer func(text string)
 	// acceptNotification isolates the active turn from same-thread history
 	// replay emitted while thread/resume is restoring prior conversation.
 	// Unit-level protocol tests leave it nil and exercise dispatch directly.
@@ -2346,6 +2397,306 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	}
 }
 
+// codexPatchInputMaxBytes bounds the total diff/content bytes recorded for a
+// single patch_apply event.
+//
+// The bound exists because the legacy protocol reports `add` and `delete` as
+// whole-file contents rather than diffs, so a single generated file can be
+// arbitrarily large. It is deliberately applied only to this new Codex payload:
+// other providers already stream tool inputs through unbounded, and clamping
+// them here would silently truncate transcripts that render correctly today.
+// Unifying the limit at the persistence boundary is a separate change.
+const codexPatchInputMaxBytes = 64 * 1024
+
+// codexNormalizeLegacyChanges converts a legacy `patch_apply_*` changes map
+// into the normalized change list.
+//
+// The legacy wire shape is map[path]FileChange, where FileChange is internally
+// tagged on `type` and carries *different* payload fields per variant:
+// add/delete carry whole-file `content`, while update carries `unified_diff`
+// plus an optional `move_path`. Nothing in that shape is a plain unified diff
+// for every case, which is why the normalized form keeps `diff` and `content`
+// as alternatives instead of one field.
+func codexNormalizeLegacyChanges(raw any) []any {
+	changes, ok := raw.(map[string]any)
+	if !ok || len(changes) == 0 {
+		return nil
+	}
+
+	// Go randomizes map iteration; sort so a replayed event yields a stable
+	// transcript instead of reshuffling the file list on every run.
+	paths := make([]string, 0, len(changes))
+	for path := range changes {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	out := make([]any, 0, len(paths))
+	for _, path := range paths {
+		entry, ok := changes[path].(map[string]any)
+		if !ok {
+			continue
+		}
+		norm := map[string]any{"path": path}
+		if kind, _ := entry["type"].(string); kind != "" {
+			norm["kind"] = kind
+		}
+		if diff, _ := entry["unified_diff"].(string); diff != "" {
+			norm["diff"] = diff
+		}
+		// Presence, not non-emptiness: an added empty file has content "" and
+		// should still render as an empty body rather than a missing one.
+		if content, ok := entry["content"].(string); ok {
+			norm["content"] = content
+		}
+		if movePath, _ := entry["move_path"].(string); movePath != "" {
+			norm["move_path"] = movePath
+		}
+		out = append(out, norm)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// codexNormalizeRawChanges converts a v2 app-server `fileChange` item's
+// changes array into the normalized change list.
+//
+// Unlike the legacy shape this is an ordered array of
+// FileUpdateChange{path, kind, diff}, and `kind` is an *object*
+// ({type, move_path?}) rather than a string — reading it as a string yields ""
+// and silently loses the add/delete/update distinction.
+//
+// The `diff` field is misleadingly named: upstream's format_file_change_diff
+// only produces a unified diff for `update`. For `add` and `delete` it returns
+// the whole file's contents verbatim, and for a moved `update` it appends a
+// trailing "\n\nMoved to: <path>" line. Feeding an added file's contents to a
+// diff parser mislabels every line — and actively inverts the meaning of any
+// line that happens to begin with '+' or '-' — so the payload is routed by
+// `kind`, not by field name.
+func codexNormalizeRawChanges(raw any) []any {
+	changes, ok := raw.([]any)
+	if !ok || len(changes) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(changes))
+	for _, change := range changes {
+		entry, ok := change.(map[string]any)
+		if !ok {
+			continue
+		}
+		norm := map[string]any{}
+		if path, _ := entry["path"].(string); path != "" {
+			norm["path"] = path
+		}
+		kind := ""
+		movePath := ""
+		switch k := entry["kind"].(type) {
+		case map[string]any:
+			kind, _ = k["type"].(string)
+			movePath, _ = k["move_path"].(string)
+		case string:
+			// Tolerate a flattened form so a future protocol tweak degrades
+			// to a labelled change instead of an unlabelled one.
+			kind = k
+		}
+		if kind != "" {
+			norm["kind"] = kind
+		}
+		if movePath != "" {
+			norm["move_path"] = movePath
+		}
+
+		body, bodyPresent := entry["diff"].(string)
+		switch kind {
+		case "add", "delete":
+			// Whole-file contents, despite arriving under `diff`. Keyed on the
+			// field being present rather than non-empty so an empty added file
+			// still renders as an empty body instead of a missing one.
+			if bodyPresent {
+				norm["content"] = body
+			} else if content, ok := entry["content"].(string); ok {
+				norm["content"] = content
+			}
+		default:
+			if body != "" {
+				norm["diff"] = stripCodexMovedToSuffix(body, movePath)
+			} else if content, ok := entry["content"].(string); ok {
+				norm["content"] = content
+			}
+		}
+		if len(norm) == 0 {
+			continue
+		}
+		out = append(out, norm)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stripCodexMovedToSuffix removes the trailing "Moved to: <path>" line that
+// upstream appends to a moved file's unified diff. The destination is already
+// carried as move_path, and leaving the sentence in would render as two stray
+// context lines at the end of the diff.
+func stripCodexMovedToSuffix(diff, movePath string) string {
+	if movePath == "" {
+		return diff
+	}
+	suffix := "\n\nMoved to: " + movePath
+	return strings.TrimSuffix(diff, suffix)
+}
+
+// codexPatchInput wraps normalized changes into the tool_use input, applying
+// the size bound. It returns nil when nothing could be normalized so a
+// malformed or unrecognised event degrades to the previous payload-less
+// behaviour rather than breaking the transcript.
+func codexPatchInput(changes []any) map[string]any {
+	if len(changes) == 0 {
+		return nil
+	}
+	// Measure before anything rewrites the bodies, so the figure reported to the
+	// reader is the size of the patch they actually produced.
+	originalBytes := codexPatchBodyBytes(changes)
+
+	// Redaction must run BEFORE the size budget, never after it. Several rules
+	// only match a credential as a whole — the PEM rule needs both the BEGIN
+	// and the END marker — so cutting a body at the budget can strand the
+	// opening half of a private key in text that no pattern will match again.
+	// The daemon and the server each redact further down the path, and neither
+	// can recover a secret that truncation has already made unrecognisable.
+	safe, ok := redact.InputMap(map[string]any{"changes": changes})["changes"].([]any)
+	if !ok {
+		safe = changes
+	}
+
+	input := map[string]any{"changes": safe}
+	// Budget the redacted bodies, since those are what gets stored. Redaction
+	// usually shrinks a body — a whole key collapses to a short placeholder —
+	// so this is also the measurement that decides whether trimming is needed
+	// at all.
+	if codexPatchBodyBytes(safe) > codexPatchInputMaxBytes {
+		applyCodexPatchBudget(safe)
+		input["truncated"] = true
+		input["original_bytes"] = originalBytes
+	}
+	return input
+}
+
+// codexPatchBodyBytes totals the diff/content payload carried by a change list.
+func codexPatchBodyBytes(changes []any) int {
+	total := 0
+	for _, change := range changes {
+		entry, ok := change.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"diff", "content"} {
+			if body, _ := entry[key].(string); body != "" {
+				total += len(body)
+			}
+		}
+	}
+	return total
+}
+
+// applyCodexPatchBudget trims diff/content bodies in place until the payload
+// fits codexPatchInputMaxBytes. Paths and kinds are never dropped: they are
+// small and are the part a reviewer needs even when the body is gone.
+func applyCodexPatchBudget(changes []any) {
+	remaining := codexPatchInputMaxBytes
+	for _, change := range changes {
+		entry, ok := change.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"diff", "content"} {
+			body, _ := entry[key].(string)
+			if body == "" {
+				continue
+			}
+			if len(body) <= remaining {
+				remaining -= len(body)
+				continue
+			}
+			if kept := truncateUTF8(body, remaining); kept != "" {
+				entry[key] = kept
+			} else {
+				delete(entry, key)
+			}
+			entry["truncated"] = true
+			remaining = 0
+		}
+	}
+}
+
+// truncateUTF8 cuts s to at most max bytes without leaving a split rune, so the
+// result still marshals as valid JSON.
+func truncateUTF8(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if len(s) <= max {
+		return s
+	}
+	return strings.ToValidUTF8(s[:max], "")
+}
+
+// codexNormalizePatchStatus maps both protocols' status spellings onto one
+// snake_case vocabulary: the legacy enum is already snake_case
+// (completed/failed/declined) while the v2 enum is camelCase and adds
+// inProgress.
+func codexNormalizePatchStatus(status string) string {
+	switch status {
+	case "":
+		return ""
+	case "inProgress", "in_progress":
+		return "in_progress"
+	default:
+		return status
+	}
+}
+
+// codexPatchResultOutput renders the tool_result line for a finished patch.
+// It always produces a non-empty string when anything is known, because an
+// empty output renders as an unexpandable blank row in the transcript.
+func codexPatchResultOutput(status string, changes []any, stdout, stderr string) string {
+	segments := make([]string, 0, 3)
+
+	if headline := codexPatchHeadline(status, len(changes)); headline != "" {
+		segments = append(segments, headline)
+	}
+	if out := strings.TrimSpace(stdout); out != "" {
+		segments = append(segments, out)
+	}
+	if err := strings.TrimSpace(stderr); err != "" {
+		segments = append(segments, err)
+	}
+	return strings.Join(segments, "\n")
+}
+
+func codexPatchHeadline(status string, fileCount int) string {
+	switch {
+	case status == "" && fileCount == 0:
+		return ""
+	case status == "":
+		return fmt.Sprintf("%s changed", pluralizeFiles(fileCount))
+	case fileCount == 0:
+		return status
+	default:
+		return fmt.Sprintf("%s (%s)", status, pluralizeFiles(fileCount))
+	}
+}
+
+func pluralizeFiles(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
 func (c *codexClient) handleEvent(msg map[string]any) {
 	msgType, _ := msg["type"].(string)
 
@@ -2389,15 +2740,32 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				Type:   MessageToolUse,
 				Tool:   "patch_apply",
 				CallID: callID,
+				Input:  codexPatchInput(codexNormalizeLegacyChanges(msg["changes"])),
 			})
 		}
 	case "patch_apply_end":
 		callID, _ := msg["call_id"].(string)
+		stdout, _ := msg["stdout"].(string)
+		stderr, _ := msg["stderr"].(string)
+		status, _ := msg["status"].(string)
+		if status == "" {
+			// `status` postdates `success`; fall back so older builds still
+			// report an outcome rather than a bare file count.
+			if success, ok := msg["success"].(bool); ok {
+				if success {
+					status = "completed"
+				} else {
+					status = "failed"
+				}
+			}
+		}
+		changes := codexNormalizeLegacyChanges(msg["changes"])
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
 				Tool:   "patch_apply",
 				CallID: callID,
+				Output: codexPatchResultOutput(codexNormalizePatchStatus(status), changes, stdout, stderr),
 			})
 		}
 	case "task_complete":
@@ -2560,15 +2928,19 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Type:   MessageToolUse,
 				Tool:   "patch_apply",
 				CallID: itemID,
+				Input:  codexPatchInput(codexNormalizeRawChanges(item["changes"])),
 			})
 		}
 
 	case method == "item/completed" && itemType == "fileChange":
+		status, _ := item["status"].(string)
+		changes := codexNormalizeRawChanges(item["changes"])
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
 				Tool:   "patch_apply",
 				CallID: itemID,
+				Output: codexPatchResultOutput(codexNormalizePatchStatus(status), changes, "", ""),
 			})
 		}
 
@@ -2578,8 +2950,17 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			c.onMessage(Message{Type: MessageText, Content: text})
 		}
 		phase, _ := item["phase"].(string)
-		if phase == "final_answer" && c.turnStarted {
-			if c.onTurnDone != nil {
+		if phase == "final_answer" {
+			// Deliberately NOT gated on turnStarted, unlike onTurnDone below:
+			// the gate exists so a subagent or a replayed history turn cannot
+			// end OUR turn early, and the thread guard at the top of this
+			// function already keeps foreign threads out. A final answer that
+			// arrives before we observed turn/started is still this thread's
+			// deliverable, and dropping it would fall back to narration.
+			if text != "" && c.onFinalAnswer != nil {
+				c.onFinalAnswer(text)
+			}
+			if c.turnStarted && c.onTurnDone != nil {
 				c.onTurnDone(false)
 			}
 		}

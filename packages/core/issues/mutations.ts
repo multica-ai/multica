@@ -1131,3 +1131,27 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
   });
 }
+
+/**
+ * Leave an issue AND its whole sub-tree (MUL-5483). Not optimistic: it writes
+ * to an unknown number of other issues' subscriber lists, so there is nothing
+ * determinate to patch — invalidate every subscriber query instead and let the
+ * server be the source of truth.
+ */
+export function useUnsubscribeFromIssueSubtree(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      userId,
+      userType,
+    }: {
+      userId: string;
+      userType: "member" | "agent";
+    }) => {
+      await api.unsubscribeFromIssueSubtree(issueId, userId, userType);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+    },
+  });
+}

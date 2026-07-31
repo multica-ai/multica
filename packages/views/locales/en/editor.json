@@ -34,7 +34,14 @@
     "copy_link": "Copy link",
     "delete": "Delete",
     "link_copied": "Link copied",
-    "copy_link_failed": "Failed to copy link"
+    "copy_link_failed": "Failed to copy link",
+    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size."
+  },
+  "canvas": {
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_fit": "Fit to view",
+    "zoom_actual": "Actual size"
   },
   "attachment": {
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
@@ -81,7 +88,11 @@
   },
   "upload": {
     "failed": "Couldn't upload {{filename}}: {{reason}}",
-    "in_progress": "Uploading…"
+    "in_progress": "Uploading…",
+    "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
+    "remove": "Remove",
+    "uploading_label": "Uploading {{filename}}…",
+    "failed_label": "Couldn’t upload {{filename}}"
   },
   "title_editor": {
     "title_aria_label": "Title"
@@ -96,11 +107,6 @@
     "copy_source": "Copy diagram source",
     "show_source": "Show source",
     "show_diagram": "Show diagram",
-    "zoom_in": "Zoom in",
-    "zoom_out": "Zoom out",
-    "zoom_fit": "Fit to view",
-    "zoom_actual": "Actual size",
-    "reset_view": "Reset view",
     "export": "Export",
     "export_png": "Download PNG",
     "export_svg": "Download SVG",

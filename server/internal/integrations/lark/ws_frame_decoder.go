@@ -73,6 +73,7 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		MessageID:    evt.Message.MessageID,
 		SenderOpenID: OpenID(evt.Sender.SenderID.OpenID),
 		MessageType:  evt.Message.MessageType,
+		Content:      evt.Message.Content,
 		CreateTime:   evt.Message.CreateTime,
 		// parent_id / root_id are populated by Lark only in reply
 		// scenarios. The enricher keys quoted-reply expansion off
@@ -91,16 +92,18 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		botUnionID = inst.BotUnionID.String
 	}
 
-	// text + post are flattened synchronously here (no external calls —
-	// the decoder must stay fast and dependency-free). merge_forward
-	// leaves Body empty: it needs an HTTP round-trip to expand and is
-	// handled downstream by the enricher, which keys off MessageType.
-	// Other types (image, file, …) also leave Body empty in this MVP;
-	// attachment ingestion is a separate issue.
+	// text + post are flattened synchronously here (no external calls — the
+	// decoder must stay fast and dependency-free). merge_forward leaves Body
+	// empty: it needs an HTTP round-trip to expand and is handled downstream by
+	// the enricher, which keys off MessageType. Standalone media gets a short
+	// visible marker while the channel adapter separately downloads and binds
+	// the binary as a Multica attachment.
 	switch evt.Message.MessageType {
 	case "text", "post":
 		msg.Body = resolveMentions(flattenContent(evt.Message.MessageType, evt.Message.Content),
 			evt.Message.Mentions, inst.BotOpenID, botUnionID)
+	case "image", "file", "audio", "media", "video":
+		msg.Body = flattenContent(evt.Message.MessageType, evt.Message.Content)
 	}
 
 	// Snapshot the user's own text as the command source BEFORE any

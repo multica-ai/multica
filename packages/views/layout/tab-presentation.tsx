@@ -98,10 +98,20 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     subject.kind === "issue"
       ? subject.id
       : (inboxItem?.issue_id ?? "");
-  const issue = useQuery({
+  // An issue tab's URL segment may be a human-readable identifier (`MUL-123`).
+  // The route seeds that entry when it resolves, but only the UUID-keyed entry
+  // receives realtime patches — so hop through it, or a tab opened by
+  // identifier would freeze on the title and status it had when first opened.
+  // Both reads stay cache-only, and a UUID segment resolves to itself.
+  const rawIssue = useQuery({
     ...issueDetailOptions(wsId, issueId || NONE),
     enabled: false,
   }).data;
+  const issue =
+    useQuery({
+      ...issueDetailOptions(wsId, rawIssue?.id || NONE),
+      enabled: false,
+    }).data ?? rawIssue;
 
   const project = useQuery({
     ...projectDetailOptions(wsId, subject.kind === "project" ? subject.id : NONE),

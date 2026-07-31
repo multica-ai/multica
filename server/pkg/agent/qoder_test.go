@@ -35,6 +35,51 @@ while IFS= read -r line; do
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"ok"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2}}}\n' "$id"
+      if [ -n "$QODER_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func fakeQoderACPScriptWithNarrationAndFinalAnswer() string {
+	return `#!/bin/sh
+# Mirrors a real Qoder ACP turn: interim narration, a tool call, then the
+# user-facing answer. All text chunks belong in the transcript, but only the
+# post-tool chunk is the backend's deliverable Result.Output.
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_final"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      narration='I will inspect the attachment.'
+      if [ -n "$QODER_TEXT_BEFORE_TOOL" ]; then
+        narration=$QODER_TEXT_BEFORE_TOOL
+      fi
+      if [ "$QODER_TERMINAL_ERROR_BEFORE_TOOL" = "1" ]; then
+        narration='API call failed after 3 retries: HTTP 429'
+      fi
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_final","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"%s"}}}}\n' "$narration"
+      if [ "$QODER_DEFERRED_TOOL" = "1" ]; then
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_final","update":{"type":"ToolCall","toolCallId":"tc-read","name":"read_file","status":"pending"}}}\n'
+      else
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_final","update":{"type":"ToolCall","toolCallId":"tc-read","name":"read_file","status":"pending","parameters":{"path":"diagram.svg"}}}}\n'
+      fi
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_final","update":{"type":"ToolCallUpdate","toolCallId":"tc-read","name":"read_file","status":"completed","output":"<svg />"}}}\n'
+      if [ "$QODER_TOOL_TERMINATED" != "1" ]; then
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_final","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"The diagram shows "}}}}\n'
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_final","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"the service architecture."}}}}\n'
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -82,6 +127,24 @@ while IFS= read -r line; do
   esac
 done
 `
+}
+
+func TestQoderCNBackendMissingExecutableNamesQoderCNBinary(t *testing.T) {
+	t.Parallel()
+
+	missingPath := missingAgentExecutable(t, "qoderclicn")
+	backend, err := New("qoderclicn", Config{ExecutablePath: missingPath})
+	if err != nil {
+		t.Fatalf("new Qoder CN backend: %v", err)
+	}
+
+	_, err = backend.Execute(context.Background(), "hello", ExecOptions{})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want missing executable error")
+	}
+	if !strings.Contains(err.Error(), "qoderclicn executable not found") {
+		t.Fatalf("Execute() error = %q, want qoderclicn executable label", err)
+	}
 }
 
 func fakeQoderACPScriptWithLeakedStdout() string {
@@ -357,6 +420,149 @@ func TestQoderBackendHappyPath(t *testing.T) {
 	}
 	if u := result.Usage["unknown"]; u.InputTokens != 1 || u.OutputTokens != 2 {
 		t.Fatalf("usage=%+v", u)
+	}
+}
+
+func TestQoderBackendDeliversFinalAnswerWithoutNarration(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "tool use emitted at start"},
+		{name: "tool use deferred until completion", env: map[string]string{"QODER_DEFERRED_TOOL": "1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			fakePath := filepath.Join(t.TempDir(), "qodercli")
+			writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptWithNarrationAndFinalAnswer()))
+
+			backend, err := New("qoder", Config{
+				ExecutablePath: fakePath,
+				Logger:         slog.Default(),
+				Env:            test.env,
+			})
+			if err != nil {
+				t.Fatalf("new qoder backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			session, err := backend.Execute(ctx, "inspect this attachment", ExecOptions{Timeout: 30 * time.Second})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+
+			var streamed []Message
+			messagesDone := make(chan struct{})
+			go func() {
+				defer close(messagesDone)
+				for msg := range session.Messages {
+					streamed = append(streamed, msg)
+				}
+			}()
+
+			result := <-session.Result
+			<-messagesDone
+
+			const want = "The diagram shows the service architecture."
+			if result.Status != "completed" {
+				t.Fatalf("status=%q err=%q", result.Status, result.Error)
+			}
+			if result.Output != want {
+				t.Fatalf("Result.Output = %q, want %q", result.Output, want)
+			}
+
+			var text []string
+			for _, msg := range streamed {
+				if msg.Type == MessageText {
+					text = append(text, msg.Content)
+				}
+			}
+			if got := strings.Join(text, "|"); got != "I will inspect the attachment.|The diagram shows |the service architecture." {
+				t.Fatalf("transcript text = %q, want narration and final answer", got)
+			}
+		})
+	}
+}
+
+func TestQoderBackendToolTerminatedTurnFallsBackToLatestTextBlock(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptWithNarrationAndFinalAnswer()))
+
+	const want = "Done. Posted the summary to the issue."
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"QODER_TEXT_BEFORE_TOOL": want,
+			"QODER_TOOL_TERMINATED":  "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "post the summary", ExecOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status=%q err=%q", result.Status, result.Error)
+	}
+	if result.Output != want {
+		t.Fatalf("Result.Output = %q, want fallback %q", result.Output, want)
+	}
+}
+
+func TestQoderBackendProviderErrorDetectionUsesFullOutput(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptWithNarrationAndFinalAnswer()))
+
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"QODER_TERMINAL_ERROR_BEFORE_TOOL": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "inspect this attachment", ExecOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("status=%q, want failed (output=%q error=%q)", result.Status, result.Output, result.Error)
+	}
+	if result.Output != "The diagram shows the service architecture." {
+		t.Fatalf("Result.Output = %q, want final answer only", result.Output)
+	}
+	if !strings.Contains(result.Error, "API call failed after 3 retries") {
+		t.Fatalf("error=%q, want provider error from the full text stream", result.Error)
 	}
 }
 
@@ -789,5 +995,44 @@ func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtSetModel(t *test
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestQoderDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. qoder ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestQoderDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qoder")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
+
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"QODER_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "ok tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }

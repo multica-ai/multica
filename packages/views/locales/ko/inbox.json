@@ -9,6 +9,12 @@
     "archive_all_read": "읽은 항목 모두 보관",
     "archive_completed": "완료된 항목 보관"
   },
+  "context_menu": {
+    "mark_read": "읽음으로 표시",
+    "mark_unread": "읽지 않음으로 표시",
+    "archive": "보관",
+    "unarchive": "보관 해제"
+  },
   "list": {
     "empty": "알림이 없습니다",
     "mark_done_tooltip": "완료로 표시",
@@ -49,7 +55,8 @@
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
-    "quick_create_failed": "에이전트 생성 실패"
+    "quick_create_failed": "에이전트 생성 실패",
+    "quick_create_unconfirmed": "에이전트 생성 결과 미확인"
   },
   "labels": {
     "set_status_to": "상태 변경:",
@@ -66,6 +73,7 @@
   },
   "errors": {
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
+    "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
     "mark_done_failed": "완료 표시를 하지 못했습니다",
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",

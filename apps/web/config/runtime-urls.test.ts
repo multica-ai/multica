@@ -197,6 +197,21 @@ describe("dev-only fallbacks", () => {
     );
   });
 
+  it("ignores the frontend process PORT while honoring backend-specific aliases", () => {
+    expect(resolveDevRemoteApiUrl({ PORT: "3000" })).toBe(
+      "http://localhost:8080",
+    );
+    expect(resolveDevRemoteApiUrl({ API_PORT: "19082", PORT: "3000" })).toBe(
+      "http://localhost:19082",
+    );
+    expect(
+      resolveDevRemoteApiUrl({ SERVER_PORT: "19083", PORT: "3000" }),
+    ).toBe("http://localhost:19083");
+    expect(
+      resolveDevRemoteApiUrl({ BACKEND_PORT: "19080", PORT: "3000" }),
+    ).toBe("http://localhost:19080");
+  });
+
   it("prefers configured origins over the dev fallbacks", () => {
     expect(
       resolveDevRemoteApiUrl({ REMOTE_API_URL: "http://backend:8080" }),

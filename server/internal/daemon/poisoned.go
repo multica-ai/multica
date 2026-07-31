@@ -101,17 +101,48 @@ func classifyPoisonedOutput(output string) (string, bool) {
 // Matching on both "400" and "invalid_request_error" keeps the classifier
 // narrow: 429 rate-limits, 5xx overloads, and tool-shaped errors are
 // transient and SHOULD resume on retry.
+//
+// That shape is Anthropic's, though, and it is not the only way a provider
+// reports an unprocessable transcript. The final clause delegates to
+// taskfailure.UnresumableHistory, which detects an empty message baked into
+// the conversation by ANY backend — see its doc comment for why the defect
+// has to be recognised by wording rather than by status code or provider.
 func classifyPoisonedError(errMsg string) (string, bool) {
 	if errMsg == "" {
 		return "", false
 	}
 	lowered := strings.ToLower(errMsg)
+	// Kiro/ACP replays images baked into a resumed conversation's history;
+	// one exceeding the provider's max pixel dimensions is rejected on every
+	// session/prompt and cannot be resumed away (GH #5975). The daemon's
+	// in-task fresh-session retry recovers the CURRENT turn, but this marks
+	// the conversation resume-unsafe so GetLastTaskSession excludes it and no
+	// later task re-selects the poisoned session. The offending
+	// messages[n].content[m] path and the pixel limit stay in the surfaced
+	// error; base64 payloads are never logged. Requiring the image-content
+	// marker alongside the dimension phrase keeps this narrow — an unrelated
+	// error mentioning dimensions won't trip it.
+	if strings.Contains(lowered, "image dimensions exceed max allowed size") &&
+		strings.Contains(lowered, "image.source.base64.data") {
+		return FailureReasonAPIInvalidRequest, true
+	}
 	// Both markers must be present: "400" alone is too generic (a tool
 	// could surface a 400 from anywhere) and "invalid_request_error"
 	// alone could in theory appear in non-poisoning contexts. The
 	// combination is the canonical Anthropic error shape and indicates
 	// the request body — i.e. the conversation history — is the problem.
 	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
+		return FailureReasonAPIInvalidRequest, true
+	}
+	// The same defect reported by a provider that words it differently.
+	// The clause above only fires on the Anthropic shape, so an empty
+	// message baked into the transcript by any other backend used to fall
+	// through to taskfailure.Classify as agent_error.unknown — resume-safe
+	// by omission, which permanently bricked the (agent, issue) pair
+	// (GH #6066, GH #5760). taskfailure.UnresumableHistory recognises the
+	// defect by what the provider says is wrong rather than by which
+	// provider said it.
+	if taskfailure.UnresumableHistory(errMsg) {
 		return FailureReasonAPIInvalidRequest, true
 	}
 	return "", false

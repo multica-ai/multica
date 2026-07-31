@@ -98,7 +98,7 @@ export function ChatAddMenu({
                   </DropdownMenuItem>
                 ))}
                 {projects.length === 0 && (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  <div className="px-2 py-1.5 text-caption text-muted-foreground">
                     {t(($) => $.input.no_projects)}
                   </div>
                 )}
@@ -112,7 +112,7 @@ export function ChatAddMenu({
                 {projectContextUnsupported && (
                   <>
                     <DropdownMenuSeparator />
-                    <div className="max-w-56 px-2 py-1.5 text-xs text-muted-foreground">
+                    <div className="max-w-56 px-2 py-1.5 text-caption text-muted-foreground">
                       {t(($) => $.input.project_context_unsupported)}
                     </div>
                   </>

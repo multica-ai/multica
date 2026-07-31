@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  Copy,
   FilePlus2,
   FolderKanban,
   Maximize2,
@@ -21,7 +20,6 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
-import { copyText } from "@multica/ui/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -69,6 +67,7 @@ import { browserTimezone } from "../../common/timezone-select";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
+import { WebhookUrlField } from "./webhook-url-field";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 import type { WebhookEventFilter } from "@multica/core/types";
@@ -424,7 +423,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0 border-b">
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-caption">
             <div className="flex items-center gap-1.5">
               <span className="inline-flex size-5 items-center justify-center rounded-md bg-primary/15 text-primary">
                 <Rocket className="size-3" />
@@ -435,11 +434,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                   : t(($) => $.dialog.header_edit)}
               </span>
             </div>
-            <span className="text-muted-foreground/60">·</span>
+            <span className="text-faint-foreground">·</span>
             <span className="text-muted-foreground">{t(($) => $.dialog.subtitle)}</span>
             {workspaceName && (
               <>
-                <ChevronRight className="size-3 text-muted-foreground/40" />
+                <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="text-muted-foreground">{workspaceName}</span>
               </>
             )}
@@ -448,14 +447,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             {!isCreate && props.canManageAccess && (
               <>
                 <Popover>
-                  <PopoverTrigger className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs text-muted-foreground opacity-90 transition-all hover:bg-accent/60 hover:text-foreground hover:opacity-100 cursor-pointer">
+                  <PopoverTrigger className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-caption text-muted-foreground transition-all hover:bg-accent/60 hover:text-foreground hover:opacity-100 cursor-pointer">
                     <Users className="size-3.5" />
                     <span>{t(($) => $.access.title)}</span>
                   </PopoverTrigger>
                   <PopoverContent align="end" sideOffset={6} keepMounted className="w-80">
                     <PopoverHeader>
                       <PopoverTitle>{t(($) => $.access.title)}</PopoverTitle>
-                      <PopoverDescription className="text-xs">
+                      <PopoverDescription className="text-caption">
                         {t(($) => $.access.description)}
                       </PopoverDescription>
                     </PopoverHeader>
@@ -523,17 +522,17 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 autoFocus={isCreate}
                 defaultValue={initial.title ?? ""}
                 placeholder={t(($) => $.dialog.title_placeholder)}
-                className="text-2xl font-semibold tracking-tight"
+                className="text-display-sm font-semibold tracking-tight"
                 onChange={setTitle}
                 onSubmit={handleSubmit}
               />
             </div>
 
             <div className="px-6 pb-2 shrink-0 flex items-baseline gap-2">
-              <span className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+              <span className="text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase">
                 {t(($) => $.dialog.runbook_label)}
               </span>
-              <span className="text-xs text-muted-foreground/80">
+              <span className="text-caption text-muted-foreground">
                 {t(($) => $.dialog.runbook_hint)}
               </span>
             </div>
@@ -617,7 +616,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t shrink-0 bg-background">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+          <div className="flex items-center gap-1.5 text-caption text-muted-foreground min-w-0">
             <Zap className="size-3.5 text-amber-500 shrink-0" />
             <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
           </div>
@@ -649,7 +648,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
+    <div className="text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
       {children}
     </div>
   );
@@ -698,11 +697,11 @@ function AgentSection({
               </span>
             )}
             <span className="flex-1 min-w-0">
-              <span className="block text-sm font-medium truncate">
+              <span className="block text-body font-medium truncate">
                 {selectedName ?? t(($) => $.dialog.select_assignee)}
               </span>
               {selectedDescription && (
-                <span className="block text-xs text-muted-foreground truncate">
+                <span className="block text-caption text-muted-foreground truncate">
                   {selectedDescription}
                 </span>
               )}
@@ -757,10 +756,10 @@ function OutputModeSection({
                 )}
               </span>
               <span className="flex-1 min-w-0">
-                <span className="block text-sm font-medium">
+                <span className="block text-body font-medium">
                   {t(($) => $.dialog.output_modes[key].label)}
                 </span>
-                <span className="block text-xs text-muted-foreground">
+                <span className="block text-caption text-muted-foreground">
                   {t(($) => $.dialog.output_modes[key].description)}
                 </span>
               </span>
@@ -804,7 +803,7 @@ function ProjectSection({
                 <FolderKanban className="size-3.5" />
               </span>
             )}
-            <span className="flex-1 min-w-0 truncate text-sm font-medium">
+            <span className="flex-1 min-w-0 truncate text-body font-medium">
               {selectedProject?.title ?? t(($) => $.dialog.no_project)}
             </span>
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
@@ -826,7 +825,7 @@ function SubscribersSection({
   return (
     <div>
       <SectionLabel>{t(($) => $.dialog.section_subscribers)}</SectionLabel>
-      <p className="mb-2 text-[11px] text-muted-foreground">
+      <p className="mb-2 text-micro text-muted-foreground">
         {t(($) => $.dialog.subscribers_hint)}
       </p>
       <SubscriberMultiSelect
@@ -856,7 +855,7 @@ function TriggerKindSection({
       <SegmentedToggle
         value={kind}
         onChange={onChange}
-        buttonClassName="px-3 py-1.5 text-sm"
+        buttonClassName="px-3 py-1.5 text-body"
         options={[
           [
             "schedule",
@@ -892,7 +891,7 @@ function WebhookSection({
     <div className="space-y-3">
       <div>
         <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
-        <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+        <p className="rounded-md border bg-background px-3 py-2 text-caption text-muted-foreground leading-relaxed">
           {isCreate
             ? t(($) => $.dialog.webhook_help_create)
             : t(($) => $.dialog.webhook_help_edit)}
@@ -919,7 +918,6 @@ function WebhookCreatedPanel({
   onClose: () => void;
 }) {
   const { t } = useT("autopilots");
-  const [copied, setCopied] = useState(false);
 
   // Same URL composition the trigger row uses: prefer the server-provided
   // webhook_url, fall back to apiBaseUrl + webhook_path, then origin + path.
@@ -930,17 +928,6 @@ function WebhookCreatedPanel({
       currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
     }) ?? "";
 
-  const handleCopy = async () => {
-    if (!url) return;
-    if (await copyText(url)) {
-      setCopied(true);
-      toast.success(t(($) => $.trigger_row.url_copied));
-      setTimeout(() => setCopied(false), 1500);
-    } else {
-      toast.error(t(($) => $.trigger_row.url_copy_failed));
-    }
-  };
-
   return (
     <>
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-10">
@@ -949,39 +936,22 @@ function WebhookCreatedPanel({
             <span className="inline-flex size-9 items-center justify-center rounded-full bg-primary/15 text-primary">
               <Webhook className="size-4" />
             </span>
-            <h2 className="text-lg font-semibold tracking-tight">
+            <h2 className="text-title font-semibold tracking-tight">
               {t(($) => $.dialog.webhook_created_title)}
             </h2>
           </div>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className="text-body text-muted-foreground leading-relaxed">
             {t(($) => $.dialog.webhook_created_description)}
           </p>
 
           <div>
-            <div className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
+            <div className="text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
               {t(($) => $.trigger_row.webhook_url_label)}
             </div>
-            <div className="flex items-stretch gap-1.5">
-              <code className="flex-1 min-w-0 truncate rounded-md border bg-muted px-3 py-2 text-xs font-mono text-foreground">
-                {url}
-              </code>
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-9 w-9 shrink-0"
-                onClick={handleCopy}
-                title={t(($) => $.trigger_row.copy_url)}
-              >
-                {copied ? (
-                  <Check className="size-4 text-emerald-500" />
-                ) : (
-                  <Copy className="size-4 text-muted-foreground" />
-                )}
-              </Button>
-            </div>
+            <WebhookUrlField url={url} size="md" />
           </div>
 
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-caption text-amber-700 dark:text-amber-400 leading-relaxed">
             {t(($) => $.dialog.webhook_created_warning)}
           </div>
         </div>

@@ -24,12 +24,11 @@ func TestBuildPiArgsNoToolAllowlist(t *testing.T) {
 
 func TestBuildPiArgsBasicFlags(t *testing.T) {
 	args := buildPiArgs("hello world", "/tmp/s.jsonl", ExecOptions{
-		Model:        "anthropic/claude-sonnet-4-20250514",
-		SystemPrompt: "be helpful",
+		Model: "anthropic/claude-sonnet-4-20250514",
 	}, slog.Default())
 
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514", "--append-system-prompt"} {
+	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in args, got: %v", want, args)
 		}
@@ -38,6 +37,24 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 	// Prompt must be the last positional argument.
 	if args[len(args)-1] != "hello world" {
 		t.Errorf("prompt should be last arg, got %q", args[len(args)-1])
+	}
+}
+
+// Pi reads the per-task AGENTS.md the daemon writes into the workdir, so the
+// daemon never populates SystemPrompt for it (providerNeedsInlineSystemPrompt).
+// Forwarding it anyway would duplicate the whole runtime brief on every turn.
+func TestBuildPiArgsIgnoresSystemPrompt(t *testing.T) {
+	args := buildPiArgs("hello world", "/tmp/s.jsonl", ExecOptions{
+		SystemPrompt: "the entire multica runtime brief",
+	}, slog.Default())
+
+	for _, a := range args {
+		if a == "--append-system-prompt" {
+			t.Fatalf("unexpected --append-system-prompt in args: %v", args)
+		}
+		if a == "the entire multica runtime brief" {
+			t.Fatalf("SystemPrompt leaked into args: %v", args)
+		}
 	}
 }
 

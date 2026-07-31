@@ -130,7 +130,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
-// Qoder:       skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see docs.qoder.com/cli/Skills.md)
+// Qoder/Qoder CN: skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see the provider docs)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
@@ -385,9 +385,10 @@ func skillsDirPath(workDir, provider string) string {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		return filepath.Join(workDir, ".kiro", "skills")
-	case "qoder":
-		// Qoder CLI discovers project-level skills under .qoder/skills/.
-		// See https://docs.qoder.com/cli/Skills.md
+	case "qoder", "qoderclicn":
+		// Both Qoder CLI editions discover project-level skills under
+		// .qoder/skills/. Their user-level roots differ, which is handled by
+		// listRuntimeLocalSkills.
 		return filepath.Join(workDir, ".qoder", "skills")
 	case "qwen":
 		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.
@@ -425,8 +426,8 @@ var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 //   - No frontmatter at all → synthesize one with `name: <slug>` (and the DB
 //     description when available).
 //   - Frontmatter present, has a non-empty `name`, AND parses as valid YAML →
-//     leave it untouched. The upstream import may have shaped that block
-//     deliberately to match a specific runtime, and we don't want to clobber it.
+//     rewrite `name` to the slug and keep every other key verbatim. See below
+//     for why `name` specifically is not left alone.
 //   - Frontmatter present and has a non-empty `name` but YAML is invalid (e.g.
 //     unquoted colon in description) → strip and re-synthesize so runtimes like
 //     Codex don't discard the skill on parse errors.
@@ -434,31 +435,89 @@ var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 //     YAML only set `description`, with the directory slug filling in for
 //     `name` at import time) → prepend `name: <slug>` as the first key of
 //     the existing block so OpenCode can still route the skill.
+//
+// `name` is the one key Multica must own. Runtimes disagree on which field
+// identifies a skill — Claude routes on the directory name, OpenCode on the
+// frontmatter `name` — so letting the two diverge gives a single skill two
+// different invocable names depending on where it runs (MUL-5529). The slug is
+// authoritative because it is what lands on disk and the only value carrying a
+// uniqueness guarantee (allocateCollisionFreeSkillDir); a frontmatter `name` is
+// author-supplied and two imported skills may both claim the same one. Every
+// other key stays byte-identical, so deliberately shaped upstream frontmatter
+// still survives the round-trip.
 func ensureSkillFrontmatter(content, slug, description string) string {
 	fmStart, ok := frontmatterBodyStart(content)
 	if !ok {
 		return synthesizeFrontmatter(content, slug, description)
 	}
-	// Frontmatter exists and has a parseable name. If it's valid YAML, leave
-	// it untouched so upstream-imported frontmatter survives round-trips.
-	if hasFrontmatterName(content[fmStart:]) {
-		if isFrontmatterValidYAML(content) {
-			return content
+	if isFrontmatterValidYAML(content) {
+		// The parser, not the spelling, decides whether a name exists. A
+		// lexical scan only recognizes a bare `name:` with a value on the same
+		// line, so `"name": x` and a valueless `name:` read as nameless and
+		// earn an injected second `name` — a duplicate mapping key that strict
+		// loaders reject outright, leaving the skill unloadable rather than
+		// merely misnamed.
+		if frontmatterHasNameKey(content) {
+			if rewritten, verified := setFrontmatterName(content, fmStart, slug); verified {
+				return rewritten
+			}
+			// The surgical rewrite could not be proven correct — an anchor on
+			// the name value is one way that happens, since replacing the line
+			// removes the anchor and strands any alias pointing at it. The
+			// block itself is still valid YAML, so rebuild it from the parsed
+			// node instead of re-synthesizing: that keeps every other key,
+			// including policy fields like disable-model-invocation whose loss
+			// would re-expose a skill the author hid from model invocation.
+			if rebuilt, ok := renameFrontmatterNameViaNode(content, slug); ok {
+				return rebuilt
+			}
+			_, body, _ := frontmatterParts(content)
+			return synthesizeFrontmatter(body, slug, description)
 		}
-		// Frontmatter has a name but the YAML is invalid (e.g. unquoted
-		// colon in the description). Strip and re-synthesize so runtimes
-		// like Codex don't hard-reject the whole skill at load time.
-		// frontmatterParts returns the full content as the body when it
-		// can't find a closing delimiter, so the malformed block is kept
-		// rather than silently dropped.
+		// No name key at all, confirmed by the parser rather than inferred.
+		// Inject one as the first key and keep the rest verbatim (including
+		// `description`, body, and any runtime-specific keys the import path
+		// preserved).
+		return content[:fmStart] + "name: " + slug + "\n" + content[fmStart:]
+	}
+
+	// Invalid YAML: there is no parse to consult, so fall back to the lexical
+	// scan. A block with a name is stripped and re-synthesized so runtimes like
+	// Codex don't hard-reject the whole skill at load time; frontmatterParts
+	// returns the full content as the body when it can't find a closing
+	// delimiter, so the malformed block is kept rather than silently dropped.
+	if hasFrontmatterName(content[fmStart:]) {
 		_, body, _ := frontmatterParts(content)
 		return synthesizeFrontmatter(body, slug, description)
 	}
-	// Frontmatter exists but lacks a parseable `name`. Inject one as the
-	// first key of the existing block and keep the rest verbatim (including
-	// `description`, body, and any runtime-specific keys the import path
-	// preserved).
 	return content[:fmStart] + "name: " + slug + "\n" + content[fmStart:]
+}
+
+// frontmatterHasNameKey reports whether content's frontmatter parses as a
+// mapping carrying a top-level `name` key, whatever its spelling or value.
+//
+// Quoting is syntax, not identity: `"name":` and `name:` are the same key, and
+// a key with an empty value is still the key. Only nesting makes a difference —
+// `metadata:\n  name: x` has no top-level name, so one still has to be added.
+func frontmatterHasNameKey(content string) bool {
+	fmBody, _, ok := frontmatterParts(content)
+	if !ok {
+		return false
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(fmBody), &doc); err != nil {
+		return false
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return false
+	}
+	mapping := doc.Content[0]
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == "name" {
+			return true
+		}
+	}
+	return false
 }
 
 // synthesizeFrontmatter produces a SKILL.md body with a YAML frontmatter block
@@ -542,29 +601,274 @@ func frontmatterBodyStart(content string) (int, bool) {
 }
 
 // hasFrontmatterName reports whether the frontmatter body (the slice starting
-// just after the opening `---` line) contains a parseable, non-empty `name:`
-// scalar before the closing `---`.
+// just after the opening `---` line) contains a top-level `name` key before
+// the closing `---`, whatever its spelling or value.
+//
+// This is the malformed-block twin of frontmatterHasNameKey: it answers the
+// same question for blocks that do not parse, where the caller is choosing
+// between re-synthesizing (name present) and injecting a fresh `name` (name
+// absent). The invariant is key presence, not value presence — `"name":`,
+// `'name':`, and a valueless `name:` are all the key, and injecting a second
+// one above any of them yields a duplicate mapping key that strict loaders
+// reject, leaving the skill unloadable rather than healed (MUL-5529). Reading
+// a plain scalar like `name:value` as the key over-detects, and deliberately
+// so: the block is already unparseable, and re-synthesis is the route that
+// repairs it.
+//
+// Only unindented keys count. An indented `name:` belongs to a nested mapping
+// (`metadata:\n  name: foo`), so the block still has no top-level name.
 func hasFrontmatterName(fmBody string) bool {
 	closeIdx := strings.Index(fmBody, "\n---")
 	if closeIdx < 0 {
-		// Missing close — scan everything we have and fall through. The
-		// frontmatter is malformed and OpenCode will reject it anyway, but
-		// detecting an existing name keeps us from layering a second one
-		// on top.
+		// Missing close — scan everything we have. The frontmatter is
+		// malformed and strict runtimes reject it anyway, but detecting an
+		// existing name keeps us from layering a second one on top.
 		closeIdx = len(fmBody)
 	}
 	for _, line := range strings.Split(fmBody[:closeIdx], "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "name:") {
-			continue
-		}
-		v := strings.TrimSpace(strings.TrimPrefix(line, "name:"))
-		v = strings.Trim(v, `"'`)
-		if v != "" {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "name:") ||
+			strings.HasPrefix(line, `"name":`) ||
+			strings.HasPrefix(line, `'name':`) {
 			return true
 		}
 	}
 	return false
+}
+
+// frontmatterNameValueSpan returns the byte range of the whole top-level `name`
+// entry — key plus value, however many lines the value occupies — inside a
+// frontmatter body that is already known to be valid YAML.
+//
+// The extent comes from yaml.v3's own line numbers rather than from
+// indentation, because indentation does not bound a YAML value. A quoted scalar
+// may wrap onto a line at the *same* indentation as its key, and so may a flow
+// collection:
+//
+//	name: "upstream
+//	continued"
+//	name: [a,
+//	b]
+//
+// Both parse; an indentation rule stops at the key's line and leaves the
+// remainder stranded, turning a rewrite into invalid YAML. Asking the parser
+// where the next top-level key starts is the only reliable boundary.
+func frontmatterNameValueSpan(fmBody string) (start, end int, ok bool) {
+	closeIdx := strings.Index(fmBody, "\n---")
+	if closeIdx < 0 {
+		closeIdx = len(fmBody)
+	}
+	block := fmBody[:closeIdx]
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(block), &doc); err != nil {
+		return 0, 0, false
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return 0, 0, false
+	}
+	mapping := doc.Content[0]
+
+	// yaml.Node lines are 1-based.
+	nameLine, nextKeyLine := 0, 0
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		key := mapping.Content[i]
+		if key.Value != "name" {
+			continue
+		}
+		nameLine = key.Line
+		if i+2 < len(mapping.Content) {
+			nextKeyLine = mapping.Content[i+2].Line
+		}
+		break
+	}
+	if nameLine == 0 {
+		return 0, 0, false
+	}
+
+	lines := strings.Split(block, "\n")
+	lastLine := len(lines)
+	if nextKeyLine > 0 {
+		lastLine = nextKeyLine - 1
+	}
+	if lastLine > len(lines) {
+		lastLine = len(lines)
+	}
+	// Blank lines and unindented comments sitting between this entry and the
+	// next key are not part of the value: block scalar content must be
+	// indented, so an unindented `#` can only be a comment. Leave them in
+	// place instead of swallowing them into the replacement.
+	for lastLine > nameLine {
+		line := strings.TrimSuffix(lines[lastLine-1], "\r")
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
+			lastLine--
+			continue
+		}
+		break
+	}
+	if lastLine < nameLine {
+		return 0, 0, false
+	}
+
+	offset := 0
+	for i, line := range lines {
+		if i == nameLine-1 {
+			start = offset
+		}
+		if i == lastLine-1 {
+			return start, offset + len(line), true
+		}
+		offset += len(line) + 1 // +1 for the newline Split consumed
+	}
+	return 0, 0, false
+}
+
+// setFrontmatterName replaces the top-level frontmatter `name` entry — key and
+// full value, however many lines it spans — with a single-line `name: <slug>`,
+// leaving every other byte of content untouched. fmStart is the offset where
+// the YAML body begins (see frontmatterBodyStart).
+//
+// verified reports that the result was re-parsed and its `name` really is slug.
+// Callers must treat false as "do not use this output": the directory ==
+// frontmatter-name invariant is the entire reason this function exists, so a
+// rewrite that cannot prove it is worse than no rewrite at all.
+func setFrontmatterName(content string, fmStart int, slug string) (result string, verified bool) {
+	fmBody := content[fmStart:]
+	start, end, ok := frontmatterNameValueSpan(fmBody)
+	if !ok {
+		return "", false
+	}
+	replacement := "name: " + slug
+	// strings.Split on "\n" leaves the "\r" of a CRLF ending inside the line;
+	// carry it over so the block doesn't end up with mixed terminators.
+	if strings.HasSuffix(fmBody[start:end], "\r") {
+		replacement += "\r"
+	}
+	rewritten := content[:fmStart+start] + replacement + content[fmStart+end:]
+	if !frontmatterNameIs(rewritten, slug) {
+		return "", false
+	}
+	return rewritten, true
+}
+
+// renameFrontmatterNameViaNode rebuilds the frontmatter block from its parsed
+// YAML node with `name` set to slug, and returns the reassembled document.
+//
+// This is the middle ground between the surgical byte rewrite and full
+// re-synthesis. It gives up the original block's exact formatting — the
+// re-marshal normalizes quoting and indentation — but keeps every key and its
+// value, which re-synthesis does not. That difference matters beyond tidiness:
+// synthesizeFrontmatter emits only name and description, so a block carrying
+// `disable-model-invocation: true` would come back out without it and the
+// skill, once on disk, would be advertised by the runtime's native discovery
+// despite the author having hidden it.
+//
+// An anchor on the name value needs care in both directions. Simply dropping it
+// strands any `*alias` that referenced it and invalidates the document. Simply
+// keeping it is worse: every alias then resolves to the slug, so a document
+// that expressed a setting by reusing the name's value silently acquires a
+// different setting. `disable-model-invocation: *shared` against
+// `name: &shared "true"` flips from true to false — the same skill-exposing
+// regression as dropping the key outright, just by another route.
+//
+// So aliases are materialized to the value they resolved to *before* the
+// rename, and the anchor is then removed as unreferenced. Every field keeps the
+// value it had; only `name` changes.
+func renameFrontmatterNameViaNode(content, slug string) (string, bool) {
+	fmBody, body, ok := frontmatterParts(content)
+	if !ok {
+		return "", false
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(fmBody), &doc); err != nil {
+		return "", false
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return "", false
+	}
+
+	mapping := doc.Content[0]
+	var value *yaml.Node
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == "name" {
+			value = mapping.Content[i+1]
+			break
+		}
+	}
+	if value == nil {
+		return "", false
+	}
+
+	// Pin every alias to what it resolves to now, before the rename can change
+	// it out from under them. Done first so the clones capture the original
+	// value rather than the slug.
+	if value.Anchor != "" {
+		materializeAliasesOf(&doc, value)
+	}
+
+	// Collapse whatever the value was (scalar, flow sequence, …) to a plain
+	// string. The anchor goes with it: nothing references it any more.
+	value.Kind = yaml.ScalarNode
+	value.Tag = "!!str"
+	value.Style = 0
+	value.Value = slug
+	value.Content = nil
+	value.Anchor = ""
+
+	marshaled, err := yaml.Marshal(&doc)
+	if err != nil {
+		return "", false
+	}
+	rebuilt := "---\n" + string(marshaled) + "---\n" + body
+	if !frontmatterNameIs(rebuilt, slug) {
+		return "", false
+	}
+	return rebuilt, true
+}
+
+// materializeAliasesOf replaces every alias node under root that points at
+// target with an inline copy of target's current value, so those fields keep
+// that value even after target is rewritten.
+func materializeAliasesOf(root, target *yaml.Node) {
+	for _, child := range root.Content {
+		if child.Kind == yaml.AliasNode && child.Alias == target {
+			// Each alias gets its own copy; sharing one node would make the
+			// encoder re-introduce an anchor and alias pair.
+			*child = *cloneYAMLNode(target)
+			continue
+		}
+		materializeAliasesOf(child, target)
+	}
+}
+
+// cloneYAMLNode deep-copies a node, stripping anchor/alias identity so the copy
+// is emitted inline rather than as a reference.
+func cloneYAMLNode(n *yaml.Node) *yaml.Node {
+	clone := *n
+	clone.Anchor = ""
+	clone.Alias = nil
+	if len(n.Content) > 0 {
+		clone.Content = make([]*yaml.Node, len(n.Content))
+		for i, child := range n.Content {
+			clone.Content[i] = cloneYAMLNode(child)
+		}
+	}
+	return &clone
+}
+
+// frontmatterNameIs reports whether content's frontmatter parses and its
+// top-level `name` is exactly want.
+func frontmatterNameIs(content, want string) bool {
+	fmBody, _, ok := frontmatterParts(content)
+	if !ok {
+		return false
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal([]byte(fmBody), &m); err != nil {
+		return false
+	}
+	name, _ := m["name"].(string)
+	return name == want
 }
 
 // yamlEscapeInline returns a double-quoted YAML scalar that always parses as
@@ -615,9 +919,16 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 		return fmt.Errorf("create skills dir: %w", err)
 	}
 
-	for _, skill := range skills {
-		baseSlug := sanitizeSkillName(skill.Name)
-		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, baseSlug)
+	// resolveSkillSlugs deduplicates within the batch first, so two skills whose
+	// names sanitize alike ("A B" / "A-B") get distinct bases here instead of
+	// racing for the same directory. The listings derive from the same function,
+	// which is what keeps them naming the directories this loop creates.
+	// allocateCollisionFreeSkillDir still runs on top, for collisions against
+	// directories we did not write (user-installed skills).
+	batchSlugs := resolveSkillSlugs(skills)
+
+	for i, skill := range skills {
+		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, batchSlugs[i])
 		if err != nil {
 			return fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
 		}
@@ -697,23 +1008,14 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
-
 	return b.String()
 }
 
 // renderQuickCreateContext renders issue_context.md for quick-create tasks.
-// This file carries only task data (user input, skills). Behavioral rules
-// and guardrails live in AGENTS.md (runtime config) and the per-turn prompt
-// to avoid redundancy and conflicting instructions.
+// This file carries only task data (the user input). Behavioral rules and
+// guardrails live in AGENTS.md (runtime config) and the per-turn prompt to
+// avoid redundancy and conflicting instructions; the skill index lives in the
+// runtime brief like every other kind (MUL-5529).
 func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	var b strings.Builder
 	b.WriteString("# Quick Create\n\n")
@@ -722,14 +1024,6 @@ func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	b.WriteString("> ")
 	b.WriteString(ctx.QuickCreatePrompt)
 	b.WriteString("\n\n")
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
 	return b.String()
 }
 
@@ -760,16 +1054,6 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 		b.WriteString("## Autopilot Instructions\n\n")
 		b.WriteString(ctx.AutopilotDescription)
 		b.WriteString("\n\n")
-	}
-
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
 	}
 
 	return b.String()

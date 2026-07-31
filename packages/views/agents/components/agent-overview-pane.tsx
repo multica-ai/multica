@@ -201,10 +201,17 @@ export function AgentOverviewPane({
 
   const visibleSettingsTabs = useMemo(
     () =>
-      SETTINGS_TABS.filter(
-        (tab) => tab.id !== "runtime_config" || runtime?.provider === "openclaw",
-      ),
-    [runtime?.provider],
+      SETTINGS_TABS.filter((tab) => {
+        // Env is the only settings tab backed by a secret-bearing endpoint.
+        // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
+        // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
+        // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
+        // The server stays the boundary; this only removes a dead entry point.
+        if (tab.id === "env") return canEdit;
+        if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
+        return true;
+      }),
+    [canEdit, runtime?.provider],
   );
 
   const visibleViews = useMemo(
@@ -315,7 +322,7 @@ export function AgentOverviewPane({
               aria-selected={activeSection === tab.id}
               onClick={() => requestSection(tab.id)}
               className={cn(
-                "relative shrink-0 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                "relative shrink-0 py-3 text-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 activeSection === tab.id
                   ? "text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-foreground"
                   : "text-muted-foreground hover:text-foreground",
@@ -376,7 +383,7 @@ export function AgentOverviewPane({
                       aria-selected={active}
                       onClick={() => requestView(tab.id)}
                       className={cn(
-                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
+                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
                         active
                           ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
                           : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
@@ -392,7 +399,7 @@ export function AgentOverviewPane({
             <section className="min-w-0 flex-1 md:overflow-y-auto">
               <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
                 <header>
-                  <h2 className="text-base font-medium text-balance">
+                  <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
                   </h2>
                 </header>

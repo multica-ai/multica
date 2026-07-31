@@ -653,7 +653,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("list autopilot subscribers: %w", err)
 	}
 	for _, sub := range templateSubs {
-		if err := qtx.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+		if _, err := qtx.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
 			IssueID:  issue.ID,
 			UserType: sub.UserType,
 			UserID:   sub.UserID,

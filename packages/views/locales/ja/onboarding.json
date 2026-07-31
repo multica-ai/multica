@@ -41,7 +41,8 @@
     "continue": "続ける",
     "skip": "スキップ",
     "cancel": "キャンセル",
-    "close": "閉じる"
+    "close": "閉じる",
+    "log_out": "ログアウト"
   },
   "source_backfill": {
     "eyebrow": "ちょっと質問",

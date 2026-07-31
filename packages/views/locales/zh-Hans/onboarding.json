@@ -41,7 +41,8 @@
     "continue": "继续",
     "skip": "跳过",
     "cancel": "取消",
-    "close": "关闭"
+    "close": "关闭",
+    "log_out": "退出登录"
   },
   "source_backfill": {
     "eyebrow": "顺便问一句",

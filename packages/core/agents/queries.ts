@@ -16,12 +16,17 @@ export const workspaceWorkingAgentsKeys = {
     wsId: string,
     type?: WorkspaceWorkingAgentType,
     mineRelation?: WorkspaceWorkingAgentMineRelation,
+    parentIssueId?: string,
   ) =>
     [
       ...workspaceWorkingAgentsKeys.all(wsId),
       "list",
       type ?? "all",
-      mineRelation ? `mine:${mineRelation}` : "workspace",
+      mineRelation
+        ? `mine:${mineRelation}`
+        : parentIssueId
+          ? `parent:${parentIssueId}`
+          : "workspace",
     ] as const,
 };
 
@@ -41,6 +46,11 @@ export const agentRunCountsKeys = {
 // workspace; all agent dots / hover cards / list rows derive presence from
 // this cache with zero additional network traffic.
 //
+// Presence itself is derived from the active tasks only (see derive-presence.ts
+// and #1823). The one terminal row per agent is used solely for the Squad hover
+// card's "last activity" line; MUL-5436 tracks moving it to a dedicated lazy
+// endpoint so this hot query stops carrying history at all.
+//
 // The 30s staleTime is a safety net only; the primary freshness signal is
 // WS task events, which invalidate this query immediately. Without WS,
 // presence still updates within 30s on focus / mount.
@@ -54,17 +64,25 @@ export function agentTaskSnapshotOptions(wsId: string) {
   });
 }
 
-// Working-agent summaries, optionally narrowed to a My Issues relation. Task
-// lifecycle WebSocket events invalidate every relation immediately; the short
-// stale time is the reconnect / missed-event safety net.
+// Working-agent summaries, optionally narrowed to a My Issues relation or to
+// one issue's direct children. Task lifecycle WebSocket events invalidate
+// every narrowing immediately; the short stale time is the reconnect /
+// missed-event safety net.
 export function workspaceWorkingAgentsOptions(
   wsId: string,
   type?: WorkspaceWorkingAgentType,
   mineRelation?: WorkspaceWorkingAgentMineRelation,
+  parentIssueId?: string,
 ) {
   return queryOptions({
-    queryKey: workspaceWorkingAgentsKeys.list(wsId, type, mineRelation),
-    queryFn: () => api.getWorkspaceWorkingAgents(type, mineRelation),
+    queryKey: workspaceWorkingAgentsKeys.list(
+      wsId,
+      type,
+      mineRelation,
+      parentIssueId,
+    ),
+    queryFn: () =>
+      api.getWorkspaceWorkingAgents(type, mineRelation, parentIssueId),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

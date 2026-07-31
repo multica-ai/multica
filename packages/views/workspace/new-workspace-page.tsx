@@ -61,7 +61,7 @@ export function NewWorkspacePage({
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           {workspaceCreationDisabled ? (
             <div className="text-center">
-              <h1 className="text-3xl font-semibold tracking-tight">
+              <h1 className="text-display font-semibold tracking-tight">
                 {t(($) => $.creation_disabled.title)}
               </h1>
               <p className="mt-3 text-muted-foreground">
@@ -71,7 +71,7 @@ export function NewWorkspacePage({
           ) : (
             <>
               <div className="text-center">
-                <h1 className="text-3xl font-semibold tracking-tight">
+                <h1 className="text-display font-semibold tracking-tight">
                   {t(($) => $.new_page.title)}
                 </h1>
                 <p className="mt-3 text-muted-foreground">
@@ -79,7 +79,7 @@ export function NewWorkspacePage({
                 </p>
               </div>
               <CreateWorkspaceForm onSuccess={onSuccess} />
-              <p className="text-center text-xs text-muted-foreground">
+              <p className="text-center text-caption text-muted-foreground">
                 {t(($) => $.new_page.invite_hint)}
               </p>
             </>

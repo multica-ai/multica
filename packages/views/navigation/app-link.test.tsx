@@ -158,6 +158,130 @@ describe("AppLink", () => {
     });
   });
 
+  describe("middle click (aux click)", () => {
+    // `fireEvent` has no auxClick helper, so dispatch the real event — same
+    // approach as use-row-link.test.tsx. Returns the event so the caller can
+    // assert on defaultPrevented, which is the whole point on desktop.
+    function auxClick(el: HTMLElement, button = 1) {
+      const event = new MouseEvent("auxclick", {
+        bubbles: true,
+        button,
+        cancelable: true,
+      });
+      el.dispatchEvent(event);
+      return event;
+    }
+
+    it("opens a BACKGROUND tab via the adapter (desktop) and does NOT push", () => {
+      const push = vi.fn();
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ push, openInNewTab });
+
+      renderLink(adapter);
+      const event = auxClick(screen.getByText("go"));
+
+      // No `activate` — a middle click means "keep me where I am".
+      expect(openInNewTab).toHaveBeenCalledWith("/issues", undefined);
+      expect(push).not.toHaveBeenCalled();
+      // The native window-open must be suppressed: on desktop it is a dead
+      // end (denied by setWindowOpenHandler, then dropped by the http/https
+      // allowlist because the packaged renderer is file://).
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it("passes newTabTitle through as the tab label", () => {
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ openInNewTab });
+
+      renderLink(adapter, { href: "/issues", newTabTitle: "MUL-7" });
+      auxClick(screen.getByText("go"));
+      expect(openInNewTab).toHaveBeenCalledWith("/issues", "MUL-7");
+    });
+
+    it("without an adapter (web) neither pushes nor prevents default, so the browser's native background tab still opens", () => {
+      const push = vi.fn();
+      const adapter = makeAdapter({ push });
+
+      renderLink(adapter);
+      const event = auxClick(screen.getByText("go"));
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it("stays background even on a target=_blank link, where a plain click would foreground", () => {
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ openInNewTab });
+
+      renderLink(adapter, {
+        href: "/issues",
+        target: "_blank",
+        newTabTitle: "MUL-7",
+      });
+      auxClick(screen.getByText("go"));
+      expect(openInNewTab).toHaveBeenCalledWith("/issues", "MUL-7");
+    });
+
+    it.each([
+      ["right button", 2],
+      ["browser back button", 3],
+      ["browser forward button", 4],
+    ])("ignores a non-middle aux click (%s)", (_label, button) => {
+      const push = vi.fn();
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ push, openInNewTab });
+
+      renderLink(adapter);
+      const event = auxClick(screen.getByText("go"), button);
+
+      expect(openInNewTab).not.toHaveBeenCalled();
+      expect(push).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it("runs the caller's onAuxClick, which can opt out of the new tab with preventDefault", () => {
+      const openInNewTab = vi.fn();
+      const callerAuxClick = vi.fn((e: React.MouseEvent) => e.preventDefault());
+      const adapter = makeAdapter({ openInNewTab });
+
+      renderLink(adapter, { href: "/issues", onAuxClick: callerAuxClick });
+      auxClick(screen.getByText("go"));
+
+      expect(callerAuxClick).toHaveBeenCalledTimes(1);
+      expect(openInNewTab).not.toHaveBeenCalled();
+    });
+
+    it("runs the caller's onAuxClick and still opens the tab when it does not preventDefault", () => {
+      const openInNewTab = vi.fn();
+      const callerAuxClick = vi.fn();
+      const adapter = makeAdapter({ openInNewTab });
+
+      renderLink(adapter, { href: "/issues", onAuxClick: callerAuxClick });
+      auxClick(screen.getByText("go"));
+
+      expect(callerAuxClick).toHaveBeenCalledTimes(1);
+      expect(openInNewTab).toHaveBeenCalledWith("/issues", undefined);
+    });
+
+    it("a caller-supplied onAuxClick passed via spread cannot silently override the aux handler", () => {
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ openInNewTab });
+      const spreadAuxClick = vi.fn();
+
+      render(
+        <NavigationProvider value={adapter}>
+          <AppLink href="/issues" {...{ onAuxClick: spreadAuxClick }}>
+            go
+          </AppLink>
+        </NavigationProvider>,
+      );
+
+      auxClick(screen.getByText("go"));
+      expect(spreadAuxClick).toHaveBeenCalled();
+      expect(openInNewTab).toHaveBeenCalledWith("/issues", undefined);
+    });
+  });
+
   it("a caller-supplied onClick passed via spread cannot silently override the navigation handler", () => {
     const push = vi.fn();
     const adapter = makeAdapter({ push });

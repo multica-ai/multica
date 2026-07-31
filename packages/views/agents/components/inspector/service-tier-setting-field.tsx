@@ -84,7 +84,7 @@ function ServiceTierPicker({
   };
 
   const display = (
-    <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
+    <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-body text-muted-foreground">
       <Gauge className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span className="min-w-0 truncate">{triggerLabel}</span>
     </div>
@@ -101,7 +101,7 @@ function ServiceTierPicker({
       triggerRender={
         <button
           type="button"
-          className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           aria-label={triggerTitle}
         />
       }
@@ -128,11 +128,11 @@ function ServiceTierPicker({
           onClick={() => void select(tier.id)}
         >
           <span className="block min-w-0 flex-1 text-left">
-            <span className="truncate text-[13px] font-medium">
+            <span className="truncate text-label font-medium">
               {tier.name}
             </span>
             {tier.description ? (
-              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+              <span className="mt-0.5 block text-micro leading-snug text-muted-foreground">
                 {tier.description}
               </span>
             ) : null}
@@ -143,7 +143,7 @@ function ServiceTierPicker({
         <button
           type="button"
           onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
+          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
           title={t(($) => $.pickers.service_tier_clear_title)}
         >
           {t(($) => $.pickers.service_tier_clear)}

@@ -6,10 +6,22 @@
     "new_skill": "새 스킬",
     "search_placeholder": "스킬 검색...",
     "scopes": {
-      "all": { "label": "전체", "description": "이 워크스페이스의 모든 스킬" },
-      "used": { "label": "사용 중", "description": "하나 이상의 에이전트에 할당된 스킬" },
-      "unused": { "label": "미사용", "description": "어떤 에이전트에도 할당되지 않은 스킬" },
-      "mine": { "label": "내가 만든 스킬", "description": "내가 생성한 스킬" }
+      "all": {
+        "label": "전체",
+        "description": "이 워크스페이스의 모든 스킬"
+      },
+      "used": {
+        "label": "사용 중",
+        "description": "하나 이상의 에이전트에 할당된 스킬"
+      },
+      "unused": {
+        "label": "미사용",
+        "description": "어떤 에이전트에도 할당되지 않은 스킬"
+      },
+      "mine": {
+        "label": "내가 만든 스킬",
+        "description": "내가 생성한 스킬"
+      }
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
@@ -95,13 +107,8 @@
     "delete_aria": "스킬 삭제",
     "delete_tooltip": "스킬 삭제",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
-    "files_label": "파일 · {{count}}",
-    "add_file_aria": "파일 추가",
-    "add_file_tooltip": "파일 추가",
     "delete_file": "파일 삭제",
-    "name_aria": "스킬 이름",
     "name_placeholder": "skill-name",
-    "description_label": "설명",
     "description_placeholder": "에이전트가 이 스킬을 언제 써야 하는지 한 문장으로 설명하세요...",
     "subline": {
       "origin_runtime_named": "로컬 런타임 · {{name}}",
@@ -110,41 +117,18 @@
       "origin_clawhub": "가져옴 · ClawHub",
       "origin_skills_sh": "가져옴 · Skills.sh",
       "origin_github": "가져옴 · GitHub",
-      "origin_workspace": "워크스페이스",
-      "updated_label": "{{when}} 수정됨",
-      "by_creator": "{{name}}님"
+      "origin_workspace": "직접 생성"
     },
     "conflict_banner": {
       "title": "다른 사람이 이 스킬을 업데이트했습니다",
       "body": "내 수정 내용은 보존되어 있습니다. 버리기를 누르면 상대 변경사항을 가져오고, 저장을 누르면 덮어씁니다."
     },
     "save_bar": {
-      "unsaved": "저장하지 않은 변경사항 — 저장하면 현재 스킬을 덮어씁니다",
+      "changed_summary": "변경됨: {{parts}}",
+      "changed_files_other": "파일 {{count}}개",
       "discard": "버리기",
       "save": "변경사항 저장",
       "saving": "저장하는 중..."
-    },
-    "sidebar": {
-      "metadata": "메타데이터",
-      "created": "생성일",
-      "updated": "수정일",
-      "created_by": "생성자",
-      "files": "파일",
-      "id": "ID",
-      "origin": "출처",
-      "used_by_other": "에이전트 {{count}}개가 사용 중",
-      "permissions": "권한",
-      "permissions_owner": "이 스킬을 수정하고 삭제할 수 있습니다. 변경사항은 다음 에이전트 실행부터 적용됩니다.",
-      "permissions_locked_creator": "생성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
-      "permissions_locked": "생성자 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
-      "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요."
-    },
-    "origin_card": {
-      "imported_runtime": "로컬 런타임에서 가져옴",
-      "imported_clawhub": "ClawHub에서 가져옴",
-      "imported_skills_sh": "Skills.sh에서 가져옴",
-      "imported_github": "GitHub에서 가져옴",
-      "provider": "제공자 · {{provider}}"
     },
     "not_found": {
       "title": "스킬을 찾을 수 없습니다",
@@ -173,8 +157,44 @@
         "absolute": "절대 경로는 사용할 수 없습니다.",
         "double_dot": "경로에 \"..\"을(를) 포함할 수 없습니다.",
         "reserved": "SKILL.md는 메인 파일용으로 예약되어 있습니다.",
-        "exists": "이 경로에 이미 파일이 있습니다."
+        "exists": "이 경로에 이미 파일이 있습니다.",
+        "is_directory": "같은 이름의 폴더가 이미 있습니다",
+        "under_file": "해당 위치는 이미 파일이 사용 중입니다"
       }
+    },
+    "header": {
+      "files_other": "파일 {{count}}개",
+      "used_by_other": "에이전트 {{count}}개가 사용 중",
+      "updated": "{{when}} 업데이트",
+      "updated_by": "{{name}}이(가) {{when}} 업데이트"
+    },
+    "tabs": {
+      "aria": "스킬 섹션",
+      "overview": "개요",
+      "files_other": "파일 {{count}}"
+    },
+    "overview": {
+      "properties": "속성",
+      "properties_hint": "이 필드는 SKILL.md 프런트매터와 동기화됩니다.",
+      "name": "이름",
+      "description": "설명",
+      "description_hint": "{{count}}자. 에이전트는 이 설명을 읽고 스킬을 불러올지 판단합니다.",
+      "labels": "라벨",
+      "used_by_other": "에이전트 {{count}}개가 사용 중",
+      "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요.",
+      "permissions_owner": "이 스킬을 편집하고 삭제할 수 있습니다. 변경 사항은 다음 에이전트 실행부터 적용됩니다.",
+      "permissions_locked_creator": "작성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
+      "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다."
+    },
+    "files": {
+      "list_aria": "스킬 파일",
+      "main": "기본 파일",
+      "supporting_other": "보조 파일 {{count}}",
+      "supporting_empty": "보조 파일이 없습니다.",
+      "add_file": "새 파일",
+      "mode_aria": "파일 보기",
+      "mode_preview": "미리보기",
+      "mode_raw": "일반 텍스트"
     }
   },
   "create": {
@@ -292,13 +312,17 @@
     "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요."
   },
   "file_tree": {
-    "no_files": "파일 없음"
+    "no_files": "파일 없음",
+    "actions": {
+      "label": "{{path}} 작업",
+      "rename": "이름 변경",
+      "delete": "삭제"
+    }
   },
   "file_viewer": {
-    "edit_tooltip": "수정",
-    "preview_tooltip": "미리보기",
     "no_content": "*아직 내용이 없습니다*",
     "markdown_placeholder": "Markdown 내용 작성...",
-    "raw_placeholder": "파일 내용..."
+    "raw_placeholder": "파일 내용...",
+    "raw_aria": "{{path}}의 일반 텍스트 내용"
   }
 }

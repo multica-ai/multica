@@ -270,6 +270,34 @@ func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	}
 }
 
+// TestFailTask_RetriesOnTransient5xxThenSucceeds pins the callback half of
+// MUL-5305 Must-fix 1: FailTask's terminal transaction is now the sole
+// persistence point for the withheld session and continuity-gap flag, so if the
+// server returns a transient 5xx (the terminal tx rolled back), the daemon MUST
+// retry until it lands — a 400 would make it bail immediately
+// (TestPostJSONWithRetry_PermanentBailsImmediately) and drop the gap forever.
+func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", true, ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts (2 transient 5xx + 1 success), got %d", got)
+	}
+}
+
 func TestPostJSONWithRetry_TransientExhausts(t *testing.T) {
 	defer noSleepRetry(t)()
 
@@ -373,5 +401,72 @@ func TestNormalizeGOOS(t *testing.T) {
 		if got := normalizeGOOS(in); got != want {
 			t.Errorf("normalizeGOOS(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestTerminalReportsCarryRetiredSessionID pins the daemon half of the
+// retire-session contract (GH #6066). Before it, a terminal report could only
+// say "here is a session" or say nothing — and saying nothing was how a
+// recovered turn silently left the poisoned id selectable. The completed path
+// matters most: that is exactly the case where a fresh-session retry SUCCEEDED
+// and the abandoned transcript would otherwise survive on an older row.
+func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		call     func(*Client) error
+	}{
+		{
+			name:     "complete",
+			endpoint: "/api/daemon/tasks/task-1/complete",
+			call: func(c *Client) error {
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S")
+			},
+		},
+		{
+			name:     "fail",
+			endpoint: "/api/daemon/tasks/task-1/fail",
+			call: func(c *Client) error {
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "api_invalid_request", false, "POISONED-S")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.endpoint {
+					t.Errorf("unexpected path %q", r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			if err := tc.call(NewClient(srv.URL)); err != nil {
+				t.Fatalf("terminal report: %v", err)
+			}
+			if got, _ := body["retired_session_id"].(string); got != "POISONED-S" {
+				t.Fatalf("retired_session_id = %v, want POISONED-S (body: %v)", body["retired_session_id"], body)
+			}
+		})
+	}
+}
+
+// TestTerminalReportsOmitEmptyRetiredSessionID keeps the common case off the
+// wire: nearly every run retires nothing, and an empty field would be
+// indistinguishable from "retire the empty session".
+func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if _, present := body["retired_session_id"]; present {
+		t.Fatalf("retired_session_id must be omitted when nothing was retired, got %v", body)
 	}
 }

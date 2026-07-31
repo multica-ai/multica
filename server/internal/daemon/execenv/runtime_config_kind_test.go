@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestClassifyTask pins the precedence rule on classifyTask. All five
+// TestClassifyTask pins the precedence rule on classifyTask. All four
 // kinds plus tiebreak cases for safety.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
@@ -17,9 +17,9 @@ func TestClassifyTask(t *testing.T) {
 		{"chat", TaskContextForEnv{ChatSessionID: "c"}, kindChat},
 		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "p"}, kindQuickCreate},
 		{"autopilot", TaskContextForEnv{AutopilotRunID: "r"}, kindAutopilotRunOnly},
-		{"comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindCommentTriggered},
-		{"assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindAssignmentTriggered},
-		{"assignment-bare", TaskContextForEnv{}, kindAssignmentTriggered},
+		{"issue-comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindIssue},
+		{"issue-assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindIssue},
+		{"issue-bare", TaskContextForEnv{}, kindIssue},
 		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
 		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
 		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
@@ -43,8 +43,7 @@ func TestTaskKindHasIssueContext(t *testing.T) {
 		kind taskKind
 		want bool
 	}{
-		{kindCommentTriggered, true},
-		{kindAssignmentTriggered, true},
+		{kindIssue, true},
 		{kindAutopilotRunOnly, false},
 		{kindQuickCreate, false},
 		{kindChat, false},
@@ -77,6 +76,38 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	}
 }
 
+// TestBuildMetaSkillContentIssueBodyFormatting pins the shared issue-body
+// hierarchy rule across every task kind that can author an issue.
+func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
+	t.Parallel()
+
+	fixtures := map[string]TaskContextForEnv{
+		"issue":        {IssueID: "i-1"},
+		"autopilot":    {AutopilotRunID: "r-1"},
+		"quick-create": {QuickCreatePrompt: "create an issue"},
+		"chat":         {ChatSessionID: "c-1"},
+	}
+
+	for name, ctx := range fixtures {
+		name, ctx := name, ctx
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("codex", ctx)
+			for _, want := range []string{
+				"## Issue Body Formatting",
+				"An issue title already serves as its H1.",
+				"do not add a Markdown H1 (`# ...`)",
+				"start with prose or `##` subheadings",
+				"Only add an H1 when the user specifically requests one",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("brief is missing issue-body formatting guidance %q\n---\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildMetaSkillContentSlimKindMatrix locks in which sections the
 // slim brief emits per task kind, machine-checking the matrix documented
 // on `buildMetaSkillContentSlim`. Heading is matched as a discrete line
@@ -92,32 +123,29 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		mustHave map[taskKind]bool
 	}
 	allKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
-		kindAutopilotRunOnly: true, kindQuickCreate: true, kindChat: true,
+		kindIssue: true, kindAutopilotRunOnly: true,
+		kindQuickCreate: true, kindChat: true,
 	}
-	issueKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
-	}
+	issueKinds := map[taskKind]bool{kindIssue: true}
 	checks := []sectionCheck{
 		{"# Multica Agent Runtime", allKinds},
 		{"## Background Task Safety", allKinds},
 		{"## Agent Identity", allKinds},
 		{"## Available Commands", allKinds},
+		{"## Issue Body Formatting", allKinds},
 		{"### Workflow", allKinds},
 		{"## Important: Always Use the `multica` CLI", allKinds},
 		{"## Output", allKinds},
 		{"## Comment Formatting", issueKinds},
 		{"## Repositories", map[taskKind]bool{
-			kindCommentTriggered: true, kindAssignmentTriggered: true,
-			kindAutopilotRunOnly: true, kindChat: true,
+			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
 		{"## Issue Metadata", issueKinds},
-		{"## Instruction Precedence", map[taskKind]bool{kindAssignmentTriggered: true}},
+		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
-		{"## Skills", map[taskKind]bool{
-			kindCommentTriggered: true, kindAssignmentTriggered: true,
-			kindAutopilotRunOnly: true, kindChat: true,
-		}},
+		// Quick-create included: it used to be skipped here and carry its own
+		// copy in issue_context.md, which nothing read. One index, one place.
+		{"## Skills", allKinds},
 		{"## Mentions", issueKinds},
 		{"## Attachments", issueKinds},
 	}
@@ -129,9 +157,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			Repos: baseRepo, AgentSkills: baseSkill},
 		kindAutopilotRunOnly: {AutopilotRunID: "r-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
-		kindCommentTriggered: {IssueID: "i-1", TriggerCommentID: "tc-1",
-			AgentName: "Eve", AgentID: "eve-1", Repos: baseRepo, AgentSkills: baseSkill},
-		kindAssignmentTriggered: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
+		kindIssue: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
 	}
 

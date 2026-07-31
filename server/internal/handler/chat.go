@@ -889,6 +889,104 @@ func parseChatMessagesPageParams(r *http.Request) (int, pgtype.Timestamptz, pgty
 	return limit, pgtype.Timestamptz{Time: beforeTime, Valid: true}, beforeID, nil
 }
 
+// RegenerateChatQuickActionsResponse acknowledges an accepted refresh request.
+// message_id is the assistant turn the refreshed pills will attach to — the
+// client anchors its pending placeholder on it and resolves it when the
+// chat:quick_actions supplement arrives.
+// RegenerateChatQuickActionsRequest names the assistant turn the client is
+// refreshing. The server confirms it is still the session's latest turn before
+// enqueuing (409 otherwise), so the client's pending marker stays aligned with
+// the turn chat:quick_actions will resolve — no ack reconciliation needed
+// (MUL-5149).
+type RegenerateChatQuickActionsRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+type RegenerateChatQuickActionsResponse struct {
+	MessageID string `json:"message_id"`
+}
+
+// RegenerateChatQuickActions re-runs the suggestion pass for a session's latest
+// assistant turn on explicit user request (the "refresh" button on the
+// quick-actions row, MUL-5149). Generation is server-side, so this spawns no
+// agent run; the refreshed pills arrive over the same chat:quick_actions
+// realtime path as the automatic pass.
+func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "chat agent is archived")
+		return
+	}
+	// The refresh no longer runs the agent, but it is still a user-triggered
+	// spend against that agent's conversation, so it keeps clearing the same
+	// INVOKE gate as a send (MUL-4525) rather than the softer view gate in
+	// gateChatSessionForUser. Deliberately NOT relaxed as a side effect of
+	// moving generation server-side.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+
+	var req RegenerateChatQuickActionsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	expectedMessageID, ok := parseUUIDOrBadRequest(w, req.MessageID, "message_id")
+	if !ok {
+		return
+	}
+
+	messageID, targetTask, err := h.TaskService.RegenerateChatQuickActions(r.Context(), session, expectedMessageID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrChatQuickActionsStale):
+			// The turn the client was refreshing is no longer the latest — its
+			// view is stale (a newer reply arrived). 409 → the client rolls back
+			// its optimistic marker and re-offers refresh on the new turn.
+			writeError(w, http.StatusConflict, "a newer reply arrived — refresh it instead")
+		case errors.Is(err, service.ErrChatQuickActionsBusy):
+			// A turn is already running for this session; it is about to replace
+			// the reply these pills would hang on. 409 → the client rolls back
+			// and can refresh once the session settles.
+			writeError(w, http.StatusConflict, "still working — try refreshing in a moment")
+		case errors.Is(err, service.ErrChatQuickActionsNoTurn):
+			writeError(w, http.StatusConflict, "no assistant reply to refresh yet")
+		case errors.Is(err, service.ErrChatQuickActionsUnavailable):
+			writeError(w, http.StatusServiceUnavailable, "suggestions are not available on this deployment")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to regenerate quick actions")
+		}
+		return
+	}
+	// Detached like the automatic pass: answer 202 now, deliver the refreshed
+	// pills over chat:quick_actions.
+	h.TaskService.GenerateChatQuickActionsAsync(targetTask, service.ChatQuickActionsRefresh)
+	writeJSON(w, http.StatusAccepted, RegenerateChatQuickActionsResponse{
+		MessageID: uuidToString(messageID),
+	})
+}
+
 func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -1087,8 +1185,9 @@ func (h *Handler) ListChatDraftRestores(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "failed to load draft restore attachments")
 			return
 		}
+		attachmentMode := attachmentURLModeFromRequest(r)
 		for _, a := range attRows {
-			attachmentsByID[uuidToString(a.ID)] = h.attachmentToResponse(a)
+			attachmentsByID[uuidToString(a.ID)] = h.attachmentToResponse(a, attachmentMode)
 		}
 	}
 
@@ -1446,8 +1545,9 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.AgentTaskResponse.Attribution})
 	if cancelled.CancelledChatMessage != nil {
 		attachments := make([]AttachmentResponse, 0, len(cancelled.CancelledChatMessage.Attachments))
+		attachmentMode := attachmentURLModeFromRequest(r)
 		for _, a := range cancelled.CancelledChatMessage.Attachments {
-			attachments = append(attachments, h.attachmentToResponse(a))
+			attachments = append(attachments, h.attachmentToResponse(a, attachmentMode))
 		}
 		resp.CancelledChatMessage = &CancelledChatMessageResponse{
 			ChatSessionID:  cancelled.CancelledChatMessage.ChatSessionID,
@@ -1531,6 +1631,9 @@ type ChatMessageResponse struct {
 	// direct-chat turn that produced no text reply (MUL-4351). Additive:
 	// clients that don't understand it fall back to the non-empty content.
 	MessageKind string `json:"message_kind"`
+	// QuickActions are sanitized follow-ups generated with this assistant turn.
+	// Always an empty array for legacy rows and user messages.
+	QuickActions []protocol.ChatQuickAction `json:"quick_actions"`
 	// Attachments linked to this message via chat_message_id. The chat
 	// bubble renders file cards from these, and the daemon claim path
 	// (daemon.go) pulls structured metadata from the same source so the
@@ -1565,9 +1668,29 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		FailureReason: textToPtr(m.FailureReason),
 		ElapsedMs:     int8ToPtr(m.ElapsedMs),
 		MessageKind:   normalizeMessageKind(m.MessageKind),
+		QuickActions:  decodeChatQuickActions(m.QuickActions),
 		Attachments:   attachments,
 	}
 }
+
+func decodeChatQuickActions(raw []byte) []protocol.ChatQuickAction {
+	actions := make([]protocol.ChatQuickAction, 0)
+	if len(raw) == 0 {
+		return actions
+	}
+	if err := json.Unmarshal(raw, &actions); err != nil {
+		return []protocol.ChatQuickAction{}
+	}
+	if actions == nil {
+		return []protocol.ChatQuickAction{}
+	}
+	if len(actions) > chatQuickActionResponseLimit {
+		actions = actions[:chatQuickActionResponseLimit]
+	}
+	return actions
+}
+
+const chatQuickActionResponseLimit = 3
 
 // normalizeMessageKind maps a stored chat_message.message_kind to the value the
 // API exposes. Unknown / empty kinds degrade to 'message' so a future kind

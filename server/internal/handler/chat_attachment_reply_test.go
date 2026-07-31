@@ -277,7 +277,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 		attID := seedAgentChatAttachment(t, agentID, sessionID, taskID)
 
 		if _, err := testHandler.TaskService.CompleteTask(context.Background(),
-			parseUUID(taskID), []byte(`{"output":"here is the chart"}`), "", ""); err != nil {
+			parseUUID(taskID), []byte(`{"output":"here is the chart"}`), "", "", false, ""); err != nil {
 			t.Fatalf("CompleteTask: %v", err)
 		}
 		msgID, content, ok := assistantMessageForTask(t, taskID)
@@ -298,7 +298,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 		attID := seedAgentChatAttachment(t, agentID, sessionID, taskID)
 
 		if _, err := testHandler.TaskService.CompleteTask(context.Background(),
-			parseUUID(taskID), []byte(`{"output":""}`), "", ""); err != nil {
+			parseUUID(taskID), []byte(`{"output":""}`), "", "", false, ""); err != nil {
 			t.Fatalf("CompleteTask: %v", err)
 		}
 		msgID, content, ok := assistantMessageForTask(t, taskID)
@@ -317,7 +317,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 	t.Run("empty output + no attachment creates no message", func(t *testing.T) {
 		taskID := seedRunningChatTask(t, agentID, sessionID)
 		if _, err := testHandler.TaskService.CompleteTask(context.Background(),
-			parseUUID(taskID), []byte(`{"output":""}`), "", ""); err != nil {
+			parseUUID(taskID), []byte(`{"output":""}`), "", "", false, ""); err != nil {
 			t.Fatalf("CompleteTask: %v", err)
 		}
 		if _, _, ok := assistantMessageForTask(t, taskID); ok {
@@ -340,7 +340,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, looseID) })
 
 		if _, err := testHandler.TaskService.CompleteTask(context.Background(),
-			parseUUID(taskID), []byte(`{"output":"done"}`), "", ""); err != nil {
+			parseUUID(taskID), []byte(`{"output":"done"}`), "", "", false, ""); err != nil {
 			t.Fatalf("CompleteTask: %v", err)
 		}
 		if got := attachmentMessageID(t, looseID); got != nil {
@@ -378,7 +378,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 		}
 
 		if _, err := testHandler.TaskService.CompleteTask(context.Background(),
-			parseUUID(taskID), []byte(`{"output":"done"}`), "", ""); err != nil {
+			parseUUID(taskID), []byte(`{"output":"done"}`), "", "", false, ""); err != nil {
 			t.Fatalf("CompleteTask: %v", err)
 		}
 		got := attachmentMessageID(t, claimedID)
@@ -391,7 +391,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 		taskID := seedRunningChatTask(t, agentID, sessionID)
 		attID := seedAgentChatAttachment(t, agentID, sessionID, taskID)
 		if _, err := testHandler.TaskService.FailTask(context.Background(),
-			parseUUID(taskID), "agent crashed", "", "", ""); err != nil {
+			parseUUID(taskID), "agent crashed", "", "", "", false, ""); err != nil {
 			t.Fatalf("FailTask: %v", err)
 		}
 		if got := attachmentMessageID(t, attID); got != nil {

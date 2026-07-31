@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
@@ -50,10 +50,16 @@ vi.mock("@multica/core/inbox/queries", () => ({
   useInboxUnreadCount: () => 2,
 }));
 
+// Stable spies: the auto-mark-read effect keys on the mutate identity, so a
+// fresh `vi.fn()` per render would make the effect's deps churn.
+const markReadMutate = vi.fn();
+const markUnreadMutate = vi.fn();
+
 vi.mock("@multica/core/inbox/mutations", () => {
   const mutation = () => ({ mutate: vi.fn() });
   return {
-    useMarkInboxRead: mutation,
+    useMarkInboxRead: () => ({ mutate: markReadMutate }),
+    useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
     useArchiveInbox: mutation,
     useUnarchiveInbox: mutation,
     useMarkAllInboxRead: mutation,
@@ -75,7 +81,23 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ searchParams, replace }),
 }));
 
-vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => true }));
+// Mobile by default — it renders the list and the detail as one column, which
+// keeps most assertions simple. Tests about actioning a row WHILE it is open
+// need the two-panel desktop layout, since mobile swaps the list out for the
+// detail on selection.
+const layout = { isMobile: true };
+vi.mock("@multica/ui/hooks/use-mobile", () => ({
+  useIsMobile: () => layout.isMobile,
+}));
+vi.mock("@multica/ui/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  ResizablePanel: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  ResizableHandle: () => null,
+}));
 vi.mock("./inbox-list", () => ({
   InboxList: ({
     items,
@@ -96,6 +118,26 @@ vi.mock("./inbox-list", () => ({
   ),
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
+
+// Capture the row actions the page hands the context menu, so the read/unread
+// handlers can be driven without standing up Base UI's menu.
+let rowActions: {
+  onMarkRead: (id: string) => void;
+  onMarkUnread: (id: string) => void;
+  onAction: (id: string) => void;
+} | null = null;
+vi.mock("./inbox-context-menu", () => ({
+  InboxContextMenuProvider: ({
+    actions,
+    children,
+  }: {
+    actions: NonNullable<typeof rowActions>;
+    children: React.ReactNode;
+  }) => {
+    rowActions = actions;
+    return children;
+  },
+}));
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
 
@@ -126,6 +168,10 @@ function reset() {
   listData.archived = [];
   searchParams = new URLSearchParams();
   replace.mockClear();
+  markReadMutate.mockClear();
+  markUnreadMutate.mockClear();
+  rowActions = null;
+  layout.isMobile = true;
 }
 
 describe("InboxPage", () => {
@@ -213,6 +259,61 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
 
     expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+  });
+
+  it("marks the opened notification read", () => {
+    reset();
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("keeps an explicitly unread row unread while it stays open", () => {
+    // Without the guard the auto-read effect fires on the very next commit and
+    // silently undoes the user's "mark as unread" — the action looks like a
+    // no-op.
+    reset();
+    layout.isMobile = false;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+    ];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    markReadMutate.mockClear();
+
+    act(() => rowActions?.onMarkUnread("inbox-a"));
+    rerender(<InboxPage />);
+
+    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).not.toHaveBeenCalled();
+  });
+
+  it("marks a parked row read again once it is re-opened", () => {
+    // The guard is scoped to the row while it stays selected. Coming back to it
+    // later is a fresh open and must behave like any other.
+    reset();
+    layout.isMobile = false;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+      item({ id: "inbox-b", issue_id: "issue-b", read: false }),
+    ];
+
+    render(<InboxPage />);
+    const [rowA, rowB] = screen.getAllByTestId("row");
+    fireEvent.click(rowA!);
+    act(() => rowActions?.onMarkUnread("inbox-a"));
+
+    fireEvent.click(rowB!);
+    markReadMutate.mockClear();
+    fireEvent.click(rowA!);
+
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
   });
 
   it("does not swallow a deep link to an issue that is not in the archive", () => {

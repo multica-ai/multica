@@ -186,7 +186,7 @@ export function StepAboutYou({
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1.5 text-body text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             {t(($) => $.common.back)}
@@ -205,10 +205,10 @@ export function StepAboutYou({
         className="min-h-0 flex-1 overflow-y-auto"
       >
         <div className="mx-auto w-full max-w-[920px] px-6 py-10 sm:px-10 md:px-14 lg:py-14">
-          <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <div className="mb-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {t(($) => $.questions.eyebrow_about_you)}
           </div>
-          <h1 className="text-balance font-serif text-[34px] font-medium leading-[1.15] tracking-tight text-foreground">
+          <h1 className="text-balance font-serif text-display font-medium leading-[1.15] tracking-tight text-foreground">
             {t(($) => $.questions.about_you.question)}
           </h1>
 
@@ -240,7 +240,7 @@ export function StepAboutYou({
           <div className="mt-10 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
             <span
               aria-live="polite"
-              className="mr-auto text-xs text-muted-foreground"
+              className="mr-auto text-caption text-muted-foreground"
             >
               {footerHint}
             </span>
@@ -299,10 +299,10 @@ function QuestionGroup({
   return (
     <section className="mt-10">
       <div className="flex items-baseline gap-3">
-        <span aria-hidden className="font-mono text-xs text-muted-foreground">
+        <span aria-hidden className="font-mono text-caption text-muted-foreground">
           {String(number).padStart(2, "0")}
         </span>
-        <h2 className="text-[17px] font-medium leading-snug text-foreground">
+        <h2 className="text-title font-medium leading-snug text-foreground">
           {question}
         </h2>
       </div>

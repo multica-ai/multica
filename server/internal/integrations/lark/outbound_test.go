@@ -17,24 +17,28 @@ import (
 )
 
 type fakePatcherQueries struct {
-	mu              sync.Mutex
-	task            db.AgentTaskQueue
-	taskErr         error
-	binding         ChatSessionBinding
-	bindingErr      error
-	installation    Installation
-	installationErr error
-	agent           db.Agent
-	agentErr        error
-	card            OutboundCardMessage
-	cardErr         error
-	created         []CreateOutboundCardMessageParams
-	createReturn    OutboundCardMessage
-	statusUpdates   []UpdateOutboundCardStatusParams
+	mu                  sync.Mutex
+	task                db.AgentTaskQueue
+	taskErr             error
+	taskChannelIngested bool
+	binding             ChatSessionBinding
+	bindingErr          error
+	installation        Installation
+	installationErr     error
+	agent               db.Agent
+	agentErr            error
+	card                OutboundCardMessage
+	cardErr             error
+	created             []CreateOutboundCardMessageParams
+	createReturn        OutboundCardMessage
+	statusUpdates       []UpdateOutboundCardStatusParams
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
 	return f.task, f.taskErr
+}
+func (f *fakePatcherQueries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	return f.taskChannelIngested, nil
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, nil
@@ -151,6 +155,9 @@ func (f *fakeAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 func (f *fakeAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	return nil, nil
 }
+func (f *fakeAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	return DownloadedResource{}, nil
+}
 func (f *fakeAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
 	return nil, nil
 }
@@ -193,6 +200,34 @@ func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient
 // a plain Lark IM text message (msg_type=text), not nested inside an
 // interactive card. This is the load-bearing UX call — the prior card
 // chrome made every reply look like a system notification.
+// TestPatcherSendsSealedChannelTaskReply is the other half of the boundary:
+// a sealed channel task owns an input batch exactly like a direct task, so
+// gating outbound on owner presence alone would silently drop every channel
+// reply. Channel provenance must let the reply through.
+func TestPatcherSendsSealedChannelTaskReply(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee555555-ee55-ee55-ee55-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "channel answer",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 || api.textSent[0].Text != "channel answer" {
+		t.Fatalf("sealed channel reply must reach Lark; textSent=%+v", api.textSent)
+	}
+}
+
 func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	taskID := uuidFromString(t, "ee333333-ee33-ee33-ee33-eeeeeeeeeeee")
@@ -349,9 +384,9 @@ func TestPatcherSkipsWhenNoChatSessionBinding(t *testing.T) {
 
 // TestPatcherSkipsDirectChatTaskOnBoundSession guards the channel boundary:
 // opening a Lark-bound session in the web/mobile UI must not make that direct
-// conversation's reply or failure leak back into the external chat. Direct
-// tasks own an input batch through chat_input_task_id; channel tasks leave it
-// NULL and continue through the existing outbound paths.
+// conversation's reply or failure leak back into the external chat. Sealed
+// channel tasks own an input batch too, so the discriminator is the
+// channel_ingested provenance of the owned batch, not owner presence.
 func TestPatcherSkipsDirectChatTaskOnBoundSession(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -1,6 +1,6 @@
 ---
 name: multica-creating-agents
-description: "Use when creating, inspecting, or debugging a Multica agent through the `multica agent` CLI or `POST /api/agents` — what each field is, its persisted shape, whether it is metadata-only or consumed by the daemon at claim time, which inputs are validated/rejected, how custom_env secrets are gated, and how skill binding behaves. Not for assigning issues to existing agents or for runtime task prompts."
+description: "Use when creating, inspecting, or debugging a Multica agent definition via the `multica agent` CLI or POST /api/agents. Not for assigning issues to agents that already exist, and not for runtime task prompts."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -20,7 +20,7 @@ These commands read state and have no side effects:
 ```bash
 multica agent get <agent-id> --output json      # full persisted agent record
 multica agent skills list <agent-id> --output json   # current skill bindings
-multica agent env get <agent-id> --output json  # plaintext env (owner/admin only, agents denied)
+multica agent env get <agent-id> --output json  # plaintext env (agent owner or ws owner/admin; agents denied)
 ```
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
@@ -58,13 +58,49 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
 adds a key when its flag was provided — `description`/`instructions` on a
 non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`thinking-level`, `service-tier`, `visibility`, …) on the flag being `Changed` — so omitted
-flags fall through to server defaults rather than sending empty strings.
+`thinking-level`, `service-tier`, `visibility`, …) on the flag being `Changed`
+— so omitted flags fall through to server defaults rather than sending empty
+strings. `--max-concurrent-tasks` is validated as 1–50 before the request is
+sent.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
 `custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
-`max_concurrent_tasks`, `mcp_config`.
+`max_concurrent_tasks`, `mcp_config`, `skill_ids`.
+
+## Copying an agent
+
+`multica agent copy <source-agent-id>` forks an existing agent's portable
+configuration into a brand-new agent, leaving the source untouched. It is the
+CLI/headless equivalent of the web "Duplicate" action. No dedicated server API
+is involved: `runAgentCopy` reads the source with `GET /api/agents/<id>`, then
+POSTs a `CreateAgentRequest` — passing the source's skill ids in `skill_ids` so
+the bindings attach in the SAME create transaction (unlike `agent create`, which
+binds nothing). The mutation is therefore a single atomic create.
+
+```bash
+multica agent copy <source-agent-id> --name "My Agent (copy)"   # same runtime
+multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cross-runtime fork
+```
+
+- Copied by default, each overridable with the matching flag: `name` (suffixed
+  `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
+  `max_concurrent_tasks`, invocation permission (`permission_mode` +
+  allow-list), and assigned workspace skills.
+- A copied `max_concurrent_tasks` is included only when the source value is
+  within 1–50. Historical out-of-range values are omitted so the new agent
+  receives the server default (`6`); an explicit out-of-range
+  `--max-concurrent-tasks` override is rejected before any API request.
+- Runtime-specific fields (`model`, `thinking_level`, `service_tier`) are copied
+  ONLY when the target runtime is unchanged. `--runtime-id` selecting a
+  different runtime drops them and REQUIRES `--model` (pass `--model ""` to
+  accept the target runtime default), mirroring the web Duplicate clearing model
+  on a runtime switch.
+- Never copied: `custom_env`, `mcp_config`, `runtime_config` (secret /
+  machine-local; redacted or masked on read anyway). Supply fresh values with
+  the same secret-safe flags as `agent create` (`--custom-env*`, `--mcp-config*`,
+  `--runtime-config`), or with `agent env set` after the copy exists.
+- `--no-skills` skips copying the source's skill bindings.
 
 ## Field contracts
 
@@ -83,14 +119,21 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
 | `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
-| `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
+| `max_concurrent_tasks` | `agent.max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
 
-Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
+Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
+Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 `custom_args` → `[]`, `avatar_url` → a random `emoji:<glyph>`, `visibility` →
-`private`, `max_concurrent_tasks` → `6`
+`private`
 (all materialized server-side before the insert). `custom_args`/`runtime_config`
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
+
+The 1–50 concurrency range applies consistently to manual create, update, and
+the create-from-template HTTP path. On create paths, an omitted field defaults
+to 6 while an explicitly supplied 0 is rejected; on update, omission preserves
+the current value. The CLI performs the same range check before sending create
+or update requests.
 
 `thinking_level` is validated only at the provider level: fixed-catalog
 providers reject an unrecognized literal, while dynamic-catalog providers such
@@ -146,14 +189,15 @@ Read-side facts (these are the wrong assumptions to avoid):
   list/get/create/update` and WS events return only `has_custom_env` (bool) and
   `custom_env_key_count` (int).
 - Reading plaintext values requires the dedicated `GET /api/agents/{id}/env`
-  endpoint (`multica agent env get`). It is gated to workspace **owner/admin**
-  members, and **agent actors are denied** regardless of the backing member's
-  role — a running agent cannot read another agent's secrets.
+  endpoint (`multica agent env get`). It is gated to the **agent's own human
+  owner** or a workspace **owner/admin**, and **agent actors are denied**
+  regardless of the backing member's role — a running agent cannot read another
+  agent's secrets, not even one its own human owns.
 - Writing values after creation does NOT go through `agent update`. The generic
   update handler rejects any `custom_env` field with a 400 ("use PUT
   /api/agents/{id}/env"). Plaintext env writes are handled by
-  `PUT /api/agents/{id}/env` (`multica agent env set`), which is owner/admin-only
-  and writes an audit row.
+  `PUT /api/agents/{id}/env` (`multica agent env set`), which carries the same
+  gate and writes an audit row.
 
 ### mcp_config
 
@@ -215,6 +259,8 @@ Read-only (safe): `agent get`, `agent skills list`, `agent env get`.
 State-changing (require an explicit instruction — do not run speculatively):
 
 - `multica agent create` — inserts a new agent row.
+- `multica agent copy` — inserts a new agent row (a fork of an existing agent);
+  the source is left untouched.
 - `multica agent skills add` / `set` — mutate bindings (`set` is destructive:
   it drops bindings not in the new list).
 - `multica agent env set` — overwrites the full `custom_env` map and writes an

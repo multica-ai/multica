@@ -19,6 +19,11 @@ REPO_WEB_URL="https://github.com/multica-ai/multica"  # without .git, for GitHub
 INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.multica/server}"
 BREW_PACKAGE="multica-ai/tap/multica"
 
+# Host ports Compose reported after `up -d`; set by setup_server and reused by
+# the summary so the health check and the printed URLs cannot diverge.
+SELFHOST_BACKEND_PORT=""
+SELFHOST_FRONTEND_PORT=""
+
 # Colors (disabled when not a terminal)
 if [ -t 1 ] || [ -t 2 ]; then
   BOLD='\033[1m'
@@ -60,44 +65,26 @@ print_remote_server_token_hint() {
   printf "\n"
 }
 
-env_file_value() {
-  local file="$1"
-  local key="$2"
-  local default="$3"
-  local line value
-  line="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 || true)"
-  if [ -z "$line" ]; then
-    printf "%s" "$default"
-    return
-  fi
-  value="${line#*=}"
-  value="${value%$'\r'}"
-  value="${value%\"}"
-  value="${value#\"}"
-  value="${value%\'}"
-  value="${value#\'}"
-  if [ -z "$value" ]; then
-    printf "%s" "$default"
-  else
-    printf "%s" "$value"
-  fi
-}
+# Host port Docker Compose actually published for a service.
+#
+# This is the only authority. Compose's interpolation gives the calling process
+# environment precedence over .env, so an ambient PORT / BACKEND_PORT / API_PORT
+# / SERVER_PORT / FRONTEND_PORT moves the published port without touching the
+# file. Re-deriving the port from .env alone made the installer probe and print
+# a port the stack was never published on (#6145). Must be called from the
+# installation directory, after `up -d`.
+compose_published_port() {
+  local service=$1 container_port=$2 published
 
-selfhost_backend_port() {
-  local file="${1:-.env}"
-  local value
-  for key in BACKEND_PORT API_PORT SERVER_PORT PORT; do
-    value="$(env_file_value "$file" "$key" "")"
-    if [ -n "$value" ]; then
-      printf "%s" "$value"
-      return
-    fi
-  done
-  printf "8080"
-}
+  published="$(docker compose -f docker-compose.selfhost.yml port "$service" "$container_port" 2>/dev/null | tail -n 1)"
+  published="${published##*:}"
+  published="${published%$'\r'}"
 
-selfhost_frontend_port() {
-  env_file_value "${1:-.env}" "FRONTEND_PORT" "3000"
+  case "$published" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
+
+  printf "%s" "$published"
 }
 
 detect_os() {
@@ -401,13 +388,22 @@ setup_server() {
   info "Starting Multica services (this may take a few minutes on first run)..."
   docker compose -f docker-compose.selfhost.yml up -d
 
+  # Read the ports Compose actually published, once, and reuse them for both the
+  # health check and the summary so the two can never disagree.
+  if ! SELFHOST_BACKEND_PORT="$(compose_published_port backend 8080)"; then
+    fail "Started the stack but could not read the backend host port from Docker Compose.
+  Check it with: cd $INSTALL_DIR && docker compose -f docker-compose.selfhost.yml ps"
+  fi
+  if ! SELFHOST_FRONTEND_PORT="$(compose_published_port frontend 3000)"; then
+    fail "Started the stack but could not read the frontend host port from Docker Compose.
+  Check it with: cd $INSTALL_DIR && docker compose -f docker-compose.selfhost.yml ps"
+  fi
+
   # Wait for health check
   info "Waiting for backend to be ready..."
-  local backend_port
-  backend_port="$(selfhost_backend_port .env)"
   local ready=false
   for i in $(seq 1 45); do
-    if curl -sf "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
+    if curl -sf "http://localhost:${SELFHOST_BACKEND_PORT}/health" >/dev/null 2>&1; then
       ready=true
       break
     fi
@@ -470,11 +466,8 @@ run_with_server() {
   printf "${BOLD}${GREEN}  ✓ Multica server is running and CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  local frontend_port backend_port
-  frontend_port="$(selfhost_frontend_port "$INSTALL_DIR/.env")"
-  backend_port="$(selfhost_backend_port "$INSTALL_DIR/.env")"
-  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$frontend_port"
-  printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$backend_port"
+  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$SELFHOST_FRONTEND_PORT"
+  printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$SELFHOST_BACKEND_PORT"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"

@@ -132,8 +132,8 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <X className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold">{t(($) => $.not_found.title)}</h2>
-            <p className="text-sm text-muted-foreground text-center">
+            <h2 className="text-title font-semibold">{t(($) => $.not_found.title)}</h2>
+            <p className="text-body text-muted-foreground text-center">
               {t(($) => $.not_found.description)}
             </p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
@@ -153,10 +153,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Check className="h-6 w-6 text-primary" />
             </div>
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-title font-semibold">
               {t(($) => $.accepted.title, { workspace_name: invitation.workspace_name })}
             </h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               {t(($) => $.accepted.redirecting)}
             </p>
           </CardContent>
@@ -170,8 +170,8 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
-            <h2 className="text-lg font-semibold">{t(($) => $.declined.title)}</h2>
-            <p className="text-sm text-muted-foreground">{t(($) => $.declined.description)}</p>
+            <h2 className="text-title font-semibold">{t(($) => $.declined.title)}</h2>
+            <p className="text-body text-muted-foreground">{t(($) => $.declined.description)}</p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
               {t(($) => $.declined.go_to_dashboard)}
             </Button>
@@ -193,12 +193,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
           </div>
 
           <div className="text-center space-y-2">
-            <h2 className="text-xl font-semibold">
+            <h2 className="text-title-lg font-semibold">
               {t(($) => $.main.join_title, {
                 workspace_name: invitation.workspace_name ?? t(($) => $.main.fallback_workspace_name),
               })}
             </h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
               {invitation.role === "admin"
                 ? t(($) => $.main.invited_role_admin)
@@ -207,13 +207,13 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
           </div>
 
           {isAlreadyHandled ? (
-            <div className="text-sm text-muted-foreground">
+            <div className="text-body text-muted-foreground">
               {invitation.status === "accepted"
                 ? t(($) => $.main.already_handled_accepted)
                 : t(($) => $.main.already_handled_declined)}
             </div>
           ) : isExpired ? (
-            <div className="text-sm text-muted-foreground">
+            <div className="text-body text-muted-foreground">
               {t(($) => $.main.expired)}
             </div>
           ) : (
@@ -237,7 +237,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
           )}
 
           {error && (
-            <p className="text-sm text-destructive text-center">{error}</p>
+            <p className="text-body text-destructive text-center">{error}</p>
           )}
         </CardContent>
       </Card>

@@ -285,6 +285,12 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantName: "Qoder Review",
 		},
 		{
+			provider: "qoderclicn",
+			root:     filepath.Join(".qoder-cn", "skills"),
+			wantPath: "~/.qoder-cn/skills/review-helper",
+			wantName: "Qoder CN Review",
+		},
+		{
 			provider: "qwen",
 			root:     filepath.Join(".qwen", "skills"),
 			wantPath: "~/.qwen/skills/review-helper",

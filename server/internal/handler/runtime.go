@@ -399,6 +399,33 @@ func sinceFromDays(now time.Time, days int, loc *time.Location) time.Time {
 // bucket + N prior full days). If tzName is empty or unparseable, falls back
 // to UTC — never returns an error so handlers stay simple.
 func parseSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
+	return parseDaysCutoff(r, defaultDays, tzName, 0)
+}
+
+// parseExactSinceParamInTZ is parseSinceParamInTZ without the extra day of
+// headroom: `days=N` yields exactly N calendar buckets (today's partial
+// bucket + N-1 prior full days), which is the window the workspace dashboard
+// actually displays.
+//
+// The N+1 cutoff exists so date-bucketed series can reach one bucket further
+// back than they render (runtime detail's prior-window delta needs it), and
+// the dashboard trims the surplus client-side with `-(days-1)`. A response
+// with NO date dimension cannot be trimmed that way, so an aggregate served
+// off the N+1 cutoff silently covers one more day than the chart beside it.
+// Endpoints whose rows carry no date use this variant instead.
+func parseExactSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
+	return parseDaysCutoff(r, defaultDays, tzName, 1)
+}
+
+// parseDaysCutoff is the shared body of the two cutoff parsers. `trimDays`
+// pulls the cutoff forward, so 0 keeps the N+1 headroom and 1 closes the
+// window to exactly N calendar days.
+func parseDaysCutoff(
+	r *http.Request,
+	defaultDays int,
+	tzName string,
+	trimDays int,
+) pgtype.Timestamptz {
 	days := defaultDays
 	if d := r.URL.Query().Get("days"); d != "" {
 		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 365 {
@@ -409,7 +436,13 @@ func parseSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype
 	if err != nil || loc == nil {
 		loc = time.UTC
 	}
-	return pgtype.Timestamptz{Time: sinceFromDays(time.Now(), days, loc), Valid: true}
+	// Guard the floor: days is already >= 1 here, and trimming a 1-day
+	// window by one would put the cutoff at start-of-today+0 — still correct
+	// ("today only"), which is exactly what days=1 means.
+	return pgtype.Timestamptz{
+		Time:  sinceFromDays(time.Now(), days-trimDays, loc),
+		Valid: true,
+	}
 }
 
 // resolveViewingTZ resolves the IANA tz to render the response in:
@@ -744,7 +777,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(activeAgents) > 0 {
-		writeJSON(w, http.StatusConflict, runtimeHasActiveAgentsResponse(activeAgents))
+		writeJSON(w, http.StatusConflict, h.runtimeHasActiveAgentsResponse(activeAgents))
 		return
 	}
 
@@ -870,10 +903,10 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 //
 // Front-end branches on `code`. The caller picks which code to send; this
 // helper just normalises the agent serialisation and the error string.
-func runtimeHasActiveAgentsResponse(agents []db.Agent) map[string]any {
+func (h *Handler) runtimeHasActiveAgentsResponse(agents []db.Agent) map[string]any {
 	resp := make([]AgentResponse, len(agents))
 	for i, a := range agents {
-		resp[i] = agentToResponse(a)
+		resp[i] = h.agentToResponse(a)
 	}
 	return map[string]any{
 		"error":         "cannot delete runtime: it has active agents bound to it. Archive or reassign the agents first.",
@@ -1005,7 +1038,7 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		// shared response helper but overrides the code to a planning
 		// signal so the dialog can distinguish "you opened from a stale
 		// page" from "the plan you confirmed just changed under you".
-		body := runtimeHasActiveAgentsResponse(currentActive)
+		body := h.runtimeHasActiveAgentsResponse(currentActive)
 		body["code"] = "runtime_delete_plan_changed"
 		body["error"] = "the active agent set changed; please review and confirm again."
 		writeJSON(w, http.StatusConflict, body)
@@ -1131,7 +1164,7 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 	}
 	for _, a := range archivedAgents {
 		h.publish(protocol.EventAgentArchived, wsID, "member", userID, map[string]any{
-			"agent": agentToResponse(a),
+			"agent": h.agentToResponse(a),
 		})
 	}
 	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{

@@ -1,0 +1,59 @@
+---
+title: Security model
+description: What a Multica task can reach on the machine that runs it, and where the real isolation boundary lives.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+When an agent picks up a task, the daemon spawns an AI coding tool (Codex, Claude Code, and so on) as a child process. Understanding what that process can touch is the whole security model.
+
+## The boundary is the daemon user
+
+By default a task runs with the **full permissions of the operating-system user running the daemon**. It can read and write every file that user can, use that user's credentials, and reach the network without restriction.
+
+Multica makes no filesystem-sandbox guarantee. One narrow exception exists today — Windows, where you have explicitly opted into Codex's native sandbox — but which platform and configuration combinations sandbox anything is a compatibility detail that moves with tool versions. Treat every task as unsandboxed and put the boundary outside the daemon.
+
+<Callout type="warning">
+Multica does not sandbox the filesystem for you. If the daemon runs as your personal user account, a task can read your SSH keys, edit your shell profile, and delete your documents. Isolation has to come from the boundary you put the daemon in.
+</Callout>
+
+This is deliberate. Agents are asked to install dependencies, run builds, use your cloud CLIs, and drive tooling that expects a normal home directory. A partial filesystem sandbox breaks that work in ways that are hard to diagnose — the tool reports "not logged in" or silently uses the wrong account — while still not protecting the thing that matters most, since it cannot stop a task from reading credentials and sending them over the network.
+
+So Multica does not pretend to be the boundary. Put one around it.
+
+## Recommended setups
+
+Pick whichever fits your infrastructure — they are listed from lightest to strongest:
+
+1. **Dedicated Unix user.** Create a `multica` user, give it only the repositories and credentials the agents need, and run the daemon as that user. Your own account stays untouched.
+2. **Container.** Run the daemon in a container with only the mounts and secrets the agents need.
+3. **Virtual machine.** Full isolation, at the cost of provisioning a machine.
+
+Whichever you choose, treat the credentials reachable from that environment as credentials the agent may use: scope tokens narrowly, prefer per-purpose deploy keys over your personal SSH key, and avoid leaving unrelated production credentials in that user's home directory.
+
+## What Multica does isolate
+
+These are real, but they are conveniences and blast-radius reduction — not a security boundary against a task that actively tries to escape:
+
+- **Per-task working directory.** Each task gets its own workdir under `~/multica_workspaces/`, so concurrent tasks do not collide on the same checkout.
+- **Per-task agent state.** Codex tasks get a task-scoped `CODEX_HOME` holding config, sessions, and skills, so per-task settings do not pollute your `~/.codex/`.
+- **Task-scoped API tokens.** The `MULTICA_TOKEN` handed to a task is bound to that agent and that task by the server, so a task cannot act as you or as another agent through the Multica API.
+
+## What is not a boundary
+
+- **The coding tool's own sandbox and approval settings.** Multica runs agents unattended, so approval prompts are answered automatically. On the default path the filesystem sandbox is off as well: Codex runs with `sandbox_mode = "danger-full-access"` and Claude Code with `--permission-mode bypassPermissions`. The exception is Windows — if you explicitly configure Codex's native sandbox (`windows.sandbox = "unelevated"` or `"elevated"`), Multica honors that opt-in and keeps `workspace-write` for those tasks. Worth doing where it fits, but it is one tool on one platform and it does not change how you should scope the daemon user.
+- **Your `HOME` directory layout.** Tasks inherit the daemon user's real `HOME` and `XDG_*` variables, which is what makes host CLIs (`gh`, `aws`, `kubectl`, `gcloud`, `glab`) work inside a task exactly as they do in your shell. It also means everything under that home is reachable.
+
+<Callout>
+On Linux, Codex tasks previously ran under the `workspace-write` sandbox with a redirected per-task `HOME`. That was removed: it left host CLIs unconfigured inside tasks, and because it restricted writes only, it never prevented a task from reading and exfiltrating credentials. Linux now matches the macOS and Windows default.
+</Callout>
+
+## Checking what a task ran with
+
+The daemon logs the effective sandbox mode at warn level when a task starts unsandboxed:
+
+```bash
+multica daemon logs --lines 200 | grep "codex sandbox"
+```
+
+To confirm the effective Codex configuration, read the managed block in the task's `config.toml` under the task's `CODEX_HOME` — the section between the `# BEGIN multica-managed` and `# END multica-managed` markers is written by the daemon on every run.

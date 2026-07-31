@@ -116,6 +116,9 @@ cleared_issue_properties AS (
 cleared_child_done_transitions AS (
     DELETE FROM child_done_transition WHERE workspace_id = $1
 ),
+cleared_quick_actions AS (
+    DELETE FROM quick_action WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
@@ -154,8 +157,8 @@ cleared_client_usage_workspace AS (
 DELETE FROM workspace WHERE workspace.id = $1
 `
 
-// The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
-// property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
+// The channel_* tables (MUL-3515 §4), resource-label junctions, custom issue
+// property definitions, and quick actions carry NO FK to workspace, so — unlike the CASCADE-backed
 // tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
 // their workspace-owned rows here so they commit or roll back atomically with
 // the workspace row.

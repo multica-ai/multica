@@ -14,11 +14,9 @@ import type {
   Issue,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  WorkingAgentSummary,
 } from "@multica/core/types";
-import {
-  myIssuesRelationFromScope,
-  type MyIssuesScope,
-} from "@multica/core/issues/stores/my-issues-view-store";
+import { type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useT } from "../../i18n";
 import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
@@ -29,6 +27,7 @@ import {
 
 export function MyIssuesHeader({
   allIssues,
+  workingAgents,
   scope,
   onScopeChange,
   isRefreshing = false,
@@ -37,6 +36,10 @@ export function MyIssuesHeader({
   onTableFacetChange,
 }: {
   allIssues: Issue[];
+  /** See IssueSurfaceController.workingAgents. My Issues used to ask the
+   *  working-agents endpoint for its own relation-scoped count; the surface
+   *  projection now covers the relation AND every active filter. */
+  workingAgents: WorkingAgentSummary[] | undefined;
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
   isRefreshing?: boolean;
@@ -47,7 +50,6 @@ export function MyIssuesHeader({
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
-  const mineRelation = myIssuesRelationFromScope(scope);
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
     { value: "all", label: t(($) => $.header.scope.all_label), description: t(($) => $.header.scope.all_description) },
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
@@ -116,14 +118,14 @@ export function MyIssuesHeader({
 
         <div className="flex shrink-0 items-center gap-1">
           {agentRunningFilter && (
-            <span className="mr-1 hidden text-xs text-muted-foreground md:inline">
+            <span className="mr-1 hidden text-caption text-muted-foreground md:inline">
               {tIssues(($) => $.agent_activity.filter_active_label)}
             </span>
           )}
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
-            mineRelation={mineRelation === "all" ? "any" : mineRelation}
+            agents={workingAgents}
           />
           <IssueDisplayControls
             scopedIssues={allIssues}

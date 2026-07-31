@@ -129,10 +129,12 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read issue_context.md: %v", err)
 	}
-	for _, want := range []string{"a1b2c3d4-e5f6-7890-abcd-ef1234567890", "Code Review"} {
-		if !strings.Contains(string(content), want) {
-			t.Fatalf("issue_context.md missing %q", want)
-		}
+	if !strings.Contains(string(content), "a1b2c3d4-e5f6-7890-abcd-ef1234567890") {
+		t.Fatalf("issue_context.md missing the issue id")
+	}
+	// The skill list lives in the runtime brief only (MUL-5529).
+	if strings.Contains(string(content), "code-review") {
+		t.Fatalf("issue_context.md should no longer carry a skill list:\n%s", content)
 	}
 
 	markerContent, err := os.ReadFile(filepath.Join(env.WorkDir, TaskContextMarkerRelPath))
@@ -448,20 +450,17 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 
 	s := string(content)
-	for _, want := range []string{
-		"test-issue-id-1234",
-		"## Agent Skills",
-		"Go Conventions",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("content missing %q", want)
-		}
+	if !strings.Contains(s, "test-issue-id-1234") {
+		t.Errorf("content missing %q", "test-issue-id-1234")
 	}
 
 	// Issue details should NOT be in the context file (agent fetches via CLI).
-	for _, absent := range []string{"## Description", "## Workspace Context"} {
+	//
+	// Nor the skill list: nothing ever read this copy, and the runtime brief
+	// carries the same names-only index (MUL-5529).
+	for _, absent := range []string{"## Description", "## Workspace Context", "## Agent Skills", "go-conventions"} {
 		if strings.Contains(s, absent) {
-			t.Errorf("content should NOT contain %q — agent fetches details via CLI", absent)
+			t.Errorf("content should NOT contain %q", absent)
 		}
 	}
 
@@ -941,12 +940,22 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		"Multica Agent Runtime",
 		"multica issue get",
 		"multica issue comment list",
-		"Go Conventions",
-		"PR Review",
+		// Skills are listed by on-disk slug: that is the directory
+		// writeSkillFiles creates and the only identifier the model can
+		// actually invoke (MUL-5529).
+		"go-conventions",
+		"pr-review",
 		"discovered automatically",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+	// The display names must not leak into the listing — a model that reads
+	// "PR Review" and invokes it by that name gets nothing.
+	for _, absent := range []string{"Go Conventions", "PR Review"} {
+		if strings.Contains(s, absent) {
+			t.Errorf("CLAUDE.md lists display name %q instead of its slug", absent)
 		}
 	}
 }
@@ -1129,7 +1138,8 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 }
@@ -1278,22 +1288,26 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 }
 
 // Skill content imported from upstream sources (GitHub, ClawHub, Skills.sh)
-// often already carries its own YAML frontmatter — possibly with a `name`
-// that differs from the DB row's display name to match a specific runtime's
-// expectations. The writer must not clobber that block; it should only
-// synthesize when frontmatter is absent.
-func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
+// often already carries its own YAML frontmatter. The writer keeps that block
+// verbatim with exactly one exception: `name` is forced to the directory slug.
+//
+// The exception exists because runtimes disagree on which field identifies a
+// skill — OpenCode routes on the frontmatter `name`, Claude on the directory
+// name. Leaving an upstream `name` in place therefore gives one skill two
+// different invocable names depending on where it runs (MUL-5529). This test
+// uses opencode precisely because it is the side that would route on the
+// upstream value.
+func TestWriteContextFilesForcesSkillFrontmatterNameToSlug(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	preExisting := "---\nname: upstream-name\ndescription: imported as-is\n---\n\nbody"
 	ctx := TaskContextForEnv{
-		IssueID: "preserve-frontmatter-test",
+		IssueID: "frontmatter-name-test",
 		AgentSkills: []SkillContextForEnv{
 			{
 				Name:        "Display Name",
 				Description: "overridden by upstream frontmatter",
-				Content:     preExisting,
+				Content:     "---\nname: upstream-name\ndescription: imported as-is\ncustom-key: keep me\n---\n\nbody",
 			},
 		},
 	}
@@ -1306,8 +1320,98 @@ func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read SKILL.md: %v", err)
 	}
-	if string(skillMd) != preExisting {
-		t.Errorf("SKILL.md was rewritten; got:\n%s\nwant:\n%s", skillMd, preExisting)
+
+	// name matches the directory it was written into, so both routing
+	// conventions resolve to the same skill.
+	want := "---\nname: display-name\ndescription: imported as-is\ncustom-key: keep me\n---\n\nbody"
+	if string(skillMd) != want {
+		t.Errorf("frontmatter name was not normalized to the slug; got:\n%s\nwant:\n%s", skillMd, want)
+	}
+}
+
+// The directory-name == frontmatter-name invariant must survive collision
+// fallback, where the allocated slug is NOT sanitizeSkillName(Name). A
+// user-installed skill already sitting at the natural slug pushes Multica's
+// copy to `<slug>-multica`; the frontmatter has to follow it there, or the
+// skill answers to the user's slug on Claude and to its own stale name on
+// OpenCode.
+func TestWriteContextFilesFrontmatterNameFollowsCollisionSlug(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Pre-create a user-owned skill at the natural slug.
+	userSkill := filepath.Join(dir, ".opencode", "skills", "review")
+	if err := os.MkdirAll(userSkill, 0o755); err != nil {
+		t.Fatalf("seed user skill: %v", err)
+	}
+	userContent := "---\nname: review\n---\n\nuser's own skill"
+	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte(userContent), 0o644); err != nil {
+		t.Fatalf("seed user SKILL.md: %v", err)
+	}
+
+	ctx := TaskContextForEnv{
+		IssueID: "collision-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Review", Content: "---\nname: whatever-upstream-said\n---\n\nmultica body"},
+		},
+	}
+
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// The user's directory is untouched.
+	got, err := os.ReadFile(filepath.Join(userSkill, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read user SKILL.md: %v", err)
+	}
+	if string(got) != userContent {
+		t.Errorf("user skill was overwritten; got:\n%s", got)
+	}
+
+	// Multica's copy landed at the fallback slug and names itself after it.
+	moved, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "review-multica", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read relocated SKILL.md: %v", err)
+	}
+	want := "---\nname: review-multica\n---\n\nmultica body"
+	if string(moved) != want {
+		t.Errorf("frontmatter name did not follow the collision slug; got:\n%s\nwant:\n%s", moved, want)
+	}
+}
+
+// The name rewrite must not disturb neighbouring keys, including a nested
+// mapping that happens to contain its own `name`. Only the top-level key is
+// the skill's identity; rewriting an indented one would splice a top-level key
+// into the middle of the nested block and corrupt the YAML.
+func TestWriteContextFilesLeavesNestedFrontmatterNameAlone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "nested-name-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Nested",
+				Content: "---\nmetadata:\n  name: inner\n---\n\nbody",
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "nested", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read SKILL.md: %v", err)
+	}
+
+	// The block has no top-level name, so one is injected; `metadata.name`
+	// stays put.
+	want := "---\nname: nested\nmetadata:\n  name: inner\n---\n\nbody"
+	if string(skillMd) != want {
+		t.Errorf("nested name handling is wrong; got:\n%s\nwant:\n%s", skillMd, want)
 	}
 }
 
@@ -1454,6 +1558,33 @@ func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesQoderCNNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "qoderclicn-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "qoderclicn", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".qoder", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .qoder/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Qoder CN provider")
+	}
+}
+
 func TestWriteContextFilesQwenNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1504,7 +1635,8 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -1539,7 +1671,8 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -1569,11 +1702,34 @@ func TestInjectRuntimeConfigQoder(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
 		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+}
+
+func TestInjectRuntimeConfigQoderCN(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-qoderclicn-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "qoderclicn", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(content), "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
 	}
 }
 
@@ -1602,7 +1758,8 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -2051,7 +2208,8 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	// Hermes now discovers skills from the daemon-seeded per-task
@@ -2187,14 +2345,14 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("config.json content = %q", data)
 	}
 
-	// config.toml should be copied and have network access appended.
+	// config.toml should be copied and have the managed sandbox block prepended.
 	data, _ = os.ReadFile(filepath.Join(codexHome, "config.toml"))
 	tomlStr := string(data)
 	if !strings.Contains(tomlStr, `model = "o3"`) {
 		t.Errorf("config.toml missing original model setting, got: %q", tomlStr)
 	}
-	if !strings.Contains(tomlStr, "network_access = true") {
-		t.Errorf("config.toml missing network_access, got: %q", tomlStr)
+	if !strings.Contains(tomlStr, "sandbox_mode = ") {
+		t.Errorf("config.toml missing managed sandbox_mode, got: %q", tomlStr)
 	}
 
 	// instructions.md should be copied.
@@ -2648,18 +2806,14 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	if !strings.Contains(s, multicaManagedBeginMarker) || !strings.Contains(s, multicaManagedEndMarker) {
 		t.Errorf("missing managed block markers, got:\n%s", s)
 	}
-	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
 		t.Error("missing sandbox_mode")
 	}
-	// The managed block uses TOML dotted-key form rather than a
-	// `[sandbox_workspace_write]` section header so it cannot leak into or
-	// inherit from any surrounding table scope. See upsertMulticaManagedBlock
-	// for why.
-	if strings.Contains(s, "[sandbox_workspace_write]") {
-		t.Errorf("managed block must not open a [sandbox_workspace_write] table header, got:\n%s", s)
-	}
-	if !strings.Contains(s, "sandbox_workspace_write.network_access = true") {
-		t.Errorf("missing dotted-key network_access = true, got:\n%s", s)
+	// Linux tasks run unsandboxed on the daemon user's real HOME, so nothing
+	// under sandbox_workspace_write applies — neither the table header nor the
+	// dotted-key form should be emitted (MUL-5578).
+	if strings.Contains(s, "sandbox_workspace_write") {
+		t.Errorf("must not emit any sandbox_workspace_write key under danger-full-access, got:\n%s", s)
 	}
 }
 
@@ -2795,8 +2949,8 @@ approval_policy = "on-failure"
 	if !strings.Contains(s, "approval_policy") {
 		t.Error("lost existing approval_policy")
 	}
-	if !strings.Contains(s, "network_access = true") {
-		t.Error("missing network_access = true")
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
+		t.Error("missing managed sandbox_mode")
 	}
 }
 
@@ -2951,14 +3105,16 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 		version  string
 		wantMode string
 		wantNet  bool
-		// wantHint is whether the policy carries an actionable upgrade hint.
-		// Only the macOS seatbelt fallback has one; the Windows compatibility
-		// fallback has no generic upgrade action, so it must not surface a
-		// misleading macOS hint.
+		// wantHint is whether the policy carries an actionable remediation hint.
+		// macOS points at a Codex upgrade and Linux at running the daemon inside
+		// an outer boundary; the Windows compatibility fallback has no generic
+		// action, so it must not surface a misleading macOS hint.
 		wantHint bool
 	}{
-		{"linux any version", "linux", "0.100.0", "workspace-write", true, false},
-		{"linux unknown version", "linux", "", "workspace-write", true, false},
+		// Linux runs unsandboxed by product decision, on any Codex version
+		// (MUL-5578) — there is no version-dependent branch to exercise here.
+		{"linux any version", "linux", "0.100.0", "danger-full-access", false, true},
+		{"linux unknown version", "linux", "", "danger-full-access", false, true},
 		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
 		{"windows unknown version", "windows", "", "danger-full-access", false, false},
 		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
@@ -2999,7 +3155,7 @@ func TestCodexSandboxPolicyForConfig(t *testing.T) {
 		{"windows undecidable fails closed", "windows", windowsSandboxUndecidable, "workspace-write", true},
 		{"windows absent falls back", "windows", windowsSandboxAbsent, "danger-full-access", false},
 		// Non-Windows platforms ignore winState entirely.
-		{"linux ignores winState", "linux", windowsSandboxNative, "workspace-write", true},
+		{"linux ignores winState", "linux", windowsSandboxNative, "danger-full-access", false},
 		{"darwin ignores winState", "darwin", windowsSandboxNative, "danger-full-access", false},
 	}
 	for _, tc := range cases {
@@ -3254,7 +3410,12 @@ func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
 	}
 }
 
-func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
+// TestPrepareCodexHomeWritesManagedSandboxBlock checks that preparing a codex
+// home wires the resolved policy all the way into config.toml. With an empty
+// shared home the resolved mode is danger-full-access on every platform — Linux
+// and macOS by their own defaults, Windows because no native windows.sandbox is
+// configured — so the expectation is host-independent.
+func TestPrepareCodexHomeWritesManagedSandboxBlock(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	// Empty shared home — no config.toml to copy.
@@ -3262,22 +3423,25 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
-	// Default prepareCodexHome assumes linux-like behavior.
 	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// config.toml should be created with network access defaults.
 	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
 	if err != nil {
 		t.Fatalf("config.toml not created: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "network_access = true") {
-		t.Error("config.toml missing network_access = true")
+	if !strings.Contains(s, multicaManagedBeginMarker) {
+		t.Errorf("config.toml missing managed block, got:\n%s", s)
 	}
-	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
-		t.Error("config.toml missing sandbox_mode")
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
+		t.Errorf("config.toml missing danger-full-access sandbox_mode, got:\n%s", s)
+	}
+	// Nothing under sandbox_workspace_write applies when the filesystem is not
+	// sandboxed; emitting it would imply containment that does not exist.
+	if strings.Contains(s, "sandbox_workspace_write") {
+		t.Errorf("config.toml must not emit sandbox_workspace_write under danger-full-access, got:\n%s", s)
 	}
 }
 
@@ -4600,14 +4764,26 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestBuildMetaSkillContentEmitsTaskInitiatorMember pins MUL-2645's brief
-// contract: when the task resolves to a member initiator, the brief gains a
-// `## Task Initiator` block naming that person (with email) and stating the
-// privacy boundary — the agent's credentials stay owner-scoped. This is what
-// lets a workspace-visible, multi-user agent tell who is actually asking
-// rather than seeing every requester as the runtime owner.
-func TestBuildMetaSkillContentEmitsTaskInitiatorMember(t *testing.T) {
+// Task Initiator moved to the per-turn prompt (MUL-5377): the initiator
+// changes whenever a different person comments on the same issue.
+func TestTaskInitiatorBlockMember(t *testing.T) {
 	t.Parallel()
+	block := BuildTaskInitiatorBlock("member", "Bohan", "bohan@example.com")
+
+	for _, want := range []string{
+		"## Task Initiator",
+		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
+		"apply any per-person privacy or access rules",
+		"credentials stay scoped to the runtime owner",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("expected initiator block to contain %q\n---\n%s", want, block)
+		}
+	}
+	if BuildTaskInitiatorBlock("member", "", "") != "" {
+		t.Error("no initiator name must render nothing")
+	}
+
 	content := buildMetaSkillContent("claude", TaskContextForEnv{
 		IssueID:        "issue-1",
 		AgentName:      "Lambda",
@@ -4617,46 +4793,20 @@ func TestBuildMetaSkillContentEmitsTaskInitiatorMember(t *testing.T) {
 		InitiatorName:  "Bohan",
 		InitiatorEmail: "bohan@example.com",
 	})
-
-	for _, want := range []string{
-		"## Task Initiator",
-		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
-		"apply any per-person privacy or access rules",
-		"credentials stay scoped to the runtime owner",
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("expected brief to contain %q\n---\n%s", want, content)
-		}
-	}
-
-	// Initiator sits after Requesting User and before Available Commands so the
-	// agent reads "who am I" → "whose context" → "who is asking now" → commands.
-	initiatorIdx := strings.Index(content, "## Task Initiator")
-	commandsIdx := strings.Index(content, "## Available Commands")
-	if !(initiatorIdx >= 0 && initiatorIdx < commandsIdx) {
-		t.Errorf("section order wrong: initiator=%d commands=%d", initiatorIdx, commandsIdx)
+	if strings.Contains(content, "## Task Initiator") {
+		t.Errorf("brief must not carry Task Initiator — it is per-run state (MUL-5377)\n---\n%s", content)
 	}
 }
 
-// TestBuildMetaSkillContentEmitsTaskInitiatorAgent covers an agent-initiated
-// task (another agent @mentioned this one): the block names the agent and
-// carries no email, since agents have no address.
-func TestBuildMetaSkillContentEmitsTaskInitiatorAgent(t *testing.T) {
+func TestTaskInitiatorBlockAgent(t *testing.T) {
 	t.Parallel()
-	content := buildMetaSkillContent("claude", TaskContextForEnv{
-		IssueID:       "issue-1",
-		AgentName:     "Lambda",
-		AgentID:       "agent-1",
-		InitiatorType: "agent",
-		InitiatorID:   "agent-9",
-		InitiatorName: "GPT-Boy",
-	})
+	block := BuildTaskInitiatorBlock("agent", "GPT-Boy", "")
 
-	if !strings.Contains(content, "initiated by **GPT-Boy**, another agent in this workspace") {
-		t.Errorf("expected agent-initiator phrasing\n---\n%s", content)
+	if !strings.Contains(block, "initiated by **GPT-Boy**, another agent in this workspace") {
+		t.Errorf("expected agent-initiator phrasing\n---\n%s", block)
 	}
-	if strings.Contains(content, "a member of this workspace") {
-		t.Errorf("agent initiator must not be described as a member\n---\n%s", content)
+	if strings.Contains(block, "a member of this workspace") {
+		t.Errorf("agent initiator must not be described as a member\n---\n%s", block)
 	}
 }
 
@@ -4722,14 +4872,9 @@ func TestSanitizeEmailForBrief(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerColdStartRead checks the
-// comment-triggered Workflow on cold start (no prior run): it points the agent
-// at the triggering thread (--thread <trigger> --tail 30) instead of the flat
-// dump and with no since-delta hint, while the Available Commands core line
-// still surfaces the thread/recent/cursor flags so they remain discoverable for
-// CLI use even though the verbose cursor walkthrough was dropped from the
-// workflow steps.
-func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
+// The brief carries the static catch-up read and the CLI flag discovery
+// point; the per-run thread routing lives in the per-turn prompt (MUL-5377).
+func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -4737,11 +4882,10 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 		triggerID = "trigger-comment-1"
 	)
 	dir := t.TempDir()
-	ctx := TaskContextForEnv{
+	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{
 		IssueID:          issueID,
 		TriggerCommentID: triggerID,
-	}
-	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
@@ -4750,55 +4894,34 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	}
 	s := string(data)
 
-	// Cold start (no prior run) → read the triggering thread, not the flat dump,
-	// and no since-delta hint.
-	for _, want := range []string{
-		"Read the triggering conversation first",
-		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
-		"multica issue comment list " + issueID + " --recent 10 --output json",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
-		}
+	if !strings.Contains(s, "multica issue comment list "+issueID+" --roots-only --summary --output json") {
+		t.Errorf("brief must keep the static catch-up read\n---\n%s", s)
 	}
 	if strings.Contains(s, "--recent 20") {
-		t.Errorf("comment-triggered Workflow still uses recent 20\n---\n%s", s)
+		t.Errorf("brief still uses recent 20\n---\n%s", s)
+	}
+	if strings.Contains(s, triggerID) {
+		t.Errorf("brief must not carry the trigger comment id (MUL-5377)\n---\n%s", s)
 	}
 	if strings.Contains(s, "new comment(s) since your last run") {
-		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
+		t.Errorf("brief must not render a since-delta hint\n---\n%s", s)
 	}
 
-	// Available Commands core line must surface the new flags (this is the
-	// single discovery point for non-workflow CLI use cases).
+	// Available Commands stays the single discovery point for the flags.
 	for _, want := range []string{
 		"[--thread <comment-id>",
 		"--tail N",
 		"--recent N",
-		"Next reply cursor",
-		"Next thread cursor",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("Available Commands core line missing %q\n---\n%s", want, s)
+			t.Errorf("Available Commands missing flag documentation %q\n---\n%s", want, s)
 		}
-	}
-
-	// The legacy step-2 phrasing this PR replaces must not regress.
-	if strings.Contains(s, "read the conversation (returns all comments, capped server-side at 2000)") {
-		t.Errorf("comment-triggered Workflow still carries the legacy full-dump phrasing\n---\n%s", s)
-	}
-	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
-	// regression target: it dumps the entire thread on long threads.
-	if strings.Contains(s, "multica issue comment list "+issueID+" --thread "+triggerID+" --output json") {
-		t.Errorf("comment-triggered Workflow regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n---\n%s", s)
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead checks the
-// comment-triggered Workflow when the daemon is resuming a prior session and no
-// since-delta hint is present. In that shape, the agent already has session
-// context and the trigger body is injected in the per-turn prompt, so the
-// runtime brief must not force a duplicate thread read.
-func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
+// Resumed/no-delta routing lives in the per-turn prompt (MUL-5377); pin the
+// helper that renders it and assert the brief stays clean.
+func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -4806,13 +4929,12 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 		triggerID = "trigger-comment-1"
 	)
 	dir := t.TempDir()
-	ctx := TaskContextForEnv{
+	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{
 		IssueID:             issueID,
 		TriggerCommentID:    triggerID,
 		TriggerThreadID:     "thread-root-1",
 		PriorSessionResumed: true,
-	}
-	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
@@ -4821,6 +4943,13 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 	}
 	s := string(data)
 
+	for _, banned := range []string{triggerID, "thread-root-1", "triggering comment is already included above"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("brief must not carry per-run resume routing %q (MUL-5377)\n---\n%s", banned, s)
+		}
+	}
+
+	hint := BuildResumedCommentsHint(issueID, triggerID, "thread-root-1")
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
@@ -4829,23 +4958,17 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 		"do not rely only on resumed session memory",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
 	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("comment-triggered resumed Workflow missing %q\n---\n%s", want, s)
+		if !strings.Contains(hint, want) {
+			t.Errorf("resumed hint missing %q\n---\n%s", want, hint)
 		}
-	}
-	if strings.Contains(s, "scoped to the triggering thread") {
-		t.Errorf("resumed Workflow must not claim the delta is thread-scoped\n---\n%s", s)
-	}
-	if strings.Contains(s, "Read the triggering conversation first") {
-		t.Errorf("resumed workflow must not force the cold-start thread read\n---\n%s", s)
 	}
 }
 
-// TestInjectRuntimeConfigAssignmentTriggerMentionsRecent pins that the
+// TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst pins that the
 // assignment-triggered Workflow keeps comment catch-up mandatory while bounding
-// the mandatory first read to the recent active-thread window. Older context
-// stays reachable through explicit pagination.
-func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
+// the mandatory first read to a roots scan. Older context stays reachable
+// through explicit pagination.
+func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -4861,17 +4984,20 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	// Mandatory comment catch-up must stay, but the required first read is
 	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"multica issue comment list issue-1 --recent 10 --output json",
+		"multica issue comment list issue-1 --roots-only --summary --output json",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("assignment Workflow regressed mandatory recent-first catch-up, missing %q\n---\n%s", want, s)
+			t.Errorf("assignment Workflow regressed mandatory scan-first catch-up, missing %q\n---\n%s", want, s)
 		}
 	}
-	// Older context must remain reachable through pagination.
+	// Older context must remain reachable through pagination. The cursor label
+	// and flags are documented in `## Available Commands` rather than restated
+	// inside the step (MUL-5372), so assert the label itself, not the literal
+	// `Next thread cursor: ...` stderr line the old step-3 copy quoted.
 	for _, want := range []string{
-		"Next thread cursor:",
+		"Next thread cursor",
 		"--before",
 		"--before-id",
 	} {
@@ -4895,6 +5021,69 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	} {
 		if strings.Contains(s, banned) {
 			t.Errorf("assignment Workflow regressed to replacement-style --recent phrasing %q\n---\n%s", banned, s)
+		}
+	}
+}
+
+// TestInjectRuntimeConfigCatchUpScansRootsFirst locks in MUL-5372: the
+// mandatory step-3 catch-up leads with a bounded `--roots-only --summary` scan
+// and an explicit per-thread drill-down, instead of making `--recent 10` the
+// required first read. `--recent N` caps threads, not comments — it returns every
+// descendant of each thread — so as the mandatory read it handed every run the
+// issue's entire comment history, and duplicated the bounded thread read the
+// per-turn message already points at on comment-triggered turns.
+//
+// It also pins the placement rule: the workflow step names only the reads it
+// mandates, while flag semantics (including the saturation trap) live once in
+// `## Available Commands`. Restating them per step is what bloated the step.
+func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		// The cheap scan is the first thing step 3 asks for.
+		"multica issue comment list issue-1 --roots-only --summary --output json",
+		// ...followed by an explicit, bounded drill-down.
+		"multica issue comment list issue-1 --thread <thread-id> --tail 30 --output json",
+		// The saturation semantics that made --recent 10 misleading are stated
+		// once, in the flag reference rather than in the step.
+		"caps THREADS, not comments",
+		"no per-thread cap",
+		"fewer than N root threads",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("brief missing bounded catch-up guidance %q\n---\n%s", want, s)
+		}
+	}
+
+	// The workflow steps must not hand the agent a ready-to-paste bulk read;
+	// that is what made the mandatory step pull whole histories.
+	if strings.Contains(s, "multica issue comment list issue-1 --recent") {
+		t.Errorf("workflow steps must not present an issue-scoped --recent command\n---\n%s", s)
+	}
+	// The saturation warning belongs to the flag reference, which introduces
+	// the flag generically as `--recent N`.
+	if !strings.Contains(s, "--recent N") {
+		t.Errorf("Available Commands must still document --recent N\n---\n%s", s)
+	}
+
+	// The catch-up stays mandatory — this change is about payload shape, not
+	// about letting agents skip context and act on stale instructions.
+	for _, want := range []string{
+		"this is mandatory, not optional",
+		"Skipping this step is the most common cause",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("step 3 must stay mandatory, missing %q\n---\n%s", want, s)
 		}
 	}
 }
@@ -5142,10 +5331,10 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
 			t.Fatalf("codex linux --content-file rule missing\n---\n%s", s)
 		}
-		// ...AND the per-turn reply instruction still points at this
-		// turn's trigger comment id.
-		if !strings.Contains(s, "--parent comment-md-codex") {
-			t.Fatalf("reply instruction lost trigger comment id\n---\n%s", s)
+		// ...AND the brief does NOT carry this turn's trigger comment id:
+		// it moved to the per-turn user message (MUL-5377).
+		if strings.Contains(s, "comment-md-codex") {
+			t.Fatalf("brief must not carry the trigger comment id\n---\n%s", s)
 		}
 	})
 

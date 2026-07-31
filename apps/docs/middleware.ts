@@ -50,7 +50,7 @@ export const config = {
   // routing them through the locale rewrite would 404 the sitemap that
   // robots.txt advertises to crawlers.
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api|_next/static|_next/image|images|favicon.ico|sitemap.xml|robots.txt).*)",
     "/",
   ],
 };

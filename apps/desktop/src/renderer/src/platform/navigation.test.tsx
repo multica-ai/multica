@@ -219,6 +219,44 @@ describe("back", () => {
   });
 });
 
+// Consumed by `useBackOrReplace` — a page whose subject was deleted steps back
+// only when this says there is somewhere to step back to.
+describe("canGoBack", () => {
+  it("is false on a tab sitting at the start of its history", () => {
+    const getAdapter = renderProvider();
+
+    expect(getActiveTab(useTabStore.getState())!.history.index).toBe(0);
+    expect(getAdapter().canGoBack!()).toBe(false);
+  });
+
+  it("is true once the tab has navigated in place", () => {
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/acme/projects");
+
+    expect(getActiveTab(useTabStore.getState())!.history.index).toBe(1);
+    expect(getAdapter().canGoBack!()).toBe(true);
+  });
+
+  it("is false again after stepping back to the start", () => {
+    const getAdapter = renderProvider();
+    getAdapter().push("/acme/projects");
+
+    getAdapter().back!();
+
+    expect(getAdapter().canGoBack!()).toBe(false);
+  });
+
+  it("is false for a freshly opened tab, which starts its own history", () => {
+    const getAdapter = renderProvider();
+    getAdapter().push("/acme/projects");
+
+    getAdapter().openInNewTab!("/acme/agents", "Agents", { activate: true });
+
+    expect(getAdapter().canGoBack!()).toBe(false);
+  });
+});
+
 describe("routeContentLinkPath (links inside content — MUL-5208)", () => {
   it("opens a same-workspace path in a foreground tab of its own", () => {
     routeContentLinkPath("/acme/issues/MUL-1");

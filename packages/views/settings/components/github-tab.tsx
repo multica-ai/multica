@@ -142,10 +142,10 @@ export function GitHubTab() {
                   <GitHubMark className="h-4 w-4" />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="github-master" className="text-sm font-medium">
+                  <Label htmlFor="github-master" className="text-body font-medium">
                     {t(($) => $.github.section_master)}
                   </Label>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-body text-muted-foreground">
                     {flags.enabled
                       ? t(($) => $.github.master_description_on)
                       : t(($) => $.github.master_description_off)}
@@ -164,23 +164,23 @@ export function GitHubTab() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">{t(($) => $.github.section_connection)}</h2>
+        <h2 className="text-body font-semibold">{t(($) => $.github.section_connection)}</h2>
         <Card>
           <CardContent className="space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
                 <GitHubMark className="h-6 w-6 mt-0.5 shrink-0" />
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">{t(($) => $.github.connection_title)}</p>
+                  <p className="text-body font-medium">{t(($) => $.github.connection_title)}</p>
                   {connected ? (
                     <>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-caption text-muted-foreground">
                         {t(($) => $.github.connected_to, {
                           login: installations.map((i) => i.account_login).join(", "),
                         })}
                       </p>
                       {primaryInstallation?.connected_by && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-caption text-muted-foreground">
                           {t(($) => $.github.connected_by, {
                             name: primaryInstallation.connected_by!,
                           })}
@@ -188,16 +188,16 @@ export function GitHubTab() {
                       )}
                     </>
                   ) : canManage ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       {t(($) => $.github.connection_description_prefix)}{" "}
-                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                      <code className="rounded bg-muted px-1 py-0.5 text-micro">
                         {t(($) => $.github.connection_identifier_example)}
                       </code>{" "}
                       {t(($) => $.github.connection_description_suffix)}{" "}
                       <strong>{t(($) => $.github.connection_description_done)}</strong>.
                     </p>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       {t(($) => $.github.contact_admin_to_connect)}
                     </p>
                   )}
@@ -237,16 +237,16 @@ export function GitHubTab() {
             </div>
 
             {canManage && !configured && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.github.not_configured)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_APP_SLUG</code>{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_APP_SLUG</code>{" "}
                 {t(($) => $.github.not_configured_and)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_WEBHOOK_SECRET</code>.
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_WEBHOOK_SECRET</code>.
               </p>
             )}
 
             {!canManage && connected && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.github.read_only_hint)}
               </p>
             )}
@@ -255,7 +255,7 @@ export function GitHubTab() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">{t(($) => $.github.section_features)}</h2>
+        <h2 className="text-body font-semibold">{t(($) => $.github.section_features)}</h2>
         <Card className="gap-0 py-0">
           <CardContent className="divide-y divide-surface-border px-0">
             <FeatureRow
@@ -263,7 +263,7 @@ export function GitHubTab() {
               icon={<PanelRight className="h-4 w-4" />}
               label={t(($) => $.github.feature_pr_sidebar_label)}
               description={
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   {t(($) => $.github.feature_pr_sidebar_description)}
                 </p>
               }
@@ -277,9 +277,9 @@ export function GitHubTab() {
               icon={<GitCommitHorizontal className="h-4 w-4" />}
               label={t(($) => $.github.feature_co_author_label)}
               description={
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   {t(($) => $.github.feature_co_author_description_prefix)}{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  <code className="rounded bg-muted px-1 py-0.5 text-caption">
                     {"Co-authored-by: multica-agent <github@multica.ai>"}
                   </code>{" "}
                   {t(($) => $.github.feature_co_author_description_suffix)}
@@ -295,7 +295,7 @@ export function GitHubTab() {
               icon={<Link2 className="h-4 w-4" />}
               label={t(($) => $.github.feature_auto_link_label)}
               description={
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   {t(($) => $.github.feature_auto_link_description)}
                 </p>
               }
@@ -308,11 +308,11 @@ export function GitHubTab() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">{t(($) => $.github.section_repositories)}</h2>
+        <h2 className="text-body font-semibold">{t(($) => $.github.section_repositories)}</h2>
         <Card>
           <CardContent>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm font-medium">
+              <p className="text-body font-medium">
                 {t(($) => $.github.repositories_shortcut_label)}
               </p>
               <Button
@@ -381,7 +381,7 @@ function FeatureRow({
       <div className="flex items-start gap-3">
         <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground">{icon}</div>
         <div className="space-y-1">
-          <Label htmlFor={id} className="text-sm font-medium">
+          <Label htmlFor={id} className="text-body font-medium">
             {label}
           </Label>
           {description}

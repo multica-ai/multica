@@ -1,0 +1,84 @@
+---
+title: 자체 호스팅 Git 코드 호스팅
+description: 워크스페이스마다 자체 호스팅 Forgejo, Gitea, GitLab 인스턴스를 연결해 이슈 번호를 참조한 Pull Request / Merge Request를 해당 이슈에 자동 연결하고, merge 시 완료로 옮기며 CI 상태를 표시합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+**자체 배포한 Multica에서만 사용할 수 있습니다.** 이 연동은 Multica를 **직접 배포해 운영할 때만** 제공되며 Multica Cloud에서는 사용할 수 없습니다. 여기서 "자체 호스팅"은 **Multica 자체를 배포하는 것**을 뜻합니다. 일반적으로 자체 네트워크의 Git 인스턴스에 접근하기 위해 사용합니다. 서버 운영자가 `MULTICA_VCS_INTEGRATION_ENABLED=true`로 기능을 켜고 `MULTICA_VCS_SECRET_KEY`도 설정해야 합니다. 그전에는 설정 → 연동에 이 영역이 표시되지 않습니다.
+</Callout>
+
+Multica는 워크스페이스별로 자체 호스팅 Git 코드 호스팅인 **Forgejo**, **Gitea**, **GitLab** 중 하나에 연결합니다. 연결하면 브랜치 이름, 제목, 본문에 이슈 번호(예: `MUL-123`)가 포함된 Pull Request(GitLab에서는 Merge Request)가 해당 [이슈](/issues)에 **자동으로 연결**되고 이슈 사이드바의 **Pull requests**에 표시됩니다. 종료 키워드가 있는 PR이 merge되면 이슈가 완료로 이동합니다. head commit의 CI는 카드에 check bar로 표시됩니다.
+
+이 코드 호스팅은 GitHub와 동시에 사용할 수 있으며 워크스페이스 하나에서 원하는 대로 조합할 수 있습니다.
+
+<Callout type="info">
+GitHub와 달리 이 코드 호스팅에는 "App" 모델이 없습니다. 워크스페이스마다 인스턴스 URL과 액세스 token을 저장하고 저장소 또는 조직에 Webhook을 등록합니다. Token과 Webhook secret은 모두 암호화되어 저장됩니다.
+</Callout>
+
+## 사전 조건(서버)
+
+먼저 이 배포에서 연동을 켭니다. 기본값은 꺼짐이며 활성화하기 전에는 해당 영역이 표시되지 않습니다.
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+공식 자체 호스팅 `docker compose` 파일(`docker-compose.selfhost.yml`)에는 이미 설정되어 있습니다.
+
+그런 다음 서버가 저장된 자격 증명을 암호화할 수 있도록 base64로 인코딩한 32바이트 키를 설정합니다. 설정하지 않으면 연결 양식을 사용할 수 없습니다.
+
+```sh
+openssl rand -base64 32
+```
+
+```sh
+MULTICA_VCS_SECRET_KEY=<base64 32바이트 키>
+```
+
+두 값이 모두 필요합니다. 스위치는 기능을 제공할지 결정하고 키는 저장된 token과 Webhook secret을 암호화합니다. 연결, Webhook, 교체 모두 두 설정을 함께 요구합니다.
+
+`MULTICA_PUBLIC_URL`을 서버의 공개 base URL로 설정하면 Multica가 바로 붙여 넣을 수 있는 Webhook URL을 표시합니다. 설정하지 않으면 화면에 Webhook 경로만 표시되므로 origin을 직접 앞에 붙여야 합니다.
+
+## 워크스페이스 연결
+
+1. Git 코드 호스팅에서 저장소 읽기 권한이 있는 액세스 token을 만듭니다.
+   - **Forgejo / Gitea**: 설정 → 애플리케이션.
+   - **GitLab**: `read_api` 권한이 있는 개인(또는 그룹/프로젝트) 액세스 token.
+2. Multica에서 **설정 → 연동 → Git 코드 호스팅**을 엽니다.
+3. **제공자**를 선택하고 인스턴스 URL(예: `https://forgejo.example.com`)과 액세스 token을 입력한 뒤 **연결**을 클릭합니다. Multica는 저장하기 전에 해당 token으로 인스턴스에 접근해 검증합니다.
+4. 연결 후 표시되는 **Webhook URL**과 **Webhook secret**을 복사합니다.
+
+<Callout type="warn">
+Webhook secret은 한 번만 표시됩니다. 페이지를 떠나기 전에 복사하세요. 같은 인스턴스에 다시 연결하면 token과 secret이 교체됩니다.
+</Callout>
+
+## Webhook 등록
+
+저장소에서 설정합니다. 모든 저장소를 포함하려면 조직 또는 그룹에서 설정할 수도 있습니다.
+
+**Forgejo / Gitea** — 설정 → Webhook → Webhook 추가 → Forgejo/Gitea:
+
+- **대상 URL**: 이전 단계의 Webhook URL.
+- **HTTP 메서드** `POST`, **콘텐츠 유형** `application/json`.
+- **secret**: Webhook secret(`X-Gitea-Signature` HMAC 검증에 사용).
+- **트리거 이벤트**: **Pull Request**를 선택하고 CI를 미러링하려면 **Commit Status**도 선택합니다.
+
+**GitLab** — 설정 → Webhooks:
+
+- **URL**: Webhook URL.
+- **Secret token**: Webhook secret(`X-Gitlab-Token`으로 전송되고 문자열 그대로 비교).
+- **트리거**: **Merge request events**를 활성화하고 CI를 미러링하려면 **Pipeline events**도 활성화합니다.
+
+Multica는 저장된 secret으로 모든 delivery를 검증하므로 일치하는 secret이 없는 Webhook은 거부됩니다.
+
+## 미러링되는 내용
+
+- **Pull / Merge Request** — open, closed, merged, draft 상태와 작성자, 브랜치, 그리고 코드 호스팅이 제공하는 경우 diff 통계.
+- **이슈 연결** — 제목, 본문, 브랜치의 번호가 PR을 이슈에 연결합니다. merge된 PR에 종료 키워드(`Closes`/`Fixes`/`Resolves MUL-123`)가 있고 open 상태인 연결 PR이 더 없으면 이슈를 완료로 옮깁니다.
+- **CI** — Forgejo/Gitea commit status와 GitLab pipeline을 head commit의 통과/실패/진행 중 check bar로 집계합니다.
+
+## 에이전트의 Pull Request 생성
+
+PR을 만드는 데 Multica의 Git 코드 호스팅 설정은 필요하지 않습니다. 에이전트는 런타임에서 저장소를 checkout하고 런타임 host 자체의 Git 자격 증명으로 브랜치를 push하고 PR을 만듭니다. 에이전트가 특정 코드 호스팅에서 작업하게 하려면 SSH deploy key 또는 host의 Git credential helper에 저장된 token 등을 사용해 데몬 host가 해당 서비스에 인증할 수 있게 하고 평소처럼 저장소 URL을 추가하세요. 저장소 checkout은 모든 Git URL을 지원하므로 제공자별 설정이 필요하지 않습니다.

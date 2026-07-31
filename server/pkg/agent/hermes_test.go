@@ -864,6 +864,97 @@ func TestHermesClientAcceptNotificationGate(t *testing.T) {
 	}
 }
 
+// TestHermesBackendEmitsSessionStatusBeforeCompletion pins the producer side
+// of the daemon's mid-flight resume contract. Both a fresh session and a
+// resumed session must reveal the effective session ID before the prompt
+// finishes, otherwise a daemon restart can lose the only usable resume pointer.
+func TestHermesBackendEmitsSessionStatusBeforeCompletion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tests := []struct {
+		name            string
+		resumeSessionID string
+		effectiveID     string
+	}{
+		{name: "fresh", effectiveID: "ses_new"},
+		{name: "resume uses returned id", resumeSessionID: "ses_old", effectiveID: "ses_resumed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			fakePath := filepath.Join(tempDir, "hermes")
+			gatePath := filepath.Join(tempDir, "release-prompt")
+			script := fmt.Sprintf(`#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*|*'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"%s"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      while [ ! -f "$HERMES_TEST_GATE" ]; do sleep 0.01; done
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`, tt.effectiveID)
+			writeTestExecutable(t, fakePath, []byte(script))
+
+			backend, err := New("hermes", Config{
+				ExecutablePath: fakePath,
+				Logger:         slog.Default(),
+				Env:            map[string]string{"HERMES_TEST_GATE": gatePath},
+			})
+			if err != nil {
+				t.Fatalf("new hermes backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "prompt", ExecOptions{
+				ResumeSessionID: tt.resumeSessionID,
+				Timeout:         10 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+
+			select {
+			case msg, ok := <-session.Messages:
+				if !ok {
+					t.Fatal("message channel closed before session status")
+				}
+				if msg.Type != MessageStatus || msg.Status != "running" || msg.SessionID != tt.effectiveID {
+					t.Fatalf("session status = %+v, want running with session ID %q", msg, tt.effectiveID)
+				}
+			case result := <-session.Result:
+				t.Fatalf("terminal result arrived before session status: %+v", result)
+			case <-time.After(5 * time.Second):
+				t.Fatal("timeout waiting for mid-flight session status")
+			}
+
+			if err := os.WriteFile(gatePath, []byte("release"), 0o600); err != nil {
+				t.Fatalf("release prompt: %v", err)
+			}
+			select {
+			case result := <-session.Result:
+				if result.Status != "completed" || result.SessionID != tt.effectiveID {
+					t.Fatalf("result = %+v, want completed with session ID %q", result, tt.effectiveID)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for terminal result")
+			}
+		})
+	}
+}
+
 func TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2359,9 +2450,14 @@ func TestIsACPSessionNotFound(t *testing.T) {
 
 // fakeHermesACPStaleResumeScript impersonates the failure shape from
 // GitHub multica#4010: session/resume succeeds and echoes back the
-// requested sessionId (hermes' observed behavior even when it no longer
-// knows the session), and the subsequent session/prompt then fails with
+// requested sessionId, and the subsequent session/prompt then fails with
 // JSON-RPC -32603 "Session not found".
+//
+// This is a real ACP shape and isACPSessionNotFound is shared by every ACP
+// backend, so it stays covered — but it is NOT what Hermes itself does. Hermes
+// reports an unknown session as a *successful* stopReason=refusal and its
+// session/resume response carries no sessionId at all; that shape is covered
+// by fakeHermesACPRefusedResumeScript below (GH #6150).
 func fakeHermesACPStaleResumeScript() string {
 	return `#!/bin/sh
 while IFS= read -r line; do
@@ -3247,5 +3343,244 @@ func TestACPRawText(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("%s: acpRawText(%q) = %q, want %q", tt.name, tt.raw, got, tt.want)
 		}
+	}
+}
+
+// TestHermesResumeSessionLost pins the predicate behind the GH #6150 recovery.
+// Both conditions are load-bearing: a refusal after real agent activity is a
+// model refusal, and a refusal on a fresh session says nothing about resume.
+func TestHermesResumeSessionLost(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		resumeID   string
+		stopReason string
+		activity   int64
+		want       bool
+	}{
+		{name: "resumed refusal with no activity", resumeID: "ses_dead", stopReason: "refusal", want: true},
+		{name: "resumed refusal after activity", resumeID: "ses_dead", stopReason: "refusal", activity: 3},
+		{name: "fresh session refusal", stopReason: "refusal"},
+		{name: "resumed end_turn", resumeID: "ses_ok", stopReason: "end_turn"},
+		{name: "resumed cancelled", resumeID: "ses_ok", stopReason: "cancelled"},
+		{name: "resumed empty stop reason", resumeID: "ses_ok"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hermesResumeSessionLost(tc.resumeID, tc.stopReason, tc.activity); got != tc.want {
+				t.Errorf("hermesResumeSessionLost(%q, %q, %d) = %v, want %v",
+					tc.resumeID, tc.stopReason, tc.activity, got, tc.want)
+			}
+		})
+	}
+}
+
+// fakeHermesACPRefusedResumeScript reproduces what real Hermes does with a
+// session it cannot load, verified against upstream hermes-agent main by
+// driving `hermes acp` over stdio:
+//
+//	session/resume -> success, result carries only _meta/models/modes
+//	                  (ACP ResumeSessionResponse has no sessionId field)
+//	session/prompt -> success, {"stopReason":"refusal"}, no session/update at all
+//
+// Nothing in the exchange is a JSON-RPC error, which is why isACPSessionNotFound
+// cannot see it. Env switches:
+//
+//	ACP_PROVIDER_ERR=1 — also write the stderr Hermes emits when the session's
+//	                     persisted provider identity no longer resolves (#6150).
+//	ACP_ACTIVITY=1     — stream one agent_message_chunk before refusing, the
+//	                     legitimate-refusal control case.
+//	ACP_LATE_ACTIVITY=1 — send that chunk AFTER the refusal and after the
+//	                     notification quiet window has elapsed, i.e. in the gap
+//	                     between quiescence and stdin EOF that Hermes really
+//	                     uses for a turn's final message.
+func fakeHermesACPRefusedResumeScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fresh"}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      if [ "$ACP_PROVIDER_ERR" = "1" ]; then
+        echo '2026-07-30 13:46:51 [WARNING] acp_adapter.session: Failed to recreate agent for ACP session ses_dead' >&2
+        echo 'RuntimeError: No LLM provider configured. Run hermes model to select a provider.' >&2
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"_meta":{},"models":null,"modes":null}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      if [ "$ACP_ACTIVITY" = "1" ]; then
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will not do that."}}}}\n' "$sid"
+      fi
+      if [ "$ACP_PROVIDER_ERR" = "1" ]; then
+        echo '2026-07-30 13:46:51 [ERROR] acp_adapter.server: prompt: session ses_dead not found' >&2
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"refusal"}}\n' "$id"
+      if [ "$ACP_LATE_ACTIVITY" = "1" ]; then
+        sleep 0.6
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Sorry, I will not do that."}}}}\n' "$sid"
+      fi
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func runHermesRefusedResume(t *testing.T, opts ExecOptions, env map[string]string) Result {
+	t.Helper()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPRefusedResumeScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: env})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if opts.Timeout == 0 {
+		opts.Timeout = 20 * time.Second
+	}
+	session, err := backend.Execute(ctx, "continue", opts)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(30 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+	return Result{}
+}
+
+// TestHermesBackendRecoversFromRefusedResume is the GH #6150 regression. A
+// resumed session Hermes cannot rebuild must fail loudly AND surrender the dead
+// session id, so shouldRetryWithFreshSession fires once and the id is retired.
+// Before the fix this reported status=completed with empty output while handing
+// the dead id straight back, so every later comment / approval / @mention on the
+// issue re-resumed it and the agent was usable exactly once per issue.
+func TestHermesBackendRecoversFromRefusedResume(t *testing.T) {
+	t.Parallel()
+
+	result := runHermesRefusedResume(t, ExecOptions{ResumeSessionID: "ses_dead"}, nil)
+
+	if result.Status != "failed" {
+		t.Errorf("status = %q, want failed (a turn that ran nothing must not report success)", result.Status)
+	}
+	if result.Error != hermesResumeLostError {
+		t.Errorf("error = %q, want %q", result.Error, hermesResumeLostError)
+	}
+	if result.SessionID != "" {
+		t.Errorf("session id = %q, want empty so the daemon retries fresh", result.SessionID)
+	}
+	if !result.ResumeRejected {
+		t.Error("ResumeRejected = false, want true so shouldRetryWithFreshSession fires")
+	}
+}
+
+// TestHermesBackendKeepsProviderErrorOnRefusedResume pins the ordering against
+// the provider-error promotion: when the sniffer captured WHY Hermes could not
+// rebuild the session, that reason is what the user needs to see, so the generic
+// fallback must not overwrite it. The recovery signals still apply.
+func TestHermesBackendKeepsProviderErrorOnRefusedResume(t *testing.T) {
+	t.Parallel()
+
+	result := runHermesRefusedResume(t,
+		ExecOptions{ResumeSessionID: "ses_dead"},
+		map[string]string{"ACP_PROVIDER_ERR": "1"},
+	)
+
+	if result.Status != "failed" {
+		t.Errorf("status = %q, want failed", result.Status)
+	}
+	if !strings.Contains(result.Error, "No LLM provider configured") {
+		t.Errorf("error = %q, want the captured provider error rather than the generic fallback", result.Error)
+	}
+	if result.SessionID != "" {
+		t.Errorf("session id = %q, want empty so the daemon retries fresh", result.SessionID)
+	}
+	if !result.ResumeRejected {
+		t.Error("ResumeRejected = false, want true so shouldRetryWithFreshSession fires")
+	}
+}
+
+// TestHermesBackendKeepsSessionOnRefusalAfterActivity is the false-positive
+// guard. A resumed turn that streamed real agent output and then stopped on
+// refusal is a model refusal, not a lost session: dropping the session id there
+// would discard a healthy conversation pointer and re-run the turn.
+func TestHermesBackendKeepsSessionOnRefusalAfterActivity(t *testing.T) {
+	t.Parallel()
+
+	result := runHermesRefusedResume(t,
+		ExecOptions{ResumeSessionID: "ses_dead"},
+		map[string]string{"ACP_ACTIVITY": "1"},
+	)
+
+	if result.SessionID != "ses_dead" {
+		t.Errorf("session id = %q, want the resumed id preserved", result.SessionID)
+	}
+	if result.ResumeRejected {
+		t.Error("ResumeRejected = true, want false — the agent ran, so a fresh session is not the cure")
+	}
+}
+
+// TestHermesBackendKeepsSessionOnRefusalWithLateActivity is the timing
+// false-positive guard. The notification quiet window closing does not end the
+// turn — stdin EOF and the pipe drain do, and Hermes legitimately delivers a
+// turn's final chunk in that gap (see
+// TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse). Deciding
+// "no activity" at the quiescence boundary instead of after the drain would
+// discard this healthy session and re-run the turn.
+func TestHermesBackendKeepsSessionOnRefusalWithLateActivity(t *testing.T) {
+	t.Parallel()
+
+	result := runHermesRefusedResume(t,
+		ExecOptions{ResumeSessionID: "ses_dead"},
+		map[string]string{"ACP_LATE_ACTIVITY": "1"},
+	)
+
+	if result.Output == "" {
+		t.Fatal("late chunk never reached the result; the fixture is not exercising the drain gap")
+	}
+	if result.SessionID != "ses_dead" {
+		t.Errorf("session id = %q, want the resumed id preserved", result.SessionID)
+	}
+	if result.ResumeRejected {
+		t.Error("ResumeRejected = true, want false — the agent answered, only late")
+	}
+}
+
+// TestHermesBackendIgnoresRefusalOnFreshSession is the second false-positive
+// guard: with no session to resume there is nothing to declare lost, so the
+// fresh session id must survive.
+func TestHermesBackendIgnoresRefusalOnFreshSession(t *testing.T) {
+	t.Parallel()
+
+	result := runHermesRefusedResume(t, ExecOptions{}, nil)
+
+	if result.SessionID != "ses_fresh" {
+		t.Errorf("session id = %q, want ses_fresh", result.SessionID)
+	}
+	if result.ResumeRejected {
+		t.Error("ResumeRejected = true, want false on a fresh session")
 	}
 }

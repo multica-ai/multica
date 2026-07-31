@@ -60,7 +60,7 @@ export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBa
         onClick={onExpand}
         className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors cursor-pointer hover:bg-muted/50"
       >
-        <span className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-2.5 text-body text-muted-foreground">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span className="truncate">
             {t(($) => $.comment.resolve.bar, { count, authors: authorsLabel })}
@@ -93,7 +93,7 @@ export function CommentsFoldBar({ replies, onExpand }: CommentsFoldBarProps) {
       onClick={onExpand}
       className="flex w-full items-center justify-between rounded-md bg-muted/45 px-3 py-2.5 text-left transition-colors cursor-pointer hover:bg-muted"
     >
-      <span className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+      <span className="flex min-w-0 items-center gap-2.5 text-body text-muted-foreground">
         <ChevronRight className="h-3.5 w-3.5 rotate-90 shrink-0" />
         <span className="truncate">
           {t(($) => $.comment.resolve.fold, { count: replies.length, authors: authorsLabel })}

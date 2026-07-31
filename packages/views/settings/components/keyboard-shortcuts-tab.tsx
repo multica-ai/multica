@@ -185,7 +185,7 @@ export function KeyboardShortcutsTab() {
       })}
 
       {visibleActions.length === 0 ? (
-        <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed px-4 py-10 text-center text-body text-muted-foreground">
           {t(($) => $.shortcuts.no_results)}
         </div>
       ) : null}
@@ -297,7 +297,7 @@ function ShortcutRow({
             onKeyDown={recording ? onCapture : undefined}
             onBlur={onCancelRecording}
             className={cn(
-              "inline-flex h-8 min-w-28 items-center justify-center rounded-md border bg-background px-2.5 font-mono text-xs font-medium shadow-xs outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex h-8 min-w-28 items-center justify-center rounded-md border bg-background px-2.5 font-mono text-caption font-medium shadow-xs outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring",
               recording && "border-brand bg-brand/5 text-brand ring-2 ring-brand/20",
               error && "border-destructive text-destructive ring-destructive/20",
             )}
@@ -341,11 +341,11 @@ function ShortcutRow({
           </Button>
         </div>
         {errorText ? (
-          <span role="alert" className="max-w-72 text-right text-xs text-destructive">
+          <span role="alert" className="max-w-72 text-right text-caption text-destructive">
             {errorText}
           </span>
         ) : recording ? (
-          <span className="text-right text-[11px] text-muted-foreground">
+          <span className="text-right text-micro text-muted-foreground">
             {t(($) => $.shortcuts.record_hint)}
           </span>
         ) : null}

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -10,20 +10,27 @@ import {
   useFileDropZone,
   FileDropOverlay,
   useUploadGate,
+  useComposerSubmit,
 } from "../../editor";
+import { PASTE_AS_FILE_THRESHOLD } from "../../editor/paste-as-file";
+import {
+  useCoordinatedUploads,
+  type UploadDraftBinding,
+} from "../../editor/use-coordinated-uploads";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
+import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
-import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
-const EMPTY_ATTACHMENTS: Attachment[] = [];
+const EMPTY_UPLOADS: DraftUpload[] = [];
 /** Editor identity for the chat composer — see the editorKey note below. */
 const CHAT_COMPOSER_EDITOR_KEY = "chat-composer";
 
@@ -73,13 +80,11 @@ interface ChatInputProps {
    * therefore treat this as the single terminal transition and consume the row.
    */
   onRestoreDraftApplied?: () => void;
-  /** Receives a File and returns the attachment row (with id + CDN link).
-   *  The wrapper owner (ChatWindow) lazy-creates a chat_session if needed
-   *  and forwards `chatSessionId` to the upload — chat-input only cares
-   *  about the upload result so it can map URL → id for back-fill on send.
-   *  When unset, paste/drag/button still type into the editor but no upload
-   *  fires (the editor's file-upload extension is a no-op without a handler). */
-  onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  /** True when uploads are available for this composer (an agent is selected).
+   *  The transport itself is the coordinated-upload engine (MUL-5181 L2) —
+   *  the owner only says whether the affordance exists. When false,
+   *  paste/drag/button still type into the editor but no upload fires. */
+  uploadEnabled?: boolean;
   onStop?: () => void;
   isRunning?: boolean;
   disabled?: boolean;
@@ -125,7 +130,7 @@ export function ChatInput({
   onSend,
   restoreDraftRequest,
   onRestoreDraftApplied,
-  onUploadFile,
+  uploadEnabled: uploadAllowed,
   onStop,
   isRunning,
   disabled,
@@ -147,6 +152,7 @@ export function ChatInput({
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   // Two keys with deliberately different concerns:
   //
@@ -167,27 +173,25 @@ export function ChatInput({
   //   - Draft restore (a cancelled run, a failed send): writes into
   //     `inputDraft`, and the editor's synchronized-value effect pushes it into
   //     the live instance. There is no second copy to drift or resurface.
-  //   - Session switch / lazy create: when the user uploads a file in a
-  //     brand-new chat, `handleUploadFile` awaits `ensureSession`, which flips
-  //     `activeSessionId` from null → uuid mid-upload. A session-keyed editor
-  //     would unmount right as the blob preview landed, dropping the image node
-  //     before file-upload.ts could swap in the CDN URL — the user would watch
-  //     the image flash on and vanish. Stable identity is what makes
-  //     first-upload-creates-session behave like every later upload.
+  //   - Session switch / lazy create: sending from a brand-new chat flips
+  //     `activeSessionId` from null → uuid while an upload's blob preview may
+  //     still be in the document. A session-keyed editor would unmount right
+  //     then, dropping the image node before file-upload.ts could swap in the
+  //     CDN URL — the user would watch the image flash on and vanish. Stable
+  //     identity is what makes first-upload-creates-session behave like every
+  //     later upload.
   // Embedded surfaces (Agent Builder) still pass `editorKeyOverride` to isolate
   // their own composer.
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
-  const draftAttachments = useChatStore(
-    (s) => s.inputDraftAttachments[draftKey] ?? EMPTY_ATTACHMENTS,
+  const storeUploads = useChatStore(
+    (s) => s.inputDraftAttachments[draftKey] ?? EMPTY_UPLOADS,
   );
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const setInputDraftAttachments = useChatStore((s) => s.setInputDraftAttachments);
-  const addInputDraftAttachment = useChatStore((s) => s.addInputDraftAttachment);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
-  const [isSubmitting, setIsSubmitting] = useState(false);
   // `isEmpty` tracks the LIVE editor, which the persisted draft lags by a
   // debounce, so the send affordance cannot be derived from `inputDraft` alone.
   // But `isEmpty` is never re-derived when the composer switches draft slots
@@ -225,13 +229,17 @@ export function ChatInput({
   const commitDraft = useCallback(
     (key: string, markdown: string) => {
       setInputDraft(key, markdown);
-      const attachments =
-        useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_ATTACHMENTS;
-      if (attachments.length === 0) return;
-      const referenced = attachments.filter((attachment) =>
-        isAttachmentReferenced(markdown, attachment),
+      const uploads =
+        useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_UPLOADS;
+      if (uploads.length === 0) return;
+      // Prune only COMPLETED uploads the body no longer references — deleting
+      // an image's markdown drops the staged upload with it. Placeholders
+      // (uploading / failed / interrupted) have no body reference yet; the
+      // status chips are their only UI, so they must survive every keystroke.
+      const referenced = uploads.filter(
+        (u) => u.status !== "uploaded" || isAttachmentReferenced(markdown, u.attachment),
       );
-      if (referenced.length !== attachments.length) {
+      if (referenced.length !== uploads.length) {
         setInputDraftAttachments(key, referenced);
       }
     },
@@ -244,6 +252,44 @@ export function ChatInput({
   // used to be a local in-flight counter that a manual delete of the pending
   // image would leave stuck (MUL-4808).
   const uploadGate = useUploadGate(editorRef);
+
+  // Reactive mirror of `editorDraftKeyRef` for the live-editor registry: a
+  // write-back may insert into this editor only while its DOCUMENT belongs to
+  // the settling draft, and a ref advance alone re-runs no effect. Updated by
+  // the adopt layout effect below, alongside the ref.
+  const [loadedDraftKey, setLoadedDraftKey] = useState(draftKey);
+
+  // Store-backed accessors for one draft slot, buildable for ANY key: the
+  // engine snapshots `resolveUploadTarget()` at pick time so an upload lands
+  // in — and settles against — the draft the editor was HOLDING, even if the
+  // user has since switched sessions.
+  const makeUploadBinding = useCallback((key: string): UploadDraftBinding => ({
+    registryKey: `chat:${key}`,
+    getUploads: () => useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_UPLOADS,
+    addUpload: (u) => useChatStore.getState().addInputDraftUpload(key, u),
+    settleUpload: (id, att) => useChatStore.getState().settleInputDraftUpload(key, id, att),
+    failUpload: (id, err) => useChatStore.getState().failInputDraftUpload(key, id, err),
+    removeUpload: (id) => useChatStore.getState().removeInputDraftUpload(key, id),
+    getBody: () => useChatStore.getState().inputDrafts[key] ?? "",
+    appendToBody: (md) => useChatStore.getState().appendToInputDraft(key, md),
+  }), []);
+  const uploadBinding = useMemo(
+    () => makeUploadBinding(draftKey),
+    [makeUploadBinding, draftKey],
+  );
+  // Coordinator-owned uploads (MUL-5181 L2): survive window close, abort on
+  // logout, are dropped after a reload. `gate` widens the editor gate
+  // with the draft's placeholders so a REOPENED composer over a still-running
+  // upload cannot send past it.
+  const {
+    uploads: draftUploads,
+    attachments: draftAttachments,
+    handleUpload,
+    gate,
+  } = useCoordinatedUploads(uploadBinding, storeUploads, {}, uploadGate, editorRef, {
+    resolveUploadTarget: () => makeUploadBinding(editorDraftKeyRef.current),
+    liveRegistryKey: `chat:${loadedDraftKey}`,
+  });
 
   // Move the editor from the draft it holds to the draft that is selected.
   //
@@ -287,6 +333,7 @@ export function ChatInput({
       commitDraft(loadedKey, pending);
     }
     editorDraftKeyRef.current = draftKey;
+    setLoadedDraftKey(draftKey);
     if (!deferredAdoptRef.current) return;
     deferredAdoptRef.current = false;
     const incoming = useChatStore.getState().inputDrafts[draftKey] ?? "";
@@ -294,20 +341,6 @@ export function ChatInput({
     editorRef.current?.adoptContent(incoming);
     setIsEmpty(!incoming.trim());
   }, [draftKey, uploadGate.uploading, commitDraft]);
-
-  // Maps "URL inserted into the editor" → "attachment row id" so that
-  // on send we can ask the server to bind only the attachments still
-  // referenced in the message body. Cleared after every send. Mirrors
-  // the comment-input flow exactly. The map key MUST match what the
-  // editor actually wrote into the markdown — that's `markdownLink`
-  // (the stable per-attachment URL) for normal post-MUL-3130 uploads
-  // and `link` (= att.url) for the no-workspace upload branch where
-  // there's no attachment-row id to address. Storing only `link` here
-  // would cause `content.includes(url)` to miss every new chat upload
-  // because the editor persists `markdownLink` instead, and the
-  // `onSend` call would silently drop `attachment_ids` so the
-  // attachment never binds to the chat message.
-  const uploadMapRef = useRef<Map<string, string>>(new Map());
 
   // Grab keyboard focus when the owner bumps `focusRequest` (a new chat was
   // started) so the user can type immediately. The editor's `focus()` latches
@@ -338,7 +371,7 @@ export function ChatInput({
     // pending and this effect re-runs on every draft change, so the restore
     // lands as soon as the user sends or clears what they were typing. Marking
     // it done here would strand it for the rest of this composer's life.
-    if (inputDraft.trim() || draftAttachments.length > 0) {
+    if (inputDraft.trim() || draftUploads.length > 0) {
       logger.debug("input.restore waiting: draft has content", {
         draftKey,
         restoreId: restoreDraftRequest.id,
@@ -347,37 +380,22 @@ export function ChatInput({
     }
     appliedRestoreIdRef.current = restoreDraftRequest.id;
     setInputDraft(draftKey, restoreDraftRequest.content);
-    setInputDraftAttachments(draftKey, restoreDraftRequest.attachments ?? []);
+    // Restores carry completed server rows — stage them as uploaded entries.
+    setInputDraftAttachments(
+      draftKey,
+      (restoreDraftRequest.attachments ?? []).map(attachmentToDraftUpload),
+    );
     setIsEmpty(!restoreDraftRequest.content.trim());
     onRestoreDraftApplied?.();
   }, [
     draftKey,
     inputDraft,
-    draftAttachments,
+    draftUploads,
     onRestoreDraftApplied,
     restoreDraftRequest,
     setInputDraft,
     setInputDraftAttachments,
   ]);
-
-  const handleUpload = useCallback(
-    async (file: File): Promise<UploadResult | null> => {
-      if (!onUploadFile) return null;
-      const result = await onUploadFile(file);
-      if (result) {
-        const persistedURL = result.markdownLink || result.link;
-        uploadMapRef.current.set(persistedURL, result.id);
-        // Bind to the draft this file is landing IN. The editor inserts the
-        // node into whatever document it currently holds, so while an earlier
-        // upload pins it to the source draft, that — not the selected draft —
-        // is where the body lives. Filing the row anywhere else splits a
-        // message from its own attachment.
-        if (result.id) addInputDraftAttachment(editorDraftKeyRef.current, result);
-      }
-      return result;
-    },
-    [addInputDraftAttachment, onUploadFile],
-  );
 
   // Drop zone wraps the rounded card so a drop anywhere on the input
   // surface routes the file through the editor's upload extension (same
@@ -386,113 +404,123 @@ export function ChatInput({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
-  const handleSend = async () => {
-    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || isSubmitting || disabled || noAgent) {
-      logger.debug("input.send skipped", {
-        emptyContent: !content,
-        isRunning,
-        isSubmitting,
-        disabled,
-        noAgent,
-      });
-      return;
-    }
-    // Block the send while any file is still uploading. If we let it
-    // through the attachment id is not yet in uploadMapRef (the upload
-    // resolves later) and the attachment would only end up bound to the
-    // session, not the message — the agent then can't `multica attachment
-    // download <id>` the file. The SubmitButton is also disabled in this
-    // state via `uploading`, but Mod+Enter bypasses the button so we
-    // still gate here.
-    if (uploadGate.isBlocked()) {
-      logger.debug("input.send skipped: uploads in flight");
-      return;
-    }
-    // The editor is still holding a DIFFERENT draft's document than the one
-    // selected — an upload pinned it and the adopt below has not run yet. The
-    // upload gate above covers most of that window, but not the sliver between
-    // the upload's final dispatch (node gone) and the re-render that adopts:
-    // React flushes that state update on a scheduler task, so a click can land
-    // first. Sending here would post the source draft's text into the selected
-    // session and then clear the wrong draft.
-    if (editorDraftKeyRef.current !== draftKey) {
-      logger.debug("input.send skipped: composer still holds another draft", {
-        loaded: editorDraftKeyRef.current,
-        selected: draftKey,
-      });
-      return;
-    }
-    // Only send attachment IDs for uploads still present in the content.
-    // Edits / deletions that remove the markdown URL also drop the binding.
-    const activeIds: string[] = [];
-    for (const [url, id] of uploadMapRef.current) {
-      if (content.includes(url)) activeIds.push(id);
-    }
-    for (const attachment of draftAttachments) {
-      if (isAttachmentReferenced(content, attachment)) activeIds.push(attachment.id);
-    }
-    const uniqueActiveIds = Array.from(new Set(activeIds));
-    // Capture draft key BEFORE onSend — creating a new session mutates
-    // activeSessionId synchronously, so reading it after onSend would point
-    // at the new session and leave the old draft orphaned.
-    const keyAtSend = draftKey;
-    let committed = false;
-    const commitInput = (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => {
-      if (committed) return;
-      committed = true;
-      // `clearEditor === false` means the owner sent fire-and-forget while the
-      // user had already navigated to another session. The editor instance is
-      // shared across sessions, so it now shows (and the user may be typing
-      // into) a DIFFERENT draft — clearing it or blurring would wipe that
-      // visible input. Only scrub the editor when the user is still on the
-      // session they sent from.
-      if (options?.clearEditor !== false) {
-        editorRef.current?.clearContent();
-        // Drop focus so the caret doesn't keep blinking under the StatusPill /
-        // streaming reply that's about to take over the user's attention. The
-        // input is also `disabled` once isRunning flips, and a focused-but-
-        // disabled editor reads as a stale cursor. We deliberately don't auto-
-        // refocus on completion — that would interrupt the user if they're
-        // selecting text from the assistant reply; one click to refocus is
-        // a fair price for not stealing focus mid-action.
-        editorRef.current?.blur();
-        setIsEmpty(true);
+  // The unified await-then-render send contract (MUL-5181). `useComposerSubmit`
+  // owns the six-step pessimistic submit — empty-guard, synchronous single-flight
+  // (a ref, so a double Mod+Enter in one tick cannot slip past a render-behind
+  // state boolean and double-send), the submit-time upload re-check, and the
+  // `submitting` lock/spinner. The chat-specific work — the loaded-draft guard,
+  // attachment-id resolution, and the owner-driven `commitInput` handoff — stays
+  // here in `onSubmit`, which receives the already-normalized content.
+  // Set by `commitInput` when it actually scrubbed the visible document; read
+  // back by `afterAccepted` a moment later to decide whether the caret may
+  // return. Reset at the top of every submit so a rejected send cannot leave a
+  // stale `true` behind for the next one.
+  const editorScrubbedRef = useRef(false);
+
+  const { submitting, submit } = useComposerSubmit({
+    editorRef,
+    uploadGate: gate,
+    containerRef: composerRef,
+    // Chat keeps the caret in the box after a send (the next turn is typed in
+    // the same place), except when the commit left the editor alone — see
+    // `editorScrubbedRef`.
+    afterAccepted: () => (editorScrubbedRef.current ? "refocus" : "none"),
+    onSubmit: async (content: string): Promise<boolean> => {
+      editorScrubbedRef.current = false;
+      // These states disable the SubmitButton, but Mod+Enter bypasses it — so a
+      // read-only or busy composer must still refuse the keyboard path.
+      if (isRunning || disabled || noAgent) {
+        logger.debug("input.send skipped", { isRunning, disabled, noAgent });
+        return false;
       }
-      // The sent draft's data is cleared regardless — the message is on its
-      // way, so its persisted draft must not resurface.
-      clearInputDraft(keyAtSend);
-      for (const key of options?.extraDraftKeys ?? []) {
-        if (key !== keyAtSend) clearInputDraft(key);
+      // The editor is still holding a DIFFERENT draft's document than the one
+      // selected — an upload pinned it and the adopt below has not run yet. The
+      // upload gate (re-checked inside useComposerSubmit) covers most of that
+      // window, but not the sliver between the upload's final dispatch (node
+      // gone) and the re-render that adopts: React flushes that state update on a
+      // scheduler task, so a submit can land first. Sending here would post the
+      // source draft's text into the selected session and then clear the wrong
+      // draft.
+      if (editorDraftKeyRef.current !== draftKey) {
+        logger.debug("input.send skipped: composer still holds another draft", {
+          loaded: editorDraftKeyRef.current,
+          selected: draftKey,
+        });
+        return false;
       }
-      uploadMapRef.current.clear();
-      setIsSubmitting(false);
-    };
-    logger.info("input.send", {
-      contentLength: content.length,
-      draftKey: keyAtSend,
-      attachmentCount: uniqueActiveIds.length,
-    });
-    setIsSubmitting(true);
-    let accepted: void | boolean;
-    try {
-      accepted = await onSend(
+      // Only send attachment IDs for uploads still present in the content.
+      // Edits / deletions that remove the markdown URL also drop the binding.
+      const activeIds: string[] = [];
+      for (const attachment of draftAttachments) {
+        if (isAttachmentReferenced(content, attachment)) activeIds.push(attachment.id);
+      }
+      const uniqueActiveIds = Array.from(new Set(activeIds));
+      // Capture draft key BEFORE onSend — creating a new session mutates
+      // activeSessionId synchronously, so reading it after onSend would point
+      // at the new session and leave the old draft orphaned.
+      const keyAtSend = draftKey;
+      // Stale-submit guard (MUL-5181 P0): snapshot the sent draft's persisted
+      // value, flushing the editor's pending debounce first so pre-submit
+      // typing is inside the snapshot. A late success may only clear what it
+      // actually sent — text typed DURING the send (or by a reopened composer
+      // after this one unmounted) survives in both the editor and the store.
+      const pendingFlush = editorRef.current?.flushPendingUpdate?.();
+      if (pendingFlush != null) commitDraft(editorDraftKeyRef.current, pendingFlush);
+      const draftValueAtSend = useChatStore.getState().inputDrafts[keyAtSend];
+      let committed = false;
+      const commitInput = (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => {
+        if (committed) return;
+        committed = true;
+        // `clearEditor === false` means the owner sent fire-and-forget while the
+        // user had already navigated to another session. The editor instance is
+        // shared across sessions, so it now shows (and the user may be typing
+        // into) a DIFFERENT draft — clearing it or blurring would wipe that
+        // visible input. Only scrub the editor when the user is still on the
+        // session they sent from.
+        // Flush typing still inside the debounce window before judging: it
+        // belongs to the LOADED document and must count as a mid-flight edit.
+        const lateMd = editorRef.current?.flushPendingUpdate?.();
+        if (lateMd != null) commitDraft(editorDraftKeyRef.current, lateMd);
+        const liveDraft = useChatStore.getState().inputDrafts[keyAtSend];
+        const untouched = liveDraft === undefined || liveDraft === draftValueAtSend;
+        if (options?.clearEditor !== false && untouched) {
+          editorRef.current?.clearContent();
+          // Scrubbed the document the user was looking at, so the caret belongs
+          // back here: chat is a conversation and the next turn is typed in the
+          // same box. `useComposerSubmit` reads this flag to decide, because the
+          // other branches must NOT grab focus — a fire-and-forget send from
+          // another session (`clearEditor: false`) leaves this shared editor
+          // showing a DIFFERENT draft the user may be typing into.
+          editorScrubbedRef.current = true;
+          setIsEmpty(true);
+        }
+        // The sent draft's data is cleared only when untouched — the message
+        // is on its way, but a draft replaced since the snapshot is NEWER work
+        // and must not resurface as collateral.
+        if (untouched) clearInputDraft(keyAtSend);
+        for (const key of options?.extraDraftKeys ?? []) {
+          if (key !== keyAtSend) clearInputDraft(key);
+        }
+      };
+      logger.info("input.send", {
+        contentLength: content.length,
+        draftKey: keyAtSend,
+        attachmentCount: uniqueActiveIds.length,
+      });
+      const accepted = await onSend(
         content,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
       );
-    } catch (err) {
-      logger.warn("input.send failed", err);
-      if (!committed) setIsSubmitting(false);
-      return;
-    }
-    if (accepted === false) {
-      if (!committed) setIsSubmitting(false);
-      return;
-    }
-    if (!committed) commitInput();
-  };
+      // Owner rejected the send (or threw, which useComposerSubmit also treats
+      // as a rejection): the draft was never committed, so it stays put for
+      // retry. Only a commit — here or by the owner — clears it.
+      if (accepted === false) return false;
+      if (!committed) commitInput();
+      return true;
+    },
+  });
 
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
@@ -504,7 +532,7 @@ export function ChatInput({
         ? t(($) => $.input.placeholder_named, { name: agentName })
         : t(($) => $.input.placeholder_default);
 
-  const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
+  const uploadEnabled = !!uploadAllowed && !disabled && !noAgent;
   // Lock only while the send request itself is creating/resolving the target
   // session. Once accepted, its project can still be detached while agent work
   // continues: changing session metadata does not cancel or move that task.
@@ -512,12 +540,13 @@ export function ChatInput({
     !!onProjectChange &&
     !disabled &&
     !noAgent &&
-    !isSubmitting &&
+    !submitting &&
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
 
   return (
     <div
+      ref={composerRef}
       className={cn(
         // The composer grows with the draft up to half the surface it sits on
         // — a fixed 160px cap made long drafts unreadable in a five-line
@@ -527,7 +556,8 @@ export function ChatInput({
         // user resizes or expands the window. The wrapper must be a flex
         // column for the card below to shrink into that cap instead of
         // spilling out of it.
-        "flex max-h-[50%] min-h-0 flex-col px-5 pb-3 pt-0",
+        "flex max-h-[50%] min-h-0 flex-col pb-3 pt-0",
+        CHAT_GUTTER,
         // Outer wrapper carries the disabled cursor. Inner card sets
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
@@ -543,7 +573,8 @@ export function ChatInput({
           // once, and it keeps the cap finite if a future host ever mounts the
           // composer without a definite height (percentage max-height would
           // then resolve to none).
-          "relative mx-auto flex min-h-16 max-h-96 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          CHAT_COLUMN,
+          "relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -572,13 +603,13 @@ export function ChatInput({
                     disabled={!projectSelectionEnabled}
                     aria-label={t(($) => $.input.change_project_context)}
                     title={t(($) => $.input.change_project_context)}
-                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 pr-7 text-xs font-medium text-foreground transition-colors hover:bg-accent/60"
+                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 pr-7 text-caption font-medium text-foreground transition-colors hover:bg-accent/60"
                   />
                 }
               />
             </div>
             {projectContextUnsupported && (
-              <span className="inline-flex min-w-0 items-center gap-1 text-xs text-warning">
+              <span className="inline-flex min-w-0 items-center gap-1 text-caption text-warning">
                 <TriangleAlert className="size-3 shrink-0" />
                 {t(($) => $.input.project_context_unsupported)}
               </span>
@@ -600,8 +631,9 @@ export function ChatInput({
               // upload's own completion dispatch.
               commitDraft(editorDraftKeyRef.current, md);
             }}
-            onSubmit={handleSend}
+            onSubmit={submit}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
+            pasteAsFileThreshold={PASTE_AS_FILE_THRESHOLD}
             onUploadingChange={uploadGate.onUploadingChange}
             attachments={draftAttachments}
             debounceMs={100}
@@ -635,18 +667,18 @@ export function ChatInput({
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton
-            onClick={handleSend}
-            disabled={hasNothingToSend || isSubmitting || !!disabled || !!noAgent}
-            loading={isSubmitting}
-            busy={uploadGate.uploading}
+            onClick={submit}
+            disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
+            loading={submitting}
+            busy={gate.uploading}
             running={isRunning}
             onStop={onStop}
-            tooltip={uploadGate.uploading
+            tooltip={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : sendShortcut
                 ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
                 : t(($) => $.input.send_tooltip)}
-            ariaLabel={uploadGate.uploading
+            ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}

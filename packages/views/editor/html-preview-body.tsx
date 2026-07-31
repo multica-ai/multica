@@ -101,7 +101,7 @@ function AttachmentBody({
     return (
       <div
         className={cn(
-          "flex items-center justify-center rounded-md border border-border bg-muted/30 text-xs text-muted-foreground",
+          "flex items-center justify-center rounded-md border border-border bg-muted/30 text-caption text-muted-foreground",
           placeholderClassName,
         )}
       >
@@ -120,7 +120,7 @@ function AttachmentBody({
     return (
       <div
         className={cn(
-          "flex items-center rounded-md border border-border bg-muted/30 px-3 text-xs text-muted-foreground",
+          "flex items-center rounded-md border border-border bg-muted/30 px-3 text-caption text-muted-foreground",
           placeholderClassName,
         )}
         data-testid={errorTestId}

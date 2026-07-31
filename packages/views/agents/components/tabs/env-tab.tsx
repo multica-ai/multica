@@ -176,7 +176,7 @@ export function EnvTab({
       <div className="space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <p className="flex items-center gap-2 text-sm font-medium">
+            <p className="flex items-center gap-2 text-body font-medium">
               <Lock className="h-3.5 w-3.5 text-muted-foreground" />
               {keyCount > 0
                 ? t(($) => $.tab_body.env.not_revealed_title, {
@@ -184,7 +184,7 @@ export function EnvTab({
                   })
                 : t(($) => $.tab_body.env.not_revealed_empty)}
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.tab_body.env.not_revealed_hint)}
             </p>
           </div>
@@ -214,13 +214,13 @@ export function EnvTab({
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.tab_body.env.intro_prefix)}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
             {"ANTHROPIC_API_KEY"}
           </code>
           {t(($) => $.tab_body.env.intro_separator)}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
             {"ANTHROPIC_BASE_URL"}
           </code>
           {t(($) => $.tab_body.env.intro_suffix)}
@@ -245,7 +245,7 @@ export function EnvTab({
                 value={entry.key}
                 onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
                 placeholder={t(($) => $.tab_body.env.key_placeholder)}
-                className="w-[40%] font-mono text-xs"
+                className="w-[40%] font-mono text-caption"
               />
               <div className="relative flex-1">
                 <Input
@@ -255,7 +255,7 @@ export function EnvTab({
                     updateEnvEntry(index, "value", e.target.value)
                   }
                   placeholder={t(($) => $.tab_body.env.value_placeholder)}
-                  className="pr-8 font-mono text-xs"
+                  className="pr-8 font-mono text-caption"
                 />
                 <button
                   type="button"
@@ -283,14 +283,14 @@ export function EnvTab({
           ))}
         </div>
       ) : (
-        <p className="text-xs italic text-muted-foreground">
+        <p className="text-caption italic text-muted-foreground">
           {t(($) => $.tab_body.env.empty_editable)}
         </p>
       )}
 
       <div className="flex items-center justify-end gap-3">
         {dirty && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          <span className="text-caption text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
         )}
         <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
           {saving ? (

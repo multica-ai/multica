@@ -1,119 +1,95 @@
 ---
-title: Cloud quickstart
-description: From sign-up to assigning your first task to an agent in 5 minutes.
+title: Quickstart
+description: Connect a computer, create your first agent, and have it complete its first task.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-This page walks you end-to-end through Multica Cloud — **sign up → install the [CLI](/cli) → start the [daemon](/daemon-runtimes) → create an [agent](/agents) → assign your first [task](/tasks)**. Takes about 5 minutes.
-
-One prerequisite: you already have at least one [AI coding tool](/providers) installed locally ([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), or [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code)). The daemon auto-detects them on startup and refuses to start if none are present.
-
-## 1. Create an account
-
-Sign up at [multica.ai](https://multica.ai). You can log in with email (6-digit verification code) or Google.
-
-After sign-up you're automatically placed in a default workspace (generated from your account name). You can rename it later, or create new workspaces.
-
-## 2. Install the Multica CLI
-
-**macOS / Linux (Homebrew recommended)**:
-
-```bash
-brew install multica-ai/tap/multica
-```
-
-**macOS / Linux (no Homebrew)**:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-```
-
-**Windows (PowerShell)**:
-
-```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-```
-
-Verify the install:
-
-```bash
-multica version
-```
-
-## 3. Log in + start the daemon
-
-A single command handles login and starts the daemon:
-
-```bash
-multica setup
-```
-
-`multica setup` will:
-
-1. Configure the CLI to connect to Multica Cloud
-2. Open your browser for login (same email verification code / Google OAuth as the web)
-3. Store the generated PAT in `~/.multica/config.json`
-4. **Start the daemon automatically** — it begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds
-
 <Callout type="info">
-**Using the desktop app?** The desktop app **starts the daemon automatically** on launch — no need to run `multica setup` by hand. See [Desktop app](/desktop-app).
+Before an agent can execute, the computer that runs it needs at least one [supported AI coding tool](/providers) installed and signed in — for example Claude Code, Codex, or Cursor. Multica does not ship these tools.
 </Callout>
 
-Verify the daemon is running:
+## 1. Sign in and open your workspace
 
-```bash
-multica daemon status
-```
+Sign in on the web ([multica.ai](https://multica.ai)) or with [Multica Desktop](https://multica.ai/download). Email verification codes and Google are both supported.
 
-`online` means it has registered with the server.
+- **Desktop**: can connect this computer automatically.
+- **Web**: connect from the command line in the next step.
 
-## 4. Verify the runtime is online
+## 2. Connect a computer
 
-In the web UI, go to **Settings → Runtimes**. The daemon you just started should appear as one or more active runtimes — one per AI coding tool installed locally.
+Agents execute work on the computers you connect. Open **Configure → Runtimes** at the bottom of the sidebar:
 
-If it shows as offline, don't panic — see [Troubleshooting → Daemon can't connect to the server](/troubleshooting#daemon-cant-connect-to-the-server).
+- **With Desktop**: Desktop automatically registers this computer as a runtime and detects the installed AI coding tools. For a tool you just installed, click **Refresh** to detect it again.
+- **With Web, or to add another computer**: click **Add a computer** in the top right, then run the two commands from the dialog in a terminal on the target computer:
 
-## 5. Create an agent
+  **macOS / Linux**
 
-In the web UI, go to **Settings → Agents** and click **New Agent**:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+  multica setup
+  ```
 
-- **Name** — the name shown for this agent on boards and in comments. Pick something you like
-- **Provider** — choose an AI coding tool you have installed locally (the dropdown only lists tools detected by your runtimes)
-- **Model** (optional) — the model selection inside that tool (a static list or dynamic discovery, depending on the provider)
-- **Instructions** (optional) — system prompt for this agent
+  **Windows PowerShell**
 
-Once created, the agent shows up in your workspace member list and can be assigned work like a human member.
+  ```powershell
+  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+  multica setup
+  ```
 
-## 6. Assign your first task
+  `multica setup` opens a browser to complete sign-in, then leaves the daemon running in the background. Once the daemon is online, the dialog usually detects the computer within a minute.
 
-Create an issue in the web UI, or from the CLI:
+**Success check**: an online computer appears in the runtime list.
 
-```bash
-multica issue create --title "Add an ASCII architecture diagram to the README"
-```
+![Add a computer dialog: two commands and the waiting-for-detection notice](/images/docs/quickstart-add-computer.png)
 
-Assign the issue to the agent you just created — click its avatar in the web UI, or use the CLI:
+<Callout type="info">
+The connection commands differ slightly on self-hosted instances — see the [Self-host quickstart](/self-host-quickstart).
+</Callout>
 
-```bash
-multica issue assign MUL-1 --to my-agent-name
-```
+## 3. Create an agent
 
-`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it. If your workspace has overlapping names, pass `--to-id <uuid>` instead (mutually exclusive with `--to`); look up the UUID via `multica agent list --output json` or `multica workspace member list --output json`.
+Open **Workspace → Agents** in the sidebar, click **New agent**, and pick a path:
 
-**What happens next from the daemon**:
+- **Start blank**: fill in the fields yourself. Only a name is strictly required — confirm the runtime and AI coding tool, then create.
+- **Build with AI**: describe what you want, and the Agent Builder asks questions and generates the configuration. This path needs an online runtime.
 
-1. It picks up the task within 3 seconds (status goes from `queued` to `dispatched`)
-2. It invokes the matching AI coding tool to start work (status becomes `running`)
-3. The AI works locally — it may read your code directory, run commands, edit files
-4. When done, it reports the result back to Multica (status becomes `completed` or `failed`, depending on whether auto-retry kicks in)
+Everything else can be refined later — see [Create and configure agents](/agents-create).
 
-The web UI updates in **real time** (via WebSocket) — no refresh needed.
+**Success check**: your agent appears in the agent list and shows as online.
+
+![Agent creation starting-point picker: Start blank and Build with AI](/images/docs/quickstart-new-agent.png)
+
+## 4. Hand it your first issue
+
+Click **New Issue** at the top of the sidebar (or press `C`). In the default agent mode:
+
+1. Under **Created by**, select the agent you just created.
+2. Describe the work in a sentence or two, for example "Explain how this workspace can be used."
+3. Submit. Multica creates the issue, sets the agent as the assignee, and starts executing immediately.
+
+![New issue dialog in agent mode: Created by set to Multica Assistant](/images/docs/quickstart-new-issue.png)
+
+## 5. Watch progress and results
+
+After submitting, open the issue: the execution log shows the run status, and the agent's progress and replies appear in the timeline.
+
+**Success check**: the execution log status changes to Completed and the agent's reply appears in the timeline. To see the full transcript, click **View transcript**.
+
+![The agent's reply in the issue and a completed execution log](/images/docs/quickstart-run-result.png)
+
+## Common problems
+
+| Symptom | Check first |
+|---|---|
+| No runtime found | Confirm the AI coding tool is installed and runs in a terminal. On Desktop, click **Refresh**; on the CLI path, rerun `multica setup`. |
+| Runtime shows offline | Keep Desktop open; on the CLI path, run `multica daemon status`, and `multica daemon start` if it is not running. |
+| Issue stays queued | Confirm the runtime the agent uses is online. When a runtime hits its concurrency limit, new tasks keep queueing. |
+
+For more cases, see [Troubleshooting](/troubleshooting).
 
 ## Next steps
 
-- [Daemon and runtimes](/daemon-runtimes) — how the daemon operates and what runtimes mean
-- [Tasks](/tasks) — task lifecycle and retry rules
-- [AI coding tools compared](/providers) — capability differences across the 16 tools
-- [Desktop app](/desktop-app) — if you'd rather not run the daemon yourself
-- [Self-host quickstart](/self-host-quickstart) — run your own backend
+- [Core concepts](/concepts) — meet all of Multica's core objects in three minutes.
+- [How Multica works](/how-multica-works) — how issues, agents, runtimes, and each run relate.
+- [Put agents to work](/triggering-agents) — beyond assignment: @-mentions, chat, and Autopilots.

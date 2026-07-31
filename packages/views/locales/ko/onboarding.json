@@ -41,7 +41,8 @@
     "continue": "계속",
     "skip": "건너뛰기",
     "cancel": "취소",
-    "close": "닫기"
+    "close": "닫기",
+    "log_out": "로그아웃"
   },
   "source_backfill": {
     "eyebrow": "간단한 질문 하나",

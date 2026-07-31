@@ -74,9 +74,9 @@ describe("waveScale", () => {
 
 describe("ThreadMinimap", () => {
   const threads = [
-    { id: "c1", entry: comment("c1", "First thread opener\nwith details") },
-    { id: "c2", entry: comment("c2", "Second thread opener") },
-    { id: "c3", entry: comment("c3", "") },
+    { id: "c1", entry: comment("c1", "First thread opener\nwith details"), resolved: false },
+    { id: "c2", entry: comment("c2", "Second thread opener"), resolved: false },
+    { id: "c3", entry: comment("c3", ""), resolved: false },
   ];
 
   it("renders nothing below the thread threshold", () => {
@@ -126,6 +126,79 @@ describe("ThreadMinimap", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("hugs the scrollbar side: ticks are right-aligned and the card opens inward", () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    try {
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={vi.fn()} />,
+      );
+
+      // The rail sits in the right gutter, so ticks flush right and the wave
+      // grows them inward (away from the scrollbar) rather than over it.
+      const tick = screen.getByRole("button", { name: "First thread opener" });
+      expect(tick).toHaveClass("justify-end");
+      expect(tick.firstElementChild).toHaveClass("origin-right");
+
+      const nav = screen.getByRole("navigation", { name: "Jump to comment thread" });
+      fireEvent.pointerMove(nav, { clientY: 0 });
+      act(() => vi.advanceTimersByTime(30 + 150)); // rAF flush + intent delay
+
+      const card = screen.getByText("with details").closest("div");
+      expect(card).toHaveClass("right-8");
+      expect(card?.className).not.toMatch(/(?:^|\s)left-/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("badges the preview card of a resolved thread, and only that one", () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    try {
+      renderWithI18n(
+        <ThreadMinimap
+          threads={[{ ...threads[0]!, resolved: true }, threads[1]!, threads[2]!]}
+          scrollContainerEl={null}
+          onJump={vi.fn()}
+        />,
+      );
+      const nav = screen.getByRole("navigation", { name: "Jump to comment thread" });
+
+      // jsdom rects are all zero → the nearest tick resolves to index 0, the
+      // resolved thread.
+      fireEvent.pointerMove(nav, { clientY: 0 });
+      act(() => vi.advanceTimersByTime(30 + 150)); // rAF flush + intent delay
+      expect(screen.getByText("Resolved")).toBeInTheDocument();
+
+      // The badge belongs to the hovered thread, not to the card: closing it
+      // must take the badge with it.
+      fireEvent.pointerLeave(nav);
+      act(() => vi.advanceTimersByTime(30 + 150));
+      expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("carries the resolved state in the tick's accessible name", () => {
+    renderWithI18n(
+      <ThreadMinimap
+        threads={[{ ...threads[0]!, resolved: true }, threads[1]!, threads[2]!]}
+        scrollContainerEl={null}
+        onJump={vi.fn()}
+      />,
+    );
+
+    // The card is visual only — a screen reader gets the state from the tick.
+    expect(
+      screen.getByRole("button", { name: "First thread opener (resolved)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Second thread opener" })).toBeInTheDocument();
   });
 
   it("jumps to the clicked thread", () => {

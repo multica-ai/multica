@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func createDaemonTestRepo(t *testing.T) string {
@@ -321,6 +322,65 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("error = %v, want missing CODEX_HOME", err)
 		}
 	})
+}
+
+// TestCodexTaskShellEnvInheritsRealHome pins the MUL-5578 contract at the layer
+// where the daemon assembles the environment a Codex task actually launches
+// with: HOME and the XDG base dirs reach the task's shell tools from the
+// *inherited* daemon process environment, so `gh`, `aws`, `kubectl`, and npm
+// resolve the daemon user's real config inside a task.
+//
+// This guards the pass-through, not runTask's decision not to inject a HOME of
+// its own — that decision lives inline in runTask and has no unit seam.
+func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
+	t.Parallel()
+
+	codexHome := t.TempDir()
+	inherited := []string{
+		"HOME=/home/daemon-user",
+		"XDG_CONFIG_HOME=/home/daemon-user/.config",
+		"XDG_CACHE_HOME=/home/daemon-user/.cache",
+		"XDG_DATA_HOME=/home/daemon-user/.local/share",
+		"XDG_STATE_HOME=/home/daemon-user/.local/state",
+		"PATH=/usr/local/bin:/usr/bin",
+	}
+	// What runTask layers on top for a Codex task: task identity plus the
+	// task-scoped CODEX_HOME, and — since MUL-5578 — no HOME/XDG entry.
+	explicit := map[string]string{
+		"CODEX_HOME":         codexHome,
+		"MULTICA_TOKEN":      "mat_task",
+		"MULTICA_SERVER_URL": "https://task.example",
+	}
+
+	if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, explicit, nil, slog.Default()); err != nil {
+		t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	var parsed struct {
+		ShellEnvironmentPolicy struct {
+			IncludeOnly []string `toml:"include_only"`
+		} `toml:"shell_environment_policy"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse config.toml: %v\n%s", err, data)
+	}
+	include := parsed.ShellEnvironmentPolicy.IncludeOnly
+
+	// The daemon user's real home must survive into the task's shell tools, or
+	// gh / aws / kubectl / npm stop resolving their config there.
+	for _, want := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		if !slices.Contains(include, want) {
+			t.Errorf("include_only missing %q, got %v", want, include)
+		}
+	}
+	// CODEX_HOME is the one home-shaped variable the daemon does own.
+	if !slices.Contains(include, "CODEX_HOME") {
+		t.Errorf("include_only missing CODEX_HOME, got %v", include)
+	}
 }
 
 func TestCodexShellAuthorizedCustomEnvNamesUsesDaemonBlocklist(t *testing.T) {
@@ -633,6 +693,131 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 		if strings.Contains(prompt, absent) {
 			t.Fatalf("prompt should NOT contain %q (skills are in runtime config)", absent)
 		}
+	}
+}
+
+// TestFreshSessionRetryPrompt asserts the daemon's single fresh-session retry
+// preserves the current prompt verbatim and prefixes an explicit context-loss
+// disclosure (GH #5975), so the new provider session does not assume continuity
+// with the conversation that could not be resumed.
+func TestFreshSessionRetryPrompt(t *testing.T) {
+	t.Parallel()
+
+	base := BuildPrompt(Task{
+		IssueID:          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		TriggerCommentID: "c0ffee00-0000-0000-0000-000000000000",
+		Agent:            &AgentData{Name: "Local Kiro"},
+	}, "kiro")
+
+	got := freshSessionRetryPrompt(base)
+
+	// The disclosure must come first and clearly signal a brand-new session
+	// with no prior provider context.
+	for _, want := range []string{
+		"brand-new session",
+		"could not be resumed",
+		"re-read the issue",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fresh-retry prompt missing disclosure %q; got:\n%s", want, got)
+		}
+	}
+	if !strings.HasSuffix(got, base) {
+		t.Fatal("fresh-retry prompt must preserve the current prompt verbatim as its suffix")
+	}
+	if strings.Index(got, "brand-new session") > strings.Index(got, base) {
+		t.Fatal("context-loss disclosure must precede the preserved prompt")
+	}
+}
+
+// TestReconcileFreshRetryResult locks the GH #5975 review must-fix: the
+// poisoned prior session id (carried only on the first result) must never be
+// grafted onto the fresh retry's result, and a fresh retry that does not
+// establish a new session must not relabel the poisoned session as resumable.
+func TestReconcileFreshRetryResult(t *testing.T) {
+	t.Parallel()
+
+	firstUsage := map[string]agent.TokenUsage{"m1": {InputTokens: 5}}
+	// The first (poisoned) result keeps its id for classification/auditing;
+	// its failure is classified unrecoverable elsewhere.
+	first := agent.Result{Status: "failed", Error: "oversized history image", SessionID: "ses_poisoned", Usage: firstUsage}
+	const firstTools = int32(0)
+
+	tests := []struct {
+		name        string
+		retry       agent.Result
+		retryTools  int32
+		retryErr    error
+		wantStatus  string
+		wantSession string
+		wantTools   int32
+	}{
+		{
+			// Fresh attempt never produced a result — keep the poisoned first
+			// result so the bad session stays recorded as unrecoverable.
+			name:        "retryErr keeps first poisoned result",
+			retry:       agent.Result{},
+			retryErr:    context.DeadlineExceeded,
+			wantStatus:  "failed",
+			wantSession: "ses_poisoned",
+			wantTools:   firstTools,
+		},
+		{
+			// Fresh session established — new result wins with its OWN id.
+			name:        "new session id wins",
+			retry:       agent.Result{Status: "completed", Output: "done", SessionID: "ses_new", Usage: map[string]agent.TokenUsage{"m1": {OutputTokens: 7}}},
+			retryTools:  2,
+			wantStatus:  "completed",
+			wantSession: "ses_new",
+			wantTools:   2,
+		},
+		{
+			// Fresh attempt failed/timed out WITHOUT a new session id — the
+			// poisoned id must NOT be resurrected; keep the first result.
+			name:        "failed retry without new session keeps first",
+			retry:       agent.Result{Status: "failed", Error: "connection refused", SessionID: ""},
+			retryTools:  0,
+			wantStatus:  "failed",
+			wantSession: "ses_poisoned",
+			wantTools:   firstTools,
+		},
+		{
+			name:        "timeout retry without new session keeps first",
+			retry:       agent.Result{Status: "timeout", Error: "timed out", SessionID: ""},
+			wantStatus:  "failed",
+			wantSession: "ses_poisoned",
+			wantTools:   firstTools,
+		},
+		{
+			// Fresh attempt succeeded but produced no resumable session id —
+			// take the success but keep the id EMPTY, never the poisoned one.
+			name:        "completed retry with empty session id keeps empty id",
+			retry:       agent.Result{Status: "completed", Output: "ok", SessionID: "", Usage: map[string]agent.TokenUsage{"m1": {OutputTokens: 3}}},
+			retryTools:  1,
+			wantStatus:  "completed",
+			wantSession: "",
+			wantTools:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, gotTools := reconcileFreshRetryResult(first, firstUsage, firstTools, tt.retry, tt.retryTools, tt.retryErr)
+			if got.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got.Status, tt.wantStatus)
+			}
+			if got.SessionID != tt.wantSession {
+				t.Fatalf("session id = %q, want %q (the poisoned id must never leak onto a resumable result)", got.SessionID, tt.wantSession)
+			}
+			if gotTools != tt.wantTools {
+				t.Fatalf("tools = %d, want %d", gotTools, tt.wantTools)
+			}
+			// Usage is always merged so billing is complete.
+			if got.Usage["m1"].InputTokens != 5 {
+				t.Fatalf("expected first-attempt input usage to be preserved, got %+v", got.Usage["m1"])
+			}
+		})
 	}
 }
 
@@ -1271,6 +1456,236 @@ func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 	}
 }
 
+func TestCodexSessionResumable(t *testing.T) {
+	t.Parallel()
+
+	seedRollout := func(t *testing.T, codexHome, sessionID string) {
+		t.Helper()
+		p := filepath.Join(codexHome, "sessions", "2026", "07", "27",
+			"rollout-2026-07-27T00-00-00-"+sessionID+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir sessions: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write rollout: %v", err)
+		}
+	}
+
+	t.Run("rollout present is resumable", func(t *testing.T) {
+		t.Parallel()
+		home := filepath.Join(t.TempDir(), "codex-home")
+		seedRollout(t, home, "sess-present")
+		if !codexSessionResumable(home, "sess-present", 50*time.Millisecond) {
+			t.Fatal("expected present rollout to be resumable")
+		}
+	})
+
+	t.Run("rollout absent is not resumable", func(t *testing.T) {
+		t.Parallel()
+		home := filepath.Join(t.TempDir(), "codex-home")
+		if codexSessionResumable(home, "sess-gone", 40*time.Millisecond) {
+			t.Fatal("expected absent rollout to be unresumable")
+		}
+	})
+
+	t.Run("rollout appearing within the wait is resumable", func(t *testing.T) {
+		t.Parallel()
+		home := filepath.Join(t.TempDir(), "codex-home")
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			seedRollout(t, home, "sess-delayed")
+		}()
+		if !codexSessionResumable(home, "sess-delayed", 2*time.Second) {
+			t.Fatal("expected a rollout flushed within the wait window to be resumable")
+		}
+	})
+
+	t.Run("non-codex (empty codex home) is always resumable", func(t *testing.T) {
+		t.Parallel()
+		// Non-Codex providers have no rollout store; the gate must be a no-op so
+		// their existing pin/report behavior is unchanged.
+		if !codexSessionResumable("", "sess-any", 0) {
+			t.Fatal("expected empty codex home to be a no-op (resumable)")
+		}
+	})
+
+	t.Run("empty session is a no-op", func(t *testing.T) {
+		t.Parallel()
+		home := filepath.Join(t.TempDir(), "codex-home")
+		if !codexSessionResumable(home, "", 0) {
+			t.Fatal("expected empty session id to be a no-op (resumable)")
+		}
+	})
+}
+
+// statusOnlyBackend emits a single status message carrying a session id (the
+// point at which the daemon pins the resume pointer) and then completes.
+type statusOnlyBackend struct {
+	sessionID string
+	result    agent.Result
+}
+
+func (b *statusOnlyBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 1)
+	msgCh <- agent.Message{Type: agent.MessageStatus, SessionID: b.sessionID}
+	close(msgCh)
+	resCh := make(chan agent.Result, 1)
+	resCh <- b.result
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// statusThenHoldBackend emits the session-id status, then keeps the run alive
+// for `hold` before completing — so a rollout that only appears AFTER the
+// status (mid-run) still has a live run for the pin waiter to observe.
+type statusThenHoldBackend struct {
+	sessionID string
+	hold      time.Duration
+	result    agent.Result
+}
+
+func (b *statusThenHoldBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		msgCh <- agent.Message{Type: agent.MessageStatus, SessionID: b.sessionID}
+		time.Sleep(b.hold)
+		close(msgCh)
+		resCh <- b.result
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// pinRecorder captures the session ids the daemon pins mid-flight.
+type pinRecorder struct {
+	mu       sync.Mutex
+	sessions []string
+}
+
+func (r *pinRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.sessions)
+}
+
+func newPinRecorder(t *testing.T) (*Daemon, *pinRecorder) {
+	t.Helper()
+	rec := &pinRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/session") {
+			var body struct {
+				SessionID string `json:"session_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.SessionID != "" {
+				rec.mu.Lock()
+				rec.sessions = append(rec.sessions, body.SessionID)
+				rec.mu.Unlock()
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return &Daemon{client: NewClient(srv.URL), logger: slog.Default()}, rec
+}
+
+// TestExecuteAndDrain_PinsResumableCodexSession pins the write-time invariant
+// (MUL-5305): a Codex session is pinned mid-flight only once its rollout exists
+// in the task's CODEX_HOME, so the daemon never persists a resume pointer the
+// next follow-up would just discover is unrecoverable and drop.
+func TestExecuteAndDrain_PinsResumableCodexSession(t *testing.T) {
+	t.Parallel()
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	rollout := filepath.Join(codexHome, "sessions", "2026", "07", "27",
+		"rollout-2026-07-27T00-00-00-sess-x.jsonl")
+	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := os.WriteFile(rollout, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+
+	d, rec := newPinRecorder(t)
+	backend := &statusOnlyBackend{sessionID: "sess-x", result: agent.Result{Status: "completed", Output: "done", SessionID: "sess-x"}}
+
+	if _, _, err := d.executeAndDrain(context.Background(), backend, "p", agent.ExecOptions{}, slog.Default(), "task-pin", codexHome, new(atomic.Int32)); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	// The pin fires in a goroutine; wait briefly for it to land.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := rec.snapshot(); len(got) == 1 && got[0] == "sess-x" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected the resumable codex session to be pinned, got %+v", rec.snapshot())
+}
+
+// TestExecuteAndDrain_SkipsPinWhenRolloutAbsent pins the negative half of the
+// write-time invariant (MUL-5305): a Codex session with no rollout in the store
+// is never pinned mid-flight, so a pointer the daemon cannot resume is not left
+// on the task row for the next follow-up to inherit.
+func TestExecuteAndDrain_SkipsPinWhenRolloutAbsent(t *testing.T) {
+	t.Parallel()
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home") // sessions dir never created
+	d, rec := newPinRecorder(t)
+	backend := &statusOnlyBackend{sessionID: "sess-absent", result: agent.Result{Status: "failed", Error: "boom", SessionID: "sess-absent"}}
+
+	if _, _, err := d.executeAndDrain(context.Background(), backend, "p", agent.ExecOptions{}, slog.Default(), "task-nopin", codexHome, new(atomic.Int32)); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	// Give any (incorrectly-spawned) pin goroutine time to fire before asserting.
+	time.Sleep(100 * time.Millisecond)
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Fatalf("expected no pin when the rollout is absent, got %+v", got)
+	}
+}
+
+// TestExecuteAndDrain_PinsWhenRolloutAppearsAfterStatus covers the crash-
+// recovery half of MUL-5305: Codex reveals the session id on a single
+// task_started status, so the pin waiter must keep watching for the life of the
+// run and pin as soon as the rollout lands — even when it flushes AFTER that one
+// status. A fixed one-shot check at status time would miss it and lose in-flight
+// crash recovery.
+func TestExecuteAndDrain_PinsWhenRolloutAppearsAfterStatus(t *testing.T) {
+	t.Parallel()
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	rolloutDir := filepath.Join(codexHome, "sessions", "2026", "07", "27")
+	if err := os.MkdirAll(rolloutDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	rollout := filepath.Join(rolloutDir, "rollout-2026-07-27T00-00-00-sess-late.jsonl")
+
+	d, rec := newPinRecorder(t)
+	backend := &statusThenHoldBackend{
+		sessionID: "sess-late",
+		hold:      400 * time.Millisecond,
+		result:    agent.Result{Status: "completed", Output: "done", SessionID: "sess-late"},
+	}
+	// The rollout appears only AFTER the status message, while the run is alive.
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		_ = os.WriteFile(rollout, []byte("{}"), 0o644)
+	}()
+
+	if _, _, err := d.executeAndDrain(context.Background(), backend, "p", agent.ExecOptions{}, slog.Default(), "task-late", codexHome, new(atomic.Int32)); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	// The pin fires from a background waiter; poll briefly for it to land.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := rec.snapshot(); len(got) == 1 && got[0] == "sess-late" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected the codex session to be pinned once its rollout appeared mid-run, got %+v", rec.snapshot())
+}
+
 func TestGateResumeToReusedWorkdir(t *testing.T) {
 	t.Parallel()
 
@@ -1455,7 +1870,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// First attempt: resume fails (no SessionID in result).
 	opts := agent.ExecOptions{ResumeSessionID: "stale-id"}
 	var msgSeq atomic.Int32
-	result, tools, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
+	result, tools, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", "", &msgSeq)
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -1467,7 +1882,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
-		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
+		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", "", &msgSeq)
 		if retryErr != nil {
 			t.Fatalf("retry error: %v", retryErr)
 		}
@@ -1556,7 +1971,7 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 
 	d, rec := newTranscriptRecorder(t)
 
-	result, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-flush", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-flush", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
@@ -1580,7 +1995,7 @@ func TestExecuteAndDrain_SeqContinuesAcrossRetry(t *testing.T) {
 	fb := &transcriptBackend{}
 	var msgSeq atomic.Int32
 
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{ResumeSessionID: "stale"}, slog.Default(), "task-seq", &msgSeq)
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{ResumeSessionID: "stale"}, slog.Default(), "task-seq", "", &msgSeq)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -1588,7 +2003,7 @@ func TestExecuteAndDrain_SeqContinuesAcrossRetry(t *testing.T) {
 		t.Fatalf("expected failed first result, got %+v", result)
 	}
 
-	result, _, err = d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "task-seq", &msgSeq)
+	result, _, err = d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "task-seq", "", &msgSeq)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -1642,7 +2057,7 @@ func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T)
 	}
 	retCh := make(chan ret, 1)
 	go func() {
-		result, _, err := d.executeAndDrain(ctx, b, "p", agent.ExecOptions{}, slog.Default(), "task-cancel-flush", new(atomic.Int32))
+		result, _, err := d.executeAndDrain(ctx, b, "p", agent.ExecOptions{}, slog.Default(), "task-cancel-flush", "", new(atomic.Int32))
 		retCh <- ret{result, err}
 	}()
 
@@ -1675,7 +2090,7 @@ func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "some-id"}
-	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1712,7 +2127,7 @@ func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "live-sess"}
-	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1947,6 +2362,38 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			priorSessionID: "stale-id",
 			want:           false,
 		},
+		{
+			// GH #5975: the Kiro backend reports ResumeRejected for an
+			// oversized historical image while KEEPING the poisoned session
+			// id for auditing. The gate reads the boolean, not an empty id,
+			// so a non-empty SessionID must still allow the fresh retry.
+			name: "kiro oversized history image retries despite non-empty session id",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)",
+				SessionID:      "ses_poisoned",
+				ResumeRejected: true,
+			},
+			priorSessionID: "ses_poisoned",
+			provider:       "kiro",
+			want:           true,
+		},
+		{
+			// Same oversized-image rejection, but a tool already ran this
+			// attempt — the retry could duplicate external side effects
+			// (comments, commits), so the single-retry gate must refuse.
+			name: "kiro oversized history image after a tool ran never retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)",
+				SessionID:      "ses_poisoned",
+				ResumeRejected: true,
+			},
+			priorSessionID: "ses_poisoned",
+			tools:          1,
+			provider:       "kiro",
+			want:           false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1985,7 +2432,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "traecli", "pi", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "qoderclicn", "traecli", "pi", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()
@@ -2001,6 +2448,55 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 			t.Fatal("a backend not listed as undetectable must not inherit the compat path")
 		}
 	})
+}
+
+// TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic pins the
+// DECISION layer for GH #6066 / GH #5760: given the same provider error, every
+// supported backend gets the same verdict, so recovery is not a property of
+// whichever adapter happened to get a bug report. ResumeRejected is false for
+// all of them here — nothing rejected the resume; the transcript loaded and the
+// provider refused to replay it.
+//
+// Scope, deliberately: this feeds each backend a hand-built agent.Result, so it
+// proves the shared decision ignores the provider NAME. It does not prove all
+// 17 adapters surface an upstream error into Result.Error in the first place —
+// #5760 is the counter-example, where the Kimi/ACP adapter swallowed the error
+// and reported completed. The fix therefore covers every backend that surfaces
+// the error; adapter-level surfacing is tracked separately (#5785 for ACP).
+//
+// The safety half is asserted in the same loop: tools > 0 must still veto the
+// retry for every backend, because re-running a turn that already posted a
+// comment or wrote a commit duplicates that side effect. Those tasks recover
+// on the next trigger instead — classifyPoisonedError retires the session at
+// report time.
+func TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic(t *testing.T) {
+	t.Parallel()
+
+	// Both real-world wordings, neither of which the pre-fix detector matched.
+	errors := map[string]string{
+		"gh6066": "Invalid request: the message at position 37 with role 'assistant' must not be empty",
+		"gh5760": "kimi provider error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty",
+	}
+
+	for _, provider := range agent.SupportedTypes {
+		for label, errMsg := range errors {
+			t.Run(provider+"/"+label+" retries fresh", func(t *testing.T) {
+				t.Parallel()
+				result := agent.Result{Status: "failed", Error: errMsg, SessionID: "poisoned-id"}
+				if !shouldRetryWithFreshSession(result, "poisoned-id", 0, provider) {
+					t.Fatalf("%s: an unresumable history must trigger the fresh-session retry on every backend", provider)
+				}
+			})
+
+			t.Run(provider+"/"+label+" respects the tool gate", func(t *testing.T) {
+				t.Parallel()
+				result := agent.Result{Status: "failed", Error: errMsg, SessionID: "poisoned-id"}
+				if shouldRetryWithFreshSession(result, "poisoned-id", 1, provider) {
+					t.Fatalf("%s: a run that already used a tool must never be re-run automatically", provider)
+				}
+			})
+		}
+	}
 }
 
 func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
@@ -2058,7 +2554,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	result, tools, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{
 		Timeout:                   5 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
-	}, slog.Default(), "task-stale", new(atomic.Int32))
+	}, slog.Default(), "task-stale", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
@@ -2113,7 +2609,7 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2152,7 +2648,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2182,7 +2678,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	// emitOne=false models a backend that hangs before sending any message.
 	// lastActivityAt is initialised at executeAndDrain entry, so the same
 	// window applies even with zero traffic.
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2208,6 +2704,7 @@ func TestExecuteAndDrain_IdleWatchdog_UsesPerRunOverride(t *testing.T) {
 		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond},
 		slog.Default(),
 		"t-idle-override",
+		"",
 		new(atomic.Int32),
 	)
 	if err != nil {
@@ -2240,6 +2737,7 @@ func TestExecuteAndDrain_IdleWatchdog_GlobalDisableWinsOverPerRunOverride(t *tes
 		agent.ExecOptions{IdleWatchdogTimeout: 20 * time.Millisecond},
 		slog.Default(),
 		"t-idle-global-off",
+		"",
 		new(atomic.Int32),
 	)
 	if err != nil {
@@ -2266,6 +2764,7 @@ func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideCannotExtendGlobalWindow(t *
 		agent.ExecOptions{IdleWatchdogTimeout: 500 * time.Millisecond},
 		slog.Default(),
 		"t-idle-global-bound",
+		"",
 		new(atomic.Int32),
 	)
 	if err != nil {
@@ -2291,7 +2790,7 @@ func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(80*time.Millisecond, cancel)
 
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2317,7 +2816,7 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 		},
 	}
 
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2390,6 +2889,7 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 		agent.ExecOptions{},
 		slog.Default(),
 		"t-long-tool",
+		"",
 		new(atomic.Int32),
 	)
 	if err != nil {
@@ -2417,6 +2917,7 @@ func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideStillUsesToolWindow(t *testi
 		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond},
 		slog.Default(),
 		"t-long-tool-override",
+		"",
 		new(atomic.Int32),
 	)
 	if err != nil {
@@ -2454,7 +2955,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2490,7 +2991,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle", new(atomic.Int32))
+	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4177,5 +4678,88 @@ func TestConvertDisabledRuntimeSkillsForEnvScopesToClaimedRuntime(t *testing.T) 
 	got := convertDisabledRuntimeSkillsForEnv(agentData, "runtime-1", "claude")
 	if len(got) != 1 || got[0].Key != "review" || got[0].Name != "Review" {
 		t.Fatalf("unexpected scoped runtime skill policy: %+v", got)
+	}
+}
+
+// nestedPatchSecretBackend emits a Codex-shaped file-edit payload carrying a
+// credential nested inside changes[] — the legacy protocol reports a deletion
+// as the whole outgoing file, so deleting a .env puts its contents here.
+type nestedPatchSecretBackend struct{}
+
+func (nestedPatchSecretBackend) Execute(
+	_ context.Context,
+	_ string,
+	_ agent.ExecOptions,
+) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 2)
+	resCh := make(chan agent.Result, 1)
+
+	msgCh <- agent.Message{
+		Type:   agent.MessageToolUse,
+		Tool:   "patch_apply",
+		CallID: "patch-1",
+		Input: map[string]any{
+			"changes": []any{
+				map[string]any{
+					"path":    ".env",
+					"kind":    "delete",
+					"content": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn\n",
+				},
+			},
+		},
+	}
+	close(msgCh)
+	resCh <- agent.Result{Status: "completed", Output: "done"}
+	close(resCh)
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// TestExecuteAndDrain_RedactsNestedToolInputBeforeSending pins the daemon side
+// of the redaction contract. The server scrubs again on ingest, but that is the
+// remote end: a daemon that self-updated ahead of the server, or one talking to
+// a server mid-rollout, must not put whole-file edit contents on the wire in
+// cleartext. Deployment order is not a control we have, so this side has to be
+// safe on its own.
+func TestExecuteAndDrain_RedactsNestedToolInputBeforeSending(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+
+	if _, _, err := d.executeAndDrain(
+		context.Background(),
+		nestedPatchSecretBackend{},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"task-redact",
+		"",
+		new(atomic.Int32),
+	); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	msgs := rec.snapshot()
+	var toolUse *TaskMessageData
+	for i := range msgs {
+		if msgs[i].Type == "tool_use" {
+			toolUse = &msgs[i]
+			break
+		}
+	}
+	if toolUse == nil {
+		t.Fatalf("no tool_use message reported: %+v", msgs)
+	}
+
+	blob, err := json.Marshal(toolUse.Input)
+	if err != nil {
+		t.Fatalf("marshal reported input: %v", err)
+	}
+	if strings.Contains(string(blob), "ghp_ABCDEFGH") {
+		t.Fatalf("nested token left the daemon unredacted: %s", blob)
+	}
+	// The surrounding structure must survive, or the transcript loses the edit.
+	if !strings.Contains(string(blob), ".env") {
+		t.Fatalf("redaction destroyed the change metadata: %s", blob)
 	}
 }

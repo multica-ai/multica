@@ -11,6 +11,10 @@ import {
   type RendererRouteContextInput,
 } from "../shared/renderer-route-context";
 import {
+  DIAGNOSTICS_CONTROL_CHANNEL,
+  type DiagnosticsControl,
+} from "../shared/diagnostics-control";
+import {
   isNavigationGesture,
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
@@ -120,9 +124,10 @@ const desktopAPI = {
   /** Identifies whether this renderer owns the main tabbed window or a
    *  dedicated issue window, parsed from validated launch arguments. */
   windowContext,
-  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
-   *  the renderer can flush it to telemetry on boot. Returns null when there's
-   *  nothing pending (the normal case). */
+  /** Read any freeze/crash breadcrumb left by a previous session, so the
+   *  renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). Reading does not consume it — call
+   *  `ackFreeze` once the event is on the wire. */
   getLastFreeze: (): FreezeBreadcrumb | null => {
     try {
       return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
@@ -130,6 +135,9 @@ const desktopAPI = {
       return null;
     }
   },
+  /** Retire the breadcrumb with this exact timestamp after its event has been
+   *  handed to analytics. Anything left unacknowledged is retried next boot. */
+  ackFreeze: (ts: number) => ipcRenderer.send("freeze:ack", ts),
   /** Report only the resolved user id (never a token) so main can close
    *  dedicated issue windows that belong to an old account. */
   reportAuthSession: (userId: string | null) =>
@@ -198,6 +206,10 @@ const desktopAPI = {
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
+  /** Publish the server-driven diagnostics flags. The main process starts
+   *  fail-closed and only enables hang stack capture once this says so. */
+  setDiagnosticsControl: (control: DiagnosticsControl) =>
+    ipcRenderer.send(DIAGNOSTICS_CONTROL_CHANNEL, control),
   /** Open the OS folder picker and return the chosen absolute path. */
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),

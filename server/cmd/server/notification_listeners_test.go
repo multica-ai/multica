@@ -71,7 +71,7 @@ func createTestSubIssue(t *testing.T, workspaceID, creatorID, parentIssueID stri
 func newNotificationBus(t *testing.T, queries *db.Queries) *events.Bus {
 	t.Helper()
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 	registerNotificationListeners(bus, queries)
 	return bus
 }
@@ -519,7 +519,7 @@ func TestNotification_SystemCommentSkipsInboxAndMentions(t *testing.T) {
 func TestSubscriberSystemCommentDoesNotSubscribe(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })

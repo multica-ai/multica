@@ -117,11 +117,11 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
   if (agent.composio_toolkit_allowlist_redacted === true) {
     return (
       <div className="space-y-3">
-        <p className="flex items-center gap-2 text-sm font-medium">
+        <p className="flex items-center gap-2 text-body font-medium">
           <Lock className="h-3.5 w-3.5 text-muted-foreground" />
           {t(($) => $.tab_body.composio_mcp.redacted_title)}
         </p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.tab_body.composio_mcp.redacted_hint)}
         </p>
       </div>
@@ -130,14 +130,14 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.tab_body.composio_mcp.subtitle)}
       </p>
 
       {showSharedWarning && (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+          className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-caption text-amber-700 dark:text-amber-400"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
@@ -149,24 +149,24 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
       )}
 
       {connectionsQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           {t(($) => $.tab_body.composio_mcp.loading)}
         </p>
       ) : connectionsQuery.isError ? (
-        <p className="text-sm text-destructive">
+        <p className="text-body text-destructive">
           {t(($) => $.tab_body.composio_mcp.load_failed)}
         </p>
       ) : activeSlugs.length === 0 ? (
         <div className="space-y-2 rounded-lg border border-dashed p-6 text-center">
-          <p className="text-sm font-medium">
+          <p className="text-body font-medium">
             {t(($) => $.tab_body.composio_mcp.empty_title)}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {t(($) => $.tab_body.composio_mcp.empty_hint)}
           </p>
           <AppLink
             href={settingsHref}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+            className="inline-flex items-center gap-1.5 text-caption font-medium text-primary hover:underline"
           >
             <Plug className="h-3 w-3" />
             {t(($) => $.tab_body.composio_mcp.empty_link_to_settings)}
@@ -182,8 +182,8 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
               <li key={slug} className="flex items-center gap-3 p-3">
                 <ComposioToolkitLogo slug={slug} name={name} fallbackLogo={tk?.logo} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{name}</p>
-                  <p className="truncate text-[10px] uppercase tracking-wide text-emerald-600">
+                  <p className="truncate text-body font-medium">{name}</p>
+                  <p className="truncate text-micro uppercase tracking-wide text-emerald-600">
                     {t(($) => $.tab_body.composio_mcp.connected)}
                   </p>
                 </div>
@@ -202,7 +202,7 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
       )}
 
       {updateAllowlist.isPending && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           {t(($) => $.tab_body.composio_mcp.saving)}
         </p>

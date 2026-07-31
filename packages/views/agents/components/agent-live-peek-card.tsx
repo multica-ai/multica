@@ -53,7 +53,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
 
   if (!agent) {
     return (
-      <div className="text-xs text-muted-foreground">
+      <div className="text-caption text-muted-foreground">
         {t(($) => $.profile_card.unavailable)}
       </div>
     );
@@ -94,14 +94,14 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
           size="xl"
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{agent.name}</p>
+          <p className="truncate text-body font-semibold">{agent.name}</p>
           <div className="mt-0.5 inline-flex items-center gap-1.5">
             {isArchived ? (
               <>
                 <archivedVisual.icon
                   className={`h-3 w-3 shrink-0 ${archivedVisual.textClass}`}
                 />
-                <span className={`text-xs ${archivedVisual.textClass}`}>
+                <span className={`text-caption ${archivedVisual.textClass}`}>
                   {t(($) => $.availability.archived)}
                 </span>
               </>
@@ -110,7 +110,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
                 <workloadVisual.icon
                   className={`h-3 w-3 shrink-0 ${workloadVisual.textClass}`}
                 />
-                <span className={`text-xs ${workloadVisual.textClass}`}>
+                <span className={`text-caption ${workloadVisual.textClass}`}>
                   {t(($) => $.workload[workload!])}
                 </span>
               </>
@@ -122,7 +122,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
       </div>
 
       {/* Meta rows. */}
-      <div className="flex flex-col gap-1.5 text-xs">
+      <div className="flex flex-col gap-1.5 text-caption">
         <CurrentIssueRow
           wsId={wsId}
           issueId={currentIssueId}
@@ -141,14 +141,17 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
   );
 }
 
-// Pick the most recent terminal task for last-activity display. Snapshot
-// already caps this to one terminal row per agent (see queries.ts header),
-// but a defensive max-by-completed_at keeps the card honest if that shape
-// ever changes.
+// Pick the most recent terminal task for last-activity display. The snapshot
+// already caps this to one terminal row per agent (see queries.ts header), but
+// a defensive max-by-completed_at keeps the card honest if that shape ever
+// changes. Only completed / failed count, matching the snapshot's outcome
+// filter exactly: cancelled never reaches this card, and treating it as a
+// terminal outcome here would let an aborted attempt mask the agent's last
+// real result if the endpoint ever started returning it.
 function pickLatestTerminal(tasks: readonly AgentTask[]): AgentTask | null {
   let best: AgentTask | null = null;
   for (const t of tasks) {
-    if (t.status !== "completed" && t.status !== "failed" && t.status !== "cancelled") {
+    if (t.status !== "completed" && t.status !== "failed") {
       continue;
     }
     if (!t.completed_at) continue;
@@ -190,7 +193,7 @@ function CurrentIssueRow({
             className="min-w-0 truncate text-brand hover:underline"
             title={`${issue.identifier} ${issue.title}`}
           >
-            <span className="mr-1 font-mono text-[11px]">{issue.identifier}</span>
+            <span className="mr-1 font-mono text-micro">{issue.identifier}</span>
             <span>{issue.title}</span>
           </AppLink>
         ) : (
@@ -227,7 +230,7 @@ function LastActivityRow({
             // matching the project's deliberate split between current and
             // historical state.
             <span
-              className="inline-flex items-center gap-0.5 rounded bg-warning/10 px-1 py-0.5 text-[10px] font-medium text-warning"
+              className="inline-flex items-center gap-0.5 rounded bg-warning/10 px-1 py-0.5 text-micro font-medium text-warning"
               title={failedLabel}
             >
               <AlertTriangle className="h-2.5 w-2.5" />

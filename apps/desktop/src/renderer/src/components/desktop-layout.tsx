@@ -36,7 +36,7 @@ const toolbarMotion = {
 function WindowToolbar() {
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
   const navButtonClassName =
-    "flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-30";
+    "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-30";
 
   return (
     <div
@@ -51,7 +51,7 @@ function WindowToolbar() {
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         <SidebarTrigger
-          className="size-7 text-muted-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className="size-7 text-faint-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         />
         <div className="flex items-center gap-1">

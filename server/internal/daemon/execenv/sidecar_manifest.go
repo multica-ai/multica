@@ -176,15 +176,7 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir string, err error) {
 	const maxAttempts = 64
 	for i := 0; i < maxAttempts; i++ {
-		var candidate string
-		switch {
-		case i == 0:
-			candidate = baseSlug
-		case i == 1:
-			candidate = baseSlug + "-multica"
-		default:
-			candidate = fmt.Sprintf("%s-multica-%d", baseSlug, i)
-		}
+		candidate := skillSlugCandidate(baseSlug, i)
 		path := filepath.Join(skillsParent, candidate)
 		if _, statErr := os.Lstat(path); statErr != nil {
 			if errors.Is(statErr, fs.ErrNotExist) {
@@ -194,6 +186,24 @@ func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir str
 		}
 	}
 	return "", "", fmt.Errorf("allocate collision-free skill dir under %s: exhausted %d attempts for base %q", skillsParent, maxAttempts, baseSlug)
+}
+
+// skillSlugCandidate is the nth name to try for a skill whose natural slug is
+// baseSlug: the bare slug first, then `-multica`, then numbered variants.
+//
+// Two callers must agree on this sequence — allocateCollisionFreeSkillDir,
+// which probes the filesystem, and resolveSkillSlugs, which deduplicates a
+// batch in memory before anything is written. If they disagreed, a skill would
+// be listed under one name and written under another.
+func skillSlugCandidate(baseSlug string, attempt int) string {
+	switch {
+	case attempt <= 0:
+		return baseSlug
+	case attempt == 1:
+		return baseSlug + "-multica"
+	default:
+		return fmt.Sprintf("%s-multica-%d", baseSlug, attempt)
+	}
 }
 
 // writeSidecarManifest persists m to {envRoot}/{sidecarManifestFile}.

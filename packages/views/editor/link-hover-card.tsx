@@ -69,9 +69,16 @@ function useLinkHover(containerRef: React.RefObject<HTMLElement | null>, disable
       if (!link) return;
       const href = link.getAttribute("href");
       if (!href || isMentionHref(href)) return;
-      // Issue mention cards render as <a class="issue-mention"> — they
-      // display their own rich info, a URL hover card is redundant.
-      if (link.classList.contains("issue-mention")) return;
+      // Mention chips render as <a class="issue-mention"> / <a
+      // class="project-mention"> — they display their own rich info, so a URL
+      // hover card is redundant, and the URL it would offer to copy is an
+      // in-app path rather than the shareable link the user expects.
+      if (
+        link.classList.contains("issue-mention") ||
+        link.classList.contains("project-mention")
+      ) {
+        return;
+      }
 
       clearTimeout(hideTimer.current);
       showTimer.current = window.setTimeout(() => {
@@ -201,7 +208,7 @@ function LinkHoverCard({
       onMouseLeave={onCardLeave}
     >
       <span
-        className="min-w-0 flex-1 truncate text-xs text-muted-foreground px-1"
+        className="min-w-0 flex-1 truncate text-caption text-muted-foreground px-1"
         title={href}
       >
         {truncateUrl(href)}

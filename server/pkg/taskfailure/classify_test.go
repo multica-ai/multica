@@ -102,6 +102,12 @@ func TestClassifyRules(t *testing.T) {
 		{"connectionrefused single", "ConnectionRefused", ReasonAgentProviderNetwork},
 		{"dns", "dns lookup failed", ReasonAgentProviderNetwork},
 		{"i/o timeout", "read tcp 1.2.3.4:443: i/o timeout", ReasonAgentProviderNetwork},
+		// MUL-5370: every Go-side context deadline used to land in
+		// agent_error.unknown, which is not on the retry allowlist — a
+		// transient stall became a terminal failure with a useless label.
+		{"context deadline exceeded", "context deadline exceeded", ReasonAgentProviderNetwork},
+		{"wrapped context deadline", `Post "https://api.example.com/v1": context deadline exceeded`, ReasonAgentProviderNetwork},
+		{"http client timeout", `Get "https://api.example.com": net/http: request canceled (Client.Timeout exceeded while awaiting headers)`, ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},
@@ -263,5 +269,110 @@ func TestClassifyAlwaysReturnsAgentSide(t *testing.T) {
 		if !got.IsAgentError() {
 			t.Errorf("Classify(%q) = %q, must be agent_error.* (in-flight classifier never returns platform-side reasons)", s, got)
 		}
+	}
+}
+
+// TestNormalizeDaemonReason is the mixed-version regression for MUL-5370.
+//
+// The daemon-side fix labels a failed skill-bundle download structurally, but
+// installed daemons upgrade on their own cadence. An un-upgraded daemon reports
+// a NON-EMPTY catchall, which FailTask's "classify only when empty" guard
+// deliberately preserves — so without this normalisation the fix would reach
+// only hosts that happened to update: no auto-retry (the catchall is not on the
+// retry allowlist) and generic chat copy, on exactly the hosts most likely to
+// be hitting the bug.
+func TestNormalizeDaemonReason(t *testing.T) {
+	t.Parallel()
+
+	const legacyErr = "resolve skill bundles: context deadline exceeded"
+
+	cases := []struct {
+		name   string
+		reason string
+		raw    string
+		want   Reason
+	}{
+		{
+			name:   "old daemon catchall is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			// A daemon new enough to classify the deadline as network, but not
+			// new enough to know the failure was a skill bundle.
+			name:   "old daemon network guess is upgraded",
+			reason: string(ReasonAgentProviderNetwork),
+			raw:    legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			name:   "pre-MUL-1949 coarse reason is upgraded",
+			reason: "agent_error",
+			raw:    legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			name:   "leading whitespace does not defeat the witness",
+			reason: string(ReasonAgentUnknown),
+			raw:    "  " + legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			// A current daemon already sends the right reason and a different
+			// error string; nothing to do.
+			name:   "current daemon reason passes through",
+			reason: string(ReasonSkillBundleUnavailable),
+			raw:    `skill bundle unavailable: skill "x" (id=1, 10 bytes) after 30s: context deadline exceeded`,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			// The witness is a prefix, not a substring: an agent that merely
+			// mentions the old wrapper in its output must not be relabelled.
+			name:   "prefix only, not substring",
+			reason: string(ReasonAgentUnknown),
+			raw:    "the agent said it could not resolve skill bundles: and then gave up",
+			want:   ReasonAgentUnknown,
+		},
+		{
+			name:   "unrelated reason with the witness is left alone",
+			reason: string(ReasonAgentProviderAuthOrAccess),
+			raw:    legacyErr,
+			want:   ReasonAgentProviderAuthOrAccess,
+		},
+		{
+			name:   "catchall without the witness is left alone",
+			reason: string(ReasonAgentUnknown),
+			raw:    "claude exited with error: exit status 1",
+			want:   ReasonAgentUnknown,
+		},
+		{
+			name:   "empty reason is left alone for the caller's classifier",
+			reason: "",
+			raw:    legacyErr,
+			want:   Reason(""),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NormalizeDaemonReason(tc.reason, tc.raw); got != tc.want {
+				t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", tc.reason, tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeDaemonReason_UpgradedReasonIsRetryable pins the property that
+// actually matters to the user: the normalised reason must be one the server
+// retries. If someone later drops skill_bundle_unavailable from
+// internal/service/task.go's retryableReasons, the label survives but the
+// self-healing this PR is for silently disappears.
+func TestNormalizeDaemonReason_UpgradedReasonIsPlatformSide(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeDaemonReason(string(ReasonAgentUnknown), "resolve skill bundles: context deadline exceeded")
+	if got.IsAgentError() {
+		t.Errorf("%q must be platform-side: the agent process never started", got)
 	}
 }

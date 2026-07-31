@@ -35,8 +35,9 @@ The monorepo enforces strict package boundaries:
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | other apps |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
+| `apps/mobile/` | types and pure functions from `@multica/core` | Web/Desktop React pages, stores, and platform implementations |
 
-If logic appears in both apps, it MUST be extracted to a shared package. There are no exceptions for "small" duplication.
+If logic appears in both apps, it MUST be extracted to a shared package. There are no exceptions for "small" duplication. Mobile owns a separate UI, data layer, and release process; it shares only types and pure functions.
 
 ### Files and components
 
@@ -53,6 +54,8 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 - Foreign keys: `<table>_id`
 - Booleans: `is_<state>` or `<state>_at` (timestamp form preferred for state changes)
 - Migration files: `NNN_descriptive_name.up.sql` + `.down.sql` — always provide both directions
+- Do not create database foreign keys or use cascade deletes or updates; enforce relationships and cleanup in the application layer.
+- Every index must use `CREATE INDEX CONCURRENTLY` or `CREATE UNIQUE INDEX CONCURRENTLY`, with each concurrent index in its own single-statement migration file.
 
 ### Go
 
@@ -67,6 +70,13 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 - Types: `PascalCase` (`Issue`, `AgentRuntime`); never `IPrefix`, never `_t` suffix.
 - Enums: prefer string literal unions; reserve `enum` for runtime-iterable cases.
 - TanStack Query keys: factory functions in `<feature>/queries.ts`, e.g. `issueKeys.detail(id)`.
+
+### API boundaries
+
+- Parse network responses with `parseWithFallback` and zod schemas from `packages/core/api/schema.ts`; do not cast them directly with `as T`.
+- When adding or changing an endpoint, update its schema and cover missing or malformed fields in tests.
+- Downstream UI must provide defaults for optional fields, and every `switch` over a server enum must include a `default` branch.
+- An installed Desktop client may connect to a newer backend; never assume that frontend and backend versions always match.
 
 ### Runtime display names
 

@@ -1,9 +1,9 @@
-import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enProjects from "../../locales/en/projects.json";
+import enIssues from "../../locales/en/issues.json";
 import { ProjectPicker } from "./project-picker";
 import { PillButton } from "../../common/pill-button";
 
@@ -25,37 +25,36 @@ vi.mock("./project-icon", () => ({
   ProjectIcon: () => <span data-testid="project-icon" />,
 }));
 
-vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuTrigger: ({ render: trigger, children }: { render?: ReactElement; children: ReactNode }) =>
-    isValidElement(trigger)
-      ? cloneElement(trigger, {}, children)
-      : <button type="button">{children}</button>,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: { children: ReactNode; onClick?: () => void }) => (
-    <button type="button" onClick={onClick}>{children}</button>
-  ),
-  DropdownMenuSeparator: () => null,
-}));
+// Real PropertyPicker (Popover) — do not mock it: the inline clear control is
+// rendered by ProjectPicker outside the popover, so it is present without
+// opening the picker.
+function renderPicker(props: Partial<React.ComponentProps<typeof ProjectPicker>> = {}) {
+  return render(
+    <I18nProvider locale="en" resources={{ en: { projects: enProjects, issues: enIssues } }}>
+      <ProjectPicker
+        projectId="project-1"
+        onUpdate={props.onUpdate ?? vi.fn()}
+        triggerRender={<PillButton />}
+        {...props}
+      />
+    </I18nProvider>,
+  );
+}
+
+function findInlineClear() {
+  return screen
+    .getAllByRole("button", { name: "Remove from project" })
+    .find((button) => button.className.includes("group-hover/project:opacity-100"));
+}
 
 describe("ProjectPicker", () => {
   it("shows a hover clear action for the selected project", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();
 
-    render(
-      <I18nProvider locale="en" resources={{ en: { projects: enProjects } }}>
-        <ProjectPicker
-          projectId="project-1"
-          onUpdate={onUpdate}
-          triggerRender={<PillButton />}
-        />
-      </I18nProvider>,
-    );
+    renderPicker({ onUpdate });
 
-    const clear = screen
-      .getAllByRole("button", { name: "Remove from project" })
-      .find((button) => button.className.includes("group-hover/project:opacity-100"));
+    const clear = findInlineClear();
     expect(clear).toBeDefined();
     expect(clear!.className).toContain("group-hover/project:opacity-100");
     expect(clear!.className).toContain("size-3.5");
@@ -74,19 +73,9 @@ describe("ProjectPicker", () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();
 
-    render(
-      <I18nProvider locale="en" resources={{ en: { projects: enProjects } }}>
-        <ProjectPicker
-          projectId="project-1"
-          onUpdate={onUpdate}
-          triggerRender={<PillButton />}
-        />
-      </I18nProvider>,
-    );
+    renderPicker({ onUpdate });
 
-    const clear = screen
-      .getAllByRole("button", { name: "Remove from project" })
-      .find((button) => button.className.includes("group-hover/project:opacity-100"));
+    const clear = findInlineClear();
     expect(clear).toBeDefined();
     expect(clear).not.toBeDisabled();
 
@@ -105,20 +94,9 @@ describe("ProjectPicker", () => {
     // both pointer and keyboard activation inert.
     const onUpdate = vi.fn();
 
-    render(
-      <I18nProvider locale="en" resources={{ en: { projects: enProjects } }}>
-        <ProjectPicker
-          projectId="project-1"
-          onUpdate={onUpdate}
-          disabled
-          triggerRender={<PillButton />}
-        />
-      </I18nProvider>,
-    );
+    renderPicker({ onUpdate, disabled: true });
 
-    const clear = screen
-      .getAllByRole("button", { name: "Remove from project" })
-      .find((button) => button.className.includes("group-hover/project:opacity-100"));
+    const clear = findInlineClear();
     expect(clear).toBeDefined();
     expect(clear).toBeDisabled();
 

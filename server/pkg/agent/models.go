@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -75,6 +74,32 @@ type ThinkingLevel struct {
 	Description string `json:"description,omitempty"`
 }
 
+// Catalog is the outcome of one model-discovery round: the models to show,
+// plus whether they were actually discovered.
+type Catalog struct {
+	Models []Model
+	// Fallback reports that discovery did not succeed and Models is a static
+	// stand-in rather than the runtime's real catalog.
+	//
+	// Several providers (codebuddy, copilot, cursor, grok) answer a failed
+	// discovery with a baked-in list so the picker still has something to
+	// show. That is a reasonable UI affordance and a terrible thing to
+	// persist: it is not what the runtime actually supports, and for
+	// codebuddy the static IDs and the real ones do not overlap at all, so
+	// every pick is an ID the CLI rejects. Callers must therefore never
+	// treat a fallback catalog as authoritative — in particular it must not
+	// enter the server's day-scale model-catalog cache, which would pin one
+	// transient failure as the answer for 24h (MUL-5549).
+	Fallback bool
+}
+
+// discovered adapts a plain `([]Model, error)` discovery function to Catalog
+// for providers that have no static fallback — for them a failure is already
+// reported as an empty list or an error, which downstream guards handle.
+func discovered(models []Model, err error) (Catalog, error) {
+	return Catalog{Models: models}, err
+}
+
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
 type modelCacheEntry struct {
@@ -102,93 +127,93 @@ const modelCacheTTL = 60 * time.Second
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
-func ListModels(ctx context.Context, providerType, executablePath string) ([]Model, error) {
+func ListModels(ctx context.Context, providerType, executablePath string) (Catalog, error) {
 	switch providerType {
 	case "claude":
 		models := claudeStaticModels()
 		annotateClaudeThinking(ctx, models, executablePath)
-		return models, nil
+		// Claude's catalog is static by design, not by failure: there is no
+		// discovery step to fall back from, so this is authoritative.
+		return Catalog{Models: models}, nil
 	case "codex":
-		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
-			return discoverCodexModels(ctx, executablePath), nil
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverCodexModels(ctx, executablePath), nil)
 		})
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
 		// dynamic-discovery backends.
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverAntigravityModels(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverAntigravityModels(ctx, executablePath))
 		})
 	case "traecli":
 		// Official TRAE CLI is ACP-native: it returns its model catalog from
 		// session/new. Enumerate it on demand like the other ACP backends
 		// (requires a logged-in traecli; falls back to manual entry on error).
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverTraecliModels(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverTraecliModels(ctx, executablePath))
 		})
 	case "cursor":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discoverCursorModels(ctx, executablePath)
 		})
 	case "copilot":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discoverCopilotModels(ctx, executablePath)
 		})
 	case "hermes":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverHermesModels(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverHermesModels(ctx, executablePath))
 		})
 	case "kimi":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverKimiModels(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverKimiModels(ctx, executablePath))
 		})
 	case "kiro":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverKiroModels(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverKiroModels(ctx, executablePath))
 		})
-	case "qoder":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverQoderModels(ctx, executablePath)
+	case "qoder", "qoderclicn":
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverQoderModels(ctx, executablePath, qoderDefaultBinary(providerType)))
 		})
 	case "opencode":
-		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
-			return discoverOpenCodeModels(ctx, executablePath)
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverOpenCodeModels(ctx, executablePath))
 		})
 	case "deveco":
-		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
-			return discoverDevecoModels(ctx, executablePath)
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverDevecoModels(ctx, executablePath))
 		})
 	case "pi":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverPiModels(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverPiModels(ctx, executablePath))
 		})
 	case "openclaw":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverOpenclawAgents(ctx, executablePath)
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverOpenclawAgents(ctx, executablePath))
 		})
 	case "codebuddy":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			models, err := discoverCodebuddyModels(ctx, executablePath)
-			if err != nil {
-				return nil, err
-			}
-			annotateCodebuddyThinking(ctx, models, executablePath)
-			return models, nil
+		// discoverCodebuddyModels owns the thinking annotation too, so the one
+		// `--help` capture feeds both catalogs. Annotating out here would run
+		// the command a second time (MUL-5549).
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discoverCodebuddyModels(ctx, executablePath)
 		})
 	case "qwen":
 		// Qwen Code has no account-independent headless model catalog. An
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
-		return []Model{}, nil
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
 		// UI picker stays usable offline / unauthenticated.
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discoverGrokModels(ctx, executablePath)
 		})
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q", providerType)
+		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
 }
 
@@ -270,18 +295,18 @@ func modelHasKnownPrefix(model string) bool {
 // The cache is keyed on providerType only; callers that need to
 // distinguish discovery by host/user should include that in the key
 // if we ever introduce such a mode.
-func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
+func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
 		out := entry.models
 		modelCacheMu.Unlock()
-		return out, nil
+		return Catalog{Models: out}, nil
 	}
 	modelCacheMu.Unlock()
 
-	models, err := fn()
+	catalog, err := fn()
 	if err != nil {
-		return nil, err
+		return Catalog{}, err
 	}
 
 	// Don't cache an empty result. Zero models is almost always a transient
@@ -289,14 +314,20 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 	// a runtime that genuinely has no models; caching it would keep the picker
 	// blank for the full TTL even after the cause clears. Skipping the cache
 	// lets the next request retry immediately. See #3729.
-	if len(models) == 0 {
-		return models, nil
+	//
+	// A fallback catalog is the same situation wearing a disguise: non-empty,
+	// but only because discovery failed and the provider substituted a static
+	// list. Caching it would hold the stand-in for the full TTL and stop the
+	// next request from retrying, which is exactly the recovery path we want
+	// to keep open (MUL-5549).
+	if len(catalog.Models) == 0 || catalog.Fallback {
+		return catalog, nil
 	}
 
 	modelCacheMu.Lock()
-	modelCache[key] = modelCacheEntry{models: models, expiresAt: time.Now().Add(modelCacheTTL)}
+	modelCache[key] = modelCacheEntry{models: catalog.Models, expiresAt: time.Now().Add(modelCacheTTL)}
 	modelCacheMu.Unlock()
-	return models, nil
+	return catalog, nil
 }
 
 func discoveryCacheKey(providerType, executablePath string) string {
@@ -878,7 +909,7 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 // drives `initialize` + `session/new`, neither of which triggers
 // a tool-permission prompt — the model catalog is part of the
 // session/new response itself.
-func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model, error) {
+func discoverCopilotModels(ctx context.Context, executablePath string) (Catalog, error) {
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "copilot",
 		clientName:   "multica-model-discovery",
@@ -886,20 +917,21 @@ func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model,
 		acpArgs:      []string{"--acp"},
 	})
 	if err != nil || len(models) == 0 {
-		return copilotStaticModels(), nil
+		return Catalog{Models: copilotStaticModels(), Fallback: true}, nil
 	}
 	for i := range models {
 		if models[i].Provider == "" {
 			models[i].Provider = inferCopilotProvider(models[i].ID)
 		}
 	}
-	return models, nil
+	return Catalog{Models: models}, nil
 }
 
-// discoverQoderModels spins up `qodercli --yolo --acp` and parses models from session/new.
-func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, error) {
+// discoverQoderModels spins up a Qoder CLI binary with `--yolo --acp` and
+// parses models from session/new.
+func discoverQoderModels(ctx context.Context, executablePath, defaultBin string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:   "qodercli",
+		defaultBin:   defaultBin,
 		clientName:   "multica-model-discovery",
 		acpArgs:      []string{"--yolo", "--acp"},
 		tmpdirPrefix: "multica-qoder-discovery-",
@@ -931,6 +963,11 @@ type acpDiscoveryProvider struct {
 	// Legacy discovery providers keep their empty-list behavior; Grok enables
 	// this so it can log the actual fallback reason.
 	strictErrors bool
+	// annotate receives the parsed catalog plus the raw session/new result so a
+	// provider can enrich models from parts of the response the shared parser
+	// ignores. CodeBuddy uses it to read its effort catalog out of the same
+	// handshake, which is why it needs no separate discovery call at all.
+	annotate func([]Model, json.RawMessage)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -1106,6 +1143,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	if err := runCtx.Err(); err != nil {
 		return fail("completion", err)
+	}
+	if p.annotate != nil {
+		p.annotate(models, sessionResult)
 	}
 	return models, nil
 }
@@ -1358,7 +1398,7 @@ func parseAntigravityModels(output string) []Model {
 // discoverGrokModels spins up `grok agent --always-approve stdio` and parses
 // the model catalog from session/new (same shape as Kiro/Qoder/Trae). Requires
 // an authenticated Grok CLI; on any failure falls back to grokStaticModels.
-func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+func discoverGrokModels(ctx context.Context, executablePath string) (Catalog, error) {
 	// Match the daemon's runtime launch: `--no-auto-update` (global) so a
 	// background update check can't stall discovery. Auth is selected only
 	// after initialize returns the methods this installed CLI actually offers.
@@ -1376,7 +1416,7 @@ func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, er
 		if err != nil {
 			slog.Debug("grok model discovery fell back to static catalog", "error", err)
 		}
-		return grokStaticModels(), nil
+		return Catalog{Models: grokStaticModels(), Fallback: true}, nil
 	}
 	for i := range models {
 		if models[i].Provider == "" {
@@ -1384,7 +1424,7 @@ func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, er
 		}
 	}
 	annotateGrokThinking(models)
-	return models, nil
+	return Catalog{Models: models}, nil
 }
 
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
@@ -1421,12 +1461,12 @@ func annotateGrokThinking(models []Model) {
 // suffixes) — static baking would be obsolete within weeks. On any
 // failure we fall back to the minimal static catalog so the UI
 // stays usable when cursor-agent isn't installed on the daemon host.
-func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, error) {
+func discoverCursorModels(ctx context.Context, executablePath string) (Catalog, error) {
 	if executablePath == "" {
 		executablePath = "cursor-agent"
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
-		return cursorStaticModels(), nil
+		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
 	// 15s to match the other network-backed discovery paths (pi/opencode/ACP);
 	// cursor-agent fetches its frequently-changing catalog, so a tight cap can
@@ -1437,13 +1477,13 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil && len(out) == 0 {
-		return cursorStaticModels(), nil
+		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
 	models := parseCursorModels(string(out))
 	if len(models) == 0 {
-		return cursorStaticModels(), nil
+		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
-	return models, nil
+	return Catalog{Models: models}, nil
 }
 
 // parseCursorModels extracts model IDs from `cursor-agent --list-models`.
@@ -1689,60 +1729,57 @@ func isOpenclawIdentifier(s string) bool {
 
 // ── CodeBuddy model discovery ──
 
-// codebuddyModelRe matches the `--model <model> ... Currently supported: (m1, m2, ...)`
-// line in `codebuddy --help` output.
-var codebuddyModelRe = regexp.MustCompile(`--model\s*<[^>]+>\s*.*?Currently supported:\s*\(([^)]+)\)`)
-
-// discoverCodebuddyModels runs `codebuddy --help` and extracts the
-// supported model list from its output. Falls back to a static list
-// when the binary is missing or the output cannot be parsed.
-func discoverCodebuddyModels(ctx context.Context, executablePath string) ([]Model, error) {
-	if executablePath == "" {
-		executablePath = "codebuddy"
-	}
-	if _, err := exec.LookPath(executablePath); err != nil {
-		return codebuddyStaticModels(), nil
-	}
-	helpOut := codebuddyHelpOutput(ctx, executablePath)
-	if helpOut == "" {
-		return codebuddyStaticModels(), nil
-	}
-	models := parseCodebuddyModels(helpOut)
-	if len(models) == 0 {
-		return codebuddyStaticModels(), nil
-	}
-	return models, nil
-}
-
-// parseCodebuddyModels extracts model IDs from codebuddy --help output.
-// The help text contains a line like:
+// discoverCodebuddyModels asks CodeBuddy for its catalog over ACP
+// (`codebuddy --acp`), the same handshake Copilot / Kimi / Kiro / Qoder / Grok /
+// TRAE already use. `session/new` answers with a structured catalog under
+// `models.availableModels` plus a `currentModelId`, which is what the shared
+// parseACPSessionNewModels reads.
 //
-//	--model <model>  ... Currently supported: (model1, model2, ...)
+// This replaces scraping the `--model` line out of `codebuddy --help` (MUL-5549).
+// The help text carried IDs and nothing else, so labels had to be guessed from
+// the ID and produced names CodeBuddy does not use ("Kimi K3 1" for what the CLI
+// calls Kimi-K3, "Deepseek V3 2 Volc" for DeepSeek-V3.2), the default model was
+// a "first entry wins" guess rather than the advertised currentModelId, and the
+// effort catalog needed a second regex over the same output. Measured against
+// CodeBuddy 2.130.0 the handshake is also markedly faster than --help — which
+// matters because that command is slow enough to have been the prime suspect for
+// the timeouts behind #6180.
 //
-// The first model in the list is marked as default.
-func parseCodebuddyModels(helpOutput string) []Model {
-	match := codebuddyModelRe.FindStringSubmatch(helpOutput)
-	if len(match) < 2 {
-		return nil
-	}
-	raw := strings.Split(match[1], ",")
-	var models []Model
-	for _, s := range raw {
-		id := strings.TrimSpace(s)
-		if id == "" {
-			continue
+// Falls back to the static catalog (marked Fallback, so it can never be cached
+// as authoritative) when the handshake fails — including the not-logged-in case,
+// where session/new may legitimately refuse.
+func discoverCodebuddyModels(ctx context.Context, executablePath string) (Catalog, error) {
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "codebuddy",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-codebuddy-discovery-",
+		acpArgs:      []string{"--acp"},
+		strictErrors: true,
+		annotate:     annotateCodebuddyThinkingFromACP,
+	})
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			slog.Debug("codebuddy model discovery fell back to static catalog", "error", err)
 		}
-		models = append(models, Model{
-			ID:       id,
-			Label:    codebuddyModelLabel(id),
-			Provider: codebuddyModelProvider(id),
-			Default:  len(models) == 0,
-		})
+		return codebuddyFallbackCatalog(), nil
 	}
-	return models
+	// Same post-pass Copilot runs: the ACP payload carries no vendor, and
+	// acpModelEntry can only recover one from a `vendor:model` id. CodeBuddy's
+	// ids are bare (`glm-5.2`, `kimi-k3-1`), so without this every model lands
+	// in one unlabelled group instead of the Zhipu / Kimi / DeepSeek sections
+	// the picker renders from Provider.
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = codebuddyModelProvider(models[i].ID)
+		}
+	}
+	return Catalog{Models: models}, nil
 }
 
-// codebuddyModelProvider infers a provider name from a model ID prefix.
+// codebuddyModelProvider infers a vendor from a CodeBuddy model ID prefix.
+// CodeBuddy aggregates several vendors under its own account, and neither the
+// ACP catalog nor the static fallback carries a vendor field, so the ID prefix
+// is the only signal available for grouping the picker.
 func codebuddyModelProvider(id string) string {
 	switch {
 	case strings.HasPrefix(id, "claude-"):
@@ -1766,25 +1803,23 @@ func codebuddyModelProvider(id string) string {
 	}
 }
 
-// codebuddyModelLabel generates a human-readable label from a model ID.
-// Capitalizes each dash-separated part; special-cases GPT/GLM to uppercase
-// and rewrites the "-ioa" suffix as "IOA".
-func codebuddyModelLabel(id string) string {
-	parts := strings.Split(id, "-")
-	for i, p := range parts {
-		if strings.EqualFold(p, "gpt") || strings.EqualFold(p, "glm") {
-			parts[i] = strings.ToUpper(p)
-		} else if strings.EqualFold(p, "ioa") {
-			parts[i] = "IOA"
-		} else if len(p) > 0 {
-			parts[i] = strings.ToUpper(p[:1]) + p[1:]
-		}
-	}
-	return strings.Join(parts, " ")
+// codebuddyFallbackCatalog is the static stand-in for a failed discovery. It
+// applies the static effort levels locally rather than probing again: whatever
+// broke the ACP handshake (binary missing, CLI not logged in, timeout) would
+// break a second attempt too.
+func codebuddyFallbackCatalog() Catalog {
+	models := codebuddyStaticModels()
+	applyCodebuddyStaticThinking(models)
+	return Catalog{Models: models, Fallback: true}
 }
 
-// codebuddyStaticModels is the fallback catalog when dynamic discovery
-// fails (binary missing, parse error, timeout).
+// codebuddyStaticModels is the fallback catalog when ACP discovery fails
+// (binary missing, CLI not logged in, handshake timeout).
+//
+// These IDs do not overlap CodeBuddy's real catalog at all, so this list is a
+// last-resort affordance to keep the picker usable, never an answer. It is
+// always returned marked Fallback so it cannot be cached as authoritative
+// (MUL-5549).
 func codebuddyStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4.6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},

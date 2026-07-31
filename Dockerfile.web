@@ -66,6 +66,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 # Copy public assets
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+# Ship the license and attribution notices with the image (LICENSE condition 1b)
+COPY --chown=nextjs:nodejs LICENSE NOTICE ./
 
 USER nextjs
 

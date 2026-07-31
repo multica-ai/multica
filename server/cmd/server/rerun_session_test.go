@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -12,6 +14,25 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// requireSessionExcluded asserts a resume lookup found nothing BECAUSE the
+// session was excluded — not because the query itself blew up.
+//
+// The bare `if err == nil && prior.SessionID.Valid` form these tests shared is
+// false-green: any real fault (undefined column, syntax error, dead
+// connection) makes err non-nil, the condition false, and the test pass. Run
+// against a database missing this PR's new column, the exclusion tests
+// reported PASS on a SQLSTATE 42703. Requiring pgx.ErrNoRows specifically is
+// what makes a passing test mean "the filter worked".
+func requireSessionExcluded(t *testing.T, sessionID pgtype.Text, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected the session to be excluded, but the lookup returned %q", sessionID.String)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("lookup failed for an unrelated reason, so this test proves nothing: %v", err)
+	}
+}
 
 // setupRerunTestFixture creates an issue assigned to the integration test
 // agent and returns (issueID, agentID, runtimeID).
@@ -106,6 +127,261 @@ func TestGetLastTaskSessionExcludesPoisonedFailures(t *testing.T) {
 	}
 }
 
+// TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked is the claim-side
+// half of MUL-5305: when the most recent task recorded NO session_id (the
+// daemon withheld an unresumable Codex session so it would not poison the next
+// follow-up), the resume lookup skips that row via `session_id IS NOT NULL`
+// and falls back to the most recent task that does have a session — so the next
+// follow-up continues from the last real conversation instead of the dropped
+// pointer that produced the reported regression.
+func TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	// Older completed task with a good, recorded session (its rollout is real).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'OLD-GOOD-SESSION', '/tmp/good')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert older completed task: %v", err)
+	}
+
+	// Newer failed task whose unresumable session was withheld (session_id NULL).
+	// This is the row a naive lookup would return, cold-starting the next run.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/blanked', 'timeout')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert newer blanked task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid {
+		t.Fatal("expected fallback to the older recorded session, got no session")
+	}
+	if prior.SessionID.String != "OLD-GOOD-SESSION" {
+		t.Fatalf("expected OLD-GOOD-SESSION, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionExcludesEmptyHistoryMessage is the SQL half of the
+// GH #6066 fix. The daemon now classifies an empty-message rejection as
+// api_invalid_request, but daemons upgrade on their own cadence — a self-host
+// install still running an older one writes agent_error.unknown, and only the
+// query's text guard keeps the next task off the poisoned session. This drives
+// that exact row shape.
+func TestGetLastTaskSessionExcludesEmptyHistoryMessage(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	// The row an un-upgraded daemon writes for GH #6066: the reason is the
+	// catchall, so the failure_reason blacklist does not fire.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'POISONED-EMPTY-MSG', '/tmp/poisoned', 'agent_error.unknown',
+		        'Invalid request: the message at position 37 with role ''assistant'' must not be empty')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert poisoned task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	requireSessionExcluded(t, prior.SessionID, err)
+}
+
+// TestGetLastTaskSessionKeepsToolEmptinessError is the narrowness half: the
+// text guard must not swallow a healthy session because some tool complained
+// that a field was empty. A false positive here silently drops conversation
+// context on every follow-up, which is worse than the bug it guards against.
+func TestGetLastTaskSessionKeepsToolEmptinessError(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-SESSION', '/tmp/healthy', 'agent_error.unknown',
+		        'validation error: field must not be empty')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid || prior.SessionID.String != "HEALTHY-SESSION" {
+		t.Fatalf("a tool emptiness error must not retire the session, got %+v", prior.SessionID)
+	}
+}
+
+// TestCompletedTaskRolloutMissingWithholdsAndDisclosesGap is the cross-layer
+// regression for MUL-5305 Must-fix 1: a COMPLETED follow-up whose Codex rollout
+// is missing (the #5934 case — the user waits for each turn to finish) must (1)
+// NOT be handed to the next follow-up as its resume pointer, and (2) NOT be
+// resumed silently — the next claim must still disclose the continuity gap. It
+// drives the REAL terminal write (CompleteAgentTask with session_rollout_missing,
+// which clears session_id and flags the row in one statement) rather than a
+// manual marker, then checks GetLastTaskSession (falls back to the older good
+// session) + GetLatestTaskRolloutMissing (the disclosure signal
+// buildClaimedTaskResponse reads).
+func TestCompletedTaskRolloutMissingWithholdsAndDisclosesGap(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	// Older completed turn with a real, recorded session.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'OLD-GOOD-SESSION', '/tmp/good')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert older completed task: %v", err)
+	}
+
+	// Newer turn still 'running' with a mid-flight-pinned session — exactly the
+	// pointer the reported bug propagates. CompleteAgentTask below finishes it
+	// with session_rollout_missing=true (the daemon found no rollout).
+	var newerTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '1 minute', 'NEW-ROLLOUT-MISSING', '/tmp/newer')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&newerTaskID); err != nil {
+		t.Fatalf("insert newer running task: %v", err)
+	}
+
+	// The real terminal write withholds the session and flags the row atomically.
+	done, err := queries.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
+		ID:                    pgtype.UUID{Bytes: parseUUIDBytes(newerTaskID), Valid: true},
+		Result:                []byte(`{"output":"done"}`),
+		SessionID:             pgtype.Text{String: "NEW-ROLLOUT-MISSING", Valid: true},
+		WorkDir:               pgtype.Text{String: "/tmp/newer", Valid: true},
+		SessionRolloutMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("CompleteAgentTask: %v", err)
+	}
+	// The terminal SQL forced the pinned session NULL and flagged the row in one
+	// statement — not two writes that a concurrent retry could interleave.
+	if done.SessionID.Valid {
+		t.Fatalf("expected withheld session_id to be NULL, got %q", done.SessionID.String)
+	}
+	if !done.SessionRolloutMissing {
+		t.Fatal("expected session_rollout_missing to be set on the terminal row")
+	}
+
+	// (1) The bad session is NOT handed out — resume falls back to the older good one.
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid || prior.SessionID.String != "OLD-GOOD-SESSION" {
+		t.Fatalf("expected fallback to OLD-GOOD-SESSION, got valid=%v %q", prior.SessionID.Valid, prior.SessionID.String)
+	}
+
+	// (2) The gap is disclosed — the resume is NOT silently claimed as complete.
+	missing, err := queries.GetLatestTaskRolloutMissing(ctx, db.GetLatestTaskRolloutMissingParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLatestTaskRolloutMissing failed: %v", err)
+	}
+	if !missing {
+		t.Fatal("expected the continuity gap to be flagged so the next claim discloses it")
+	}
+}
+
+// TestFailedTaskRolloutMissingForcesNullOverMidFlightPin covers the failure-path
+// half of MUL-5305 Must-fix 1: FailAgentTask normally COALESCE-preserves a
+// mid-flight-pinned session, which would let an auto-retry created in the SAME
+// transaction inherit a rollout-missing pointer. With session_rollout_missing
+// the terminal UPDATE forces session_id NULL and flags the row in ONE statement,
+// so there is no window between the fail committing and a separate marker where
+// the retry could observe the bad pointer or a false gap flag.
+func TestFailedTaskRolloutMissingForcesNullOverMidFlightPin(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	// Running task with a mid-flight-pinned session, as UpdateAgentTaskSession
+	// would have left it before the run failed with no rollout on disk.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '1 minute', 'PINNED-BUT-NO-ROLLOUT', '/tmp/wd')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert running task: %v", err)
+	}
+
+	// The daemon withheld it: FailTask sends an empty session_id (Valid:false)
+	// AND session_rollout_missing=true. The CASE must win over the COALESCE.
+	failed, err := queries.FailAgentTask(ctx, db.FailAgentTaskParams{
+		ID:                    pgtype.UUID{Bytes: parseUUIDBytes(taskID), Valid: true},
+		Error:                 pgtype.Text{String: "runtime went offline", Valid: true},
+		FailureReason:         pgtype.Text{String: "timeout", Valid: true},
+		SessionID:             pgtype.Text{Valid: false},
+		WorkDir:               pgtype.Text{Valid: false},
+		SessionRolloutMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("FailAgentTask: %v", err)
+	}
+	if failed.SessionID.Valid {
+		t.Fatalf("expected the mid-flight pin to be forced NULL, got %q", failed.SessionID.String)
+	}
+	if !failed.SessionRolloutMissing {
+		t.Fatal("expected session_rollout_missing to be set on the failed row")
+	}
+}
+
 // TestGetLastTaskSessionFallbackPoisonedClassifier covers the second
 // poisoned classifier so adding a third doesn't silently break this rule.
 func TestGetLastTaskSessionFallbackPoisonedClassifier(t *testing.T) {
@@ -130,9 +406,7 @@ func TestGetLastTaskSessionFallbackPoisonedClassifier(t *testing.T) {
 		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
 		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
 	})
-	if err == nil && prior.SessionID.Valid {
-		t.Fatalf("expected no resumable session, got %q", prior.SessionID.String)
-	}
+	requireSessionExcluded(t, prior.SessionID, err)
 }
 
 // TestGetLastTaskSessionExcludesAPIInvalidRequest covers the MUL-1921
@@ -163,9 +437,7 @@ func TestGetLastTaskSessionExcludesAPIInvalidRequest(t *testing.T) {
 		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
 		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
 	})
-	if err == nil && prior.SessionID.Valid {
-		t.Fatalf("expected no resumable session for api_invalid_request, got %q", prior.SessionID.String)
-	}
+	requireSessionExcluded(t, prior.SessionID, err)
 }
 
 // TestGetLastTaskSessionExcludesCodexSemanticInactivity covers Codex
@@ -347,9 +619,7 @@ func TestGetLastTaskSessionExcludesLegacyAPI400(t *testing.T) {
 		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
 		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
 	})
-	if err == nil && prior.SessionID.Valid {
-		t.Fatalf("expected no resumable session, but query fell back to %q", prior.SessionID.String)
-	}
+	requireSessionExcluded(t, prior.SessionID, err)
 }
 
 // TestGetLastTaskSessionKeepsBenignAgentErrorWithSession asserts the
@@ -666,5 +936,205 @@ func TestEnqueueTaskForIssueDoesNotForceFreshSession(t *testing.T) {
 	}
 	if task.ForceFreshSession {
 		t.Fatal("expected normal enqueue to leave force_fresh_session=false")
+	}
+}
+
+// TestGetLastTaskSessionExcludesPoisonedOriginSession is the GH #5975 core
+// regression: the SAME session_id appears on an older 'completed' row (the turn
+// that first baked the oversized image into history) AND a newer poisoned
+// 'failed' row (a later text-only turn that resumed it and hit the same
+// rejection). A row-level filter would drop the poisoned row and fall back to
+// the completed row — which points at the exact same dead session. The
+// per-session-latest-state selection must invalidate the whole session.
+func TestGetLastTaskSessionExcludesPoisonedOriginSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	// Older completed row: the successful turn that consumed the oversized
+	// screenshot and stored the session id.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'POISON-ORIGIN', '/tmp/origin')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed origin task: %v", err)
+	}
+
+	// Newer poisoned row on the SAME session: a later text-only turn resumed
+	// it and hit the oversized-history-image rejection.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'POISON-ORIGIN', '/tmp/origin', 'api_invalid_request',
+		        'kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert poisoned resume task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	requireSessionExcluded(t, prior.SessionID, err)
+}
+
+// TestGetLastTaskSessionFallsBackToHealthyDistinctSession asserts that while a
+// poisoned session (completed origin + newer poisoned resume, same id) is
+// invalidated, a DIFFERENT healthy session on the same issue is still eligible.
+func TestGetLastTaskSessionFallsBackToHealthyDistinctSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '3 minutes', now() - interval '3 minutes', 'POISON-ORIGIN', '/tmp/origin')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed origin task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'POISON-ORIGIN', '/tmp/origin', 'api_invalid_request',
+		        'session/prompt: Internal error (code=-32603, data=messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert poisoned resume task: %v", err)
+	}
+	// A separate, healthy session (distinct id) — the eligible fallback.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-DISTINCT', '/tmp/healthy')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert healthy distinct task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if prior.SessionID.String != "HEALTHY-DISTINCT" {
+		t.Fatalf("expected fallback to HEALTHY-DISTINCT, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionExcludesKiroOversizedImageByText is the GH #5975
+// defense-in-depth: a row that escaped the daemon classifier (still tagged
+// 'agent_error', e.g. a new-server + old-daemon deploy window) must still be
+// excluded on error-text shape alone via the oversized-image ILIKE clause.
+func TestGetLastTaskSessionExcludesKiroOversizedImageByText(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'KIRO-OVERSIZED', '/tmp/kiro', 'agent_error',
+		        'kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert unclassified kiro oversized task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	requireSessionExcluded(t, prior.SessionID, err)
+}
+
+// TestGetLastTaskSessionRestoresRecoveredSession asserts the per-session-latest
+// rule is symmetric: if a session that once failed poisoned later terminates
+// cleanly again (a newer 'completed' row on the same id), it becomes resumable
+// once more.
+func TestGetLastTaskSessionRestoresRecoveredSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'RECOVER-SESS', '/tmp/recover', 'api_invalid_request',
+		        'session/prompt: Internal error (code=-32603, data=messages.0.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert earlier poisoned task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', 'RECOVER-SESS', '/tmp/recover')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert later completed task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if prior.SessionID.String != "RECOVER-SESS" {
+		t.Fatalf("expected the recovered session to be resumable again, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker is the
+// review-tightening negative control: the oversized-image ILIKE now requires
+// BOTH the dimension phrase AND the image-content marker, matching the Kiro
+// detector / classifyPoisonedError precision. An unrelated error that merely
+// mentions image dimensions (without the image.source.base64.data marker) must
+// NOT be filtered — otherwise a benign failure would needlessly drop a
+// resumable session.
+func TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '30 seconds', now() - interval '30 seconds', 'DIM-ONLY-RESUMABLE', '/tmp/dim', 'agent_error',
+		        'tool reported: image dimensions exceed max allowed size: 8000 pixels while generating a thumbnail')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert dimension-phrase-only task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid || prior.SessionID.String != "DIM-ONLY-RESUMABLE" {
+		t.Fatalf("expected the dimension-phrase-only session to stay resumable, got %q (valid=%v)", prior.SessionID.String, prior.SessionID.Valid)
 	}
 }

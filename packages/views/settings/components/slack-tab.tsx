@@ -91,7 +91,7 @@ export function SlackTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-1">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           {t(($) => $.slack.page_description)}
         </p>
       </section>
@@ -99,10 +99,10 @@ export function SlackTab() {
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.slack.not_enabled_title)}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.slack.not_enabled_title)}</p>
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.slack.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+              <code className="rounded bg-muted px-1 py-0.5 text-micro">
                 MULTICA_SLACK_SECRET_KEY
               </code>{" "}
               {t(($) => $.slack.not_enabled_description_suffix)}{" "}
@@ -113,26 +113,26 @@ export function SlackTab() {
       ) : !installSupported && installations.length === 0 ? (
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.slack.preview_title)}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.slack.preview_title)}</p>
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.slack.preview_description)}
             </p>
           </CardContent>
         </Card>
       ) : (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold">{t(($) => $.slack.connected_bots)}</h2>
+          <h2 className="text-body font-semibold">{t(($) => $.slack.connected_bots)}</h2>
           {isLoading ? (
             <Card>
               <CardContent>
-                <p className="text-sm text-muted-foreground">{t(($) => $.slack.loading)}</p>
+                <p className="text-body text-muted-foreground">{t(($) => $.slack.loading)}</p>
               </CardContent>
             </Card>
           ) : installations.length === 0 ? (
             <Card>
               <CardContent className="space-y-2">
-                <p className="text-sm font-medium">{t(($) => $.slack.empty_title)}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-body font-medium">{t(($) => $.slack.empty_title)}</p>
+                <p className="text-caption text-muted-foreground">
                   {t(($) => $.slack.empty_description_prefix)}{" "}
                   <strong>{t(($) => $.slack.empty_description_cta)}</strong>{" "}
                   {t(($) => $.slack.empty_description_suffix)}
@@ -211,15 +211,15 @@ function InstallationRow({
           profileLink
         />
         <div className="space-y-1">
-          <p className="text-sm font-medium">
+          <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.slack.revoked_badge)}
               </span>
             )}
           </p>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t(($) => $.slack.installed_at_label, {
               when: new Date(installation.installed_at).toLocaleString(),
             })}
@@ -390,7 +390,7 @@ export function SlackAgentBindButton({
             <button
               type="button"
               onClick={() => openExternal(SLACK_BYO_VIDEO_URL)}
-              className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary underline-offset-2 hover:underline"
+              className="inline-flex w-fit items-center gap-2 text-body font-medium text-primary underline-offset-2 hover:underline"
             >
               <ExternalLink className="h-4 w-4" />
               {t(($) => $.slack.byo_video_cta)}
@@ -400,7 +400,7 @@ export function SlackAgentBindButton({
           <button
             type="button"
             onClick={() => openExternal(slackDocsUrl(i18n.language))}
-            className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary underline-offset-2 hover:underline"
+            className="inline-flex w-fit items-center gap-2 text-body font-medium text-primary underline-offset-2 hover:underline"
             data-testid="slack-byo-docs-link"
           >
             <ExternalLink className="h-4 w-4" />
@@ -483,7 +483,7 @@ function SlackAgentBotStatusRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
       )}
       data-testid="slack-agent-bot-status"
@@ -536,7 +536,7 @@ function SlackAgentBotConnectedBadge({
       data-testid="slack-agent-bot-connected"
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
           <span className="truncate">{t(($) => $.slack.agent_bot_connected_label)}</span>
         </span>
@@ -562,7 +562,7 @@ function SlackAgentBotConnectedBadge({
           onClick={() =>
             openExternal(`https://app.slack.com/client/${installation.team_id}`)
           }
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
           title={t(($) => $.slack.agent_bot_manage_tooltip)}
         >
           <ExternalLink className="h-3 w-3" />

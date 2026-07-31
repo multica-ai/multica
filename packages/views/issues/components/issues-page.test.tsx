@@ -149,19 +149,27 @@ const mockListIssueTableFacets = vi.hoisted(() =>
       "blocked",
       "cancelled",
     ];
-    const groups = await Promise.all(
-      statuses.map(async (status) => ({
-        status,
-        response: await mockListIssues({
-          status,
-          limit: 50,
-          offset: 0,
-          ...(request.query.scope.assignee_types
-            ? { assignee_types: request.query.scope.assignee_types }
-            : {}),
-        }),
-      })),
+    // Only sweep the legacy endpoint for a status facet. Every surface also
+    // requests an always-on `working_agents` facet to label its activity chip,
+    // and that must not look like the legacy status sweep these tests forbid.
+    const wantsStatus = request.facets.some(
+      (facet: any) => facet.kind === "status",
     );
+    const groups = wantsStatus
+      ? await Promise.all(
+          statuses.map(async (status) => ({
+            status,
+            response: await mockListIssues({
+              status,
+              limit: 50,
+              offset: 0,
+              ...(request.query.scope.assignee_types
+                ? { assignee_types: request.query.scope.assignee_types }
+                : {}),
+            }),
+          })),
+        )
+      : [];
     return {
       query_fingerprint: "test",
       total: groups.reduce((sum, group) => sum + group.response.issues.length, 0),

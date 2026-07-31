@@ -33,6 +33,7 @@ export type WSEventType =
   | "task:cancelled"
   | "inbox:new"
   | "inbox:read"
+  | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
   | "inbox:batch-read"
@@ -56,6 +57,7 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:quick_actions"
   | "chat:cancel_finalized"
   | "chat:session_read"
   | "chat:session_deleted"
@@ -158,6 +160,12 @@ export interface InboxNewPayload {
 }
 
 export interface InboxReadPayload {
+  item_id: string;
+  recipient_id: string;
+}
+
+/** Emitted when a recipient flips a notification back to unread. */
+export interface InboxUnreadPayload {
   item_id: string;
   recipient_id: string;
 }
@@ -376,6 +384,34 @@ export interface ChatDonePayload {
    * populated alongside this even for a no_response turn.
    */
   message_kind?: import("./chat").ChatMessageKind;
+  /** Server-validated follow-ups attached to the persisted assistant reply. */
+  quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The daemon will follow up with a chat:quick_actions supplement for this
+   * turn — render a placeholder. Never true alongside populated
+   * quick_actions; absent on older servers/daemons.
+   */
+  quick_actions_pending?: boolean;
+}
+
+/**
+ * chat:quick_actions — supplements a finished turn with the follow-up
+ * suggestions from the daemon's background pass. An empty list is terminal:
+ * "no suggestions this turn", resolve any placeholder.
+ */
+export interface ChatQuickActionsPayload {
+  chat_session_id: string;
+  task_id: string;
+  message_id: string;
+  quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The regeneration behind an explicit refresh failed: the actions carried
+   * here are the turn's UNCHANGED prior pills, sent only to resolve the pending
+   * spinner. Clients surface a "couldn't refresh" notice rather than treating
+   * them as freshly generated. Absent/false on the normal success path and on
+   * older servers.
+   */
+  failed?: boolean;
 }
 
 /**
@@ -493,6 +529,7 @@ export interface WSEventPayloadMap {
   "task:progress": unknown;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
+  "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
   "inbox:batch-read": InboxBatchReadPayload;
@@ -507,6 +544,7 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
