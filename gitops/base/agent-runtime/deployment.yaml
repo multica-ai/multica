@@ -3,7 +3,12 @@ kind: Deployment
 metadata:
   name: agentrunner
   annotations:
-    reloader.stakater.com/auto: "true"
+    # Reloader's `/auto` mode doesn't reliably pick up updates the External
+    # Secrets Operator writes to a Secret it owns — every other ESO-backed
+    # workload in this org uses `/search` (here) + `/match` (on the
+    # ExternalSecret) instead; see gitops/base/agent-runtime/external-secret.yaml
+    # and onepassword-external-secret.yaml.
+    reloader.stakater.com/search: "true"
 spec:
   replicas: 1
   # Default (600s) is shorter than preflight can legitimately take (~20 min) —
