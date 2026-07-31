@@ -99,7 +99,14 @@
     "update_confirm": "Update",
     "updating": "Updating...",
     "updated_toast": "Updated {{name}} from source",
-    "update_failed_toast": "Failed to update skill"
+    "update_failed_toast": "Failed to update skill",
+    "update_no_permission": "Selection includes skills that can't be updated from a source",
+    "update_dialog_title_multi_one": "Update {{count}} skill from source?",
+    "update_dialog_title_multi_other": "Update {{count}} skills from source?",
+    "update_dialog_desc_multi_one": "This replaces the selected skill with the latest version from its source. Local changes will be lost.",
+    "update_dialog_desc_multi_other": "This replaces the {{count}} selected skills with the latest versions from their sources. Local changes will be lost.",
+    "updated_multi_toast_one": "Updated {{count}} skill from source",
+    "updated_multi_toast_other": "Updated {{count}} skills from source"
   },
   "toolbar": {
     "result_count_title": "Matching skills / all skills",

@@ -95,7 +95,11 @@
     "update_confirm": "更新",
     "updating": "更新中...",
     "updated_toast": "{{name}} をソースから更新しました",
-    "update_failed_toast": "スキルの更新に失敗しました"
+    "update_failed_toast": "スキルの更新に失敗しました",
+    "update_no_permission": "ソースから更新できないスキルが選択に含まれています",
+    "update_dialog_title_multi_other": "{{count}} 件のスキルをソースから更新しますか？",
+    "update_dialog_desc_multi_other": "選択した {{count}} 件のスキルをソースの最新バージョンに置き換えます。ローカルの変更は失われます。",
+    "updated_multi_toast_other": "{{count}} 件のスキルをソースから更新しました"
   },
   "toolbar": {
     "result_count_title": "該当スキル / 全スキル",
