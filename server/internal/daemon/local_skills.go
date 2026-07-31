@@ -210,7 +210,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				qwenpawHome = filepath.Join(home, ".qwenpaw")
 			}
 		}
-		providerRoot = filepath.Join(qwenpawHome, "skills")
+		providerRoot = filepath.Join(qwenpawHome, "skill_pool")
 	default:
 		return nil, false, nil
 	}
