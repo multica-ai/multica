@@ -56,6 +56,7 @@ import {
 } from "./utils/parse-markdown-chunked";
 import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
+import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
 import { createEditorExtensions } from "./extensions";
 import {
   uploadAndInsertFile,
@@ -189,6 +190,12 @@ interface ContentEditorBaseProps {
    * command menu (issue comments), e.g. /note.
    */
   slashCommandMode?: "skill" | "command";
+  /**
+   * Quick actions to offer in the "command" `/` menu, plus the resolver that
+   * turns a pick into the text it would post (MUL-5465). Read through
+   * functions so a newly created action appears without remounting the editor.
+   */
+  quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -362,6 +369,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionContextItems,
       enableSlashCommands = false,
       slashCommandMode = "skill",
+      quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
       onReady,
@@ -387,6 +395,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // live without remounting the editor.
     const pasteAsFileThresholdRef = useRef<number | undefined>(pasteAsFileThreshold);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
+    // Kept in a ref for the same reason as mentionContextItems: the extension
+    // set is built once at mount, so a directly-captured options object would
+    // freeze whatever closures existed then and stop seeing new quick actions.
+    const quickActionMenuRef = useRef<BuiltinCommandSuggestionOptions | undefined>(quickActionMenu);
     const lastEmittedRef = useRef<string | null>(null);
     // `content` already consumes the initial synchronized value when Tiptap
     // mounts. Track later changes separately so the sync effect does not parse
@@ -482,6 +494,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUploadFileRef.current = wrappedOnUploadFile;
     pasteAsFileThresholdRef.current = pasteAsFileThreshold;
     mentionContextItemsRef.current = mentionContextItems ?? [];
+    quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
@@ -584,6 +597,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
         slashCommandMode,
+        quickActionMenu: {
+          getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
+          renderQuickAction: (id: string) =>
+            quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
+          onRenderError: (error: unknown) =>
+            quickActionMenuRef.current?.onRenderError?.(error),
+        },
         resolveIssueIdentifierRef,
       }),
       onUpdate: ({ editor: ed }) => {

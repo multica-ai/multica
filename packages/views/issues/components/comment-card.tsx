@@ -725,7 +725,7 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="pl-12 pr-4 pt-1 text-body leading-relaxed text-foreground/85">
+          <div className="pl-12 pr-4 pt-1 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
@@ -752,6 +752,13 @@ function CommentRow({
 // ---------------------------------------------------------------------------
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
+
+// A quick action posts an ordinary comment and is rendered as one (MUL-5465).
+// It briefly had a collapsed one-line header that expanded to reveal the
+// prompt, on the theory that repeated runs would bury the discussion. In
+// practice the prompts are short, the header restated what the body already
+// said, and the disclosure only added a click between the reader and the text.
+// Provenance still lives on `quick_action_id`; it is data, not decoration.
 
 function CommentCardImpl({
   issueId,
@@ -1034,7 +1041,7 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-body leading-relaxed text-foreground/85">
+                <div className="pl-10 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />

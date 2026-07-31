@@ -59,7 +59,10 @@
     "copied_toast": "已复制",
     "copy_failed_toast": "复制失败",
     "scroll_to_latest": "滚动到最新消息",
-    "loading_older": "正在加载更早的消息…"
+    "loading_older": "正在加载更早的消息…",
+    "quick_actions_heading": "后续提问",
+    "quick_actions_regenerate": "重新生成建议",
+    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
   },
   "session_history": {
     "untitled": "无标题",

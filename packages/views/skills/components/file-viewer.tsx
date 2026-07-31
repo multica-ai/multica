@@ -50,7 +50,8 @@ export function FileViewer({
   if (isMd && mode === "preview") {
     return (
       <div className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-[68ch] px-6 py-7 sm:px-8">
+        {/* pb-24: keeps the last lines readable under the floating save pill. */}
+        <div className="mx-auto max-w-[68ch] px-6 pb-24 pt-7 sm:px-8">
           <RichContent
             content={body || t(($) => $.file_viewer.no_content)}
             density="document"
@@ -72,7 +73,7 @@ export function FileViewer({
           ? t(($) => $.file_viewer.markdown_placeholder)
           : t(($) => $.file_viewer.raw_placeholder)
       }
-      className="h-full min-h-full resize-none rounded-none border-0 px-6 py-5 font-mono text-body leading-relaxed read-only:cursor-default focus-visible:ring-0 sm:px-8"
+      className="h-full min-h-full resize-none rounded-none border-0 px-6 pb-24 pt-5 font-mono text-body leading-relaxed read-only:cursor-default focus-visible:ring-0 sm:px-8"
     />
   );
 }

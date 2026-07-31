@@ -129,7 +129,8 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read issue_context.md: %v", err)
 	}
-	for _, want := range []string{"a1b2c3d4-e5f6-7890-abcd-ef1234567890", "Code Review"} {
+	// "Code Review" is listed by its on-disk slug (MUL-5529).
+	for _, want := range []string{"a1b2c3d4-e5f6-7890-abcd-ef1234567890", "code-review"} {
 		if !strings.Contains(string(content), want) {
 			t.Fatalf("issue_context.md missing %q", want)
 		}
@@ -451,7 +452,9 @@ func TestWriteContextFiles(t *testing.T) {
 	for _, want := range []string{
 		"test-issue-id-1234",
 		"## Agent Skills",
-		"Go Conventions",
+		// Listed by on-disk slug, not the "Go Conventions" display name —
+		// the slug is the only name the model can invoke (MUL-5529).
+		"go-conventions",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("content missing %q", want)
@@ -941,12 +944,22 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		"Multica Agent Runtime",
 		"multica issue get",
 		"multica issue comment list",
-		"Go Conventions",
-		"PR Review",
+		// Skills are listed by on-disk slug: that is the directory
+		// writeSkillFiles creates and the only identifier the model can
+		// actually invoke (MUL-5529).
+		"go-conventions",
+		"pr-review",
 		"discovered automatically",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+	// The display names must not leak into the listing — a model that reads
+	// "PR Review" and invokes it by that name gets nothing.
+	for _, absent := range []string{"Go Conventions", "PR Review"} {
+		if strings.Contains(s, absent) {
+			t.Errorf("CLAUDE.md lists display name %q instead of its slug", absent)
 		}
 	}
 }
@@ -1129,7 +1142,8 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 }
@@ -1278,22 +1292,26 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 }
 
 // Skill content imported from upstream sources (GitHub, ClawHub, Skills.sh)
-// often already carries its own YAML frontmatter — possibly with a `name`
-// that differs from the DB row's display name to match a specific runtime's
-// expectations. The writer must not clobber that block; it should only
-// synthesize when frontmatter is absent.
-func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
+// often already carries its own YAML frontmatter. The writer keeps that block
+// verbatim with exactly one exception: `name` is forced to the directory slug.
+//
+// The exception exists because runtimes disagree on which field identifies a
+// skill — OpenCode routes on the frontmatter `name`, Claude on the directory
+// name. Leaving an upstream `name` in place therefore gives one skill two
+// different invocable names depending on where it runs (MUL-5529). This test
+// uses opencode precisely because it is the side that would route on the
+// upstream value.
+func TestWriteContextFilesForcesSkillFrontmatterNameToSlug(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	preExisting := "---\nname: upstream-name\ndescription: imported as-is\n---\n\nbody"
 	ctx := TaskContextForEnv{
-		IssueID: "preserve-frontmatter-test",
+		IssueID: "frontmatter-name-test",
 		AgentSkills: []SkillContextForEnv{
 			{
 				Name:        "Display Name",
 				Description: "overridden by upstream frontmatter",
-				Content:     preExisting,
+				Content:     "---\nname: upstream-name\ndescription: imported as-is\ncustom-key: keep me\n---\n\nbody",
 			},
 		},
 	}
@@ -1306,8 +1324,98 @@ func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read SKILL.md: %v", err)
 	}
-	if string(skillMd) != preExisting {
-		t.Errorf("SKILL.md was rewritten; got:\n%s\nwant:\n%s", skillMd, preExisting)
+
+	// name matches the directory it was written into, so both routing
+	// conventions resolve to the same skill.
+	want := "---\nname: display-name\ndescription: imported as-is\ncustom-key: keep me\n---\n\nbody"
+	if string(skillMd) != want {
+		t.Errorf("frontmatter name was not normalized to the slug; got:\n%s\nwant:\n%s", skillMd, want)
+	}
+}
+
+// The directory-name == frontmatter-name invariant must survive collision
+// fallback, where the allocated slug is NOT sanitizeSkillName(Name). A
+// user-installed skill already sitting at the natural slug pushes Multica's
+// copy to `<slug>-multica`; the frontmatter has to follow it there, or the
+// skill answers to the user's slug on Claude and to its own stale name on
+// OpenCode.
+func TestWriteContextFilesFrontmatterNameFollowsCollisionSlug(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Pre-create a user-owned skill at the natural slug.
+	userSkill := filepath.Join(dir, ".opencode", "skills", "review")
+	if err := os.MkdirAll(userSkill, 0o755); err != nil {
+		t.Fatalf("seed user skill: %v", err)
+	}
+	userContent := "---\nname: review\n---\n\nuser's own skill"
+	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte(userContent), 0o644); err != nil {
+		t.Fatalf("seed user SKILL.md: %v", err)
+	}
+
+	ctx := TaskContextForEnv{
+		IssueID: "collision-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Review", Content: "---\nname: whatever-upstream-said\n---\n\nmultica body"},
+		},
+	}
+
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// The user's directory is untouched.
+	got, err := os.ReadFile(filepath.Join(userSkill, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read user SKILL.md: %v", err)
+	}
+	if string(got) != userContent {
+		t.Errorf("user skill was overwritten; got:\n%s", got)
+	}
+
+	// Multica's copy landed at the fallback slug and names itself after it.
+	moved, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "review-multica", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read relocated SKILL.md: %v", err)
+	}
+	want := "---\nname: review-multica\n---\n\nmultica body"
+	if string(moved) != want {
+		t.Errorf("frontmatter name did not follow the collision slug; got:\n%s\nwant:\n%s", moved, want)
+	}
+}
+
+// The name rewrite must not disturb neighbouring keys, including a nested
+// mapping that happens to contain its own `name`. Only the top-level key is
+// the skill's identity; rewriting an indented one would splice a top-level key
+// into the middle of the nested block and corrupt the YAML.
+func TestWriteContextFilesLeavesNestedFrontmatterNameAlone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "nested-name-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Nested",
+				Content: "---\nmetadata:\n  name: inner\n---\n\nbody",
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "nested", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read SKILL.md: %v", err)
+	}
+
+	// The block has no top-level name, so one is injected; `metadata.name`
+	// stays put.
+	want := "---\nname: nested\nmetadata:\n  name: inner\n---\n\nbody"
+	if string(skillMd) != want {
+		t.Errorf("nested name handling is wrong; got:\n%s\nwant:\n%s", skillMd, want)
 	}
 }
 
@@ -1504,7 +1612,8 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -1539,7 +1648,8 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -1569,7 +1679,8 @@ func TestInjectRuntimeConfigQoder(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -1602,7 +1713,8 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
@@ -2051,7 +2163,8 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	if !strings.Contains(s, "Coding") {
+	// Listed by on-disk slug rather than the display name (MUL-5529).
+	if !strings.Contains(s, "coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
 	// Hermes now discovers skills from the daemon-seeded per-task

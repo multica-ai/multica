@@ -3,15 +3,14 @@
 Multica is licensed under a modified version of the Apache License 2.0, with the following additional conditions:
 
 1. Multica may be utilized commercially, including as a backend service for
-   other applications or as a task management platform for enterprises.
-   Should the conditions below be met, a commercial license must be obtained
-   from the producer:
+   other applications or as a task management platform for enterprises,
+   subject to the following conditions:
 
-   a. Hosted or embedded service: Unless explicitly authorized by Multica
-      in writing, you may not use the Multica source code to provide a
-      hosted service to third parties, or embed Multica as a component of
-      a product or service that is sold, licensed, or otherwise
-      commercially distributed to third parties.
+   a. Hosted or embedded service: Unless you have obtained a commercial
+      license from the producer, you may not use the Multica source code
+      to provide a hosted service to third parties, or embed Multica as a
+      component of a product or service that is sold, licensed, or
+      otherwise commercially distributed to third parties.
 
       - This restriction applies to offering Multica (in whole or
         substantial part) as a SaaS platform, a managed service, or as
@@ -19,15 +18,45 @@ Multica is licensed under a modified version of the Apache License 2.0, with the
       - Internal use within a single organization (including multiple
         workspaces) does not require a commercial license.
 
-   b. LOGO and copyright information: In the process of using Multica's
-      frontend, you may not remove or modify the LOGO or copyright
-      information in the Multica console or applications. This restriction
-      is inapplicable to uses of Multica that do not involve its frontend.
+   b. Branding and copyright information: Unless the producer has granted
+      you a written branding waiver, you may not remove or modify the
+      Multica LOGO, the Multica product name, or the copyright and
+      attribution information displayed by a Multica user interface.
 
-      - Frontend Definition: For the purposes of this license, the
-        "frontend" of Multica includes all components located in the
-        `apps/web/` directory when running Multica from the raw source
-        code, or the "web" image when running Multica with Docker.
+      - User Interface Definition: For the purposes of this license, a
+        "Multica user interface" means any user interface derived, in whole
+        or in substantial part, from the user interface code in this
+        repository. This includes the components located in the
+        `apps/web/`, `apps/desktop/`, `apps/mobile/`, `packages/views/`,
+        and `packages/ui/` directories when running Multica from the raw
+        source code, the frontend container image (published as
+        `ghcr.io/multica-ai/multica-web`) when running Multica with
+        Docker, and any compiled desktop or mobile application built from
+        that code. That enumeration is illustrative rather than
+        exhaustive: user interface code remains covered when it is
+        modified, moved, renamed, or extracted into another package or
+        repository.
+      - This restriction is inapplicable to uses of Multica that do not
+        involve a Multica user interface, such as running only the
+        `server/` backend, the daemon, or the CLI without redistributing
+        or operating any Multica user interface. Such uses remain subject
+        to condition (c) below.
+
+   c. Attribution for non-interface use: If you redistribute or operate a
+      product or service built on Multica's backend, daemon, or CLI
+      without a Multica user interface, you must retain all copyright,
+      patent, trademark, and attribution notices present in the source
+      code and in the NOTICE file, and state in your user-facing
+      documentation that the product is built on Multica, including a link
+      to https://github.com/multica-ai/multica.
+
+   d. Relationship between grants: A branding waiver is not a commercial
+      license and does not permit any use restricted by condition (a). A
+      commercial license does not by itself waive condition (b) or
+      condition (c). Each grant must be obtained from the producer
+      expressly and separately, and neither may be inferred from the other
+      or from the producer's silence, review, or acceptance of your
+      contributions.
 
 2. As a contributor, you should agree that:
 

@@ -44,8 +44,8 @@ const MAX_LOG_LINES = 500;
 const LEVELS: readonly LogLevel[] = ["DEBUG", "INFO", "WARN", "ERROR"];
 
 const LEVEL_BADGE_CLASS: Record<LogLevel, string> = {
-  DEBUG: "border-muted-foreground/25 text-muted-foreground/70",
-  INFO: "border-foreground/15 text-foreground/80",
+  DEBUG: "border-muted-foreground/25 text-muted-foreground",
+  INFO: "border-foreground/15 text-foreground",
   WARN: "border-warning/40 text-warning",
   ERROR: "border-destructive/40 text-destructive",
 };
@@ -366,7 +366,7 @@ export function DaemonPanel({
           <span className="tabular-nums">
             Showing {filtered.length} of {logs.length}
             {logs.length === MAX_LOG_LINES && (
-              <span className="ml-1 text-muted-foreground/60">
+              <span className="ml-1 text-muted-foreground">
                 (buffer full)
               </span>
             )}
@@ -450,14 +450,14 @@ function FilterChip({
           ? variant
             ? LEVEL_BADGE_CLASS[variant]
             : "bg-accent text-accent-foreground"
-          : "border-dashed text-muted-foreground/50",
+          : "border-dashed text-muted-foreground",
       )}
     >
       {label}
       <span
         className={cn(
           "tabular-nums",
-          active ? "text-current/80" : "text-muted-foreground/40",
+          active ? "text-current" : "text-muted-foreground",
         )}
       >
         {count}
@@ -497,7 +497,7 @@ function LogLineRow({
   // for panic stack traces and partial writes during log rotation.
   if (!line.timestamp || !line.level) {
     return (
-      <div className="break-all whitespace-pre-wrap px-2 py-0.5 text-muted-foreground/70">
+      <div className="break-all whitespace-pre-wrap px-2 py-0.5 text-muted-foreground">
         {highlight(line.raw, search)}
       </div>
     );
@@ -511,7 +511,7 @@ function LogLineRow({
       )}
       onClick={hasFields ? onToggle : undefined}
     >
-      <span className="shrink-0 tabular-nums text-muted-foreground/60">
+      <span className="shrink-0 tabular-nums text-muted-foreground">
         {line.timestamp}
       </span>
       <LevelBadge level={line.level} />
@@ -519,7 +519,7 @@ function LogLineRow({
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="break-words">{highlight(line.message, search)}</span>
           {hasFields && !expanded && (
-            <span className="min-w-0 truncate text-muted-foreground/60">
+            <span className="min-w-0 truncate text-muted-foreground">
               {fieldEntries
                 .map(([k, v]) => `${k}=${truncateValue(v)}`)
                 .join("  ")}
@@ -530,8 +530,8 @@ function LogLineRow({
           <div className="ml-1 mt-1 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-muted-foreground">
             {fieldEntries.map(([k, v]) => (
               <Fragment key={k}>
-                <span className="text-muted-foreground/70">{k}</span>
-                <span className="break-all text-foreground/85">{v}</span>
+                <span className="text-muted-foreground">{k}</span>
+                <span className="break-all text-foreground">{v}</span>
               </Fragment>
             ))}
           </div>
@@ -574,7 +574,7 @@ function GroupRows({
         <button
           type="button"
           onClick={onToggle}
-          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
         >
           <span>···</span>
           <span>
@@ -608,7 +608,7 @@ function GroupRows({
       <button
         type="button"
         onClick={onToggle}
-        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground/60 hover:text-foreground"
+        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
       >
         <span>···</span>
         <span>collapse {rest.length + 1} repeated</span>
@@ -642,9 +642,9 @@ function EmptyState({
     subtitle = "";
   }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground/70">
+    <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground">
       <p className="text-body">{title}</p>
-      <p className="text-caption text-muted-foreground/50">{subtitle}</p>
+      <p className="text-caption text-muted-foreground">{subtitle}</p>
     </div>
   );
 }

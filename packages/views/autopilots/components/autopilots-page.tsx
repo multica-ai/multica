@@ -291,7 +291,7 @@ function TriggerCell({ autopilot }: { autopilot: Autopilot }) {
   if (kinds.length === 0) {
     return (
       <ListGridCell className="hidden @2xl:flex">
-        <span className="text-caption text-muted-foreground/40">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </ListGridCell>
     );
   }
@@ -342,7 +342,7 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
   if (!autopilot.last_run_at) {
     return (
       <ListGridCell className="hidden @2xl:flex">
-        <span className="text-caption text-muted-foreground/40">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </ListGridCell>
     );
   }
@@ -378,7 +378,7 @@ function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
           {formatInTimeZone(next, undefined, i18n.language)}
         </span>
       ) : (
-        <span className="text-caption text-muted-foreground/40">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       )}
     </ListGridCell>
   );
@@ -798,7 +798,7 @@ export function AutopilotsPage() {
         </div>
       ) : showEmpty ? (
         <div className="flex flex-col items-center px-5 py-16">
-          <Zap className="mb-3 h-10 w-10 text-muted-foreground opacity-30" />
+          <Zap className="mb-3 h-10 w-10 text-faint-foreground" />
           <p className="text-body text-muted-foreground">
             {t(($) => $.page.empty.title)}
           </p>

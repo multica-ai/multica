@@ -2053,6 +2053,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 
 	// Chat task: populate workspace/session info from the chat_session table.
 	if task.ChatSessionID.Valid {
+		resp.QuickActionsDisabled = task.QuickActionsDisabled
+		// A quick-actions regeneration task carries the id of the turn to
+		// re-supplement; the daemon runs only the suggestion pass for it and
+		// skips the main reply (MUL-5149).
+		if task.RegenerateQuickActionsFor.Valid {
+			resp.RegenerateQuickActionsFor = uuidToString(task.RegenerateQuickActionsFor)
+		}
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
@@ -2916,6 +2923,10 @@ type TaskCompleteRequest struct {
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	// QuickActionsPending declares a chat:quick_actions supplement will follow;
+	// the json tag must match protocol.TaskCompletedPayload because this request
+	// is re-marshalled into that payload for the completion transaction.
+	QuickActionsPending bool `json:"quick_actions_pending"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and
 	// flag the continuity gap for the next claim.
@@ -2925,6 +2936,35 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+}
+
+// TaskQuickActionsRequest carries the raw (unparsed) output of the daemon's
+// post-completion suggestion pass; the service parses it leniently.
+type TaskQuickActionsRequest struct {
+	Raw string `json:"raw"`
+}
+
+// SupplementTaskQuickActions attaches follow-up suggestions to an already
+// completed chat turn. Arrives after CompleteTask by design — the daemon
+// reports completion first so the user's turn is not blocked on suggestion
+// generation, then follows up here.
+func (h *Handler) SupplementTaskQuickActions(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	task, _, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+	var req TaskQuickActionsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.TaskService.SupplementChatQuickActions(r.Context(), task, req.Raw, false); err != nil {
+		slog.Warn("supplement task quick actions failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {

@@ -56,7 +56,7 @@ export function BreadcrumbHeader({ segments, leaf, actions, className }: Breadcr
             >
               {segment.label}
             </AppLink>
-            <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+            <ChevronRight className="h-3 w-3 text-faint-foreground shrink-0" />
           </Fragment>
         ))}
         {leaf}

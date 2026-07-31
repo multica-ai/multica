@@ -62,7 +62,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// hiccup (see antigravityModelError).
 	if opts.Model != "" {
 		catalog, _ := ListModels(ctx, "antigravity", execPath)
-		if err := antigravityModelError(opts.Model, catalog); err != nil {
+		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
 		}
 	}

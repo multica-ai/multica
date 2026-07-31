@@ -1135,7 +1135,15 @@ func TestPreviewCommentTriggers_AllPlusMemberMentionStaysSuppressed(t *testing.T
 // straight to the panicking parseUUID (util.MustParseUUID), turning attacker-
 // controlled comment text into a 500 — and on the create path the comment row
 // was already committed before the panic. Malformed ids must be reported as
-// blocked mentions, exactly like a well-formed id that owns no entity.
+// blocked mentions, never as an error response.
+//
+// The reason is target_unavailable on BOTH the agent and the squad path
+// (MUL-5548): a string that is not a UUID cannot name an entity in any
+// workspace, so it conceals no existence and must not be blamed on invoke
+// permission. This is deliberately NOT the well-formed-but-unresolved case,
+// which stays invocation_not_allowed so a blocked reason can never confirm a
+// private agent — that boundary is pinned by
+// TestCreateComment_BlockedMentionReasonDoesNotEnumeratePrivateAgent.
 func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -1156,14 +1164,14 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 			content:    "[@Broken](mention://agent/-) please look",
 			targetType: "agent",
 			targetID:   "-",
-			reason:     ReasonInvocationNotAllowed,
+			reason:     ReasonTargetUnavailable,
 		},
 		{
 			name:       "short hex agent id",
 			content:    "[@Broken](mention://agent/dead-beef) please look",
 			targetType: "agent",
 			targetID:   "dead-beef",
-			reason:     ReasonInvocationNotAllowed,
+			reason:     ReasonTargetUnavailable,
 		},
 		{
 			name:       "malformed squad id",
@@ -1177,7 +1185,7 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 			content:    "[@all](mention://all/all) heads up [@Broken](mention://agent/-) please look",
 			targetType: "agent",
 			targetID:   "-",
-			reason:     ReasonInvocationNotAllowed,
+			reason:     ReasonTargetUnavailable,
 		},
 		{
 			name:       "all plus malformed squad id",

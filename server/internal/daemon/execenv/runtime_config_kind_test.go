@@ -76,6 +76,38 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	}
 }
 
+// TestBuildMetaSkillContentIssueBodyFormatting pins the shared issue-body
+// hierarchy rule across every task kind that can author an issue.
+func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
+	t.Parallel()
+
+	fixtures := map[string]TaskContextForEnv{
+		"issue":        {IssueID: "i-1"},
+		"autopilot":    {AutopilotRunID: "r-1"},
+		"quick-create": {QuickCreatePrompt: "create an issue"},
+		"chat":         {ChatSessionID: "c-1"},
+	}
+
+	for name, ctx := range fixtures {
+		name, ctx := name, ctx
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("codex", ctx)
+			for _, want := range []string{
+				"## Issue Body Formatting",
+				"An issue title already serves as its H1.",
+				"do not add a Markdown H1 (`# ...`)",
+				"start with prose or `##` subheadings",
+				"Only add an H1 when the user specifically requests one",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("brief is missing issue-body formatting guidance %q\n---\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildMetaSkillContentSlimKindMatrix locks in which sections the
 // slim brief emits per task kind, machine-checking the matrix documented
 // on `buildMetaSkillContentSlim`. Heading is matched as a discrete line
@@ -100,6 +132,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Background Task Safety", allKinds},
 		{"## Agent Identity", allKinds},
 		{"## Available Commands", allKinds},
+		{"## Issue Body Formatting", allKinds},
 		{"### Workflow", allKinds},
 		{"## Important: Always Use the `multica` CLI", allKinds},
 		{"## Output", allKinds},

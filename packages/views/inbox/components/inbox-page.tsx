@@ -16,6 +16,7 @@ import {
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
+  useMarkInboxUnread,
   useArchiveInbox,
   useUnarchiveInbox,
   useMarkAllInboxRead,
@@ -59,6 +60,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
+import { InboxContextMenuProvider } from "./inbox-context-menu";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
@@ -204,6 +206,7 @@ export function InboxPage() {
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const markUnreadMutation = useMarkInboxUnread();
   const archiveMutation = useArchiveInbox();
   const unarchiveMutation = useUnarchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
@@ -213,6 +216,13 @@ export function InboxPage() {
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
 
+
+  // An explicit "mark as unread" on the row that is currently open has to
+  // survive the auto-read effect below, which would otherwise fire on the very
+  // next commit and silently undo it. Holds that one item's id, and only while
+  // it stays selected: moving the selection elsewhere releases the guard, so
+  // re-opening the row later marks it read again like any other open.
+  const manualUnreadIdRef = useRef<string | null>(null);
 
   // Auto-mark-read whenever a selected item is unread — covers both click-
   // to-select and URL-param-select (e.g. OS notification click on desktop).
@@ -224,6 +234,7 @@ export function InboxPage() {
   const selectedRead = selected?.read;
   useEffect(() => {
     if (!selectedId || selectedRead) return;
+    if (manualUnreadIdRef.current === selectedId) return;
     markReadMutate(selectedId, {
       onError: (err) =>
         toast.error(
@@ -234,8 +245,43 @@ export function InboxPage() {
     });
   }, [selectedId, selectedRead, markReadMutate, t]);
 
+  // Release the guard as soon as the selection moves off the parked row.
+  useEffect(() => {
+    if (manualUnreadIdRef.current && manualUnreadIdRef.current !== selectedId) {
+      manualUnreadIdRef.current = null;
+    }
+  }, [selectedId]);
+
   const handleSelect = (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
+  };
+
+  const handleMarkRead = (id: string) => {
+    // Reading it back explicitly cancels an earlier park on the same row.
+    if (manualUnreadIdRef.current === id) manualUnreadIdRef.current = null;
+    markReadMutation.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_read_failed),
+        ),
+    });
+  };
+
+  const handleMarkUnread = (id: string) => {
+    // Only the open row needs the guard — the auto-read effect never touches
+    // the others, and arming it for a background row would suppress the very
+    // first open of that row later.
+    if (selected?.id === id) manualUnreadIdRef.current = id;
+    markUnreadMutation.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_unread_failed),
+        ),
+    });
   };
 
   // Both archive and unarchive remove the row from the list it was actioned
@@ -394,7 +440,7 @@ export function InboxPage() {
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate">{t(($) => $.list.archived_title)}</span>
-      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
         {archivedItems.length}
       </span>
     </button>
@@ -403,20 +449,29 @@ export function InboxPage() {
   const list = archivedError && isArchivedView ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Archive className="mb-3 h-8 w-8 text-muted-foreground/50" />
+        <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
         <p className="text-body">{t(($) => $.errors.archived_load_failed)}</p>
       </div>
     </div>
   ) : (
-    <InboxList
-      items={visibleItems}
+    <InboxContextMenuProvider
       view={view}
-      selectedKey={selectedKey}
-      archivedCount={archivedItems.length}
-      onSelect={handleSelect}
-      onAction={isArchivedView ? handleUnarchive : handleArchive}
-      onOpenArchived={openArchived}
-    />
+      actions={{
+        onMarkRead: handleMarkRead,
+        onMarkUnread: handleMarkUnread,
+        onAction: isArchivedView ? handleUnarchive : handleArchive,
+      }}
+    >
+      <InboxList
+        items={visibleItems}
+        view={view}
+        selectedKey={selectedKey}
+        archivedCount={archivedItems.length}
+        onSelect={handleSelect}
+        onAction={isArchivedView ? handleUnarchive : handleArchive}
+        onOpenArchived={openArchived}
+      />
+    </InboxContextMenuProvider>
   );
 
   const listPanel = (
@@ -458,7 +513,7 @@ export function InboxPage() {
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
       </p>
       {selected.body && (
-        <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground/80">
+        <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {selected.body}
         </div>
       )}
@@ -618,7 +673,7 @@ export function InboxPage() {
       <div className="flex flex-col min-h-0 h-full">
         {detailContent ?? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+            <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
             <p className="text-body">
               {visibleItems.length === 0
                 ? t(($) => $.detail.empty)

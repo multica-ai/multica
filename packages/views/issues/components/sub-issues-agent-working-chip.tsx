@@ -58,7 +58,10 @@ export const SubIssuesAgentWorkingChip = memo(
           }
         >
           <AgentAvatarStack agentIds={agentIds} size="xs" max={3} />
-          <span className="animate-chat-text-shimmer text-micro font-medium leading-none tabular-nums">
+          {/* No leading-none: the shimmer paints glyphs via background-clip:
+              text, and the background only covers the line box — a squeezed
+              line box leaves descenders transparent. */}
+          <span className="animate-chat-text-shimmer text-micro font-medium tabular-nums">
             {t(($) => $.agent_activity.chip_agents_working, {
               count: agentIds.length,
             })}

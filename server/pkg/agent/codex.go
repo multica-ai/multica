@@ -44,9 +44,20 @@ const (
 // rejects). Kept as its own constant so bumping codex independently of
 // other agents stays easy if codex starts shipping longer failure traces.
 const (
-	codexStderrTailBytes                   = 2048
-	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
-	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
+	codexStderrTailBytes                  = 2048
+	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	// defaultCodexFirstTurnNoProgressTimeout caps how long the first turn may
+	// stay completely silent after the app-server reports turn/started. Its only
+	// job is to fail fast instead of waiting out
+	// defaultCodexSemanticInactivityTimeout, so it only has to stay well under
+	// that 10 minute backstop.
+	//
+	// 30s turned out to sit inside the normal range rather than above it: two
+	// independent field reports measured the first progress event landing just
+	// past 30s on gpt-5.5, and ~39s for a WSL app-server (GH #5959). Both were
+	// healthy turns the watchdog killed. 60s clears that evidence with margin
+	// while keeping the fast-fail value (MUL-5542).
+	defaultCodexFirstTurnNoProgressTimeout = 60 * time.Second
 	defaultCodexHandshakeTimeout           = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine

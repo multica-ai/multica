@@ -122,18 +122,19 @@
       "origin_clawhub": "Imported · ClawHub",
       "origin_skills_sh": "Imported · Skills.sh",
       "origin_github": "Imported · GitHub",
-      "origin_workspace": "Workspace"
+      "origin_workspace": "Created manually"
     },
     "conflict_banner": {
       "title": "Someone else updated this skill",
       "body": "Your edits are preserved. Discard to pull their changes, or Save to overwrite."
     },
     "save_bar": {
-      "unsaved": "Unsaved changes — will overwrite the live skill on save",
+      "changed_summary": "Changed: {{parts}}",
+      "changed_files_one": "{{count}} file",
+      "changed_files_other": "{{count}} files",
       "discard": "Discard",
       "save": "Save changes",
-      "saving": "Saving…",
-      "saved": "All changes saved"
+      "saving": "Saving…"
     },
     "not_found": {
       "title": "Skill not found",

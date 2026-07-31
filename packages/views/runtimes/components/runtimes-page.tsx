@@ -344,7 +344,7 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
       {locator && (
         <ChevronRight
           aria-hidden="true"
-          className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
+          className="h-4 w-4 shrink-0 text-faint-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
         />
       )}
     </>

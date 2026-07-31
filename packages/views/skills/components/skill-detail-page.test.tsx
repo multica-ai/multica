@@ -53,7 +53,10 @@ vi.mock("@multica/core/auth", () => {
     ),
   };
 });
-vi.mock("@multica/core/paths", () => ({
+// Partial: `WORKSPACE_PAGES` also comes from here and backs the shared
+// SkillIcon, so the real module has to stay reachable.
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({ skills: () => "/acme/skills" }),
 }));
 vi.mock("@multica/core/permissions", () => ({
@@ -195,20 +198,40 @@ describe("SkillDetailPage file mode", () => {
   });
 });
 
-describe("SkillDetailPage save bar", () => {
-  it("stays mounted and disabled while clean so committing an edit never shifts the layout", async () => {
+describe("SkillDetailPage save pill", () => {
+  it("is absent while clean and floats in with a change summary once dirty", async () => {
     renderPage();
-    expect(await screen.findByText("All changes saved")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Save changes/ }).hasAttribute("disabled"),
-    ).toBe(true);
+    await screen.findByRole("tab", { name: "Overview" });
+    expect(screen.queryByRole("button", { name: /Save changes/ })).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Description"), {
       target: { value: "changed" },
     });
+    expect(screen.getByText("Changed: Description")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: /Save changes/ }).hasAttribute("disabled"),
     ).toBe(false);
+  });
+
+  it("lists every dirty part in the summary, reusing the field labels", async () => {
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "renamed-skill" },
+    });
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "changed" },
+    });
+    expect(screen.getByText("Changed: Name · Description")).toBeTruthy();
+  });
+
+  it("counts a supporting-file edit as one changed file", async () => {
+    renderPage(new URLSearchParams("view=files"));
+    fireEvent.click(await screen.findByRole("tab", { name: "patterns.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /patterns\.md/ }), {
+      target: { value: "edited content" },
+    });
+    expect(screen.getByText("Changed: 1 file")).toBeTruthy();
   });
 
   it("is absent for read-only viewers, who get the capability banner instead", async () => {

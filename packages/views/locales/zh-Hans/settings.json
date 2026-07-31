@@ -1,4 +1,51 @@
 {
+  "quick_actions": {
+    "title": "快捷操作",
+    "description": "预先配置好执行的 Agent 和提示词，之后在任意 Issue 侧边栏一键触发。",
+    "add": "新建快捷操作",
+    "search_placeholder": "搜索快捷操作",
+    "loading": "正在加载快捷操作…",
+    "no_results": "没有匹配的快捷操作",
+    "actions_open": "打开「{{name}}」的操作菜单",
+    "columns": {
+      "name": "名称",
+      "target": "执行者",
+      "visibility": "可见范围",
+      "usage": "使用",
+      "updated": "更新时间"
+    },
+    "empty_title": "还没有快捷操作",
+    "empty_hint": "把反复交给 Agent 做的事配置成快捷操作——代码审查、补测试、安全检查。",
+    "archived": "已归档",
+    "visibility_public": "团队",
+    "visibility_private": "仅自己",
+    "visibility_public_hint": "工作区所有成员",
+    "visibility_private_hint": "只有你",
+    "field_visibility": "谁可以使用",
+    "public_target_hint": "只能选所有成员都能触发的 Agent。",
+    "target_private": "私有",
+    "target_missing": "执行者不可用",
+    "archive": "归档",
+    "unarchive": "恢复",
+    "edit": "编辑",
+    "delete": "删除",
+    "cancel": "取消",
+    "save": "保存",
+    "never_used": "从未使用",
+    "used_count": "已使用 {{count}} 次",
+    "create_title": "新建快捷操作",
+    "edit_title": "编辑快捷操作",
+    "dialog_description": "以 Issue 评论的形式执行，和 @提及 一样。",
+    "field_name": "名称",
+    "field_name_placeholder": "代码审查",
+    "field_target": "执行者",
+    "field_prompt": "提示词",
+    "field_prompt_placeholder": "请审查这个 Issue 关联的代码，重点关注正确性和边界情况。",
+    "prompt_hint": "原样发送。Agent 本来就能看到这个 Issue。",
+    "template_not_supported": "暂不支持变量，请删除 {{token}}。Agent 本来就能读到这个 Issue。",
+    "delete_title": "删除这条快捷操作？",
+    "delete_description": "它会从所有 Issue 侧边栏消失，历史运行记录仍保留在执行日志中。如果以后可能还要用，建议改为归档。"
+  },
   "auto_save": {
     "saving": "正在保存…",
     "saved": "已保存",
@@ -98,7 +145,10 @@
   "chat": {
     "floating_title": "悬浮窗",
     "floating_label": "悬浮聊天窗",
-    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
+    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。",
+    "quick_actions_title": "推荐操作",
+    "quick_actions_label": "生成推荐操作",
+    "quick_actions_hint": "智能体每次回复后自动生成最多三个后续操作建议。关闭后，本设备发送的消息不再触发生成；已有的建议仍会显示。"
   },
   "issue": {
     "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
@@ -135,7 +185,8 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "properties": "属性"
+      "properties": "属性",
+      "quick_actions": "快捷操作"
     }
   },
   "properties": {

@@ -117,18 +117,18 @@
       "origin_clawhub": "インポート済み · ClawHub",
       "origin_skills_sh": "インポート済み · Skills.sh",
       "origin_github": "インポート済み · GitHub",
-      "origin_workspace": "ワークスペース"
+      "origin_workspace": "手動で作成"
     },
     "conflict_banner": {
       "title": "他のユーザーがこのスキルを更新しました",
       "body": "あなたの編集内容は保持されています。破棄すると相手の変更を取り込み、保存すると上書きします。"
     },
     "save_bar": {
-      "unsaved": "未保存の変更 — 保存すると現在のスキルを上書きします",
+      "changed_summary": "変更あり:{{parts}}",
+      "changed_files_other": "ファイル{{count}}件",
       "discard": "破棄",
       "save": "変更を保存",
-      "saving": "保存中…",
-      "saved": "変更は保存済みです"
+      "saving": "保存中…"
     },
     "not_found": {
       "title": "スキルが見つかりません",

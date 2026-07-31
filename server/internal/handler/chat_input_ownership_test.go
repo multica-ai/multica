@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -39,7 +41,7 @@ func sendDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, conte
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID))
+	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID), false)
 	if err != nil {
 		t.Fatalf("SendDirectChatMessage: %v", err)
 	}
@@ -472,5 +474,344 @@ func TestCompleteTask_SealedChannelRetryEmptyOutputWritesNoRow(t *testing.T) {
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
 		t.Fatalf("sealed channel retry empty completion must write NO assistant row, got %d", len(rows))
+	}
+}
+
+func TestCompleteTask_ChatQuickActions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "quick-actions chat")
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what next?")
+	markTaskRunning(t, ctx, taskID)
+
+	output := "Here is the plan.\n\n```quick-actions\n" +
+		`[{"label":"Draft it","prompt":"Draft the complete plan","primary":true},` +
+		`{"label":"Make a checklist","prompt":"Turn this into a checklist"}]` +
+		"\n```"
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, output), "", "", false, ""); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(rows))
+	}
+	if rows[0].Content != "Here is the plan." || rows[0].MessageKind != protocol.ChatMessageKindMessage {
+		t.Fatalf("persisted reply = kind %q content %q", rows[0].MessageKind, rows[0].Content)
+	}
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 2 || actions[0].Prompt != "Draft the complete plan" || !actions[0].Primary {
+		t.Fatalf("persisted quick actions = %+v", actions)
+	}
+
+	// An actions-only turn (quick-actions footer with no visible text) must NOT
+	// become an empty-content message: older Desktop / mobile clients ignore
+	// quick_actions and would render an empty bubble. It falls through to the
+	// visible no_response fallback instead, and the chips are dropped (MUL-4351).
+	actionsOnlyTask := sendDirectChat(t, ctx, agentID, sessionID, "give me options only")
+	markTaskRunning(t, ctx, actionsOnlyTask)
+	actionsOnly := "```quick-actions\n[{\"label\":\"Continue\",\"prompt\":\"Continue the plan\"}]\n```"
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(actionsOnlyTask), completeResult(t, actionsOnly), "", "", false, ""); err != nil {
+		t.Fatalf("complete actions-only task: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	if len(rows) != 2 || rows[1].MessageKind != protocol.ChatMessageKindNoResponse {
+		t.Fatalf("actions-only outcome = %+v", rows)
+	}
+	if rows[1].Content == "" {
+		t.Fatal("actions-only no_response row must carry a non-empty fallback body for old clients")
+	}
+	var droppedActions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[1].QuickActions, &droppedActions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(droppedActions) != 0 {
+		t.Fatalf("actions-only no_response row must not carry quick actions, got %+v", droppedActions)
+	}
+}
+
+func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "suggest-pass chat")
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what next?")
+	markTaskRunning(t, ctx, taskID)
+
+	output := "Main reply.\n\n```quick-actions\n" +
+		`[{"label":"From footer","prompt":"in-band fallback"}]` + "\n```"
+	req := TaskCompleteRequest{Output: output, QuickActionsPending: true}
+	result, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal complete request: %v", err)
+	}
+	task, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", "", false, "")
+	if err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(rows))
+	}
+	if rows[0].Content != "Main reply." {
+		t.Fatalf("footer must still be stripped from content, got %q", rows[0].Content)
+	}
+
+	raw := "```json\n" + `[{"label":"From pass","prompt":"suggested prompt","primary":true}]` + "\n```"
+	if err := testHandler.TaskService.SupplementChatQuickActions(ctx, *task, raw, false); err != nil {
+		t.Fatalf("supplement quick actions: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "From pass" || !actions[0].Primary {
+		t.Fatalf("supplement must overwrite the in-band fallback, got %+v", actions)
+	}
+
+	// An empty supplement must not clobber existing actions (it only resolves
+	// the pending placeholder client-side).
+	if err := testHandler.TaskService.SupplementChatQuickActions(ctx, *task, "", false); err != nil {
+		t.Fatalf("empty supplement: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	actions = nil
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions after empty supplement: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "From pass" {
+		t.Fatalf("empty supplement must keep existing actions, got %+v", actions)
+	}
+}
+
+func TestDirectChat_QuickActionsOptOutStampsTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "opt-out chat")
+	sess, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	ag, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	optedOut, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "no suggestions", nil, "member", parseUUID(testUserID), true)
+	if err != nil {
+		t.Fatalf("send opted-out message: %v", err)
+	}
+	if !optedOut.Task.QuickActionsDisabled {
+		t.Fatal("opt-out send must stamp quick_actions_disabled on the task")
+	}
+
+	// Default (older clients / toggle on) stays enabled.
+	normal, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "with suggestions", nil, "member", parseUUID(testUserID), false)
+	if err != nil {
+		t.Fatalf("send normal message: %v", err)
+	}
+	if normal.Task.QuickActionsDisabled {
+		t.Fatal("default send must leave quick_actions_disabled false")
+	}
+}
+
+// TestRegenerateChatQuickActions_StaleTargetRejected pins the ack-alignment
+// contract (MUL-5149 review): a refresh names the turn it is refreshing, and
+// the server enqueues it only while that turn is STILL the session's latest.
+// Once a newer reply lands, refreshing the older turn is refused, so the
+// client's pending marker never points at a turn the resulting
+// chat:quick_actions event could not match.
+func TestRegenerateChatQuickActions_StaleTargetRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "regen stale chat")
+
+	// Turn 1: a resumable assistant reply (session_id + runtime bound) is latest.
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "first question")
+	markTaskRunning(t, ctx, t1)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "first reply"), "sess-1", "/tmp/wd", false, ""); err != nil {
+		t.Fatalf("complete turn 1: %v", err)
+	}
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant turn, got %d", len(rows))
+	}
+	m1 := rows[0].ID
+
+	// Refreshing the current latest turn is accepted and targets exactly it.
+	target, regenTask, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1)
+	if err != nil {
+		t.Fatalf("regenerate latest turn: %v", err)
+	}
+	if target != m1 {
+		t.Fatalf("regenerate target = %v, want the latest turn %v", target, m1)
+	}
+	// That refresh enqueues a regen pass that occupies the session until the
+	// daemon finishes it. Settle it so the session is idle again — this test
+	// isolates the STALE check; the busy-rejection path has its own tests.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1`,
+		uuidToString(regenTask.ID)); err != nil {
+		t.Fatalf("settle regen task: %v", err)
+	}
+
+	// Turn 2 lands, so m1 is no longer the latest.
+	t2 := sendDirectChat(t, ctx, agentID, sessionID, "second question")
+	markTaskRunning(t, ctx, t2)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t2), completeResult(t, "second reply"), "sess-2", "/tmp/wd", false, ""); err != nil {
+		t.Fatalf("complete turn 2: %v", err)
+	}
+	session, err = testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("reload session after turn 2: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	if len(rows) != 2 {
+		t.Fatalf("expected two assistant turns, got %d", len(rows))
+	}
+	m2 := rows[1].ID
+
+	// Refreshing the now-stale m1 is refused; refreshing the new latest m2 works.
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsStale) {
+		t.Fatalf("stale-target regenerate error = %v, want ErrChatQuickActionsStale", err)
+	}
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m2); err != nil {
+		t.Fatalf("regenerate new latest turn: %v", err)
+	}
+}
+
+// TestRegenerateChatQuickActions_ActiveTurnRejected pins finding §1 of the
+// MUL-5149 review: a newer reply that is queued/running but whose assistant row
+// has not landed yet leaves the OLD turn as the latest-persisted one, so the
+// stale check still passes on it. Regenerating then would resume the session
+// after the newer turn advanced its provider state, attaching suggestions built
+// from the newer context to the older turn. The in-flight task must refuse it.
+func TestRegenerateChatQuickActions_ActiveTurnRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "regen busy chat")
+
+	// Turn 1 completes with a resumable session → m1 is the latest assistant turn.
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "first")
+	markTaskRunning(t, ctx, t1)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "first reply"), "sess-1", "/tmp/wd", false, ""); err != nil {
+		t.Fatalf("complete turn 1: %v", err)
+	}
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant turn, got %d", len(rows))
+	}
+	m1 := rows[0].ID
+
+	// Turn 2 is in flight (running, no assistant row yet) so m1 is STILL the
+	// latest-persisted turn — the stale check passes — but the session is busy.
+	t2 := sendDirectChat(t, ctx, agentID, sessionID, "second")
+	markTaskRunning(t, ctx, t2)
+
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
+		t.Fatalf("busy-session regenerate error = %v, want ErrChatQuickActionsBusy", err)
+	}
+}
+
+// TestRegenerateChatQuickActions_ConcurrentRefreshRejected pins finding §2 of
+// the MUL-5149 review: a second refresh of the same turn while the first pass is
+// still in flight is refused rather than enqueuing a duplicate, quota-spending
+// pass. A per-client disabled button cannot stop a second client, so the guard
+// lives under the session lock next to the enqueue.
+func TestRegenerateChatQuickActions_ConcurrentRefreshRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "regen dedup chat")
+
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "q")
+	markTaskRunning(t, ctx, t1)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "a"), "sess-1", "/tmp/wd", false, ""); err != nil {
+		t.Fatalf("complete turn 1: %v", err)
+	}
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant turn, got %d", len(rows))
+	}
+	m1 := rows[0].ID
+
+	// First refresh is accepted and enqueues a regen pass that now occupies the session.
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	// Second refresh of the same turn while the first pass is still queued is refused.
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
+		t.Fatalf("concurrent refresh error = %v, want ErrChatQuickActionsBusy", err)
+	}
+}
+
+// TestRegenerateChatQuickActions_DeferredActiveTurnRejected pins the re-review
+// §1 gap: a chat auto-retry armed with a backoff fire_at is inserted 'deferred'
+// (CreateRetryTask; provider_network's final attempt waits ~5s that way). During
+// that window the failed turn has written no assistant row, so the old turn is
+// still latest-persisted and its pills stay clickable — yet the session is about
+// to advance when the retry fires. HasActiveChatTaskForSession must count
+// 'deferred', else the refresh resumes a session the retry moves past and pins
+// the new turn's suggestions onto the old one.
+func TestRegenerateChatQuickActions_DeferredActiveTurnRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "regen deferred chat")
+
+	t1 := sendDirectChat(t, ctx, agentID, sessionID, "first")
+	markTaskRunning(t, ctx, t1)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "first reply"), "sess-1", "/tmp/wd", false, ""); err != nil {
+		t.Fatalf("complete turn 1: %v", err)
+	}
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant turn, got %d", len(rows))
+	}
+	m1 := rows[0].ID
+
+	// Turn 2 failed and is waiting out its retry backoff: a deferred task with a
+	// future fire_at and no assistant row yet, so m1 is still latest-persisted.
+	t2 := sendDirectChat(t, ctx, agentID, sessionID, "second")
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status='deferred', fire_at=now() + interval '5 seconds' WHERE id=$1`,
+		t2); err != nil {
+		t.Fatalf("defer turn 2: %v", err)
+	}
+
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
+		t.Fatalf("deferred-active regenerate error = %v, want ErrChatQuickActionsBusy", err)
 	}
 }

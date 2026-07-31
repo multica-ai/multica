@@ -1,4 +1,51 @@
 {
+  "quick_actions": {
+    "title": "Quick Actions",
+    "description": "Preset an agent and a prompt once, then trigger it from any issue's sidebar with a single click.",
+    "add": "New quick action",
+    "search_placeholder": "Search quick actions",
+    "loading": "Loading quick actions…",
+    "no_results": "No quick actions match your search",
+    "actions_open": "Open actions for {{name}}",
+    "columns": {
+      "name": "Name",
+      "target": "Runs as",
+      "visibility": "Who",
+      "usage": "Used",
+      "updated": "Updated"
+    },
+    "empty_title": "No quick actions yet",
+    "empty_hint": "Create one for the work you ask an agent to do again and again — code review, writing tests, a security pass.",
+    "archived": "Archived",
+    "visibility_public": "Team",
+    "visibility_private": "Just me",
+    "visibility_public_hint": "Everyone in the workspace",
+    "visibility_private_hint": "Only you",
+    "field_visibility": "Who can use it",
+    "public_target_hint": "Must be an agent everyone can trigger.",
+    "target_private": "private",
+    "target_missing": "Target unavailable",
+    "archive": "Archive",
+    "unarchive": "Restore",
+    "edit": "Edit",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "save": "Save",
+    "never_used": "Never used",
+    "used_count": "Used {{count}}×",
+    "create_title": "New quick action",
+    "edit_title": "Edit quick action",
+    "dialog_description": "Runs as a comment on the issue, like an @mention.",
+    "field_name": "Name",
+    "field_name_placeholder": "Code Review",
+    "field_target": "Runs as",
+    "field_prompt": "Prompt",
+    "field_prompt_placeholder": "Review the code linked to this issue. Focus on correctness and edge cases.",
+    "prompt_hint": "Sent as written. The agent already sees the issue.",
+    "template_not_supported": "Variables aren’t supported yet — remove {{token}}. The agent already reads this issue.",
+    "delete_title": "Delete this quick action?",
+    "delete_description": "It disappears from every issue sidebar. Past runs stay in the execution log. Archive instead if you may want it back."
+  },
   "auto_save": {
     "saving": "Saving…",
     "saved": "Saved",
@@ -98,7 +145,10 @@
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab.",
+    "quick_actions_title": "Suggested follow-ups",
+    "quick_actions_label": "Generate suggested follow-ups",
+    "quick_actions_hint": "Generate up to three follow-up suggestions after each agent reply. When off, messages sent from this device no longer trigger generation; existing suggestions stay visible."
   },
   "issue": {
     "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
@@ -135,7 +185,8 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
-      "properties": "Properties"
+      "properties": "Properties",
+      "quick_actions": "Quick Actions"
     }
   },
   "properties": {

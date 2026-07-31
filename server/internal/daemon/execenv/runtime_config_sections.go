@@ -28,8 +28,8 @@ import (
 //     skip sections they have no use for (Mentions, Comment Formatting,
 //     Issue Metadata, Sub-issue, ...).
 //  2. Per-section prose compression — Available Commands, Issue
-//     Metadata, Mentions, Sub-issue Creation, Comment Formatting,
-//     Always Use CLI, Background Task Safety, Task Initiator,
+//     Body Formatting, Metadata, Mentions, Sub-issue Creation,
+//     Comment Formatting, Always Use CLI, Background Task Safety, Task Initiator,
 //     Repositories, Output are all tightened. Every test-asserted phrase
 //     stays.
 //
@@ -282,6 +282,15 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
 }
 
+// writeIssueBodyFormatting emits the default Markdown hierarchy for issue
+// descriptions. It is shared by every task kind because issue creation and
+// updates can be requested from issue, chat, autopilot, and quick-create
+// surfaces.
+func writeIssueBodyFormatting(b *strings.Builder) {
+	b.WriteString("## Issue Body Formatting\n\n")
+	b.WriteString("An issue title already serves as its H1. By default, do not add a Markdown H1 (`# ...`) to an issue body or description; start with prose or `##` subheadings instead. Only add an H1 when the user specifically requests one.\n\n")
+}
+
 // writeCommentFormatting emits the cross-platform file-first guardrail.
 // Windows branch carries the `$OutputEncoding` rationale because Windows
 // PowerShell silently drops non-ASCII through stdin.
@@ -380,7 +389,11 @@ func writeWorkflowHeader(b *strings.Builder) {
 	b.WriteString("### Workflow\n\n")
 }
 
-// writeWorkflowChat emits the chat-mode workflow.
+// writeWorkflowChat emits the chat-mode workflow. Follow-up quick actions are
+// deliberately NOT taught here: the daemon generates them in a dedicated
+// post-completion suggestion pass (chat_suggest.go), because an optional
+// formatting instruction in this brief proved unreliable across providers and
+// long conversations.
 func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 	b.WriteString("- Respond conversationally and helpfully to the user's message\n")
@@ -665,6 +678,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Section               | comment | assign | autopilot | quick_create | chat
 //	----------------------+---------+--------+-----------+--------------+------
 //	Available Commands    |   full  |  full  |   full    |   minimal    | full
+//	Issue Body Formatting |    ✓    |   ✓    |     ✓     |      ✓       |  ✓
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
 //	Repositories          |    △    |   △    |     △     |      —       |  △
 //	Project Context       |    △    |   △    |     △     |      △       |  △
@@ -699,6 +713,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	default:
 		writeAvailableCommands(&b)
 	}
+	writeIssueBodyFormatting(&b)
 
 	if kind == kindIssue {
 		writeCommentFormatting(&b)

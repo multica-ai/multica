@@ -25,10 +25,13 @@ type TimelineEntry struct {
 	Details json.RawMessage `json:"details,omitempty"`
 
 	// Comment-only fields
-	Content        *string              `json:"content,omitempty"`
-	ParentID       *string              `json:"parent_id,omitempty"`
-	UpdatedAt      *string              `json:"updated_at,omitempty"`
-	CommentType    *string              `json:"comment_type,omitempty"`
+	Content     *string `json:"content,omitempty"`
+	ParentID    *string `json:"parent_id,omitempty"`
+	UpdatedAt   *string `json:"updated_at,omitempty"`
+	CommentType *string `json:"comment_type,omitempty"`
+	// Set only on comments produced by a quick action run. Unforgeable: there
+	// is no request field for it on the generic comment endpoint.
+	QuickActionID  *string              `json:"quick_action_id,omitempty"`
 	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
 	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
 	ResolvedAt     *string              `json:"resolved_at,omitempty"`
@@ -181,6 +184,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ActorID:        uuidToString(c.AuthorID),
 			Content:        &content,
 			CommentType:    &commentType,
+			QuickActionID:  uuidToPtr(c.QuickActionID),
 			ParentID:       uuidToPtr(c.ParentID),
 			CreatedAt:      timestampToString(c.CreatedAt),
 			UpdatedAt:      &updatedAt,

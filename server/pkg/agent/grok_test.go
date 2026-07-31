@@ -743,12 +743,15 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	t.Setenv("GROK_AUTH_METHODS", "api")
 	t.Setenv("XAI_API_KEY", "test-only-key")
 
-	models, err := discoverGrokModels(context.Background(), fakePath)
+	catalog, err := discoverGrokModels(context.Background(), fakePath)
 	if err != nil {
 		t.Fatalf("discover grok models: %v", err)
 	}
-	if len(models) != 2 || models[0].ID != "grok-4.5" {
-		t.Fatalf("unexpected models: %+v", models)
+	if len(catalog.Models) != 2 || catalog.Models[0].ID != "grok-4.5" {
+		t.Fatalf("unexpected models: %+v", catalog.Models)
+	}
+	if catalog.Fallback {
+		t.Error("a successful ACP discovery must not be marked Fallback")
 	}
 	raw, err := os.ReadFile(requestsFile)
 	if err != nil {
@@ -786,12 +789,15 @@ func TestDiscoverGrokModelsStopsOnAuthFailures(t *testing.T) {
 			t.Setenv("GROK_AUTH_FAIL", tc.authFail)
 			t.Setenv("XAI_API_KEY", "")
 
-			models, err := discoverGrokModels(context.Background(), fakePath)
+			catalog, err := discoverGrokModels(context.Background(), fakePath)
 			if err != nil {
 				t.Fatalf("discover grok models: %v", err)
 			}
-			if len(models) != 2 || models[0].ID != "grok-4.5" {
-				t.Fatalf("expected static fallback, got %+v", models)
+			if len(catalog.Models) != 2 || catalog.Models[0].ID != "grok-4.5" {
+				t.Fatalf("expected static fallback, got %+v", catalog.Models)
+			}
+			if !catalog.Fallback {
+				t.Error("static fallback must be marked Fallback so it is never cached as the real catalog")
 			}
 			raw, err := os.ReadFile(requestsFile)
 			if err != nil {

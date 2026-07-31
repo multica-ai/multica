@@ -75,6 +75,9 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           availability dot is surfaced here; last-task state lives in the
           agents list and the agent detail page. */}
       <div className="flex items-start gap-3">
+        {/* Base avatar rather than the ActorAvatar wrapper: this card IS a
+            hover-card payload, so it must not nest another hover card or
+            profile link inside itself. */}
         <ActorAvatarBase
           name={agent.name}
           initials={initials}

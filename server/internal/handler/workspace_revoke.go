@@ -139,6 +139,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// A private quick action is visible and runnable ONLY by its creator
+	// (quick_action carries no FK, so nothing removes it implicitly). Once the
+	// creator is gone the row is unreachable by every remaining member while
+	// still consuming the workspace's active-action limit, so drop those in
+	// the same tx. Public actions are workspace furniture and survive.
+	if err := qtx.DeletePrivateQuickActionsByCreator(ctx, db.DeletePrivateQuickActionsByCreatorParams{
+		WorkspaceID: workspaceID,
+		CreatedByID: userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves

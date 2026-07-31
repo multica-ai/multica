@@ -222,7 +222,7 @@ function TreeNodeItem({
                 // Hidden until the row is hovered or something inside it holds
                 // focus, so a rail of ten files is not a rail of ten buttons.
                 // after:-inset-1 widens the hit area past the 20px glyph.
-                className="mr-1 shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+                className="mr-1 shrink-0 rounded p-0.5 text-faint-foreground opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
                 onClick={(event) => event.stopPropagation()}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
@@ -335,7 +335,7 @@ export function FileTree({
   if (tree.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-        <FolderOpen className="h-5 w-5 text-muted-foreground/40" />
+        <FolderOpen className="h-5 w-5 text-faint-foreground" />
         <p className="mt-2 text-caption">{t(($) => $.file_tree.no_files)}</p>
       </div>
     );

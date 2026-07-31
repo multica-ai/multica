@@ -177,4 +177,9 @@ iOS 移动端代码位于 [`apps/mobile/`](apps/mobile/)，自己编译装到手
 
 ## 开源协议
 
-[Modified Apache 2.0 (with commercial restrictions)](LICENSE)
+[Modified Apache 2.0 (with commercial restrictions)](LICENSE)，署名信息见 [NOTICE](NOTICE)。
+
+- 面向第三方的托管服务或嵌入式商业分发，需向 producer 取得商业授权（条款 1a）。
+- 除非取得 producer 的书面品牌豁免，不得移除或修改 Multica 界面中的 LOGO、产品名与署名信息。「界面」按派生关系界定——包含 `apps/web/`、`apps/desktop/`、`apps/mobile/`、`packages/views/`、`packages/ui/`——并覆盖源码、前端容器镜像与编译后的桌面 / 移动端二进制（条款 1b）。
+- 不使用 Multica 界面的用法（只跑 `server/` 后端、daemon 或 CLI）不受品牌限制，但需保留源码与 [NOTICE](NOTICE) 中的署名，并在产品文档中声明基于 Multica 构建且回链本仓库（条款 1c）。
+- 品牌豁免与商业授权是两个独立的授权，互不蕴含（条款 1d）。

@@ -12,6 +12,7 @@ import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useCommentUploads } from "./use-comment-uploads";
+import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
 interface CommentInputProps {
   issueId: string;
@@ -33,6 +34,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // `defaultValue` at mount time, so this snapshot drives both the editor's
   // initial content and the submit-button enable state — without this the
   // button would be disabled even though the editor visibly contains text.
+  // Quick actions in the `/` menu: picking one inserts the server-rendered
+  // body so the user can edit before sending, instead of firing immediately.
+  const quickActionMenu = useQuickActionMenu(issueId);
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
@@ -225,6 +229,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"
+          quickActionMenu={quickActionMenu}
         />
       </div>
       )}

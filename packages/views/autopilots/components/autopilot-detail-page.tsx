@@ -365,7 +365,7 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
             {scheduleDescription !== null && scheduleConfig !== null && (
               // Fields only: the zone already reads out in the sentence above,
               // where a person can use it — same rule as the editor's readback.
-              <div className="font-mono text-micro text-muted-foreground/60">
+              <div className="font-mono text-micro text-muted-foreground">
                 {cronFields(scheduleConfig)}
               </div>
             )}

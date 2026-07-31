@@ -117,18 +117,18 @@
       "origin_clawhub": "가져옴 · ClawHub",
       "origin_skills_sh": "가져옴 · Skills.sh",
       "origin_github": "가져옴 · GitHub",
-      "origin_workspace": "워크스페이스"
+      "origin_workspace": "직접 생성"
     },
     "conflict_banner": {
       "title": "다른 사람이 이 스킬을 업데이트했습니다",
       "body": "내 수정 내용은 보존되어 있습니다. 버리기를 누르면 상대 변경사항을 가져오고, 저장을 누르면 덮어씁니다."
     },
     "save_bar": {
-      "unsaved": "저장하지 않은 변경사항 — 저장하면 현재 스킬을 덮어씁니다",
+      "changed_summary": "변경됨: {{parts}}",
+      "changed_files_other": "파일 {{count}}개",
       "discard": "버리기",
       "save": "변경사항 저장",
-      "saving": "저장하는 중...",
-      "saved": "모든 변경 사항이 저장됨"
+      "saving": "저장하는 중..."
     },
     "not_found": {
       "title": "스킬을 찾을 수 없습니다",

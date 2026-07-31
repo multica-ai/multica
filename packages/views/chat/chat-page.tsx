@@ -13,6 +13,11 @@ import {
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
+import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
+import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
+import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
+import { useQuery } from "@tanstack/react-query";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useNavigation } from "../navigation";
@@ -54,6 +59,15 @@ export function ChatPage() {
   const isMobile = useIsMobile();
 
   const c = useChatController({ isActive: true });
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
+  );
+  // Drop a stuck pending marker (dead daemon / failed supplement) so the pill
+  // spinner stops and a later refresh starts clean (MUL-5149).
+  useQuickActionsPendingTimeout(c.activeSessionId ?? null, quickActionsPending);
+  // Toast when an accepted refresh later fails in the daemon (async half).
+  useQuickActionsFailureToast(c.activeSessionId ?? null);
+  const regenerateQuickActions = useRegenerateChatQuickActions();
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -246,6 +260,19 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
+          onQuickAction={(action) => c.handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!c.pendingTaskId || c.isSessionArchived || c.isAgentArchived || c.noAgent
+          }
+          onRegenerateQuickActions={(message) =>
+            c.activeSessionId
+              ? regenerateQuickActions.mutateAsync({
+                  sessionId: c.activeSessionId,
+                  messageId: message.id,
+                })
+              : undefined
+          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState agent={c.activeAgent} />
@@ -342,7 +369,7 @@ export function ChatPage() {
             conversation
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-              <MessageSquare className="h-10 w-10 text-muted-foreground/30" />
+              <MessageSquare className="h-10 w-10 text-faint-foreground" />
               <p className="text-body">{t(($) => $.page.select_prompt)}</p>
             </div>
           )}

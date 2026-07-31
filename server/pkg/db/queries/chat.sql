@@ -208,16 +208,17 @@ UPDATE chat_session SET updated_at = now()
 WHERE id = $1;
 
 -- name: CreateChatMessage :one
--- message_kind defaults to 'message' via COALESCE so every existing caller
+-- message_kind and quick_actions default via COALESCE so every existing caller
 -- (which omits it) keeps writing ordinary messages; the empty-reply path passes
 -- 'no_response' to mark a visible turn with no text output (MUL-4351).
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
-    message_kind, channel_media_pending_until, channel_ingested
+    message_kind, quick_actions, channel_media_pending_until, channel_ingested
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
     COALESCE(sqlc.narg(message_kind)::text, 'message'),
+    COALESCE(sqlc.narg(quick_actions)::jsonb, '[]'::jsonb),
     -- The media deadline is DB-clock time: every consumer compares it against
     -- SQL now() (GetChannelMediaPendingUntil, the deferred promote, the
     -- trailing-message guard), so the writer must use the same clock. The
@@ -350,7 +351,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at
+    quick_actions_disabled, regenerate_quick_actions_for, fire_at
 )
 VALUES (
     $1, $2, NULL,
@@ -364,6 +365,8 @@ VALUES (
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    COALESCE(sqlc.narg('quick_actions_disabled')::boolean, FALSE),
+    sqlc.narg(regenerate_quick_actions_for),
     sqlc.narg('fire_at')::timestamptz
 )
 RETURNING *;
@@ -453,6 +456,28 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
 ORDER BY completed_at DESC
 LIMIT 1;
 
+-- name: HasActiveChatTaskForSession :one
+-- True while ANY task — a normal user turn OR a background quick-actions
+-- regenerate — is in flight for the session (contrast GetPendingChatTask, which
+-- hides regenerate passes from the UI). A quick-actions refresh is refused when
+-- this is true: a running turn is about to change the latest reply, so the
+-- target we'd resume is already stale even before its assistant row lands; and a
+-- second concurrent regenerate would double-spend quota on the same turn. Read
+-- inside the same session lock as the enqueue so it cannot race a sibling insert
+-- (MUL-5149 review §1/§2).
+--
+-- 'deferred' is included: an auto-retry armed with a backoff fire_at is inserted
+-- deferred (CreateRetryTask), and provider_network's final chat attempt waits
+-- ~5s that way. During that window the failed turn has written no assistant row,
+-- so the latest-persisted check still points at the OLD turn — omitting deferred
+-- would let a refresh resume a session the retry is about to advance and attach
+-- the new turn's suggestions to the old one (MUL-5149 re-review §1).
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue
+  WHERE chat_session_id = $1
+    AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+) AS has_active;
+
 -- name: GetPendingChatTask :one
 -- Returns the most recent in-flight task for a chat session, if any.
 -- Used by the frontend to recover pending state after refresh / reopen.
@@ -461,6 +486,10 @@ LIMIT 1;
 -- without "resetting to 0s".
 SELECT id, status, created_at FROM agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  -- Background quick-actions regeneration passes are invisible to the chat UI:
+  -- they own no assistant turn and must not raise the StatusPill or disable the
+  -- composer (MUL-5149 refresh follow-up).
+  AND regenerate_quick_actions_for IS NULL
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -481,6 +510,9 @@ FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE atq.chat_session_id IS NOT NULL
   AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  -- Exclude background quick-actions regeneration passes: they own no assistant
+  -- turn and must not surface as "running" chat work (MUL-5149 refresh follow-up).
+  AND atq.regenerate_quick_actions_for IS NULL
   AND cs.workspace_id = $1
   AND cs.creator_id = $2
 ORDER BY atq.created_at DESC;
@@ -501,6 +533,9 @@ SELECT EXISTS (
   JOIN chat_session cs ON cs.id = atq.chat_session_id
   WHERE atq.chat_session_id IS NOT NULL
     AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    -- Background quick-actions regeneration passes own no visible turn and must
+    -- never light the FAB "running" indicator (MUL-5149 refresh follow-up).
+    AND atq.regenerate_quick_actions_for IS NULL
     AND cs.workspace_id = sqlc.arg(workspace_id)
     AND cs.creator_id = sqlc.arg(creator_id)
     AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
@@ -637,3 +672,32 @@ WHERE chat_session_id IN (
     JOIN agent a ON a.id = cs.agent_id
     WHERE a.runtime_id = $1 AND a.kind = 'system'
 );
+
+-- name: GetChatMessageByTaskAssistant :one
+-- The completed turn's assistant outcome row, for the quick-actions
+-- supplement path (daemon suggestion pass finishing after chat:done).
+SELECT * FROM chat_message
+WHERE task_id = $1 AND role = 'assistant'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetLatestAssistantChatMessageForSession :one
+-- The session's most recent assistant turn, used as the regeneration target
+-- when the user clicks "refresh" on the quick-actions row (MUL-5149). Only rows
+-- with a task_id qualify — the daemon suggest supplement keys off task_id and
+-- a resume needs a real completed turn to resume from.
+SELECT * FROM chat_message
+WHERE chat_session_id = $1 AND role = 'assistant' AND task_id IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: SetChatMessageQuickActionsByTask :one
+UPDATE chat_message
+SET quick_actions = $2
+WHERE id = (
+    SELECT inner_msg.id FROM chat_message AS inner_msg
+    WHERE inner_msg.task_id = $1 AND inner_msg.role = 'assistant'
+    ORDER BY inner_msg.created_at DESC
+    LIMIT 1
+)
+RETURNING *;

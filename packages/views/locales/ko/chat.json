@@ -59,7 +59,10 @@
     "copied_toast": "복사했습니다",
     "copy_failed_toast": "복사 실패",
     "scroll_to_latest": "최신 메시지로 스크롤",
-    "loading_older": "이전 메시지를 불러오는 중…"
+    "loading_older": "이전 메시지를 불러오는 중…",
+    "quick_actions_heading": "후속 질문",
+    "quick_actions_regenerate": "제안 다시 생성",
+    "quick_actions_regenerate_failed": "제안을 다시 생성하지 못했습니다. 다시 시도해 주세요."
   },
   "session_history": {
     "untitled": "제목 없음",

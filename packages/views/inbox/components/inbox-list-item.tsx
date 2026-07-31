@@ -10,6 +10,7 @@ import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
+import { useInboxContextMenu } from "./inbox-context-menu";
 import { useT } from "../../i18n";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
@@ -46,6 +47,7 @@ export function InboxListItem({
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
+  const openContextMenu = useInboxContextMenu();
   const displayTitle = getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
@@ -62,8 +64,16 @@ export function InboxListItem({
     <button
       type="button"
       onClick={onClick}
-      className={`group flex w-full items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors ${
-        isSelected ? "bg-accent" : "hover:bg-accent/50"
+      // Right-click opens the list's shared menu (mark read/unread, archive).
+      // `select-none` mirrors what Base UI's own trigger used to merge in, so
+      // right-clicking a row never starts a text selection.
+      onContextMenu={
+        openContextMenu ? (e) => openContextMenu(item, e) : undefined
+      }
+      className={`group flex w-full select-none items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors ${
+        isSelected
+          ? "bg-accent"
+          : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
       }`}
     >
       <ActorAvatar
@@ -110,7 +120,7 @@ export function InboxListItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
             <InboxDetailLabel item={item} />
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -125,7 +135,7 @@ export function InboxListItem({
                 hoverCard={false}
               />
             )}
-            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
               {timeAgo(item.created_at)}
             </span>
           </div>

@@ -75,10 +75,10 @@ export function InboxList({
           <span className="min-w-0 flex-1 truncate font-medium">
             {t(($) => $.list.archived_title)}
           </span>
-          <span className="shrink-0 tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 tabular-nums text-muted-foreground">
             {archivedCount}
           </span>
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+          <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
         </button>
       ) : null,
     [isArchivedView, archivedCount, onOpenArchived, t],
@@ -90,7 +90,7 @@ export function InboxList({
     return (
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
+          <Inbox className="mb-3 h-8 w-8 text-faint-foreground" />
           <p className="text-body">
             {isArchivedView
               ? t(($) => $.list.archived_empty)

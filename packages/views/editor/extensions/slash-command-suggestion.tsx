@@ -263,18 +263,62 @@ export const BUILTIN_COMMANDS: SlashCommandItem[] = [
   { id: "note", label: "note", descriptionKey: "note" },
 ];
 
+/** Marks a menu entry as a configured quick action rather than a built-in. */
+export const QUICK_ACTION_ITEM_PREFIX = "quick-action:";
+
+export function isQuickActionItem(item: SlashCommandItem): boolean {
+  return item.id.startsWith(QUICK_ACTION_ITEM_PREFIX);
+}
+
+export function quickActionIdFromItem(item: SlashCommandItem): string {
+  return item.id.slice(QUICK_ACTION_ITEM_PREFIX.length);
+}
+
 // Match on the command label as a prefix only — the description is for display,
 // not search. With a single command this keeps the menu predictable (typing
 // `/no` surfaces `note`; an unrelated `/deploy` shows nothing).
-export function buildBuiltinCommandItems(query: string): SlashCommandItem[] {
+export function buildBuiltinCommandItems(
+  query: string,
+  quickActions: { id: string; name: string; description?: string }[] = [],
+): SlashCommandItem[] {
   const q = query.toLowerCase();
-  return BUILTIN_COMMANDS.filter((c) => c.label.toLowerCase().startsWith(q));
+  // Quick actions lead: on an issue they are the reason a user reaches for
+  // `/`, and `/note` is a rarely-used escape hatch.
+  const actionItems: SlashCommandItem[] = quickActions.map((a) => ({
+    id: `${QUICK_ACTION_ITEM_PREFIX}${a.id}`,
+    label: a.name,
+    description: a.description || undefined,
+  }));
+  return [...actionItems, ...BUILTIN_COMMANDS]
+    .filter((c) => c.label.toLowerCase().startsWith(q))
+    .slice(0, MAX_ITEMS);
 }
 
-export function createBuiltinCommandSuggestion(): Omit<
-  SuggestionOptions<SlashCommandItem>,
-  "editor"
-> {
+export interface BuiltinCommandSuggestionOptions {
+  /**
+   * Configured quick actions offered alongside the built-ins. Read lazily on
+   * every keystroke so a newly created action shows up without remounting the
+   * editor.
+   */
+  getQuickActions?: () => { id: string; name: string; description?: string }[];
+  /**
+   * Resolves a quick action to the text it would post. Server-rendered, so the
+   * inserted body is byte-identical to what clicking the sidebar button sends.
+   * Returning "" (or throwing) must leave the composer untouched rather than
+   * inserting a half-rendered prompt.
+   */
+  renderQuickAction?: (quickActionId: string) => Promise<string>;
+  /**
+   * Called when renderQuickAction rejects. The extension cannot show UI of its
+   * own — a ProseMirror command runs outside React's tree — so the host turns
+   * this into a toast. Without it a failed pick is completely silent.
+   */
+  onRenderError?: (error: unknown) => void;
+}
+
+export function createBuiltinCommandSuggestion(
+  options: BuiltinCommandSuggestionOptions = {},
+): Omit<SuggestionOptions<SlashCommandItem>, "editor"> {
   const pluginKey = new PluginKey("builtinCommandSuggestion");
 
   return {
@@ -283,8 +327,59 @@ export function createBuiltinCommandSuggestion(): Omit<
     // Only open over a `/` the user actually typed, so a pasted path
     // (`/usr/local/bin`) never opens the command menu (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
-    items: ({ query }) => buildBuiltinCommandItems(query),
+    items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
     command: ({ editor, range, props }) => {
+      if (isQuickActionItem(props)) {
+        const render = options.renderQuickAction;
+        if (!render) return;
+        const id = quickActionIdFromItem(props);
+
+        // The "/query" text is deliberately left in place while the request
+        // is in flight. Deleting first meant a failed or slow render destroyed
+        // what the user typed with nothing to show for it, and the insert then
+        // landed wherever the caret happened to be by the time it resolved.
+        //
+        // Snapshot the EXACT text under the range, not just its shape. A
+        // prefix check ("does it still start with /") passes when the user
+        // rewrote `/review` into `/fix` mid-request, and the stale response
+        // would then overwrite the new command.
+        const originalText = editor.state.doc.textBetween(range.from, range.to);
+
+        void render(id)
+          .then((content) => {
+            if (!content) return;
+            const withinDoc = range.to <= editor.state.doc.content.size;
+            const unchanged =
+              withinDoc && editor.state.doc.textBetween(range.from, range.to) === originalText;
+            if (!unchanged) {
+              // The command was edited, moved, or removed while the request
+              // was outstanding. Inserting anywhere now would either clobber
+              // the user's newer text or drop the body in an unrelated spot,
+              // so this pick is simply abandoned.
+              return;
+            }
+            editor
+              .chain()
+              .focus()
+              // contentType: "markdown" is load-bearing. Without it Tiptap
+              // inserts the string as literal TEXT, so the server-rendered
+              // `[@Name](mention://agent/…)` never becomes a mention node —
+              // it serialises back out with the brackets escaped
+              // (`\[@Name\](…)`) and renders as raw markup in the thread.
+              .insertContentAt({ from: range.from, to: range.to }, content, {
+                contentType: "markdown",
+              })
+              .run();
+            window.getSelection()?.collapseToEnd();
+          })
+          .catch((error: unknown) => {
+            // The command text is still there, so the user can retry or edit
+            // it by hand; the host surfaces why nothing was inserted.
+            options.onRenderError?.(error);
+          });
+        return;
+      }
+
       // Insert the plain-text prefix (e.g. "/note ") rather than a rich node,
       // so a menu selection and a hand-typed command are byte-identical and the
       // backend can detect the marker with a simple prefix match. The trailing

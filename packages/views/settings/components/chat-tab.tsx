@@ -22,6 +22,8 @@ export function ChatTab() {
   const { t } = useT("settings");
   const enabled = useChatStore((s) => s.floatingChatEnabled);
   const setEnabled = useChatStore((s) => s.setFloatingChatEnabled);
+  const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
+  const setQuickActionsEnabled = useChatStore((s) => s.setQuickActionsEnabled);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.chat)}>
@@ -40,6 +42,25 @@ export function ChatTab() {
               });
             }}
             aria-label={t(($) => $.chat.floating_label)}
+          />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.chat.quick_actions_title)}>
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.chat.quick_actions_label)}
+            description={t(($) => $.chat.quick_actions_hint)}
+          >
+          <Switch
+            checked={quickActionsEnabled}
+            onCheckedChange={(checked) => {
+              setQuickActionsEnabled(checked);
+              toast.success(t(($) => $.auto_save.toast_saved), {
+                id: "settings-auto-save",
+              });
+            }}
+            aria-label={t(($) => $.chat.quick_actions_label)}
           />
           </SettingsRow>
         </SettingsCard>

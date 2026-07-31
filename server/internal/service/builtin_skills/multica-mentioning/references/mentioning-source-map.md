@@ -76,21 +76,28 @@ a pointer.
 | Negative regression test proves another comment's pending task still dedupes the preview | `server/internal/handler/comment_trigger_preview_test.go:267-290` |
 | Edit-submit regression test proves `suppress_agent_ids` filters update-triggered tasks | `server/internal/handler/comment_trigger_preview_test.go:292-316` |
 
-## Guards that make a valid mention a silent no-op
+## Guards and outcomes for a parsed mention
 
-| Guard | Source |
-| --- | --- |
-| agent archived / no runtime → `continue` (`RuntimeID` invalid or `ArchivedAt` set) | `server/internal/handler/comment.go:1451-1452` |
-| squad leader archived / no runtime → `continue` | `server/internal/handler/comment.go:1417-1423` |
-| private agent the actor cannot access → `continue` (`canAccessPrivateAgent`) | `server/internal/handler/comment.go:1454-1458` |
-| private squad leader the actor cannot trigger → `continue` (`canAccessPrivateAgent`) | `server/internal/handler/comment.go:1425-1428` |
-| already-pending dedup (agent) → shared pending-task helper → `continue` | `server/internal/handler/comment.go:1459-1463` |
-| already-pending dedup (squad leader) → shared pending-task helper → `continue` | `server/internal/handler/comment.go:1429-1433` |
-| `canAccessPrivateAgent` definition | `server/internal/handler/agent_access.go` (search `func (h *Handler) canAccessPrivateAgent`) |
-| `canEnqueueSquadLeader` (loads leader, delegates to `canInvokeAgent`) | `server/internal/handler/agent_access.go:261-267` |
-| autopilot-delegation invoke authority: an unattributed autopilot run delegating on the issue it created falls back to the autopilot creator as the effective invoking user for the gate, bound to verified speaking-task lineage (author == task agent, `task.issue_id` == this issue) so no cross-issue borrow (MUL-4857) | gate application via `opts.effectiveInvoker()` in `server/internal/handler/comment.go` (search `func (o commentTriggerComputeOptions) effectiveInvoker`); lineage-verifying helper in `server/internal/handler/agent_access.go` (search `func (h *Handler) autopilotDelegationAuthority`); resolved from the trusted X-Task-ID / `comment.source_task_id` via `autopilotDelegationAuthorityFromRequest` / `autopilotDelegationAuthorityFromComment` |
-| autopilot-delegation authority on the DEFERRED path: a delegation to a busy target replays at the target's completion reconcile, which restores the same authority from `comment.source_task_id` (MUL-4857) | `server/internal/handler/daemon.go` (search `reconcileCommentsOnCompletion`, the `autopilotDelegationAuthorityFromComment` call) |
-| authority lineage is persisted per-action: only an agent editing its OWN comment re-stamps `source_task_id` to the current editing task (issue-scoped, like create); any other editor — including a workspace owner/admin editing an agent's comment (manage rights, not invoke rights) — CLEARS it, so a cross-issue edit or an admin edit makes every authority/originator read fail closed, including the deferred completion-reconcile — preview, save, and reconcile agree (MUL-4857) | `server/internal/handler/comment.go` (search `commentSourceTaskIDForIssue` and the `isAuthor` branch in `UpdateComment`) |
+A mention that parses is never silently dropped: every guard below either
+records a blocked outcome with a stable `reason_code`, or hands the trigger to
+enqueue, which resolves it to queued / coalesced / deferred. Only a mention
+that never parsed at all (a name where a UUID belongs) is a true silent no-op.
+
+| Guard | Outcome | Source |
+| --- | --- | --- |
+| mentioned agent is archived, or has no runtime bound | blocked `target_unavailable` / `runtime_offline` — evaluated in that order and AFTER the invoke gate, so a caller who may not invoke the target never learns its state | `server/internal/handler/comment.go` (search `resolveMentionedAgentCommentTriggers`, the agent-branch `ArchivedAt` / `RuntimeID` checks) |
+| mentioned squad's leader is archived, or has no runtime bound | blocked `target_unavailable` / `runtime_offline`, same ordering behind the leader invoke gate | `server/internal/handler/comment.go` (search `resolveMentionedAgentCommentTriggers`, the squad-branch `ArchivedAt` / `RuntimeID` checks) |
+| private agent the actor cannot INVOKE (`canInvokeAgent`, not `canAccessPrivateAgent` — MUL-3963 split see-vs-run) | blocked `invocation_not_allowed` | `server/internal/handler/comment.go` (search `resolveMentionedAgentCommentTriggers`, the agent-branch `canInvokeAgent` call) |
+| private squad leader the actor cannot INVOKE (`canInvokeAgent`) | blocked `invocation_not_allowed` | `server/internal/handler/comment.go` (search `resolveMentionedAgentCommentTriggers`, the squad-branch `canInvokeAgent` call) |
+| well-formed mention uuid that resolves to no agent in this workspace | blocked `invocation_not_allowed` — the SAME code as a private agent, so a blocked reason can never confirm existence | `server/internal/handler/comment.go` (search `Do not reveal whether the id exists`) |
+| mention id that is not a valid uuid at all (`mention://agent/-`) | blocked `target_unavailable` on BOTH the agent and squad branch: a non-uuid names no entity anywhere, so it hides nothing and must not be blamed on permission (MUL-5548) | `server/internal/handler/comment.go` (search `cannot name an entity in ANY workspace`) |
+| the mentioned agent already has a pending task on this issue | NOT a drop: the resolver flags `AlreadyPending` and enqueue folds the comment into that task — `coalesced` on a same-head merge, `deferred` on a different head, `blocked` if the merge fails closed | flag set in `server/internal/handler/comment.go` (search `AlreadyPending: hasPending`); resolved in `resolveCommentTriggerEnqueue` |
+| the mentioned squad's leader already has a pending task on this issue | same `AlreadyPending` fold as the agent row | `server/internal/handler/comment.go` (search `hasPendingTaskForIssueAndAgent` in the squad branch) |
+| `canAccessPrivateAgent` definition — the SEE gate, deliberately NOT used by the mention path | n/a (reference) | `server/internal/handler/agent_access.go` (search `func (h *Handler) canAccessPrivateAgent`) |
+| `canEnqueueSquadLeader` (loads leader, delegates to `canInvokeAgent`) — squad assignment/promote path, NOT the mention path | n/a (reference) | `server/internal/handler/agent_access.go` (search `func (h *Handler) canEnqueueSquadLeader`) |
+| autopilot-delegation invoke authority: an unattributed autopilot run delegating on the issue it created falls back to the autopilot creator as the effective invoking user for the gate, bound to verified speaking-task lineage (author == task agent, `task.issue_id` == this issue) so no cross-issue borrow (MUL-4857) | feeds the invoke gate | gate application via `opts.effectiveInvoker()` in `server/internal/handler/comment.go` (search `func (o commentTriggerComputeOptions) effectiveInvoker`); lineage-verifying helper in `server/internal/handler/agent_access.go` (search `func (h *Handler) autopilotDelegationAuthority`); resolved from the trusted X-Task-ID / `comment.source_task_id` via `autopilotDelegationAuthorityFromRequest` / `autopilotDelegationAuthorityFromComment` |
+| autopilot-delegation authority on the DEFERRED path: a delegation to a busy target replays at the target's completion reconcile, which restores the same authority from `comment.source_task_id` (MUL-4857) | feeds the invoke gate | `server/internal/handler/daemon.go` (search `reconcileCommentsOnCompletion`, the `autopilotDelegationAuthorityFromComment` call) |
+| authority lineage is persisted per-action: only an agent editing its OWN comment re-stamps `source_task_id` to the current editing task (issue-scoped, like create); any other editor — including a workspace owner/admin editing an agent's comment (manage rights, not invoke rights) — CLEARS it, so a cross-issue edit or an admin edit makes every authority/originator read fail closed, including the deferred completion-reconcile — preview, save, and reconcile agree (MUL-4857) | fails closed | `server/internal/handler/comment.go` (search `commentSourceTaskIDForIssue` and the `isAuthor` branch in `UpdateComment`) |
 
 ## @all broadcast and assignee-trigger suppression
 

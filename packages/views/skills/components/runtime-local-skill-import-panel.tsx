@@ -361,7 +361,7 @@ function ConflictResolutionPanel({
                     count: conflicts.length,
                   })}
             </p>
-            <p className="mt-1 text-caption opacity-85">
+            <p className="mt-1 text-caption">
               {t(($) => $.runtime_import.conflict_hint)}
             </p>
           </div>

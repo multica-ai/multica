@@ -376,7 +376,9 @@ func (h *Handler) cachedModelCatalog(ctx context.Context, runtimeID string) *Mod
 		slog.Warn("model catalog cache read failed", "error", err, "runtime_id", runtimeID)
 		return nil
 	}
-	if snapshot == nil || !cacheableModelCatalog(snapshot.Models, snapshot.Supported) {
+	// fallback=false: a stored snapshot is by construction a real discovery
+	// result — fallback catalogs never enter the cache.
+	if snapshot == nil || !cacheableModelCatalog(snapshot.Models, snapshot.Supported, false) {
 		return nil
 	}
 	return snapshot
@@ -477,6 +479,11 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		Models    []ModelEntry `json:"models"`
 		Supported *bool        `json:"supported"`
 		Error     string       `json:"error"`
+		// Fallback marks a completed report whose models are a static
+		// stand-in the provider substituted after discovery failed, not the
+		// runtime's real catalog. Older daemons omit it; absent means "this
+		// daemon cannot tell us", which stays the pre-MUL-5549 behaviour.
+		Fallback bool `json:"fallback"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -509,13 +516,24 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		// serving a catalog the runtime no longer advertises. Failed reports
 		// deliberately leave the cache alone — serving the last known good list
 		// through a transient discovery failure is the point of the cache.
+		//
+		// A fallback report is a failed report wearing a completed label: the
+		// models are a static stand-in, so they are neither fresh truth to
+		// store nor grounds to discard a real catalog we already hold. Treat it
+		// like a failure and leave the cache untouched (MUL-5549).
 		if h.ModelCatalogCache != nil {
-			if cacheableModelCatalog(body.Models, supported) {
+			switch modelCatalogCacheDecision(body.Models, supported, body.Fallback) {
+			case modelCatalogCacheStore:
 				if err := h.ModelCatalogCache.Put(r.Context(), runtimeID, body.Models, supported); err != nil {
 					slog.Warn("model catalog cache write failed", "error", err, "runtime_id", runtimeID)
 				}
-			} else if err := h.ModelCatalogCache.Invalidate(r.Context(), runtimeID); err != nil {
-				slog.Warn("model catalog cache invalidate failed", "error", err, "runtime_id", runtimeID)
+			case modelCatalogCacheDrop:
+				if err := h.ModelCatalogCache.Invalidate(r.Context(), runtimeID); err != nil {
+					slog.Warn("model catalog cache invalidate failed", "error", err, "runtime_id", runtimeID)
+				}
+			case modelCatalogCacheKeep:
+				slog.Debug("model discovery reported a fallback catalog; leaving cached catalog untouched",
+					"runtime_id", runtimeID, "count", len(body.Models))
 			}
 		}
 	} else {

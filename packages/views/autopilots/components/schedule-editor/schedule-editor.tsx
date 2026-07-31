@@ -888,7 +888,7 @@ export function ScheduleEditor({
               </p>
               {/* The parser's own words, verbatim — untranslated, but it is the
                   only text that says which field is wrong. */}
-              <p className="font-mono text-micro text-destructive/70">{cronErrorDetail}</p>
+              <p className="font-mono text-micro text-destructive">{cronErrorDetail}</p>
             </div>
           ) : advanced ? (
             // Three different things are being said here, and only the first is

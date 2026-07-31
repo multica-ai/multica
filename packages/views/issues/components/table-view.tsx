@@ -432,7 +432,7 @@ function SortableColumnHeader({
           type="button"
           aria-label={reorderLabel}
           className={cn(
-            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground/50 opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
+            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
             isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
           )}
           {...attributes}
@@ -768,7 +768,7 @@ export function InlineTitle({
             <button
               type="button"
               aria-label={createSubIssueLabel}
-              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 onCreateSubIssue();
@@ -779,7 +779,7 @@ export function InlineTitle({
             <button
               type="button"
               aria-label={renameLabel}
-              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 setDraft(row.issue.title);
@@ -1482,7 +1482,16 @@ export function TableView({
           // keepPreviousData alone cannot bridge a changed table query inside
           // useQueries. Retain the last settled head per structural branch to
           // keep the previous table painted while the new query is pending.
-          ...(placeholder ? { placeholderData: () => placeholder } : {}),
+          //
+          // Passed as a VALUE, not a closure. QueryObserver reuses the previous
+          // placeholder result only while `options.placeholderData` compares
+          // equal BY REFERENCE to the previous render's, so `() => placeholder`
+          // — a fresh arrow on every rebuild of this array — forced the
+          // placeholder to be recomputed and the result re-derived on every
+          // render. The value comes from a ref Map and is already stable, and
+          // the closure ignored both of the arguments the function form
+          // receives, so the two forms are equivalent (MUL-5477).
+          ...(placeholder ? { placeholderData: placeholder } : {}),
           enabled:
             (branch.groupKey === null ||
               !collapsedGroupSet.has(branch.groupKey)) &&
