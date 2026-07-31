@@ -1007,23 +1007,14 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
-
 	return b.String()
 }
 
 // renderQuickCreateContext renders issue_context.md for quick-create tasks.
-// This file carries only task data (user input, skills). Behavioral rules
-// and guardrails live in AGENTS.md (runtime config) and the per-turn prompt
-// to avoid redundancy and conflicting instructions.
+// This file carries only task data (the user input). Behavioral rules and
+// guardrails live in AGENTS.md (runtime config) and the per-turn prompt to
+// avoid redundancy and conflicting instructions; the skill index lives in the
+// runtime brief like every other kind (MUL-5529).
 func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	var b strings.Builder
 	b.WriteString("# Quick Create\n\n")
@@ -1032,14 +1023,6 @@ func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	b.WriteString("> ")
 	b.WriteString(ctx.QuickCreatePrompt)
 	b.WriteString("\n\n")
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
 	return b.String()
 }
 
@@ -1070,16 +1053,6 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 		b.WriteString("## Autopilot Instructions\n\n")
 		b.WriteString(ctx.AutopilotDescription)
 		b.WriteString("\n\n")
-	}
-
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
 	}
 
 	return b.String()

@@ -77,10 +77,7 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { useT } from "../../i18n";
-import {
-  ResourceLabelPicker,
-  useResourceLabelsEnabled,
-} from "../../labels/resource-label-picker";
+import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 
 const SKILL_MD = "SKILL.md";
 
@@ -370,7 +367,6 @@ function OverviewTab({
   onAddToAgents: () => void;
 }) {
   const { t } = useT("skills");
-  const labelsEnabled = useResourceLabelsEnabled();
 
   return (
     <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
@@ -414,15 +410,13 @@ function OverviewTab({
             </p>
           </PropertyRow>
 
-          {labelsEnabled && (
-            <PropertyRow label={t(($) => $.detail.overview.labels)}>
-              <ResourceLabelPicker
-                resourceType="skill"
-                resourceId={skill.id}
-                canEdit={canEdit}
-              />
-            </PropertyRow>
-          )}
+          <PropertyRow label={t(($) => $.detail.overview.labels)}>
+            <ResourceLabelPicker
+              resourceType="skill"
+              resourceId={skill.id}
+              canEdit={canEdit}
+            />
+          </PropertyRow>
         </div>
       </section>
 

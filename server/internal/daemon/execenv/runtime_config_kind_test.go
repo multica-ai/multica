@@ -143,9 +143,9 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
-		{"## Skills", map[taskKind]bool{
-			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
-		}},
+		// Quick-create included: it used to be skipped here and carry its own
+		// copy in issue_context.md, which nothing read. One index, one place.
+		{"## Skills", allKinds},
 		{"## Mentions", issueKinds},
 		{"## Attachments", issueKinds},
 	}

@@ -429,11 +429,17 @@
     "status_running": "작업 중",
     "status_queued": "대기 중",
     "empty_hover": "현재 작업 중인 에이전트가 없습니다",
+    "unknown_hover": "작업 중인 에이전트: 아직 불러오지 않았습니다",
     "filter_active_label": "에이전트가 작업 중인 issue만 보는 중",
     "tasks_count_other": "task {{count}}개",
     "chip_agents_working_other": "작업 중인 에이전트 {{count}}개",
     "issues_count_other": "issue {{count}}개",
     "chip_agents_working_unknown": "작업 중인 에이전트: —"
+  },
+  "filtered_empty": {
+    "title": "필터 조건에 맞는 issue가 없습니다",
+    "hint": "필터를 조정하거나 해제하면 이 보기의 issue가 표시됩니다.",
+    "clear_button": "필터 해제"
   },
   "agent_live": {
     "is_working": "{{name}} 작업 중",

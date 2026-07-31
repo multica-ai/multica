@@ -429,11 +429,17 @@
     "status_running": "作業中",
     "status_queued": "待機中",
     "empty_hover": "現在作業中のエージェントはありません",
+    "unknown_hover": "作業中のエージェント: まだ読み込まれていません",
     "filter_active_label": "エージェントが作業中の issue を表示中",
     "tasks_count_other": "task {{count}} 件",
     "chip_agents_working_other": "作業中のエージェント {{count}} 件",
     "issues_count_other": "issue {{count}} 件",
     "chip_agents_working_unknown": "作業中のエージェント: —"
+  },
+  "filtered_empty": {
+    "title": "フィルター条件に一致する issue がありません",
+    "hint": "フィルターを変更または解除すると、このビューの issue が表示されます。",
+    "clear_button": "フィルターを解除"
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",

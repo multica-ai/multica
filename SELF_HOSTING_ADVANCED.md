@@ -138,11 +138,29 @@ If the frontend and backend are served from different hostnames, `COOKIE_DOMAIN`
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `8080` | Backend server port |
+| `PORT` | `8080` | Backend port — the one to edit. It is the port the backend process listens on for a local/bare run, and the host port the Compose self-host stack publishes. In Compose the container always listens on `8080` internally, so changing this needs no rebuild. |
+| `BACKEND_PORT` | Value of `PORT` | Optional alias that overrides `PORT` for the backend. `API_PORT` and `SERVER_PORT` are further aliases; the **alias order** is `BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `PORT` → `8080`, and it is the same in `Makefile`, `scripts/local-env.sh` and `docker-compose.selfhost.yml`. Leave them unset unless the host port must differ from the port the process listens on. |
 | `METRICS_ADDR` | empty | Optional Prometheus metrics listener, for example `127.0.0.1:9090` |
-| `FRONTEND_PORT` | `3000` | Frontend port |
+| `FRONTEND_PORT` | `3000` | Frontend port. Host port in Compose; the container always listens on `3000` internally. |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins. Governs **both** the HTTP CORS allowlist **and** the WebSocket `Origin` check. A browser origin that isn't listed here (and isn't `localhost`) has its real-time WebSocket upgrade rejected with `403`, so live updates stop working until a manual refresh. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+
+> **Which source wins depends on the entry point**, and only the alias order above
+> is shared. Docker Compose lets the calling environment outrank `.env`
+> (`PORT=9100 docker compose … up -d` publishes 9100). `make` is the other way
+> round: it `include`s the env file, so a value there outranks the same variable
+> from your environment, and a `make selfhost PORT=…` command-line assignment
+> outranks both. Editing the env file is therefore the one method that behaves
+> the same everywhere. None of this affects whether the reported port is correct:
+> `make selfhost` and both installers read the published port back from
+> `docker compose port`, so the health check and the printed URL always match
+> what Compose actually published.
+
+The web development server is one intentional exception to the generic `PORT`
+fallback: Next uses `PORT` for its own frontend listener before it evaluates the
+rewrite configuration. Its backend fallback therefore accepts
+`BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `8080`, while an explicit
+`REMOTE_API_URL` or `NEXT_PUBLIC_API_URL` still takes priority.
 
 ### CLI / Daemon
 

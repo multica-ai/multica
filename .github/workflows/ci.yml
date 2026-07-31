@@ -51,11 +51,18 @@ jobs:
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
               - 'scripts/selfhost-config.test.sh'
+              - 'scripts/selfhost-wait.sh'
+              # selfhost-config.test.sh asserts on the installers' side of
+              # the port contract, so a change to either must run it.
+              - 'scripts/install.sh'
+              - 'scripts/install.ps1'
               - 'scripts/check.sh'
               - 'scripts/dev.sh'
               - 'scripts/local-env.sh'
               - '.env.example'
               - 'docker-compose.selfhost.yml'
+              - 'docker-compose.selfhost.build.yml'
+              - 'Makefile'
 
       - name: Decide
         id: decide
@@ -368,18 +375,27 @@ jobs:
         run: go build ./cmd/multica
 
   installer:
-    # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
-    # backend job so installer regressions surface independently, and
-    # exercised on macOS too because the installer targets macOS/Homebrew
-    # and `tar` / `sed` / `mktemp` differ between BSD and GNU userlands.
+    # Stub-driven shell tests for scripts/install.sh and scripts/install.ps1.
+    # Kept off the heavy backend job so installer regressions surface
+    # independently, and exercised on macOS too because the installer targets
+    # macOS/Homebrew and `tar` / `sed` / `mktemp` differ between BSD and GNU
+    # userlands. Windows runs the PowerShell installer's own suite: the two
+    # installers share one port contract, and neither is covered by the
+    # frontend job.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Test shell installers
+        if: runner.os != 'Windows'
         run: bash scripts/install.test.sh
+
+      - name: Test PowerShell installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/install.ps1.test.ps1

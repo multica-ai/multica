@@ -69,6 +69,19 @@ var corsAllowedHeaders = []string{
 	"X-Client-Capabilities",
 }
 
+// corsExposedHeaders lists response headers browser clients are allowed to read.
+// Without this a custom response header is silently unreadable from JS on a
+// cross-origin request (only the CORS-safelisted response headers are exposed by
+// default) — the header arrives on the wire and then disappears, which looks
+// exactly like the server never sent it.
+//
+// Referencing the handler constant rather than re-typing the string keeps a
+// rename from quietly switching the signal off (MUL-5492).
+var corsExposedHeaders = []string{
+	handler.HeaderCommentsTruncated,
+	handler.HeaderTimelineTruncated,
+}
+
 func allowedOrigins() []string {
 	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	if raw == "" {
@@ -708,6 +721,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   corsAllowedHeaders,
+		ExposedHeaders:   corsExposedHeaders,
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))

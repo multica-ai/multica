@@ -429,11 +429,17 @@
     "status_running": "正在工作",
     "status_queued": "排队中",
     "empty_hover": "当前没有智能体在工作",
+    "unknown_hover": "工作中的智能体：尚未加载",
     "filter_active_label": "正在查看有智能体在工作的 issue",
     "tasks_count_other": "{{count}} 个 task",
     "chip_agents_working_other": "{{count}} 个智能体工作中",
     "issues_count_other": "{{count}} 个 issue",
     "chip_agents_working_unknown": "工作中的智能体：—"
+  },
+  "filtered_empty": {
+    "title": "没有符合筛选条件的 issue",
+    "hint": "调整或清除筛选条件，就能看到这个视图里的 issue。",
+    "clear_button": "清除筛选"
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",

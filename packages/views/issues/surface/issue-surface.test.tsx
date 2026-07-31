@@ -13,7 +13,10 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { pruneIssueSurfaceViewStates } from "@multica/core/issues/stores/surface-view-store";
+import {
+  getIssueSurfaceViewStore,
+  pruneIssueSurfaceViewStates,
+} from "@multica/core/issues/stores/surface-view-store";
 import type {
   AgentTask,
   Issue,
@@ -680,5 +683,100 @@ describe("IssueSurface — table pagination ownership", () => {
       expect(screen.queryByText("Selected issue in collapsed group")).toBeNull();
     });
     expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
+  });
+});
+
+// MUL-5525. A surface whose filters match nothing is not an empty surface.
+// Every caller's own empty copy ("No issues linked — create one") describes the
+// UNFILTERED case, so the shared filtered state has to win before `renderEmpty`
+// runs. The agents-working chip is the most common way into this state.
+describe("IssueSurface — filtered empty state", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    mockWsId.current = "ws-1";
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Resolve `t(($) => $.a.b)` to "a.b" so copy can be asserted by key
+    // without loading the locale bundles into this suite.
+    mockTranslate.mockImplementation(((...args: unknown[]) => {
+      const path: string[] = [];
+      const probe: unknown = new Proxy(() => {}, {
+        get: (_target, property) => {
+          path.push(String(property));
+          return probe;
+        },
+      });
+      (args[0] as (value: unknown) => unknown)(probe);
+      return path.join(".");
+    }) as unknown as () => string);
+    const listIssues = vi.fn(() =>
+      Promise.resolve({ issues: [], total: 0 } satisfies ListIssuesResponse),
+    );
+    setApiInstance({
+      listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+    pruneIssueSurfaceViewStates([]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    mockTranslate.mockImplementation(() => "translated");
+    vi.restoreAllMocks();
+  });
+
+  function filteredSurface() {
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pf" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("says the filters hid everything instead of offering to create the first issue", async () => {
+    const store = getIssueSurfaceViewStore("project:pf");
+    act(() => store.getState().toggleAgentRunningFilter());
+
+    render(filteredSurface());
+
+    await screen.findByText("filtered_empty.title");
+    expect(screen.getByText("filtered_empty.hint")).toBeInTheDocument();
+    // The project's own "nothing linked yet" copy would be a lie here.
+    expect(screen.queryByText("detail.empty_issues_title")).toBeNull();
+  });
+
+  it("clears exactly the filters it blamed, then hands the surface back", async () => {
+    const store = getIssueSurfaceViewStore("project:pf");
+    act(() => store.getState().toggleAgentRunningFilter());
+
+    render(filteredSurface());
+
+    await screen.findByText("filtered_empty.title");
+    fireEvent.click(
+      screen.getByRole("button", { name: "filtered_empty.clear_button" }),
+    );
+
+    expect(store.getState().agentRunningFilter).toBe(false);
+    await screen.findByText("detail.empty_issues_title");
+    expect(screen.queryByText("filtered_empty.title")).toBeNull();
+  });
+
+  it("keeps the unfiltered empty state when no filter is active", async () => {
+    render(filteredSurface());
+
+    await screen.findByText("detail.empty_issues_title");
+    expect(screen.queryByText("filtered_empty.title")).toBeNull();
   });
 });

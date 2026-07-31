@@ -129,11 +129,12 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read issue_context.md: %v", err)
 	}
-	// "Code Review" is listed by its on-disk slug (MUL-5529).
-	for _, want := range []string{"a1b2c3d4-e5f6-7890-abcd-ef1234567890", "code-review"} {
-		if !strings.Contains(string(content), want) {
-			t.Fatalf("issue_context.md missing %q", want)
-		}
+	if !strings.Contains(string(content), "a1b2c3d4-e5f6-7890-abcd-ef1234567890") {
+		t.Fatalf("issue_context.md missing the issue id")
+	}
+	// The skill list lives in the runtime brief only (MUL-5529).
+	if strings.Contains(string(content), "code-review") {
+		t.Fatalf("issue_context.md should no longer carry a skill list:\n%s", content)
 	}
 
 	markerContent, err := os.ReadFile(filepath.Join(env.WorkDir, TaskContextMarkerRelPath))
@@ -449,22 +450,17 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 
 	s := string(content)
-	for _, want := range []string{
-		"test-issue-id-1234",
-		"## Agent Skills",
-		// Listed by on-disk slug, not the "Go Conventions" display name —
-		// the slug is the only name the model can invoke (MUL-5529).
-		"go-conventions",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("content missing %q", want)
-		}
+	if !strings.Contains(s, "test-issue-id-1234") {
+		t.Errorf("content missing %q", "test-issue-id-1234")
 	}
 
 	// Issue details should NOT be in the context file (agent fetches via CLI).
-	for _, absent := range []string{"## Description", "## Workspace Context"} {
+	//
+	// Nor the skill list: nothing ever read this copy, and the runtime brief
+	// carries the same names-only index (MUL-5529).
+	for _, absent := range []string{"## Description", "## Workspace Context", "## Agent Skills", "go-conventions"} {
 		if strings.Contains(s, absent) {
-			t.Errorf("content should NOT contain %q — agent fetches details via CLI", absent)
+			t.Errorf("content should NOT contain %q", absent)
 		}
 	}
 

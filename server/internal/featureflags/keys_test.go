@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestResourceLabelsReleaseFlagDefaultsToOff(t *testing.T) {
-	ctx := context.Background()
-	if ResourceLabelsEnabled(ctx, nil) {
-		t.Fatal("resource labels release flag must default to off")
+func TestResourceLabelsCompatDecisionStaysEnabled(t *testing.T) {
+	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
+	if !flags[resourceLabelsCompat] {
+		t.Fatal("resource labels must stay enabled for installed clients")
 	}
 }
 

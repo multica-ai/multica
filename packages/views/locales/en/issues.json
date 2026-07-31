@@ -445,6 +445,7 @@
     "status_running": "Working",
     "status_queued": "Queued",
     "empty_hover": "No agents working right now",
+    "unknown_hover": "Agents working: not loaded yet",
     "filter_active_label": "Viewing issues with agents working",
     "tasks_count_one": "{{count}} task",
     "tasks_count_other": "{{count}} tasks",
@@ -453,6 +454,11 @@
     "issues_count_one": "{{count}} issue",
     "issues_count_other": "{{count}} issues",
     "chip_agents_working_unknown": "Agents working: —"
+  },
+  "filtered_empty": {
+    "title": "No issues match these filters",
+    "hint": "Adjust or clear the filters to see the issues in this view.",
+    "clear_button": "Clear filters"
   },
   "agent_live": {
     "is_working": "{{name}} is working",

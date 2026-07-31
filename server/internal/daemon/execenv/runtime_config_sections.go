@@ -548,28 +548,32 @@ func writeSubIssueCreation(b *strings.Builder) {
 	b.WriteString("**Ordering with stages.** For phased plans, group children with `--stage <N>` (N ≥ 1) instead of hand-promoting the backlog chain — stage members run together, and the parent wakes once per stage. Use `--stage k --status backlog` for later stages, then `multica issue children <id>` to inspect groupings before promoting. Reach for stages whenever a plan has more than one step or a step must wait for a group.\n\n")
 }
 
-// writeSkills emits the Skills section listing skill names + descriptions.
-func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
+// writeSkills emits the Skills section: an index of invocable skill names.
+//
+// Names only, deliberately. Every runtime CLI discovers the SKILL.md files the
+// daemon writes and builds its own listing from their frontmatter, so repeating
+// the descriptions here bought a second, more expensive copy of what the model
+// already had — measured at ~3,100 tokens per brief on a real task, 40% of the
+// whole brief — and no extra routing signal (MUL-5529).
+//
+// The index itself stays because it is the one skill listing Multica controls.
+// Each CLI's own listing is theirs: its format, and whether it exists at all,
+// can change with any release.
+//
+// There is no per-provider branch. The old fallback told providers outside a
+// hardcoded list to read `.agent_context/skills/`, which was the wrong path for
+// every provider that actually reached it — grok and traecli write to
+// `.grok/skills` and `.traecli/skills` — while both discover natively and never
+// needed the pointer.
+func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	skills := modelVisibleSkills(ctx.AgentSkills)
 	if len(skills) == 0 {
 		return
 	}
 	b.WriteString("## Skills\n\n")
-	switch provider {
-	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "qwen":
-		// Hermes discovers these from its per-task HERMES_HOME/skills (seeded by
-		// the daemon), so it needs the same "discovered automatically" framing
-		// as the other native-discovery runtimes rather than a path pointer.
-		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-	default:
-		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
-	}
+	b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 	for _, skill := range skills {
-		if desc := strings.TrimSpace(skill.Description); desc != "" {
-			fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, desc)
-		} else {
-			fmt.Fprintf(b, "- **%s**\n", skill.Name)
-		}
+		fmt.Fprintf(b, "- **%s**\n", skill.Name)
 	}
 	b.WriteString("\n")
 }
@@ -685,7 +689,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Issue Metadata        |    ✓    |   ✓    |     —     |      —       |  —
 //	Instruction Precedence|    —    |   ✓    |     —     |      —       |  —
 //	Sub-issue Creation    |    ✓    |   ✓    |     —     |      —       |  —
-//	Skills                |    ✓    |   ✓    |     ✓    |      —       |  ✓
+//	Skills                |    ✓    |   ✓    |     ✓    |      ✓       |  ✓
 //	Mentions              |    ✓    |   ✓    |     —     |      —       |  —
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
@@ -749,9 +753,10 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeSubIssueCreation(&b)
 	}
 
-	if kind != kindQuickCreate {
-		writeSkills(&b, provider, ctx)
-	}
+	// Every kind, quick-create included. Quick-create used to be skipped here
+	// and carried its own copy in issue_context.md instead; now that both are
+	// the same names-only index, the brief is the one that survives.
+	writeSkills(&b, ctx)
 
 	if kind == kindIssue {
 		writeMentions(&b)

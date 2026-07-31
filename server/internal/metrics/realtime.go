@@ -15,6 +15,7 @@ type RealtimeCollector struct {
 	slowEvictionsTotal  *prometheus.Desc
 	messagesSentTotal   *prometheus.Desc
 	messagesDropped     *prometheus.Desc
+	inboundTooLarge     *prometheus.Desc
 	redisConnected      *prometheus.Desc
 	redisXAddTotal      *prometheus.Desc
 	redisXAddErrors     *prometheus.Desc
@@ -35,6 +36,7 @@ func NewRealtimeCollector(m *realtime.Metrics) *RealtimeCollector {
 		slowEvictionsTotal:  newRealtimeDesc("slow_evictions_total", "Total realtime clients evicted for slow consumption."),
 		messagesSentTotal:   newRealtimeDesc("messages_sent_total", "Total realtime messages sent."),
 		messagesDropped:     newRealtimeDesc("messages_dropped_total", "Total realtime messages dropped."),
+		inboundTooLarge:     newRealtimeDesc("inbound_too_large_total", "Total realtime connections closed for exceeding the inbound message size limit."),
 		redisConnected:      newRealtimeDesc("redis_connected", "Whether the realtime Redis relay is connected."),
 		redisXAddTotal:      newRealtimeDesc("redis_xadd_total", "Total Redis XADD operations by the realtime relay."),
 		redisXAddErrors:     newRealtimeDesc("redis_xadd_errors_total", "Total Redis XADD errors by the realtime relay."),
@@ -58,6 +60,7 @@ func (c *RealtimeCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.slowEvictionsTotal,
 		c.messagesSentTotal,
 		c.messagesDropped,
+		c.inboundTooLarge,
 		c.redisConnected,
 		c.redisXAddTotal,
 		c.redisXAddErrors,
@@ -82,6 +85,7 @@ func (c *RealtimeCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.slowEvictionsTotal, prometheus.CounterValue, float64(m.SlowEvictionsTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.messagesSentTotal, prometheus.CounterValue, float64(m.MessagesSentTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.messagesDropped, prometheus.CounterValue, float64(m.MessagesDroppedTotal.Load()))
+	ch <- prometheus.MustNewConstMetric(c.inboundTooLarge, prometheus.CounterValue, float64(m.InboundTooLargeTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.redisConnected, prometheus.GaugeValue, boolFloat(m.RedisConnected.Load()))
 	ch <- prometheus.MustNewConstMetric(c.redisXAddTotal, prometheus.CounterValue, float64(m.RedisXAddTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.redisXAddErrors, prometheus.CounterValue, float64(m.RedisXAddErrors.Load()))

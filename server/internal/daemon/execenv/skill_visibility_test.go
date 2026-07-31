@@ -117,37 +117,35 @@ Hidden body.`,
 		},
 	}
 
-	rendered := map[string]string{
-		"runtime config": buildMetaSkillContent("codex", TaskContextForEnv{
-			IssueID:     ctx.IssueID,
-			AgentName:   ctx.AgentName,
-			AgentID:     ctx.AgentID,
-			AgentSkills: ctx.AgentSkills,
-		}),
-		"issue context": renderIssueContext("codex", TaskContextForEnv{
-			IssueID:     ctx.IssueID,
-			AgentSkills: ctx.AgentSkills,
-		}),
-		"quick create": renderQuickCreateContext(TaskContextForEnv{
-			QuickCreatePrompt: ctx.QuickCreatePrompt,
-			AgentSkills:       ctx.AgentSkills,
-		}),
-		"autopilot": renderAutopilotContext(TaskContextForEnv{
-			AutopilotRunID: ctx.AutopilotRunID,
-			AgentSkills:    ctx.AgentSkills,
-		}),
-	}
-
-	for name, out := range rendered {
+	// The brief is now the only Multica-rendered skill listing, for every kind.
+	for _, kind := range []TaskContextForEnv{
+		{IssueID: ctx.IssueID, AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
+		{QuickCreatePrompt: ctx.QuickCreatePrompt, AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
+		{AutopilotRunID: ctx.AutopilotRunID, AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
+		{ChatSessionID: "c-1", AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
+	} {
+		out := buildMetaSkillContent("codex", kind)
 		// Listings carry the on-disk slug, not the display name (MUL-5529).
 		if !strings.Contains(out, "visible-skill") {
-			t.Errorf("%s missing visible skill:\n%s", name, out)
+			t.Errorf("brief missing visible skill:\n%s", out)
 		}
 		if strings.Contains(out, "Visible Skill") {
-			t.Errorf("%s lists the display name instead of the slug:\n%s", name, out)
+			t.Errorf("brief lists the display name instead of the slug:\n%s", out)
 		}
 		if strings.Contains(out, "hidden-skill") || strings.Contains(out, "hidden description") {
-			t.Errorf("%s advertised disable-model-invocation skill:\n%s", name, out)
+			t.Errorf("brief advertised disable-model-invocation skill:\n%s", out)
+		}
+	}
+
+	// issue_context.md and its quick-create / autopilot variants no longer
+	// carry a skill list at all; nothing read that copy.
+	for name, out := range map[string]string{
+		"issue context": renderIssueContext("codex", TaskContextForEnv{IssueID: ctx.IssueID, AgentSkills: ctx.AgentSkills}),
+		"quick create":  renderQuickCreateContext(TaskContextForEnv{QuickCreatePrompt: ctx.QuickCreatePrompt, AgentSkills: ctx.AgentSkills}),
+		"autopilot":     renderAutopilotContext(TaskContextForEnv{AutopilotRunID: ctx.AutopilotRunID, AgentSkills: ctx.AgentSkills}),
+	} {
+		if strings.Contains(out, "## Agent Skills") || strings.Contains(out, "visible-skill") {
+			t.Errorf("%s still renders a skill list:\n%s", name, out)
 		}
 	}
 }

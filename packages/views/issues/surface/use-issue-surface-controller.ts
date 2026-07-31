@@ -13,6 +13,7 @@ import type {
   IssueTableGroupsRequest,
   IssueTableQuerySpec,
   Project,
+  WorkingAgentSummary,
 } from "@multica/core/types";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -74,10 +75,12 @@ export interface IssueSurfaceController {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen. Feeds the
-   *  header chip so its count IS the post-click row count (MUL-4884). */
-  /** See IssueSurfaceData.workingScopeIssues — undefined means UNKNOWN. */
-  workingScopeIssues: Issue[] | undefined;
+  /** Agents currently working inside THIS surface, under the surface's active
+   *  filters — the header chip's count, so clicking it leaves exactly these
+   *  agents' rows (MUL-4884, MUL-5525). `undefined` means the projection has
+   *  not resolved yet; the chip renders an indeterminate state rather than a
+   *  number it cannot stand behind. */
+  workingAgents: WorkingAgentSummary[] | undefined;
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -95,6 +98,9 @@ export interface IssueSurfaceController {
    * Board and compound Swimlane cells. */
   groupBranches?: IssueGroupBranches;
   activeFilters: Omit<IssueFilters, "statusFilters">;
+  /** Any filter that `clearFilters()` would reset is on. Lets an empty surface
+   *  say "your filters hid everything" instead of "there is nothing here". */
+  hasActiveFilters: boolean;
   actions: IssueSurfaceActions;
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
@@ -347,6 +353,24 @@ export function useIssueSurfaceController({
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
 
+  // Exactly the filters `clearFilters()` resets, so an empty surface that
+  // reports "filters hid everything" can always offer a button that fixes it.
+  // Display toggles (show sub-issues) and per-surface search are deliberately
+  // out: they have their own affordances and clearing filters would not undo
+  // them.
+  const hasActiveFilters =
+    statusFilters.length > 0 ||
+    priorityFilters.length > 0 ||
+    assigneeFilters.length > 0 ||
+    includeNoAssignee ||
+    creatorFilters.length > 0 ||
+    viewProjectFilters.length > 0 ||
+    viewIncludeNoProject ||
+    labelFilters.length > 0 ||
+    Object.keys(effectivePropertyFilters).length > 0 ||
+    dateFilter != null ||
+    agentRunningFilter === true;
+
   const workingAgentMineRelation =
     scope.type === "my"
       ? scope.relation === "all"
@@ -497,6 +521,50 @@ export function useIssueSurfaceController({
       usesServerStatusSurface ||
       ((usesTable || usesServerGroupSurface) && activeTableFacet !== null),
   });
+  // The header chip's count, kept on its own query rather than folded into the
+  // submenu facet request above. Two reasons: that request is deliberately
+  // lazy (an always-on facet would re-enable it for Table/grouped surfaces on
+  // mount), and this spec drops `working_issue_ids` so toggling the filter
+  // does not change the query identity — the number must not flicker when you
+  // click the very chip it labels.
+  const workingAgentsQuerySpec = useMemo<IssueTableQuerySpec>(() => {
+    if (!agentRunningFilter) return tableQuerySpec;
+    const { working_issue_ids: _working, ...filters } = tableQuerySpec.filters;
+    return { ...tableQuerySpec, filters };
+  }, [agentRunningFilter, tableQuerySpec]);
+  const workingAgentsFacetRequest = useMemo(
+    () => ({
+      query: workingAgentsQuerySpec,
+      facets: [{ kind: "working_agents" } as const],
+      include_total: false,
+    }),
+    [workingAgentsQuerySpec],
+  );
+  const workingAgentsFacetQuery = useQuery({
+    ...issueTableFacetsOptions(wsId, workingAgentsFacetRequest),
+    placeholderData: keepPreviousData,
+    // Gantt owns its own count: its canvas projection is client-side and not
+    // expressible as a Table query spec, so a facet answer would over-count.
+    //
+    // The actor panel (member / agent detail) renders no agents-working chip at
+    // all, so nothing would read the answer — and with no control to toggle it,
+    // `agentRunningFilter` is unreachable there. Skip the aggregation rather
+    // than pay for it on every panel mount. Adding the chip to that header
+    // means dropping this clause.
+    enabled: !usesGantt && scope.type !== "actor",
+  });
+  const facetWorkingAgents = useMemo<WorkingAgentSummary[] | undefined>(() => {
+    const facet = workingAgentsFacetQuery.data?.facets.find(
+      (candidate) => candidate.kind === "working_agents",
+    );
+    // A backend without this facet (older deploy) answers with an error or a
+    // response that omits it. Stay indeterminate instead of claiming zero.
+    if (!facet) return undefined;
+    return facet.values.map((value) => ({
+      id: value.key,
+      running_task_count: value.count,
+    }));
+  }, [workingAgentsFacetQuery.data]);
   useEffect(() => {
     if (!usesServerFacets) setActiveTableFacet(null);
   }, [usesServerFacets]);
@@ -631,6 +699,28 @@ export function useIssueSurfaceController({
       (effectiveViewMode === "swimlane" && swimlaneGrouping === "project"),
   });
 
+  // Gantt draws a client-materialized canvas, so its chip counts the agents
+  // holding those canvas rows. Every other view mode takes the server facet.
+  const workingAgents = useMemo<WorkingAgentSummary[] | undefined>(() => {
+    if (!usesGantt) return facetWorkingAgents;
+    const rows = data.ganttWorkingScopeIssues;
+    if (!rows) return undefined;
+    const visible = new Set(rows.map((issue) => issue.id));
+    const summaries: WorkingAgentSummary[] = [];
+    for (const agent of workspaceWorkingAgents) {
+      const running = agent.issue_ids.filter((id) => visible.has(id)).length;
+      if (running > 0) {
+        summaries.push({ id: agent.id, running_task_count: running });
+      }
+    }
+    return summaries;
+  }, [
+    data.ganttWorkingScopeIssues,
+    facetWorkingAgents,
+    usesGantt,
+    workspaceWorkingAgents,
+  ]);
+
   const exportTableIssues = useCallback(async () => {
     const issues: Issue[] = [];
     const seenIssueIds = new Set<string>();
@@ -684,13 +774,17 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
   });
 
+  const { ganttWorkingScopeIssues: _ganttWorkingScope, ...surfaceData } = data;
+
   return {
     scopeKey,
     projectId,
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
-    ...data,
+    ...surfaceData,
+    workingAgents,
+    hasActiveFilters,
     statusPagination: usesServerStatusSurface
       ? data.statusPagination
       : undefined,

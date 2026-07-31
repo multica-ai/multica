@@ -9,14 +9,12 @@ import (
 // modelVisibleSkills returns the skills a model may invoke, with Name
 // normalized to the on-disk slug.
 //
-// The normalization is not cosmetic. Every caller renders these entries into a
-// listing the model reads to pick a skill, and the only name it can actually
-// invoke is the directory slug writeSkillFiles lays down — sanitizeSkillName of
-// the same field. A workspace skill's Name is its human display name ("PR
-// review"), so listing it verbatim hands the model an identifier that does not
-// resolve (MUL-5529). Normalizing here rather than at each call site keeps the
-// four listings (runtime brief + the three issue_context renderers) from
-// drifting apart.
+// The normalization is not cosmetic. The runtime brief renders these entries
+// into the listing the model reads to pick a skill, and the only name it can
+// actually invoke is the directory slug writeSkillFiles lays down —
+// sanitizeSkillName of the same field. A workspace skill's Name is its human
+// display name ("PR review"), so listing it verbatim hands the model an
+// identifier that does not resolve (MUL-5529).
 //
 // Slugs come from resolveSkillSlugs over the *unfiltered* batch, because
 // writeSkillFiles lays down every skill — including the ones hidden here — and
