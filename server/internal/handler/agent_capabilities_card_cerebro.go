@@ -385,21 +385,13 @@ type AgentCapabilityTaskMandate interface {
 	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
 }
 
-// ApplyTaskMandate overlays the immutable task ceiling on a canonical card.
-// Both the HTTP route and Gateway tool call this exact function.
+// ApplyTaskMandate overlays the immutable task ceiling on connection calls.
+// Platform actions intentionally keep their canonical permission result: the
+// FIR-4076 rollback removed Task Mandate enforcement from those HTTP actions,
+// and their capability keys are not issued in the connection/tool mandate.
 func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) {
 	if mandates == nil || card == nil || !taskID.Valid {
 		return
-	}
-	for i := range card.Tools {
-		if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, card.Tools[i].Key); err != nil {
-			card.Tools[i].Permission = "deny"
-			card.Tools[i].Reason = fmt.Sprintf("task mandate denied the capability: %v", err)
-			card.Tools[i].Allowed = false
-			card.Tools[i].Callable = false
-			card.Tools[i].BlockedReason = card.Tools[i].Reason
-			card.Tools[i].HowToFix = "Start a new task whose issued mandate includes this capability."
-		}
 	}
 	for i := range card.Connections {
 		for j := range card.Connections[i].Tools {
