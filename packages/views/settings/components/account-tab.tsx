@@ -170,7 +170,7 @@ export function AccountTab() {
                 aria-invalid={descriptionTooLong}
                 className="resize-y"
               />
-              <div className="mt-1 flex justify-end text-xs text-muted-foreground">
+              <div className="mt-1 flex justify-end text-caption text-muted-foreground">
                 <span
                   className={descriptionTooLong ? "text-destructive shrink-0" : "shrink-0"}
                   aria-live="polite"
@@ -179,7 +179,7 @@ export function AccountTab() {
                 </span>
               </div>
               {descriptionTooLong ? (
-                <p className="mt-1 text-xs text-destructive">
+                <p className="mt-1 text-caption text-destructive">
                   {t(($) => $.account.profile_description_too_long, {
                     max: MAX_PROFILE_DESCRIPTION_LEN,
                     count: profileDescription.length,

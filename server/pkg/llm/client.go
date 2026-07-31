@@ -36,7 +36,7 @@ import (
 // FallbackModel is the last-resort model used when neither the request nor the
 // configured default supplies one. It is deliberately a small, inexpensive
 // model since this layer backs lightweight utility calls.
-const FallbackModel = "gpt-4o-mini"
+const FallbackModel = "gpt-5.6-luna"
 
 // defaultTimeout bounds the full request lifecycle (including SDK retries) when
 // the caller's context has no deadline of its own. Streaming requests are not

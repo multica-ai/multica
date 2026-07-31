@@ -413,6 +413,8 @@
     "unmapped_notice_other": "{{count}} models have no maintained price — their tokens are excluded from cost totals.",
     "custom_pricing": {
       "open_button": "Set custom prices",
+      "edit_button": "Edit custom prices",
+      "active_notice": "Some models in this period are priced with your custom rates.",
       "title": "Custom model prices",
       "description": "Enter per-million-token rates so we can price models we don't ship a maintained rate for. Stored locally on this machine.",
       "empty": "No models need a custom price right now.",

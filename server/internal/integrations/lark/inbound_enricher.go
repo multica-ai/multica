@@ -123,7 +123,9 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // addressed to the Bot, and only when RecentContextSize > 0 — it answers
 // MUL-3084 (the Bot saw only the single @-ed line, never the surrounding
 // conversation). It is the one fetch here NOT triggered by something the
-// user explicitly attached.
+// user explicitly attached. When the @-mention arrives inside a Lark topic
+// (话题) the window is scoped to that topic, so a topic's context never
+// includes a sibling topic's messages (#5835 — see fetchRecentItems).
 //
 // In group chats, every speaker across ALL blocks (recent + quoted +
 // forwarded) and the sender who @-mentioned the Bot are resolved to real
@@ -290,11 +292,19 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 // fetchRecentItems pulls the recent group window and returns the
 // messages to render — the trigger message itself and the directly-quoted
 // parent (which gets its own <quoted_message> block) filtered out, sorted
-// oldest-first. The window is anchored to the trigger message's time so
-// it captures the conversation up to the @-mention rather than whatever
-// is newest by the time this fetch runs. A fetch failure is returned to
-// the caller (which renders a safe, readable degradation note); it never
-// blocks ingestion.
+// oldest-first. A fetch failure is returned to the caller (which renders a
+// safe, readable degradation note); it never blocks ingestion.
+//
+// When the trigger arrived inside a Lark topic (msg.ThreadID != ""), the
+// window is scoped to that topic (container_id_type=thread) so sibling
+// topics that share the chat_id can't leak into this topic's context or
+// its persisted turn (#5835). Because the thread container rejects
+// end_time, the topic path anchors to the trigger time CLIENT-side; it
+// also fail-closes on thread_id — any returned item whose thread_id is
+// missing or does not match is dropped rather than trusted. A topic fetch
+// failure degrades exactly like the chat path and NEVER falls back to a
+// chat-wide fetch (that would re-open the leak). Outside a topic the chat
+// path is unchanged: anchored to the trigger time via end_time.
 func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds InstallationCredentials, msg InboundMessage) ([]LarkMessage, error) {
 	if msg.ChatID == "" {
 		classified := classifyRecentContextFetchError(errRecentContextChannelUnbound)
@@ -302,13 +312,21 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 		return nil, errRecentContextChannelUnbound
 	}
 
+	// Lark sends create_time as epoch millis; a missing/unparseable time
+	// yields 0. The chat path converts it to seconds for end_time; the
+	// thread path uses the raw millis for the client-side anchor below.
+	triggerMillis := parseLarkMillis(msg.CreateTime)
 	params := ListMessagesParams{
 		ChatID:   msg.ChatID,
 		PageSize: e.recentContextSize,
-		// Lark sends create_time as epoch millis; end_time wants seconds. A
-		// missing/unparseable time yields 0, which the client treats as
-		// "no end_time" (newest N).
-		EndTime: parseLarkMillis(msg.CreateTime) / 1000,
+	}
+	if msg.ThreadID != "" {
+		// Topic-scoped fetch: no end_time (the thread container rejects it);
+		// the window is anchored client-side below.
+		params.ThreadID = msg.ThreadID
+	} else {
+		// 0 tells the client "no end_time" (newest N).
+		params.EndTime = triggerMillis / 1000
 	}
 	var items []LarkMessage
 	var err error
@@ -353,10 +371,32 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 	if msg.ParentID != "" {
 		exclude[msg.ParentID] = true
 	}
+	inThread := msg.ThreadID != ""
 	kept := make([]LarkMessage, 0, len(items))
 	for _, it := range items {
 		if exclude[it.MessageID] {
 			continue
+		}
+		// The Bot's markdown replies are sent as schema-2.0 interactive
+		// cards, which flatten to a zero-signal "[interactive card]"
+		// placeholder — drop them rather than render noise (#5835).
+		if it.SenderType == "app" && it.MessageType == "interactive" {
+			continue
+		}
+		if inThread {
+			// Fail-closed topic isolation: the thread container should only
+			// return this topic's messages, but if Lark ever returns an item
+			// with a missing or mismatched thread_id, drop it rather than
+			// risk leaking a sibling topic's content into this topic.
+			if it.ThreadID != msg.ThreadID {
+				continue
+			}
+			// The thread container ignores end_time, so anchor client-side:
+			// drop anything created strictly after the @-mention moment. A
+			// zero trigger time (unparseable) disables the anchor.
+			if triggerMillis > 0 && parseLarkMillis(it.CreateTime) > triggerMillis {
+				continue
+			}
 		}
 		kept = append(kept, it)
 	}

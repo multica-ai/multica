@@ -1,4 +1,5 @@
 {{- $frontendImageTag := default .Chart.AppVersion .Values.images.frontend.tag -}}
+{{- $remoteApiUrl := default (printf "http://%s:8080" (include "multica.backend.fullname" .)) .Values.frontend.config.remoteApiUrl -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,6 +32,20 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "3000"
+            - name: REMOTE_API_URL
+              value: {{ $remoteApiUrl | quote }}
+            {{- if .Values.frontend.config.docsUrl }}
+            - name: DOCS_URL
+              value: {{ .Values.frontend.config.docsUrl | quote }}
+            {{- end }}
+            {{- if .Values.frontend.config.publicApiUrl }}
+            - name: NEXT_PUBLIC_API_URL
+              value: {{ .Values.frontend.config.publicApiUrl | quote }}
+            {{- end }}
+            {{- if .Values.frontend.config.publicWsUrl }}
+            - name: NEXT_PUBLIC_WS_URL
+              value: {{ .Values.frontend.config.publicWsUrl | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       {{- with .Values.frontend.affinity }}

@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  ExternalLink,
   FolderOpen,
   Link2,
   Network,
@@ -86,8 +87,11 @@ interface IssueActionsMenuItemsProps {
    *  Decoupled this way so the same item can drive both the dropdown
    *  (3-dot button) and the context menu (right-click) wrappers. */
   onOpenAssignee: () => void;
-  /** If set, navigate here after the issue is deleted (used by the detail page). */
-  onDeletedNavigateTo?: string;
+  /** If set, leave the page after the issue is deleted (used by the detail
+   *  page, which renders the issue being deleted). The delete modal goes back
+   *  to the list the user came from and only falls back to this path when
+   *  there is no in-app history. List surfaces leave it unset and stay put. */
+  onDeletedFallbackPath?: string;
 }
 
 export function IssueActionsMenuItems({
@@ -95,12 +99,13 @@ export function IssueActionsMenuItems({
   actions,
   primitives: P,
   onOpenAssignee,
-  onDeletedNavigateTo,
+  onDeletedFallbackPath,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const {
     isPinned,
     updateField,
+    openInNewTab,
     togglePin,
     copyLink,
     openCreateSubIssue,
@@ -155,7 +160,7 @@ export function IssueActionsMenuItems({
               <StatusIcon status={s} className="h-3.5 w-3.5" />
               {t(($) => $.status[s])}
               {issue.status === s && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -172,13 +177,13 @@ export function IssueActionsMenuItems({
           {PRIORITY_ORDER.map((p) => (
             <P.Item key={p} onClick={() => updateField({ priority: p })}>
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
                 {t(($) => $.priority[p])}
               </span>
               {issue.priority === p && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -251,6 +256,13 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {/* Leads the "do something with this issue itself" group: the only
+          discoverable way to open an issue elsewhere for users who don't know
+          modifier-click, so it sits above the copy actions. */}
+      <P.Item onClick={openInNewTab}>
+        <ExternalLink className="h-3.5 w-3.5" />
+        {t(($) => $.actions.open_in_new_tab)}
+      </P.Item>
       <P.Item onClick={togglePin}>
         {isPinned ? (
           <PinOff className="h-3.5 w-3.5" />
@@ -305,7 +317,7 @@ export function IssueActionsMenuItems({
 
       <P.Item
         variant="destructive"
-        onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
+        onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
       >
         <Trash2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.delete_issue)}

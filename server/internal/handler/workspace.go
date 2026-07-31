@@ -48,7 +48,7 @@ type WorkspaceResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
-func workspaceToResponse(w db.Workspace) WorkspaceResponse {
+func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	var settings any
 	if w.Settings != nil {
 		json.Unmarshal(w.Settings, &settings)
@@ -72,7 +72,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
-		AvatarURL:   textToPtr(w.AvatarUrl),
+		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
@@ -110,7 +110,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = workspaceToResponse(ws)
+		resp[i] = h.workspaceToResponse(ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -128,7 +128,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
 }
 
 type CreateWorkspaceRequest struct {
@@ -238,7 +238,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.notifyDaemonWorkspacesChanged(userID)
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
-	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
+	writeJSON(w, http.StatusCreated, h.workspaceToResponse(ws))
 }
 
 type UpdateWorkspaceRequest struct {
@@ -341,7 +341,18 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
+		// Read the stored value so an unchanged re-send skips revalidation —
+		// this handler is the one avatar writer that doesn't already have the
+		// row in hand.
+		var current string
+		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+			current = existing.AvatarUrl.String
+		}
+		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, current)
+		if !ok {
+			return
+		}
+		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
@@ -353,7 +364,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
 	if req.Name != nil {
 		if members, err := h.Queries.ListMembers(r.Context(), ws.ID); err == nil {
 			userIDs := make([]string, 0, len(members))
@@ -364,7 +375,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
@@ -422,7 +433,7 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:   timestampToString(m.CreatedAt),
 			Name:        m.UserName,
 			Email:       m.UserEmail,
-			AvatarURL:   textToPtr(m.UserAvatarUrl),
+			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
 	}
 
@@ -434,7 +445,7 @@ type CreateMemberRequest struct {
 	Role  string `json:"role"`
 }
 
-func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
+func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
 	return MemberWithUserResponse{
 		ID:          uuidToString(member.ID),
 		WorkspaceID: uuidToString(member.WorkspaceID),
@@ -443,7 +454,7 @@ func memberWithUserResponse(member db.Member, user db.User) MemberWithUserRespon
 		CreatedAt:   timestampToString(member.CreatedAt),
 		Name:        user.Name,
 		Email:       user.Email,
-		AvatarURL:   textToPtr(user.AvatarUrl),
+		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(user.AvatarUrl)),
 	}
 }
 
@@ -525,14 +536,14 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)
-	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
+	eventPayload := map[string]any{"member": h.memberWithUserResponse(member, user)}
 	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
 	h.publish(protocol.EventMemberAdded, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 	h.notifyDaemonWorkspacesChanged(uuidToString(user.ID))
 
-	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
+	writeJSON(w, http.StatusCreated, h.memberWithUserResponse(member, user))
 }
 
 type UpdateMemberRequest struct {
@@ -609,10 +620,10 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": memberWithUserResponse(updatedMember, user),
+		"member": h.memberWithUserResponse(updatedMember, user),
 	})
 
-	writeJSON(w, http.StatusOK, memberWithUserResponse(updatedMember, user))
+	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {

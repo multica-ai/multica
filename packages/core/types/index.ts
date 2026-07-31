@@ -13,6 +13,9 @@ export type {
   TaskEvidence,
   AgentActivityBucket,
   AgentRunCount,
+  WorkspaceWorkingAgent,
+  WorkspaceWorkingAgentType,
+  WorkspaceWorkingAgentMineRelation,
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
@@ -22,6 +25,7 @@ export type {
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
   CreateAgentRequest,
+  AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentTemplate,
   AgentTemplateSummary,
@@ -35,6 +39,8 @@ export type {
   Skill,
   SkillSummary,
   AgentSkillSummary,
+  DisabledRuntimeSkill,
+  SetAgentRuntimeSkillEnabledRequest,
   SkillFile,
   CreateSkillRequest,
   UpdateSkillRequest,
@@ -47,9 +53,12 @@ export type {
   DashboardUsageByAgent,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  DashboardFailureDaily,
+  DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
+  RuntimeModelServiceTier,
   RuntimeModelThinking,
   RuntimeModelThinkingLevel,
   RuntimeModelListRequest,
@@ -76,6 +85,20 @@ export type { Label, LabelResourceType, CreateLabelRequest, UpdateLabelRequest, 
 export type { IssueProperty, IssuePropertyType, IssuePropertyOption, IssuePropertyConfig, IssuePropertyValue, IssuePropertyValues, CreatePropertyRequest, UpdatePropertyRequest, ListPropertiesResponse, IssuePropertiesResponse } from "./property";
 export { ISSUE_PROPERTY_TYPES, isKnownPropertyType } from "./property";
 export type {
+  QuickAction,
+  QuickActionVisibility,
+  QuickActionAssigneeType,
+  QuickActionStatus,
+  CreateQuickActionRequest,
+  UpdateQuickActionRequest,
+  ListQuickActionsResponse,
+} from "./quick-action";
+export {
+  QUICK_ACTION_SIDEBAR_LIMIT,
+  QUICK_ACTION_TEMPLATE_TOKEN_RE,
+  findQuickActionTemplateToken,
+} from "./quick-action";
+export type {
   TimelineEntry,
   AssigneeFrequencyEntry,
 } from "./activity";
@@ -89,6 +112,9 @@ export type {
   ChatLastMessage,
   ChatPinnedAgent,
   ChatMessage,
+  ChatQuickAction,
+  ChatQuickActionsPendingState,
+  ChatQuickActionsFailureState,
   ChatMessagesPage,
   ChatPendingTask,
   PendingChatTaskItem,
@@ -123,10 +149,22 @@ export type {
   GitHubMergeableState,
   GitHubPullRequest,
   GitHubPullRequestChecksConclusion,
+  GitHubPullRequestChecksRollup,
+  GitHubPullRequestMergeable,
+  GitHubPullRequestMergeStateStatus,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
+  GitHubRepository,
+  ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
 } from "./github";
+export type {
+  VCSProvider,
+  VCSConnection,
+  ListVCSConnectionsResponse,
+  ConnectVCSRequest,
+  ConnectVCSResponse,
+} from "./vcs";
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,

@@ -1,12 +1,16 @@
 "use client";
 
 import { StatusIcon } from "../../issues/components";
+import {
+  IssueAgentActivityIndicator,
+} from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
+import { useInboxContextMenu } from "./inbox-context-menu";
 import { useT } from "../../i18n";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
@@ -43,6 +47,7 @@ export function InboxListItem({
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
+  const openContextMenu = useInboxContextMenu();
   const displayTitle = getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
@@ -53,17 +58,26 @@ export function InboxListItem({
   const actionLabel = isArchivedView
     ? t(($) => $.list.unarchive_tooltip)
     : t(($) => $.list.archive_tooltip);
+  const actorType = item.actor_type ?? item.recipient_type;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group flex w-full items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors ${
-        isSelected ? "bg-accent" : "hover:bg-accent/50"
+      // Right-click opens the list's shared menu (mark read/unread, archive).
+      // `select-none` mirrors what Base UI's own trigger used to merge in, so
+      // right-clicking a row never starts a text selection.
+      onContextMenu={
+        openContextMenu ? (e) => openContextMenu(item, e) : undefined
+      }
+      className={`group flex w-full select-none items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors ${
+        isSelected
+          ? "bg-accent"
+          : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
       }`}
     >
       <ActorAvatar
-        actorType={item.actor_type ?? item.recipient_type}
+        actorType={actorType}
         actorId={item.actor_id ?? item.recipient_id}
         size="lg"
         enableHoverCard
@@ -75,7 +89,7 @@ export function InboxListItem({
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
             )}
             <span
-              className={`truncate text-sm ${showUnread ? "font-medium" : "text-muted-foreground"}`}
+              className={`truncate text-body ${showUnread ? "font-medium" : "text-muted-foreground"}`}
             >
               {displayTitle}
             </span>
@@ -106,12 +120,25 @@ export function InboxListItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
             <InboxDetailLabel item={item} />
           </p>
-          <span className={`shrink-0 text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
-            {timeAgo(item.created_at)}
-          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* Badge only, no hover card (MUL-5189). "An agent is on this"
+                is worth showing while triaging; the card behind it adds only
+                elapsed time, which does not change whether you open the row.
+                The row already carries the ActorAvatar hover card on the
+                left, so a second popup here was mostly noise. */}
+            {item.issue_id && (
+              <IssueAgentActivityIndicator
+                issueId={item.issue_id}
+                hoverCard={false}
+              />
+            )}
+            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
+              {timeAgo(item.created_at)}
+            </span>
+          </div>
         </div>
       </div>
     </button>

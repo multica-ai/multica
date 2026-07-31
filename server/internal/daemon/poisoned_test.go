@@ -157,6 +157,60 @@ func TestClassifyPoisonedError(t *testing.T) {
 			errMsg: "claude execution timeout after 10m",
 			wantOK: false,
 		},
+		{
+			// GH #6066: a run killed mid-reply left an empty assistant
+			// message in the transcript. The provider refuses to replay it
+			// and words the refusal with neither "invalid_request_error"
+			// nor a bare "400", so before taskfailure.UnresumableHistory
+			// this landed in agent_error.unknown — resume-safe by omission
+			// — and every later task on the issue resumed the dead session.
+			name:       "gh6066 empty assistant message in history",
+			errMsg:     "Invalid request: the message at position 37 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// GH #5760: the same defect on Kimi/ACP. Has a "400" but no
+			// "invalid_request_error", so the Anthropic clause missed it too.
+			name:       "gh5760 kimi empty assistant message",
+			errMsg:     "kimi provider error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// The narrowness guard: an emptiness complaint with no locator
+			// into the message history is some tool's validation error, and
+			// discarding a healthy session over it would lose real context.
+			name:   "tool validation emptiness is not poisoning",
+			errMsg: "validation error: field must not be empty",
+			wantOK: false,
+		},
+		{
+			// GH #5975: a Kiro resume rejected because the session
+			// history replays an image over the provider's max pixel
+			// dimensions. The conversation is unresumable, so it must be
+			// classified api_invalid_request even though the error is a
+			// -32603 "Internal error" (no 400 / invalid_request_error).
+			name:       "kiro oversized history image",
+			errMsg:     `kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)`,
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// A plain -32603 "Internal error" (the transient close
+			// handshake) shares the code but names neither image marker,
+			// so it must NOT be classified as poisoning.
+			name:   "plain kiro internal error is not poisoning",
+			errMsg: `kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Kiro failed to generate a response)`,
+			wantOK: false,
+		},
+		{
+			// The dimension phrase alone (without the image-content
+			// marker) is too weak to classify as a poisoned history.
+			name:   "dimension phrase without image-content marker",
+			errMsg: `some tool reported: image dimensions exceed max allowed size: 8000 pixels`,
+			wantOK: false,
+		},
 	}
 
 	for _, tc := range cases {

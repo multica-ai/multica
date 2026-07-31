@@ -83,6 +83,55 @@ func connectWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	return conn
 }
 
+type failingScopeAuthorizer struct{}
+
+func (failingScopeAuthorizer) AuthorizeScope(context.Context, string, string, string, string) (bool, error) {
+	return false, errors.New("database unavailable")
+}
+
+func TestClientHandleSubscribeReportsLookupFailure(t *testing.T) {
+	hub := NewHub()
+	hub.SetAuthorizer(failingScopeAuthorizer{})
+	client := &Client{
+		hub:           hub,
+		send:          make(chan []byte, 1),
+		userID:        testUserID,
+		workspaceID:   testWorkspaceID,
+		subscriptions: make(map[scopeKey]bool),
+	}
+
+	client.handleSubscribe(ScopeTask, "task-id")
+
+	select {
+	case raw := <-client.send:
+		var frame struct {
+			Type    string            `json:"type"`
+			Payload map[string]string `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &frame); err != nil {
+			t.Fatalf("unmarshal subscribe error: %v", err)
+		}
+		if frame.Type != "subscribe_error" {
+			t.Fatalf("frame type = %q, want subscribe_error", frame.Type)
+		}
+		if got := frame.Payload["error"]; got != "lookup_failed" {
+			t.Fatalf("error = %q, want lookup_failed", got)
+		}
+		if got := frame.Payload["scope"]; got != ScopeTask {
+			t.Fatalf("scope = %q, want %q", got, ScopeTask)
+		}
+		if got := frame.Payload["id"]; got != "task-id" {
+			t.Fatalf("id = %q, want task-id", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for subscribe_error")
+	}
+
+	if len(client.subscriptions) != 0 {
+		t.Fatalf("lookup failure must not subscribe client, got %d subscriptions", len(client.subscriptions))
+	}
+}
+
 // totalClients counts all currently registered clients.
 func totalClients(hub *Hub) int {
 	hub.mu.RLock()

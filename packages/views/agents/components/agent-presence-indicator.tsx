@@ -75,7 +75,7 @@ export function AgentPresenceIndicator({
       {/* Availability — dot + label. Single dimension, single colour. */}
       <span className="inline-flex items-center gap-1.5">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-        <span className={`text-xs ${av.textClass}`}>{availabilityLabel}</span>
+        <span className={`text-caption ${av.textClass}`}>{availabilityLabel}</span>
       </span>
 
       {/* Workload — separator + label, with counts when working/queued.
@@ -86,21 +86,21 @@ export function AgentPresenceIndicator({
           "Archived" already says everything; "Archived · Idle" is noise. */}
       {detail.availability !== "archived" && (
       <span className="inline-flex items-center gap-1">
-        <span className="text-xs text-muted-foreground">·</span>
+        <span className="text-caption text-muted-foreground">·</span>
         <span
-          className={`text-xs ${
+          className={`text-caption ${
             isQueued ? queuedTone : wl.textClass
           }`}
         >
           {workloadLabel}
         </span>
         {isWorking && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {detail.runningCount} / {detail.capacity}
           </span>
         )}
         {showQueueBadge && (
-          <span className="rounded-md bg-muted px-1 py-0 text-xs font-medium text-muted-foreground">
+          <span className="rounded-md bg-muted px-1 py-0 text-caption font-medium text-muted-foreground">
             {t(($) => $.presence.queue_badge, { count: detail.queuedCount })}
           </span>
         )}
@@ -108,7 +108,7 @@ export function AgentPresenceIndicator({
             there's no running/capacity ratio to anchor on. Honestly
             surfaces "stuck" on offline runtimes. */}
         {isQueued && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {detail.queuedCount}
           </span>
         )}

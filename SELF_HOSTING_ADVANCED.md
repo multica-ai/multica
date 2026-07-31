@@ -95,11 +95,34 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static credentials. When both are unset, the AWS SDK default credential chain is used |
 | `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2). Setting this defaults to path-style URLs for backward compatibility |
 | `S3_USE_PATH_STYLE` | Optional S3 addressing mode. Leave empty for the default (`true` when `AWS_ENDPOINT_URL` is set, `false` for AWS S3). Set `false` for S3-compatible providers that require virtual-hosted-style URLs |
-| `ATTACHMENT_DOWNLOAD_MODE` | Attachment download behavior: `auto` (default), `cloudfront`, `presign`, or `proxy`. Use `proxy` for private buckets behind Docker/VPC-only endpoints such as `http://rustfs:9000` |
+| `ATTACHMENT_DOWNLOAD_MODE` | Attachment download behavior: `auto` (default), `cloudfront`, `presign`, or `proxy`. Use `proxy` for private buckets behind Docker/VPC-only endpoints such as `http://rustfs:9000`. Avatars follow the same policy — see below |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | TTL for CloudFront signed URLs and S3 presigned download URLs (default: `30m`) |
 | `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
+
+#### Avatars on a private bucket
+
+User / agent / squad / workspace avatars are stored as the raw storage object
+URL. When the bucket is public — a public `CLOUDFRONT_DOMAIN`, or the default
+local-disk backend — that URL is served to clients unchanged.
+
+When the bucket is private and no public CDN domain is configured (S3 with
+Block Public Access, R2, MinIO), the API instead serves avatars from
+`/api/avatars/<signature>/<key>` and resolves each request through
+`ATTACHMENT_DOWNLOAD_MODE` — a presigned redirect, a CloudFront-signed
+redirect, or a proxied body. The signature in the path is what authorizes the
+read: an auth-gated URL cannot be used as an `<img src>` from the Desktop app
+or a split-origin frontend, because the session cookie is `SameSite=Strict`.
+
+Only image objects resolve through this route, and only ones that are
+*avatar-class*: a standalone upload not attached to an issue, comment, chat, or
+task. Pointing an `avatar_url` at a file someone attached to an issue is
+rejected when it is set and 404s if it was already stored, so a private image
+cannot be turned into a public link by way of the avatar field.
+
+No configuration is required, and avatars uploaded before this behavior
+existed are fixed without a backfill.
 
 ### Cookies
 
@@ -108,6 +131,8 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `COOKIE_DOMAIN` | Optional `Domain` attribute for session + CloudFront cookies. **Leave empty** for single-host deployments (localhost, LAN IP, or a single hostname). Only set it when the frontend and backend sit on different subdomains of one registered domain (e.g. `.example.com`). **Do not use an IP literal** — RFC 6265 forbids IP addresses in the cookie `Domain` attribute and browsers will drop such `Set-Cookie` headers. |
 
 The `Secure` flag on session cookies is derived automatically from the scheme of `FRONTEND_ORIGIN`: HTTPS origins get `Secure` cookies; plain-HTTP origins (LAN / private-network self-host) get non-secure cookies so the browser can actually store them.
+
+If the frontend and backend are served from different hostnames, `COOKIE_DOMAIN` is **required**, not optional: the browser must be able to read the `multica_csrf` cookie from the page's own origin to send the `X-CSRF-Token` header, and without it every write request fails with `403 {"error":"CSRF validation failed"}`. Scope it to the narrowest parent domain that covers both hosts — it also shares the `multica_auth` session cookie with every host under that domain. See [Reverse Proxy](#reverse-proxy) for the full split-domain configuration and its trust requirements.
 
 ### Server
 
@@ -374,12 +399,60 @@ When using separate domains for frontend and backend, set these environment vari
 # Backend
 FRONTEND_ORIGIN=https://app.example.com
 CORS_ALLOWED_ORIGINS=https://app.example.com
+COOKIE_DOMAIN=.example.com           # narrowest parent covering both hosts — read the scope warning below
 
 # Frontend (only if you are building the web image from source via docker-compose.selfhost.build.yml)
 REMOTE_API_URL=https://api.example.com
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
+
+> **`COOKIE_DOMAIN` is required in this setup — omitting it breaks every write.** The web app authenticates with an HttpOnly `multica_auth` cookie plus a JS-readable `multica_csrf` cookie, and sends the CSRF value as an `X-CSRF-Token` header on every non-GET request. Both cookies are host-only unless `COOKIE_DOMAIN` is set, so a frontend on `app.example.com` cannot read a cookie issued by `api.example.com`. The header is then never sent and the backend rejects the request with `403 {"error":"CSRF validation failed"}` — while GET requests keep working, so the app renders but nothing can be created or edited.
+>
+> After changing `COOKIE_DOMAIN`, delete the existing `multica_auth` / `multica_csrf` cookies on **both** hosts and log in again. Stale host-only cookies otherwise sit alongside the new domain-scoped ones and the browser sends both.
+
+> **Scope `COOKIE_DOMAIN` as narrowly as possible.** The same value also scopes `multica_auth`, the session JWT, and the browser then sends it to **every** host under that domain. `HttpOnly` only stops page scripts from reading the cookie — it does not stop the server behind a sibling subdomain from receiving it on every request. Use the narrowest parent that still covers both hosts: for `agent.example.com` + `api.agent.example.com` that is `.agent.example.com`, **not** `.example.com`, which would also hand your users' session cookie to unrelated hosts such as a separately deployed `docs.example.com`.
+
+Both of these must hold, or this layout is not safe to use:
+
+- The frontend and backend share a common parent domain. Unrelated domains (`app.com` and `api.io`) cannot be covered by any `COOKIE_DOMAIN` value.
+- Every host under that parent domain is operated by the same trusted party. If anything in scope is third-party hosted, or other teams can create records under it, a compromise or a rogue service there receives valid sessions for your deployment.
+
+If either condition fails, use the same-origin layout below, which keeps the session cookie host-only.
+
+### Same Origin (Recommended)
+
+A separate API domain is not required. Leave `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` at their defaults and the browser calls `/api` and `/ws` on the page's own origin, so no cross-host cookie problem can arise in the first place:
+
+```bash
+# Backend
+FRONTEND_ORIGIN=https://app.example.com
+CORS_ALLOWED_ORIGINS=https://app.example.com
+COOKIE_DOMAIN=                       # empty: cookies are host-only on app.example.com, which is correct here
+
+# Frontend
+NEXT_PUBLIC_API_URL=                 # empty: the client uses relative /api paths on the page origin
+NEXT_PUBLIC_WS_URL=                  # empty
+REMOTE_API_URL=http://backend:8080   # target the Next.js rewrites proxy /api, /auth and /uploads to
+```
+
+Serve everything from the single `app.example.com` vhost. HTTP works out of the box, because Next.js rewrites forward `/api`, `/auth` and `/uploads` to `REMOTE_API_URL`. WebSockets do **not** go through those rewrites, so add a `/ws` block to the frontend vhost that reaches the backend directly:
+
+```nginx
+# Add to the app.example.com server block above
+location /ws {
+    proxy_pass http://localhost:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+}
+```
+
+See [WebSocket for LAN / Non-localhost Access](#websocket-for-lan--non-localhost-access) for why the rewrites cannot carry the `Upgrade` handshake.
+
+This keeps cookies, CORS, and the WebSocket origin check on a single origin. It is both the configuration least likely to break and the safer one: the session cookie stays host-only, so no sibling subdomain can ever receive it. An `api.example.com` vhost can still be kept for CLI and daemon use: those clients authenticate with a `mul_` personal access token over `Authorization: Bearer`, which never goes through the cookie or CSRF path.
 
 ## LAN / Non-localhost Access
 

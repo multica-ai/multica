@@ -6,10 +6,22 @@
     "new_skill": "New skill",
     "search_placeholder": "Search skills…",
     "scopes": {
-      "all": { "label": "All", "description": "All skills in this workspace" },
-      "used": { "label": "In use", "description": "Skills assigned to at least one agent" },
-      "unused": { "label": "Unused", "description": "Skills not assigned to any agent" },
-      "mine": { "label": "Created by me", "description": "Skills you created" }
+      "all": {
+        "label": "All",
+        "description": "All skills in this workspace"
+      },
+      "used": {
+        "label": "In use",
+        "description": "Skills assigned to at least one agent"
+      },
+      "unused": {
+        "label": "Unused",
+        "description": "Skills not assigned to any agent"
+      },
+      "mine": {
+        "label": "Created by me",
+        "description": "Skills you created"
+      }
     },
     "empty": {
       "title": "No skills yet",
@@ -100,13 +112,8 @@
     "delete_aria": "Delete skill",
     "delete_tooltip": "Delete skill",
     "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
-    "files_label": "Files · {{count}}",
-    "add_file_aria": "Add file",
-    "add_file_tooltip": "Add file",
     "delete_file": "Delete file",
-    "name_aria": "Skill name",
     "name_placeholder": "skill-name",
-    "description_label": "Description",
     "description_placeholder": "One sentence describing when an agent should use this skill…",
     "subline": {
       "origin_runtime_named": "Local runtime · {{name}}",
@@ -115,42 +122,19 @@
       "origin_clawhub": "Imported · ClawHub",
       "origin_skills_sh": "Imported · Skills.sh",
       "origin_github": "Imported · GitHub",
-      "origin_workspace": "Workspace",
-      "updated_label": "Updated {{when}}",
-      "by_creator": "by {{name}}"
+      "origin_workspace": "Created manually"
     },
     "conflict_banner": {
       "title": "Someone else updated this skill",
       "body": "Your edits are preserved. Discard to pull their changes, or Save to overwrite."
     },
     "save_bar": {
-      "unsaved": "Unsaved changes — will overwrite the live skill on save",
+      "changed_summary": "Changed: {{parts}}",
+      "changed_files_one": "{{count}} file",
+      "changed_files_other": "{{count}} files",
       "discard": "Discard",
       "save": "Save changes",
       "saving": "Saving…"
-    },
-    "sidebar": {
-      "metadata": "Metadata",
-      "created": "Created",
-      "updated": "Updated",
-      "created_by": "Created by",
-      "files": "Files",
-      "id": "ID",
-      "origin": "Origin",
-      "used_by_one": "Used by {{count}} agent",
-      "used_by_other": "Used by {{count}} agents",
-      "permissions": "Permissions",
-      "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
-      "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
-      "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
-      "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign."
-    },
-    "origin_card": {
-      "imported_runtime": "Imported from local runtime",
-      "imported_clawhub": "Imported from ClawHub",
-      "imported_skills_sh": "Imported from Skills.sh",
-      "imported_github": "Imported from GitHub",
-      "provider": "provider · {{provider}}"
     },
     "not_found": {
       "title": "Skill not found",
@@ -180,8 +164,49 @@
         "absolute": "Absolute paths are not allowed.",
         "double_dot": "Paths cannot contain \"..\".",
         "reserved": "SKILL.md is reserved for the main file.",
-        "exists": "A file at this path already exists."
+        "exists": "A file at this path already exists.",
+        "is_directory": "A folder with this name already exists",
+        "under_file": "A file already exists at that location"
       }
+    },
+    "header": {
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "used_by_one": "{{count}} agent",
+      "used_by_other": "{{count}} agents",
+      "updated": "Updated {{when}}",
+      "updated_by": "Updated {{when}} by {{name}}"
+    },
+    "tabs": {
+      "aria": "Skill sections",
+      "overview": "Overview",
+      "files_one": "Files {{count}}",
+      "files_other": "Files {{count}}"
+    },
+    "overview": {
+      "properties": "Properties",
+      "properties_hint": "These fields stay in sync with the SKILL.md frontmatter.",
+      "name": "Name",
+      "description": "Description",
+      "description_hint": "{{count}} characters. Agents read this to decide whether to load the skill.",
+      "labels": "Labels",
+      "used_by_one": "Used by {{count}} agent",
+      "used_by_other": "Used by {{count}} agents",
+      "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign.",
+      "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
+      "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
+      "permissions_locked": "Only the creator or a workspace admin can edit this skill."
+    },
+    "files": {
+      "list_aria": "Skill files",
+      "main": "Main file",
+      "supporting_one": "Supporting {{count}}",
+      "supporting_other": "Supporting {{count}}",
+      "supporting_empty": "No supporting files.",
+      "add_file": "New file",
+      "mode_aria": "File view",
+      "mode_preview": "Preview",
+      "mode_raw": "Plain text"
     }
   },
   "create": {
@@ -300,13 +325,17 @@
     "conflict_name_still_exists": "That name already exists. Choose another name or skip."
   },
   "file_tree": {
-    "no_files": "No files"
+    "no_files": "No files",
+    "actions": {
+      "label": "Actions for {{path}}",
+      "rename": "Rename",
+      "delete": "Delete"
+    }
   },
   "file_viewer": {
-    "edit_tooltip": "Edit",
-    "preview_tooltip": "Preview",
     "no_content": "*No content yet*",
     "markdown_placeholder": "Write markdown content...",
-    "raw_placeholder": "File content..."
+    "raw_placeholder": "File content...",
+    "raw_aria": "Plain text content of {{path}}"
   }
 }

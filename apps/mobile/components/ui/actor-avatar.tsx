@@ -89,8 +89,29 @@ function BareAvatar({
   // can crash native-side on malformed sources (empty string, plain "foo",
   // etc.). Cheap regex; falsy / bad input falls through to the icon fallback.
   const rawUrl = type && type !== "system" ? getAvatarUrl(type, id) : null;
+  const emoji = rawUrl?.startsWith("emoji:")
+    ? rawUrl.slice("emoji:".length).trim() || null
+    : null;
   const url =
-    rawUrl && /^(https?:|data:|file:|asset:)/.test(rawUrl) ? rawUrl : null;
+    !emoji && rawUrl && /^(https?:|data:|file:|asset:)/.test(rawUrl)
+      ? rawUrl
+      : null;
+
+  if (emoji) {
+    return (
+      <View
+        style={{ width: size, height: size, borderRadius: radius }}
+        className="items-center justify-center bg-muted"
+      >
+        <Text
+          accessibilityLabel={type === "system" ? "" : getName(type, id)}
+          style={{ fontSize: Math.round(size * 0.58), lineHeight: size }}
+        >
+          {emoji}
+        </Text>
+      </View>
+    );
+  }
 
   if (url) {
     return (

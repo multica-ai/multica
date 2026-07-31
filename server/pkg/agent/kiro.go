@@ -104,8 +104,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Kiro streams interim narration and the final answer as the same
+	// AgentMessageChunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 	// Completion-preservation state for the -32603 close-handshake guard.
 	//
@@ -174,11 +176,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finishingMu.Unlock()
 				}
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -397,6 +395,24 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					)
 					sessionID = ""
 					resumeRejected = true
+				} else if opts.ResumeSessionID != "" && isKiroOversizedHistoryImage(err) {
+					// A resumed session whose history contains an image
+					// exceeding the provider's max pixel dimensions replays
+					// that image on every session/prompt and is rejected
+					// before the current turn runs (GH #5975). Unlike a
+					// missing session the transcript still exists, so this is
+					// permanent for the resume path: only a fresh session
+					// without the resume id can recover. Signal
+					// ResumeRejected so the daemon retries once from a cold
+					// session; keep the (poisoned) session id on the result
+					// so it stays visible for auditing — the daemon gates the
+					// retry on the boolean, not on an empty id, and a
+					// successful fresh retry overwrites it with the new id.
+					b.cfg.Logger.Warn("resumed session has an oversized historical image the provider rejects; signaling resume rejection so the daemon retries with a fresh session",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					resumeRejected = true
 				}
 			}
 		} else {
@@ -427,17 +443,17 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text
 		// stream show a terminal upstream-LLM failure (HTTP 4xx /
 		// rate-limit / expired token). See the helper docs for the
 		// full signal set; the key safety property is that transient
 		// per-attempt warnings followed by a successful retry stay
-		// "completed".
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// "completed". It reads the full text stream, not the
+		// deliverable, so a give-up turn that lands before a tool call
+		// stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage
@@ -478,6 +494,36 @@ func isKiroGoalCompleteCloseError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
+}
+
+// isKiroOversizedHistoryImage reports whether err is Kiro/upstream rejecting a
+// resumed conversation because an image already baked into the session history
+// exceeds the provider's maximum allowed pixel dimensions. Kiro surfaces this
+// at session/prompt time as a -32603 whose `data` names the offending
+// messages[n].content[m].image.source.base64.data block and the dimension
+// limit (GH #5975), e.g.:
+//
+//	session/prompt: Internal error (code=-32603, data=Encountered an error in
+//	the response stream: messages.14.content.0.image.source.base64.data: At
+//	least one of the image dimensions exceed max allowed size: 8000 pixels)
+//
+// Both markers must be present so an unrelated -32603 — a transient "failed to
+// generate a response" close, or a mid-command crash producing the same
+// result-less shape — is never misread as a permanent history incompatibility.
+// This is deliberately distinct from isACPSessionNotFound: the session exists,
+// only its historical multimodal content is unusable, so the recovery is a
+// fresh session started WITHOUT the resume id rather than clearing a dead id.
+func isKiroOversizedHistoryImage(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Method != "session/prompt" || rpcErr.Code != -32603 {
+		return false
+	}
+	data := strings.ToLower(rpcErr.Data)
+	return strings.Contains(data, "image.source.base64.data") &&
+		strings.Contains(data, "image dimensions exceed max allowed size")
 }
 
 // isKiroIssueCommentAddTool reports whether a tool-use message is a

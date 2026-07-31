@@ -1,73 +1,94 @@
 ---
 title: Skills
-description: Attach "knowledge packs" to an agent — compatible with the Anthropic Agent Skills open standard.
+description: Package recurring instructions, steps, and reference material into skills that multiple agents can reuse.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A Skill is a **knowledge pack** for an [agent](/agents) — a `SKILL.md` plus optional supporting files (scripts, configs, reference templates) that tell the agent "when you hit this kind of task, think and act like this." Multica adopts the [Anthropic Agent Skills](https://agentskills.io) open standard, so any compliant Skill — from Anthropic's official repository, ClawHub, or skills.sh — can be imported directly.
+A skill is a reusable set of working methods in a workspace. Its main file is `SKILL.md`, optionally accompanied by scripts, templates, and reference material.
 
-## Workspace skills vs. local skills
+Add a skill to an [agent](/agents) and the agent uses its guidance when executing related tasks. The same method no longer has to be copied into each agent's instructions, and updates are maintained in one place.
 
-Multica supports two skill sources:
+## Skills and agent instructions
 
-- **Workspace skill** — stored in Multica's cloud. Once attached to an agent, it's synced down to your daemon at task execution time. This is the **standard way to share skills across a team**.
-- **Local skill** — lives in a directory on your machine. On your request, the [daemon](/daemon-runtimes) scans your machine, and you manually pick which ones to bring into the workspace. The daemon checks **two roots, in priority order**: first the runtime's own skill directory (each AI coding tool has a conventional default path, e.g. Claude Code's `~/.claude/skills/`), then the cross-tool universal directory `~/.agents/skills/` — a shared location used by ecosystems like Codex and Gemini CLI. When the same skill name exists in both, the **provider-specific directory wins**, so the universal root only ever surfaces *additional* skills and never changes what an existing skill resolves to.
+| | Agent instructions | Skill |
+|---|---|---|
+| **Best for** | This agent's long-lived responsibilities, boundaries, and delivery requirements | Reusable steps, material, and tools for one kind of work |
+| **Scope** | Belongs to one agent and is provided on every run | Can be added to multiple agents and enabled or disabled individually |
+| **Example** | "Only review frontend code, never modify it directly" | An accessibility checklist and report template |
 
-Most of the time you want **workspace skills**: import once, every teammate's agent can use it. Local skills are a fit when you want to test locally first, or when the content involves sensitive local material.
+## Creating or importing a skill
 
-## Repository-scoped skills
+On the workspace **Skills** page, choose "New skill". Three options are available:
 
-Repo-scoped skills are expected behavior. Some AI coding tools discover **project-level skills committed inside a repository**, such as `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. When a Multica task checks out that repository, those files remain in the workdir and the underlying tool can load them through its native discovery rules. You do **not** need to import those repo skills into Multica just to use them in that repo; Multica does **not** import them into the workspace skill registry automatically.
+| Option | When it fits |
+|---|---|
+| **Create manually** | Start writing from a blank `SKILL.md`. |
+| **Import from URL** | Import a published skill from GitHub, ClawHub, or Skills.sh. |
+| **Copy from a runtime** | Scan skills on a connected computer and copy the selected ones into the workspace. |
 
-Workspace skills still sync into the same provider-native location for tools that support project-level discovery. If a workspace skill would collide with an existing repo skill directory, Multica writes the workspace copy to a sibling name such as `review-helper-multica` instead of overwriting the repo's files. The tool may then see both skills, with the workspace copy carrying the adjusted name.
+Copying from a runtime takes a snapshot of the files at that moment. Later changes to the local files do not update the workspace version automatically; re-import or edit in Multica.
 
-## Importing a skill
+With the CLI, you can also import from a `.skill` or `.zip` file:
 
-Workspace skills come from four sources:
+```bash
+multica skill import --file ./review-helper.skill
+```
 
-- **New** — write the `SKILL.md` and related files directly in the UI
-- **From GitHub** — paste a repo URL (e.g. `https://github.com/owner/repo/tree/main/skills/my-skill`) and Multica pulls the `SKILL.md` and every file in that directory
-- **From ClawHub** — search and import from the [ClawHub](https://clawhub.io) public marketplace, with version selection
-- **From local** — the daemon scans skill directories on your machine, and you pick which to bring into the workspace
+If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import.
 
-Both individual files and whole skill packs have size caps (single-file cap around 1 MB when importing from GitHub). The exact rules appear in the import dialog — exceeding them returns an error.
+## Skill contents
+
+Every skill contains a main file, `SKILL.md`. Spell out:
+
+- when the skill applies;
+- what to check before starting;
+- the steps to execute;
+- what form the result should take;
+- when to stop and check with a member.
+
+You can also add supporting files, for example:
+
+```text
+SKILL.md
+references/api-conventions.md
+templates/review-report.md
+scripts/check.sh
+```
+
+`SKILL.md` is a reserved path; a supporting file cannot use that name. Supporting files are delivered to the agent together with the main file.
 
 ## Attaching to an agent
 
-Once imported, a skill has to be **attached to a specific agent** to take effect. One agent can have multiple skills attached, and one skill can be attached to multiple agents.
+After creating or importing a skill, it still needs to be added to specific agents. Pick agents on the skill page, or manage bindings from the agent's **Skills** tab.
 
-After attaching, the agent picks up its skills the next time it starts a task — each AI coding tool has its own skill discovery path (Claude Code uses `.claude/skills/`, Cursor uses `.cursor/skills/`, Antigravity uses `.agents/skills/`, etc.), and Multica drops files in the right place automatically. **However, three tools (Gemini, Hermes, OpenClaw) currently use the generic fallback path `.agent_context/skills/` — whether these tools actually read skills from that path depends on the tool itself.** Full path mapping and the native-discovery vs. fallback distinction is in [AI coding tools comparison → Where skill files go](/providers#where-skill-files-go).
+- One agent can use multiple skills;
+- one skill can serve multiple agents;
+- when a skill isn't needed for now, disable the binding instead of deleting the skill;
+- edits take effect from subsequent runs and don't change tasks already running.
 
-After you edit a skill's contents, **only newly created tasks pick up the new version** — tasks already running continue with the old skill.
+Only members who can modify the agent can add, remove, or disable its skills.
 
-## Safety of third-party skills
+## Workspace skills and repository skills
 
-Skills imported from GitHub or ClawHub may include scripts and executable content. Multica itself **does not sign, audit, or sandbox them** — skill contents are handed to the corresponding AI coding tool as-is, and whether the tool treats them as executable is up to the tool.
+Workspace skills are stored in Multica — a fit for skills the team maintains together and adds to different agents.
+
+Some AI coding tools also read project-level skills directly from the code repository, such as `.claude/skills/` or `.agents/skills/`. Those files stay managed by the repository; Multica does not automatically register them as workspace skills. Support depends on the tool in use — see [AI coding tools comparison](/providers).
+
+Runtime-local skills already installed on a connected computer (Claude Code and Codex) show up in the agent's **Skills** tab and can be disabled per agent. Disabling likewise requires permission to modify the agent.
+
+## Edit permissions
+
+Any workspace member can create or import a skill. The creator and workspace `owner`s and `admin`s can modify or delete it; other members can view and use it, but cannot overwrite its content.
+
+Deletion is permanent and removes the skill from all agents at the same time.
 
 <Callout type="warning">
-**Before importing a third-party skill, review the `SKILL.md` and every file that ships with it.**
-
-In February 2026 the "ClawHavoc" incident — malicious instructions planted in a popular skill pack stole API keys from affected users. ClawHub has since added VirusTotal scanning, but **automated scans are not a substitute for your own review**.
-
-**Only import from sources you trust.** For projects involving sensitive data, consider using only local skills you wrote yourself.
+Skills imported from external sources may contain scripts, commands, or unsafe instructions. Multica does not review, sign, or sandbox them for you. Imported content is handed to agents as-is, so the source needs to be trusted.
 </Callout>
-
-## Skills vs. MCP
-
-Both augment what an agent can do, but in different directions:
-
-- **Skill** = a structured **knowledge pack** (static content + instructions). The agent reads a skill to learn "when I see problem X, here's how to think and what to do."
-- **MCP** (Model Context Protocol) = a **tool channel**. The agent uses MCP to connect to external services (databases, filesystems, third-party APIs) and **invoke** them.
-
-The two are complementary. In Multica today, MCP support is **provider-specific**: Claude Code, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw consume `mcp_config`; other tools receive the field but don't actually use it. A dedicated MCP section will come in a later release.
-
----
-
-By now you know what an agent is, how to create one, and how to attach skills. The next question: **where does it actually run, and why does my agent sometimes get stuck?** The next chapter covers the execution architecture — daemons, runtimes, and how tasks work together.
 
 ## Next steps
 
-- [Daemon and runtimes](/daemon-runtimes) — where agents actually run, and how to tell online from offline
-- [Executing tasks](/tasks) — the full lifecycle of one "agent work session"
-- [AI coding tools comparison](/providers) — full comparison of all 16 tools (including each one's skill injection path)
+- [Squads](/squads) — let a leader pick the right member for the work.
+- [Daemon and runtimes](/daemon-runtimes) — how skills reach the actual execution environment.
+- [AI coding tools comparison](/providers) — how different tools support skills.

@@ -126,7 +126,8 @@
   "picker": {
     "no_project": "プロジェクトなし",
     "remove": "プロジェクトから削除",
-    "empty": "プロジェクトはまだありません"
+    "empty": "プロジェクトはまだありません",
+    "search_placeholder": "プロジェクトを検索..."
   },
   "chip": {
     "fallback_label": "プロジェクト"

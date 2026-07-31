@@ -1,6 +1,8 @@
 "use client";
 
 import { Archive } from "lucide-react";
+import { cn } from "@multica/ui/lib/utils";
+import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useT } from "../../i18n";
 
 // Sibling of OfflineBanner / NoAgentBanner, occupying the same banner slot
@@ -8,14 +10,14 @@ import { useT } from "../../i18n";
 // (retired): the input above is disabled and this banner explains that the
 // conversation is read-only history — the agent can no longer reply.
 //
-// Layout (`px-5` outer, `mx-auto max-w-4xl` inner) mirrors its siblings so the
-// banner's edges line up with the input on every viewport size.
+// Layout comes from the shared CHAT_GUTTER / CHAT_COLUMN pair, same as its
+// siblings, so the banner's edges line up with the input at every surface width.
 export function ArchivedAgentBanner({ agentName }: { agentName?: string }) {
   const { t } = useT("chat");
   const name = agentName?.trim() || t(($) => $.offline_banner.fallback_name);
   return (
-    <div className="px-5 mb-1.5">
-      <div className="mx-auto flex w-full max-w-4xl items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs bg-muted text-muted-foreground ring-1 ring-border">
+    <div className={cn(CHAT_GUTTER, "mb-1.5")}>
+      <div className={cn(CHAT_COLUMN, "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-caption bg-muted text-muted-foreground ring-1 ring-border")}>
         <Archive className="size-3.5 shrink-0" />
         <span className="truncate">
           {t(($) => $.archived_agent_banner, { name })}

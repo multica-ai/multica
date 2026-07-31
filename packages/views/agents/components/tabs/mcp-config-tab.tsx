@@ -13,7 +13,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { ApiError } from "@multica/core/api";
-import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
+import {
+  runtimeCapabilitiesOptions,
+  runtimeDisplayLabel,
+} from "@multica/core/runtimes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -131,17 +134,17 @@ export function McpConfigTab({
 
   return (
     <div className="space-y-8">
-      <p className="max-w-2xl break-words text-pretty text-sm leading-6 text-muted-foreground">
+      <p className="max-w-2xl break-words text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.mcp_config.intro)}
       </p>
 
       <section className="space-y-3">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-sm font-medium">
+            <h3 className="text-body font-medium">
               {t(($) => $.tab_body.mcp_config.managed_title)}
             </h3>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
               {t(($) => $.tab_body.mcp_config.managed_hint)}
             </p>
           </div>
@@ -160,10 +163,10 @@ export function McpConfigTab({
               aria-hidden="true"
             />
             <div>
-              <p className="text-sm font-medium">
+              <p className="text-body font-medium">
                 {t(($) => $.tab_body.mcp_config.redacted_title)}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 text-caption text-muted-foreground">
                 {t(($) => $.tab_body.mcp_config.redacted_hint)}
               </p>
             </div>
@@ -185,12 +188,12 @@ export function McpConfigTab({
       <section className="space-y-3">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-sm font-medium">
+            <h3 className="text-body font-medium">
               {t(($) => $.tab_body.mcp_config.runtime_title)}
             </h3>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
               {t(($) => $.tab_body.mcp_config.runtime_hint, {
-                runtime: runtime?.custom_name || runtime?.name || "Runtime",
+                runtime: runtime ? runtimeDisplayLabel(runtime) : "Runtime",
               })}
             </p>
           </div>
@@ -334,8 +337,8 @@ function McpServerList({
             <Server className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{server.name}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="truncate text-body font-medium">{server.name}</p>
+            <p className="text-caption text-muted-foreground">
               <span className="uppercase">{server.transport}</span>
               {server.source ? ` · ${server.source}` : null}
             </p>
@@ -375,7 +378,7 @@ function McpServerList({
 
 function McpNotice({ text, loading = false }: { text: string; loading?: boolean }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-caption text-muted-foreground">
       {loading ? (
         <Loader2
           className="h-4 w-4 animate-spin motion-reduce:animate-none"

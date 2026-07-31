@@ -25,15 +25,24 @@ type HealthResponse struct {
 	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
 	// so a foreign-OS daemon can't be started/stopped by the app even though
 	// /health is reachable. See #3916.
-	OS              string            `json:"os"`
-	Uptime          string            `json:"uptime"`
-	DaemonID        string            `json:"daemon_id"`
-	DeviceName      string            `json:"device_name"`
-	ServerURL       string            `json:"server_url"`
-	CLIVersion      string            `json:"cli_version"`
-	ActiveTaskCount int64             `json:"active_task_count"`
-	Agents          []string          `json:"agents"`
-	Workspaces      []healthWorkspace `json:"workspaces"`
+	OS              string   `json:"os"`
+	Uptime          string   `json:"uptime"`
+	DaemonID        string   `json:"daemon_id"`
+	DeviceName      string   `json:"device_name"`
+	ServerURL       string   `json:"server_url"`
+	CLIVersion      string   `json:"cli_version"`
+	ActiveTaskCount int64    `json:"active_task_count"`
+	Agents          []string `json:"agents"`
+	// SkippedAgents maps a provider that WAS discovered on this machine to the
+	// reason the last registration round dropped it (version undetectable,
+	// below the minimum supported version). Purely diagnostic, and omitted when
+	// empty so older consumers see no change.
+	//
+	// Without it, "CLI not installed" and "CLI installed but rejected" both
+	// render as an absent runtime, which is what made GH #6077 unactionable for
+	// the reporter (MUL-5439).
+	SkippedAgents map[string]string `json:"skipped_agents,omitempty"`
+	Workspaces    []healthWorkspace `json:"workspaces"`
 }
 
 type healthWorkspace struct {
@@ -77,8 +86,8 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		}
 		d.mu.Unlock()
 
-		agents := make([]string, 0, len(d.cfg.Agents))
-		for name := range d.cfg.Agents {
+		agents := make([]string, 0, len(d.agents()))
+		for name := range d.agents() {
 			agents = append(agents, name)
 		}
 
@@ -104,6 +113,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			CLIVersion:      d.cfg.CLIVersion,
 			ActiveTaskCount: d.activeTasks.Load(),
 			Agents:          agents,
+			SkippedAgents:   d.skippedAgentsSnapshot(),
 			Workspaces:      wsList,
 		}
 

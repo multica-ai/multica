@@ -164,7 +164,7 @@ export function TaskStatusPill({
 
   return (
     <div
-      className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
+      className="flex items-center gap-1.5 px-1 text-caption text-muted-foreground"
       aria-live="polite"
     >
       {!stage.static && (
@@ -174,7 +174,7 @@ export function TaskStatusPill({
         <span className={cn(!stage.static && "animate-chat-text-shimmer")}>
           {stage.label}
         </span>
-        <span className="opacity-70"> · {formatElapsedSecs(elapsedSecs)}</span>
+        <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
       </span>
     </div>
   );

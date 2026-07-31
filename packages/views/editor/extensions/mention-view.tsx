@@ -8,7 +8,7 @@
  * to open in a new tab (AppLink doesn't expose that intent hook).
  *
  * Issue chip sizing: must fit within the paragraph line box (14px * 1.625 =
- * 22.75px). Card is text-xs (12px) + py-0.5 + border ≈ 22px total. The
+ * 22.75px). Card is text-caption (12px) + py-0.5 + border ≈ 22px total. The
  * `vertical-align: middle` rule on `[data-node-view-wrapper]` in CSS handles
  * line-box alignment; setting it on the inner <a> has no effect because the
  * wrapper is the outermost inline element.
@@ -60,12 +60,18 @@ function ProjectMention({
   const projectPath = p.projectDetail(projectId);
 
   const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
     e.stopPropagation();
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
-      if (openInNewTab) openInNewTab(projectPath, fallbackLabel);
+      if (openInNewTab) {
+        e.preventDefault();
+        openInNewTab(projectPath, fallbackLabel);
+      }
+      // Web: no adapter — leave the event alone so the browser's native
+      // modifier-click on the anchor opens the tab (or window for shift),
+      // preserving background/foreground semantics window.open would flatten.
       return;
     }
+    e.preventDefault();
     push(projectPath);
   };
 

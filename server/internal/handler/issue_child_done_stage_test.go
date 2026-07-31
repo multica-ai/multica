@@ -171,12 +171,16 @@ func TestStageAdvanceInstruction(t *testing.T) {
 		}
 		// It must make clear that finishing the stage != the whole issue is
 		// done, and hand both paths (wrap up / create the next stage) to the
-		// leader.
+		// leader. When wrapping up, the explicit ask is in_review so the
+		// comment-triggered "only change status when asked" rule permits it.
 		if !strings.Contains(got, "does not mean the whole issue is done") {
 			t.Fatalf("expected stage-done != issue-done framing, got %q", got)
 		}
 		if !strings.Contains(got, "next stage") {
 			t.Fatalf("expected create-next-stage guidance, got %q", got)
+		}
+		if !strings.Contains(got, "multica issue status "+parentID+" in_review") {
+			t.Fatalf("expected explicit in_review instruction for confirmed completion, got %q", got)
 		}
 	})
 }

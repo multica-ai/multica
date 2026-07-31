@@ -248,7 +248,7 @@ export function ActivityHeatmap({
             ))}
           </svg>
         </div>
-        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-1 text-micro text-muted-foreground">
           <span>{t(($) => $.charts.heatmap_less)}</span>
           {[0, 1, 2, 3, 4].map((level) => (
             <div
@@ -312,13 +312,13 @@ function Insight({
 }) {
   return (
     <div className="min-w-0">
-      <dt className="truncate text-[11px] uppercase tracking-wider text-muted-foreground">
+      <dt className="truncate text-micro uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
-      <dd className="mt-0.5 truncate text-sm font-medium tabular-nums">
+      <dd className="mt-0.5 truncate text-body font-medium tabular-nums">
         {value}
         {sub != null && (
-          <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+          <span className="ml-1.5 text-caption font-normal text-muted-foreground">
             {sub}
           </span>
         )}

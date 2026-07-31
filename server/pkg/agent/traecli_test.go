@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -286,63 +285,5 @@ func TestTraecliUsesSessionLoadForResume(t *testing.T) {
 	}
 	if strings.Contains(requests, `"method":"session/resume"`) {
 		t.Fatalf("traecli must use session/load (loadSession:true), not session/resume:\n%s", requests)
-	}
-}
-
-// TestTraecliRealACPSmoke drives the REAL official `traecli acp serve` binary
-// end-to-end when it is installed and logged in. It is the live counterpart to
-// the fake-ACP tests above: it proves the backend's initialize → session/new →
-// session/prompt flow works against the actual binary and the user's account.
-//
-// Skipped automatically when traecli is not on PATH or the session cannot be
-// created (not logged in), so CI — which has neither — stays green. Run locally
-// with a logged-in traecli to exercise it.
-func TestTraecliRealACPSmoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real-binary smoke test in -short mode")
-	}
-	path, err := exec.LookPath("traecli")
-	if err != nil {
-		t.Skip("traecli not on PATH; skipping real-binary smoke test")
-	}
-
-	backend, err := New("traecli", Config{ExecutablePath: path, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new traecli backend: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(ctx, "Reply with exactly one word: pong. Do not use any tools.", ExecOptions{
-		Cwd:     t.TempDir(),
-		Timeout: 80 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	select {
-	case result := <-session.Result:
-		// "session/new" panics on a NOT-logged-in traecli (no models); treat
-		// that as a skip so the test only fails for real protocol regressions.
-		if result.Status == "failed" && strings.Contains(result.Error, "session/new") {
-			t.Skipf("traecli not logged in (session/new failed): %v", result.Error)
-		}
-		if result.Status != "completed" {
-			t.Fatalf("real traecli run did not complete: status=%q error=%q", result.Status, result.Error)
-		}
-		if !strings.Contains(strings.ToLower(result.Output), "pong") {
-			t.Fatalf("expected real traecli output to contain 'pong', got %q", result.Output)
-		}
-		if result.SessionID == "" {
-			t.Error("expected a non-empty session id from real traecli")
-		}
-		t.Logf("real traecli smoke OK: session=%s output=%q", result.SessionID, result.Output)
-	case <-time.After(90 * time.Second):
-		t.Fatal("timeout waiting for real traecli result")
 	}
 }

@@ -460,8 +460,9 @@ describe("ContentEditor", () => {
     // `normalizeMarkdown` (which would `trimEnd()`). This pins down that the
     // F2a/F3 dedupe refactor preserved the method's exact return value —
     // trailing blank lines included — instead of folding it into the trimming
-    // helper. `stripBlobUrls` (unmocked here) only strips blob image markdown,
-    // so the trailing newlines survive untouched.
+    // helper. It used to also pass through `stripBlobUrls`; that wrapper is
+    // gone (an in-flight placeholder no longer serialises at all), and the
+    // trailing newlines still survive untouched.
     editorState.markdown = "kept body\n\n";
 
     const ref = createRef<ContentEditorRef>();

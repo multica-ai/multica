@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -31,6 +34,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
@@ -65,6 +69,16 @@ type Config struct {
 	// invitation only. The public /api/config endpoint mirrors this flag so
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
+	// VCSIntegrationEnabled gates the self-hosted Git provider integration
+	// (Forgejo / Gitea / GitLab) at the deployment level, independent of whether
+	// MULTICA_VCS_SECRET_KEY is set. It is the product boundary: the feature is
+	// intended for self-hosted Multica only (where Multica and the Git instance
+	// can share a network), and is left off on the managed cloud — connect,
+	// rotate, and webhook handlers reject when it is false, and /api/config
+	// omits it so the UI hides the whole section rather than showing a
+	// "missing key" message a cloud user cannot act on. Populated from
+	// MULTICA_VCS_INTEGRATION_ENABLED; the self-host compose defaults it on.
+	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
@@ -127,6 +141,15 @@ type WorkspaceSetRefreshNotifier interface {
 	NotifyWorkspacesChanged(userID string)
 }
 
+// DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
+// daemon so a queued heartbeat-carried request (model discovery) is picked up
+// immediately instead of on the daemon's next scheduled tick (MUL-5444).
+// Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
+// (multi-node, fans out through Redis).
+type DaemonPendingWorkNotifier interface {
+	NotifyPendingWork(runtimeID, kind string)
+}
+
 type Handler struct {
 	Queries                *db.Queries
 	DB                     dbExecutor
@@ -150,6 +173,16 @@ type Handler struct {
 	Storage                storage.Storage
 	CFSigner               *auth.CloudFrontSigner
 	Analytics              analytics.Client
+	// DaemonPendingWork pushes "heartbeat now" hints for queued
+	// heartbeat-carried requests (MUL-5444). Optional: when nil,
+	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
+	// correct delivery scope for a single-node deployment.
+	DaemonPendingWork DaemonPendingWorkNotifier
+	// ModelCatalogCache serves the last known good model list for a runtime so
+	// the picker can render without waiting for a daemon round trip
+	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
+	// cache as a permanent miss and falls back to the full discovery flow.
+	ModelCatalogCache ModelCatalogCache
 	// Metrics is the shared business-metrics collector built by main.go.
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
@@ -208,6 +241,11 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
+	// ChannelMediaReconciler settles the channel-media intent ledger
+	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
+	// where the storage backend exists; main.go starts it as an independent
+	// worker goroutine. Nil when no storage backend is configured.
+	ChannelMediaReconciler *service.ChannelMediaReconciler
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
@@ -228,7 +266,21 @@ type Handler struct {
 	// Config); when unconfigured its Enabled() reports false and callers fall
 	// back silently.
 	LLM *llm.Client
-	cfg Config
+	// VCSSecretBox encrypts/decrypts per-workspace Git provider access tokens and
+	// webhook secrets at rest (Forgejo / Gitea / GitLab). Nil when
+	// MULTICA_VCS_SECRET_KEY is unset; the connect/webhook handlers return 503
+	// in that case so a misconfigured self-host deployment surfaces a clear
+	// error rather than silently storing plaintext. Wired in
+	// cmd/server/router.go after New.
+	VCSSecretBox *secretbox.Box
+	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
+	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
+	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
+	// trigger is a no-op) when GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY are unset,
+	// so the feature degrades cleanly on deployments without a private key.
+	// Wired in cmd/server/router.go after New.
+	PRRefresh *ghsnapshot.Manager
+	cfg       Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -278,6 +330,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
+		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
 		LivenessStore:                NewNoopLivenessStore(),
@@ -300,6 +353,18 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+
+	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built
+	// unconditionally but inert (every trigger no-ops) when the App private key
+	// is unconfigured, so the feature degrades cleanly. main.go calls
+	// h.PRRefresh.Start(ctx) to launch its worker pool + TTL sweeper.
+	ghClient, err := ghsnapshot.NewClientFromEnv()
+	if err != nil {
+		// Malformed key is operator-actionable; the pipeline stays disabled.
+		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
+	}
+	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+
 	return h
 }
 
@@ -750,6 +815,12 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 }
 
 // resolveIssueByIdentifier tries to look up an issue by "PREFIX-NUMBER" format.
+//
+// The prefix must match the workspace's own issue prefix, the same rule
+// `lookupIssueByIdentifier` applies to VCS webhooks. Without it every prefix
+// resolved to the same issue number, so `FOO-134` and `TRS-134` were
+// interchangeable — which makes the identifier URL `/{ws}/issues/{key}`
+// unusable as a canonical link.
 func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID string) (db.Issue, bool) {
 	parts := splitIdentifier(id)
 	if parts == nil {
@@ -760,6 +831,11 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
+		return db.Issue{}, false
+	}
+	// Case-insensitive: a hand-typed `trs-134` should open `TRS-134`.
+	prefix := h.getIssuePrefix(ctx, wsUUID)
+	if prefix == "" || !strings.EqualFold(parts.prefix, prefix) {
 		return db.Issue{}, false
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
@@ -795,6 +871,12 @@ func splitIdentifier(id string) *identifierParts {
 			return nil
 		}
 		num = num*10 + int(c-'0')
+		// Guard the int32 conversion below: a UUID whose last group happens to
+		// be all digits ("…-421234567890") reaches here and would otherwise be
+		// truncated into a plausible-looking issue number.
+		if num > math.MaxInt32 {
+			return nil
+		}
 	}
 	if num <= 0 {
 		return nil

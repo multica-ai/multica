@@ -11,6 +11,8 @@ export type IssueCreateDefaults = Partial<
   assignee_type?: CreateIssueRequest["assignee_type"] | null;
   assignee_id?: string | null;
   parent_issue_id?: string | null;
+  /** Display-only context for the create dialog while the parent query loads. */
+  parent_issue_identifier?: string;
   project_id?: string | null;
 };
 
@@ -24,4 +26,6 @@ export interface IssueSurfaceProps {
   modes: IssueSurfaceMode[];
   surfaceKey?: string;
   createDefaults?: IssueCreateDefaults;
+  /** Server-owned membership search shared by non-Table issue surfaces. */
+  search?: string;
 }

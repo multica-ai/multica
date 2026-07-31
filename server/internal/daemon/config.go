@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mattn/go-shellwords"
@@ -145,6 +144,9 @@ type Overrides struct {
 	RuntimeName                    string
 	Profile                        string // profile name (empty = default)
 	HealthPort                     int    // health check port (0 = use default)
+	// AllowNoAgents is reserved for read-only local configuration probes. Daemon
+	// startup keeps the default false and still refuses to run with no agent CLI.
+	AllowNoAgents bool
 	// DisableAutoUpdate, when true, forces the auto-update poller off. There
 	// is no symmetric "force on" override because the env/default already
 	// resolves to enabled; the flag exists so users can opt out from the CLI.
@@ -211,141 +213,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 
-	// Probe available agent CLIs. exec.LookPath is the primary path, but on
-	// macOS/Linux a GUI-launched daemon (Electron, Launchpad) does not
-	// inherit the user's interactive shell PATH — fnm/nvm/volta multishells,
-	// the Anthropic native installer prefix, and per-user npm prefixes all
-	// live in dirs that only get added to PATH by ~/.zshrc or ~/.bashrc.
-	// shellResolvedAgents asks the user's login shell, lazily on first miss,
-	// to resolve every standard agent name to its canonical absolute path,
-	// so we can find binaries the bare daemon process can't see. See
-	// resolveAgentsViaLoginShell for the details and constraints.
-	//
-	// Laziness matters: the happy path (every agent on the daemon's PATH or
-	// pinned to an explicit MULTICA_*_PATH) must not pay the cost of
-	// spawning the user's login shell — that touches their rc files and
-	// adds startup latency that scales with whatever they put in there. We
-	// only fork a shell when a bare command name actually missed LookPath.
-	var (
-		shellResolveOnce sync.Once
-		shellResolved    map[string]string
-	)
-	getShellResolved := func() map[string]string {
-		shellResolveOnce.Do(func() {
-			shellResolved = resolveAgentsViaLoginShell(defaultAgentCommandNames)
-		})
-		return shellResolved
-	}
-	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
-		cmd := envOrDefault(envVar, defaultCmd)
-		if path, err := resolveAgentExecutablePath(cmd); err == nil {
-			return AgentEntry{
-				Path:    path,
-				Command: cmd,
-				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
-			}, true
-		}
-		// The shell fallback only rescues bare command names. An operator
-		// who pinned MULTICA_*_PATH to an absolute or relative path that
-		// doesn't exist should hard-miss, not silently get a different
-		// binary.
-		if strings.ContainsAny(cmd, "/\\") {
-			return AgentEntry{}, false
-		}
-		if path, ok := getShellResolved()[cmd]; ok {
-			return AgentEntry{
-				Path:    path,
-				Command: cmd,
-				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
-			}, true
-		}
-		if defaultCmd == "codex" && cmd == defaultCmd {
-			// Codex Desktop bundles its CLI inside the macOS app instead of
-			// installing it onto PATH.
-			for _, p := range codexDesktopAppBundlePaths() {
-				if _, err := os.Stat(p); err == nil {
-					return AgentEntry{
-						Path:    p,
-						Command: cmd,
-						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
-					}, true
-				}
-			}
-		}
-		return AgentEntry{}, false
-	}
-
-	agents := map[string]AgentEntry{}
-	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
-		agents["claude"] = e
-	}
-	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
-		agents["codex"] = e
-	}
-	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
-		agents["opencode"] = e
-	}
-	if e, ok := probe("MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
-		agents["deveco"] = e
-	}
-	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
-		agents["openclaw"] = e
-	}
-	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
-		agents["hermes"] = e
-	}
-	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
-		agents["pi"] = e
-	}
-	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
-		agents["cursor"] = e
-	}
-	if e, ok := probe("MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL"); ok {
-		agents["copilot"] = e
-	}
-	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
-		agents["kimi"] = e
-	}
-	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
-		agents["kiro"] = e
-	}
-	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
-		agents["codebuddy"] = e
-	}
-	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
-	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
-	// daemon-wide default; its value is the exact `agy models` display string
-	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
-	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
-		agents["antigravity"] = e
-	}
-	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
-	if path, err := resolveAgentExecutablePath(qoderPath); err == nil {
-		agents["qoder"] = AgentEntry{
-			Path:    path,
-			Command: qoderPath,
-			Model:   strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
-		}
-	}
-	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
-	// driven over ACP via `traecli acp serve --yolo`. MULTICA_TRAECLI_MODEL seeds
-	// the daemon-wide default model (a model id from the user's logged-in traecli
-	// catalog).
-	if e, ok := probe("MULTICA_TRAECLI_PATH", "traecli", "MULTICA_TRAECLI_MODEL"); ok {
-		agents["traecli"] = e
-	}
-	// xAI Grok Build CLI (`grok`), driven over ACP via
-	// `grok agent --always-approve stdio`. MULTICA_GROK_MODEL seeds the
-	// daemon-wide default (e.g. grok-4.5).
-	if e, ok := probe("MULTICA_GROK_PATH", "grok", "MULTICA_GROK_MODEL"); ok {
-		agents["grok"] = e
-	}
-	// Qwen Code (`qwen`) runs headlessly with -p and stream-json. Its native
-	// QWEN.md and .qwen/skills task context is prepared by execenv.
-	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
-		agents["qwen"] = e
-	}
-	if len(agents) == 0 {
+	// Discover installed agent CLIs. Extracted so the periodic workspace sync
+	// can re-run the same discovery on a live daemon (MUL-5439).
+	agents := probeAgentCLIs()
+	if len(agents) == 0 && !overrides.AllowNoAgents {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, traecli, grok, or qwen and ensure it is on PATH")
 	}
 
@@ -860,7 +731,7 @@ func isExecutableFile(path string) bool {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli", "grok", "qwen",
+	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "qodercli", "traecli", "grok", "qwen",
 }
 
 // codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
@@ -946,7 +817,9 @@ var supportedLoginShells = map[string]struct{}{
 //     (`[A-Za-z0-9._-]` only); we inline them into the script unquoted to
 //     keep the script readable. Custom MULTICA_*_PATH values never reach this
 //     resolver — those go through exec.LookPath directly.
-func resolveAgentsViaLoginShell(names []string) map[string]string {
+//
+// A var so tests can stub the fork without a real login shell.
+var resolveAgentsViaLoginShell = func(names []string) map[string]string {
 	out := map[string]string{}
 	if len(names) == 0 {
 		return out

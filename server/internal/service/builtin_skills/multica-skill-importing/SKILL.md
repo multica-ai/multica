@@ -1,6 +1,6 @@
 ---
 name: multica-skill-importing
-description: "Use when a user provides a skill URL, slug, or clear intent to import/install a specific skill into the current Multica workspace. Teaches the workspace import API/CLI path (POST /api/skills/import), the supported URL source families, --on-conflict fail|overwrite|rename|skip behavior and structured import results, additive agent binding vs replace-all, and the reserved SKILL.md supporting-file rule. Do not use it to decide which skill the user needs, and never treat an external local installer like npx skills add as the final Multica install."
+description: "Use when asked to import or install a specific skill into this Multica workspace from a URL or slug. Not for choosing which skill the user needs; never treat a local installer such as `npx skills add` as the final install."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -79,7 +79,7 @@ skill folder works too. The server:
   wrapper directory name and then the uploaded filename;
 - carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
   license files, and binary assets — under the same per-file (1 MiB),
-  per-bundle (8 MiB), and file-count (128) caps as URL imports, and rejects path
+  per-bundle (8 MiB), and file-count (256) caps as URL imports, and rejects path
   traversal (zip-slip);
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.

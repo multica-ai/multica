@@ -17,6 +17,11 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -24,11 +29,16 @@ WHERE atq.issue_id = $1
 `
 
 type GetIssueUsageSummaryRow struct {
-	TotalInputTokens      int64 `json:"total_input_tokens"`
-	TotalOutputTokens     int64 `json:"total_output_tokens"`
-	TotalCacheReadTokens  int64 `json:"total_cache_read_tokens"`
-	TotalCacheWriteTokens int64 `json:"total_cache_write_tokens"`
-	TaskCount             int32 `json:"task_count"`
+	TotalInputTokens         int64 `json:"total_input_tokens"`
+	TotalOutputTokens        int64 `json:"total_output_tokens"`
+	TotalCacheReadTokens     int64 `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens    int64 `json:"total_cache_write_tokens"`
+	TotalCostUsdTicks        int64 `json:"total_cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32 `json:"task_count"`
 }
 
 func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID) (GetIssueUsageSummaryRow, error) {
@@ -39,13 +49,18 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 		&i.TotalOutputTokens,
 		&i.TotalCacheReadTokens,
 		&i.TotalCacheWriteTokens,
+		&i.TotalCostUsdTicks,
+		&i.UncostedInputTokens,
+		&i.UncostedOutputTokens,
+		&i.UncostedCacheReadTokens,
+		&i.UncostedCacheWriteTokens,
 		&i.TaskCount,
 	)
 	return i, err
 }
 
 const getTaskUsage = `-- name: GetTaskUsage :many
-SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at FROM task_usage
+SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks FROM task_usage
 WHERE task_id = $1
 ORDER BY model
 `
@@ -70,6 +85,7 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 			&i.CacheWriteTokens,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CostUsdTicks,
 		); err != nil {
 			return nil, err
 		}
@@ -123,8 +139,10 @@ type ListDashboardAgentRunTimeRow struct {
 // token cost window (which is anchored on tu.created_at, ~= completion time).
 //
 // No date bucketing, so no @tz — but @since is the viewer's local
-// start-of-day-(N) so the "last N days" window lines up with the per-agent
-// cost card; passed straight through without re-truncation.
+// start-of-day for the EXACT N-day window (parseExactSinceParamInTZ), so the
+// "last N days" window lines up with the per-agent cost card and the daily
+// charts the client trims to the same span; passed straight through without
+// re-truncation.
 func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboardAgentRunTimeParams) ([]ListDashboardAgentRunTimeRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardAgentRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
@@ -140,6 +158,146 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 			&i.TaskCount,
 			&i.FailedCount,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardFailuresByAgent = `-- name: ListDashboardFailuresByAgent :many
+SELECT
+    atq.agent_id,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.agent_id, 2
+ORDER BY atq.agent_id, 2
+`
+
+type ListDashboardFailuresByAgentParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardFailuresByAgentRow struct {
+	AgentID       pgtype.UUID `json:"agent_id"`
+	FailureReason string      `json:"failure_reason"`
+	TaskCount     int32       `json:"task_count"`
+}
+
+// Per-(agent, failure_reason) terminal-task counts — the "top offenders"
+// half of the dashboard's errors breakdown. Same `failure_reason = ”`
+// succeeded-bucket convention as ListDashboardFailuresDaily, so the client
+// can rank agents by failure rate rather than raw count.
+//
+// No date bucketing, so no @tz — @since is the viewer's local
+// start-of-day-(N) so the window lines up with the per-agent run-time card.
+func (q *Queries) ListDashboardFailuresByAgent(ctx context.Context, arg ListDashboardFailuresByAgentParams) ([]ListDashboardFailuresByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardFailuresByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardFailuresByAgentRow{}
+	for rows.Next() {
+		var i ListDashboardFailuresByAgentRow
+		if err := rows.Scan(&i.AgentID, &i.FailureReason, &i.TaskCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardFailuresDaily = `-- name: ListDashboardFailuresDaily :many
+SELECT
+    DATE(atq.completed_at AT TIME ZONE $2::text) AS date,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $3::timestamptz
+  AND ($4::uuid IS NULL OR i.project_id = $4)
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2
+`
+
+type ListDashboardFailuresDailyParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardFailuresDailyRow struct {
+	Date          pgtype.Date `json:"date"`
+	FailureReason string      `json:"failure_reason"`
+	TaskCount     int32       `json:"task_count"`
+}
+
+// Daily per-(date, failure_reason) terminal-task counts for the workspace,
+// optionally scoped to a single project. Powers the workspace dashboard's
+// "Errors" trend and the errors-by-class breakdown.
+//
+// Shape note: this returns EVERY terminal task, not just the failures. The
+// `failure_reason = ”` row of each date carries that date's succeeded
+// count, which is the denominator the client needs for an error rate. A
+// failed row whose failure_reason column is NULL or empty (pre-MUL-1949
+// rows, or a failure path that forgot to classify) collapses into the
+// 'unclassified' bucket so it stays countable instead of masquerading as a
+// success. Cardinality is bounded by days x (21 reasons + 2), so the whole
+// window fits in one small payload.
+//
+// Unlike ListDashboardRunTimeDaily this does NOT require started_at — a task
+// that expired in the queue (failure_reason='queued_expired') never started
+// but is unambiguously a failure, and dropping it would under-report exactly
+// the outage the Errors chart exists to surface. Every failure path sets
+// completed_at, so bucketing on it covers all of them.
+//
+// @since is already the viewer's local start-of-day-(N) (parseSinceParamInTZ)
+// — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
+func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashboardFailuresDailyParams) ([]ListDashboardFailuresDailyRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardFailuresDaily,
+		arg.WorkspaceID,
+		arg.Tz,
+		arg.Since,
+		arg.ProjectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardFailuresDailyRow{}
+	for rows.Next() {
+		var i ListDashboardFailuresDailyRow
+		if err := rows.Scan(&i.Date, &i.FailureReason, &i.TaskCount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -237,6 +395,11 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -253,14 +416,19 @@ type ListDashboardUsageByAgentParams struct {
 }
 
 type ListDashboardUsageByAgentRow struct {
-	AgentID          pgtype.UUID `json:"agent_id"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	TaskCount        int32       `json:"task_count"`
+	AgentID                  pgtype.UUID `json:"agent_id"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32       `json:"task_count"`
 }
 
 // Per-(agent, provider, model) token aggregates from `task_usage_hourly`. No
@@ -294,6 +462,11 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -315,6 +488,11 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -332,14 +510,19 @@ type ListDashboardUsageDailyParams struct {
 }
 
 type ListDashboardUsageDailyRow struct {
-	Date             pgtype.Date `json:"date"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	TaskCount        int32       `json:"task_count"`
+	Date                     pgtype.Date `json:"date"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32       `json:"task_count"`
 }
 
 // Daily per-(date, provider, model) token aggregates for the workspace, served
@@ -381,6 +564,11 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -394,14 +582,15 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
     output_tokens = EXCLUDED.output_tokens,
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
+    cost_usd_ticks = EXCLUDED.cost_usd_ticks,
     updated_at = now()
 `
 
@@ -413,12 +602,16 @@ type UpsertTaskUsageParams struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
 }
 
 // Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
 // detects the row as dirty and re-aggregates its bucket.
 // Without the conflict-side bump, a correction to historical token counts
 // would never propagate to the rollup.
+// cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
+// when it reports none. It is overwritten like the token counters so a
+// corrected report replaces the previous figure rather than accumulating.
 func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
 	_, err := q.db.Exec(ctx, upsertTaskUsage,
 		arg.TaskID,
@@ -428,6 +621,7 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 		arg.OutputTokens,
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
+		arg.CostUsdTicks,
 	)
 	return err
 }

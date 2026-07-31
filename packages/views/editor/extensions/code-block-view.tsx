@@ -83,7 +83,7 @@ function CodeBlockView({ node }: NodeViewProps) {
         className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
       >
         {language && (
-          <span className="text-xs text-muted-foreground select-none">
+          <span className="text-caption text-muted-foreground select-none">
             {language}
           </span>
         )}

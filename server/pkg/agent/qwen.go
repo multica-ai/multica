@@ -21,6 +21,9 @@ type qwenBackend struct {
 // qwenBlockedArgs are owned by Multica. Qwen accepts the task prompt and stream
 // protocol as flags, so custom args must not replace either. Model/session are
 // also selected by Multica, and safe mode disables the QWEN.md context file.
+// --yolo/-y, --approval-mode, and --core-tools are daemon-owned permission
+// flags; users may not disable bypass mode or narrow the core tool registry
+// from custom_args (use --exclude-tools to hard-deny specific tools instead).
 var qwenBlockedArgs = map[string]blockedArgMode{
 	"-p":                   blockedWithValue,
 	"--prompt":             blockedWithValue,
@@ -37,6 +40,10 @@ var qwenBlockedArgs = map[string]blockedArgMode{
 	"--chat-recording":     blockedWithValue,
 	"--mcp-config":         blockedWithValue,
 	"--safe-mode":          blockedStandalone,
+	"--yolo":               blockedStandalone,
+	"-y":                   blockedStandalone,
+	"--approval-mode":      blockedWithValue,
+	"--core-tools":         blockedWithValue,
 }
 
 func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
@@ -47,6 +54,11 @@ func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []strin
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
+	// --yolo is daemon-owned: Qwen Code's non-interactive mode filters out
+	// approval-requiring tools (run_shell_command, edit, write_file, etc.)
+	// unless bypass mode is active. All other adapters use an equivalent
+	// mechanism; this keeps Qwen headless runs consistent (MUL-5134).
+	args = append(args, "--yolo")
 	args = append(args, filterCustomArgs(opts.ExtraArgs, qwenBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, qwenBlockedArgs, logger)...)
 	return args

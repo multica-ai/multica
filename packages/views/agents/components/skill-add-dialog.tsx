@@ -99,10 +99,10 @@ export function SkillAddDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle className="text-body">
             {t(($) => $.tab_body.skills.add_dialog_title)}
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription className="text-caption">
             {t(($) => $.tab_body.skills.add_dialog_description)}
           </DialogDescription>
         </DialogHeader>

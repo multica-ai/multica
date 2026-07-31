@@ -17,19 +17,30 @@ import { useNavigation } from "./context";
  * call `stopPropagation` so clicking them never reaches these handlers.
  *
  * Mirrors AppLink's modifier semantics: a plain left click pushes; cmd/ctrl
- * (or a middle click) opens a background tab on desktop.
+ * (or a middle click) opens a background tab on desktop. On web there is no
+ * adapter and — because the row is a `<div>`, not an `<a>` — no native
+ * modifier-click behaviour to inherit either, so the browser tab is opened
+ * here against the shareable URL. Without that fallback a modifier or middle
+ * click would silently navigate in place.
  *
  * Callers add `cursor-pointer` to the row's own className (kept out of the
  * returned props so it can't clash with the row's existing className).
  */
 export function useRowLink() {
-  const { push, openInNewTab, prefetch } = useNavigation();
+  const { push, openInNewTab, prefetch, getShareableUrl } = useNavigation();
 
   return useCallback(
     (href: string) => {
       const open = (newTab: boolean) => {
-        if (newTab && openInNewTab) openInNewTab(href);
-        else push(href);
+        if (!newTab) {
+          push(href);
+          return;
+        }
+        if (openInNewTab) {
+          openInNewTab(href);
+          return;
+        }
+        window.open(getShareableUrl(href), "_blank", "noopener,noreferrer");
       };
       return {
         onClick: (e: React.MouseEvent) => {
@@ -47,6 +58,6 @@ export function useRowLink() {
         onMouseEnter: () => prefetch?.(href),
       };
     },
-    [push, openInNewTab, prefetch],
+    [push, openInNewTab, prefetch, getShareableUrl],
   );
 }

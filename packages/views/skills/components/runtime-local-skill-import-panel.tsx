@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -15,7 +16,6 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
-  AgentRuntime,
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
   Skill,
@@ -23,6 +23,7 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  runtimeDisplayLabel,
   runtimeListOptions,
   runtimeLocalSkillsKeys,
   runtimeLocalSkillsOptions,
@@ -43,14 +44,25 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useT } from "../../i18n";
 import { HighlightText } from "../../search/highlight-text";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import {
+  buildRuntimeMachines,
+  runtimeRowLabel,
+} from "../../runtimes/components/runtime-machines";
 import { isNameConflictError } from "../lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -103,10 +115,6 @@ const INITIAL_BULK_STATE: BulkImportState = {
  * See also maxLocalSkillImportBatch in server/internal/handler/daemon.go.
  */
 const IMPORT_CONCURRENCY = 10;
-
-function runtimeLabel(runtime: AgentRuntime): string {
-  return `${runtime.name} (${runtime.provider})`;
-}
 
 function defaultRenameName(name: string): string {
   return `${name} copy`;
@@ -181,7 +189,7 @@ function SkillItem({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium">
+            <span className="truncate text-body font-medium">
               <HighlightText text={skill.name} query={query} />
             </span>
             <Badge variant="secondary">
@@ -193,14 +201,14 @@ function SkillItem({
             // falls past the first two lines stays visible instead of being
             // clipped out of view.
             <p
-              className={`mt-1 text-xs text-muted-foreground ${
+              className={`mt-1 text-caption text-muted-foreground ${
                 query.trim() ? "" : "line-clamp-2"
               }`}
             >
               <HighlightText text={skill.description} query={query} />
             </p>
           )}
-          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+          <p className="mt-1 truncate font-mono text-caption text-muted-foreground">
             <HighlightText text={skill.source_path} query={query} />
           </p>
         </div>
@@ -212,18 +220,18 @@ function SkillItem({
       {expanded && (
         <div className="space-y-2.5 border-t bg-card px-4 py-3">
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">
+            <Label className="text-caption text-muted-foreground">
               {t(($) => $.runtime_import.skill_name_label)}
             </Label>
             <Input
               value={editName ?? ""}
               onChange={(e) => onNameChange?.(e.target.value)}
               placeholder={skill.name}
-              className="h-8 text-sm"
+              className="h-8 text-body"
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">
+            <Label className="text-caption text-muted-foreground">
               {t(($) => $.runtime_import.skill_description_label)}
             </Label>
             <Textarea
@@ -231,7 +239,7 @@ function SkillItem({
               onChange={(e) => onDescriptionChange?.(e.target.value)}
               placeholder={t(($) => $.runtime_import.skill_description_placeholder)}
               rows={2}
-              className="resize-none text-sm"
+              className="resize-none text-body"
             />
           </div>
         </div>
@@ -257,42 +265,42 @@ function BulkImportSummary({ results }: { results: BulkImportResult[] }) {
       {/* Summary counts */}
       <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-5">
         <div className="rounded-md bg-green-50 px-3 py-2 dark:bg-green-950/30">
-          <div className="text-lg font-semibold text-green-700 dark:text-green-400">
+          <div className="text-title font-semibold text-green-700 dark:text-green-400">
             {created.length}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {t(($) => $.runtime_import.bulk_summary_created)}
           </div>
         </div>
         <div className="rounded-md bg-blue-50 px-3 py-2 dark:bg-blue-950/30">
-          <div className="text-lg font-semibold text-blue-700 dark:text-blue-400">
+          <div className="text-title font-semibold text-blue-700 dark:text-blue-400">
             {updated.length}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {t(($) => $.runtime_import.bulk_summary_updated)}
           </div>
         </div>
         <div className="rounded-md bg-amber-50 px-3 py-2 dark:bg-amber-950/30">
-          <div className="text-lg font-semibold text-amber-700 dark:text-amber-400">
+          <div className="text-title font-semibold text-amber-700 dark:text-amber-400">
             {conflicts.length}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {t(($) => $.runtime_import.bulk_summary_conflicts)}
           </div>
         </div>
         <div className="rounded-md bg-yellow-50 px-3 py-2 dark:bg-yellow-950/30">
-          <div className="text-lg font-semibold text-yellow-700 dark:text-yellow-400">
+          <div className="text-title font-semibold text-yellow-700 dark:text-yellow-400">
             {skipped.length}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {t(($) => $.runtime_import.bulk_summary_skipped)}
           </div>
         </div>
         <div className="rounded-md bg-red-50 px-3 py-2 dark:bg-red-950/30">
-          <div className="text-lg font-semibold text-red-700 dark:text-red-400">
+          <div className="text-title font-semibold text-red-700 dark:text-red-400">
             {failed.length}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {t(($) => $.runtime_import.bulk_summary_failed)}
           </div>
         </div>
@@ -303,7 +311,7 @@ function BulkImportSummary({ results }: { results: BulkImportResult[] }) {
         {results.map((r) => (
           <div
             key={r.key}
-            className="flex items-center gap-2 rounded px-2 py-1.5 text-xs"
+            className="flex items-center gap-2 rounded px-2 py-1.5 text-caption"
           >
             <ResultIcon status={r.status} />
             <span className="min-w-0 flex-1 truncate">{r.name}</span>
@@ -342,7 +350,7 @@ function ConflictResolutionPanel({
 
   return (
     <div className="space-y-4 py-2">
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-body text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
@@ -353,7 +361,7 @@ function ConflictResolutionPanel({
                     count: conflicts.length,
                   })}
             </p>
-            <p className="mt-1 text-xs opacity-85">
+            <p className="mt-1 text-caption">
               {t(($) => $.runtime_import.conflict_hint)}
             </p>
           </div>
@@ -396,12 +404,12 @@ function ConflictResolutionPanel({
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{r.name}</div>
+                  <div className="truncate text-body font-medium">{r.name}</div>
                   {r.error && (
-                    <p className="mt-1 text-xs text-destructive">{r.error}</p>
+                    <p className="mt-1 text-caption text-destructive">{r.error}</p>
                   )}
                   {!r.conflict?.can_overwrite && (
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-caption text-muted-foreground">
                       {creatorName
                         ? t(($) => $.runtime_import.conflict_locked_creator, {
                             creator: creatorName,
@@ -468,7 +476,7 @@ function ConflictResolutionPanel({
 
               {resolution.action === "rename" && (
                 <div className="mt-3 space-y-1">
-                  <Label className="text-xs text-muted-foreground">
+                  <Label className="text-caption text-muted-foreground">
                     {t(($) => $.runtime_import.conflict_rename_label)}
                   </Label>
                   <Input
@@ -479,7 +487,7 @@ function ConflictResolutionPanel({
                         renameName: e.target.value,
                       })
                     }
-                    className="h-8 text-sm"
+                    className="h-8 text-body"
                   />
                 </div>
               )}
@@ -506,6 +514,7 @@ export function RuntimeLocalSkillImportPanel({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const localRuntimes = useMemo(
@@ -516,6 +525,19 @@ export function RuntimeLocalSkillImportPanel({
           (userId == null || r.owner_id === userId),
       ),
     [runtimes, userId],
+  );
+
+  // Group the local runtimes by machine so the picker reads as
+  // "machine → provider/runtime" (alias-aware) instead of a flat list of
+  // raw daemon names (MUL-5248). Reuses the same source of truth as the
+  // agent runtime picker.
+  const runtimeMachines = useMemo(
+    () =>
+      buildRuntimeMachines(localRuntimes, {
+        now: Date.now(),
+        currentUserId: userId,
+      }),
+    [localRuntimes, userId],
   );
 
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<string>("");
@@ -918,7 +940,7 @@ export function RuntimeLocalSkillImportPanel({
         <div className="space-y-4 py-4">
           <div className="text-center">
             <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
-            <p className="mt-3 text-sm font-medium">
+            <p className="mt-3 text-body font-medium">
               {t(($) => $.runtime_import.bulk_progress, {
                 completed: bulkState.completed,
                 total: bulkState.total,
@@ -931,7 +953,7 @@ export function RuntimeLocalSkillImportPanel({
             {bulkState.results.map((r) => (
               <div
                 key={r.key}
-                className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+                className="flex items-center gap-2 rounded px-2 py-1 text-caption"
               >
                 <ResultIcon status={r.status} />
                 <span className="truncate">{r.name}</span>
@@ -991,10 +1013,10 @@ export function RuntimeLocalSkillImportPanel({
     if (localRuntimes.length === 0) {
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {t(($) => $.runtime_import.no_local_runtimes_title)}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.runtime_import.no_local_runtimes_hint)}
           </p>
         </div>
@@ -1003,7 +1025,7 @@ export function RuntimeLocalSkillImportPanel({
     if (!selectedRuntime) {
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {t(($) => $.runtime_import.choose_runtime)}
           </p>
         </div>
@@ -1011,7 +1033,7 @@ export function RuntimeLocalSkillImportPanel({
     }
     if (selectedRuntime.status !== "online") {
       return (
-        <div className="flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-caption text-muted-foreground">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           {t(($) => $.runtime_import.must_be_online)}
         </div>
@@ -1031,7 +1053,7 @@ export function RuntimeLocalSkillImportPanel({
     }
     if (skillsQuery.error) {
       return (
-        <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-caption text-destructive">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {skillsQuery.error instanceof Error
             ? skillsQuery.error.message
@@ -1041,7 +1063,7 @@ export function RuntimeLocalSkillImportPanel({
     }
     if (!skillsQuery.data?.supported) {
       return (
-        <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2 text-caption text-muted-foreground">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {t(($) => $.runtime_import.not_supported)}
         </div>
@@ -1050,10 +1072,10 @@ export function RuntimeLocalSkillImportPanel({
     if (runtimeSkills.length === 0) {
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {t(($) => $.runtime_import.no_skills_title)}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.runtime_import.no_skills_hint)}
           </p>
         </div>
@@ -1067,16 +1089,16 @@ export function RuntimeLocalSkillImportPanel({
             value={skillSearchQuery}
             onChange={(e) => setSkillSearchQuery(e.target.value)}
             placeholder={t(($) => $.runtime_import.search_placeholder)}
-            className="h-9 pl-8 text-sm"
+            className="h-9 pl-8 text-body"
           />
         </div>
 
         {filteredRuntimeSkills.length === 0 ? (
           <div className="rounded-lg border border-dashed px-4 py-8 text-center">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               {t(($) => $.runtime_import.no_search_results_title)}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               {t(($) => $.runtime_import.no_search_results_hint, {
                 query: skillSearchQuery.trim(),
               })}
@@ -1095,7 +1117,7 @@ export function RuntimeLocalSkillImportPanel({
                 onChange={toggleAll}
                 className="cursor-pointer accent-primary"
               />
-              <span className="text-xs text-muted-foreground">
+              <span className="text-caption text-muted-foreground">
                 {t(($) => $.runtime_import.select_all, {
                   count: filteredRuntimeSkills.length,
                 })}
@@ -1148,6 +1170,86 @@ export function RuntimeLocalSkillImportPanel({
     }
   };
 
+  const footerContent =
+    bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
+      <>
+        <div className="min-w-0 flex-1 text-caption text-muted-foreground">
+          {bulkState.phase === "cancelled"
+            ? t(($) => $.runtime_import.bulk_cancelled_hint)
+            : t(($) => $.runtime_import.bulk_complete_hint)}
+        </div>
+        <Button type="button" size="sm" onClick={handleDone}>
+          {t(($) => $.runtime_import.bulk_done_button)}
+        </Button>
+      </>
+    ) : resolvingConflicts ? (
+      <>
+        <div className="min-w-0 flex-1 text-caption text-muted-foreground">
+          {t(($) => $.runtime_import.conflict_footer, {
+            count: pendingConflicts.length,
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void handleApplyConflictResolutions()}
+          disabled={!canApplyConflictResolutions}
+        >
+          {t(($) => $.runtime_import.conflict_apply_button)}
+        </Button>
+      </>
+    ) : importing ? (
+      <>
+        <div className="min-w-0 flex-1 text-caption text-muted-foreground">
+          {t(($) => $.runtime_import.bulk_progress, {
+            completed: bulkState.completed,
+            total: bulkState.total,
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleCancel}
+        >
+          {t(($) => $.runtime_import.bulk_cancel_button)}
+        </Button>
+      </>
+    ) : (
+      <>
+        <div className="min-w-0 flex-1 text-caption text-muted-foreground">
+          {singleSelectedSkill ? (
+            <>
+              {t(($) => $.runtime_import.ready)}{" "}
+              <span className="font-medium text-foreground">
+                {editName.trim() || singleSelectedSkill.name}
+              </span>{" "}
+              {t(($) => $.runtime_import.into_workspace)}
+            </>
+          ) : selectedKeys.size > 1 ? (
+            t(($) => $.runtime_import.bulk_ready, {
+              count: selectedKeys.size,
+            })
+          ) : (
+            t(($) => $.runtime_import.select_skill)
+          )}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleBulkImport}
+          disabled={!canImport}
+        >
+          <Download className="h-3 w-3" />
+          {selectedKeys.size > 1
+            ? t(($) => $.runtime_import.bulk_import_button, {
+                count: selectedKeys.size,
+              })
+            : t(($) => $.runtime_import.import_button)}
+        </Button>
+      </>
+    );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sticky top: runtime picker + status */}
@@ -1158,37 +1260,58 @@ export function RuntimeLocalSkillImportPanel({
         }`}
       >
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">
+          <label className="text-caption text-muted-foreground">
             {t(($) => $.runtime_import.runtime_label)}
           </label>
           <Select
             items={localRuntimes.map((runtime) => ({
               value: runtime.id,
-              label: runtimeLabel(runtime),
+              label: runtimeDisplayLabel(runtime),
             }))}
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder={t(($) => $.runtime_import.runtime_placeholder)}>
-                {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
+                {selectedRuntime ? (
+                  <>
+                    <ProviderLogo
+                      provider={selectedRuntime.provider}
+                      className="h-4 w-4 shrink-0"
+                    />
+                    <span className="truncate">
+                      {runtimeDisplayLabel(selectedRuntime)}
+                    </span>
+                  </>
+                ) : null}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {localRuntimes.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {runtimeLabel(r)}
-                </SelectItem>
+              {runtimeMachines.map((machine) => (
+                <SelectGroup key={machine.id}>
+                  <SelectLabel>{machine.title}</SelectLabel>
+                  {machine.runtimes.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      <ProviderLogo
+                        provider={r.provider}
+                        className="h-4 w-4 shrink-0"
+                      />
+                      <span className="truncate">
+                        {runtimeRowLabel(r, machine.title)}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>
         </div>
 
         {selectedRuntime && (
-          <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 text-caption text-muted-foreground">
             <HardDrive className="h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">
-              {runtimeLabel(selectedRuntime)}
+              {runtimeDisplayLabel(selectedRuntime)}
             </span>
             <Badge
               variant={
@@ -1210,94 +1333,73 @@ export function RuntimeLocalSkillImportPanel({
           importing && bulkState.phase !== "importing" ? "pointer-events-none opacity-60" : ""
         }`}
       >
-        {middle}
-        {bulkState.phase === "idle" && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.ignored_files_hint)}
-          </p>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={bulkState.phase}
+            initial={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(8px)",
+            }}
+            animate={{
+              opacity: 1,
+              transform: "translateY(0)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(-8px)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {middle}
+            {bulkState.phase === "idle" && (
+              <p className="mt-3 text-caption text-muted-foreground">
+                {t(($) => $.runtime_import.ignored_files_hint)}
+              </p>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Sticky bottom: contextual actions per phase */}
       <div className="flex shrink-0 items-center gap-3 border-t bg-muted/30 px-5 py-3">
-        {bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {bulkState.phase === "cancelled"
-                ? t(($) => $.runtime_import.bulk_cancelled_hint)
-                : t(($) => $.runtime_import.bulk_complete_hint)}
-            </div>
-            <Button type="button" size="sm" onClick={handleDone}>
-              {t(($) => $.runtime_import.bulk_done_button)}
-            </Button>
-          </>
-        ) : resolvingConflicts ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.conflict_footer, {
-                count: pendingConflicts.length,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void handleApplyConflictResolutions()}
-              disabled={!canApplyConflictResolutions}
-            >
-              {t(($) => $.runtime_import.conflict_apply_button)}
-            </Button>
-          </>
-        ) : importing ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.bulk_progress, {
-                completed: bulkState.completed,
-                total: bulkState.total,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCancel}
-            >
-              {t(($) => $.runtime_import.bulk_cancel_button)}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {singleSelectedSkill ? (
-                <>
-                  {t(($) => $.runtime_import.ready)}{" "}
-                  <span className="font-medium text-foreground">
-                    {editName.trim() || singleSelectedSkill.name}
-                  </span>{" "}
-                  {t(($) => $.runtime_import.into_workspace)}
-                </>
-              ) : selectedKeys.size > 1 ? (
-                t(($) => $.runtime_import.bulk_ready, {
-                  count: selectedKeys.size,
-                })
-              ) : (
-                t(($) => $.runtime_import.select_skill)
-              )}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleBulkImport}
-              disabled={!canImport}
-            >
-              <Download className="h-3 w-3" />
-              {selectedKeys.size > 1
-                ? t(($) => $.runtime_import.bulk_import_button, {
-                    count: selectedKeys.size,
-                  })
-                : t(($) => $.runtime_import.import_button)}
-            </Button>
-          </>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={bulkState.phase}
+            className="flex min-w-0 flex-1 items-center gap-3"
+            initial={{ opacity: 0 }}
+            animate={{
+              opacity: 1,
+              transition: {
+                duration: UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transition: {
+                duration: UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {footerContent}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

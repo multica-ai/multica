@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -237,6 +238,201 @@ func TestHTTPClient_IsConfigured(t *testing.T) {
 	c := NewHTTPAPIClient(HTTPClientConfig{})
 	if !c.IsConfigured() {
 		t.Fatalf("real client must report IsConfigured()=true")
+	}
+}
+
+func TestHTTPClient_DownloadMessageResource(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_1/resources/img_1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("resource: method = %s, want GET", r.Method)
+		}
+		if got := r.URL.Query().Get("type"); got != "image" {
+			t.Errorf("resource type = %q, want image", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok_resource" {
+			t.Errorf("auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Disposition", `attachment; filename="shot.png"`)
+		_, _ = w.Write([]byte{1, 2, 3})
+	})
+	c := newTestClient(fake, time.Now)
+	got, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_1",
+		FileKey:   "img_1",
+		Type:      "image",
+	})
+	if err != nil {
+		t.Fatalf("DownloadMessageResource: %v", err)
+	}
+	if string(got.Data) != string([]byte{1, 2, 3}) || got.ContentType != "image/png" ||
+		got.Filename != "shot.png" || got.SizeBytes != 3 {
+		t.Fatalf("downloaded resource wrong: %+v", got)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceUsesResourceTimeout(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_video/resources/file_video", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("type"); got != "file" {
+			t.Errorf("resource type = %q, want file", got)
+		}
+		time.Sleep(80 * time.Millisecond)
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", `attachment; filename="clip.mp4"`)
+		_, _ = w.Write([]byte("slow-video"))
+	})
+	c := NewHTTPAPIClient(HTTPClientConfig{
+		BaseURL:                 fake.URL(),
+		HTTPClient:              &http.Client{Timeout: 20 * time.Millisecond},
+		ResourceDownloadTimeout: 500 * time.Millisecond,
+		Now:                     time.Now,
+	}).(*httpAPIClient)
+	got, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_video",
+		FileKey:   "file_video",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("DownloadMessageResource slow video: %v", err)
+	}
+	if string(got.Data) != "slow-video" || got.ContentType != "video/mp4" || got.Filename != "clip.mp4" {
+		t.Fatalf("downloaded slow video wrong: %+v", got)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceExceedingTimeoutIsCancelled(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_timeout/resources/file_timeout", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+			_, _ = w.Write([]byte("too late"))
+		}
+	})
+	c := NewHTTPAPIClient(HTTPClientConfig{
+		BaseURL:                 fake.URL(),
+		ResourceDownloadTimeout: 20 * time.Millisecond,
+		Now:                     time.Now,
+	}).(*httpAPIClient)
+
+	_, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_timeout",
+		FileKey:   "file_timeout",
+		Type:      "file",
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout error = %v, want context deadline exceeded", err)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceRejectsDeclaredOversize(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_large/resources/file_large", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(maxMessageResourceBytes+1, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	_, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_large",
+		FileKey:   "file_large",
+		Type:      "file",
+	})
+	if err == nil || !strings.Contains(err.Error(), "resource exceeds") {
+		t.Fatalf("declared oversize error = %v", err)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceAllowsDeclaredFeishuLimit(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_limit/resources/file_limit", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(maxMessageResourceBytes, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	got, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_limit",
+		FileKey:   "file_limit",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("declared Feishu-limit resource should be accepted: %v", err)
+	}
+	got.Body.Close()
+	if got.SizeBytes != maxMessageResourceBytes {
+		t.Fatalf("SizeBytes = %d, want %d", got.SizeBytes, maxMessageResourceBytes)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceAllowsAbovePreviousLocalLimit(t *testing.T) {
+	const previousLocalLimit = 20 << 20
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_above_previous/resources/file_above_previous", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(previousLocalLimit+1, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	got, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_above_previous",
+		FileKey:   "file_above_previous",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("resource above previous 20MiB local limit should be accepted: %v", err)
+	}
+	got.Body.Close()
+	if got.SizeBytes != previousLocalLimit+1 {
+		t.Fatalf("SizeBytes = %d, want %d", got.SizeBytes, previousLocalLimit+1)
+	}
+}
+
+func TestMaxBytesReadCloserEnforcesUnknownLengthBoundary(t *testing.T) {
+	t.Run("exact limit", func(t *testing.T) {
+		body := &maxBytesReadCloser{r: io.NopCloser(strings.NewReader("abc")), remaining: 3}
+		got, err := io.ReadAll(body)
+		if err != nil || string(got) != "abc" {
+			t.Fatalf("exact limit: body=%q err=%v", got, err)
+		}
+	})
+
+	t.Run("one byte over", func(t *testing.T) {
+		body := &maxBytesReadCloser{r: io.NopCloser(strings.NewReader("abcd")), remaining: 3}
+		got, err := io.ReadAll(body)
+		if err == nil || !strings.Contains(err.Error(), "resource exceeds") || string(got) != "abc" {
+			t.Fatalf("overflow: body=%q err=%v", got, err)
+		}
+	})
+}
+
+func TestHTTPClient_DownloadMessageResourceBusinessError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_1/resources/img_1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"code": 234003, "msg": "File not in msg"})
+	})
+	c := newTestClient(fake, time.Now)
+	_, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_1",
+		FileKey:   "img_1",
+		Type:      "image",
+	})
+	if err == nil || !strings.Contains(err.Error(), "234003") {
+		t.Fatalf("expected APIError with code, got %v", err)
 	}
 }
 
@@ -1109,8 +1305,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})

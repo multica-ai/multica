@@ -16,7 +16,7 @@ export function SegmentedToggle<T extends string>({
   value: T;
   options: ReadonlyArray<readonly [T, ReactNode]>;
   onChange: (value: T) => void;
-  /** Overrides the compact default sizing (text-xs px-2 py-1). */
+  /** Overrides the compact default sizing (text-caption px-2 py-1). */
   buttonClassName?: string;
 }) {
   return (
@@ -31,7 +31,7 @@ export function SegmentedToggle<T extends string>({
           }}
           className={cn(
             "rounded-sm font-medium transition-colors",
-            buttonClassName ?? "px-2 py-1 text-xs",
+            buttonClassName ?? "px-2 py-1 text-caption",
             value === key
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",

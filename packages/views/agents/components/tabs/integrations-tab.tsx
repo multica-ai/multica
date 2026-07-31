@@ -81,10 +81,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   if (!canManageLark && !canManageSlack) {
     return (
       <div className="space-y-6">
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.tab_body.integrations.intro)}
         </p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.tab_body.integrations.members_note)}
         </p>
       </div>
@@ -93,7 +93,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
 
   return (
     <div className="space-y-6">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.tab_body.integrations.intro)}
       </p>
 
@@ -103,8 +103,8 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             <Webhook className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="text-sm font-medium">{ts(($) => $.lark.section_title)}</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <h3 className="text-body font-medium">{ts(($) => $.lark.section_title)}</h3>
+            <p className="text-caption leading-relaxed text-muted-foreground">
               {ts(($) => $.lark.page_description)}
             </p>
           </div>
@@ -114,7 +114,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // No at-rest key on this deployment. The tab is only mounted
             // when the feature is configured, so this is the rare "key was
             // removed after an install existed" race.
-            <p className="text-xs text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {ts(($) => $.lark.not_enabled_title)}
             </p>
           ) : !installSupported && !hasActiveInstall ? (
@@ -125,8 +125,8 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // governs NEW installs, so the bound state must still render below
             // (server/internal/handler/lark.go).
             <div className="space-y-1">
-              <p className="text-xs font-medium">{ts(($) => $.lark.preview_title)}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption font-medium">{ts(($) => $.lark.preview_title)}</p>
+              <p className="text-caption text-muted-foreground">
                 {ts(($) => $.lark.preview_description)}
               </p>
             </div>
@@ -150,8 +150,8 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             <MessagesSquare className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="text-sm font-medium">{ts(($) => $.slack.section_title)}</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <h3 className="text-body font-medium">{ts(($) => $.slack.section_title)}</h3>
+            <p className="text-caption leading-relaxed text-muted-foreground">
               {ts(($) => $.slack.page_description)}
             </p>
           </div>
@@ -161,11 +161,11 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // Slack install/revoke stay workspace owner/admin-only, so an
             // agent owner who is not an admin only gets the read-only note
             // here (unlike Lark above). Reuses the shared members note.
-            <p className="text-xs text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.tab_body.integrations.members_note)}
             </p>
           ) : !slackConfigured ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {ts(($) => $.slack.not_enabled_title)}
             </p>
           ) : !slackInstallSupported && !slackHasActiveInstall ? (
@@ -173,8 +173,8 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // fresh "Connect Slack" would 503. Surface the "coming soon" notice
             // instead of a broken CTA; an already-bound agent still renders.
             <div className="space-y-1">
-              <p className="text-xs font-medium">{ts(($) => $.slack.preview_title)}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption font-medium">{ts(($) => $.slack.preview_title)}</p>
+              <p className="text-caption text-muted-foreground">
                 {ts(($) => $.slack.preview_description)}
               </p>
             </div>

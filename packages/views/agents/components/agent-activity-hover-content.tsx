@@ -97,7 +97,7 @@ function AgentActivityTaskRow({
     : task.created_at;
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex items-center gap-2 text-caption">
       <ActorAvatarBase
         name={getActorName("agent", task.agent_id)}
         initials={getActorInitials("agent", task.agent_id)}
@@ -141,7 +141,7 @@ export function AgentActivityHoverContent({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-muted-foreground">
+      <div className="text-caption font-medium text-muted-foreground">
         {/* One row per task, so count tasks — not agents. A single agent can
             run several tasks at once, so an agent-worded header here would
             disagree with the row count below. */}
@@ -199,7 +199,7 @@ export function WorkspaceAgentActivityHoverContent({
 
   if (issues.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.agent_activity.empty_hover)}
       </p>
     );
@@ -207,7 +207,7 @@ export function WorkspaceAgentActivityHoverContent({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="text-xs font-medium text-muted-foreground">
+      <div className="text-caption font-medium text-muted-foreground">
         {`${t(($) => $.agent_activity.issues_count, {
           count: issues.length,
         })} · ${t(($) => $.agent_activity.tasks_count, { count: taskCount })}`}
@@ -215,8 +215,8 @@ export function WorkspaceAgentActivityHoverContent({
       <div className="flex flex-col gap-2.5">
         {issues.map((issue) => (
           <div key={issue.id} className="flex flex-col gap-1.5">
-            <div className="flex items-baseline gap-1.5 text-xs">
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+            <div className="flex items-baseline gap-1.5 text-caption">
+              <span className="shrink-0 font-mono text-micro text-muted-foreground">
                 {issue.identifier}
               </span>
               <span className="truncate">{issue.title}</span>

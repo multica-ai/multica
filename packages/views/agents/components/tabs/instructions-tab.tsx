@@ -44,14 +44,14 @@ export function InstructionsTab({
 
   return (
     <div className="space-y-5">
-      <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+      <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.instructions.intro)}
       </p>
 
       <div className="space-y-2">
         <label
           htmlFor={`agent-system-prompt-${agent.id}`}
-          className="text-sm font-medium"
+          className="text-body font-medium"
         >
           {t(($) => $.tab_body.instructions.system_prompt_label)}
         </label>
@@ -69,7 +69,7 @@ export function InstructionsTab({
 
       <div className="flex items-center justify-end gap-3">
         {isDirty && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          <span className="text-caption text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
         )}
         <Button
           size="sm"

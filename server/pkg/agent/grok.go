@@ -190,8 +190,10 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	msgStream := newGrokMessageStream(256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Grok streams interim narration and the final answer as the same
+	// agent_message_chunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
@@ -220,11 +222,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// kimi/traecli do so the UI sees consistent snake_case names.
 				msg.Tool = kimiToolNameFromTitle(msg.Tool)
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -443,10 +441,23 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "grok cancelled the prompt"
 				}
+				// `session/load` carries no model id (only `session/new`
+				// does), so a resumed session with no configured model would
+				// otherwise bucket its whole spend under "unknown" — which
+				// prices at $0 because no pricing row matches. The turn's
+				// own `_meta.modelId` is authoritative; use it.
+				if effectiveModel == "" {
+					effectiveModel = pr.modelID
+				}
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
 				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				// xAI prices the turn itself and reports the result here.
+				// Carrying it through is the only way the ≥200K long-context
+				// surcharge reaches the bill — token counts alone cannot
+				// reconstruct which tier a request hit.
+				c.usage.CostUSDTicks += pr.usage.CostUSDTicks
 				c.usageMu.Unlock()
 			default:
 			}
@@ -473,13 +484,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		drainCancel()
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text stream show a
-		// terminal upstream-LLM failure (auth / rate-limit / HTTP 4xx).
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// terminal upstream-LLM failure (auth / rate-limit / HTTP 4xx). It reads
+		// the full text stream, not the deliverable, so a give-up turn that
+		// lands before a tool call stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage

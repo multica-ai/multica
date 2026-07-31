@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NavigationProvider } from "./context";
 import { useRowLink } from "./use-row-link";
@@ -36,6 +36,10 @@ function renderProbe(adapter: NavigationAdapter) {
 }
 
 describe("useRowLink", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("pushes on plain left click", () => {
     const push = vi.fn();
     const adapter = makeAdapter({ push });
@@ -62,17 +66,35 @@ describe("useRowLink", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("falls back to a single push for cmd/ctrl click without openInNewTab", () => {
+  // Web has no adapter, and the row is a <div> — there is no native
+  // modifier-click behaviour to inherit, so without an explicit window.open
+  // the row would navigate in place and swallow the user's intent (MUL-5456).
+  it("opens a browser tab against the shareable URL for cmd/ctrl click without openInNewTab (web)", () => {
     const push = vi.fn();
-    const adapter = makeAdapter({ push });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const adapter = makeAdapter({
+      push,
+      getShareableUrl: (p) => `https://app.example${p}`,
+    });
 
     renderProbe(adapter);
     fireEvent.click(screen.getByRole("row"), { metaKey: true });
     fireEvent.click(screen.getByRole("row"), { ctrlKey: true });
 
-    expect(push).toHaveBeenCalledTimes(2);
-    expect(push).toHaveBeenNthCalledWith(1, "/acme/projects/p1");
-    expect(push).toHaveBeenNthCalledWith(2, "/acme/projects/p1");
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenNthCalledWith(
+      1,
+      "https://app.example/acme/projects/p1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(open).toHaveBeenNthCalledWith(
+      2,
+      "https://app.example/acme/projects/p1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("opens a background tab and prevents default for middle click when available", () => {
@@ -93,9 +115,13 @@ describe("useRowLink", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("falls back to one prevented push for middle click without openInNewTab", () => {
+  it("opens a browser tab for middle click without openInNewTab (web)", () => {
     const push = vi.fn();
-    const adapter = makeAdapter({ push });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const adapter = makeAdapter({
+      push,
+      getShareableUrl: (p) => `https://app.example${p}`,
+    });
 
     renderProbe(adapter);
     const event = new MouseEvent("auxclick", {
@@ -106,7 +132,11 @@ describe("useRowLink", () => {
     screen.getByRole("row").dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(push).toHaveBeenCalledWith("/acme/projects/p1");
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith(
+      "https://app.example/acme/projects/p1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 });

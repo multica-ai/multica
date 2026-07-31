@@ -104,17 +104,20 @@ export function PropertyPicker({
     }
   }, [highlightedIndex, getItems, children]); // re-run when children change (filtered list updates)
 
-  const handleOpenChange = useCallback(
-    (v: boolean) => {
-      onOpenChange(v);
-      if (!v) {
-        setQuery("");
-        setHighlightedIndex(-1);
-        onSearchChange?.("");
-      }
-    },
-    [onOpenChange, onSearchChange],
-  );
+  // Reset the search state on the open -> closed transition rather than inside
+  // an open-change handler. Every picker closes itself after a selection by
+  // calling its own `setOpen(false)`, which flips this `open` prop directly and
+  // never routes through the popover's `onOpenChange` — so a handler-only reset
+  // left the stale query (and the filtered list) in place on the next open.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      setQuery("");
+      setHighlightedIndex(-1);
+      onSearchChange?.("");
+    }
+    wasOpen.current = open;
+  }, [open, onSearchChange]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -161,7 +164,7 @@ export function PropertyPicker({
   );
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {tooltip ? (
         <Tooltip open={tooltipOpen} onOpenChange={setTooltipHover}>
           <TooltipTrigger render={popoverTrigger} />
@@ -184,7 +187,7 @@ export function PropertyPicker({
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               aria-label={filterAria}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+              className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
             />
           </div>
         )}
@@ -225,7 +228,7 @@ export function PickerItem({
       data-picker-item
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-body ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off
@@ -265,7 +268,7 @@ export function PickerSection({
 }) {
   return (
     <div>
-      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
         {label}
       </div>
       {children}
@@ -280,7 +283,7 @@ export function PickerSection({
 export function PickerEmpty() {
   const { t } = useT("issues");
   return (
-    <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+    <div className="px-2 py-3 text-center text-body text-muted-foreground">
       {t(($) => $.pickers.no_results)}
     </div>
   );

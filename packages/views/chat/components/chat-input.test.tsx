@@ -1,10 +1,30 @@
-import { forwardRef, useEffect, useRef, useImperativeHandle } from "react";
+import { cloneElement, forwardRef, useEffect, useRef, useImperativeHandle } from "react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { DraftUpload } from "@multica/core/drafts";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
+import enEditor from "../../locales/en/editor.json";
+
+// Uploads flow through the module-level coordinator, which calls
+// `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
+// mocking that call; it resolves a server Attachment row (makeUpload's extra
+// link/markdownLink fields are ignored by the engine, which re-derives them).
+const mockApiUploadFile = vi.hoisted(() => vi.fn());
+// Observability for the write-back insert path: a settle whose mount died
+// delivers into the live editor through this method.
+const insertMarkdownSpy = vi.hoisted(() => vi.fn());
+
+// The real handle mints an id when it inserts the placeholder and hands it to
+// the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
+// the same or the two records drift apart only in tests.
+let mockUploadIdSeq = 0;
+
+vi.mock("@multica/core/api", () => ({
+  api: { uploadFile: mockApiUploadFile },
+}));
 
 function makeUpload(overrides: Partial<UploadResult> & { id: string; link: string; filename: string }): UploadResult {
   return {
@@ -30,7 +50,7 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
   };
 }
 
-const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
+const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor } };
 
 // Track drop-zone callbacks so the test can simulate a real drop.
 const dropHandlers = vi.hoisted(() => ({
@@ -49,6 +69,11 @@ vi.mock("../../editor", async () => ({
   ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
     "../../editor/use-upload-gate",
   )),
+  // Real await-then-render submit contract (pure React) — it only imports
+  // types from ContentEditor / the upload gate, so it pulls in no Tiptap tree.
+  ...(await vi.importActual<typeof import("../../editor/use-composer-submit")>(
+    "../../editor/use-composer-submit",
+  )),
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
     dropHandlers.onDrop = onDrop;
     return { isDragOver: false, dropZoneProps: { "data-testid": "drop-zone" } };
@@ -60,7 +85,7 @@ vi.mock("../../editor", async () => ({
       value?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
-      onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
       onUploadingChange?: (uploading: boolean) => void;
       mentionMode?: string;
       mentionContextItems?: unknown[];
@@ -99,7 +124,7 @@ vi.mock("../../editor", async () => ({
         // the host learns about it through onUploadingChange, not by polling.
         if (uploadingRef.current === 1) onUploadingChange?.(true);
         try {
-          const result = await onUploadFile?.(file);
+          const result = await onUploadFile?.(file, `mock-upload-${++mockUploadIdSeq}`);
           if (result) {
             // Mirror the real editor (uploadAndInsertFile in
             // packages/views/editor/extensions/file-upload.ts): the
@@ -119,6 +144,17 @@ vi.mock("../../editor", async () => ({
         }
       },
       hasActiveUploads: () => uploadingRef.current > 0,
+      // Placeholder rebuild contract: the real handle draws a card for an
+      // upload the document is not showing and reports whether it landed.
+      // Mocks track ids only — no document to draw into.
+      insertUploadPlaceholder: () => true,
+      settleUploadPlaceholder: () => false,
+      insertMarkdownAtEnd: (md: string) => {
+        insertMarkdownSpy(md);
+        valueRef.current = `${valueRef.current}\n\n${md}`.trim();
+        onUpdate?.(valueRef.current);
+        return true;
+      },
       // This mock emits onUpdate synchronously, so a pending debounced update
       // never exists and there is nothing to hand back. The real debounce (and
       // the draft-switch flush that depends on it) is covered against the real
@@ -144,17 +180,50 @@ vi.mock("../../editor", async () => ({
   }),
 }));
 
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+    triggerRender,
+    disabled,
+  }: {
+    projectId: string;
+    onUpdate: (updates: { project_id: string | null }) => void;
+    triggerRender: React.ReactElement<{
+      onClick?: () => void;
+      children?: React.ReactNode;
+      "data-project-picker-disabled"?: string;
+    }>;
+    disabled?: boolean;
+  }) =>
+    // Surface the `disabled` prop ChatInput passes so a test can assert the
+    // shared picker (and thus its keyboard clear control) is locked mid-send.
+    // The real keyboard-inertness of that control is covered against the real
+    // ProjectPicker in project-picker.test.tsx.
+    cloneElement(triggerRender, {
+      onClick: () => onUpdate({ project_id: null }),
+      children: projectId,
+      "data-project-picker-disabled": disabled ? "true" : "false",
+    }),
+}));
+
 // Mock chat store with an in-memory implementation that supports both
-// (selector) calls and getState().
+// (selector) calls and getState(). Draft attachments hold coordinator-owned
+// DraftUpload entries (MUL-5181 L2).
 vi.mock("@multica/core/chat", () => {
   const state = {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
     inputDrafts: {} as Record<string, string>,
-    inputDraftAttachments: {} as Record<string, UploadResult[]>,
+    inputDraftAttachments: {} as Record<string, unknown[]>,
     setInputDraft: vi.fn(),
+    appendToInputDraft: vi.fn(),
     setInputDraftAttachments: vi.fn(),
     addInputDraftAttachment: vi.fn(),
+    addInputDraftUpload: vi.fn(),
+    settleInputDraftUpload: vi.fn(),
+    failInputDraftUpload: vi.fn(),
+    removeInputDraftUpload: vi.fn(),
     clearInputDraft: vi.fn(),
   };
   return {
@@ -184,10 +253,15 @@ beforeEach(() => {
     selectedAgentId: string;
     inputDrafts: Record<string, string>;
     setInputDraft: ReturnType<typeof vi.fn>;
+    appendToInputDraft: ReturnType<typeof vi.fn>;
     clearInputDraft: ReturnType<typeof vi.fn>;
-    inputDraftAttachments: Record<string, UploadResult[]>;
+    inputDraftAttachments: Record<string, DraftUpload[]>;
     setInputDraftAttachments: ReturnType<typeof vi.fn>;
     addInputDraftAttachment: ReturnType<typeof vi.fn>;
+    addInputDraftUpload: ReturnType<typeof vi.fn>;
+    settleInputDraftUpload: ReturnType<typeof vi.fn>;
+    failInputDraftUpload: ReturnType<typeof vi.fn>;
+    removeInputDraftUpload: ReturnType<typeof vi.fn>;
   };
   state.activeSessionId = null;
   state.selectedAgentId = "agent-1";
@@ -197,44 +271,101 @@ beforeEach(() => {
   state.setInputDraft.mockImplementation((key: string, value: string) => {
     state.inputDrafts[key] = value;
   });
+  state.appendToInputDraft.mockClear();
+  // Mirrors the real store: trailing whitespace trimmed before the separator.
+  state.appendToInputDraft.mockImplementation((key: string, markdown: string) => {
+    const existing = state.inputDrafts[key] ?? "";
+    state.inputDrafts[key] = existing.trim()
+      ? `${existing.replace(/\s+$/, "")}\n\n${markdown}`
+      : markdown;
+  });
   state.setInputDraftAttachments.mockClear();
-  state.setInputDraftAttachments.mockImplementation((key: string, attachments: UploadResult[]) => {
-    if (attachments.length > 0) state.inputDraftAttachments[key] = attachments;
+  state.setInputDraftAttachments.mockImplementation((key: string, uploads: DraftUpload[]) => {
+    if (uploads.length > 0) state.inputDraftAttachments[key] = uploads;
     else delete state.inputDraftAttachments[key];
   });
   state.addInputDraftAttachment.mockClear();
   state.addInputDraftAttachment.mockImplementation((key: string, attachment: UploadResult) => {
     const existing = state.inputDraftAttachments[key] ?? [];
-    state.inputDraftAttachments[key] = existing.some((a) => a.id === attachment.id)
-      ? existing.map((a) => (a.id === attachment.id ? attachment : a))
-      : [...existing, attachment];
+    state.inputDraftAttachments[key] = [
+      ...existing,
+      {
+        clientUploadId: attachment.id,
+        status: "uploaded",
+        filename: attachment.filename,
+        size: attachment.size_bytes,
+        attachment,
+      } as DraftUpload,
+    ];
+  });
+  state.addInputDraftUpload.mockClear();
+  state.addInputDraftUpload.mockImplementation((key: string, upload: DraftUpload) => {
+    const existing = state.inputDraftAttachments[key] ?? [];
+    if (existing.some((u) => u.clientUploadId === upload.clientUploadId)) return;
+    state.inputDraftAttachments[key] = [...existing, upload];
+  });
+  state.settleInputDraftUpload.mockClear();
+  state.settleInputDraftUpload.mockImplementation(
+    (key: string, clientUploadId: string, attachment: UploadResult) => {
+      const existing = state.inputDraftAttachments[key] ?? [];
+      state.inputDraftAttachments[key] = existing.map((u) =>
+        u.clientUploadId === clientUploadId
+          ? ({
+              clientUploadId,
+              status: "uploaded",
+              filename: attachment.filename,
+              size: attachment.size_bytes,
+              attachment,
+            } as DraftUpload)
+          : u,
+      );
+    },
+  );
+  state.failInputDraftUpload.mockClear();
+  state.failInputDraftUpload.mockImplementation(
+    (key: string, clientUploadId: string, error?: string) => {
+      const existing = state.inputDraftAttachments[key] ?? [];
+      state.inputDraftAttachments[key] = existing.map((u) =>
+        u.clientUploadId === clientUploadId
+          ? ({ ...u, status: "failed", error } as DraftUpload)
+          : u,
+      );
+    },
+  );
+  state.removeInputDraftUpload.mockClear();
+  state.removeInputDraftUpload.mockImplementation((key: string, clientUploadId: string) => {
+    const remaining = (state.inputDraftAttachments[key] ?? []).filter(
+      (u) => u.clientUploadId !== clientUploadId,
+    );
+    if (remaining.length > 0) state.inputDraftAttachments[key] = remaining;
+    else delete state.inputDraftAttachments[key];
   });
   state.clearInputDraft.mockClear();
   state.clearInputDraft.mockImplementation((key: string) => {
     delete state.inputDrafts[key];
     delete state.inputDraftAttachments[key];
   });
+  mockApiUploadFile.mockReset();
+  mockApiUploadFile.mockImplementation(async () =>
+    makeUpload({ id: "att-1", link: "https://cdn.example/att-1.png", filename: "img.png" }),
+  );
+  insertMarkdownSpy.mockReset();
 });
 
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   const onSend = props.onSend ?? vi.fn();
-  const onUploadFile =
-    props.onUploadFile ??
-    vi.fn(async (_file: File) =>
-      makeUpload({ id: "att-1", link: "https://cdn.example/att-1.png", filename: "img.png" }),
-    );
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <ChatInput onSend={onSend} onUploadFile={onUploadFile} agentName="Multica" {...props} />
+      <ChatInput onSend={onSend} uploadEnabled agentName="Multica" {...props} />
     </I18nProvider>,
   );
-  return { onSend, onUploadFile };
+  return { onSend };
 }
 
 function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
   return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <ChatInput onSend={vi.fn()} onUploadFile={vi.fn()} agentName="Multica" {...props} />
+      <ChatInput onSend={vi.fn()} uploadEnabled agentName="Multica" {...props} />
     </I18nProvider>
   );
 }
@@ -287,10 +418,10 @@ describe("ChatInput new-chat draft identity", () => {
   });
 
   it("keeps staged attachments across an agent switch", async () => {
-    const onUploadFile = vi.fn(async (_file: File) =>
+    mockApiUploadFile.mockImplementation(async () =>
       makeUpload({ id: "att-kept", link: "/api/attachments/att-kept/download", filename: "a.png" }),
     );
-    const { rerender } = render(element({ agentName: "agent-1", onUploadFile }));
+    const { rerender } = render(element({ agentName: "agent-1" }));
 
     await act(async () => {
       dropHandlers.onDrop?.([new File(["x"], "a.png", { type: "image/png" })]);
@@ -299,11 +430,15 @@ describe("ChatInput new-chat draft identity", () => {
     switchAgentTo("agent-2", rerender);
 
     const state = useChatStore.getState() as unknown as {
-      inputDraftAttachments: Record<string, UploadResult[]>;
+      inputDraftAttachments: Record<string, DraftUpload[]>;
     };
     // Body and attachments share one attribution rule, so the files follow the
     // text across the switch instead of stranding in the old agent's slot.
-    expect(state.inputDraftAttachments["__draft_new__"]?.map((a) => a.id)).toEqual(["att-kept"]);
+    expect(
+      state.inputDraftAttachments["__draft_new__"]?.map((u) =>
+        u.status === "uploaded" ? u.attachment.id : u.status,
+      ),
+    ).toEqual(["att-kept"]);
     expect(Object.keys(state.inputDraftAttachments)).toEqual(["__draft_new__"]);
   });
 
@@ -372,9 +507,157 @@ describe("ChatInput @ context wiring", () => {
   });
 });
 
+describe("ChatInput project context", () => {
+  type ChatProject = NonNullable<
+    React.ComponentProps<typeof ChatInput>["projects"]
+  >[number];
+  const sampleProject: ChatProject = {
+    id: "project-alpha",
+    workspace_id: "ws-1",
+    title: "Project Alpha",
+    description: null,
+    icon: "📘",
+    status: "planned",
+    priority: "none",
+    lead_type: null,
+    lead_id: null,
+    start_date: null,
+    due_date: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    issue_count: 0,
+    done_count: 0,
+    resource_count: 0,
+  };
+
+  it("warns next to the chip when the agent's daemon cannot apply the project description", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+      projectContextUnsupported: true,
+    });
+
+    expect(
+      screen.getByText(
+        "Project description won't apply — this agent's daemon needs an upgrade",
+      ),
+    ).toBeInTheDocument();
+    // Soft gate: the warning must not lock the control.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).not.toBeDisabled();
+  });
+
+  it("shows no daemon warning when support is current or unknown", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+    });
+
+    expect(
+      screen.queryByText(
+        "Project description won't apply — this agent's daemon needs an upgrade",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the selected project chip and forwards context changes", () => {
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
+
+    expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("allows removing project context while the agent is running", () => {
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+      isRunning: true,
+    });
+
+    const projectControl = screen.getByRole("button", {
+      name: "Change project context",
+    });
+    expect(projectControl).not.toBeDisabled();
+    fireEvent.click(projectControl);
+    expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
+    // A brand-new chat creates its session row lazily during send, bound to
+    // the project selected at click time. If the user could switch project
+    // while that create is in flight, the session would be created against the
+    // old project while the UI already shows the new one — the agent would
+    // then receive a project/repo context the user no longer intends
+    // (MUL-5150). The control must stay locked for the whole send, not only
+    // once the agent is running.
+    let resolveSend: (accepted: boolean) => void;
+    const sendPromise = new Promise<boolean>((res) => {
+      resolveSend = res;
+    });
+    const onSend = vi.fn<ChatInputOnSend>(() => sendPromise);
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+      onSend,
+    });
+
+    // Interactive before send starts.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).not.toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "slow network" },
+    });
+    let sendBtn: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendBtn = buttons[buttons.length - 1]!;
+      expect(sendBtn).not.toBeDisabled();
+    });
+    fireEvent.click(sendBtn!);
+
+    // Send pending → project control locked; a click cannot fire a change.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Change project context" }),
+      ).toBeDisabled(),
+    );
+    // ChatInput also propagates the lock to the shared ProjectPicker so its
+    // internal clear button (a keyboard-reachable path the wrapper's
+    // pointer-events-none does not cover) is disabled too. The clear control's
+    // keyboard-inertness itself is covered against the real ProjectPicker in
+    // project-picker.test.tsx.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).toHaveAttribute("data-project-picker-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
+    expect(onProjectChange).not.toHaveBeenCalled();
+
+    // Resolve the pending send so the promise doesn't dangle past the test.
+    await act(async () => {
+      resolveSend!(true);
+      await sendPromise;
+    });
+  });
+});
+
 describe("ChatInput attachment wiring", () => {
-  it("routes dropped files through the editor's upload handler", async () => {
-    const { onUploadFile } = renderInput();
+  it("routes dropped files through the coordinator upload", async () => {
+    renderInput();
     expect(dropHandlers.onDrop).not.toBeNull();
     const file = new File(["x"], "drop.png", { type: "image/png" });
     await act(async () => {
@@ -383,15 +666,16 @@ describe("ChatInput attachment wiring", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onUploadFile).toHaveBeenCalledWith(file);
+    expect(mockApiUploadFile).toHaveBeenCalledTimes(1);
+    expect(mockApiUploadFile.mock.calls[0]?.[0]).toBe(file);
   });
 
   it("passes attachment_ids to onSend for uploads still referenced in the content", async () => {
     const onSend = vi.fn();
-    const onUploadFile = vi.fn(async (_file: File) =>
+    mockApiUploadFile.mockImplementation(async () =>
       makeUpload({ id: "att-42", link: "https://cdn.example/att-42.png", filename: "x.png" }),
     );
-    renderInput({ onSend, onUploadFile });
+    renderInput({ onSend });
 
     // Simulate the drop → editor.uploadFile → onUploadFile happy path. The
     // mock editor appends the markdown link into its value and calls
@@ -418,9 +702,11 @@ describe("ChatInput attachment wiring", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     const [, ids] = onSend.mock.calls[0]!;
     expect(ids).toEqual(["att-42"]);
-    expect(useChatStore.getState().addInputDraftAttachment).toHaveBeenCalledWith(
+    // The placeholder was staged in the LOADED draft slot at pick time and
+    // settled into the uploaded entry the send just bound.
+    expect(useChatStore.getState().addInputDraftUpload).toHaveBeenCalledWith(
       "__draft_new__",
-      expect.objectContaining({ id: "att-42" }),
+      expect.objectContaining({ status: "uploading", filename: "drop.png" }),
     );
   });
 
@@ -436,15 +722,17 @@ describe("ChatInput attachment wiring", () => {
     const onSend = vi.fn();
     const SHORT_LIVED_LINK = "/uploads/workspaces/ws-1/foo.png?exp=42&sig=stale";
     const STABLE_MARKDOWN_LINK = "/api/attachments/att-99/download";
-    const onUploadFile = vi.fn(async (_file: File) =>
+    mockApiUploadFile.mockImplementation(async () =>
       makeUpload({
         id: "att-99",
         link: SHORT_LIVED_LINK,
+        // The engine derives markdownLink from the row's markdown_url.
+        markdown_url: STABLE_MARKDOWN_LINK,
         markdownLink: STABLE_MARKDOWN_LINK,
         filename: "foo.png",
       }),
     );
-    renderInput({ onSend, onUploadFile });
+    renderInput({ onSend });
 
     const file = new File(["x"], "foo.png", { type: "image/png" });
     await act(async () => {
@@ -479,8 +767,8 @@ describe("ChatInput attachment wiring", () => {
       resolveUpload = res;
     });
     const onSend = vi.fn();
-    const onUploadFile = vi.fn(() => uploadPromise);
-    renderInput({ onSend, onUploadFile });
+    mockApiUploadFile.mockImplementation(() => uploadPromise);
+    renderInput({ onSend });
 
     // Give the editor some text so isEmpty=false — this isolates the
     // disabled state to the pending-upload condition (otherwise both
@@ -519,8 +807,129 @@ describe("ChatInput attachment wiring", () => {
     expect(ids).toEqual(["att-slow"]);
   });
 
-  it("does not render the file upload button when onUploadFile is omitted", () => {
-    renderInput({ onUploadFile: undefined });
+  it("delivers a dead mount's settle into the editor still HOLDING that draft, not the selected one", async () => {
+    const state = useChatStore.getState() as unknown as {
+      activeSessionId: string | null;
+      inputDrafts: Record<string, string>;
+      inputDraftAttachments: Record<string, DraftUpload[]>;
+    };
+
+    // Mount #1 composes to session-a and starts an upload that outlives it.
+    state.activeSessionId = "session-a";
+    let resolveA!: (v: UploadResult) => void;
+    mockApiUploadFile.mockImplementationOnce(
+      () => new Promise<UploadResult>((r) => (resolveA = r)),
+    );
+    const first = render(element({}));
+    await act(async () => {
+      dropHandlers.onDrop?.([new File(["x"], "a.png", { type: "image/png" })]);
+      await Promise.resolve();
+    });
+    first.unmount();
+
+    // Mount #2 also loads session-a, then gets PINNED to it by its own upload
+    // while the user switches selection to session-b: loaded=A, selected=B.
+    let resolveB!: (v: UploadResult) => void;
+    mockApiUploadFile.mockImplementationOnce(
+      () => new Promise<UploadResult>((r) => (resolveB = r)),
+    );
+    const second = render(element({}));
+    await act(async () => {
+      dropHandlers.onDrop?.([new File(["y"], "b.png", { type: "image/png" })]);
+      await Promise.resolve();
+    });
+    state.activeSessionId = "session-b";
+    second.rerender(element({}));
+
+    // Mount #1's upload settles. Its target draft is session-a — which mount
+    // #2's editor is HOLDING (not showing as selected). The registry must be
+    // keyed by the LOADED draft, so the insert reaches that document; keying
+    // by selection would misroute or drop it.
+    await act(async () => {
+      resolveA(
+        makeUpload({
+          id: "att-pinned",
+          link: "/api/attachments/att-pinned/download",
+          filename: "a.png",
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(insertMarkdownSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/attachments/att-pinned/download"),
+    );
+    expect(state.inputDrafts["session-a"] ?? "").toContain(
+      "/api/attachments/att-pinned/download",
+    );
+    // The selected-but-not-loaded draft must not receive the link.
+    expect(state.inputDrafts["session-b"] ?? "").not.toContain("att-pinned");
+
+    await act(async () => {
+      resolveB(makeUpload({ id: "att-b", link: "/api/attachments/att-b/download", filename: "b.png" }));
+      await Promise.resolve();
+    });
+  });
+
+  it("text typed while a chat send is in flight survives the success", async () => {
+    const state = useChatStore.getState() as unknown as {
+      inputDrafts: Record<string, string>;
+    };
+    let resolveSend!: (v: boolean) => void;
+    const onSend = vi.fn(
+      (
+        _content: string,
+        _ids: string[] | undefined,
+        _commit: (o?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
+      ) => new Promise<boolean>((r) => { resolveSend = r; }),
+    );
+    renderInput({ onSend: onSend as never });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "draft A" } });
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[buttons.length - 1]!);
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+
+    // The editor stays interactive during the send; the debounced commit files
+    // the newer text under the same slot mid-flight.
+    fireEvent.change(editor, { target: { value: "draft B typed during send" } });
+
+    await act(async () => {
+      resolveSend(true);
+      await Promise.resolve();
+    });
+
+    // Success may only clear what it sent — the newer draft survives, and the
+    // editor was not scrubbed over it.
+    expect(state.inputDrafts["__draft_new__"]).toBe("draft B typed during send");
+    expect(editorState.cleared).toBe(0);
+  });
+
+  it("keeps an in-flight placeholder while the user keeps typing", () => {
+    // commitDraft prunes uploaded rows the body no longer references; a
+    // placeholder has no body reference yet, so a keystroke must never prune
+    // it — that would drop the chip and strand the settle on the guard.
+    const state = useChatStore.getState() as unknown as {
+      inputDraftAttachments: Record<string, DraftUpload[]>;
+    };
+    state.inputDraftAttachments["__draft_new__"] = [
+      { clientUploadId: "c-flight", status: "uploading", filename: "up.png", size: 1 },
+    ];
+    renderInput();
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "still typing" } });
+
+    expect(state.inputDraftAttachments["__draft_new__"]).toHaveLength(1);
+    expect(state.inputDraftAttachments["__draft_new__"]?.[0]).toMatchObject({
+      status: "uploading",
+      clientUploadId: "c-flight",
+    });
+  });
+
+  it("does not render the file upload button when uploads are disabled", () => {
+    renderInput({ uploadEnabled: false });
     // The ChatAddMenu "+" (which hosts file upload) only mounts when upload
     // wiring is present — without it the chat input falls back to "submit +
     // extras" only. Probe by counting buttons: with no upload, only the
@@ -699,7 +1108,7 @@ describe("ChatInput async send", () => {
   it("sends attachment ids restored from persisted draft attachments", async () => {
     const state = useChatStore.getState() as unknown as {
       inputDrafts: Record<string, string>;
-      inputDraftAttachments: Record<string, UploadResult[]>;
+      inputDraftAttachments: Record<string, DraftUpload[]>;
     };
     const attachment = makeUpload({
       id: "att-persisted",
@@ -707,7 +1116,17 @@ describe("ChatInput async send", () => {
       filename: "persisted.png",
     });
     state.inputDrafts["__draft_new__"] = "see ![](/api/attachments/att-persisted/download)";
-    state.inputDraftAttachments["__draft_new__"] = [attachment];
+    // Persisted drafts hold DraftUpload entries (the real store normalizes
+    // legacy bare rows into this shape on load).
+    state.inputDraftAttachments["__draft_new__"] = [
+      {
+        clientUploadId: "att-persisted",
+        status: "uploaded",
+        filename: attachment.filename,
+        size: attachment.size_bytes,
+        attachment,
+      },
+    ];
 
     const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
       commitInput();
@@ -882,8 +1301,11 @@ describe("ChatInput commit handoff", () => {
     await typeAndSend(onSend);
 
     expect(editorState.cleared).toBeGreaterThan(0);
-    expect(editorState.blurred).toBeGreaterThan(0);
     expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__");
+    // Chat is a conversation: the caret returns to the box for the next turn
+    // rather than being dropped (MUL-5181 follow-up).
+    await waitFor(() => expect(editorState.focused).toBeGreaterThan(0));
+    expect(editorState.blurred).toBe(0);
   });
 
   it("leaves the editor intact on a fire-and-forget commit but still clears the sent draft", async () => {
@@ -898,5 +1320,9 @@ describe("ChatInput commit handoff", () => {
     expect(editorState.blurred).toBe(0);
     // …but the sent session's persisted draft is cleared regardless.
     expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__");
+    // And the caret must NOT be pulled into an editor that is showing someone
+    // else's draft: refocus is bound to having actually scrubbed the document.
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(editorState.focused).toBe(0);
   });
 });

@@ -22,7 +22,7 @@
  * fallback. Differences are visual-only.
  */
 import { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
+import { View, type TextStyle } from "react-native";
 import Animated, {
   cancelAnimation,
   useAnimatedStyle,
@@ -109,6 +109,16 @@ function pickStage(
   return { label: "Thinking" };
 }
 
+// Tabular figures for the 1Hz counter — proportional digits change the text
+// width on 9s → 10s, which reflows the whole row once a second.
+//
+// This CANNOT be `className="tabular-nums"`. Tailwind compiles that utility to
+// `font-variant-numeric`, and react-native-css-interop's property allow-list
+// only carries `font-variant-caps` — the declaration is dropped, so the class
+// is a silent no-op on RN. `fontVariant` is the working equivalent. Hoisted so
+// the once-a-second re-render doesn't hand Text a fresh style object.
+const TABULAR_NUMS: TextStyle = { fontVariant: ["tabular-nums"] };
+
 export function StatusPill({
   pendingTask,
   taskMessages = [],
@@ -145,7 +155,7 @@ export function StatusPill({
       {stage.static ? null : <BreathingDots />}
       <Text className="text-xs text-muted-foreground" numberOfLines={1}>
         {stage.label}
-        <Text className="text-xs text-muted-foreground/70">
+        <Text className="text-xs text-muted-foreground/70" style={TABULAR_NUMS}>
           {" · "}
           {formatElapsedSecs(elapsedSec)}
         </Text>

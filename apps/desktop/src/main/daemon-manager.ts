@@ -16,7 +16,11 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir, hostname } from "os";
-import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
+import type {
+  DaemonStatus,
+  DaemonPrefs,
+  LocalRuntimeProbe,
+} from "../shared/daemon-types";
 import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
@@ -810,6 +814,92 @@ function profileArgs(active: ActiveProfile): string[] {
   return active.name ? ["--profile", active.name] : [];
 }
 
+function successfulRuntimeProbe(
+  providers: string[],
+  daemonRunning: boolean,
+): Extract<LocalRuntimeProbe, { probeResult: "success" }> {
+  const providerSummary: Record<string, number> = {};
+  for (const rawProvider of providers) {
+    const provider = rawProvider.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(provider)) continue;
+    providerSummary[provider] = (providerSummary[provider] ?? 0) + 1;
+  }
+  const runtimeCount = Object.values(providerSummary).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  return {
+    probeResult: "success",
+    runtimeCount,
+    providerSummary,
+    onlineCount: daemonRunning ? runtimeCount : 0,
+    offlineCount: daemonRunning ? 0 : runtimeCount,
+  };
+}
+
+async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
+  const health = await fetchHealth();
+  if (health.state === "running") {
+    return successfulRuntimeProbe(health.agents ?? [], true);
+  }
+
+  const bin = await resolveCliBinary();
+  if (!bin) return { probeResult: "error" };
+  const active = await ensureActiveProfile();
+  return new Promise((resolve) => {
+    execFile(
+      bin,
+      ["daemon", "probe-runtimes", ...profileArgs(active)],
+      { timeout: 15_000, env: desktopSpawnEnv(), maxBuffer: 64 * 1024 },
+      (error, stdout) => {
+        if (error) {
+          resolve({ probeResult: "error" });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout) as {
+            probe_result?: unknown;
+            runtime_count?: unknown;
+            provider_summary?: unknown;
+          };
+          if (
+            parsed.probe_result !== "success" ||
+            typeof parsed.runtime_count !== "number" ||
+            !parsed.provider_summary ||
+            typeof parsed.provider_summary !== "object" ||
+            Array.isArray(parsed.provider_summary)
+          ) {
+            resolve({ probeResult: "error" });
+            return;
+          }
+          const providers: string[] = [];
+          for (const [provider, count] of Object.entries(
+            parsed.provider_summary as Record<string, unknown>,
+          )) {
+            if (
+              !Number.isInteger(count) ||
+              (count as number) < 0 ||
+              (count as number) > 1000
+            ) {
+              resolve({ probeResult: "error" });
+              return;
+            }
+            providers.push(...Array<string>(count as number).fill(provider));
+          }
+          const probe = successfulRuntimeProbe(providers, false);
+          resolve(
+            probe.runtimeCount === parsed.runtime_count
+              ? probe
+              : { probeResult: "error" },
+          );
+        } catch {
+          resolve({ probeResult: "error" });
+        }
+      },
+    );
+  });
+}
+
 // Env passed to every CLI child so the daemon process knows it was spawned
 // by the Desktop app. The server uses this to mark runtimes as managed and
 // hide CLI self-update UI. Computed lazily so it picks up the PATH fix
@@ -1078,6 +1168,7 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
   ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
   ipcMain.handle("daemon:get-status", () => fetchHealth());
+  ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
   // The host's OS name, available regardless of daemon state. The Runtimes
   // page uses it as a fallback identity for "this machine" when no
   // app-managed daemon is reporting a device name (e.g. the daemon runs

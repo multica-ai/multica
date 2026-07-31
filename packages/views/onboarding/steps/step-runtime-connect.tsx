@@ -7,6 +7,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
+import {
+  runtimeDisplayLabel,
+  runtimeDisplayName,
+} from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
@@ -36,6 +40,7 @@ export function StepRuntimeConnect({
   onNext,
   onBack,
   onRefresh,
+  runtimesPending,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
@@ -44,6 +49,13 @@ export function StepRuntimeConnect({
    *  bundled daemon so a freshly-installed CLI shows up — otherwise the
    *  daemon's PATH probe runs once at boot and never re-probes. */
   onRefresh?: () => void | Promise<void>;
+  /** Desktop-only signal: the local daemon is still booting or is known to
+   *  have agent CLIs on this host that haven't finished registering yet.
+   *  While true, the step keeps showing the scanning skeleton past the normal
+   *  timeout instead of flashing the "no runtime found" empty state — that
+   *  empty state is a false negative when the daemon is mid-probe (MUL-5119).
+   *  Web omits it and keeps the plain wall-clock timeout. */
+  runtimesPending?: boolean;
 }) {
   const { runtimes, selected, selectedId, setSelectedId } =
     useRuntimePicker(wsId);
@@ -58,6 +70,7 @@ export function StepRuntimeConnect({
       onNext={onNext}
       onBack={onBack}
       onRefresh={onRefresh}
+      runtimesPending={runtimesPending}
     />
   );
 }
@@ -68,8 +81,14 @@ export function StepRuntimeConnect({
 
 type Phase = "scanning" | "found" | "empty";
 
-/** Input ms before an empty list flips from "scanning" to "empty". */
+/** Idle ms before an empty list flips from "scanning" to "empty" — unless the
+ *  platform reports runtimes are still pending (see `runtimesPending`). */
 const EMPTY_TIMEOUT_MS = 5000;
+
+/** Absolute ceiling: even while the platform still reports runtimes pending,
+ *  fall back to the empty exits after this so a wedged version probe can never
+ *  hang the step on the scanning skeleton forever. */
+const EMPTY_HARD_TIMEOUT_MS = 20000;
 
 function FancyView({
   wsId,
@@ -80,6 +99,7 @@ function FancyView({
   onNext,
   onBack,
   onRefresh,
+  runtimesPending,
 }: {
   wsId: string;
   runtimes: AgentRuntime[];
@@ -89,30 +109,52 @@ function FancyView({
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
   onRefresh?: () => void | Promise<void>;
+  runtimesPending?: boolean;
 }) {
   const { t } = useT("onboarding");
   const qc = useQueryClient();
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
 
-  // Flip to "empty" only after we've waited long enough for the daemon
-  // to report. The 5s budget covers the bundled daemon's typical 1–3s
-  // boot; anything past that is a genuine "no runtime" situation and we
-  // switch from scanning skeletons to the skip / refresh exits.
-  // `scanEpoch` resets the timer when the user hits Refresh, so a
-  // freshly-installed CLI gets another scanning window before falling
-  // back to the empty state.
+  // Decide when an empty runtime list stops being "still scanning" and becomes
+  // the genuine "no runtime" exits. Two timers run while the list is empty:
+  //
+  //   - soft (EMPTY_TIMEOUT_MS): the normal budget. Once it fires we flip to
+  //     empty UNLESS `runtimesPending` says the platform (desktop daemon) is
+  //     still booting or mid-probe — registration on a host with several CLIs
+  //     can outlast the soft budget, and flashing "no runtime found" while the
+  //     daemon is still working is a false negative (MUL-5119).
+  //   - hard (EMPTY_HARD_TIMEOUT_MS): an absolute ceiling so a wedged probe
+  //     that never resolves `runtimesPending` back to false can't pin the step
+  //     on the scanning skeleton forever.
+  //
+  // `scanEpoch` resets both timers when the user hits Refresh, so a
+  // freshly-installed CLI gets another scanning window before falling back to
+  // the empty state.
   const [scanEpoch, setScanEpoch] = useState(0);
-  const [hasTimedOut, setHasTimedOut] = useState(false);
+  const [softTimedOut, setSoftTimedOut] = useState(false);
+  const [hardTimedOut, setHardTimedOut] = useState(false);
   useEffect(() => {
     if (runtimes.length > 0) return;
-    setHasTimedOut(false);
-    const id = window.setTimeout(() => setHasTimedOut(true), EMPTY_TIMEOUT_MS);
-    return () => window.clearTimeout(id);
+    setSoftTimedOut(false);
+    setHardTimedOut(false);
+    const soft = window.setTimeout(() => setSoftTimedOut(true), EMPTY_TIMEOUT_MS);
+    const hard = window.setTimeout(
+      () => setHardTimedOut(true),
+      EMPTY_HARD_TIMEOUT_MS,
+    );
+    return () => {
+      window.clearTimeout(soft);
+      window.clearTimeout(hard);
+    };
   }, [runtimes.length, scanEpoch]);
 
   const phase: Phase =
-    runtimes.length > 0 ? "found" : hasTimedOut ? "empty" : "scanning";
+    runtimes.length > 0
+      ? "found"
+      : hardTimedOut || (softTimedOut && runtimesPending !== true)
+        ? "empty"
+        : "scanning";
 
   const onlineCount = runtimes.filter((r) => r.status === "online").length;
 
@@ -163,7 +205,9 @@ function FancyView({
 
   const footerHint =
     phase === "found" && selected
-      ? t(($) => $.step_runtime.hint_selected, { name: selected.name })
+      ? t(($) => $.step_runtime.hint_selected, {
+          name: runtimeDisplayLabel(selected),
+        })
       : phase === "found"
         ? t(($) => $.step_runtime.hint_pick)
         : phase === "scanning"
@@ -182,7 +226,7 @@ function FancyView({
             <button
               type="button"
               onClick={onBack}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="flex items-center gap-1.5 text-body text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               {t(($) => $.common.back)}
@@ -229,38 +273,52 @@ function FancyView({
             )}
             {phase === "empty" && (
               <EmptyView
-                onSkip={() => onNext(null)}
+                onSkip={handleSkip}
                 onRefresh={handleRefresh}
                 refreshing={refreshing}
               />
             )}
 
+            {/* Footer action bar. The controls are phase-scoped so no dead or
+                duplicated affordance ever shows:
+                  - Skip: shown while scanning / found. The empty phase owns its
+                    own prominent Skip card, so the footer Skip is dropped there
+                    to avoid two "Skip for now" buttons on one screen.
+                  - Start exploring: only actionable once a runtime is picked, so
+                    it renders only in the found phase instead of sitting
+                    permanently disabled through scanning / empty. */}
             <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
               <span
                 aria-live="polite"
-                className="mr-auto text-xs text-muted-foreground"
+                className="mr-auto text-caption text-muted-foreground"
               >
                 {footerHint}
               </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  disabled={submitting}
-                  onClick={handleSkip}
-                >
-                  {t(($) => $.step_runtime.skip)}
-                </Button>
-                <Button
-                  size="lg"
-                  disabled={!canContinue || submitting}
-                  onClick={handleContinue}
-                >
-                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {t(($) => $.step_runtime.start_exploring)}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
+              {phase !== "empty" && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    disabled={submitting}
+                    onClick={handleSkip}
+                  >
+                    {t(($) => $.step_runtime.skip)}
+                  </Button>
+                  {phase === "found" && (
+                    <Button
+                      size="lg"
+                      disabled={!canContinue || submitting}
+                      onClick={handleContinue}
+                    >
+                      {submitting && (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      )}
+                      {t(($) => $.step_runtime.start_exploring)}
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </main>
@@ -286,10 +344,10 @@ function ScanningView() {
   const { t } = useT("onboarding");
   return (
     <div>
-      <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
+      <h1 className="text-balance font-serif text-display font-medium leading-[1.1] tracking-tight text-foreground">
         {t(($) => $.step_runtime.scanning_headline)}
       </h1>
-      <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
+      <p className="mt-4 max-w-[560px] text-body-lg leading-[1.55] text-muted-foreground">
         {t(($) => $.step_runtime.scanning_lede_prefix)}
         <span className="font-medium text-foreground">{"Claude Code"}</span>
         {", "}
@@ -334,14 +392,14 @@ function FoundView({
 
   return (
     <div>
-      <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
+      <h1 className="text-balance font-serif text-display font-medium leading-[1.1] tracking-tight text-foreground">
         {t(($) => $.step_runtime.found_headline)}
       </h1>
-      <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
+      <p className="mt-4 max-w-[560px] text-body-lg leading-[1.55] text-muted-foreground">
         {t(($) => $.step_runtime.found_lede)}
       </p>
 
-      <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-4 py-2.5 text-xs">
+      <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-4 py-2.5 text-caption">
         <span className="font-semibold text-foreground">
           {t(($) => $.step_runtime.runtime_count, { count: total })}
         </span>
@@ -391,7 +449,7 @@ function EmptyView({
   return (
     <div>
       <div className="flex items-start justify-between gap-4">
-        <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
+        <h1 className="text-balance font-serif text-display font-medium leading-[1.1] tracking-tight text-foreground">
           {t(($) => $.step_runtime.empty_headline)}
         </h1>
         <RefreshButton
@@ -400,7 +458,7 @@ function EmptyView({
           className="mt-2 shrink-0"
         />
       </div>
-      <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
+      <p className="mt-4 max-w-[560px] text-body-lg leading-[1.55] text-muted-foreground">
         {t(($) => $.step_runtime.empty_lede_prefix)}
         <span className="font-medium text-foreground">{"Claude Code"}</span>
         {", "}
@@ -449,14 +507,14 @@ function ComingSoonCard({
       className="flex items-center justify-between gap-4 rounded-lg border border-dashed bg-muted/20 px-5 py-4 opacity-70"
     >
       <div className="min-w-0">
-        <div className="text-[14.5px] font-medium text-foreground">{title}</div>
-        <p className="mt-1 text-[12.5px] leading-[1.55] text-muted-foreground">
+        <div className="text-body font-medium text-foreground">{title}</div>
+        <p className="mt-1 text-caption leading-[1.55] text-muted-foreground">
           {subtitle}
         </p>
       </div>
       <span
         aria-hidden
-        className="inline-flex shrink-0 items-center rounded-full border bg-background px-3 py-1.5 text-[12px] font-medium uppercase tracking-wide text-muted-foreground"
+        className="inline-flex shrink-0 items-center rounded-full border bg-background px-3 py-1.5 text-caption font-medium uppercase tracking-wide text-muted-foreground"
       >
         {badgeLabel}
       </span>
@@ -517,14 +575,14 @@ function EmptyCard({
       className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/30"
     >
       <div className="min-w-0">
-        <div className="text-[14.5px] font-medium text-foreground">{title}</div>
-        <p className="mt-1 text-[12.5px] leading-[1.55] text-muted-foreground">
+        <div className="text-body font-medium text-foreground">{title}</div>
+        <p className="mt-1 text-caption leading-[1.55] text-muted-foreground">
           {subtitle}
         </p>
       </div>
       <span
         aria-hidden
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 py-2 text-[13px] font-medium text-foreground transition-colors group-hover:border-foreground group-hover:bg-foreground group-hover:text-background"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 py-2 text-label font-medium text-foreground transition-colors group-hover:border-foreground group-hover:bg-foreground group-hover:text-background"
       >
         {actionLabel}
         <ArrowRight className="h-3.5 w-3.5" />
@@ -566,10 +624,10 @@ function RuntimeCard({
         <ProviderLogo provider={runtime.provider} className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-foreground">
-          {runtime.name}
+        <div className="truncate text-body font-medium text-foreground">
+          {runtimeDisplayName(runtime)}
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+        <div className="mt-0.5 flex items-center gap-1.5 font-mono text-micro text-muted-foreground">
           <span
             className={cn(
               "h-1.5 w-1.5 rounded-full",

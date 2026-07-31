@@ -42,12 +42,7 @@ COPY packages/ packages/
 # Re-link after source overlay (fixes any symlinks overwritten by COPY)
 RUN pnpm install --frozen-lockfile --offline
 
-# Set build-time env: tells Next.js rewrites to proxy API calls to the backend service
-ARG REMOTE_API_URL=http://backend:8080
-ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_APP_VERSION=dev
-ENV REMOTE_API_URL=$REMOTE_API_URL
-ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
 
@@ -60,6 +55,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV REMOTE_API_URL=http://backend:8080
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
@@ -70,6 +66,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 # Copy public assets
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+# Ship the license and attribution notices with the image (LICENSE condition 1b)
+COPY --chown=nextjs:nodejs LICENSE NOTICE ./
 
 USER nextjs
 

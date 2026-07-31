@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestClassifyTask pins the precedence rule on classifyTask. All five
+// TestClassifyTask pins the precedence rule on classifyTask. All four
 // kinds plus tiebreak cases for safety.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
@@ -17,9 +17,9 @@ func TestClassifyTask(t *testing.T) {
 		{"chat", TaskContextForEnv{ChatSessionID: "c"}, kindChat},
 		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "p"}, kindQuickCreate},
 		{"autopilot", TaskContextForEnv{AutopilotRunID: "r"}, kindAutopilotRunOnly},
-		{"comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindCommentTriggered},
-		{"assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindAssignmentTriggered},
-		{"assignment-bare", TaskContextForEnv{}, kindAssignmentTriggered},
+		{"issue-comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindIssue},
+		{"issue-assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindIssue},
+		{"issue-bare", TaskContextForEnv{}, kindIssue},
 		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
 		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
 		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
@@ -43,8 +43,7 @@ func TestTaskKindHasIssueContext(t *testing.T) {
 		kind taskKind
 		want bool
 	}{
-		{kindCommentTriggered, true},
-		{kindAssignmentTriggered, true},
+		{kindIssue, true},
 		{kindAutopilotRunOnly, false},
 		{kindQuickCreate, false},
 		{kindChat, false},
@@ -77,6 +76,38 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	}
 }
 
+// TestBuildMetaSkillContentIssueBodyFormatting pins the shared issue-body
+// hierarchy rule across every task kind that can author an issue.
+func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
+	t.Parallel()
+
+	fixtures := map[string]TaskContextForEnv{
+		"issue":        {IssueID: "i-1"},
+		"autopilot":    {AutopilotRunID: "r-1"},
+		"quick-create": {QuickCreatePrompt: "create an issue"},
+		"chat":         {ChatSessionID: "c-1"},
+	}
+
+	for name, ctx := range fixtures {
+		name, ctx := name, ctx
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("codex", ctx)
+			for _, want := range []string{
+				"## Issue Body Formatting",
+				"An issue title already serves as its H1.",
+				"do not add a Markdown H1 (`# ...`)",
+				"start with prose or `##` subheadings",
+				"Only add an H1 when the user specifically requests one",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("brief is missing issue-body formatting guidance %q\n---\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildMetaSkillContentSlimKindMatrix locks in which sections the
 // slim brief emits per task kind, machine-checking the matrix documented
 // on `buildMetaSkillContentSlim`. Heading is matched as a discrete line
@@ -92,31 +123,28 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		mustHave map[taskKind]bool
 	}
 	allKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
-		kindAutopilotRunOnly: true, kindQuickCreate: true, kindChat: true,
+		kindIssue: true, kindAutopilotRunOnly: true,
+		kindQuickCreate: true, kindChat: true,
 	}
-	issueKinds := map[taskKind]bool{
-		kindCommentTriggered: true, kindAssignmentTriggered: true,
-	}
+	issueKinds := map[taskKind]bool{kindIssue: true}
 	checks := []sectionCheck{
 		{"# Multica Agent Runtime", allKinds},
 		{"## Background Task Safety", allKinds},
 		{"## Agent Identity", allKinds},
 		{"## Available Commands", allKinds},
+		{"## Issue Body Formatting", allKinds},
 		{"### Workflow", allKinds},
 		{"## Important: Always Use the `multica` CLI", allKinds},
 		{"## Output", allKinds},
 		{"## Comment Formatting", issueKinds},
 		{"## Repositories", map[taskKind]bool{
-			kindCommentTriggered: true, kindAssignmentTriggered: true,
-			kindAutopilotRunOnly: true, kindChat: true,
+			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
 		{"## Issue Metadata", issueKinds},
-		{"## Instruction Precedence", map[taskKind]bool{kindAssignmentTriggered: true}},
+		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
 		{"## Skills", map[taskKind]bool{
-			kindCommentTriggered: true, kindAssignmentTriggered: true,
-			kindAutopilotRunOnly: true, kindChat: true,
+			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
 		{"## Mentions", issueKinds},
 		{"## Attachments", issueKinds},
@@ -129,9 +157,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			Repos: baseRepo, AgentSkills: baseSkill},
 		kindAutopilotRunOnly: {AutopilotRunID: "r-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
-		kindCommentTriggered: {IssueID: "i-1", TriggerCommentID: "tc-1",
-			AgentName: "Eve", AgentID: "eve-1", Repos: baseRepo, AgentSkills: baseSkill},
-		kindAssignmentTriggered: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
+		kindIssue: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
 	}
 
@@ -213,12 +239,46 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"run the work synchronously instead",
 		"Never background-and-yield",
 		"foreground tool call that blocks",
-		"gh run watch",
+		// MUL-5274: an explicitly requested persistent local service is a
+		// completed handoff, not unfinished run-owned work. Pin the narrow
+		// exception and its readiness / cleanup / honesty requirements.
+		"persistent service handoff",
+		"running service itself is the requested deliverable",
+		"stdio redirected to durable logs",
+		"PID/profile",
+		"verify readiness before replying",
+		"survival as best-effort, not guaranteed",
+		"does not cover tests, builds, CI polling",
+		"are not agent-owned background tasks",
+		"GitHub Actions after a successful push",
+		"Do not wait for them by default",
+		// MUL-5223 pins: named tool-shape bans, merge requirements
+		// denied as acceptance criteria, replacement hand-off phrasing,
+		// and the scoped escape hatch that keeps an explicitly requested
+		// CI result both permitted and executable.
+		"do NOT run `gh pr checks --watch`",
+		"any sleep / retry loop that polls check status",
+		"NOT your delivery acceptance criteria",
+		"CI running: <PR link>",
+		"unless the explicit exception below applies",
+		"The one exception",
+		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 		"running in the background so you can keep working",
 		"standing by",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
 		}
+	}
+	// `gh run watch` may only appear as a banned command, never as the
+	// section's example of how to wait properly.
+	if strings.Contains(out, "e.g. `gh run watch`") {
+		t.Errorf("slim Background Task Safety should not suggest waiting for external GitHub CI\n---\n%s", out)
+	}
+	// MUL-5274 review: with the persistent-service exception in the list, a
+	// "The rules above ..." scoping sentence would sweep in work that is
+	// precisely no longer run-owned after handoff.
+	if strings.Contains(out, "The rules above") {
+		t.Errorf("slim Background Task Safety must not reintroduce the ambiguous \"The rules above\" scoping sentence\n---\n%s", out)
 	}
 }

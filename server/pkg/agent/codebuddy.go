@@ -44,7 +44,22 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
-		"--disallowedTools", "AskUserQuestion",
+		// CodeBuddy's interactive tools have no UI to render in under the
+		// daemon's headless stream-json transport. AskUserQuestion and
+		// ExitPlanMode are both exempted from CodeBuddy's permission-mode
+		// finalization, so --permission-mode bypassPermissions does NOT
+		// auto-approve them — they always reach the permission bridge and
+		// stall the turn waiting for a confirmation nobody can give
+		// (GitHub #6012). EnterPlanMode is denied alongside them: leaving it
+		// enabled would let the model enter a plan mode it then has no tool
+		// to leave. Plan-shaped work still happens — the plan is written as
+		// ordinary assistant output instead of behind an approval gate.
+		//
+		// Pass one value per tool: --disallowedTools is variadic and
+		// CodeBuddy compares each entry against the tool name exactly
+		// (PermissionUtils.matchPermissionRules), so a comma-joined string
+		// would match nothing despite what the CLI's own help text claims.
+		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -404,6 +419,11 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 			"subtype":    "success",
 			"request_id": msg.RequestID,
 			"response": map[string]any{
+				// CodeBuddy's SdkPermissionClient reads `allowed` and treats a
+				// missing key as a denial; `behavior` is Claude Code's spelling,
+				// which the fork still honours on its other permission paths.
+				// Send both so an approval is never read as a silent reject.
+				"allowed":      true,
 				"behavior":     "allow",
 				"updatedInput": inputMap,
 			},

@@ -21,7 +21,12 @@
     "send_blocked_toast": "消息未发送——你已没有该智能体的使用权限",
     "attachment_bind_failed_toast": "消息已发送，但文件未能附加。请稍后重试。",
     "add_tooltip": "添加",
-    "upload_file": "图片或文件"
+    "upload_file": "图片或文件",
+    "project_context": "项目上下文",
+    "change_project_context": "更改项目上下文",
+    "remove_project_context": "移除项目上下文",
+    "no_projects": "还没有项目",
+    "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级"
   },
   "message_list": {
     "show_details": "查看详情",
@@ -36,6 +41,14 @@
       "runtime_offline": "智能体当前离线，暂时无法回复。等它恢复在线后再试。",
       "runtime_recovery": "智能体在完成前重启了。请重试。",
       "manual": "这次回复已取消。",
+      "skill_bundle_unavailable": "没能下载到智能体的 skill，这次回复没有启动。通常是网络连接问题，请重试。",
+      "provider_network": "与模型服务的连接中断，回复没能完成。检查网络后重试。",
+      "provider_auth_or_access": "智能体的模型账号登录已失效。重新登录后再试。",
+      "provider_quota_limit": "智能体的模型账号额度已用尽。充值或更换账号后再试。",
+      "provider_capacity_or_rate_limit": "模型服务繁忙或触发了限流。稍后再试。",
+      "context_overflow": "这次对话超出了模型的上下文长度。开一个新会话，或把需求拆得更小一些。",
+      "runtime_missing_executable": "在这台设备上找不到智能体的 CLI。确认已安装并且在 PATH 中，然后重试。",
+      "runtime_version_unsupported": "智能体的 CLI 版本过低。升级后重试。",
       "fallback": "出了点问题，智能体未能完成回复。请重试。"
     },
     "tools_other": "{{count}} 个工具",
@@ -45,7 +58,10 @@
     "copy_action": "复制",
     "copied_toast": "已复制",
     "copy_failed_toast": "复制失败",
-    "loading_older": "正在加载更早的消息…"
+    "loading_older": "正在加载更早的消息…",
+    "quick_actions_heading": "后续提问",
+    "quick_actions_regenerate": "重新生成建议",
+    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
   },
   "session_history": {
     "untitled": "无标题",

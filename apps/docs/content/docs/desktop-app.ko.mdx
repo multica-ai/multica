@@ -1,99 +1,144 @@
 ---
 title: 데스크톱 앱
-description: Multica Desktop이 무엇인지, 웹 앱과 어떻게 다른지, 언제 쓸 만한지 알아봅니다.
+description: Multica Desktop을 설치하고 데스크톱 탭과 내장 데몬을 사용하며 자체 호스팅 인스턴스에 연결합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica Desktop은 macOS, Windows, Linux용 네이티브 데스크톱 앱입니다. 구성된 환경에 대해 웹 앱과 동일한 백엔드에 연결되며 동일한 데이터를 보여줍니다. 기본적으로 Desktop은 Multica Cloud를 사용하며, 자체 호스팅 인스턴스는 로컬 런타임 설정 파일로 구성할 수 있습니다. Desktop은 브라우저가 할 수 없는 몇 가지 기능도 추가로 제공합니다: **[워크스페이스](/workspaces)별 독립적인 탭 그룹**, **[데몬](/daemon-runtimes) 자동 시작**, **원클릭 업그레이드**입니다.
+Multica Desktop은 macOS, Windows, Linux에서 사용할 수 있습니다. Web 버전과 같은 계정 및 워크스페이스 데이터를 사용하지만 로컬 데몬을 자동으로 관리하고 워크스페이스별 탭을 따로 유지합니다.
 
-## Desktop 또는 웹 — 무엇을 선택할까
+## Desktop과 Web
 
-| | 웹 | Desktop |
-|---|---|---|
-| 접근 방식 | 브라우저에서 URL 열기 | 네이티브 앱 설치 |
-| 다중 탭 | 브라우저 자체 탭 (워크스페이스 구분 없음) | **워크스페이스별 독립 탭 그룹 한 개** |
-| 데몬 | `multica daemon start`를 직접 실행 | 실행 시 **자동으로 시작** |
-| 업그레이드 | 새로고침하면 최신 버전 | 앱이 백그라운드에서 확인하고 다음 실행 시 설치 |
-| 로그인 후 데이터 | 동일 | 동일 |
+| | Web | Desktop |
+| --- | --- | --- |
+| 여는 방법 | 브라우저 | 데스크톱 앱 설치 |
+| 워크스페이스 탭 | 브라우저 탭 사용 | 워크스페이스별 독립 탭 모음 유지 |
+| 데몬 | CLI를 별도로 설치하고 시작 | 로그인 후 앱이 자동으로 시작 |
+| 업데이트 | 페이지 새로 고침 | 데스크톱 앱을 통해 업데이트 |
 
-**웹을 선택**: 일회성으로 사용하거나, 다른 사람의 기기에서 작업하거나, 아무것도 설치하고 싶지 않을 때.
-**Desktop을 선택**: 매일 사용하거나, 여러 워크스페이스를 동시에 다루거나, 데몬을 수동으로 관리하고 싶지 않을 때.
+잠시 확인하거나 공용 컴퓨터에서 사용할 때는 Web이 더 편리합니다.
 
-## 다중 탭: 워크스페이스를 전환하면 어떻게 되나
+둘 다 동시에 로그인할 수 있습니다. 같은 Multica 서비스에 연결되어 있으면 표시되는 데이터가 공유됩니다.
 
-Desktop은 **참여한 모든 워크스페이스**마다 독립적인 탭 그룹을 유지합니다. 워크스페이스를 전환하면 현재 워크스페이스의 탭이 하나의 단위로 숨겨지고, 이전 워크스페이스의 탭은 떠났던 그대로 복원됩니다 — VSCode의 멀티 워크스페이스 동작이나 Slack에서 워크스페이스를 전환하는 것과 비슷합니다.
+## 설치
 
-예시: 워크스페이스 A에서 이슈 탭 3개를 열어 둔 상태로 워크스페이스 B로 전환합니다. A의 탭 3개는 사라지고, B에는 B에서 마지막으로 열어 두었던 것이 표시됩니다. 다시 A로 전환하면 그 3개의 탭이 정확히 이전 상태 그대로 돌아옵니다. **탭은 워크스페이스 간에 절대 새어 나가지 않습니다.**
+[Multica 다운로드 페이지](https://multica.ai/download)에서 운영체제와 프로세서 아키텍처에 맞는 설치 패키지를 선택합니다.
 
-로그아웃하면 **모든 워크스페이스의 탭 상태가 지워지므로**, 여러 사용자가 기기를 공유하더라도 데이터가 새어 나가지 않습니다.
+| 플랫폼 | 설치 패키지 |
+| --- | --- |
+| macOS | `.dmg` |
+| Windows | `.exe` |
+| Linux | `.AppImage`, `.deb`, `.rpm` |
 
-## Desktop의 자동 업데이트 방식
-
-실행 시 Desktop은 GitHub Releases에서 더 최신 버전이 있는지 확인합니다. 새 버전이 발견되면:
-
-1. 백그라운드에서 새 버전을 조용히 다운로드합니다.
-2. "준비 완료 — 다음 실행 시 설치됩니다"라고 알려 줍니다.
-3. 종료(또는 다음 재시작) 시, 앱이 닫히기 전에 업데이트를 설치합니다.
-4. 다음 실행 시 새 버전이 실행됩니다.
-
-이 전체 과정은 **작업 중인 내용을 방해하지 않습니다**.
-
-<Callout type="warning">
-**Windows에서는 ARM64와 x64가 별도의 업데이트 채널입니다** — 잘못된 아키텍처를 설치하면 업데이트가 감지되지 않습니다. 다운로드할 때 기기에 맞는 `.exe`를 선택하세요 (ARM 빌드에는 `arm64` 접미사가 붙어 있습니다).
-</Callout>
-
-macOS 빌드는 서명 및 공증되어 있으므로, 첫 실행 시 "확인되지 않은 개발자" 경고가 표시되지 않습니다. Linux 빌드는 `.AppImage`입니다 — 자동 업데이트는 electron-updater에 의존하는데, 일부 배포판에서는 불안정할 수 있습니다. **자동 업데이트가 작동하지 않으면, 새 버전을 수동으로 다운로드하여 기존 파일을 교체하세요.**
-
-## 별도의 CLI와 데몬이 여전히 필요한가요?
-
-**아닙니다.** Desktop에는 동일한 `multica` CLI 바이너리가 내장되어 있으며, 시작 시 자체 데몬 프로필을 실행합니다 (터미널에서 수동으로 실행 중인 데몬과는 격리됩니다).
-
-이미 CLI를 설치하고 `multica daemon start`를 직접 실행했더라도, Desktop은 그 데몬을 가로채지 않습니다 — 별도의 프로필로 자체 데몬을 시작합니다. 둘은 **서로 다른 런타임**으로 등록되며, UI에서 두 개의 독립된 런타임을 볼 수 있습니다.
-
-터미널에서 CLI 명령을 실행하고 싶다면, Desktop이 특별한 경로를 제공하지는 않습니다 — 별도로 설치한 CLI를 사용하거나, 앱의 리소스 디렉터리 안 `resources/bin/multica`에 있는 번들 사본을 실행하세요.
-
-## 다운로드 및 설치
-
-[Multica 다운로드 페이지](https://multica.ai/download)에서 사용하는 플랫폼의 설치 프로그램을 받으세요:
-
-| 플랫폼 | 파일 |
-|---|---|
-| macOS (Intel 또는 Apple Silicon) | `.dmg` |
-| Windows x64 | `.exe` (표준) |
-| Windows ARM64 | `.exe` (`arm64` 접미사 포함) |
-| Linux | `.AppImage` |
-
-첫 실행 시 로그인이 필요합니다 — 웹 앱과 동일한 이메일 + 인증 코드 흐름입니다. 로그인하면 Desktop이 워크스페이스 목록을 자동으로 동기화합니다.
+설치 후 Web 버전과 같은 이메일로 로그인합니다. 로그인하면 Desktop이 내장 Multica CLI를 시작하고 로컬에 설치된 AI 코딩 도구를 감지합니다.
 
 <Callout type="info">
-**Desktop은 기본적으로 Multica Cloud를 사용하지만, 로컬 설정 파일로 자체 호스팅 인스턴스를 가리키도록 할 수 있습니다.** 앱 안에는 여전히 "자체 호스팅에 연결" 선택기가 없습니다. Desktop은 렌더러가 시작되기 전에 `~/.multica/desktop.json`을 읽습니다. 파일이 없으면 Cloud 기본값을 사용합니다.
+Desktop 내장 CLI는 앱이 런타임을 관리할 때만 사용합니다. 터미널에서 `multica issue` 같은 명령도 실행하려면 [빠른 시작 2단계](/cloud-quickstart#2-컴퓨터-연결)에 따라 CLI를 별도로 설치하세요.
+</Callout>
 
-최소 자체 호스팅 설정:
+## 데스크톱 탭
+
+Desktop은 워크스페이스마다 탭을 따로 저장합니다. 예를 들어 워크스페이스 A에서 이슈 세 개를 연 뒤 워크스페이스 B로 전환하면 B의 탭이 표시됩니다. A로 돌아오면 이전 세 탭이 그대로 남아 있습니다.
+
+같은 리소스는 현재 워크스페이스에서 한 번만 열립니다. 탭은 순서를 바꾸고, 고정하고, 닫을 수 있으며 각각의 앞으로 가기, 뒤로 가기, 스크롤 위치도 유지됩니다. 현재 배포 환경의 앱 링크를 클릭하거나 붙여 넣으면 브라우저로 이동하지 않고 탭에서 바로 열립니다.
+
+로그아웃하면 로컬에 저장된 모든 탭이 삭제되어 다음 로그인 사용자가 이전 계정의 페이지를 보지 못합니다.
+
+## 내장 데몬
+
+로그인하면 Desktop이 현재 Multica 서비스 전용 CLI profile을 만들고 이 profile로 데몬을 시작합니다. profile은 다음 위치에 있습니다.
+
+```text
+~/.multica/profiles/desktop-<host>/
+```
+
+터미널에서 사용하는 기본 profile을 읽거나 덮어쓰지 않습니다. 다른 데몬을 직접 동시에 시작하면 Multica에는 각각 별도 런타임으로 표시됩니다.
+
+Desktop 설정에서 실행 상태와 로그를 확인할 수 있습니다. 도구가 감지되지 않으면 먼저 일반 터미널에서 실행되고 로그인되어 있는지 확인한 뒤 Desktop 데몬을 다시 시작하세요.
+
+## Desktop 업데이트
+
+자동 업데이트는 기본으로 켜져 있습니다. 앱이 백그라운드에서 새 버전을 확인하고 다운로드합니다. 다운로드가 끝나면 즉시 다시 시작해 설치하거나 다음 종료 시 설치할 수 있습니다. **설정 → 업데이트**에서 자동 확인을 끄거나 새 버전을 직접 확인할 수도 있습니다.
+
+업데이트는 운영체제와 프로세서 아키텍처에 따라 배포됩니다.
+
+- Windows arm64와 macOS x64(Intel)는 각각 별도 업데이트 소스를 사용합니다.
+- 나머지 아키텍처는 기본 업데이트 소스를 사용합니다.
+- 앱이 업데이트 소스를 자동으로 맞추므로 직접 선택할 필요가 없습니다.
+- Linux 자동 업데이트는 `.AppImage`에서만 작동합니다. `.deb`와 `.rpm`은 새 설치 패키지를 내려받아 덮어씁니다.
+- 자동 업데이트에 실패해도 다운로드 페이지에서 해당 설치 패키지를 받아 덮어쓸 수 있습니다.
+
+## 자체 호스팅 인스턴스 연결
+
+Desktop은 기본적으로 Multica Cloud에 연결됩니다. 자체 호스팅 인스턴스에 연결하려면 사용자 디렉터리에 `~/.multica/desktop.json`을 만듭니다.
 
 ```json
 {
   "schemaVersion": 1,
-  "apiUrl": "https://api.your-domain"
+  "apiUrl": "https://api.example.com"
 }
 ```
 
-`apiUrl`은 필수이며 `http` 또는 `https`를 사용해야 합니다. Desktop은 동일 오리진에서 `wsUrl`을 `/ws`로 유도하고(`https`이면 `wss`, `http`이면 `ws`), API 오리진에서 `appUrl`을 유도합니다. 배포 환경이 서로 다른 오리진을 사용한다면 명시적으로 설정하세요:
+`apiUrl`은 backend의 공개 주소로 필수이며 `http` 또는 `https`를 사용해야 합니다. 다음 두 주소는 생략할 수 있으며 Desktop이 자동으로 추론합니다.
+
+- `wsUrl`: `apiUrl`의 프로토콜을 `ws` 또는 `wss`로 바꾸고 경로 뒤에 `/ws`를 추가합니다.
+- `appUrl`: 도메인이 `api.`로 시작하고 세 구간 이상이면 `api.` 접두사를 제거합니다(`api.example.com` → `example.com`). 그렇지 않으면 `apiUrl`과 동일하게 유지합니다.
+
+보통 `apiUrl`만 작성하면 됩니다. 추론 결과가 맞지 않을 때 명시적으로 덮어쓰면 됩니다. 일반적인 경우는 세 가지입니다.
+
+- Web과 API가 서로 다른 도메인을 사용
+- WebSocket을 별도로 배포
+- 도메인이 접두사 제거 규칙을 만족하지 않음(`api.local` 같은 두 구간 도메인은 접두사를 제거하지 않음)
 
 ```json
 {
   "schemaVersion": 1,
-  "apiUrl": "https://api.your-domain",
-  "wsUrl": "wss://api.your-domain/ws",
-  "appUrl": "https://your-domain"
+  "apiUrl": "https://api.example.com",
+  "appUrl": "https://app.example.com",
+  "wsUrl": "wss://ws.example.com/socket"
 }
 ```
 
-`desktop.json`이 존재하지만 유효하지 않으면, Desktop은 안전하게 동작을 차단하여 Cloud로 조용히 되돌아가는 대신 차단형 설정 오류를 표시합니다. 개발 빌드의 경우, `electron-vite dev` 중에는 여전히 `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`이 우선합니다. 런타임 Desktop 자체 호스팅 구성은 [issue #1371](https://github.com/multica-ai/multica/issues/1371)에서 구현되었습니다.
+저장한 뒤 Desktop을 다시 시작합니다. 설정 파일이 존재하지만 JSON, 버전, URL이 유효하지 않으면 앱에 설정 오류가 표시되고 Cloud에 자동 연결되지 않습니다. 해당 파일을 삭제하고 다시 시작하면 기본 Cloud 설정으로 돌아갑니다.
+
+<Callout type="warning">
+Desktop은 브라우저와 실행 컴퓨터에서 모두 접근할 수 있는 주소에만 연결할 수 있습니다. 원격 자체 호스팅 인스턴스에 HTTPS가 없거나 WebSocket 프록시가 설정되지 않으면 Desktop이 연결되지 않습니다. 전체 설정은 [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)을 참고하세요.
+</Callout>
+
+## Windows Defender가 Multica를 바이러스로 탐지하는 경우
+
+**증상**: Windows 보안이 `Trojan:Script/Wacatac.B!ml` 같은 위협을 보고하고 Desktop 설치 경로 안의 파일을 격리합니다. 격리되는 대상은 보통 앱 실행 파일이 아니라 함께 포함된 CLI입니다.
+
+```text
+C:\Users\<사용자>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
+```
+
+**오탐입니다.** `!ml` 접미사는 이 판정이 악성코드 시그니처 일치가 아니라 Defender의 머신러닝 휴리스틱에서 나왔다는 뜻입니다. Multica의 Windows 빌드는 아직 Authenticode 코드 서명을 하지 않았고, 갓 배포된 서명 없는 바이너리가 백그라운드 프로세스를 띄우고 네트워크 연결을 여는 형태는 이런 휴리스틱이 가장 의심스럽게 평가하는 프로필입니다. 모든 Windows 산출물은 이 저장소의 공개 소스에서 GitHub Actions로 빌드됩니다.
+
+**직접 검증할 수 있습니다** — 모든 GitHub 릴리스에는 CLI 아카이브 전체를 포함한 `checksums.txt`가 함께 게시됩니다.
+
+```powershell
+Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
+```
+
+출력된 해시를 [최신 릴리스](https://github.com/multica-ai/multica/releases/latest)의 `checksums.txt` 해당 줄과 비교하세요.
+
+**해결 방법**:
+
+1. **격리된 파일 복원** — Windows 보안 → *바이러스 및 위협 방지* → *보호 기록* → Multica 항목 선택 → *작업* → *복원*.
+2. **제외 항목 추가** (다시 격리되지 않도록) — *바이러스 및 위협 방지* → *설정 관리* → *제외* → *제외 추가 또는 제거* → *폴더*에서 다음 두 경로를 모두 추가합니다.
+   - `%LOCALAPPDATA%\Programs\@multicadesktop`
+   - `%APPDATA%\Multica`
+
+   두 경로 모두 필요합니다. 포함된 CLI가 사라지면 Desktop이 대체 바이너리를 `%APPDATA%\Multica\bin`에 내려받기 때문에, 설치 폴더만 제외하면 새로 받은 파일이 다시 격리되는 상황이 반복됩니다.
+3. **오탐을 Microsoft에 신고** — [Microsoft Security Intelligence 파일 제출 페이지](https://www.microsoft.com/en-us/wdsi/filesubmission)에서 *Software developer*와 *Incorrectly detected as malware*를 선택하세요. 모든 사용자에 대해 탐지를 철회시키는 방법은 이것이며, 보통 며칠 안에 반영됩니다.
+
+<Callout type="warning">
+이 제외 항목은 [다운로드 페이지](https://multica.ai/download) 또는 [GitHub 릴리스](https://github.com/multica-ai/multica/releases)에서 설치했고 체크섬이 일치하는 경우에만 추가하세요. 제외를 설정하면 해당 폴더 안의 모든 파일에 대해 실시간 보호가 꺼집니다.
 </Callout>
 
 ## 다음 단계
 
-- [Cloud Quickstart](/cloud-quickstart) — Desktop을 위한 Cloud 온보딩 흐름
-- [Self-Host Quickstart](/self-host-quickstart) — 자체 백엔드를 실행하고 CLI 또는 Desktop 런타임 설정으로 연결하기
-- [데몬 및 런타임](/daemon-runtimes) — 데몬의 작동 방식 (Desktop이 대신 시작해 주지만 동작은 동일합니다)
+- [빠른 시작](/cloud-quickstart) — 처음 연결하는 과정을 진행합니다.
+- [데몬과 런타임](/daemon-runtimes) — 내장 데몬의 작동 방식을 알아봅니다.
+- [문제 해결](/troubleshooting) — 연결 문제를 해결합니다.

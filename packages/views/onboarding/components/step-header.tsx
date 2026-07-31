@@ -66,7 +66,7 @@ export function StepHeader({ currentStep }: { currentStep: OnboardingStep }) {
           );
         })}
       </div>
-      <span className="text-xs font-medium text-muted-foreground">
+      <span className="text-caption font-medium text-muted-foreground">
         {t(($) => $.step_header.step_of, { current: safeIndex + 1, total })}
       </span>
     </div>

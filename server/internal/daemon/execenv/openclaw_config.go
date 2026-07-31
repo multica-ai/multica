@@ -28,19 +28,40 @@ const openclawConfigFile = "openclaw-config.json"
 // at 0o600 next to the wrapper.
 const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 
-// openclawCLITimeout caps each `openclaw config ...` invocation during task
-// setup. The CLI is fast (<200ms normal); 5s leaves headroom for a cold
-// node start without letting a hung CLI stall task dispatch indefinitely.
+// openclawCLITimeout is the context deadline set on each `openclaw config ...`
+// invocation during task setup. The CLI is fast (<200ms normal); 5s leaves
+// headroom for a cold node start.
+//
+// It is a deadline, not a guaranteed cap — see the gap below.
+//
+// Known gap (deliberately not fixed here): this deadline does not actually
+// bound the call when the CLI leaves a descendant holding stdout.
+// CommandContext kills only the direct child, and cmd.Output() blocks in
+// Wait() until the stdout pipe closes, so the call runs for the descendant's
+// lifetime. Measured on linux/dash: a shim whose backgrounded child slept 6s
+// took 6.01s against a 150ms deadline. An npm shim is that shape on Windows
+// (cmd.exe → node).
+//
+// A cmd.WaitDelay backstop bounds the call but leaves the descendant running
+// (measured: returns in 2.17s with the grandchild still in state S), trading a
+// hang for a process leak — and on Unix nothing reaps it, because
+// preparationProcessController.finish() is a no-op there. Closing this properly
+// needs process-tree ownership (Unix process group, Windows Job Object) so the
+// deadline can terminate the whole tree, which is its own change with its own
+// risk surface. Tracked in MUL-5467; this file intentionally keeps the existing
+// behaviour rather than shipping half of it.
 const openclawCLITimeout = 5 * time.Second
 
 // OpenclawConfigPrep is the input to prepareOpenclawConfig. Only OpenclawBin
 // is meaningful in production — Timeout is here for tests that need a tight
-// cap to assert error paths.
+// deadline to assert error paths.
 type OpenclawConfigPrep struct {
 	// OpenclawBin is the openclaw CLI binary to invoke for config introspection.
 	// Empty means resolve "openclaw" from PATH at exec time.
 	OpenclawBin string
-	// Timeout caps each CLI invocation. Zero falls back to openclawCLITimeout.
+	// Timeout sets the context deadline for each CLI invocation — not a
+	// guaranteed cap on how long the call takes; see openclawCLITimeout. Zero
+	// falls back to openclawCLITimeout.
 	Timeout time.Duration
 	// McpConfig is the agent's saved `mcp_config` JSON (Claude-style
 	// `{"mcpServers": {"<name>": {...}}}`). When non-null the wrapper pins
@@ -760,6 +781,23 @@ var openclawExec = execOpenclawCLI
 // stderr is captured separately and appended to error messages — failures
 // here surface up to the daemon log, and a `openclaw doctor` hint there is
 // more useful than just an exit code.
+//
+// When the CLI is a batch shim that exits non-zero and says nothing at all,
+// openclawShimDiagnostic adds the interpreter-resolution detail that a bare
+// `exit status 1` hides (MUL-5422 / #6061). Real stderr always wins — the
+// diagnostic is a fallback for the silent case, not a replacement.
+//
+// Attribution order matters. openclawCLITimeout kills the child via
+// CommandContext, and a killed process surfaces as *exec.ExitError
+// ("signal: killed") — indistinguishable by type from a genuine exit 1. So the
+// context is checked FIRST; otherwise a timeout gets reported as "node is not
+// on PATH, install Node.js", sending the user to fix something that was never
+// broken.
+//
+// In that branch the CONTEXT error is what gets %w-wrapped, not the process
+// error, so errors.Is(err, context.DeadlineExceeded) holds for callers that
+// check cancellation the standard way. The process error is still printed for
+// diagnosis, just not as the wrapped cause.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = os.Environ()
@@ -768,8 +806,17 @@ func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, e
 	raw, err := cmd.Output()
 	if err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stderrMsg != "" {
+				return "", fmt.Errorf("openclaw %s: %w (process: %v; stderr: %s)", strings.Join(args, " "), ctxErr, err, stderrMsg)
+			}
+			return "", fmt.Errorf("openclaw %s: %w (process: %v)", strings.Join(args, " "), ctxErr, err)
+		}
 		if stderrMsg != "" {
 			return "", fmt.Errorf("openclaw %s: %w (stderr: %s)", strings.Join(args, " "), err, stderrMsg)
+		}
+		if diag := openclawShimDiagnostic(bin, err); diag != "" {
+			return "", fmt.Errorf("openclaw %s: %w (%s)", strings.Join(args, " "), err, diag)
 		}
 		return "", fmt.Errorf("openclaw %s: %w", strings.Join(args, " "), err)
 	}

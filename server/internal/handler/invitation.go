@@ -451,7 +451,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	slog.Info("invitation accepted", "invitation_id", invitationID, "user_id", userID, "workspace_id", uuidToString(accepted.WorkspaceID))
 
 	wsID := uuidToString(accepted.WorkspaceID)
-	memberResp := memberWithUserResponse(member, user)
+	memberResp := h.memberWithUserResponse(member, user)
 
 	// Broadcast member:added so existing clients update their member lists.
 	eventPayload := map[string]any{"member": memberResp}

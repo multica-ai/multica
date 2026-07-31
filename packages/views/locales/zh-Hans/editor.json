@@ -34,7 +34,14 @@
     "copy_link": "复制链接",
     "delete": "删除",
     "link_copied": "已复制链接",
-    "copy_link_failed": "复制链接失败"
+    "copy_link_failed": "复制链接失败",
+    "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。"
+  },
+  "canvas": {
+    "zoom_in": "放大",
+    "zoom_out": "缩小",
+    "zoom_fit": "适应窗口",
+    "zoom_actual": "实际大小"
   },
   "attachment": {
     "download_failed": "下载链接获取失败，请稍后重试。",
@@ -81,7 +88,11 @@
   },
   "upload": {
     "failed": "{{filename}} 上传失败：{{reason}}",
-    "in_progress": "上传中…"
+    "in_progress": "上传中…",
+    "interrupted": "上传已中断——文件未保存。请重新添加。",
+    "remove": "移除",
+    "uploading_label": "正在上传 {{filename}}…",
+    "failed_label": "{{filename}} 上传失败"
   },
   "title_editor": {
     "title_aria_label": "标题"
@@ -96,11 +107,6 @@
     "copy_source": "复制图表源码",
     "show_source": "显示源码",
     "show_diagram": "显示图表",
-    "zoom_in": "放大",
-    "zoom_out": "缩小",
-    "zoom_fit": "适应窗口",
-    "zoom_actual": "实际大小",
-    "reset_view": "重置视图",
     "export": "导出",
     "export_png": "下载 PNG",
     "export_svg": "下载 SVG",

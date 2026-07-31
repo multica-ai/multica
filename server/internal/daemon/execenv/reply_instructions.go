@@ -81,8 +81,11 @@ func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string)
 // timeline (oldest-first, server cap 2000), point the agent at the triggering
 // CONVERSATION: `--thread <trigger> --tail 30` returns that thread's root plus
 // its 30 newest replies (root is always included, even at --tail 0) — the
-// context the triggering comment actually needs. A `--recent 10` pointer is kept
-// for cross-thread background the agent can pull on judgment.
+// context the triggering comment actually needs. Cross-thread background is a
+// cheap `--roots-only --summary` scan; the hint deliberately does NOT name
+// `--recent`, whose saturation trap and pagination live once in the brief's
+// `## Available Commands` (MUL-5372). Per-turn hints name only the reads they
+// actually want the agent to run.
 //
 // Both surfaces call this so the cold fallback cannot drift between them (same
 // single-source rule as BuildNewCommentsHint, PR #2816). Returns "" when there
@@ -97,8 +100,9 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 		"Read the triggering conversation first: "+
 			"`multica issue comment list %s --thread %s --tail 30 --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"Need cross-thread background? `multica issue comment list %s --recent 10 --output json` "+
-			"(resolved threads come back folded — `--full` to expand).\n\n",
+			"Need cross-thread background? Scan the other threads cheaply with "+
+			"`multica issue comment list %s --roots-only --summary --output json` and expand only "+
+			"what looks relevant.\n\n",
 		issueID, threadID, issueID,
 	)
 }

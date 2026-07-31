@@ -11,7 +11,7 @@
  *   - Linear's editor (Tiptap-based, 14px body)
  *
  * Key decisions:
- *   Body: 14px (text-sm), line-height 1.625 (between GitHub 1.5 and Tailwind 1.714)
+ *   Body: 14px (text-body), line-height 1.625 (between GitHub 1.5 and Tailwind 1.714)
  *   Headings: h1=22px (1.57x), h2=18px (1.29x), h3=15px (1.07x) — compact but
  *     with clear hierarchy. Previous h3 was 14px (same as body = no differentiation).
  *   Paragraph spacing: 10px (was 8px; GitHub uses 10px, Tailwind prose-sm uses 16px)
@@ -38,7 +38,7 @@
 
 /* Headings — compact but with clear visual hierarchy */
 .rich-text-editor h1 {
-  font-size: 1.375rem;
+  font-size: var(--text-display-sm);
   font-weight: 700;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
@@ -47,7 +47,7 @@
 }
 
 .rich-text-editor h2 {
-  font-size: 1.125rem;
+  font-size: var(--text-title);
   font-weight: 600;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
@@ -55,7 +55,7 @@
 }
 
 .rich-text-editor h3 {
-  font-size: 0.9375rem;
+  font-size: var(--text-body-lg);
   font-weight: 600;
   margin-top: 1rem;
   margin-bottom: 0.5rem;
@@ -311,10 +311,10 @@
 .rich-text-editor td {
   text-align: left;
   padding: 0.625rem 1rem;
-  font-size: 0.875rem;
+  font-size: var(--text-body);
   /* Match body-paragraph line-height. Tiptap wraps cell content in <p>
      (which carries 1.625); the readonly render keeps bare text in the cell,
-     which otherwise inherits the host's text-sm line-height (~1.43) and
+     which otherwise inherits the host's text-body line-height (~1.43) and
      makes every readonly cell 2.5px shorter per line. */
   line-height: 1.625;
 }

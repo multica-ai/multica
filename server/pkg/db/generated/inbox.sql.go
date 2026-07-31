@@ -559,6 +559,41 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 	return i, err
 }
 
+const markInboxUnread = `-- name: MarkInboxUnread :one
+UPDATE inbox_item SET read = false
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+`
+
+// Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+// the inbox renders one row per issue carrying that group's NEWEST item, and
+// the group's read state is that item's read state. Flipping the whole group
+// unread would resurrect older siblings the user already dealt with and
+// inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+// UI shows.
+func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, markInboxUnread, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
 const unarchiveInboxByIssue = `-- name: UnarchiveInboxByIssue :execrows
 UPDATE inbox_item SET archived = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true

@@ -1,222 +1,106 @@
 ---
-title: エージェントランタイムをインストールする
-description: Multica はあなたのマシンにインストールされている AI コーディングツールを駆動します。このページでは、デーモンがそれらを検出できるように、サポートされている 16 種のツールをそれぞれインストールする方法を説明します。
+title: AI コーディングツールをインストールする
+description: 対応する AI コーディングツールをインストールしてログインし、Multica がローカル環境でタスクを実行できるようにします。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica における**ランタイム**とは、あなたのマシンのデーモンと、デーモンが `PATH` で見つけた AI コーディングツール 1 つが組になったものです。オンボーディングの「ランタイムを接続」ステップで **No supported tools detected** と表示される場合、それはデーモンが `PATH` をスキャンしたものの、駆動方法を知っている 16 種のツールのいずれも見つけられなかったことを意味します。以下のツールのいずれか（または複数）をインストールしてから、そのステップに戻って再スキャンしてください — 数秒以内にランタイムが表示されます。
+ローカルランタイムは、Multica デーモンと、デーモンが呼び出せる AI コーディングツールの 2 つで構成されます。使用するツールだけをインストールすればよく、すべてをインストールする必要はありません。
 
-このページは次のドキュメントのインストール側の補完ドキュメントです。
+## 1. ツールを選ぶ
 
-- [デーモンとランタイム](/daemon-runtimes) — 検出の仕組み
-- [AI コーディングツールマトリクス](/providers) — 各ツールができることとできないこと（セッション再開、MCP、モデル選択）
+すでにインストールしてログイン済みのツールには、追加設定は不要です。モデル、MCP、セッション再開、スキルの対応状況はツールごとに異なります。詳しくは [AI コーディングツール比較](/providers)を参照してください。
+
+Multica は現在、次のコマンドを検出します。
+
+| ツール | 検出するコマンド | 公式インストールガイド |
+| --- | --- | --- |
+| Antigravity CLI | `agy` | [Antigravity のインストールとログイン](https://antigravity.google/docs/cli-install) |
+| Claude Code | `claude` | [Claude Code クイックスタート](https://code.claude.com/docs/en/quickstart) |
+| CodeBuddy Code | `codebuddy` | [CodeBuddy クイックスタート](https://www.codebuddy.ai/docs/cli/quickstart) |
+| Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
+| GitHub Copilot CLI | `copilot` | [Copilot CLI のインストール](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
+| Cursor Agent | `cursor-agent` | [Cursor CLI のインストール](https://docs.cursor.com/en/cli/installation) |
+| DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
+| Grok Build | `grok` | [Grok Build クイックスタート](https://docs.x.ai/build/overview) |
+| Hermes Agent | `hermes` | [Hermes クイックスタート](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
+| Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
+| Kiro CLI | `kiro-cli` | [Kiro CLI のインストール](https://kiro.dev/docs/cli/installation/) |
+| OpenClaw | `openclaw` | [OpenClaw のインストール](https://docs.openclaw.ai/install) |
+| OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
+| Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Qoder CLI | `qodercli` | [Qoder CLI クイックスタート](https://docs.qoder.com/en/cli/quick-start) |
+| Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
+| TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
+
+ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
+
+## 2. ローカル環境でログインする
+
+インストール後、まずターミナルからツールを単独で起動し、各ツールの手順に従ってログインするか、モデルプロバイダーを設定してください。ターミナル上でリクエストを実行できない場合は、デーモンから呼び出しても失敗します。
+
+ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 
 <Callout type="info">
-Multica サーバーがあなたの API キーやツール自体を見ることは決してありません。以下のすべて — インストール、認証、モデルアクセス — はあなたのローカルマシン上に存在します。何かが失敗する場合、それはほぼ常にローカルの問題です。
+Claude Code は 2.0.0 以降、Codex は 0.100.0 以降、Copilot は 1.0.0 以降、Grok は 0.2.89 以降、Qwen Code は 0.20.0 以降が必要です。最低バージョンを満たしていない場合、デーモンはそのランタイムを登録しません。
 </Callout>
 
-## 始める前に
+## 3. デーモンからコマンドを見つけられることを確認する
 
-以下の**すべての**ツールに 2 つの前提条件が適用されます。
+macOS、Linux、WSL では、次を実行します。
 
-1. **Multica デーモンが実行中である必要があります。** [Multica CLI](/cli) をインストールした後に `multica daemon start` を実行するか、デーモンを自動的に起動する [Multica デスクトップアプリ](/desktop-app)を使用してください。デーモンが実行されていなければ、ツールを検出する主体がありません。
-2. **ツールのバイナリが `PATH` で到達可能である必要があります。** デーモンは各ツールを名前で呼び出して実行します（各セクションの**デーモンが探す名前**の列を参照）。ターミナルで `which <name>` で見つからなければ、デーモンも見つけられません。インストール後は、新しいターミナルを開く（またはデーモンを再起動する）ことで、新しい `PATH` エントリが反映されるようにしてください。
+```bash
+command -v <command>
+<command> --version
+```
 
-ツールをインストールした後は、デーモンを再起動してください。
+Windows PowerShell では、次を実行します。
+
+```powershell
+Get-Command <command>
+<command> --version
+```
+
+`<command>` は表にあるコマンド名に置き換えてください。たとえば `claude`、`codex`、`cursor-agent` です。最初のコマンドで実行ファイルのパスが返れば、検出できています。
+
+ターミナルではツールを見つけられるのに、Desktop やバックグラウンドのデーモンでは見つからない場合、両者が異なる `PATH` を使っていることが一般的な原因です。アプリを再起動するか、対応する `MULTICA_<PROVIDER>_PATH` 環境変数で絶対パスを指定してください。設定の詳細は[環境変数](/environment-variables#デーモン設定)を参照してください。
+
+## 4. 再検出してオンライン状態を確認する
+
+CLI でデーモンを起動します。
+
+```bash
+multica daemon start
+```
+
+デーモンがすでに実行中の場合は、新しいツールをインストールした後に再起動します。
 
 ```bash
 multica daemon restart
 ```
 
-または、デスクトップアプリではアプリを再起動するだけで構いません。デーモンは起動するたびに `PATH` を再スキャンします。
+Multica Desktop を使っている場合は、アプリを終了して開き直してください。
 
-## サポートされている 16 種のツール
+次に Multica の**ランタイム**ページを開きます。対象のコンピューターの下にツールが表示され、オンライン状態になっていることを確認してください。これで、エージェントを作成または編集するときにこのランタイムを選択できます。
 
-おおよそ利用者の多い順に並べています。すでに認証情報を持っているものを選んで使ってください — 16 種すべてをインストールする必要はありません。
+<Callout type="warning">
+デーモンの起動時には、標準対応している CLI が少なくとも 1 つ検出される必要があります。カスタムランタイム設定はデーモンの起動後に同期されるため、ツールが何もないコンピューターで唯一の起動条件として使うことはできません。
+</Callout>
 
-### Claude Code (Anthropic)
+## ツールが検出されない場合
 
-最も完全な連携です。セッション再開が動作し、MCP が動作し、エージェントの `mcp_config` フィールドを消費します（詳しくは[マトリクス](/providers)を参照）。
+次の順番で確認してください。
 
-| | |
-|---|---|
-| デーモンが探す名前 | `claude` |
-| インストール | [claude.com/claude-code](https://www.claude.com/claude-code) の公式ガイドに従ってください。標準的な方法は npm パッケージ `@anthropic-ai/claude-code` です（Node.js 18+ が必要）。 |
-| 認証 | `claude` を一度実行して CLI 内のログイン手順に従うか、`ANTHROPIC_API_KEY` を設定してください。 |
-| 備考 | 新しいユーザーに最初に推奨する選択肢です。 |
+1. ターミナルからツール自体を実行し、インストールとログインが完了していることを確認します。
+2. `command -v` または `Get-Command` で、実際のコマンド名とパスを確認します。
+3. `multica daemon logs -f` を実行し、バージョン、パス、認証に関するエラーを確認します。
+4. デーモンを再起動し、現在の環境を読み込み直します。
+5. **ランタイム**ページに戻り、コンピューターとツールがどちらもオンラインであることを確認します。
 
-### Codex (OpenAI)
+ツールがオンラインと表示されているのに実行が失敗する場合は、イシューの実行ログで CLI が返した具体的なエラーを確認するか、[トラブルシューティング](/troubleshooting)を参照してください。
 
-よりきめ細かい承認ゲートを備えた JSON-RPC 2.0 のトランスポートです。**セッション再開は動作します** — Multica は Codex app-server の `thread/resume` で再開し、古いまたは存在しない thread では新しい thread にフォールバックします。
+## 次のステップ
 
-| | |
-|---|---|
-| デーモンが探す名前 | `codex` |
-| インストール | [github.com/openai/codex](https://github.com/openai/codex) の公式ガイドに従ってください。標準的な方法は npm パッケージ `@openai/codex` です。 |
-| 認証 | `codex login`（ブラウザベース）または `OPENAI_API_KEY`。 |
-
-### Cursor (Anysphere)
-
-Cursor エディタに対応する CLI です。**セッション再開は動作します** — 現在の Cursor Agent は stream-json イベントで `session_id` を返し、Multica は次回実行時に `--resume <id>` でそれを渡します。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `cursor-agent` |
-| インストール | [Cursor エディタ](https://cursor.com/)をインストールしてから、[docs.cursor.com](https://docs.cursor.com/) のドキュメントに従って CLI をインストールしてください。バイナリ名は `cursor` ではなく `cursor-agent` です。 |
-| 認証 | Cursor エディタを通じてログインすると、CLI がそのセッションを再利用します。 |
-
-### GitHub Copilot
-
-モデルのルーティングはあなたの GitHub アカウントのエンタイトルメント（entitlement）を通じて行われます — ツールが自分でモデルを選ぶのではなく、どのモデルを受け取るかは GitHub が決めます。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `copilot` |
-| インストール | GitHub の CLI ドキュメント [github.com/github/copilot-cli](https://github.com/github/copilot-cli) を参照してください。 |
-| 認証 | CLI を通じたブラウザベースの GitHub ログイン。 |
-| 備考 | ログインしているアカウントに有効な GitHub Copilot サブスクリプションが必要です。 |
-
-### OpenCode (SST)
-
-オープンソースの CLI エージェントです。独自の設定ファイルから利用可能なモデルを動的に発見します — 自分のモデルカタログを持ち込みたいユーザーによく合います。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `opencode` |
-| インストール | [opencode.ai](https://opencode.ai/) の公式ガイド、または GitHub リポジトリ [github.com/sst/opencode](https://github.com/sst/opencode) に従ってください。一般的な方法はインストールスクリプトまたは npm パッケージです。 |
-| 認証 | OpenCode のドキュメントに従ってモデルプロバイダー（Anthropic、OpenAI など）を構成してください。 |
-
-### DevEco Code (Huawei)
-
-**DevEco Code** は Huawei の HarmonyOS 開発向け独立コーディングエージェントで、OpenCode エンジンをベースに構築されています。独自のモデルカタログと Huawei アカウント認証を備えます。Multica は `deveco run --format json` で駆動し、モデルは `deveco models` から動的に探索されます（内蔵 `deveco/GLM-5.1`）。MCP サーバーは DevEco ネイティブ設定（`DEVECO_CONFIG_CONTENT`）で行います。Multica 側の `mcp_config` 連携は開発中です。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `deveco` |
-| インストール | `npm install -g @deveco/deveco-code`。公式 README [gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code/blob/develop/README.en.md) または npm ページ [npmjs.com/package/@deveco/deveco-code](https://www.npmjs.com/package/@deveco/deveco-code) を参照してください。 |
-| 対応プラットフォーム | Windows x64 と macOS（arm64/x64）のみ。Linux ビルドは提供されていません。 |
-| 認証 | DevEco CLI 経由の Huawei アカウントログイン。 |
-
-### Kiro CLI (Amazon)
-
-ACP-over-stdio のトランスポートです。セッション再開は ACP `session/load` を通じて動作し、スキルは `.kiro/skills/` にコピーされます。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `kiro-cli` |
-| インストール | [kiro.dev](https://kiro.dev/) の Kiro ドキュメントを参照してください。バイナリ名は `kiro` ではなく `kiro-cli` です。 |
-| 認証 | AWS アカウントベースで、Kiro 独自のオンボーディングに従ってください。 |
-
-### Kimi (Moonshot)
-
-ACP プロトコルのエージェントで、主に中国市場を対象としています。スキルは `.kimi/skills/` 配下に置かれます（ネイティブ発見）。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `kimi` |
-| インストール | [github.com/MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli) の公式ガイドに従ってください。 |
-| 認証 | Moonshot API キーで、ベンダーのドキュメントに従って構成します。 |
-
-### Hermes (Nous Research)
-
-ACP プロトコルのエージェントです（Kimi とトランスポートを共有）。セッション再開が動作します。スキル注入のパスは汎用の `.agent_context/skills/` にフォールバックします — 依存する前に、スキルが正しくロードされているか確認してください。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `hermes` |
-| インストール | 最新の CLI ディストリビューションは Nous Research のリポジトリ [github.com/NousResearch](https://github.com/NousResearch) を参照してください。 |
-| 認証 | ベンダーのドキュメントに従います。 |
-
-### OpenClaw
-
-オープンソースの CLI エージェントオーケストレーターです。**モデルはエージェント層にバインドされます**（`openclaw agents add --model`） — タスクごとに上書きすることはできず、Multica から `--model` や `--system-prompt` を渡すこともできません。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `openclaw` |
-| インストール | プロジェクト [github.com/openclaw-org/openclaw](https://github.com/openclaw-org/openclaw) を参照してください（コミュニティによる保守）。 |
-| 認証 | OpenClaw のドキュメントに従って、基盤となるモデルプロバイダーを構成してください。 |
-
-### Pi (Inflection AI)
-
-ミニマルです。**セッション再開の方式が特殊です** — 再開 id が文字列 id ではなく、ディスク上のセッションファイルへのパスです。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `pi` |
-| インストール | Inflection の CLI ドキュメント [pi.ai](https://pi.ai/) を参照してください。 |
-| 認証 | ベンダーのドキュメントに従います。 |
-
-### CodeBuddy (Tencent)
-
-Claude Code 互換の CLI エージェントです。Multica は Claude Code と同じ stream-json プロトコルで駆動します: セッション再開は `--resume` で動作し、MCP 構成は `--mcp-config` で渡されます。CodeBuddy は Claude のディレクトリを再利用せず独自の設定ディレクトリを使うため、スキルは `.codebuddy/skills/` に配置され、ランタイムのブリーフは `CODEBUDDY.md` に書き込まれます。モデルは動的に探索されます。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `codebuddy` |
-| インストール | 公式 CLI ドキュメント [codebuddy.ai/cli](https://www.codebuddy.ai/cli) を参照してください。 |
-| 認証 | ベンダーのドキュメントに従います。 |
-
-### Qoder (Alibaba)
-
-stdio 上で ACP プロトコルを使用するエージェント型のコーディング CLI です（Hermes、Kimi、Kiro CLI とトランスポートを共有します）。セッション再開は ACP `session/resume` を通じて動作し、MCP 構成は ACP `mcpServers` として渡され、モデル選択は動的に探索され、スキルは `.qoder/skills/` にコピーされます。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `qodercli` |
-| インストール | 公式 CLI ドキュメント [qoder.com/cli](https://qoder.com/cli) を参照してください。 |
-| 認証 | ベンダーのドキュメントに従います。 |
-
-### Trae CLI (ByteDance)
-
-ByteDance 公式の TRAE CLI（`traecli`、Trae IDE と組み合わせて使う製品で、**オープンソースの `bytedance/trae-agent` ではありません**）です。ACP ネイティブのため、Multica は stdio 上で `traecli acp serve --yolo` を通じて駆動し、Hermes、Kimi、Kiro CLI、Qoder とトランスポートを共有します。セッション再開は ACP `session/load`、MCP 構成は ACP `mcpServers`、モデル選択は動的探索で動作し、スキルは `.traecli/skills/` にコピーされます。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `traecli` |
-| インストール | 公式 CLI ドキュメント [docs.trae.cn/cli](https://docs.trae.cn/cli) を参照してください。 |
-| 認証 | `traecli` を一度対話的に実行してブラウザベースの企業ログインを完了してください。Trae IDE へのログインと CLI へのログインは別です。 |
-
-### Antigravity (Google)
-
-Google の Antigravity CLI（`agy`）です。Google の Antigravity サービスと組になり、Gemini ベースのモデルを実行します。セッション再開は `--conversation <id>` を通じて動作し、デーモンが CLI のログファイルからこれをキャプチャします。モデル選択は Antigravity CLI 自体の内部で管理されます — Multica はこのプロバイダーに対してエージェントごとのモデルピッカーを無効にします。スキルは `.agents/skills/` に書き込まれます（CLI が Gemini CLI のワークスペーススキルレイアウトを継承します — [Antigravity ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `agy` |
-| インストール | [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview) の公式ガイドに従ってください。CLI はあらかじめビルドされて提供されます — `agy install` を一度実行して PATH とシェルエイリアスを設定してください。 |
-| 認証 | `agy` を対話的に一度実行して Google アカウントのログインを完了するか、Antigravity デスクトップアプリを通じてログインしてください — CLI は GUI が書き込んだ keyring エントリを再利用します。 |
-| 備考 | CLI は構造化されたイベントストリームではなく、stdout に通常のアシスタントテキストを出力します。途中の「I will run X」の行と最終的な応答の両方がテキストとして Multica に中継されます。 |
-
-### Grok (xAI)
-
-xAI の Grok Build CLI（`grok`）です。Multica は `grok --no-auto-update agent --always-approve stdio` で ACP 接続し、`initialize` 後に CLI が提示した認証方式を選んで `authenticate` を完了してからセッションを作成します。セッション再開は ACP `session/load`、モデル検出は `session/new`、MCP は ACP `mcpServers` で動作します。スキルは `.grok/skills/` にコピーされ、ユーザーのスキルは `$GROK_HOME/skills/`（既定は `~/.grok/skills/`）または共通の `~/.agents/skills/` から検出されます。
-
-| | |
-|---|---|
-| デーモンが探す名前 | `grok` |
-| インストール | Grok Build CLI をインストールし、`grok` を `PATH` に追加してください（通常は `~/.grok/bin`）。 |
-| 認証 | `grok login` を実行するか、`XAI_API_KEY` を設定してください。ACP が提示した対応方式がない場合、Multica はセッション作成前に明示的に失敗します。 |
-| 備考 | バイナリは `MULTICA_GROK_PATH`、既定モデルは `MULTICA_GROK_MODEL` で上書きできます。最小 CLI バージョンは `0.2.89` です。 |
-
-## インストールした後
-
-1. **バイナリが `PATH` にあるか確認してください。** 新しいターミナルを開いて `which <name>`（例: `which claude`、`which cursor-agent`、`which kiro-cli`、`which agy`）を実行してください。パスが出力されれば、デーモンが見つけられます。何も出力されない場合は、まずシェルの `PATH` を修正してください（典型的な原因は、リロードされていないシェルごとの rc ファイルです）。
-2. **デーモンを再起動してください。** `multica daemon restart` を実行するか、デスクトップアプリを再起動してください。デーモンは起動時にのみ `PATH` をスキャンします。
-3. **ランタイムページを確認してください。** Multica UI の**ランタイム**ページに、`(ワークスペース × ツール)` の組み合わせごとに 1 行ずつ表示されるはずです。行に「offline」と表示される場合は、[デーモンとランタイム → ランタイムがオフラインと表示されるとき](/daemon-runtimes#when-a-runtime-is-marked-offline)を参照してください。
-4. **オンボーディングに戻ってください。** 「ランタイムを接続」ステップはポーリングを行い、数秒以内に新しいランタイムを認識します — リロードは不要です。
-
-## トラブルシューティング
-
-- **`which` はバイナリを見つけるのにデーモンは見つけません。** デーモンが古い `PATH` で起動されています。再起動してください。
-- **バイナリは存在するのに起動に失敗します。** ターミナルからツール自体の `--version` や `--help` を一度実行してください — ここで発生する失敗のほとんどは、認証の欠落、期限切れのトークン、または Node.js / ランタイムの不一致です。
-- **ランタイムページに行は表示されるのに、タスクがすぐに失敗します。** タスクをトリガーしながら `multica daemon logs -f` を確認してください。デーモンはツール自体のエラー出力をそのまま表示します。
-
-より広範な症状については、[トラブルシューティングガイド](/troubleshooting)を参照してください。
-
-## 次に
-
-- [デーモンとランタイム](/daemon-runtimes) — 検出、ハートビート、オフライン処理の仕組み
-- [AI コーディングツールマトリクス](/providers) — ツールが接続された後の機能差
-- [エージェントの作成と構成](/agents-create) — エージェントに使うツールを選び、タスクの実行を開始する
+- [エージェントを作成・設定する](/agents-create) — 接続したランタイムを選択する
+- [デーモンとランタイム](/daemon-runtimes) — オンライン状態、同時実行、カスタムランタイムについて確認する
+- [AI コーディングツール比較](/providers) — Multica で使える機能をツールごとに比較する

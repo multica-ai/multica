@@ -18,13 +18,14 @@ import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 export interface UseIssueActionsResult {
   isPinned: boolean;
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
+  openInNewTab: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
   removeParent: () => void;
   openAddChild: () => void;
-  openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
+  openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
 /**
@@ -109,6 +110,33 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
   );
 
+  // Explicit "open it somewhere else" CTA, so the new tab takes focus
+  // (`activate: true`) — the user is asking to move into the new context, not
+  // to stash it for later the way modifier-click does. Same contract as the
+  // table row open and the attachment preview's "Open in new tab".
+  //
+  // Only desktop implements `openInNewTab`; on web it is undefined and we fall
+  // back to a real browser tab via the shareable URL.
+  const openInNewTab = useCallback(() => {
+    if (!issueId) return;
+    // Identifier form, same as copyLink: on web this becomes a real browser
+    // tab at the shareable URL, so it is a link the user sees and may copy out
+    // of the address bar. Opening on the UUID would also make the route
+    // immediately rewrite the fresh tab's URL.
+    const path = paths.issueDetail(issueIdentifier || issueId);
+    if (navigation.openInNewTab) {
+      navigation.openInNewTab(path, issueIdentifier ?? undefined, {
+        activate: true,
+      });
+      return;
+    }
+    window.open(
+      navigation.getShareableUrl(path),
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, [issueId, issueIdentifier, navigation, paths]);
+
   const togglePin = useCallback(() => {
     if (!issueId) return;
     if (isPinned) {
@@ -120,13 +148,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;
-    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
+    // Share the identifier form (`/{ws}/issues/MUL-123`): a pasted link should
+    // say which issue it points at. The UUID form stays valid, so links copied
+    // before this still resolve.
+    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId));
     if (await copyText(url)) {
       toast.success(t(($) => $.detail.link_copied));
     } else {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
-  }, [paths, issueId, navigation, t]);
+  }, [paths, issueId, issueIdentifier, navigation, t]);
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
@@ -185,12 +216,12 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   }, [openModal, issueId]);
 
   const openDeleteConfirm = useCallback(
-    (opts?: { onDeletedNavigateTo?: string }) => {
+    (opts?: { onDeletedFallbackPath?: string }) => {
       if (!issueId) return;
       openModal("issue-delete-confirm", {
         issueId,
         identifier: issueIdentifier,
-        onDeletedNavigateTo: opts?.onDeletedNavigateTo,
+        onDeletedFallbackPath: opts?.onDeletedFallbackPath,
       });
     },
     [openModal, issueId, issueIdentifier],
@@ -199,6 +230,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   return {
     isPinned,
     updateField,
+    openInNewTab,
     togglePin,
     copyLink,
     openCreateSubIssue,

@@ -308,7 +308,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 
 	if assistantCreated {
-		resp := agentToResponse(assistant)
+		resp := h.agentToResponse(assistant)
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 			userID, req.WorkspaceID, uuidToString(assistant.ID),

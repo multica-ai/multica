@@ -14,8 +14,8 @@ at the bottom before relying on an exact line.
 | `runIssuePullRequests` handler | `server/cmd/multica/cmd_issue.go:507` | new citation |
 | Calls `GET /api/issues/<id>/pull-requests` | `server/cmd/multica/cmd_issue.go:522` | `:522` (unchanged) |
 | API route registration | `server/cmd/server/router.go:480` | `:480` (unchanged) |
-| Handler `ListPullRequestsForIssue` → `Queries.ListPullRequestsByIssue` | `server/internal/handler/github.go:466,471` | `:466` (unchanged) |
-| Row → response mapper `issuePullRequestRowToResponse` | `server/internal/handler/github.go:149` | new citation |
+| Handler `ListPullRequestsForIssue` → `Queries.ListPullRequestsByIssue` | `server/internal/handler/github.go:687,692` | `:466` |
+| Row → response mapper `issuePullRequestRowToResponse` | `server/internal/handler/github.go:205` | `:149` |
 
 The CLI resolves the issue ref, GETs the endpoint, and (for `--output json`)
 prints the raw `{"pull_requests": [...]}` body. Only `--output` is accepted; the
@@ -23,25 +23,33 @@ default `table` shows `NUMBER STATE TITLE URL`.
 
 ## PR response shape
 
-`GitHubPullRequestResponse` struct: `server/internal/handler/github.go:51`. JSON
+`GitHubPullRequestResponse` struct: `server/internal/handler/github.go:58`. JSON
 fields the agent can read off each element of `pull_requests`:
 
-- `number` (`json:"number"`, line 56)
-- `html_url` (`json:"html_url"`, line 59)
-- `title` (`json:"title"`, line 57)
-- `state` (`json:"state"`, line 58) — the folded lifecycle enum (see below)
-- `merged_at` (`json:"merged_at"`, line 63), `closed_at` (line 64)
-- `mergeable_state` (`json:"mergeable_state"`, line 70) — mirrors GitHub; UI only
+- `provider` (`json:"provider"`, line 63)
+- `number` (`json:"number"`, line 67)
+- `html_url` (`json:"html_url"`, line 70)
+- `title` (`json:"title"`, line 68)
+- `state` (`json:"state"`, line 69) — the folded lifecycle enum (see below)
+- `merged_at` (`json:"merged_at"`, line 74), `closed_at` (line 75)
+- `mergeable_state` (`json:"mergeable_state"`, line 80) — mirrors GitHub; UI only
   surfaces `clean`/`dirty`, other values round-trip as unknown
-- `checks_conclusion` (`json:"checks_conclusion"`, line 74) — aggregated
-  `"passed"`/`"failed"`/`"pending"` or `null` (no observed suite)
-- `checks_passed` / `checks_failed` / `checks_pending` (lines 78-80) — per-suite
-  counts; `aggregateChecksConclusion` (line 183) folds them into
-  `checks_conclusion`
+- `snapshot_available` (`json:"snapshot_available"`, line 100) — for GitHub,
+  true only when the App snapshot feature is enabled and the snapshot head
+  matches the current PR head (`currentGitHubSnapshotAvailable`, lines 258-265)
+- `mergeable` / `merge_state_status` (lines 90, 94) — conflict-only verdict vs
+  the complete merge gate; "ready" requires `merge_state_status == "clean"`
+- `checks_rollup` (`json:"checks_rollup"`, line 105) and run-level
+  `checks_total` / `checks_passed` / `checks_failed` / `checks_running`
+  (lines 111-114), plus `failed_check_names` (line 118)
+- `checks_conclusion` (`json:"checks_conclusion"`, line 108) — coarse
+  `"passed"`/`"failed"`/`"pending"` or `null`; GitHub derives it only from an
+  available current-head snapshot (mapper lines 242-254), while self-hosted VCS
+  providers use `aggregateChecksConclusion` (line 275)
 
 There is **no** standalone `draft` or `merged` boolean in the response. The
 PR lifecycle is encoded in the single `state` string by `derivePRState`
-(`server/internal/handler/github.go:994`):
+(`server/internal/handler/github.go:1317`):
 
 ```
 merged   → if PullRequest.Merged
@@ -51,7 +59,7 @@ open     → otherwise
 ```
 
 `derivePRState` is called when the webhook upserts the row
-(`server/internal/handler/github.go:682`), so `state` is what the list endpoint
+(`server/internal/handler/github.go:1115`), so `state` is what the list endpoint
 returns. "Is it merged?" = `state == "merged"` (or `merged_at != null`); "is it a
 draft?" = `state == "draft"`. Combine with `checks_conclusion` for CI status.
 
@@ -121,6 +129,9 @@ and is hidden from the PR list.
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
 | Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
+| `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
+| Assignment brief: ordinary agent `in_progress` then `in_review`; squad leader `in_progress` only on first dispatch | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowAssignment`) | new citation |
+| Failed task may roll `in_progress` → `todo` when no active task remains | `server/internal/service/task.go` (`HandleFailedTasks`) | new citation |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
@@ -146,7 +157,10 @@ away, so no task is left orphaned.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
-`todo` is the woken agent's decision, not a server side effect.
+`todo` is the woken agent's decision, not a server side effect. When the woken
+assignee (often a squad leader) decides the parent is complete, the system
+comment explicitly asks for `multica issue status <parent-id> in_review` —
+comment-triggered runs otherwise must not change status unless asked.
 
 ## Metadata CLI
 

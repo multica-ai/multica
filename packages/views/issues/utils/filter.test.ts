@@ -93,6 +93,14 @@ describe("filterIssues", () => {
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
   });
 
+  it("treats an explicitly active empty assignee predicate as match-none", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      assigneeFilterActive: true,
+    });
+    expect(result).toEqual([]);
+  });
+
   it("hides assigned issues when only 'No assignee' is selected", () => {
     const result = filterIssues(issues, { ...NO_FILTER, includeNoAssignee: true });
     expect(result.every((i) => !i.assignee_id)).toBe(true);

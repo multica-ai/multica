@@ -1,155 +1,87 @@
 ---
-title: AI コーディングツール対応表
-description: Multica は 16 個の AI コーディングツールをサポートしています。すべて同じインターフェースを実装していますが、機能の詳細は大きく異なります。
+title: AI コーディングツール比較
+description: Multica が対応する AI コーディングツールと、モデル、MCP、セッション、スキルの違いを比較します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica は **16 個の AI コーディングツール**を標準でサポートしています。これらはすべて同じインターフェース（キューへの投入、ディスパッチ、実行、結果の返却）を実装しているため、同じ Multica ボードからどれでも動かすことができます。**しかし機能の詳細は大きく異なります**: セッション再開が実際に動作するか、MCP をサポートするか、スキルファイルがどこに置かれるか、モデルをどう選択するか。このページがその完全な対応表です。
+Multica は、普段使っている AI コーディングツールの代わりになるものではありません。ランタイムがコンピューターにインストール済みでログイン済みのツールを呼び出し、実行の進捗と結果をイシューに書き戻します。
 
-エージェントを作成するときにツールを選ぶ際のガイダンスは、[エージェントの作成と構成](/agents-create)を参照してください。
+すでにいずれかのツールを使っている場合は、通常そのまま使い続けられます。ツールを選ぶときは、次の 4 点を確認してください。
 
-## 機能対応マトリクス
+- コンピューターにすでにインストールされているか
+- アカウントでどのモデルを利用できるか
+- Multica から MCP を設定する必要があるか
+- チームでどのスキルを再利用したいか
 
-| ツール | ベンダー | セッション再開 | MCP | スキル注入パス | モデル選択 |
-|---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | 動的探索（`agy models`） |
-| **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | 静的 + flag |
-| **CodeBuddy** | Tencent | ✅ | ✅ | `.codebuddy/skills/` | 動的探索 |
-| **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | 静的 |
-| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静的（アカウントの権限で決定） |
-| **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 動的探索 |
-| **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/`（タスクごとのホーム） | 動的探索 |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 動的探索 |
-| **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 動的探索 |
-| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 動的探索 + variant |
-| **DevEco Code** | Huawei（ファーウェイ） | ✅ | ❌ | `.deveco/skills/` | 動的探索（`deveco models`） |
-| **OpenClaw** | オープンソース | ✅ | ✅ | `.agent_context/skills/`（フォールバック） | エージェントにバインドされ、タスクごとに切り替え不可 |
-| **Pi** | Inflection AI | ✅（セッションがファイルパス） | ❌ | `.pi/skills/` | 動的探索 |
-| **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | 動的探索 |
-| **Trae CLI** | ByteDance | ✅（ACP `session/load`） | ✅ | `.traecli/skills/` | 動的探索 |
-| **Grok** | xAI | ✅（ACP `session/load`） | ✅ | `.grok/skills/` | 動的探索（ACP `session/new`） |
+インストール方法は [AI コーディングツールをインストールする](/install-agent-runtime)を参照してください。
 
-## 各ツールの用途
+## 対応ツール
 
-### Antigravity
+| ツール | 検出コマンド | セッション再開 | Multica による MCP 管理 | スキルの注入先 |
+|---|---|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | `.codebuddy/skills/` |
+| Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | 1 回の実行専用の `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
-Google が提供します。CLI バイナリ名は `agy` です。Google の Antigravity サービスと連携し、Gemini ベースのデフォルトモデルが付属しています。**セッション再開が動作します** — `--conversation <id>` を通じて行われ、stdout が構造化されたイベントストリームではなくプレーンテキストであるため、デーモンが CLI のログファイルから conversation UUID をキャプチャします。**モデル選択が動作します** — `--model` flag（agy 1.0.6 で追加）を通じて行われ、デーモンが `agy models` でカタログを列挙し、選択された値をそのまま渡します。これらは `provider/model` slug ではなく `Claude Opus 4.6 (Thinking)` のような人間が読める表示名である点に注意してください。また agy は認識できない値を渡すと黙って空実行するため、手入力ではなく検出されたリストから選ぶことをおすすめします。スキルは `.agents/skills/` に配置されます（CLI が Gemini CLI のワークスペーススキルレイアウトをそのまま継承します — [Antigravity 移行ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
+「Multica による MCP 管理」とは、エージェント設定に MCP server を入力し、Multica が実行前にその設定を対応ツールへ渡せることを意味します。そのツールにほかの MCP 設定方法がない、という意味ではありません。
 
-### Claude Code
+## モデルの取得元
 
-Anthropic が提供します。**新規ユーザーにとって第一の選択肢**であり、最も完成度の高い機能セットを備えています: セッション再開が実際に動作し、MCP 構成を読み取り、`--max-turns` や `--append-system-prompt` のような細かな調整 flag をサポートします。Anthropic API キーが必要です。
+エージェントを作成するとき、モデル一覧は対応するランタイムから取得されます。固定されたモデル名を提供するツールもあれば、ローカル設定、ログイン中のアカウント、サブスクリプションに応じて利用可能なモデルを返すツールもあります。
 
-### CodeBuddy
+モデルを選択しない場合、Multica はそのツールのデフォルト設定を使用します。一覧が空の場合は、ランタイムがオンラインでツールにログイン済みであることを確認してから、モデル一覧を更新してください。
 
-Tencent が提供します。Claude Code 互換の CLI エージェントです — Multica は Claude Code と同じ stream-json プロトコルで駆動するため、セッション再開が動作し（`--resume` 経由）、MCP 構成は `--mcp-config` で渡されます。CodeBuddy は Claude のディレクトリを再利用せず独自の設定ディレクトリを使うため、スキルは `.codebuddy/skills/` に配置され、ランタイムのブリーフは `CODEBUDDY.md` に書き込まれます。モデルは動的に探索されます。
-
-### Codex
-
-OpenAI が提供します。JSON-RPC 2.0 を使用し、ステートフルな能力がより強く、よりきめ細かい承認メカニズム（`exec_command` および `patch_apply` に対する手動承認）を備えています。MCP 構成はタスクごとの `$CODEX_HOME/config.toml` に書き込まれます。**セッション再開は動作します** — Multica は Codex app-server の `thread/resume` で再開します。保存済み thread が見つからない、または古い場合は、新しい thread にフォールバックしてタスクを続行します。
-
-### Copilot
-
-GitHub が提供します。モデルルーティングは GitHub アカウントの権限を経由します — ツールが直接モデルを選択するのではなく、GitHub がどのモデルを提供するかを決定します。`.github/skills/` にスキルを置くのは GitHub CLI のネイティブな探索メカニズムです。
-
-### Cursor
-
-Anysphere が提供し、Cursor エディターに対応する CLI です。**セッション再開は動作します** — 現在の Cursor Agent の stream-json イベントには `session_id` が含まれ、Multica は次回実行時に `--resume <id>` でそれを渡します。MCP 構成はタスクワークスペースの `.cursor/mcp.json` に書き込まれ、Cursor のプロジェクト approval ファイルはタスクごとの `CURSOR_DATA_DIR` 配下に置かれるため、管理対象 MCP server はユーザーのグローバル Cursor approvals に依存しません。
-
-### Hermes
-
-Nous Research が提供します。ACP プロトコルを使用します（Kimi とトランスポート層を共有します）。セッション再開が動作し、MCP 構成は ACP `mcpServers` として渡されます。Hermes はスキルを自身のホームディレクトリ（`~/.hermes/skills/`）と設定済みの `skills.external_dirs` からのみ探索し、ワークスペース相対の探索は行いません。そのため、**エージェントにスキルが割り当てられている場合のみ**、Multica は `HERMES_HOME` をユーザーの `~/.hermes/` のタスクごとオーバーレイに向けます。実ホームはシンボリックリンクでミラーされ（auth／シークレットも含むためトークン更新が伝播します）、派生した `config.yaml` が既存スキルを読み取り専用の external root として参照し、割り当てられたスキルだけがその `skills/` ディレクトリに書き込まれて優先されます。グローバルスキルはそのまま機能します。Multica は共有の `~/.hermes/` を直接書き換えず、読み取ってリンクするだけですが、Hermes 自身がミラーされたシンボリックリンク経由で書き込む場合（トークン更新など）は伝播します。`custom_args` の `-p`/`--profile` 指定は尊重されます。オーバーレイはその profile のホームからシードされ、フラグは起動コマンドから消費されるため、オーバーレイを迂回できません。タスクの記憶はタスクごとに隔離されます。新しい `memories/` ディレクトリに加え、派生設定で外部 `memory.provider` バックエンドを無効化するので、ディスク上のメモも共有の Supermemory/Hindsight 的バンクもタスク間で共有されません（マネージドで agent スコープの記憶バックエンドは今後の別課題です）。SQLite の `state.db` セッションストアとジャーナルファイルもタスクローカルで、Hermes がオーバーレイ内に作成します。ホストの会話履歴はリンクもコピーもされず、Windows で稼働中の WAL ロックがセットアップを妨げることもありません。スキルが割り当てられていない Hermes タスクは実ホームのまま変わりません。なお home のプラットフォーム既定はネイティブ Windows では `%LOCALAPPDATA%\hermes` です。
-
-**Hermes profile を選択する。** 特定の profile で Hermes を起動するには、エージェントの `custom_args` に profile フラグと profile 名を 2 つの独立したエントリとして設定します。たとえば `research` という profile を使う場合:
-
-```json
-["-p", "research"]
-```
-
-`"-p research"` のように 1 つの文字列へまとめないでください。Multica は配列の各要素を 1 つの argv エントリとしてツールへ渡します。`custom_args` はエージェントごとに設定します — [エージェントの作成と構成](/agents-create)を参照してください。
-
-### Kimi
-
-Moonshot が提供し、中国市場を対象としています。Hermes と ACP プロトコルを共有し、MCP 構成も ACP `mcpServers` として渡されますが、スキルパス `.kimi/skills/` は Kimi CLI のネイティブな探索メカニズムであり、Hermes のフォールバックとは異なります。
-
-### Kiro CLI
-
-Amazon が提供します。`kiro-cli acp` を通じて stdio 上で ACP を使用します。セッション再開は ACP `session/load` で動作し、MCP 構成は ACP `mcpServers` として渡され、モデル選択は `session/set_model` で動作し、スキルはプロジェクトレベルのネイティブ探索のために `.kiro/skills/` にコピーされます。
-
-### OpenCode
-
-SST が提供するオープンソースです。利用可能なモデルと model variant を動的に探索します（CLI の構成ファイルをスキャン）。セッション再開が動作し、エージェントの `mcp_config` フィールドを消費します。Multica は `OPENCODE_CONFIG_CONTENT` 環境変数でインライン注入するため、エージェントの MCP server はタスク workdir の `opencode.json`（エージェントまたはユーザーが所有するファイル）を書き換えずに OpenCode に届きます。モデルが variant を公開している場合、Multica はそれをエージェントの thinking selector として表示し、選択値を `opencode run --variant` で OpenCode に渡します。**自分のモデルカタログをカスタマイズしたい、いじるのが好きなユーザーに適しています。**
-
-### DevEco Code
-
-**DevEco Code** は Huawei（ファーウェイ）の HarmonyOS 開発向け独立コーディングエージェント（`deveco` CLI、[gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code)）です。OpenCode エンジンをベースにしつつ、単体で完成した成熟製品として提供され、独自のモデルカタログと provider（内蔵 `deveco/GLM-5.1`）、Huawei アカウント認証、専用の設定・スキル体系（`~/.config/deveco/` と `.deveco/skills/`）を備えます。Multica は `deveco run --format json` で駆動し、NDJSON イベントストリームをパースします。**セッション再開が動作します**（`--session <id>` 経由）。モデルは `deveco models` から動的に探索され、システムコンテキストはタスクごとの `AGENTS.md` で渡されます。MCP サーバーは DevEco ネイティブの `DEVECO_CONFIG_CONTENT` チャネルで設定します。Multica 側の `mcp_config` 連携は開発中のため、現時点では DevEco エージェントの MCP タブは非表示になります。認証は `deveco auth login`（Huawei アカウント）で行います。
-
-### OpenClaw
-
-オープンソースプロジェクトであり、CLI エージェントオーケストレーターです。MCP 構成は Multica のタスクごとの config wrapper 経由で書き込まれます。**モデルはエージェント層にバインドされます**（`openclaw agents add --model`） — タスクごとに上書きできません。構成は厳格に制御されます: ユーザーは `--model` や `--system-prompt` を渡せず、エージェント登録時の構成が決定します。
-
-### Pi
-
-Inflection AI が提供し、ミニマルです。**セッション再開の方式が独特です** — セッション ID が文字列 ID ではなく、ディスク上のファイルパス（`~/.pi/...`）です。他のツールでは再開 id は CLI が返す文字列ですが、Pi では再開 id はセッションファイルそのものです。
-
-### Qoder
-
-Alibaba が提供します。エージェント型のコーディング CLI です。stdio 上で ACP プロトコルを使用します（Hermes、Kimi、Kiro CLI とトランスポートを共有します）。セッション再開は ACP `session/resume` を通じて動作し、MCP 構成は ACP `mcpServers` として渡され、モデル選択は動的に探索され、スキルはネイティブ探索のために `.qoder/skills/` にコピーされます。
-
-### Trae
-
-ByteDance 公式の TRAE CLI（`traecli`、Trae IDE と組み合わせて使う製品で、オープンソースの `bytedance/trae-agent` ではありません）です。ACP ネイティブのため、Multica は `traecli acp serve --yolo` で stdio 経由で駆動します。Kiro や Qoder と同じトランスポートです。セッション再開は ACP `session/load` で動作し、MCP 構成は ACP `mcpServers` として渡され、モデルは動的に探索されて `session/set_model` でタスクごとに切り替えられます。スキルは `.traecli/skills/` にコピーされます。
-
-### Grok
-
-xAI の Grok Build CLI（`grok`）です。Multica は `grok --no-auto-update agent --always-approve stdio` で ACP 接続します。`initialize` の応答後、CLI が提示した方式から `xai.api_key`（`XAI_API_KEY` 設定時に優先）または `cached_token` を選び、`authenticate` の成功を待ってからセッションを作成または読み込みます。利用可能な方式がなければ明示的に失敗します。セッション再開は ACP `session/load`、モデルは `session/new` から動的に探索して `session/set_model` で切り替えます。`grok-4.5` の reasoning effort は公式対応の `low`、`medium`、`high` のみです。MCP 構成は ACP `mcpServers` で渡されます。スキルは `.grok/skills/` に書き込まれ、ユーザースキルは `$GROK_HOME/skills/`（既定 `~/.grok/skills/`）と共通の `~/.agents/skills/` から探索されます。
-
-## セッション再開: 実際にサポートするツール
-
-セッション再開のメカニズムは[タスク](/tasks#can-a-task-continue-from-the-previous-context)で扱います。**サポートされているすべてのツールがセッションを再開できます** — 再開 id を渡すと、タスクは以前のコンテキストから続行します。唯一の例外は Pi で、再開 id が文字列 ID ではなくディスク上のセッションファイルへのパスです（上記の [Pi](#pi) を参照）。
-
-## MCP 構成: ツールごとの対応
-
-**16 個のツールのうち、`mcp_config` を実際に消費するのは 12 個です: Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI、Grok**。残りの 4 個（Antigravity、Copilot、DevEco Code、Pi）はこのフィールドを受け取りますが、**無視します** — エラーも警告もなく、構成はただ効果を発揮しません。
-
-接続方式はツールごとに異なります: Claude Code と CodeBuddy は `--mcp-config` と `--strict-mcp-config` で受け取り、Codex は daemon 管理の `mcp_servers` ブロックをタスクごとの `$CODEX_HOME/config.toml` に書き込み、Cursor は `.cursor/mcp.json` とタスクごとの `CURSOR_DATA_DIR` 配下のプロジェクト approval を書き込みます。Hermes、Kimi、Kiro CLI、Qoder、Trae CLI、Grok は ACP `mcpServers` で受け取ります。OpenCode は `OPENCODE_CONFIG_CONTENT` 環境変数でインライン構成を受け取り、OpenClaw は Multica のタスクごとの config wrapper 経由で `mcp.servers` を受け取ります。OpenCode の経路はプロジェクトの `opencode.json` を書き換えません。
-
-<Callout type="warning">
-エージェント構成で `mcp_config` を設定しても、MCP 列に ✅ がないツールを選んだ場合、MCP サーバーはそのエージェントに**何の効果**も及ぼしません。MCP 連携はツールごとに実装されています。
+<Callout type="info">
+ツールによってモデル名が異なることがあります。AI コーディングツールを変更すると、以前のモデル値は新しいツールで使えないため、選び直す必要があります。
 </Callout>
 
-## スキルファイルが置かれる場所
+## セッション再開
 
-各ツールは**それぞれ独自の**スキル探索パスを使用します。タスクが実行される前に、Multica デーモンがワークスペースのスキルファイルを対応するパスにコピーします。
+上記のツールはすべて、後続の実行で既存のセッションを続行できます。ただし、元のセッションが残っており、そのセッションへアクセスできるランタイムでタスクが実行される必要があります。
 
-| ツール | パス | ネイティブ探索か |
-|---|---|---|
-| Claude Code | `.claude/skills/` | ✅ ネイティブ |
-| CodeBuddy | `.codebuddy/skills/` | ✅ ネイティブ |
-| Codex | `$CODEX_HOME/skills/` | ✅ ネイティブ |
-| Copilot | `.github/skills/` | ✅ ネイティブ |
-| Cursor | `.cursor/skills/` | ✅ ネイティブ |
-| Kimi | `.kimi/skills/` | ✅ ネイティブ |
-| Kiro CLI | `.kiro/skills/` | ✅ ネイティブ |
-| OpenCode | `.opencode/skills/` | ✅ ネイティブ |
-| DevEco Code | `.deveco/skills/` | ✅ ネイティブ |
-| Pi | `.pi/skills/` | ✅ ネイティブ |
-| Qoder | `.qoder/skills/` | ✅ ネイティブ |
-| Trae CLI | `.traecli/skills/` | ✅ ネイティブ |
-| Grok | `.grok/skills/` | ✅ ネイティブ |
-| Antigravity | `.agents/skills/` | ✅ ネイティブ（Gemini CLI のワークスペースレイアウトを継承 — [Antigravity ドキュメント](https://antigravity.google/docs/gcli-migration)を参照） |
-| Hermes | `HERMES_HOME/skills/`（タスクごとのホーム） | ✅ ネイティブ（タスクごとに `~/.hermes/` からシード） |
-| OpenClaw | `.agent_context/skills/` | ⚠️ 汎用フォールバック |
+Multica はツールから返されたセッション識別子を保存します。次に同じイシューで作業を続けるとき、ランタイムはそのセッションの再開を試みます。再開できない場合は、新しいセッションを作成して実行を続けます。Pi はローカルのセッションファイルパスを保存するため、元のコンピューターとファイルへの依存度が高くなります。
 
-フォールバックパスを使うツールが実際にこのディレクトリを読み取るかどうかは、そのツール自体のドキュメントによって異なり、保証されません。OpenClaw でスキルが適用されない場合は、まずこの点を確認してください。
+再試行とセッション再開のルールは、[タスク](/tasks#手動リトライ)を参照してください。
 
-ネイティブなプロジェクトレベルのパスでは、リポジトリスコープの探索は想定された挙動です。チェックアウトされたリポジトリが対応するディレクトリをすでに含んでいる場合、基盤となるツールはそのコミット済みスキルを自分で検出できます。そのリポジトリで使うためだけに、これらの repo skills を Multica へインポートする必要はありません。Multica はそれらのリポジトリファイルをそのまま保持します。ワークスペーススキルの自然なディレクトリ名が同じ場合、デーモンは `review-helper-multica` のような衝突しない兄弟ディレクトリへワークスペースコピーを書き込みます。
+## MCP 設定
 
-スキルの作成と使用については、[スキル](/skills)を参照してください。
+Antigravity、GitHub Copilot CLI、DevEco Code、Pi は、現時点ではエージェントの MCP 設定を読み取りません。そのため、これらのツールを選んだ場合、エージェント作成画面にこの項目は表示されません。
 
-## 次へ
+<Callout type="warning">
+MCP server のコマンド、引数、環境変数は、エージェント設定の一部としてサーバーに保存されます。共有する必要がないローカルの認証情報を設定へ直接入力しないでください。
+</Callout>
 
-- [エージェントの作成と構成](/agents-create) — エージェントに使うツールを選ぶ
-- [タスク](/tasks) — タスクのライフサイクルとセッション再開のメカニズム
-- [デーモンとランタイム](/daemon-runtimes) — ツールが実行される場所と Multica への接続方法
-- [エージェントランタイムのインストール](/install-agent-runtime) — サポートされる 16 個のツールそれぞれのインストールと認証
+## スキルの注入方法
+
+実行を開始する前に、Multica はエージェントに紐づいたスキルを上表の場所へ書き込み、各ツールが標準の仕組みで検出できるようにします。
+
+リポジトリにすでにあるスキルは上書きしません。同名のスキルがある場合、Multica は注入するコピーに別のディレクトリ名を使い、実行後には自分で作成したファイルだけを削除します。
+
+Codex、Hermes、OpenClaw の動作は少し異なります。
+
+- Codex は実行ごとに専用の `CODEX_HOME` を使い、システム全体の Codex ディレクトリにはスキルを書き込みません。
+- Hermes は実行ごとに専用の `HERMES_HOME` を使います。既存のローカル設定は読み取れますが、紐づけたスキルとセッションデータはタスクごとに分離されます。この分離はエージェントにスキルが紐づいている場合だけ有効になり、スキルがないタスクでは既存の Hermes ホームディレクトリを使います。
+- OpenClaw は現在のタスクの作業ディレクトリにある `skills/` を使い、実行専用の設定でそのディレクトリをワークスペースとして指定します。
+
+スキルの作成と紐づけについては、[スキル](/skills)を参照してください。
+
+## 次のステップ
+
+- [エージェントを作成・設定する](/agents-create) — モデルと thinking level の設定
+- [AI コーディングツールをインストールする](/install-agent-runtime) — インストールと検出の手順
+- [デーモンとランタイム](/daemon-runtimes) — ランタイムの登録と同時実行

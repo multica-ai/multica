@@ -103,7 +103,7 @@ export function TimezonePicker({
               : `${ariaLabel}: ${[selectedCity, selectedOffset].filter(Boolean).join(" ")}`
           }
           className={cn(
-            "flex h-8 w-full items-center gap-1.5 rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors outline-none",
+            "flex h-8 w-full items-center gap-1.5 rounded-lg border border-input bg-transparent px-2.5 text-body transition-colors outline-none",
             "hover:bg-accent/30",
             "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
             "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
@@ -117,7 +117,7 @@ export function TimezonePicker({
           <Globe className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="flex-1 truncate text-left">{selectedCity}</span>
           {selectedOffset && (
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
               {selectedOffset}
             </span>
           )}
@@ -144,7 +144,7 @@ export function TimezonePicker({
                 onChange(tz);
                 setOpen(false);
               }}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors hover:bg-accent"
             >
               <span className="flex size-3.5 shrink-0 items-center justify-center">
                 {isSelected && (
@@ -153,7 +153,7 @@ export function TimezonePicker({
               </span>
               <span className="flex-1 truncate text-left">{cityLabel(tz)}</span>
               {off && (
-                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
                   {off}
                 </span>
               )}

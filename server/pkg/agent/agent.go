@@ -25,9 +25,14 @@ type Backend interface {
 type ExecOptions struct {
 	Cwd   string
 	Model string
-	// SystemPrompt is consumed only by providers that can pass or safely inline
-	// developer/system instructions. Hermes ACP intentionally ignores it and
-	// relies on cwd-scoped context files such as AGENTS.md instead.
+	// SystemPrompt carries the Multica runtime brief for the few providers
+	// that cannot pick it up from disk. The daemon leaves it empty for every
+	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
+	// brief is already delivered as a per-task context file in the workdir —
+	// CLAUDE.md, AGENTS.md, CODEBUDDY.md or QWEN.md depending on the runtime.
+	//
+	// A backend must therefore NOT assume this is populated, and adding a new
+	// backend that only reads SystemPrompt will silently receive nothing.
 	SystemPrompt              string
 	ThreadName                string
 	MaxTurns                  int
@@ -65,6 +70,10 @@ type ExecOptions struct {
 	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// ServiceTier is a runtime-native Codex execution tier (for example
+	// "priority", displayed as Fast). Empty means inherit local Codex config.
+	// Other providers ignore this field.
+	ServiceTier string
 	// OpenclawMode chooses between local (embedded) and gateway routing for
 	// the openclaw backend. "" or "local" keeps the historical behaviour —
 	// the daemon spawns `openclaw agent --local …` and the agent loop runs
@@ -76,6 +85,10 @@ type ExecOptions struct {
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
 	OpenclawMode string
+	// ClaudeSettingsPath is a daemon-owned, task-local settings file passed
+	// through Claude Code's --settings flag. It currently carries restrictive
+	// runtime-skill overrides only; other providers ignore it.
+	ClaudeSettingsPath string
 }
 
 // runContext derives the execution context for an agent subprocess from the
@@ -132,7 +145,22 @@ type TokenUsage struct {
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
+	// CostUSDTicks is the provider's own statement of what this usage cost,
+	// in ticks of 1e-10 USD. Zero means "not reported" — only a few agents
+	// return it (xAI Grok Build does, via `_meta.usage.costUsdTicks`).
+	//
+	// It matters because a token-times-rate estimate cannot reproduce
+	// request-level pricing rules. xAI bills a request at 2x once its prompt
+	// reaches 200K tokens, and a usage record aggregates every model call in
+	// a turn — so the stored token counts cannot say which tier any single
+	// request hit. The provider's own figure already has that priced in.
+	CostUSDTicks int64
 }
+
+// CostUSDTicksPerUSD is the scale of the provider-reported cost unit: xAI
+// reports whole ticks of 1e-10 USD, which keeps sub-cent turn costs exact in
+// int64 all the way to the database instead of drifting through float64.
+const CostUSDTicksPerUSD = 10_000_000_000
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
@@ -143,9 +171,15 @@ type Result struct {
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
 	// ResumeRejected is positive evidence that this run's requested resume
-	// was itself refused — the transcript is gone, or the session belongs to
-	// another provider account. Only a refused resume can be cured by starting
-	// over, so it is what the daemon's fresh-session fallback looks for first.
+	// was itself refused — the transcript is gone, the session belongs to
+	// another provider account, OR the session still exists but its history
+	// can no longer be replayed to the provider (e.g. GH #5975: a stored
+	// image now exceeds the provider's max dimensions, so every resumed
+	// session/prompt is rejected before the turn runs). What unites these is
+	// that the resume CANNOT continue and only starting over can cure it, so
+	// it is what the daemon's fresh-session fallback looks for first. Note the
+	// last case keeps a non-empty SessionID (the id is real, only its history
+	// is unusable) — the daemon gates on this boolean, not an empty id.
 	//
 	// false is NOT evidence of the opposite. For a backend listed in
 	// ResumeRejectionUndetectable it means "could not tell"; for every other
@@ -163,6 +197,11 @@ type Result struct {
 	// process tree was reaped. It is intentionally not part of the public
 	// result contract.
 	codexInitializeRetrySafe bool
+	// codexStartupRefreshRetrySafe is provider-internal evidence that the
+	// first turn produced no semantic progress because Codex could not load
+	// its model catalog, and that the process tree was reaped afterwards.
+	// Like codexInitializeRetrySafe it is not part of the public contract.
+	codexStartupRefreshRetrySafe bool
 }
 
 // Config configures a Backend instance.

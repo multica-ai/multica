@@ -1639,15 +1639,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:            uuidToString(agent.ID),
-			Name:          agent.Name,
-			Instructions:  agent.Instructions,
-			CustomEnv:     customEnv,
-			CustomArgs:    customArgs,
-			McpConfig:     mcpConfig,
-			Model:         agent.Model.String,
-			ThinkingLevel: agent.ThinkingLevel.String,
-			RuntimeConfig: runtimeConfig,
+			ID:                    uuidToString(agent.ID),
+			Name:                  agent.Name,
+			Instructions:          agent.Instructions,
+			CustomEnv:             customEnv,
+			CustomArgs:            customArgs,
+			McpConfig:             mcpConfig,
+			Model:                 agent.Model.String,
+			ThinkingLevel:         agent.ThinkingLevel.String,
+			ServiceTier:           agent.ServiceTier.String,
+			RuntimeConfig:         runtimeConfig,
+			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
@@ -1751,7 +1753,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					// Parent-status authority is deliberately NARROWER than
+					// briefing injection. Injection is keyed off is_leader_task
+					// (see above) and therefore also fires on the MUL-3724 path,
+					// where the issue belongs to a plain agent and this squad was
+					// only @mentioned for help. Granting status ownership there
+					// would let a guest squad push someone else's in-flight issue
+					// to in_review, so we gate it on the issue actually being
+					// assigned to this squad.
+					ownsIssueStatus := issue.AssigneeType.Valid &&
+						issue.AssigneeType.String == "squad" &&
+						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {
@@ -1761,6 +1774,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						"squad_id", uuidToString(squad.ID),
 						"squad_name", squad.Name,
 						"leader_agent_id", resp.Agent.ID,
+						"owns_issue_status", ownsIssueStatus,
 					)
 				}
 			}
@@ -1998,6 +2012,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = src.SessionID.String
 				}
+				// MUL-5305: if the source task withheld its Codex session because
+				// the rollout was missing, this rerun has nothing resumable from it
+				// — disclose the gap rather than silently starting fresh.
+				if src.SessionRolloutMissing {
+					resp.PriorSessionResumeUnavailable = true
+				}
 			}
 		} else if !task.ForceFreshSession {
 			// Non-rerun follow-up on the same issue: resume the most recent
@@ -2016,11 +2036,30 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
+			// MUL-5305: if the most recent terminal task withheld its Codex
+			// session because the rollout was missing, GetLastTaskSession fell
+			// back to an older session (or none). Disclose the continuity gap so
+			// the next run tells the user the most recent turn's context could not
+			// be carried over — even when that older session resumes cleanly,
+			// which the resume-presence gate would otherwise pass silently.
+			if missing, err := h.Queries.GetLatestTaskRolloutMissing(r.Context(), db.GetLatestTaskRolloutMissingParams{
+				AgentID: task.AgentID,
+				IssueID: task.IssueID,
+			}); err == nil && missing {
+				resp.PriorSessionResumeUnavailable = true
+			}
 		}
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.
 	if task.ChatSessionID.Valid {
+		resp.QuickActionsDisabled = task.QuickActionsDisabled
+		// A quick-actions regeneration task carries the id of the turn to
+		// re-supplement; the daemon runs only the suggestion pass for it and
+		// skips the main reply (MUL-5149).
+		if task.RegenerateQuickActionsFor.Valid {
+			resp.RegenerateQuickActionsFor = uuidToString(task.RegenerateQuickActionsFor)
+		}
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
@@ -2075,7 +2114,53 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 				break
 			}
-			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
+			// A web chat can opt into the same durable project context as an
+			// issue-bound task. Revalidate the soft reference in this workspace at
+			// claim time: a deleted/stale project degrades to workspace context and
+			// can never leak a project from another tenant.
+			var projectRepos []RepoData
+			if cs.ProjectID.Valid {
+				if project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+					ID:          cs.ProjectID,
+					WorkspaceID: cs.WorkspaceID,
+				}); err == nil {
+					resp.ProjectID = uuidToString(project.ID)
+					resp.ProjectTitle = project.Title
+					resp.ProjectDescription = project.Description.String
+					if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
+						resources := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							resources = append(resources, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct {
+									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
+								}
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+								}
+							}
+						}
+						resp.ProjectResources = resources
+					}
+				}
+			}
+			if len(projectRepos) > 0 {
+				resp.Repos = projectRepos
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos
@@ -2104,18 +2189,28 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						resp.PriorWorkDir = prior.WorkDir.String
 					}
 				}
+				// MUL-5305: if the most recent terminal task on this chat session
+				// withheld its Codex session (rollout missing), we resumed an older
+				// session (or none) above — disclose the continuity gap so the next
+				// turn tells the user the most recent turn's context is missing.
+				if missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID); err == nil && missing {
+					resp.PriorSessionResumeUnavailable = true
+				}
 			}
 			// Resolve the user-message input batch for this run. A task-owned
-			// direct-chat task (chat_input_task_id set, MUL-4351) reads exactly
-			// the user messages tagged with its own input owner, so a message
-			// that arrived after this turn was sealed can never be absorbed here.
-			// Legacy and channel (Slack/Lark) tasks carry a NULL owner and keep
-			// the trailing-message selector — the run of user messages after the
-			// last assistant row, which also covers a debounced burst (MUL-2968:
-			// "看上海天气" then "还有青岛" must both be delivered) — so a rolling
-			// deploy never replays their history. Attachments are collected per
-			// included message so the agent can `multica attachment download <id>`
-			// (the inline markdown URL is signed + 30-min expiring on the CDN).
+			// task (chat_input_task_id set) reads exactly the user messages
+			// tagged with its own input owner, so a message that arrived after
+			// this turn was sealed can never be absorbed here. Direct-chat
+			// tasks have owned their single message since MUL-4351; channel
+			// (Slack/Lark) tasks now seal their trailing batch at enqueue too.
+			// Only legacy tasks created before that deploy carry a NULL owner
+			// and keep the trailing-message selector — the run of user messages
+			// after the last assistant row, which also covers a debounced burst
+			// (MUL-2968: "看上海天气" then "还有青岛" must both be delivered) —
+			// so a rolling deploy never replays their history. Attachments are
+			// collected per included message so the agent can
+			// `multica attachment download <id>` (the inline markdown URL is
+			// signed + 30-min expiring on the CDN).
 			var unanswered []db.ChatMessage
 			var inputLoadErr error
 			if task.ChatInputTaskID.Valid {
@@ -2335,7 +2430,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						// Quick-create has no issue yet — there is no parent
+						// status to own on this turn. Once the leader opens the
+						// issue with the squad as assignee, the issue-bound
+						// claim path above grants ownership.
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, false)
 						if strings.TrimSpace(resp.Agent.Instructions) == "" {
 							resp.Agent.Instructions = briefing
 						} else {
@@ -2498,7 +2597,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// process instead of its own credential, so any API call the agent
 	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
 	// recognized server-side as actor=agent, closing the lateral-movement
-	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
+	// path on human-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
 	// owner is required because task tokens are still bound to an owning user;
 	// without one, fail the claim explicitly instead of letting the daemon
 	// fall back to a member/owner credential. MUL-3292.
@@ -2644,6 +2743,9 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 // these, not just the latest. Every completed or failed run writes an
 // assistant row, so the anchor advances one turn at a time; the result is the
 // whole slice on the first turn and exactly the new message(s) thereafter.
+// Legacy channel tasks also stop at the first unexpired media marker so an old
+// run cannot consume a placeholder that has not been bound yet. New channel
+// tasks use task-owned input batches and do not depend on this fallback.
 func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 	start := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -2652,7 +2754,15 @@ func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 			break
 		}
 	}
-	return msgs[start:]
+	msgs = msgs[start:]
+	now := time.Now()
+	for i := range msgs {
+		pending := msgs[i].ChannelMediaPendingUntil
+		if pending.Valid && pending.Time.After(now) {
+			return msgs[:i]
+		}
+	}
+	return msgs
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
@@ -2813,6 +2923,48 @@ type TaskCompleteRequest struct {
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	// QuickActionsPending declares a chat:quick_actions supplement will follow;
+	// the json tag must match protocol.TaskCompletedPayload because this request
+	// is re-marshalled into that payload for the completion transaction.
+	QuickActionsPending bool `json:"quick_actions_pending"`
+	// SessionRolloutMissing: the daemon withheld this task's Codex session
+	// because its rollout was missing (MUL-5305). Clear the resume pointer and
+	// flag the continuity gap for the next claim.
+	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
+	// RetiredSessionID: a session this run proved unresumable and abandoned
+	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
+	// to report" — this says "never hand this id to a later run". Older
+	// daemons omit it, which is exactly the pre-fix behaviour.
+	RetiredSessionID string `json:"retired_session_id,omitempty"`
+}
+
+// TaskQuickActionsRequest carries the raw (unparsed) output of the daemon's
+// post-completion suggestion pass; the service parses it leniently.
+type TaskQuickActionsRequest struct {
+	Raw string `json:"raw"`
+}
+
+// SupplementTaskQuickActions attaches follow-up suggestions to an already
+// completed chat turn. Arrives after CompleteTask by design — the daemon
+// reports completion first so the user's turn is not blocked on suggestion
+// generation, then follows up here.
+func (h *Handler) SupplementTaskQuickActions(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	task, _, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+	var req TaskQuickActionsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.TaskService.SupplementChatQuickActions(r.Context(), task, req.Raw, false); err != nil {
+		slog.Warn("supplement task quick actions failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -2831,7 +2983,11 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, _ := json.Marshal(req)
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir)
+	// MUL-5305: SessionRolloutMissing is applied inside CompleteTask's terminal
+	// transaction (force session_id NULL + flag the row), so an auto-retry the
+	// same commit creates and wakes can never observe the withheld pointer or a
+	// missing continuity-gap flag.
+	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.SessionRolloutMissing, req.RetiredSessionID)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -3072,7 +3228,28 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// The first qualifying comment enqueues the follow-up task; later ones
 		// find it AlreadyPending and merge in, so all undelivered comments end
 		// up covered by a single bounded run.
-		h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)
+		//
+		// A BLOCKED replay must not be discarded (#5914, Elon round 8): the slot
+		// can be held by a task that will never see this comment (it predates that
+		// task and is not in its planned ids), so dropping the failure here is
+		// exactly how a promised follow-up is lost. Hand the obligation to that
+		// blocker instead, keeping it alive until some run provably covers it.
+		if res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]; res.status == DispatchBlocked {
+			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
+			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, headSha) {
+				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
+					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
+			} else {
+				// The slot is held by a DIFFERENT-head queued task: it can neither
+				// cover this comment nor accept it (merging would let an old-head
+				// run consume a new-head request — TEN-356). Today's schema has no
+				// safe place to park the obligation, so surface it loudly rather
+				// than let it disappear quietly.
+				slog.Error("reconcile comments on completion: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
+					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
+					"reason", res.reason)
+			}
+		}
 		scheduled++
 	}
 	if scheduled > 0 {
@@ -3326,6 +3503,22 @@ type TaskUsagePayload struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// CostUSDTicks is the provider's own price for this usage in 1e-10 USD.
+	// Absent or 0 from every daemon that doesn't have one (older builds, and
+	// every provider except Grok today) — stored as NULL so the reader knows
+	// to fall back to rate-table estimation rather than reading a real $0.
+	CostUSDTicks int64 `json:"cost_usd_ticks"`
+}
+
+// authoritativeCostTicks converts a reported cost into the nullable column.
+// Only a positive figure is authoritative: 0 is what a daemon that knows
+// nothing about cost sends, and storing it would claim a genuine $0 spend and
+// suppress the estimate. Negative is nonsense from a malformed report.
+func authoritativeCostTicks(ticks int64) pgtype.Int8 {
+	if ticks <= 0 {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: ticks, Valid: true}
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
@@ -3373,11 +3566,12 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
 
 		// Surface prompt-cache effectiveness per run so cache hit rates are
 		// observable in logs, not just queryable from runtime_usage. The ratio
@@ -3422,6 +3616,15 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	// SessionRolloutMissing: the daemon withheld this task's Codex session
+	// because its rollout was missing (MUL-5305). Clear the resume pointer and
+	// flag the continuity gap for the next claim.
+	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
+	// RetiredSessionID: a session this run proved unresumable and abandoned
+	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
+	// to report" — this says "never hand this id to a later run". Older
+	// daemons omit it, which is exactly the pre-fix behaviour.
+	RetiredSessionID string `json:"retired_session_id,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -3439,10 +3642,22 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
+	// MUL-5305: SessionRolloutMissing is applied inside FailTask's terminal
+	// transaction — forcing session_id NULL (overriding the COALESCE that would
+	// keep a stale mid-flight pin) and flagging the row in the same commit that
+	// creates and wakes the auto-retry, so the retry can never claim the withheld
+	// pointer or miss the continuity gap.
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID)
 	if err != nil {
+		// A FailTask error is an infrastructure failure (the terminal
+		// transaction that also clears the withheld session, writes the
+		// continuity-gap flag, and creates the auto-retry rolled back), not a bad
+		// request. Return 5xx so the daemon's terminal callback — which treats a
+		// 400 as permanent and bails without retrying (postJSONWithRetry /
+		// isTransientError) — retries and the fail, gap flag, and retry land
+		// exactly once (MUL-5305). An invalid request body still returns 400 above.
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.TaskService.NotifyTaskFinished(*task)
@@ -3778,7 +3993,13 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"total_output_tokens":      row.TotalOutputTokens,
 		"total_cache_read_tokens":  row.TotalCacheReadTokens,
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
-		"task_count":               row.TaskCount,
+		// Cost split — see the note on DashboardUsageDailyResponse.
+		"cost_usd_ticks":              row.TotalCostUsdTicks,
+		"uncosted_input_tokens":       row.UncostedInputTokens,
+		"uncosted_output_tokens":      row.UncostedOutputTokens,
+		"uncosted_cache_read_tokens":  row.UncostedCacheReadTokens,
+		"uncosted_cache_write_tokens": row.UncostedCacheWriteTokens,
+		"task_count":                  row.TaskCount,
 	})
 }
 

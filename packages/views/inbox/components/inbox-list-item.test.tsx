@@ -4,7 +4,39 @@ import type { InboxItem } from "@multica/core/types";
 import { InboxListItem } from "./inbox-list-item";
 
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
-vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
+vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
+  IssueAgentActivityIndicator: ({
+    issueId,
+    hoverCard,
+  }: {
+    issueId: string;
+    hoverCard?: boolean;
+  }) => (
+    <span
+      data-testid="issue-agent-activity"
+      data-issue-id={issueId}
+      data-hover-card={hoverCard === false ? "false" : "true"}
+    />
+  ),
+}));
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({
+    actorType,
+    actorId,
+    showStatusDot,
+  }: {
+    actorType: string;
+    actorId: string;
+    showStatusDot?: boolean;
+  }) => (
+    <span
+      data-testid="actor-avatar"
+      data-actor-type={actorType}
+      data-actor-id={actorId}
+      data-show-status-dot={showStatusDot === true ? "true" : "false"}
+    />
+  ),
+}));
 vi.mock("./inbox-detail-label", () => ({ InboxDetailLabel: () => null }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
 
@@ -70,5 +102,38 @@ describe("InboxListItem unread affordance", () => {
 
     expect(unreadDot(container)).toBeNull();
     expect(title(container)?.className).not.toContain("font-medium");
+  });
+});
+
+describe("InboxListItem issue activity", () => {
+  it("shows issue-specific agent activity without an availability dot", () => {
+    const { getByTestId } = renderRow({ item: item(), view: "inbox" });
+
+    expect(getByTestId("actor-avatar").getAttribute("data-show-status-dot")).toBe(
+      "false",
+    );
+    expect(
+      getByTestId("issue-agent-activity").getAttribute("data-issue-id"),
+    ).toBe("issue-1");
+  });
+
+  it("shows the activity badge without its hover card", () => {
+    // Triage rows only need "an agent is on this". The card behind the badge
+    // adds elapsed time, which does not change whether you open the row, and
+    // the row already carries the actor hover card on the left.
+    const { getByTestId } = renderRow({ item: item(), view: "inbox" });
+
+    expect(
+      getByTestId("issue-agent-activity").getAttribute("data-hover-card"),
+    ).toBe("false");
+  });
+
+  it("omits issue activity for a notification without an issue", () => {
+    const { queryByTestId } = renderRow({
+      item: item({ issue_id: null }),
+      view: "inbox",
+    });
+
+    expect(queryByTestId("issue-agent-activity")).toBeNull();
   });
 });

@@ -104,7 +104,42 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 }
 
+func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
+	origCfg := testHandler.cfg
+	t.Cleanup(func() { testHandler.cfg = origCfg })
+
+	fetch := func() map[string]json.RawMessage {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	testHandler.cfg.VCSIntegrationEnabled = false
+	if _, ok := fetch()["vcs_integration_available"]; ok {
+		t.Fatal("vcs_integration_available must be omitted when the integration is disabled")
+	}
+
+	testHandler.cfg.VCSIntegrationEnabled = true
+	raw, ok := fetch()["vcs_integration_available"]
+	if !ok {
+		t.Fatal("vcs_integration_available must be present when the integration is enabled")
+	}
+	if string(raw) != "true" {
+		t.Fatalf("vcs_integration_available: want true, got %s", raw)
+	}
+}
+
 func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_PUBLIC_URL", "")
 	t.Setenv("MULTICA_APP_URL", "https://multica.internal.example/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -128,6 +163,7 @@ func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
 }
 
 func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_PUBLIC_URL", "")
 	t.Setenv("MULTICA_APP_URL", "")
 	t.Setenv("FRONTEND_ORIGIN", "https://multica.internal.example/")
 

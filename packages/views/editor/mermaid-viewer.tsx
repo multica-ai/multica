@@ -21,12 +21,7 @@ import {
   Code as CodeIcon,
   Copy,
   Download,
-  Frame,
   Image as ImageIcon,
-  Maximize,
-  Minus,
-  Plus,
-  RotateCcw,
   X,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -40,14 +35,15 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../i18n";
 import { CodeBlockStatic } from "./code-block-static";
-import { useDiagramCanvas } from "./hooks/use-diagram-canvas";
+import { useZoomCanvas } from "./hooks/use-zoom-canvas";
+import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
 import {
   buildExportSvg,
   diagramFilenameStem,
   downloadBlob,
   renderSvgToPngBlob,
 } from "./utils/mermaid-export";
-import type { Size } from "./utils/diagram-transform";
+import type { Size } from "./utils/zoom-transform";
 
 const COPY_FEEDBACK_MS = 2000;
 
@@ -72,6 +68,8 @@ export interface MermaidViewerProps extends MermaidViewerContentProps {
   finalFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
+// Viewer-only chrome (source toggle, copy, close). The zoom buttons come from
+// the shared <ZoomControls>.
 function ToolbarButton({
   onClick,
   disabled,
@@ -149,7 +147,7 @@ function MermaidViewerContent({
   const { t } = useT("editor");
   const [showSource, setShowSource] = useState(false);
   const [copied, setCopied] = useState(false);
-  const canvas = useDiagramCanvas({ content: layout });
+  const canvas = useZoomCanvas({ content: layout });
 
   const handleCopySource = useCallback(async () => {
     if (await copyText(chart)) {
@@ -204,54 +202,11 @@ function MermaidViewerContent({
       {/* Sibling of the scrolling canvas, never inside it: the toolbar must
           stay put no matter how far the diagram is panned or zoomed. */}
       <header className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/30 px-3 py-2">
-          <DialogTitle className="mr-1 truncate text-sm font-medium">
+          <DialogTitle className="mr-1 truncate text-body font-medium">
             {t(($) => $.mermaid.viewer_title)}
           </DialogTitle>
 
-          <div className="flex items-center gap-0.5">
-            <ToolbarButton
-              onClick={canvas.zoomOut}
-              disabled={!canvas.canZoomOut || showSource}
-              label={t(($) => $.mermaid.zoom_out)}
-            >
-              <Minus className="size-4" />
-            </ToolbarButton>
-            {/* Fixed width so the toolbar doesn't jitter as digits change. */}
-            <span
-              className="w-12 select-none text-center text-xs tabular-nums text-muted-foreground"
-              aria-live="polite"
-            >
-              {canvas.zoomPercent}%
-            </span>
-            <ToolbarButton
-              onClick={canvas.zoomIn}
-              disabled={!canvas.canZoomIn || showSource}
-              label={t(($) => $.mermaid.zoom_in)}
-            >
-              <Plus className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              onClick={canvas.fit}
-              disabled={showSource}
-              label={t(($) => $.mermaid.zoom_fit)}
-            >
-              <Frame className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              onClick={canvas.zoomToActualSize}
-              disabled={showSource}
-              label={t(($) => $.mermaid.zoom_actual)}
-            >
-              <Maximize className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              onClick={canvas.reset}
-              disabled={showSource || canvas.isFitted}
-              label={t(($) => $.mermaid.reset_view)}
-            >
-              <RotateCcw className="size-4" />
-            </ToolbarButton>
-          </div>
+          <ZoomControls canvas={canvas} disabled={showSource} />
 
           <div className="ml-auto flex items-center gap-0.5">
             <ToolbarButton
@@ -312,45 +267,23 @@ function MermaidViewerContent({
             <CodeBlockStatic language="mermaid" body={chart} />
           </div>
         ) : (
-          <div
-            ref={(node) => {
-              canvasRef.current = node;
-              canvas.setViewportNode(node);
-            }}
-            className={cn("mermaid-viewer-canvas", canvas.isPanning && "is-panning")}
-            // `application` tells screen readers to pass arrow keys through to
-            // the canvas instead of using them for their own navigation.
-            role="application"
-            aria-label={t(($) => $.mermaid.canvas_label)}
-            tabIndex={0}
-            onPointerDown={canvas.handlePointerDown}
-            onPointerMove={canvas.handlePointerMove}
-            onPointerUp={canvas.handlePointerUp}
-            onPointerCancel={canvas.handlePointerUp}
-            onKeyDown={canvas.handleKeyDown}
+          <ZoomCanvas
+            canvas={canvas}
+            content={layout}
+            label={t(($) => $.mermaid.canvas_label)}
+            className="bg-muted"
+            canvasRef={canvasRef}
           >
             {viewerDocument && (
-              <div
-                className={cn(
-                  "mermaid-viewer-content",
-                  canvas.isAnimated && "is-animated",
-                )}
-                style={{
-                  width: `${layout.width}px`,
-                  height: `${layout.height}px`,
-                  transform: `translate(${canvas.transform.x}px, ${canvas.transform.y}px) scale(${canvas.transform.scale})`,
-                }}
-              >
-                <iframe
-                  className="mermaid-viewer-frame"
-                  sandbox=""
-                  srcDoc={viewerDocument}
-                  title={t(($) => $.mermaid.viewer_title)}
-                  style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
-                />
-              </div>
+              <iframe
+                className="mermaid-viewer-frame"
+                sandbox=""
+                srcDoc={viewerDocument}
+                title={t(($) => $.mermaid.viewer_title)}
+                style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
+              />
             )}
-          </div>
+          </ZoomCanvas>
         )}
     </>
   );

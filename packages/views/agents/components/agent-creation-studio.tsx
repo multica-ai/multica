@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -13,9 +14,12 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_MAX_CONCURRENT_TASKS_MAX,
+  AGENT_MAX_CONCURRENT_TASKS_MIN,
   agentTemplateDetailOptions,
   agentTemplateListOptions,
 } from "@multica/core/agents";
@@ -27,6 +31,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
+  runtimeDisplayLabel,
   runtimeListOptions,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
@@ -50,6 +55,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -67,11 +76,30 @@ import {
   SettingsSection,
 } from "../../settings/components/settings-layout";
 import { ModelDropdown } from "./model-dropdown";
+import { CharCounter } from "./char-counter";
+import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { SkillMultiSelect } from "./skill-multi-select";
 
 type StudioMode = "choose" | "templates" | "blank" | "template" | "ai";
+type StudioScreenKey =
+  | "choose"
+  | "templates"
+  | "configure"
+  | "ai-setup"
+  | "ai-builder";
+type TransitionDirection = 1 | -1;
 type PermissionScope = "private" | "workspace" | "members";
+
+export function getAgentCreationScreenKey(
+  mode: StudioMode,
+  builderSessionId: string,
+): StudioScreenKey {
+  if (mode === "blank" || mode === "template") return "configure";
+  if (mode === "ai") return builderSessionId ? "ai-builder" : "ai-setup";
+  return mode;
+}
 
 export interface AgentDraft {
   name: string;
@@ -80,11 +108,56 @@ export interface AgentDraft {
   avatarUrl: string | null;
   runtimeId: string;
   model: string;
+  /** Runtime-native reasoning/effort token, scoped to `model`. */
+  thinkingLevel: string;
+  /** Runtime-native execution tier (Codex Speed), scoped to `model`. */
+  serviceTier: string;
   skillIds: Set<string>;
   permissionScope: PermissionScope;
   memberIds: Set<string>;
   /** Team grants are not editable in this form yet, but duplicates must preserve them. */
   teamIds: Set<string>;
+}
+
+/**
+ * Draft fields whose only meaning comes from the currently selected
+ * runtime + model pair. A runtime change invalidates all three; a model
+ * change invalidates the two that hang off the exact model catalog. Keeping
+ * them together is what stops an orphan `thinking_level` / `service_tier`
+ * from being persisted for a model that never advertised it — the daemon
+ * would silently fall back at execution time and the settings page would
+ * disagree with what actually ran (MUL-5390).
+ */
+export function applyDraftRuntimeChange(
+  draft: AgentDraft,
+  runtimeId: string,
+): AgentDraft {
+  return {
+    ...draft,
+    runtimeId,
+    model: "",
+    thinkingLevel: "",
+    serviceTier: "",
+  };
+}
+
+/** Model change: drop the per-model capability overrides, keep the runtime. */
+export function applyDraftModelChange(
+  draft: AgentDraft,
+  model: string,
+): AgentDraft {
+  if (model === draft.model) return draft;
+  return { ...draft, model, thinkingLevel: "", serviceTier: "" };
+}
+
+/**
+ * Mirrors the server's `utf8.RuneCountInString` check (agent.go:1013). The
+ * textarea's `maxLength` covers typing and pasting, but a duplicated agent or
+ * an AI-builder draft can seed a longer value programmatically — without this
+ * the create button would submit into a guaranteed 400.
+ */
+export function isDraftDescriptionWithinLimit(description: string): boolean {
+  return [...description].length <= AGENT_DESCRIPTION_MAX_LENGTH;
 }
 
 export interface BuilderDraftPayload {
@@ -97,6 +170,23 @@ export interface BuilderDraftPayload {
   member_ids?: unknown;
 }
 
+export interface AgentCreateErrors {
+  nameError: string | null;
+  formError: string | null;
+}
+
+export function classifyAgentCreateError(
+  error: unknown,
+  fallbackMessage: string,
+  conflictMessage: string,
+): AgentCreateErrors {
+  const message =
+    error instanceof Error && error.message ? error.message : fallbackMessage;
+  return error instanceof ApiError && error.status === 409
+    ? { nameError: conflictMessage, formError: null }
+    : { nameError: null, formError: message };
+}
+
 const BUILDER_INPUT_PREFIX = "MULTICA_AGENT_BUILDER_INPUT\n";
 const EMPTY_CHAT_MESSAGES: ChatMessage[] = [];
 const EMPTY_DRAFT: AgentDraft = {
@@ -106,6 +196,8 @@ const EMPTY_DRAFT: AgentDraft = {
   avatarUrl: null,
   runtimeId: "",
   model: "",
+  thinkingLevel: "",
+  serviceTier: "",
   skillIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
@@ -121,11 +213,15 @@ export function AgentCreationStudio() {
   const currentUser = useAuthStore((state) => state.user);
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
-    runtimeListOptions(wsId),
-  );
+  const {
+    data: runtimes = [],
+    isLoading: runtimesLoading,
+    isSuccess: runtimesLoaded,
+    isError: runtimesFailed,
+  } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const { data: templates = [], isLoading: templatesLoading } = useQuery(
@@ -136,21 +232,27 @@ export function AgentCreationStudio() {
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
   const [mode, setMode] = useState<StudioMode>(duplicateId ? "blank" : "choose");
+  const [transitionDirection, setTransitionDirection] =
+    useState<TransitionDirection>(1);
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_DRAFT);
+  // True when a duplicate had to fall back to another runtime, which drops the
+  // source's model / thinking / speed. The notice explains the empty fields.
+  const [duplicateRuntimeReset, setDuplicateRuntimeReset] = useState(false);
   const [sourceTemplate, setSourceTemplate] = useState<AgentTemplateSummary | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplateSummary | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [builderSessionId, setBuilderSessionId] = useState("");
   const [builderStarting, setBuilderStarting] = useState(false);
   const [builderClosing, setBuilderClosing] = useState(false);
+  const [builderSwitchingRuntime, setBuilderSwitchingRuntime] = useState(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [builderRestoreDraft, setBuilderRestoreDraft] = useState<{
     id: string;
     content: string;
   } | null>(null);
-  const duplicateAppliedRef = useRef(false);
   const appliedAssistantMessageRef = useRef<string | null>(null);
   const builderSessionIdRef = useRef("");
 
@@ -285,29 +387,24 @@ export function AgentCreationStudio() {
     setDraft((current) => ({ ...current, runtimeId: usableRuntimes[0]?.id ?? "" }));
   }, [draft.runtimeId, usableRuntimes]);
 
-  useEffect(() => {
-    if (!duplicateAgent || duplicateAppliedRef.current) return;
-    duplicateAppliedRef.current = true;
-    const duplicateAccess = deriveDuplicateAccess(duplicateAgent);
-    setDraft({
-      name: `${duplicateAgent.name}${t(($) => $.create_dialog.duplicate_copy_suffix)}`,
-      description: duplicateAgent.description ?? "",
-      instructions: duplicateAgent.instructions ?? "",
-      avatarUrl: duplicateAgent.avatar_url ?? null,
-      runtimeId:
-        duplicateAgent.runtime_id &&
-        runtimes.some(
-          (runtime) =>
-            runtime.id === duplicateAgent.runtime_id &&
-            isRuntimeUsableForUser(runtime, currentUser?.id ?? null),
-        )
-          ? duplicateAgent.runtime_id
-          : usableRuntimes[0]?.id ?? "",
-      model: duplicateAgent.model ?? "",
-      skillIds: new Set(duplicateAgent.skills.map((skill) => skill.id)),
-      ...duplicateAccess,
-    });
-  }, [currentUser?.id, duplicateAgent, runtimes, t, usableRuntimes]);
+  useDuplicateDraftSeed({
+    source: duplicateAgent,
+    // `buildDuplicateDraft` decides whether the copy can stay on the source
+    // runtime by looking it up in this list. An error is a decidable answer
+    // (the runtime cannot be confirmed, so the fallback is right); a pending
+    // query is not.
+    runtimesSettled: runtimesLoaded || runtimesFailed,
+    runtimes,
+    currentUserId: currentUser?.id ?? null,
+    fallbackRuntimeId: usableRuntimes[0]?.id ?? "",
+    nameSuffix: t(($) => $.create_dialog.duplicate_copy_suffix),
+    onSeed: (duplicated, runtimeReset) => {
+      // Only the forced fallback gets the notice; a later manual runtime switch
+      // is the user's own doing and needs no explanation.
+      setDuplicateRuntimeReset(runtimeReset);
+      setDraft(duplicated);
+    },
+  });
 
   const skillIdSet = useMemo(
     () => new Set(workspaceSkills.map((skill) => skill.id)),
@@ -376,8 +473,12 @@ export function AgentCreationStudio() {
     draft.name.trim().length > 0 &&
     selectedRuntime != null &&
     isRuntimeUsableForUser(selectedRuntime, currentUser?.id ?? null) &&
+    isDraftDescriptionWithinLimit(draft.description) &&
     !accessInvalid &&
     !creating;
+  // Duplicating onto a different runtime than the source: the runtime-specific
+  // execution config was dropped, so say it instead of letting the user notice
+  // an empty model later.
   const currentModeLabel =
     mode === "choose"
       ? t(($) => $.creation_studio.step_choose)
@@ -388,10 +489,13 @@ export function AgentCreationStudio() {
           : t(($) => $.creation_studio.step_configure);
 
   const resetCreationMode = () => {
+    setTransitionDirection(-1);
     setMode("choose");
     setSelectedTemplate(null);
     setSourceTemplate(null);
     setBuilderSessionId("");
+    setNameError(null);
+    setFormError(null);
   };
 
   const deleteBuilderSession = async () => {
@@ -403,7 +507,6 @@ export function AgentCreationStudio() {
       qc.removeQueries({ queryKey: chatKeys.messages(builderSessionId) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(builderSessionId) });
       builderSessionIdRef.current = "";
-      setBuilderSessionId("");
       return true;
     } catch (error) {
       setBuilderError(
@@ -422,6 +525,7 @@ export function AgentCreationStudio() {
       navigation.push(paths.agents());
       return;
     }
+    setTransitionDirection(-1);
     if (mode === "templates" && selectedTemplate) {
       setSelectedTemplate(null);
       return;
@@ -441,7 +545,13 @@ export function AgentCreationStudio() {
       ...EMPTY_DRAFT,
       runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
+    setTransitionDirection(1);
     setMode("blank");
+  };
+
+  const chooseAI = () => {
+    setTransitionDirection(1);
+    setMode("ai");
   };
 
   const applyTemplate = () => {
@@ -455,6 +565,7 @@ export function AgentCreationStudio() {
       instructions: detail.instructions,
       runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
+    setTransitionDirection(1);
     setMode("template");
   };
 
@@ -468,6 +579,7 @@ export function AgentCreationStudio() {
         model: draft.model.trim() || undefined,
       });
       if (!session.session_id) throw new Error(t(($) => $.creation_studio.builder.start_failed));
+      setTransitionDirection(1);
       setBuilderSessionId(session.session_id);
     } catch (error) {
       setBuilderError(
@@ -478,9 +590,53 @@ export function AgentCreationStudio() {
     }
   };
 
+  // Rebinds the conversation's execution runtime on the server BEFORE the draft
+  // reflects the new selection. Updating the draft first is what produced
+  // MUL-5163: the picker showed runtime B while every subsequent message still
+  // ran on the runtime the session was created with.
+  const switchBuilderRuntime = async (runtimeId: string) => {
+    if (!runtimeId || runtimeId === draft.runtimeId) return;
+    // Before the conversation exists there is no carrier to rebind, so the
+    // picker is still plain draft state.
+    if (!builderSessionId) {
+      setDraft((current) => applyDraftRuntimeChange(current, runtimeId));
+      return;
+    }
+    if (builderSwitchingRuntime) return;
+    setBuilderSwitchingRuntime(true);
+    setBuilderError(null);
+    try {
+      const result = await api.switchAgentBuilderRuntime(builderSessionId, {
+        runtime_id: runtimeId,
+      });
+      // Follow the runtime the server says it bound. Resolving here at all means
+      // the rebind committed, so refusing to move the draft would leave the
+      // picker pointing at a runtime that no longer executes anything — the same
+      // split this whole change removes. The client fallback already resolves an
+      // unparseable success body to the requested id.
+      const boundRuntimeId = result.runtime_id || runtimeId;
+      // Model ids are per-runtime; clear it — with the per-model thinking /
+      // speed overrides — so the new runtime resolves its own defaults instead
+      // of keeping values it may not serve.
+      setDraft((current) => applyDraftRuntimeChange(current, boundRuntimeId));
+      toast.success(t(($) => $.creation_studio.builder.switch_runtime_success));
+    } catch (error) {
+      setBuilderError(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.creation_studio.builder.switch_runtime_failed),
+      );
+    } finally {
+      setBuilderSwitchingRuntime(false);
+    }
+  };
+
   const sendBuilderMessage = async (content: string): Promise<boolean> => {
     const text = content.trim();
-    if (!text || !builderSessionId || builderPending) return false;
+    // builderSwitchingRuntime blocks the send while a rebind is in flight: the
+    // server serialises the two anyway, but letting the message through would
+    // mean the user cannot tell which runtime answered it.
+    if (!text || !builderSessionId || builderPending || builderSwitchingRuntime) return false;
     setBuilderError(null);
     try {
       const encodedContent = encodeBuilderInput(
@@ -561,7 +717,8 @@ export function AgentCreationStudio() {
   const createAgent = async () => {
     if (!canCreate || !selectedRuntime) return;
     setCreating(true);
-    setCreateError(null);
+    setNameError(null);
+    setFormError(null);
     try {
       const invocationTargets = buildInvocationTargets(draft);
       let agent: Agent;
@@ -581,25 +738,12 @@ export function AgentCreationStudio() {
         });
         agent = response.agent;
       } else {
-        const request: CreateAgentRequest = {
-          name: draft.name.trim(),
-          description: draft.description.trim(),
-          instructions: draft.instructions.trim() || undefined,
-          avatar_url: draft.avatarUrl ?? undefined,
-          runtime_id: selectedRuntime.id,
-          model: draft.model.trim() || undefined,
-          permission_mode:
-            draft.permissionScope === "private" ? "private" : "public_to",
-          invocation_targets: invocationTargets,
-          skill_ids: [...draft.skillIds],
+        const request = buildCreateAgentRequest({
+          draft,
+          runtimeId: selectedRuntime.id,
           template: mode === "ai" ? "agent_builder" : undefined,
-        };
-        if (duplicateAgent) {
-          if (duplicateAgent.custom_args.length > 0) {
-            request.custom_args = duplicateAgent.custom_args;
-          }
-          request.max_concurrent_tasks = duplicateAgent.max_concurrent_tasks;
-        }
+          duplicateSource: duplicateAgent,
+        });
         agent = await api.createAgent(request);
       }
 
@@ -641,11 +785,54 @@ export function AgentCreationStudio() {
       toast.success(t(($) => $.creation_studio.created, { name: agent.name || draft.name.trim() }));
       navigation.push(squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id));
     } catch (error) {
-      setCreateError(
-        error instanceof Error ? error.message : t(($) => $.creation_studio.create_failed),
+      const nextErrors = classifyAgentCreateError(
+        error,
+        t(($) => $.creation_studio.create_failed),
+        t(($) => $.creation_studio.name_conflict),
       );
+      setNameError(nextErrors.nameError);
+      setFormError(nextErrors.formError);
       setCreating(false);
     }
+  };
+
+  const screenKey = getAgentCreationScreenKey(mode, builderSessionId);
+  const screenVariants = {
+    initial: (direction: TransitionDirection) => ({
+      opacity: 0,
+      transform: shouldReduceMotion
+        ? "translateX(0)"
+        : direction === 1
+          ? "translateX(8px)"
+          : "translateX(-8px)",
+    }),
+    animate: {
+      opacity: 1,
+      transform: "translateX(0)",
+      transition: {
+        duration: shouldReduceMotion
+          ? UI_MOTION_DURATION.fast
+          : UI_MOTION_DURATION.standard,
+        ease: UI_EASE_OUT,
+      },
+    },
+    exit: (direction: TransitionDirection) => ({
+      opacity: 0,
+      transform: shouldReduceMotion
+        ? "translateX(0)"
+        : direction === 1
+          ? "translateX(-8px)"
+          : "translateX(8px)",
+      transition: {
+        duration: UI_MOTION_DURATION.fast,
+        ease: UI_EASE_OUT,
+      },
+    }),
+  };
+
+  const updateAgentName = (name: string) => {
+    setNameError(null);
+    setDraft((current) => ({ ...current, name }));
   };
 
   return (
@@ -655,35 +842,49 @@ export function AgentCreationStudio() {
           <ArrowLeft className="size-4" aria-hidden="true" />
         </Button>
         <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold">
+          <h1 className="truncate text-body font-semibold">
             {duplicateAgent
               ? t(($) => $.creation_studio.duplicate_title, { name: duplicateAgent.name })
               : squadId
                 ? t(($) => $.creation_studio.squad_title)
                 : t(($) => $.creation_studio.title)}
           </h1>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="truncate text-caption text-muted-foreground">
             {currentModeLabel}
           </p>
         </div>
         {mode !== "choose" && mode !== "templates" && (
-          <div className="ml-auto hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+          <div className="ml-auto hidden items-center gap-2 text-caption text-muted-foreground sm:flex">
             <span className="rounded-full bg-muted px-2 py-1">
               {sourceTemplate?.name ?? (mode === "ai" ? t(($) => $.creation_studio.modes.ai.title) : t(($) => $.creation_studio.modes.blank.title))}
             </span>
             {selectedRuntime && (
               <span className="rounded-full bg-muted px-2 py-1">
-                {selectedRuntime.name || selectedRuntime.provider}
+                {runtimeDisplayLabel(selectedRuntime)}
               </span>
             )}
           </div>
         )}
       </header>
 
+      <AnimatePresence
+        mode="wait"
+        initial={false}
+        custom={transitionDirection}
+      >
+        <motion.div
+          key={screenKey}
+          custom={transitionDirection}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="flex min-h-0 flex-1 flex-col"
+        >
       {mode === "choose" && (
         <ModeChooser
           onBlank={chooseBlank}
-          onAI={() => setMode("ai")}
+          onAI={chooseAI}
         />
       )}
 
@@ -705,8 +906,13 @@ export function AgentCreationStudio() {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-8">
             {duplicateAgent && (
-              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
+              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-body">
                 {t(($) => $.creation_studio.duplicate_env_notice)}
+              </div>
+            )}
+            {duplicateRuntimeReset && (
+              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-body">
+                {t(($) => $.creation_studio.duplicate_runtime_reset_notice)}
               </div>
             )}
             <ConfigurationPanel
@@ -716,13 +922,15 @@ export function AgentCreationStudio() {
               runtimesLoading={runtimesLoading}
               members={members}
               currentUserId={currentUser?.id ?? null}
-              createError={createError}
+              nameError={nameError}
+              onNameChange={updateAgentName}
             />
           </div>
           <StudioFooter
             canCreate={canCreate}
             creating={creating}
             squad={!!squadId}
+            error={formError}
             onCreate={createAgent}
           />
         </div>
@@ -767,10 +975,10 @@ export function AgentCreationStudio() {
           <div className="min-h-0 overflow-y-auto border-l bg-muted/10">
             <div className="mx-auto max-w-2xl px-5 py-6">
               <div className="mb-6">
-                <h2 className="text-base font-semibold tracking-tight">
+                <h2 className="text-title-sm font-semibold tracking-tight">
                   {t(($) => $.creation_studio.live_draft)}
                 </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   {t(($) => $.creation_studio.live_draft_hint)}
                 </p>
               </div>
@@ -782,18 +990,27 @@ export function AgentCreationStudio() {
                 runtimesLoading={runtimesLoading}
                 members={members}
                 currentUserId={currentUser?.id ?? null}
-                createError={createError}
+                nameError={nameError}
+                onNameChange={updateAgentName}
+                onRuntimeSelect={(runtimeId) => {
+                  void switchBuilderRuntime(runtimeId);
+                }}
+                runtimeSwitchPending={builderPending}
+                runtimeSwitchInFlight={builderSwitchingRuntime}
               />
             </div>
             <StudioFooter
               canCreate={canCreate && !builderPending}
               creating={creating}
               squad={!!squadId}
+              error={formError}
               onCreate={createAgent}
             />
           </div>
         </div>
       )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
@@ -825,13 +1042,13 @@ export function ModeChooser({
     <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10">
       <div className="w-full max-w-5xl">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
             {t(($) => $.creation_studio.eyebrow)}
           </div>
-          <h2 className="mt-2 text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="mt-2 text-balance text-display-sm font-semibold tracking-tight sm:text-display">
             {t(($) => $.creation_studio.choose_title)}
           </h2>
-          <p className="mt-3 text-pretty text-sm text-muted-foreground">
+          <p className="mt-3 text-pretty text-body text-muted-foreground">
             {t(($) => $.creation_studio.choose_description)}
           </p>
         </div>
@@ -849,16 +1066,16 @@ export function ModeChooser({
               )}
             >
               {recommended && (
-                <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
+                <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2 py-1 text-micro font-medium text-primary">
                   {t(($) => $.creation_studio.recommended)}
                 </span>
               )}
               <span className="flex size-11 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-foreground">
                 <Icon className="size-5" aria-hidden="true" />
               </span>
-              <span className="mt-7 text-base font-semibold">{title}</span>
-              <span className="mt-2 text-sm leading-6 text-muted-foreground">{description}</span>
-              <span className="mt-auto flex items-center gap-1 pt-5 text-xs font-medium text-foreground">
+              <span className="mt-7 text-title-sm font-semibold">{title}</span>
+              <span className="mt-2 text-body leading-6 text-muted-foreground">{description}</span>
+              <span className="mt-auto flex items-center gap-1 pt-5 text-caption font-medium text-foreground">
                 {t(($) => $.creation_studio.continue)}
                 <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
               </span>
@@ -913,7 +1130,7 @@ function TemplateChooser({
           {loading ? (
             <div className="flex justify-center py-16"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
           ) : templates.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">{t(($) => $.creation_studio.templates.empty)}</div>
+            <div className="py-16 text-center text-body text-muted-foreground">{t(($) => $.creation_studio.templates.empty)}</div>
           ) : (
             <div className="space-y-2">
               {templates.map((template) => (
@@ -930,10 +1147,10 @@ function TemplateChooser({
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><Bot className="size-4" /></span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium">{template.name}</span>
-                      {template.category && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{template.category}</span>}
+                      <span className="truncate text-body font-medium">{template.name}</span>
+                      {template.category && <span className="ml-auto shrink-0 text-micro text-muted-foreground">{template.category}</span>}
                     </span>
-                    <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted-foreground">{template.description}</span>
+                    <span className="mt-1 line-clamp-2 block text-caption leading-5 text-muted-foreground">{template.description}</span>
                   </span>
                 </button>
               ))}
@@ -945,18 +1162,18 @@ function TemplateChooser({
         {!selected ? (
           <div className="flex h-full min-h-80 flex-col items-center justify-center px-8 text-center text-muted-foreground">
             <Bot className="size-8" />
-            <p className="mt-3 text-sm">{t(($) => $.creation_studio.templates.select_hint)}</p>
+            <p className="mt-3 text-body">{t(($) => $.creation_studio.templates.select_hint)}</p>
           </div>
         ) : (
           <div className="mx-auto max-w-3xl p-6 sm:p-8">
             <div className="flex items-start gap-4">
               <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Bot className="size-6" /></span>
-              <div><h2 className="text-xl font-semibold">{selected.name}</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">{selected.description}</p></div>
+              <div><h2 className="text-title-lg font-semibold">{selected.name}</h2><p className="mt-1 text-body leading-6 text-muted-foreground">{selected.description}</p></div>
             </div>
             {selected.skills.length > 0 && (
-              <div className="mt-7"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.skills)}</h3><div className="mt-3 space-y-2">{selected.skills.map((skill) => <div key={skill.source_url} className="flex items-start gap-2 rounded-lg border bg-card p-3"><Check className="mt-0.5 size-4 shrink-0 text-success" /><div><div className="text-sm font-medium">{skill.cached_name}</div><div className="mt-0.5 text-xs text-muted-foreground">{skill.cached_description}</div></div></div>)}</div></div>
+              <div className="mt-7"><h3 className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.skills)}</h3><div className="mt-3 space-y-2">{selected.skills.map((skill) => <div key={skill.source_url} className="flex items-start gap-2 rounded-lg border bg-card p-3"><Check className="mt-0.5 size-4 shrink-0 text-success" /><div><div className="text-body font-medium">{skill.cached_name}</div><div className="mt-0.5 text-caption text-muted-foreground">{skill.cached_description}</div></div></div>)}</div></div>
             )}
-            <div className="mt-7"><h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.instructions)}</h3><div className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-6">{detailLoading ? <Loader2 className="size-4 animate-spin" /> : detail?.instructions}</div></div>
+            <div className="mt-7"><h3 className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">{t(($) => $.creation_studio.templates.instructions)}</h3><div className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-body leading-6">{detailLoading ? <Loader2 className="size-4 animate-spin" /> : detail?.instructions}</div></div>
             <div className="mt-7 flex justify-end"><Button onClick={onUse} disabled={detailLoading || !detail}>{t(($) => $.creation_studio.templates.use)}<ChevronRight className="size-4" /></Button></div>
           </div>
         )}
@@ -972,8 +1189,12 @@ function ConfigurationPanel({
   runtimesLoading,
   members,
   currentUserId,
-  createError,
+  nameError,
+  onNameChange,
   compact = false,
+  onRuntimeSelect,
+  runtimeSwitchPending = false,
+  runtimeSwitchInFlight = false,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -981,13 +1202,34 @@ function ConfigurationPanel({
   runtimesLoading: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
-  createError: string | null;
+  nameError: string | null;
+  onNameChange: (name: string) => void;
   compact?: boolean;
+  /** Builder sessions rebind the server-side carrier instead of only editing
+   *  the draft. Absent for the plain create flows, where the draft is the only
+   *  state that exists. */
+  onRuntimeSelect?: (runtimeId: string) => void;
+  /** A builder reply is in flight, so the server would refuse the rebind. */
+  runtimeSwitchPending?: boolean;
+  /** A rebind request is in flight. */
+  runtimeSwitchInFlight?: boolean;
 }) {
   const { t } = useT("agents");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => onChange({ ...draft, [key]: value });
   const otherMembers = members.filter((member) => member.user_id !== currentUserId);
+  const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  const handleRuntimeSelect = (id: string) => {
+    if (id === draft.runtimeId) return;
+    if (onRuntimeSelect) {
+      onRuntimeSelect(id);
+      return;
+    }
+    // Model is per-runtime; clear it — and the per-model thinking / speed
+    // overrides — on runtime change so the new runtime resolves its own
+    // defaults instead of stale values.
+    onChange(applyDraftRuntimeChange(draft, id));
+  };
 
   return (
     <div className={cn("space-y-8", compact && "space-y-6")}>
@@ -1007,42 +1249,44 @@ function ConfigurationPanel({
                 name={draft.name}
                 size={compact ? 52 : 56}
                 onUploaded={(url) => set("avatarUrl", url)}
+                onEmojiSelected={(value) => set("avatarUrl", value)}
                 onClear={() => set("avatarUrl", null)}
               />
             </div>
           </DraftFieldRow>
-          <DraftFieldRow
+          <AgentNameField
             compact={compact}
-            label={t(($) => $.create_dialog.name_label)}
-            htmlFor="agent-create-name"
-          >
-            <Input
-              id="agent-create-name"
-              name="agent-name"
-              autoComplete="off"
-              aria-label={t(($) => $.create_dialog.name_label)}
-              value={draft.name}
-              onChange={(event) => set("name", event.target.value)}
-              placeholder={t(($) => $.create_dialog.name_placeholder)}
-            />
-          </DraftFieldRow>
+            name={draft.name}
+            error={nameError}
+            onChange={onNameChange}
+          />
           <DraftFieldRow
             compact={compact}
             align="start"
             label={t(($) => $.create_dialog.description_label)}
             htmlFor="agent-create-description"
           >
-            <Textarea
-              id="agent-create-description"
-              name="agent-description"
-              autoComplete="off"
-              aria-label={t(($) => $.create_dialog.description_label)}
-              value={draft.description}
-              onChange={(event) => set("description", event.target.value)}
-              placeholder={t(($) => $.create_dialog.description_placeholder)}
-              rows={compact ? 3 : 4}
-              className="resize-y"
-            />
+            <div>
+              <Textarea
+                id="agent-create-description"
+                name="agent-description"
+                autoComplete="off"
+                aria-label={t(($) => $.create_dialog.description_label)}
+                value={draft.description}
+                onChange={(event) => set("description", event.target.value)}
+                placeholder={t(($) => $.create_dialog.description_placeholder)}
+                rows={compact ? 3 : 4}
+                // The create API rejects >255 characters with a 400. Cap the
+                // input and show the counter so the limit is visible before
+                // submitting, matching the settings page.
+                maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
+                className="resize-y"
+              />
+              <CharCounter
+                length={[...draft.description].length}
+                max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
           </DraftFieldRow>
         </SettingsCard>
       </SettingsSection>
@@ -1066,7 +1310,7 @@ function ConfigurationPanel({
               onChange={(event) => set("instructions", event.target.value)}
               placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
               rows={compact ? 9 : 12}
-              className="min-h-44 resize-y font-mono text-[13px] leading-6"
+              className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
           <div className="px-4 py-4">
@@ -1084,26 +1328,46 @@ function ConfigurationPanel({
       >
         <SettingsCard>
           <div className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}>
-            <RuntimePicker
-              runtimes={runtimes}
-              runtimesLoading={runtimesLoading}
-              members={members}
-              currentUserId={currentUserId}
-              selectedRuntimeId={draft.runtimeId}
-              onSelect={(id) => {
-                // Model is per-runtime; clear it on runtime change so the new
-                // runtime resolves its own default instead of a stale value.
-                if (id !== draft.runtimeId) onChange({ ...draft, runtimeId: id, model: "" });
-              }}
-            />
+            <div className="min-w-0">
+              <RuntimePicker
+                runtimes={runtimes}
+                runtimesLoading={runtimesLoading}
+                members={members}
+                currentUserId={currentUserId}
+                selectedRuntimeId={draft.runtimeId}
+                onSelect={handleRuntimeSelect}
+                disabled={runtimeLocked}
+              />
+              {/* A silently greyed-out picker is the worst version of this: the
+                  user reaches for it exactly when the current runtime has gone
+                  wrong, so say what unblocks it instead of just refusing. */}
+              {runtimeSwitchPending && (
+                <p className="mt-1.5 text-caption text-muted-foreground">
+                  {t(($) => $.creation_studio.builder.switch_runtime_pending)}
+                </p>
+              )}
+            </div>
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}
               runtimeOnline={selectedRuntime?.status === "online"}
               value={draft.model}
-              onChange={(value) => set("model", value)}
-              disabled={!selectedRuntime}
+              onChange={(value) => onChange(applyDraftModelChange(draft, value))}
+              // A successful switch clears the model, so an edit made while the
+              // rebind is in flight would be silently discarded.
+              disabled={!selectedRuntime || runtimeSwitchInFlight}
             />
           </div>
+          {/* Both fields fail closed: they render only when the exact selected
+              model's live catalog advertises the capability (or a value is
+              already set and needs clearing), so an offline runtime, a failed
+              discovery or an empty model shows nothing instead of an input
+              that cannot be honoured. */}
+          <AgentExecutionOverrides
+            draft={draft}
+            runtime={selectedRuntime}
+            disabled={runtimeLocked}
+            onChange={onChange}
+          />
         </SettingsCard>
       </SettingsSection>
 
@@ -1143,10 +1407,10 @@ function ConfigurationPanel({
                     ) : null}
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-sm font-medium">
+                    <span className="block text-body font-medium">
                       {t(($) => $.creation_studio.access[scope].title)}
                     </span>
-                    <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
                       {t(($) => $.creation_studio.access[scope].description)}
                     </span>
                   </span>
@@ -1177,14 +1441,14 @@ function ConfigurationPanel({
                       actorId={member.user_id}
                       size="sm"
                     />
-                    <span className="min-w-0 flex-1 truncate text-sm">
+                    <span className="min-w-0 flex-1 truncate text-body">
                       {member.name}
                     </span>
                   </label>
                 );
               })}
               {draft.memberIds.size === 0 ? (
-                <p className="px-2 py-1 text-xs text-destructive">
+                <p className="px-2 py-1 text-caption text-destructive">
                   {t(($) => $.creation_studio.access.members.required)}
                 </p>
               ) : null}
@@ -1192,17 +1456,103 @@ function ConfigurationPanel({
           ) : null}
         </SettingsCard>
       </SettingsSection>
-
-      {createError ? (
-        <div
-          role="alert"
-          aria-live="polite"
-          className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-        >
-          {createError}
-        </div>
-      ) : null}
     </div>
+  );
+}
+
+export function AgentNameField({
+  name,
+  error,
+  onChange,
+  compact = false,
+}: {
+  name: string;
+  error: string | null;
+  onChange: (name: string) => void;
+  compact?: boolean;
+}) {
+  const { t } = useT("agents");
+  const errorId = "agent-create-name-error";
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!error) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [error]);
+
+  return (
+    <DraftFieldRow
+      compact={compact}
+      label={t(($) => $.create_dialog.name_label)}
+      htmlFor="agent-create-name"
+    >
+      <div className="space-y-1.5">
+        <Input
+          ref={inputRef}
+          id="agent-create-name"
+          name="agent-name"
+          autoComplete="off"
+          aria-label={t(($) => $.create_dialog.name_label)}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          value={name}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={t(($) => $.create_dialog.name_placeholder)}
+        />
+        {error ? (
+          <p id={errorId} className="text-caption text-destructive">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </DraftFieldRow>
+  );
+}
+
+/**
+ * Per-model execution overrides (thinking level + Codex speed) for the create
+ * flow. Capability comes from the exact selected model's live catalog on the
+ * selected runtime, so nothing renders while that cannot be resolved — an
+ * offline runtime, failed discovery, or an empty "use the runtime default"
+ * model. That is the same fail-closed rule the settings page follows, and it is
+ * why no value can be sent that the daemon would refuse to honour.
+ */
+export function AgentExecutionOverrides({
+  draft,
+  runtime,
+  disabled = false,
+  onChange,
+}: {
+  draft: AgentDraft;
+  runtime: RuntimeDevice | null;
+  disabled?: boolean;
+  onChange: (draft: AgentDraft) => void;
+}) {
+  const { t } = useT("agents");
+  const runtimeOnline = runtime?.status === "online";
+  return (
+    <>
+      <ThinkingSettingField
+        label={t(($) => $.creation_studio.thinking_label)}
+        runtimeId={runtime?.id ?? null}
+        runtimeOnline={runtimeOnline}
+        provider={runtime?.provider ?? ""}
+        model={draft.model}
+        value={draft.thinkingLevel}
+        canEdit={!disabled}
+        onChange={(thinkingLevel) => onChange({ ...draft, thinkingLevel })}
+      />
+      <ServiceTierSettingField
+        label={t(($) => $.creation_studio.speed_label)}
+        runtimeId={runtime?.id ?? null}
+        runtimeOnline={runtimeOnline}
+        model={draft.model}
+        value={draft.serviceTier}
+        canEdit={!disabled}
+        onChange={(serviceTier) => onChange({ ...draft, serviceTier })}
+      />
+    </>
   );
 }
 
@@ -1230,11 +1580,11 @@ function DraftFieldRow({
       )}
     >
       {htmlFor ? (
-        <label htmlFor={htmlFor} className="text-sm font-medium">
+        <label htmlFor={htmlFor} className="text-body font-medium">
           {label}
         </label>
       ) : (
-        <div className="text-sm font-medium">{label}</div>
+        <div className="text-body font-medium">{label}</div>
       )}
       <div className="min-w-0">{children}</div>
     </div>
@@ -1244,7 +1594,7 @@ function DraftFieldRow({
 function BuilderSetup({ draft, onChange, runtimes, runtimesLoading, members, currentUserId, selectedRuntime, starting, error, onStart, onConnectRuntime }: { draft: AgentDraft; onChange: (draft: AgentDraft) => void; runtimes: RuntimeDevice[]; runtimesLoading: boolean; members: MemberWithUser[]; currentUserId: string | null; selectedRuntime: RuntimeDevice | null; starting: boolean; error: string | null; onStart: () => void; onConnectRuntime: () => void; }) {
   const { t } = useT("agents");
   const hasOnline = runtimes.some((runtime) => runtime.status === "online" && isRuntimeUsableForUser(runtime, currentUserId));
-  return <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10"><div className="w-full max-w-xl rounded-xl border bg-card p-6 shadow-sm"><span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><MessageSquare className="size-5" /></span><h2 className="mt-5 text-xl font-semibold">{t(($) => $.creation_studio.builder.setup_title)}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t(($) => $.creation_studio.builder.setup_description)}</p><div className="mt-6 space-y-4"><RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={currentUserId} selectedRuntimeId={draft.runtimeId} onSelect={(runtimeId) => { if (runtimeId !== draft.runtimeId) onChange({ ...draft, runtimeId, model: "" }); }} /><ModelDropdown runtimeId={selectedRuntime?.id ?? null} runtimeOnline={selectedRuntime?.status === "online"} value={draft.model} onChange={(model) => onChange({ ...draft, model })} disabled={!selectedRuntime} /></div>{error && <div role="alert" className="mt-4 text-sm text-destructive">{error}</div>}<div className="mt-6 flex justify-end">{hasOnline ? <Button onClick={onStart} disabled={starting || selectedRuntime?.status !== "online"}>{starting && <Loader2 className="size-4 animate-spin" />}{t(($) => $.creation_studio.builder.start)}</Button> : <Button onClick={onConnectRuntime}>{t(($) => $.creation_studio.builder.connect_runtime)}</Button>}</div></div></main>;
+  return <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10"><div className="w-full max-w-xl rounded-xl border bg-card p-6 shadow-sm"><span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><MessageSquare className="size-5" /></span><h2 className="mt-5 text-title-lg font-semibold">{t(($) => $.creation_studio.builder.setup_title)}</h2><p className="mt-2 text-body leading-6 text-muted-foreground">{t(($) => $.creation_studio.builder.setup_description)}</p><div className="mt-6 space-y-4"><RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={currentUserId} selectedRuntimeId={draft.runtimeId} onSelect={(runtimeId) => { if (runtimeId !== draft.runtimeId) onChange(applyDraftRuntimeChange(draft, runtimeId)); }} /><ModelDropdown runtimeId={selectedRuntime?.id ?? null} runtimeOnline={selectedRuntime?.status === "online"} value={draft.model} onChange={(model) => onChange(applyDraftModelChange(draft, model))} disabled={!selectedRuntime} /></div>{error && <div role="alert" className="mt-4 text-body text-destructive">{error}</div>}<div className="mt-6 flex justify-end">{hasOnline ? <Button onClick={onStart} disabled={starting || selectedRuntime?.status !== "online"}>{starting && <Loader2 className="size-4 animate-spin" />}{t(($) => $.creation_studio.builder.start)}</Button> : <Button onClick={onConnectRuntime}>{t(($) => $.creation_studio.builder.connect_runtime)}</Button>}</div></div></main>;
 }
 
 function BuilderConversation({
@@ -1280,17 +1630,19 @@ function BuilderConversation({
   ];
 
   return (
-    <section className="flex min-h-0 flex-col bg-background">
+    // `@container`: this is one column of the studio's split layout, so the
+    // shared chat gutter must size against the column, not the viewport.
+    <section className="flex min-h-0 flex-col bg-background @container">
       <header className="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b px-5 py-2.5">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">
+          <h2 className="truncate text-body font-semibold">
             {t(($) => $.creation_studio.builder.chat_title)}
           </h2>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="truncate text-caption text-muted-foreground">
             {t(($) => $.creation_studio.builder.chat_hint)}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground">
           <span
             className={cn(
               "size-2 rounded-full",
@@ -1316,10 +1668,10 @@ function BuilderConversation({
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-8">
           <div className="w-full max-w-xl text-center">
-            <h3 className="text-balance text-lg font-semibold">
+            <h3 className="text-balance text-title font-semibold">
               {t(($) => $.creation_studio.builder.empty_title)}
             </h3>
-            <p className="mx-auto mt-2 max-w-md text-pretty text-sm leading-6 text-muted-foreground">
+            <p className="mx-auto mt-2 max-w-md text-pretty text-body leading-6 text-muted-foreground">
               {t(($) => $.creation_studio.builder.empty_description)}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -1328,7 +1680,7 @@ function BuilderConversation({
                   key={prompt}
                   type="button"
                   onClick={() => void onSend(prompt)}
-                  className="rounded-full border bg-background px-3 py-1.5 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border bg-background px-3 py-1.5 text-caption transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {prompt}
                 </button>
@@ -1342,7 +1694,7 @@ function BuilderConversation({
         <div
           role="alert"
           aria-live="polite"
-          className="mx-5 mb-3 rounded-md bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          className="mx-5 mb-3 rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive"
         >
           {error}
         </div>
@@ -1363,7 +1715,46 @@ function BuilderConversation({
   );
 }
 
-function StudioFooter({ canCreate, creating, squad, onCreate }: { canCreate: boolean; creating: boolean; squad: boolean; onCreate: () => void; }) { const { t } = useT("agents"); return <div className="sticky bottom-0 mt-8 flex items-center justify-end gap-3 border-t bg-background/95 px-5 py-3 backdrop-blur"><Button type="button" onClick={onCreate} disabled={!canCreate}>{creating && <Loader2 className="size-4 animate-spin" />}{creating ? t(($) => $.creation_studio.creating) : squad ? t(($) => $.creation_studio.create_and_add) : t(($) => $.creation_studio.create_and_open)}</Button></div>; }
+export function StudioFooter({
+  canCreate,
+  creating,
+  squad,
+  error,
+  onCreate,
+}: {
+  canCreate: boolean;
+  creating: boolean;
+  squad: boolean;
+  error: string | null;
+  onCreate: () => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="pe-chat-launcher sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 py-3 pl-5 backdrop-blur">
+      {error ? (
+        <p
+          role="alert"
+          className="min-w-0 flex-1 break-words text-body text-destructive"
+        >
+          {error}
+        </p>
+      ) : null}
+      <Button
+        type="button"
+        className="ml-auto shrink-0"
+        onClick={onCreate}
+        disabled={!canCreate}
+      >
+        {creating && <Loader2 className="size-4 animate-spin" />}
+        {creating
+          ? t(($) => $.creation_studio.creating)
+          : squad
+            ? t(($) => $.creation_studio.create_and_add)
+            : t(($) => $.creation_studio.create_and_open)}
+      </Button>
+    </div>
+  );
+}
 export function buildInvocationTargets(
   draft: AgentDraft,
 ): AgentInvocationTargetInput[] {
@@ -1421,6 +1812,152 @@ export function deriveDuplicateAccess(
     memberIds: new Set(memberIds),
     teamIds: new Set(teamIds),
   };
+}
+
+/**
+ * Seeds the studio draft from the agent being duplicated.
+ *
+ * `model` / `thinkingLevel` / `serviceTier` only mean something on the runtime
+ * they were chosen for, so they ride along only when the copy stays on that
+ * exact runtime. When the source runtime is gone, private to somebody else or
+ * offline, the draft falls back to another runtime and the three are cleared
+ * for the user to pick again — the same rule `multica agent copy` already
+ * enforces server-side (cmd_agent_copy.go). Before MUL-5390 the fallback kept
+ * the source `model` and silently persisted a cross-provider value.
+ */
+export function buildDuplicateDraft(
+  source: Agent,
+  options: {
+    runtimes: RuntimeDevice[];
+    currentUserId: string | null;
+    fallbackRuntimeId: string;
+    nameSuffix: string;
+  },
+): AgentDraft {
+  const keepsRuntime =
+    !!source.runtime_id &&
+    options.runtimes.some(
+      (runtime) =>
+        runtime.id === source.runtime_id &&
+        isRuntimeUsableForUser(runtime, options.currentUserId),
+    );
+  return {
+    ...EMPTY_DRAFT,
+    name: `${source.name}${options.nameSuffix}`,
+    description: source.description ?? "",
+    instructions: source.instructions ?? "",
+    avatarUrl: source.avatar_url ?? null,
+    runtimeId: keepsRuntime
+      ? (source.runtime_id as string)
+      : options.fallbackRuntimeId,
+    model: keepsRuntime ? source.model ?? "" : "",
+    thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
+    serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
+    skillIds: new Set(source.skills.map((skill) => skill.id)),
+    ...deriveDuplicateAccess(source),
+  };
+}
+
+/**
+ * Seeds the duplicate draft exactly once, and only from a runtime list that has
+ * actually answered.
+ *
+ * The ordering matters: the agent list and the runtime list are independent
+ * queries, so on a cold start (a direct `?duplicate=<id>` link, or a refresh)
+ * the agent can arrive while runtimes are still pending. Seeding then would run
+ * `buildDuplicateDraft` against `[]`, read the source runtime as unavailable,
+ * and clear the model / thinking / speed that a same-runtime copy must keep —
+ * permanently, because seeding happens once. Re-running on every runtime change
+ * instead would overwrite edits the user already made, so the gate is on the
+ * query being decidable rather than on the data changing.
+ */
+export function useDuplicateDraftSeed({
+  source,
+  runtimesSettled,
+  runtimes,
+  currentUserId,
+  fallbackRuntimeId,
+  nameSuffix,
+  onSeed,
+}: {
+  source: Agent | null;
+  /** The runtime query resolved or failed — `false` while it is pending. */
+  runtimesSettled: boolean;
+  runtimes: RuntimeDevice[];
+  currentUserId: string | null;
+  fallbackRuntimeId: string;
+  nameSuffix: string;
+  onSeed: (draft: AgentDraft, runtimeReset: boolean) => void;
+}): void {
+  const seededRef = useRef(false);
+  // The callback is recreated every render by design (it closes over setState),
+  // so keep it out of the effect's dependency list.
+  const onSeedRef = useRef(onSeed);
+  onSeedRef.current = onSeed;
+
+  useEffect(() => {
+    if (seededRef.current || !source || !runtimesSettled) return;
+    seededRef.current = true;
+    const draft = buildDuplicateDraft(source, {
+      runtimes,
+      currentUserId,
+      fallbackRuntimeId,
+      nameSuffix,
+    });
+    onSeedRef.current(draft, draft.runtimeId !== source.runtime_id);
+  }, [
+    currentUserId,
+    fallbackRuntimeId,
+    nameSuffix,
+    runtimes,
+    runtimesSettled,
+    source,
+  ]);
+}
+
+/**
+ * Assembles the `POST /api/agents` body. Empty execution overrides are omitted
+ * rather than sent as `""` so the runtime resolves its own default, and the
+ * duplicate-only fields are the runtime-independent ones (`custom_args`,
+ * concurrency) — mirroring `multica agent copy`.
+ */
+export function buildCreateAgentRequest(options: {
+  draft: AgentDraft;
+  runtimeId: string;
+  /** Template attribution for the `agent_created` event, not a template create. */
+  template?: string;
+  duplicateSource?: Agent | null;
+}): CreateAgentRequest {
+  const { draft, runtimeId, template, duplicateSource } = options;
+  const request: CreateAgentRequest = {
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    instructions: draft.instructions.trim() || undefined,
+    avatar_url: draft.avatarUrl ?? undefined,
+    runtime_id: runtimeId,
+    model: draft.model.trim() || undefined,
+    thinking_level: draft.thinkingLevel.trim() || undefined,
+    service_tier: draft.serviceTier.trim() || undefined,
+    permission_mode:
+      draft.permissionScope === "private" ? "private" : "public_to",
+    invocation_targets: buildInvocationTargets(draft),
+    skill_ids: [...draft.skillIds],
+    template,
+  };
+  if (duplicateSource) {
+    if (duplicateSource.custom_args.length > 0) {
+      request.custom_args = duplicateSource.custom_args;
+    }
+    const sourceConcurrency = duplicateSource.max_concurrent_tasks;
+    if (
+      Number.isInteger(sourceConcurrency) &&
+      sourceConcurrency >= AGENT_MAX_CONCURRENT_TASKS_MIN &&
+      sourceConcurrency <= AGENT_MAX_CONCURRENT_TASKS_MAX
+    ) {
+      request.max_concurrent_tasks = sourceConcurrency;
+    }
+  }
+  return request;
 }
 export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
   const match = content.match(/<agent_draft>([\s\S]*?)<\/agent_draft>/);
@@ -1635,6 +2172,11 @@ export function mergeBuilderDraft(
         ? payload.instructions
         : current.instructions,
     model,
+    // The builder can move the model, which invalidates whatever thinking /
+    // speed the user picked for the previous one. It never sets these two
+    // itself, so an unchanged model simply preserves them.
+    thinkingLevel: model === current.model ? current.thinkingLevel : "",
+    serviceTier: model === current.model ? current.serviceTier : "",
     skillIds: new Set(skillIds),
     permissionScope: scope,
     memberIds: new Set(scope === "members" ? memberIds : []),

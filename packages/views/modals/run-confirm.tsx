@@ -188,7 +188,7 @@ export function RunConfirmModal({
         {/* Always mounted and always usable on the first frame — nothing about
             this box depends on a server answer. */}
         <div className="grid gap-1.5">
-          <label className="text-sm font-medium" htmlFor="handoff-note">
+          <label className="text-body font-medium" htmlFor="handoff-note">
             {t(($) => $.run_confirm.note_label)}
           </label>
           <Textarea
@@ -201,7 +201,7 @@ export function RunConfirmModal({
             rows={3}
           />
           {noteDisabled ? (
-            <p className="text-xs text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
+            <p className="text-caption text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
           ) : null}
         </div>
 

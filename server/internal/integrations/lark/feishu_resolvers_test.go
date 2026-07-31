@@ -23,6 +23,7 @@ func binderUUID(b byte) pgtype.UUID {
 type fakeChatSession struct {
 	ensureIn engine.EnsureSessionInput
 	appendIn engine.AppendInput
+	mediaIn  engine.BindMediaInput
 }
 
 func (f *fakeChatSession) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
@@ -33,6 +34,11 @@ func (f *fakeChatSession) EnsureSession(_ context.Context, in engine.EnsureSessi
 func (f *fakeChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in
 	return engine.AppendResult{}, nil
+}
+
+func (f *fakeChatSession) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
+	f.mediaIn = in
+	return nil
 }
 
 func TestFeishuSessionBinder_EnsureSessionMapping(t *testing.T) {
@@ -148,5 +154,24 @@ func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 	if got.MessageID != "om_1" || got.ThreadID != "th_1" || got.SessionID != binderUUID(1) ||
 		got.Sender != binderUUID(7) || got.InstallationID != binderUUID(2) || got.ClaimToken != binderUUID(9) {
 		t.Errorf("append mapping wrong: %+v", got)
+	}
+}
+
+func TestFeishuSessionBinder_BindMediaMapping(t *testing.T) {
+	f := &fakeChatSession{}
+	b := &feishuSessionBinder{session: f}
+	ref := channel.MediaRef{Type: channel.MsgTypeImage, StorageURL: "https://cdn.example.test/image.png"}
+	if err := b.BindMedia(context.Background(), engine.BindMediaParams{
+		MessageID:   binderUUID(4),
+		SessionID:   binderUUID(1),
+		WorkspaceID: binderUUID(2),
+		Sender:      binderUUID(7),
+		MediaRefs:   []channel.MediaRef{ref},
+	}); err != nil {
+		t.Fatalf("BindMedia: %v", err)
+	}
+	got := f.mediaIn
+	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+		t.Fatalf("media mapping wrong: %+v", got)
 	}
 }

@@ -22,7 +22,7 @@ export interface ProjectChipProps {
 }
 
 const BASE_CLASS =
-  "project-chip inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs max-w-72";
+  "project-chip inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption max-w-72";
 
 export function ProjectChip({
   projectId,

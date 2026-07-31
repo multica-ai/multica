@@ -75,9 +75,24 @@ jobs:
             echo "frontend=false" >> "$GITHUB_OUTPUT"
           fi
 
-  frontend:
+  # The frontend validation is split across two runners on purpose. Both
+  # `@multica/web:build` (a webpack production build) and `@multica/views:test`
+  # (259 jsdom files) are CPU-saturating, and a standard runner only has
+  # 4 vCPUs. Running them in one job made them starve each other: the views
+  # suite needs ~104s wall when it owns 4 cores but took ~500s sharing them,
+  # and the identical webpack compile went from ~26s to ~342s. Splitting buys
+  # a second 4-vCPU box rather than reducing the work; total runner-minutes go
+  # up slightly, wall-clock feedback time goes down.
+  #
+  # The split is weighted, not even: the test group is by far the heavier half
+  # (~575 CPU-seconds vs ~250 for build + typecheck + lint), so it gets a
+  # runner to itself and everything else shares the other one.
+  frontend-build:
     needs: changes
     runs-on: ubuntu-latest
+    env:
+      # Pin turbo's filesystem cache somewhere actions/cache can address.
+      TURBO_CACHE_DIR: .turbo/cache
     steps:
       - name: Checkout
         if: ${{ needs.changes.outputs.frontend == 'true' }}
@@ -98,6 +113,31 @@ jobs:
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: pnpm install
 
+      # `node-version: 22` above floats across patch releases, and turbo's
+      # global hash does not include the interpreter at all (`engines` is null
+      # in its dry-run cache inputs). Without the resolved version in the key,
+      # a runner silently moving to another 22.x would restore a cache built by
+      # the old interpreter and report green without executing anything.
+      - name: Resolve runtime for cache key
+        id: runtime
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+
+      # Cache entries are immutable, so the key carries the commit SHA to make
+      # every run publish a fresh one and `restore-keys` falls back to the most
+      # recent prefix match. The two frontend jobs run disjoint task sets, so
+      # they get their own prefixes rather than racing to save one key.
+      # GitHub scopes caches by branch: a PR reads main's entries (so unchanged
+      # tasks hit on the first push) and writes its own (so re-pushes hit too).
+      - name: Restore turbo cache
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: turbo-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ github.sha }}
+          restore-keys: |
+            turbo-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
+
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
@@ -112,14 +152,91 @@ jobs:
           pnpm generate:reserved-slugs
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
-      - name: Build, type check, lint, and test
+      - name: Build, type check, and lint
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Mobile lives in a parallel mobile-verify workflow (path-filtered
         # to apps/mobile/** + packages/core/**) so it doesn't add
         # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
         # filter in sync with the root package.json scripts, which also
         # exclude @multica/mobile.
-        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs' --filter='!@multica/mobile'
+        run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
+
+  frontend-test:
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      TURBO_CACHE_DIR: .turbo/cache
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: pnpm install
+
+      - name: Resolve runtime for cache key
+        id: runtime
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+
+      # See frontend-build for the key strategy. These entries are tiny (~60KB
+      # measured): `test` declares no outputs, so turbo caches exit codes and
+      # logs rather than artifacts -- yet a hit still skips the whole suite,
+      # which is the single most expensive task in the graph.
+      - name: Restore turbo cache
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ github.sha }}
+          restore-keys: |
+            turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
+
+      - name: Test
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        # Same filter rationale as frontend-build. Type errors are not this
+        # job's responsibility -- frontend-build owns the `typecheck` task.
+        # `test` reaches dependency sources through the hash-only
+        # `^cache-inputs` edge (see turbo.json), so no `tsc` runs here.
+        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile'
+
+  # Aggregate gate. `frontend` is the status-check name the repository's
+  # branch rules refer to, so it has to survive the split above: this job
+  # keeps reporting under that name and simply fails when either half fails.
+  # It also inherits the old contract that the check goes green (rather than
+  # staying pending) on PRs the path filter excluded — both halves succeed
+  # trivially in that case because every step is gated off.
+  frontend:
+    needs: [frontend-build, frontend-test]
+    # `!cancelled()` rather than `always()`: a run superseded by a newer push
+    # is cancelled by the concurrency group above, and there is no reason to
+    # spend a runner reporting a verdict nobody will read.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check frontend job results
+        env:
+          BUILD_RESULT: ${{ needs.frontend-build.result }}
+          TEST_RESULT: ${{ needs.frontend-test.result }}
+        run: |
+          echo "frontend-build: $BUILD_RESULT"
+          echo "frontend-test:  $TEST_RESULT"
+          if [ "$BUILD_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ]; then
+            echo "::error::frontend validation failed"
+            exit 1
+          fi
 
   backend:
     runs-on: ubuntu-latest
@@ -163,14 +280,23 @@ jobs:
           go-version: "1.26.1"
           cache-dependency-path: server/go.sum
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Test Helm chart
+        run: bash scripts/helm-config.test.sh
+
       - name: Build
         run: cd server && go build ./...
 
       - name: Run migrations
         run: cd server && go run ./cmd/migrate up
 
+      - name: Verify Go test wrapper
+        run: bash scripts/test-go.test.sh
+
       - name: Test
-        run: cd server && go test -race ./...
+        run: bash scripts/test-go.sh --race
 
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go
@@ -208,6 +334,34 @@ jobs:
         # -v so a silent skip (no PowerShell host resolved, or a -run pattern
         # that stops matching) is visible in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+
+      - name: Test bounded Codex cleanup with inherited stdout descendant
+        working-directory: server
+        # Windows cannot prove whole-tree termination without a Job Object,
+        # but a descendant holding inherited stdout must never keep Result
+        # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
+        run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
+
+      - name: Test Windows OpenClaw npm shim interpreter resolution
+        working-directory: server
+        # #6061: every OpenClaw task failed execenv prep on a Windows host with
+        # a bare `exit status 1` and no stderr. A batch shim resolves and runs
+        # fine while the `node` it re-execs is unreachable, and npm's real
+        # template prefers a co-located node.exe over PATH — none of which can
+        # be proven without a real cmd.exe host. These tests pin: the positive
+        # control (node on PATH → success), that a missing node surfaces
+        # cmd.exe's own stderr (the first run of this job disproved #6061's
+        # premise that it does not), that a genuinely silent shim DOES reach the
+        # new diagnostic, that a co-located interpreter is credited, that a
+        # context timeout is not misdiagnosed as a missing interpreter, and that
+        # TEMP/TMP are NOT load-bearing (the originally reported root cause,
+        # since retracted upstream).
+        # Scoped to the windows-tagged shim tests — the package's legacy
+        # OpenClaw HOME tests are not Windows-safe; the backend job still runs
+        # the full package plus the cross-platform half on Linux.
+        # -v so a skip (no node on the runner) is visible instead of passing
+        # silently as "ok".
+        run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server

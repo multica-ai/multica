@@ -27,6 +27,19 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "runtime-daily", days, projectId, tz] as const,
+  failuresDaily: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "failures-daily", days, projectId, tz] as const,
+  failuresByAgent: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) =>
+    [...dashboardKeys.all(wsId), "failures-by-agent", days, projectId, tz] as const,
 };
 
 // 5-min rollup cadence on the server, 60s background refetch on the client.
@@ -47,9 +60,9 @@ function isSameDashboardScope(
 }
 
 // `tz` participates in every dashboard key so a Preferences change
-// repoints the cache. All four series — token rollups and the
-// atq.completed_at-based run-time series — slice their day boundary in
-// the viewer's tz, so the four dashboard tabs always agree.
+// repoints the cache. Every series — token rollups and the
+// atq.completed_at-based run-time / failure series — slices its day boundary
+// in the viewer's tz, so all the dashboard tabs always agree.
 export function dashboardUsageDailyOptions(
   wsId: string,
   days: number,
@@ -133,6 +146,54 @@ export function dashboardRunTimeDailyOptions(
     queryKey,
     queryFn: () =>
       api.getDashboardRunTimeDaily({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+    placeholderData: (previousData, previousQuery) =>
+      isSameDashboardScope(previousQuery?.queryKey, queryKey)
+        ? keepPreviousData(previousData)
+        : undefined,
+  });
+}
+
+export function dashboardFailuresDailyOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  const queryKey = dashboardKeys.failuresDaily(wsId, days, projectId, tz);
+  return queryOptions({
+    queryKey,
+    queryFn: () =>
+      api.getDashboardFailuresDaily({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+    placeholderData: (previousData, previousQuery) =>
+      isSameDashboardScope(previousQuery?.queryKey, queryKey)
+        ? keepPreviousData(previousData)
+        : undefined,
+  });
+}
+
+export function dashboardFailuresByAgentOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  const queryKey = dashboardKeys.failuresByAgent(wsId, days, projectId, tz);
+  return queryOptions({
+    queryKey,
+    queryFn: () =>
+      api.getDashboardFailuresByAgent({
         days,
         project_id: projectId ?? undefined,
         tz,

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Issue } from "@multica/core/types";
-import { getIssueGroupId, getMoveUpdates, insertIdByPosition, issueMatchesGroup, propertyGroupId } from "./drag-utils";
+import {
+  getIssueGroupId,
+  getMoveAnchors,
+  getMoveUpdates,
+  insertIdByPosition,
+  issueMatchesGroup,
+  propertyGroupId,
+} from "./drag-utils";
 
 function mk(id: string, position: number): Issue {
   return {
@@ -33,6 +40,19 @@ function mk(id: string, position: number): Issue {
 function mapOf(...issues: Issue[]): Map<string, Issue> {
   return new Map(issues.map((i) => [i.id, i]));
 }
+
+describe("getMoveAnchors", () => {
+  it("derives relative neighbors from the optimistic order", () => {
+    expect(getMoveAnchors(["a", "moving", "b"], "moving")).toEqual({
+      before_id: "a",
+      after_id: "b",
+    });
+    expect(getMoveAnchors(["moving"], "moving")).toEqual({
+      before_id: null,
+      after_id: null,
+    });
+  });
+});
 
 describe("insertIdByPosition", () => {
   it("inserts the id at its position-sorted slot", () => {

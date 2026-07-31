@@ -138,18 +138,15 @@ spec:
       name: http
 {{- if .Values.frontend.compatibility.backendAlias }}
 ---
-# DNS alias: the multica-web image bakes REMOTE_API_URL=http://backend:8080
-# at build time, and the Next.js standalone build does not re-evaluate the
-# rewrite destinations from runtime env. This ExternalName makes the bare
-# host "backend" resolve to the backend Service inside the cluster, so the
-# frontend's /api, /ws, /auth, and /uploads proxies work out of the box.
+# DNS alias for legacy multica-web images that baked
+# REMOTE_API_URL=http://backend:8080 at build time. Current images resolve
+# frontend.config.remoteApiUrl at runtime and do not need this Service.
 #
 # The name is intentionally unprefixed ("backend", not "{{ .Release.Name }}-backend")
 # because the baked-in host has no release prefix. As a result only ONE release
 # of this chart can run per namespace, and the name may collide with a
 # pre-existing Service/backend (see frontend.compatibility.backendAlias in
-# values.yaml). Operators running a web image built with a patched
-# REMOTE_API_URL can set that value to false to drop this Service entirely.
+# values.yaml).
 apiVersion: v1
 kind: Service
 metadata:

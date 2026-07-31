@@ -108,7 +108,7 @@ export function LarkTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-1">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           {t(($) => $.lark.page_description)}
         </p>
       </section>
@@ -116,10 +116,10 @@ export function LarkTab() {
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.lark.not_enabled_title)}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.lark.not_enabled_title)}</p>
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.lark.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+              <code className="rounded bg-muted px-1 py-0.5 text-micro">
                 MULTICA_LARK_SECRET_KEY
               </code>{" "}
               {t(($) => $.lark.not_enabled_description_suffix)}{" "}
@@ -136,26 +136,26 @@ export function LarkTab() {
         // when there is nothing to manage.
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.lark.preview_title)}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.lark.preview_title)}</p>
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.lark.preview_description)}
             </p>
           </CardContent>
         </Card>
       ) : (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold">{t(($) => $.lark.connected_bots)}</h2>
+          <h2 className="text-body font-semibold">{t(($) => $.lark.connected_bots)}</h2>
           {isLoading ? (
             <Card>
               <CardContent>
-                <p className="text-sm text-muted-foreground">{t(($) => $.lark.loading)}</p>
+                <p className="text-body text-muted-foreground">{t(($) => $.lark.loading)}</p>
               </CardContent>
             </Card>
           ) : installations.length === 0 ? (
             <Card>
               <CardContent className="space-y-2">
-                <p className="text-sm font-medium">{t(($) => $.lark.empty_title)}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-body font-medium">{t(($) => $.lark.empty_title)}</p>
+                <p className="text-caption text-muted-foreground">
                   {t(($) => $.lark.empty_description_prefix)}{" "}
                   <strong>{t(($) => $.lark.empty_description_cta)}</strong>{" "}
                   {t(($) => $.lark.empty_description_suffix)}
@@ -240,20 +240,20 @@ function InstallationRow({
           profileLink
         />
         <div className="space-y-1">
-          <p className="text-sm font-medium">
+          <p className="text-body font-medium">
             {agentName}
-            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
               {installation.region === "lark"
                 ? t(($) => $.lark.region_lark)
                 : t(($) => $.lark.region_feishu)}
             </span>
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.lark.revoked_badge)}
               </span>
             )}
           </p>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t(($) => $.lark.installed_at_label, {
               when: new Date(installation.installed_at).toLocaleString(),
             })}
@@ -468,13 +468,13 @@ function LarkAgentBotStatusRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
       )}
       data-testid="lark-agent-bot-status"
     >
       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
         {installation.region === "lark"
           ? t(($) => $.lark.region_lark)
           : t(($) => $.lark.region_feishu)}
@@ -563,9 +563,9 @@ function LarkAgentBotConnectedBadge({
           is mandatory: the backend disconnect tears down the WebSocket
           and stops message delivery. */}
       <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
             {installation.region === "lark"
               ? t(($) => $.lark.region_lark)
               : t(($) => $.lark.region_feishu)}
@@ -596,7 +596,7 @@ function LarkAgentBotConnectedBadge({
         href={manageHref}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
         title={
           installation.region === "lark"
             ? t(($) => $.lark.agent_bot_manage_tooltip_lark)
@@ -852,7 +852,7 @@ function LarkInstallDialog({
 
         <div className="flex flex-col items-center gap-4 py-2">
           {beginning && !session && (
-            <p className="text-sm text-muted-foreground">{t(($) => $.lark.install_starting)}</p>
+            <p className="text-body text-muted-foreground">{t(($) => $.lark.install_starting)}</p>
           )}
 
           {session && status === "pending" && (
@@ -862,7 +862,7 @@ function LarkInstallDialog({
                   network image dependency, prints at any DPI. */}
                 <QRCode value={session.qrCodeURL} size={192} />
               </div>
-              <p className="text-center text-xs text-muted-foreground">
+              <p className="text-center text-caption text-muted-foreground">
                 {region === "lark"
                   ? t(($) => $.lark.install_scan_hint_lark)
                   : t(($) => $.lark.install_scan_hint_feishu)}
@@ -871,7 +871,7 @@ function LarkInstallDialog({
                 href={session.qrCodeURL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs underline text-muted-foreground"
+                className="text-caption underline text-muted-foreground"
               >
                 {region === "lark"
                   ? t(($) => $.lark.install_open_link_fallback_lark)
@@ -881,12 +881,12 @@ function LarkInstallDialog({
           )}
 
           {status === "success" && (
-            <p className="text-sm font-medium">{t(($) => $.lark.install_success)}</p>
+            <p className="text-body font-medium">{t(($) => $.lark.install_success)}</p>
           )}
 
           {status === "error" && (
             <div className="space-y-2 text-center">
-              <p className="text-sm font-medium text-destructive">
+              <p className="text-body font-medium text-destructive">
                 {(() => {
                   switch (errorReason) {
                     case "expired":
@@ -911,7 +911,7 @@ function LarkInstallDialog({
                 })()}
               </p>
               {errorMessage && (
-                <p className="text-[10px] text-muted-foreground break-all">
+                <p className="text-micro text-muted-foreground break-all">
                   {errorMessage}
                 </p>
               )}

@@ -36,6 +36,16 @@ export function NavigationProvider({
   );
 }
 
+/**
+ * Non-throwing read of the adapter. For components that legitimately render
+ * outside a provider — leaf editor UI mounted in isolation, and the tests that
+ * exercise it — where the navigation-dependent behaviour has a sane fallback.
+ * Anything that must navigate should use `useNavigation()` and keep the throw.
+ */
+export function useOptionalNavigation(): NavigationAdapter | null {
+  return use(NavigationContext);
+}
+
 export function useNavigation(): NavigationAdapter {
   const ctx = use(NavigationContext);
   if (!ctx)

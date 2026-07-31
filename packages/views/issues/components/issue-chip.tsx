@@ -22,7 +22,7 @@ import { StatusIcon } from "./status-icon";
  * dismiss button in chat's context anchor card, …).
  *
  * Size budget: must fit within a 14px line-box when used inline — hence
- * `py-0.5` + text-xs (see MentionView docstring for the math).
+ * `py-0.5` + text-caption (see MentionView docstring for the math).
  */
 export interface IssueChipProps {
   issueId: string;
@@ -34,7 +34,7 @@ export interface IssueChipProps {
 }
 
 const BASE_CLASS =
-  "issue-mention inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs";
+  "issue-mention inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();

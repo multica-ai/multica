@@ -54,7 +54,6 @@ export interface TabSession {
    */
   resourceKey: string;
   title: string;
-  icon: string;
   /**
    * Pinned tabs render at the left of the tab bar as icon-only, suppress the
    * X close button, and turn any `navigation.push()` originating in them into
@@ -126,11 +125,10 @@ interface TabStore {
   openTab: (
     path: string,
     title: string,
-    icon: string,
     opts?: { activate?: boolean },
   ) => string;
   /** Always creates a new tab (no dedupe) in the active workspace. */
-  addTab: (path: string, title: string, icon: string) => string;
+  addTab: (path: string, title: string) => string;
   /**
    * Close a tab. Finds it across all workspaces (callers like the X button
    * only know the tab id, not the owning workspace). If this is the last
@@ -147,10 +145,10 @@ interface TabStore {
    */
   setActiveTab: (tabId: string) => void;
   /** Patch display metadata of a tab (title-sync). Finds across groups. */
-  updateTab: (tabId: string, patch: Partial<Pick<TabSession, "title" | "icon">>) => void;
+  updateTab: (tabId: string, patch: Partial<Pick<TabSession, "title">>) => void;
   /**
-   * In-tab navigation: update the active session's url/resourceKey/icon and
-   * its virtual history. This is the ONLY way a session's url changes; the
+   * In-tab navigation: update the active session's url/resourceKey and its
+   * virtual history. This is the ONLY way a session's url changes; the
    * Coordinator reconciles the router afterwards.
    */
   navigateActiveSession: (url: string, opts?: { replace?: boolean }) => void;
@@ -212,34 +210,14 @@ interface TabStore {
 }
 
 // ---------------------------------------------------------------------------
-// Route → icon mapping (title comes from document.title, not from here)
+// Session identity helpers
 // ---------------------------------------------------------------------------
-
-const ROUTE_ICONS: Record<string, string> = {
-  inbox: "Inbox",
-  "my-issues": "CircleUser",
-  issues: "ListTodo",
-  projects: "FolderKanban",
-  autopilots: "ListTodo",
-  agents: "Bot",
-  runtimes: "Monitor",
-  skills: "BookOpenText",
-  settings: "Settings",
-};
-
-/**
- * Resolve a route icon from a pathname.
- *
- * Tab URLs are always workspace-scoped: `/{slug}/{route}/...`, so the route
- * segment lives at index 1. Pre-workspace flows (create, invite) are rendered
- * by the window overlay, never as tabs.
- *
- * Title is NOT determined here — it comes from document.title.
- */
-export function resolveRouteIcon(pathname: string): string {
-  const segments = pathname.split("/").filter(Boolean);
-  return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
-}
+//
+// A tab's icon is NOT part of this model. It is derived from `tab.url` at
+// render time via `routeIconForPath` (@multica/views/layout), which shares the
+// route → icon map in `@multica/core/paths` with the sidebar nav — so the two
+// surfaces cannot drift, and no stale icon can survive in persisted state.
+// Title is likewise not determined here; it comes from document.title.
 
 /** Extract the leading workspace slug from a path, or null if the path
  *  isn't workspace-scoped (global path, root, or empty). */
@@ -325,13 +303,12 @@ function createId(): string {
   return createSafeId();
 }
 
-function makeSession(url: string, title: string, icon: string): TabSession {
+function makeSession(url: string, title: string): TabSession {
   return {
     id: createId(),
     url,
     resourceKey: resourceKeyForUrl(url),
     title,
-    icon,
     pinned: false,
     history: { stack: [url], index: 0 },
     memento: emptyMemento(),
@@ -352,7 +329,7 @@ function defaultPathFor(slug: string): string {
 
 function defaultTabFor(slug: string): TabSession {
   const path = defaultPathFor(slug);
-  return makeSession(path, "Issues", resolveRouteIcon(path));
+  return makeSession(path, "Issues");
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +398,7 @@ export const useTabStore = create<TabStore>()(
           // First time entering this workspace — create the group.
           const cleanDesired = desiredPath ? sanitizeTabPath(desiredPath) : null;
           const seedPath = cleanDesired ?? defaultPathFor(slug);
-          const tab = makeSession(seedPath, "Issues", resolveRouteIcon(seedPath));
+          const tab = makeSession(seedPath, "Issues");
           set({
             activeWorkspaceSlug: slug,
             byWorkspace: {
@@ -449,7 +426,7 @@ export const useTabStore = create<TabStore>()(
               });
               return;
             }
-            const tab = makeSession(clean, "Issues", resolveRouteIcon(clean));
+            const tab = makeSession(clean, "Issues");
             set({
               activeWorkspaceSlug: slug,
               byWorkspace: {
@@ -468,7 +445,7 @@ export const useTabStore = create<TabStore>()(
         set({ activeWorkspaceSlug: slug });
       },
 
-      openTab(path, title, icon, opts) {
+      openTab(path, title, opts) {
         const { activeWorkspaceSlug, byWorkspace } = get();
         const clean = sanitizeTabPath(path);
         if (!activeWorkspaceSlug || !clean) return "";
@@ -489,7 +466,7 @@ export const useTabStore = create<TabStore>()(
           return existing.id;
         }
 
-        const tab = makeSession(clean, title, icon);
+        const tab = makeSession(clean, title);
         set({
           byWorkspace: {
             ...byWorkspace,
@@ -502,14 +479,14 @@ export const useTabStore = create<TabStore>()(
         return tab.id;
       },
 
-      addTab(path, title, icon) {
+      addTab(path, title) {
         const { activeWorkspaceSlug, byWorkspace } = get();
         const clean = sanitizeTabPath(path);
         if (!activeWorkspaceSlug || !clean) return "";
         const group = byWorkspace[activeWorkspaceSlug];
         if (!group) return "";
 
-        const tab = makeSession(clean, title, icon);
+        const tab = makeSession(clean, title);
         set({
           byWorkspace: {
             ...byWorkspace,
@@ -585,7 +562,7 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
         const current = group.tabs[index];
         const next: TabSession = { ...current, ...patch };
-        if (next.title === current.title && next.icon === current.icon) {
+        if (next.title === current.title) {
           return;
         }
         const nextTabs = [...group.tabs];
@@ -630,7 +607,6 @@ export const useTabStore = create<TabStore>()(
           ...current,
           url: clean,
           resourceKey: resourceKeyForUrl(clean),
-          icon: resolveRouteIcon(splitTabUrl(clean).pathname),
           history: { stack, index: historyIndex },
         };
         const nextTabs = [...group.tabs];
@@ -854,7 +830,6 @@ export const useTabStore = create<TabStore>()(
                 id: t.id,
                 url: t.url,
                 title: t.title,
-                icon: t.icon,
                 pinned: t.pinned,
                 history: t.history,
                 memento: t.memento,
@@ -863,68 +838,91 @@ export const useTabStore = create<TabStore>()(
           ]),
         ),
       }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<V4Persisted> | undefined;
-        if (!persisted?.byWorkspace) return currentState;
-
-        const byWorkspace: Record<string, WorkspaceTabGroup> = {};
-        for (const [slug, pGroup] of Object.entries(persisted.byWorkspace)) {
-          const tabs: TabSession[] = [];
-          for (const pTab of pGroup.tabs) {
-            const clean = sanitizeTabPath(pTab.url);
-            // Persisted url may have come from a stale version or a
-            // manual edit. Drop rather than rewrite so we never silently
-            // put users on a url that doesn't match the group's slug.
-            if (!clean || extractWorkspaceSlug(clean) !== slug) {
-              console.warn(
-                `[tab-store] dropping persisted tab "${pTab.url}" from ` +
-                  `group "${slug}" — url/slug mismatch`,
-              );
-              continue;
-            }
-            const stack =
-              Array.isArray(pTab.history?.stack) && pTab.history.stack.length > 0
-                ? pTab.history.stack
-                : [clean];
-            const index = Math.min(
-              Math.max(pTab.history?.index ?? stack.length - 1, 0),
-              stack.length - 1,
-            );
-            tabs.push({
-              id: pTab.id,
-              url: clean,
-              resourceKey: resourceKeyForUrl(clean),
-              title: pTab.title,
-              icon: pTab.icon,
-              pinned: pTab.pinned === true,
-              history: { stack, index },
-              memento:
-                pTab.memento && typeof pTab.memento.scroll === "object"
-                  ? pTab.memento
-                  : emptyMemento(),
-            });
-          }
-          if (tabs.length === 0) continue;
-          // Enforce the "pinned first" invariant on rehydration in case a
-          // user (or a buggy older write) persisted the pinned tabs out of
-          // order. Stable sort preserves intra-group order.
-          tabs.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
-          const activeTabId = tabs.some((t) => t.id === pGroup.activeTabId)
-            ? pGroup.activeTabId
-            : tabs[0].id;
-          byWorkspace[slug] = { tabs, activeTabId };
-        }
-
-        const activeWorkspaceSlug =
-          persisted.activeWorkspaceSlug && byWorkspace[persisted.activeWorkspaceSlug]
-            ? persisted.activeWorkspaceSlug
-            : (Object.keys(byWorkspace)[0] ?? null);
-
-        return { ...currentState, byWorkspace, activeWorkspaceSlug };
-      },
+      merge: (persistedState, currentState) =>
+        mergePersistedTabs(persistedState, currentState),
     },
   ),
 );
+
+/** The persisted slice of the store — what `merge` reads and rebuilds. */
+interface PersistedTabState {
+  activeWorkspaceSlug: string | null;
+  byWorkspace: Record<string, WorkspaceTabGroup>;
+}
+
+/**
+ * Rebuild live sessions from a persisted payload.
+ *
+ * Every persisted field is treated as untrusted: urls are re-sanitized and
+ * checked against their group's slug, history indices are clamped, and a
+ * missing memento is replaced. Fields that are *derivable* are not read at
+ * all — notably `icon`, which older builds persisted and which may name the
+ * icon a route used to have. The tab bar computes the icon from `url`, so a
+ * stale or unknown persisted name cannot survive rehydration.
+ *
+ * Exported for tests; production calls it through the persist `merge` hook.
+ */
+export function mergePersistedTabs<T extends PersistedTabState>(
+  persistedState: unknown,
+  currentState: T,
+): T {
+  const persisted = persistedState as Partial<V4Persisted> | undefined;
+  if (!persisted?.byWorkspace) return currentState;
+
+  const byWorkspace: Record<string, WorkspaceTabGroup> = {};
+  for (const [slug, pGroup] of Object.entries(persisted.byWorkspace)) {
+    const tabs: TabSession[] = [];
+    for (const pTab of pGroup.tabs) {
+      const clean = sanitizeTabPath(pTab.url);
+      // Persisted url may have come from a stale version or a
+      // manual edit. Drop rather than rewrite so we never silently
+      // put users on a url that doesn't match the group's slug.
+      if (!clean || extractWorkspaceSlug(clean) !== slug) {
+        console.warn(
+          `[tab-store] dropping persisted tab "${pTab.url}" from ` +
+            `group "${slug}" — url/slug mismatch`,
+        );
+        continue;
+      }
+      const stack =
+        Array.isArray(pTab.history?.stack) && pTab.history.stack.length > 0
+          ? pTab.history.stack
+          : [clean];
+      const index = Math.min(
+        Math.max(pTab.history?.index ?? stack.length - 1, 0),
+        stack.length - 1,
+      );
+      tabs.push({
+        id: pTab.id,
+        url: clean,
+        resourceKey: resourceKeyForUrl(clean),
+        title: pTab.title,
+        pinned: pTab.pinned === true,
+        history: { stack, index },
+        memento:
+          pTab.memento && typeof pTab.memento.scroll === "object"
+            ? pTab.memento
+            : emptyMemento(),
+      });
+    }
+    if (tabs.length === 0) continue;
+    // Enforce the "pinned first" invariant on rehydration in case a
+    // user (or a buggy older write) persisted the pinned tabs out of
+    // order. Stable sort preserves intra-group order.
+    tabs.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
+    const activeTabId = tabs.some((t) => t.id === pGroup.activeTabId)
+      ? pGroup.activeTabId
+      : tabs[0].id;
+    byWorkspace[slug] = { tabs, activeTabId };
+  }
+
+  const activeWorkspaceSlug =
+    persisted.activeWorkspaceSlug && byWorkspace[persisted.activeWorkspaceSlug]
+      ? persisted.activeWorkspaceSlug
+      : (Object.keys(byWorkspace)[0] ?? null);
+
+  return { ...currentState, byWorkspace, activeWorkspaceSlug };
+}
 
 function stepHistory(
   get: () => TabStore,
@@ -945,7 +943,6 @@ function stepHistory(
     ...current,
     url,
     resourceKey: resourceKeyForUrl(url),
-    icon: resolveRouteIcon(splitTabUrl(url).pathname),
     history: { ...current.history, index: nextIndex },
   };
   const nextTabs = [...group.tabs];
@@ -1013,7 +1010,14 @@ interface V4PersistedTab {
   id: string;
   url: string;
   title: string;
-  icon: string;
+  /**
+   * Legacy. v4 payloads written before route icons became derived state still
+   * carry an icon name, and that name can be stale (a tab opened on an older
+   * build kept whatever the route mapped to then). It is never read on
+   * rehydration — the tab bar derives the icon from `url` — and `partialize`
+   * drops it on the next write.
+   */
+  icon?: string;
   pinned: boolean;
   history: { stack: string[]; index: number };
   memento: TabMemento;
@@ -1034,11 +1038,13 @@ export function migrateV3ToV4(v3: V3Persisted): V4Persisted {
   for (const [slug, group] of Object.entries(v3.byWorkspace ?? {})) {
     byWorkspace[slug] = {
       activeTabId: group.activeTabId,
+      // `icon` is deliberately not carried over: it is derived from the url
+      // at render time, and a v3 payload's icon may predate the current
+      // route → icon map.
       tabs: group.tabs.map((t) => ({
         id: t.id,
         url: t.path,
         title: t.title,
-        icon: t.icon,
         pinned: t.pinned,
         history: { stack: [t.path], index: 0 },
         memento: emptyMemento(),

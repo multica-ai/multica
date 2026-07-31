@@ -1,192 +1,129 @@
 ---
 title: Daemon and runtimes
-description: Agents don't run on Multica's servers — they run on your own machines.
+description: How Multica connects computers, discovers AI coding tools, and executes tasks.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
-import { Mermaid } from "@/components/mermaid";
 
-In Multica, [agents](/agents) do **not** run on our servers — they run on your own machines, driven by a small program called the **daemon** that invokes the [AI coding tools](/providers) installed locally. The Multica server only coordinates: it stores [issues](/issues), queues [tasks](/tasks), and dispatches them to the right **runtime** (runtime = daemon × one AI coding tool).
+Multica records and coordinates the work; connected computers execute it. The **daemon** on a computer claims tasks and invokes the AI coding tools installed on that machine.
 
-This structure is the biggest difference between Multica and Linear / Jira: **your API keys, toolchain, and code directories stay on your machine** — the Multica server never sees any of them. That means "my agent isn't working" is almost always a local problem — the daemon isn't running, an AI tool isn't installed, a key has expired. Check locally first; see [Troubleshooting](/troubleshooting) for a guide.
+## Daemon vs runtime
+
+- The **daemon** is the Multica background process running on one computer. It connects to the server, discovers local tools, claims tasks, and reports results back.
+- A **runtime** represents one concrete execution environment available to a workspace. It corresponds to one computer plus one AI coding tool — or one custom runtime profile — on that computer.
+
+For example, a computer has both Claude Code and Codex installed and is connected to two workspaces. The daemon registers Claude Code and Codex runtimes for each workspace. Restarting the daemon updates the existing records; it does not keep creating new runtimes for the same combination.
+
+## Execution location and data boundaries
+
+The AI coding tools a local runtime invokes, those tools' own login credentials, and your local code directories all stay on the connected computer. The Multica server does not execute commands on behalf of local tools, and it does not automatically upload your entire working directory.
+
+So the team can collaborate, the server stores issues, comments, agent configuration, task context, run records, and the results agents write back. That content can include code snippets or other project context an agent chose to read and include in its replies.
+
+<Callout type="warning">
+An agent's custom environment variables are stored server-side and sent to the runtime at execution time. Do not read "local execution" as "every secret exists only on this machine": custom environment variables and MCP configuration live on the server, and their display is limited by the sensitive-value rules.
+</Callout>
 
 ## Starting the daemon
 
-The daemon is part of the Multica CLI. Once you've installed the [Multica CLI](/cli), run on your own machine:
+With Multica Desktop, the app starts the daemon automatically — no extra command needed.
+
+On the web, a remote computer, or a headless environment, [install the Multica CLI](/cli) first, then run:
 
 ```bash
 multica daemon start
 ```
 
-On startup it does four things:
-
-1. Reads the credentials saved when you logged in
-2. Detects AI coding tools installed on your `PATH` (17 built-in: [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Qwen Code](/providers#qwen-code), [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code), [Grok](/providers#grok))
-3. Registers itself with the server, along with a runtime for each detected tool
-4. Keeps **polling every 3 seconds** for tasks to pick up, and **sends a heartbeat every 15 seconds**
-
-Common commands:
+The daemon runs in the background by default. Common commands:
 
 | Command | Purpose |
-|---|---|
-| `multica daemon start` | Start (background by default; add `--foreground` to run in the foreground) |
-| `multica daemon stop` | Stop |
-| `multica daemon restart` | Restart |
-| `multica daemon status` | Show status |
-| `multica daemon logs` | Show logs (add `-f` to follow) |
+| --- | --- |
+| `multica daemon status` | Show daemon and connection status |
+| `multica daemon logs -f` | Follow the logs |
+| `multica daemon restart` | Restart the daemon and re-detect local tools |
+| `multica daemon stop` | Stop the daemon |
+| `multica daemon start --foreground` | Run in the current terminal, for debugging |
 
-Full CLI reference in [CLI commands](/cli).
+On startup, the daemon detects supported AI coding tools on `PATH` and registers runtimes for the workspaces you are allowed to connect. If a tool was just installed or signed in, restart the daemon to detect it again.
 
-**The desktop app ships with a daemon.** If you use the [desktop app](/desktop-app), you don't need to run `multica daemon start` manually — it launches the daemon automatically on startup. See the [Desktop app](/desktop-app) page for which option fits your workflow.
+The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).
 
-## Why one machine has multiple runtimes
+## Dispatch and online status
 
-A runtime is not a server and not a container — it's the combination of "**daemon × one AI coding tool**". For example: you start the daemon on a MacBook with both Claude Code and Codex installed, and you're a member of two workspaces. Multica then registers 4 runtimes:
+Once registered, a runtime keeps a persistent connection. When a new task enters the queue, the server notifies the matching daemon; the daemon also polls periodically as a backstop after connection interruptions. So when a runtime is online with spare capacity, tasks usually start immediately.
 
-<Mermaid chart={`
-graph TD
-    D["Your daemon<br/>MacBook"]
-    D --> R1["Runtime<br/>Workspace A × Claude Code"]
-    D --> R2["Runtime<br/>Workspace A × Codex"]
-    D --> R3["Runtime<br/>Workspace B × Claude Code"]
-    D --> R4["Runtime<br/>Workspace B × Codex"]
-`} />
+The daemon sends a heartbeat every 15 seconds. The server combines heartbeats and connection state to decide whether a runtime is online; after a daemon exits unexpectedly, the runtime usually shows as offline within about 3 minutes at the latest.
 
-Key points:
+![Runtime details for one online computer: the same daemon registered 7 runtimes, one row per detected AI coding tool, each showing online status and CLI version](/images/docs/runtime-machine-detail.png)
 
-- **One daemon can map to multiple runtimes** — one per combination of installed tool and workspace you belong to
-- **The same daemon, workspace, and tool produces exactly one runtime** — restarting the daemon never creates duplicate records
-- The **Runtimes** page in the Multica UI lists these rows
+When a runtime is offline:
+
+- Tasks already queued wait for the runtime to recover, for up to 2 hours.
+- Tasks that were running fail; eligible issue or chat tasks can retry automatically.
+- When the daemon starts again, it re-registers its runtimes and reclaims tasks that did not end cleanly last time.
+- A runtime offline for more than 7 days with no agents bound to it (including archived ones) is cleaned up automatically.
+
+Detailed states and retry rules are in [Tasks](/tasks).
+
+## Concurrency limits
+
+One daemon executes at most 20 tasks at a time by default; each agent at most 6. Effective concurrency is the smaller of the two.
+
+Once a limit is reached, new tasks keep queueing. You can adjust a single agent's concurrency in the agent settings, and the machine-wide cap through `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
+
+## Private and public runtimes
+
+A local runtime is **private** by default: the runtime owner and the workspace's owners and admins can create agents on it.
+
+The runtime owner or an admin can make it **public**. Other workspace members can then select this runtime as well; that does not share the underlying AI coding tool's login credentials — it only lets members route their agents' tasks to this computer.
 
 ## Custom runtime profiles
 
-Built-in provider detection covers the common tools, but teams can also define
-**custom runtime profiles** for AI CLIs that speak one of Multica's supported
-protocol families and need a different launch command. Typical examples include
-an internal wrapper around Codex, a version-pinned executable, or a team CLI
-that adds fixed model arguments.
+If your team uses an internal wrapper, a version-pinned executable, or needs fixed extra arguments for a compatible tool, create a **custom runtime profile**.
 
-Do not create a custom profile just to use Claude Code, Codex, Kimi, or another
-built-in provider with its normal command. The daemon detects those tools
-automatically.
+A custom profile does not add a new communication protocol. You still pick one of the protocol families Multica already supports (the tool's integration protocol type; see [AI coding tools comparison](/providers)), and the command itself must be compatible with that family.
 
-### Before you create one
+### Creating a profile
 
-- Install the custom command on at least one machine running a Multica daemon,
-  and confirm the same command works in that machine's terminal.
-- Confirm the tool speaks one of the base protocol families shown in the UI.
-  Choosing a family tells Multica how to communicate with the process; it does
-  not make an incompatible CLI compatible.
-- You must be a workspace owner or admin to create, edit, or delete a profile.
+Only workspace owners and admins can create, edit, or delete custom runtime profiles:
 
-### Create one from the Runtimes UI
+1. Open **Runtimes** and go to a computer where the command is installed.
+2. Click **Add custom runtime**.
+3. Choose the protocol family the command is actually compatible with.
+4. Fill in the name, command, and fixed arguments, then save.
 
-1. Open **Runtimes**, then select the machine where you installed the command.
-2. Select **Add custom runtime**.
-3. Choose the base protocol family implemented by the command.
-4. Enter a display name and the command you would run in a terminal, including
-   any fixed arguments. Add an optional description so teammates know what it
-   is for.
-5. Select **Create runtime**.
+The profile is shared across the workspace. Each connected computer looks up the command on its own; only computers that can resolve it on `PATH` register the corresponding runtime. Creating a profile does not install the command, and it does not sign other members in to the tool.
 
-The profile definition belongs to the whole workspace and syncs to every
-connected daemon. Each machine registers its own runtime only when it can
-resolve that command. The machine where you started the flow shows a temporary
-**Registering** row while it waits. If the row does not become online, check
-that the command is installed and available to the daemon on that machine.
+The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 
-Creating a profile does not install the CLI, authenticate it, or copy it to
-other machines. Install and sign in to the underlying tool separately on every
-machine that should provide this runtime.
-
-### Manage profiles from the CLI
-
-The same workspace profiles can be managed from the CLI:
+If a Desktop-launched daemon cannot find a command your terminal can run, set an absolute path for the current computer:
 
 ```bash
-multica runtime profile list
-multica runtime profile create --display-name "Composer" --protocol-family codex --command-name agent
-multica runtime profile update <profile-id> --command-name agent
-multica runtime profile delete <profile-id>
+multica runtime profile set-path <profile-id> --path /absolute/path/to/command
 ```
 
-Custom and built-in runtimes share the same machine list. Use a custom runtime
-row's actions menu to edit or delete its profile. Deleting a profile removes its
-registered runtime instances after the daemons synchronize; it can be blocked
-while agents still depend on it.
-
-The command is argv-oriented, not a shell string. Multica stores an executable
-name plus fixed arguments, then the daemon launches it directly with
-`exec.Command(command_name, fixed_args...)`. Plain arguments, quotes, and
-backslash escaping are supported; pipes, redirects, `&&`, `;`, backticks, and
-`$VAR` / `$(...)` expansion are not. Use a wrapper script when the runtime needs
-shell behavior. Today the Runtimes UI owns command-and-argument parsing; the CLI
-profile commands manage the profile row and local path overrides.
-
-If a desktop-launched daemon cannot find a command that works in your terminal,
-pin the absolute path on that machine:
+Remove the path override:
 
 ```bash
-multica runtime profile set-path <profile-id> --path /abs/path/to/agent
 multica runtime profile unset-path <profile-id>
 ```
 
-Profile command or argument edits apply to newly claimed tasks after the daemon
-re-registers. Running tasks keep the launch arguments they started with. For
-mixed deployments, upgrade the server before rolling out newer daemons: the
-server-side Runtimes UI stores `fixed_args`, and the server is what surfaces
-`failed_profiles` registration reports. Older components may ignore fields they
-do not understand instead of failing loudly, so treating the server upgrade as
-the first step keeps the rollout observable.
+Editing a profile only affects tasks claimed afterwards. Before deleting a profile, deal with the active agents still bound to its runtimes. Deleting only the runtime instance on one computer does not delete the profile — a running daemon will re-register it.
 
-<Callout type="info">
-**Cloud runtimes are coming**, currently in a waitlist phase. Once available, you'll be able to execute agent tasks directly on Multica Cloud without running a local daemon. Sign up with your email on the [download page](https://multica.ai/download) to get notified.
-</Callout>
+## Troubleshooting an offline runtime
 
-## When a runtime is marked offline
+Check in this order:
 
-Multica uses heartbeats to decide whether a runtime is online. Three key numbers:
+1. Run `multica daemon status` to confirm the daemon is running.
+2. Run `multica daemon logs -f` to look for login, network, or tool-detection errors.
+3. Run `command -v <tool-command>` in the same environment to confirm the daemon can find it.
+4. Open Multica's **Runtimes** page and check whether the target computer and the matching AI coding tool show as online.
+5. After a tool install, a path change, or a profile update, run `multica daemon restart`.
 
-| Event | Threshold |
-|---|---|
-| Daemon heartbeat frequency | Every **15 seconds** |
-| Marked as missing | No heartbeat for **45 seconds** (3 missed beats) |
-| Auto-deleted | Missing with no associated agents for over **7 days** |
+If the problem persists, see [Troubleshooting](/troubleshooting).
 
-Missing is not permanent — as soon as the daemon sends another heartbeat it returns to online, and the runtime record is preserved. Restarting the daemon does not lose runtimes.
+## Next steps
 
-<Callout type="warning">
-**Tasks running on a missing runtime are marked as failed** (failure reason `runtime_offline`). For retryable sources (issues, chat), Multica automatically requeues them; Autopilot-triggered tasks are not retried automatically. See [Tasks → Which failures retry automatically](/tasks#which-failures-retry-automatically-which-dont).
-</Callout>
-
-## How many tasks can run in parallel
-
-Multica enforces concurrency limits at two layers:
-
-- **Daemon layer**: **20 concurrent tasks** by default (tunable via env var `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`)
-- **Agent layer**: **6 concurrent tasks per agent** by default (configured per-agent)
-
-The tighter of the two wins. If your daemon is already running 20 tasks, new tasks wait even if an agent still has headroom.
-
-If you see tasks stuck in `queued` without moving to `dispatched`, one of these two limits is usually saturated.
-
-## What happens to in-flight tasks after a daemon crash
-
-When the daemon crashes or is force-killed, the tasks it had picked up are left in `dispatched` or `running`. On the next start, the daemon tells the server: "these tasks are no longer mine, please mark them failed." The server flips them to `failed` with reason `runtime_recovery` — for retryable sources, the tasks are automatically requeued.
-
-Even if this step fails due to a network issue, there's a server-side scan **every 30 seconds** as a backstop: any runtime without a heartbeat for over 45 seconds is marked missing, and its tasks are reclaimed along with it.
-
-## Troubleshooting agents that aren't working
-
-When you hit a "my agent isn't working" problem, run this three-step checklist first:
-
-1. Run `multica daemon status` — confirm the daemon is running and online
-2. Run `multica daemon logs -f` — check for errors
-3. Open the **Runtimes** page in the Multica UI — confirm your runtime shows "online"
-
-More scenarios in [Troubleshooting](/troubleshooting).
-
-## Next
-
-- [Tasks](/tasks) — the full lifecycle of a task once the daemon picks it up
-- [Providers Matrix](/providers) — capability differences across the 17 AI coding tools
+- [Install AI coding tools](/install-agent-runtime) — install and verify a supported AI coding tool.
+- [AI coding tools comparison](/providers) — compare models, session resumption, MCP, and skill support.
+- [Tasks](/tasks) — queueing, stopping, and retries.

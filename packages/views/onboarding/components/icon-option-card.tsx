@@ -6,15 +6,32 @@ import { cn } from "@multica/ui/lib/utils";
 const OTHER_INPUT_MAX_LENGTH = 80;
 
 /**
- * Card-grid option used by the per-question questionnaire steps
- * (Source / Role / Use case). One row = icon + label. Clicking the
- * card selects it; the parent step decides when to advance (an
- * explicit Continue button gates the transition so users can change
- * their mind before committing). The `Other` variant swaps its
- * label area for a free-text input when selected.
+ * One option in a questionnaire card grid. `slug` is the persisted
+ * enum value; `icon` is a React node (lucide icon, brand SVG, or emoji
+ * span); `label` is the localized string already resolved by the
+ * caller. `isOther` flips this card into a free-text input row.
+ *
+ * Shared by the About-you onboarding step and the workspace
+ * source-backfill prompt, which both render their options through the
+ * cards below.
+ */
+export interface QuestionOption {
+  slug: string;
+  icon: ReactNode;
+  label: string;
+  isOther?: boolean;
+}
+
+/**
+ * Card-grid option used by the questionnaire surfaces (the About-you
+ * onboarding step, the source-backfill prompt). One row = icon +
+ * label. Clicking the card selects it; the parent decides when to
+ * advance (an explicit Continue button gates the transition so users
+ * can change their mind before committing). The `Other` variant swaps
+ * its label area for a free-text input when selected.
  *
  * `mode` controls ARIA role: `"radio"` for single-select questions
- * (role), `"checkbox"` for multi-select (source, use case). Visual
+ * (role, source), `"checkbox"` for multi-select (use case). Visual
  * style is identical — the border/shadow treatment already conveys
  * "selected"; multi-select cards just additionally don't deselect
  * other cards when clicked, which is the parent's responsibility.
@@ -47,11 +64,11 @@ export function IconOptionCard({
     >
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center text-[18px] leading-none text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center text-title leading-none text-foreground"
       >
         {icon}
       </span>
-      <span className="text-[14px] font-medium leading-tight text-foreground">
+      <span className="text-body font-medium leading-tight text-foreground">
         {label}
       </span>
     </button>
@@ -101,7 +118,7 @@ export function IconOtherOptionCard({
     >
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center text-[18px] leading-none text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center text-title leading-none text-foreground"
       >
         {icon}
       </span>
@@ -120,10 +137,10 @@ export function IconOtherOptionCard({
           placeholder={placeholder}
           maxLength={OTHER_INPUT_MAX_LENGTH}
           aria-label={placeholder}
-          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[14px] font-medium leading-tight text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-body font-medium leading-tight text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
       ) : (
-        <span className="text-[14px] font-medium leading-tight text-foreground">
+        <span className="text-body font-medium leading-tight text-foreground">
           {label}
         </span>
       )}

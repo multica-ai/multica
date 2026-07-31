@@ -73,9 +73,28 @@ function readIssueProperties(qc: ReturnType<typeof useQueryClient>, wsId: string
       if (issue) return issue.properties ?? {};
     }
   }
+  for (const [, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.childrenAll(wsId),
+  })) {
+    const issue = data?.find((candidate) => candidate.id === issueId);
+    if (issue) return issue.properties ?? {};
+  }
   return undefined;
 }
 
+async function cancelIssuePropertyMutationQueries(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  issueId: string,
+) {
+  await Promise.all([
+    qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
+    qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.childrenAll(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) }),
+  ]);
+}
 
 /**
  * Optimistic single-property write on an issue.
@@ -102,13 +121,9 @@ export function useSetIssueProperty() {
     scope: { id: `issue-properties:${wsId}` },
     mutationKey: ["issue-properties", wsId],
     onMutate: async ({ issueId, propertyId, value }) => {
-      // Cancel in-flight list refetches too: a response snapshotted before
-      // this write would land after the optimistic patch and revert it.
-      await Promise.all([
-        qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
-      ]);
+      // A response snapshotted before this write must not land after the
+      // optimistic patch and revert any denormalized issue projection.
+      await cancelIssuePropertyMutationQueries(qc, wsId, issueId);
       const prev = readIssueProperties(qc, wsId, issueId);
       patchIssueProperties(qc, wsId, issueId, { ...(prev ?? {}), [propertyId]: value });
       return { prevValue: prev?.[propertyId], hadBag: prev !== undefined, issueId, propertyId };
@@ -135,11 +150,7 @@ export function useUnsetIssueProperty() {
     scope: { id: `issue-properties:${wsId}` },
     mutationKey: ["issue-properties", wsId],
     onMutate: async ({ issueId, propertyId }) => {
-      await Promise.all([
-        qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
-      ]);
+      await cancelIssuePropertyMutationQueries(qc, wsId, issueId);
       const prev = readIssueProperties(qc, wsId, issueId);
       if (prev) {
         const next = { ...prev };

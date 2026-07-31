@@ -81,7 +81,12 @@ function SubmitButton({
       onClick={onClick}
       aria-label={ariaLabel}
     >
-      {loading ? (
+      {loading || busy ? (
+        // `busy` spins too, not just greys out: an upload can be running with
+        // nothing else on screen to explain the disabled control (a reopened
+        // composer is still rebuilding its placeholder, or the user deleted
+        // it). A spinner says "waiting on something" without a hover; the
+        // tooltip says what.
         <Loader2 className="animate-spin" aria-hidden="true" />
       ) : (
         <ArrowUp aria-hidden="true" />

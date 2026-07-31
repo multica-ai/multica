@@ -8,6 +8,10 @@ import { WebProviders } from "@/components/web-providers";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import {
+  resolveBrowserApiBaseUrl,
+  resolveBrowserWsUrl,
+} from "@/config/runtime-urls";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -20,8 +24,15 @@ import "./globals.css";
 // stack), and a hashed family name can only be referenced from CSS via a variable.
 // Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
 // app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
+//
+// Italic is loaded explicitly: `style` defaults to `["normal"]`, and without a real
+// italic face the ~20 semantic italic labels (chat empty states, model-picker's
+// "Managed by runtime", dashboard/squad placeholders) plus every markdown <em> and
+// blockquote rendered as browser-synthesized oblique. Keep in sync with desktop's
+// `@fontsource-variable/inter/wght-italic.css` import.
 const inter = Inter({
   subsets: ["latin"],
+  style: ["normal", "italic"],
   variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
@@ -110,6 +121,8 @@ export default async function RootLayout({
 }) {
   const locale = await getRequestLocale();
   const resources = { [locale]: RESOURCES[locale] };
+  const apiBaseUrl = resolveBrowserApiBaseUrl(process.env);
+  const wsUrl = resolveBrowserWsUrl(process.env);
 
   return (
     <html
@@ -137,7 +150,12 @@ export default async function RootLayout({
           />
         )}
         <ThemeProvider>
-          <WebProviders locale={locale} resources={resources}>
+          <WebProviders
+            locale={locale}
+            resources={resources}
+            apiBaseUrl={apiBaseUrl}
+            wsUrl={wsUrl}
+          >
             {children}
           </WebProviders>
           <Toaster />

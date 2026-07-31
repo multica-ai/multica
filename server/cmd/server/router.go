@@ -204,6 +204,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		VCSIntegrationEnabled:    os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
@@ -238,10 +239,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		if notifier, ok := opts.DaemonWakeup.(handler.WorkspaceSetRefreshNotifier); ok {
 			h.DaemonWorkspaceRefresh = notifier
 		}
+		if notifier, ok := opts.DaemonWakeup.(handler.DaemonPendingWorkNotifier); ok {
+			h.DaemonPendingWork = notifier
+		}
 	}
 	if rdb != nil {
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
+		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
@@ -267,6 +272,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// into one agent run instead of one per message (MUL-2968).
 	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
 	h.ChannelRouter = channelRouter
+	// Media intent-ledger reconciler: settles uploaded-but-unbound objects.
+	// Built ONLY when a storage backend exists — store is nil when S3 is not
+	// configured and the local upload dir failed to initialize, and a
+	// reconciler with nil Storage would panic the worker goroutine on the
+	// first unreferenced row (ledger rows can pre-exist from a boot where
+	// storage WAS configured). Without storage the resolver skips every
+	// upload, so no new rows appear and the ledger simply waits for a boot
+	// with working storage. Started from main.go as its own worker.
+	if store != nil {
+		h.ChannelMediaReconciler = &service.ChannelMediaReconciler{
+			Queries: queries,
+			Storage: store,
+			Logger:  slog.Default(),
+		}
+	}
 	h.ChannelSupervisor = engine.NewSupervisor(
 		lark.NewChannelInstallationStore(queries),
 		channelRegistry,
@@ -391,8 +411,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Credentials: installSvc,
 					Logger:      slog.Default(),
 				})
+				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
-					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,
+					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
@@ -608,6 +629,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
 	}
 
+	// VCS at-rest encryption: the box encrypts per-workspace access tokens and
+	// webhook secrets for token-based providers (Forgejo / Gitea / GitLab).
+	// Without it, connect/webhook handlers return 503 (so a misconfigured
+	// self-host never stores plaintext secrets).
+	if vcsKey, err := secretbox.LoadKey("MULTICA_VCS_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(vcsKey)
+		if err != nil {
+			slog.Error("vcs: secretbox.New failed; vcs integration disabled", "error", err)
+		} else {
+			h.VCSSecretBox = box
+			slog.Info("vcs integration enabled")
+		}
+	} else {
+		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -715,6 +752,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/uploads/*", h.ServeLocalUpload)
 	}
 
+	// Capability-authenticated attachment download (MUL-5292). Public by
+	// necessity: a native download (Electron's webContents.downloadURL, a
+	// cross-site webview <img>) carries neither Authorization nor a session
+	// cookie, so there is nothing here for middleware.Auth to read. The
+	// short-lived, single-attachment signature in the query is the credential,
+	// and it is only ever minted by the AUTHENTICATED GET
+	// /api/attachments/{id} after that request's membership check passed.
+	// The authenticated /api/attachments/{id}/download route below is
+	// unchanged — this one is purely additive.
+	r.Get("/api/attachments/{id}/signed-download", h.DownloadAttachmentWithCapability)
+
+	// Avatar serving. Public for the same reason as the capability download
+	// above: the auth cookie is SameSite=Strict, so an auth-gated URL cannot
+	// be a native <img src> from Desktop / mobile webview or a split-origin
+	// self-hosted web app. The HMAC signature in the path is the credential.
+	// It covers the storage key, only image keys resolve, and the object must
+	// be avatar-class — see server/internal/handler/avatar.go (MUL-5393 /
+	// #6024).
+	r.Get("/api/avatars/{sig}/*", h.ServeAvatar)
+
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
 		slog.Warn("rate limiting disabled: REDIS_URL not configured")
@@ -744,6 +801,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
 	// the browser back to Settings → Integrations.
+	// VCS webhook for token-based providers (Forgejo / Gitea / GitLab). No Multica
+	// auth — authenticated per-connection by the provider's signature scheme;
+	// the connection id in the path selects the workspace, provider, and
+	// decryption secret.
+	r.Post("/api/webhooks/vcs/{connectionId}", h.HandleVCSWebhook)
 	// Stripe webhook (no Multica auth — Stripe signs the raw body
 	// with a shared secret, the multica-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see
@@ -793,6 +855,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/wait-local-directory", h.MarkTaskWaitingLocalDirectory)
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
+		r.Post("/tasks/{taskId}/quick-actions", h.SupplementTaskQuickActions)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
@@ -831,6 +894,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
+		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
 
 		// Note (MUL-4309): the generic OpenAI-compatible passthrough endpoints
 		// (POST /api/llm/v1/chat/completions[/stream]) were intentionally
@@ -868,6 +932,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// VCS connections (Forgejo / Gitea / GitLab) — member-visible
+					// for the same reason as GitHub installations; connect /
+					// disconnect are admin-gated in the group below.
+					r.Get("/vcs/connections", h.ListVCSConnections)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -900,7 +968,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
+					r.Get("/github/installations/{installationId}/repositories", h.ListGitHubInstallationRepositories)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// VCS connect / disconnect / webhook regeneration (admin-only).
+					r.Post("/vcs/connections", h.ConnectVCS)
+					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
+					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires
@@ -1033,6 +1106,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
+				r.Post("/table/groups", h.ListIssueTableGroups)
+				r.Post("/table/rows", h.ListIssueTableRows)
+				r.Post("/table/facets", h.ListIssueTableFacets)
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/children", h.ListChildrenByParents)
@@ -1049,6 +1125,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
@@ -1060,6 +1137,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
+					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
+					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
 					r.Post("/reactions", h.AddIssueReaction)
@@ -1080,6 +1159,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+
+			// Issue quick actions (definitions; running one lives under
+			// /api/issues/{id}/quick-actions/{quickActionId}/run)
+			r.Route("/api/quick-actions", func(r chi.Router) {
+				r.Get("/", h.ListQuickActions)
+				r.Post("/", h.CreateQuickAction)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateQuickAction)
+					r.Delete("/", h.DeleteQuickAction)
+				})
+			})
 
 			// Custom issue properties (definitions; values live under /api/issues/{id}/properties)
 			r.Route("/api/properties", func(r chi.Router) {
@@ -1215,10 +1305,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/labels", h.AttachLabelToAgent)
 					r.Delete("/labels/{labelId}", h.DetachLabelFromAgent)
 					r.Put("/skills/{skillId}/enabled", h.SetAgentSkillEnabled)
+					r.Put("/runtime-skills/enabled", h.SetAgentRuntimeSkillEnabled)
 					r.Delete("/skills/{skillId}", h.RemoveAgentSkill)
-					// Dedicated env-management endpoint. Owner/admin only;
-					// agent actors are denied. Every reveal / write is
-					// audited to activity_log. See MUL-2600 and
+					// Dedicated env-management endpoint. Admits the agent
+					// owner or a workspace owner/admin; agent actors are
+					// denied. Every reveal / write is audited to
+					// activity_log. See MUL-2600, MUL-5438 and
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
@@ -1232,7 +1324,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListAgentTemplates)
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
-			r.Post("/api/agent-builder/sessions", h.CreateAgentBuilderSession)
+			r.Route("/api/agent-builder/sessions", func(r chi.Router) {
+				r.Post("/", h.CreateAgentBuilderSession)
+				r.Patch("/{sessionId}/runtime", h.SwitchAgentBuilderRuntime)
+			})
 
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
@@ -1261,6 +1356,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
+				r.Get("/failures/daily", h.GetDashboardFailuresDaily)
+				r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
 			})
 
 			// Runtimes
@@ -1314,6 +1411,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// every active task + each agent's most recent terminal task.
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
 
+			// Independent workspace-level list backing the issues-header
+			// "agents working" chip and its assignee-id Table filter.
+			r.Get("/api/working-agents", h.ListWorkspaceWorkingAgents)
+
 			// Workspace-wide daily agent activity (last 30d, anchored on
 			// completed_at). Backs the Agents-list sparkline (trailing 7d
 			// slice) AND the agent detail "Last 30 days" panel.
@@ -1332,6 +1433,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
+					// Explicit "refresh" of a turn's quick actions: re-runs the
+					// daemon suggestion pass for the latest assistant reply (MUL-5149).
+					r.Post("/quick-actions/regenerate", h.RegenerateChatQuickActions)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
@@ -1374,6 +1478,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
+				r.Post("/{id}/unread", h.MarkInboxUnread)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
 			})
