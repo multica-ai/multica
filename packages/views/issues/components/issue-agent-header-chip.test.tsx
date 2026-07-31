@@ -246,6 +246,38 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.getAllByTestId("event")).toHaveLength(1);
   });
 
+  it("refreshes the transcript when the opened task completes", async () => {
+    const qc = newClient();
+    mockState.tasks = [makeTask({ id: LIVE_TASK_ID, status: "running" })];
+    qc.setQueryData(chatKeys.taskMessages(LIVE_TASK_ID), [msg(1)]);
+    listTaskMessages.mockResolvedValue([msg(1)]);
+
+    const { rerender } = renderChip(qc);
+
+    fireEvent.click(screen.getByRole("button", { name: `open transcript ${LIVE_TASK_ID}` }));
+
+    await waitFor(() => {
+      expect(listTaskMessages).toHaveBeenCalledTimes(1);
+    });
+
+    mockState.tasks = [
+      makeTask({
+        id: LIVE_TASK_ID,
+        status: "completed",
+        completed_at: "2026-06-08T08:05:00Z",
+      }),
+    ];
+    rerender(
+      <QueryClientProvider client={qc}>
+        <IssueAgentHeaderChip issueId="issue-2" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(listTaskMessages).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("opens the activity card on hover, not only on click", () => {
     mockState.tasks = [makeTask({})];
 

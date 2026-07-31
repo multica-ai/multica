@@ -76,7 +76,12 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     return { running, queued };
   }, [tasks]);
 
-  const [openedTranscriptTask, setOpenedTranscriptTask] = useState<AgentTask | null>(null);
+  const [openedTranscriptTaskSnapshot, setOpenedTranscriptTaskSnapshot] =
+    useState<AgentTask | null>(null);
+  const openedTranscriptTask = openedTranscriptTaskSnapshot
+    ? tasks.find((task) => task.id === openedTranscriptTaskSnapshot.id) ??
+      openedTranscriptTaskSnapshot
+    : null;
 
   // No active work → render nothing.
   if (running.length === 0 && queued.length === 0 && !openedTranscriptTask) return null;
@@ -89,7 +94,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           running={running}
           queued={queued}
           onTranscriptOpenChange={(task, open) => {
-            setOpenedTranscriptTask(open ? task : null);
+            setOpenedTranscriptTaskSnapshot(open ? task : null);
           }}
         />
       ) : null}
@@ -102,7 +107,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           renderButton={false}
           open
           onOpenChange={(open) => {
-            if (!open) setOpenedTranscriptTask(null);
+            if (!open) setOpenedTranscriptTaskSnapshot(null);
           }}
         />
       ) : null}
