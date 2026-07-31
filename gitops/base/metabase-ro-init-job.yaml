@@ -78,9 +78,15 @@ spec:
           # -v passes the password as a psql variable (:'metabase_ro_password'),
           # not shell/string interpolation into the SQL text, so it can't be
           # used for SQL injection regardless of what characters it contains.
+          # Named dollar-quote tag (do), not the bare/empty tag — Kubernetes
+          # expands two adjacent dollar signs in container command/args down
+          # to a single one (its escape sequence for $(VAR) interpolation),
+          # which mangles a bare dollar-quoted DO block into invalid SQL
+          # before psql ever sees it. A named tag has no adjacent-dollar
+          # substring, so it survives untouched.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
             -v metabase_ro_password="$PGVAR_METABASE_RO_PASSWORD" <<'SQL'
-          DO $$
+          DO $do$
           BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metabase_ro') THEN
               CREATE ROLE metabase_ro LOGIN PASSWORD :'metabase_ro_password';
@@ -88,7 +94,7 @@ spec:
               ALTER ROLE metabase_ro WITH LOGIN PASSWORD :'metabase_ro_password';
             END IF;
           END
-          $$;
+          $do$;
           SQL
 
           echo "Granting read-only privileges..."
