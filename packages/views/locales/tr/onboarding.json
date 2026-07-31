@@ -111,7 +111,7 @@
     "swap_body": "Her ajanın çalışma ortamını yalnızca bir ayardır. İstediğiniz zaman değiştirebilirsiniz.",
     "add_more_title": "Daha sonra daha fazlasını ekleyin",
     "add_more_body": "Bir ekip arkadaşı için başka bir bilgisayar veya her ajan için özel bir bilgisayar bağlayabilirsiniz.",
-    "learn_more": "Ajan çalışma ortamlarıı hakkında bilgi al →"
+    "learn_more": "Ajan çalışma ortamları hakkında bilgi al →"
   },
   "cli_install": {
     "copy_aria": "Kopyala",
@@ -263,7 +263,7 @@
     "scanning_lede_prefix": "Ajanınız zaten sahip olduğunuz bir AI coding tool üzerinden çalışır; örneğin ",
     "scanning_lede_suffix": " ve diğerleri. Bu bilgisayarda kurulu olanları kontrol ediyoruz.",
     "found_headline": "Bu bilgisayar bağlı. Bir ajan çalışma ortamı seçin.",
-    "found_lede": "Bu bilgisayarda bulduğumuz ajan çalışma ortamlarıı bunlar. İlk ajanınız için birini seçin; daha sonra değiştirebilir veya daha fazlasını ekleyebilirsiniz.",
+    "found_lede": "Bu bilgisayarda bulduğumuz ajan çalışma ortamları bunlar. İlk ajanınız için birini seçin; daha sonra değiştirebilir veya daha fazlasını ekleyebilirsiniz.",
     "runtime_count_one": "{{count}} ajan çalışma ortamı",
     "runtime_count_other": "{{count}} ajan çalışma ortamı",
     "status_all_online": "hepsi online",
@@ -275,7 +275,7 @@
     "empty_lede_prefix": "Ajan çalışma ortamı, bağlandığımız bir AI coding tool'dur; örneğin ",
     "empty_lede_suffix": ". Birini kurup yenileyin veya aşağıdan bir yol seçin.",
     "empty_skip_title": "Şimdilik atla",
-    "empty_skip_subtitle": "Çalışma alanınıze salt okunur modda girin. Bu bilgisayarda ajan çalışma ortamı bağlanana kadar ajanınız task çalıştıramaz; ama yine de gezinebilir, planlayabilir ve ekip arkadaşlarınızı davet edebilirsiniz.",
+    "empty_skip_subtitle": "Çalışma alanınıza salt okunur modda girin. Bu bilgisayarda ajan çalışma ortamı bağlanana kadar ajanınız task çalıştıramaz; ama yine de gezinebilir, planlayabilir ve ekip arkadaşlarınızı davet edebilirsiniz.",
     "empty_skip_action": "Atla",
     "empty_waitlist_title": "Cloud bilgisayar kullan",
     "empty_waitlist_subtitle": "Sizin için cloud'da bir bilgisayar çalıştıracağız. Henüz yayında değil.",

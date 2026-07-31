@@ -328,7 +328,7 @@
       "public_targets_empty_hint": "Aşağıdan en az bir seçenek belirleyin; aksi halde ajan özel kalır."
     },
     "runtime_search_placeholder": "Search machines…",
-    "runtime_no_results": "No matching machines",
+    "runtime_no_results": "Eşleşen makine yok",
     "runtime_group_online": "{{online}}/{{total}} online"
   },
   "tab_body": {
@@ -391,14 +391,14 @@
       "redacted_title": "Yapılandırıldı — görünümünüzden gizlendi",
       "redacted_hint": "Bu config'i yalnızca ajan sahibi veya çalışma alanı admini okuyabilir.",
       "managed_title": "Managed by Multica",
-      "managed_hint": "Saved in Multica for this agent. These servers are merged with runtime servers; a Multica server wins when names match.",
-      "managed_empty": "No MCP servers are managed by Multica yet.",
-      "add_action": "Add MCP",
-      "agent_disabled_badge": "Off for agent",
-      "runtime_disabled_badge": "Off in runtime",
-      "runtime_overridden_badge": "Overridden by Multica",
-      "runtime_title": "Inherited from runtime",
-      "runtime_hint": "Discovered automatically from {{runtime}} and merged at task launch. URLs, headers, commands, and environment variables never leave the machine.",
+      "managed_hint": "Bu ajan için Multica'da kaydedilir. Bu sunucular runtime sunucularıyla birleştirilir; adlar eşleştiğinde Multica sunucusu önceliklidir.",
+      "managed_empty": "Multica tarafından henüz yönetilen MCP sunucusu yok.",
+      "add_action": "MCP ekle",
+      "agent_disabled_badge": "Ajan için kapalı",
+      "runtime_disabled_badge": "Runtime'da kapalı",
+      "runtime_overridden_badge": "Multica tarafından geçersiz kılındı",
+      "runtime_title": "Runtime'dan devralındı",
+      "runtime_hint": "{{runtime}} üzerinden otomatik olarak keşfedilir ve task başlatılırken birleştirilir. URL'ler, header'lar, komutlar ve ortam değişkenleri makineden dışarı çıkmaz.",
       "refresh_action": "Refresh",
       "runtime_missing": "Assign a local runtime to discover inherited MCP servers.",
       "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited MCP servers.",
@@ -448,7 +448,7 @@
       "dialog_add_action": "Add Server",
       "dialog_update_action": "Save Changes",
       "delete_dialog_title": "Delete MCP Server?",
-      "delete_dialog_description": "{{name}} will no longer be available to this agent. Runtime servers are not affected.",
+      "delete_dialog_description": "{{name}} artık bu ajan tarafından kullanılamaz. Runtime sunucuları etkilenmez.",
       "delete_action": "Delete Server"
     },
     "skills": {
@@ -472,7 +472,7 @@
       "assigned_title": "Assigned to agent",
       "assigned_hint": "Workspace skills travel with the agent. Turn one off temporarily without removing it.",
       "runtime_title": "Inherited from runtime",
-      "runtime_hint": "Discovered automatically from {{runtime}} and available whenever this agent runs there.",
+      "runtime_hint": "{{runtime}} üzerinden otomatik olarak keşfedilir ve bu ajan orada her çalıştığında kullanılabilir.",
       "workspace_badge": "Workspace",
       "inherited_badge": "Inherited",
       "refresh_action": "Refresh",
@@ -480,7 +480,7 @@
       "toggle_aria": "Toggle {{name}}",
       "remove_aria": "Remove {{name}}",
       "toggle_failed_toast": "Failed to change skill status",
-      "runtime_toggle_aria": "Toggle inherited {{name}}",
+      "runtime_toggle_aria": "Devralınan {{name}} öğesini aç/kapat",
       "runtime_toggle_failed_toast": "Failed to change inherited skill status",
       "runtime_missing": "Assign a local runtime to discover inherited skills.",
       "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited skills.",
@@ -551,7 +551,7 @@
       "failed_label": "failed"
     },
     "composio_mcp": {
-      "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
+      "subtitle": "Bu ajanın bir toolkit'i MCP sunucusu olarak bağlamasına izin vermek için seçin. Bu izin yalnızca çalıştırmayı doğrudan veya bir alt ajan zinciri üzerinden başlatan kişi siz (oluşturucusu) olduğunuzda geçerlidir.",
       "loading": "Loading your connections…",
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
@@ -672,7 +672,7 @@
     "details_provider": "Provider",
     "details_mode": "Mode",
     "details_workdir": "Workdir",
-    "details_created": "Created",
+    "details_created": "Oluşturuldu",
     "details_started": "Started",
     "details_completed": "Completed",
     "copy_workdir": "Copy working directory",
@@ -690,7 +690,7 @@
   "overview": {
     "agent_context": "Agent",
     "access": "Access",
-    "attention_title": "Tasks need attention",
+    "attention_title": "Dikkat edilmesi gereken task'ler var",
     "attention_queued_one": "{{count}} task is queued while the runtime is unavailable.",
     "attention_queued_other": "{{count}} tasks are queued while the runtime is unavailable."
   },

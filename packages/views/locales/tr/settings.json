@@ -566,7 +566,7 @@
     "empty_hint": "Severity veya Environment gibi türlendirilmiş alanlar oluşturun; ajanlar bunları doğrulamayla okuyup yazabilir.",
     "no_results": "Eşleşen özellik yok",
     "save_failed": "Özellik kaydedilemedi",
-    "limit_hint": "{{count}}/{{max}} active properties",
+    "limit_hint": "{{count}}/{{max}} etkin özellik",
     "archived_badge": "Arşivlendi",
     "types": {
       "text": "Metin",
@@ -628,7 +628,7 @@
       "usage": "Kullanan",
       "updated": "Güncellendi"
     },
-    "usage_count": "{{count}} used",
+    "usage_count": "{{count}} kullanım",
     "loading": "Etiketler yükleniyor...",
     "empty": "Henüz {{scope}} etiketi yok",
     "no_results": "Eşleşen etiket yok",
