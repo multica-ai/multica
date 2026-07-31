@@ -5,4 +5,4 @@ resources:
   - ../../../base/agent-runtime
 images:
   - name: ghcr.io/g2crowd/agentrunner-runtime-prod
-    newTag: "e2538aef"
+    newTag: "24ba4972"
