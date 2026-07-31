@@ -31,6 +31,8 @@ patchesStrategicMerge:
   # Delete patches — remove resources not needed in dev
   - patches/delete-hpa-pdb.yaml
   - patches/delete-cloudfront.yaml
+  - patches/delete-rds-reader-instance.yaml
+  - patches/delete-metabase-ro-init-job.yaml
 # Remap the base manifests' -prod image references to the -dev GHCR repos
 # that dev.yml publishes to. The `name:` value MUST match the image string in
 # the base manifests verbatim; `newName:` rewrites it, `newTag:` pins the

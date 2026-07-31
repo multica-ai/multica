@@ -25,6 +25,7 @@ resources:
   - iam-resources.yaml
   - iam-backend.yaml
   - pgvector-init-job.yaml
+  - metabase-ro-init-job.yaml
   - deployment-backend.yaml
   - deployment-web.yaml
   - hpa-backend.yaml

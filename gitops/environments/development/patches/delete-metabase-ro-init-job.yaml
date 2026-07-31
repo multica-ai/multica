@@ -1,0 +1,9 @@
+# Dev has no reader instance (see delete-rds-reader-instance.yaml) and no
+# METABASE_RO_PASSWORD SSM param under its prefix, so this job would fail on
+# every sync. Metabase is scoped to the tools environment only for now.
+$patch: delete
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentfarm-metabase-ro-init
+  namespace: agentfarm

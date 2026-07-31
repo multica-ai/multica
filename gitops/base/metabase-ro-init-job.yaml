@@ -1,0 +1,154 @@
+---
+# Provisions the read-only `metabase_ro` Postgres role used by the Metabase
+# analytics dashboard (docs/plans/2026-07-31-001-analytics-metabase-dashboard-plan.md)
+# to query agentfarm-postgres-reader-instance's reader endpoint.
+#
+# Runs against the WRITER endpoint (role creation/grants are DDL, which the
+# reader endpoint rejects) — same connection env-var pattern as
+# pgvector-init-job.yaml. The role itself only ever gets used against the
+# reader endpoint by Metabase; this job just creates and grants it.
+#
+# Idempotent: DO blocks guard CREATE ROLE (Postgres has no
+# CREATE ROLE IF NOT EXISTS), and GRANT is naturally idempotent. Re-running
+# is not just safe on a fresh apply — this job is the run mechanism for
+# widening its own grants over time (e.g. after ALTER DEFAULT PRIVILEGES
+# additions), since ArgoCD's PostSync hook re-runs the same manifest on
+# every sync rather than only on first creation.
+#
+# METABASE_RO_PASSWORD must exist as an SSM param under /agentfarm/tools/
+# (surfaced into agentfarm-secret-store by secret-store.yaml's bulk
+# dataFrom.find) before this job's PostSync hook runs; ArgoCD does not
+# create SSM params. See PR description / rollout notes for the manual
+# pre-req.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentfarm-metabase-ro-init
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: metabase-ro-init
+  annotations:
+    # Run after the main sync so the ExternalSecret has populated
+    # agentfarm-secret-store, and after the reader ClusterInstance exists
+    # (not a hard dependency for this job — DDL runs against the writer —
+    # but the reader instance and this role are meaningless without each
+    # other, so keep them landing in the same sync).
+    argocd.argoproj.io/hook: PostSync
+    # Delete any previous run before creating a new one so re-syncs don't
+    # collide on the immutable Job name.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: metabase-ro-init
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: agentfarm
+      nodeSelector:
+        karpenter.sh/nodepool: shared
+        kubernetes.io/arch: arm64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999  # postgres user in postgres:17 image
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: metabase-ro-init
+        image: postgres:17.2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          echo "Testing database connection..."
+          psql "$DATABASE_URL" -c "SELECT version();"
+
+          echo "Creating metabase_ro role if absent..."
+          # -v passes the password as a psql variable (:'metabase_ro_password'),
+          # not shell/string interpolation into the SQL text, so it can't be
+          # used for SQL injection regardless of what characters it contains.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -v metabase_ro_password="$PGVAR_METABASE_RO_PASSWORD" <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metabase_ro') THEN
+              CREATE ROLE metabase_ro LOGIN PASSWORD :'metabase_ro_password';
+            ELSE
+              ALTER ROLE metabase_ro WITH LOGIN PASSWORD :'metabase_ro_password';
+            END IF;
+          END
+          $$;
+          SQL
+
+          echo "Granting read-only privileges..."
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          GRANT CONNECT ON DATABASE agentfarm TO metabase_ro;
+          GRANT USAGE ON SCHEMA public TO metabase_ro;
+          GRANT SELECT ON ALL TABLES IN SCHEMA public TO metabase_ro;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO metabase_ro;
+          -- No sequence/function grants — Metabase only ever needs SELECT
+          -- on tables/views for dashboard queries.
+          SQL
+
+          echo "metabase_ro role provisioned successfully"
+        env:
+          # DDL (CREATE ROLE / GRANT) must run against the writer endpoint.
+          - name: POSTGRES_HOST
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: endpoint
+          - name: POSTGRES_PORT
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: port
+          - name: POSTGRES_USER
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: master_username
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: attribute.master_password
+          - name: POSTGRES_DB
+            value: agentfarm
+          - name: DATABASE_URL
+            value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+          # metabase_ro's own password — from agentfarm-secret-store
+          # (SSM /agentfarm/tools/METABASE_RO_PASSWORD). Passed to psql as a
+          # variable (-v) rather than interpolated into SQL text, so it's
+          # never subject to SQL-injection via shell/string formatting.
+          - name: PGVAR_METABASE_RO_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-secret-store
+                key: METABASE_RO_PASSWORD
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Mi

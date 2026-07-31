@@ -1,0 +1,9 @@
+# Dev stays single-instance (fixed-capacity db.t3.medium, low-cost profile —
+# see infra/rds-instance.yaml). The reader instance added in
+# gitops/base/rds-instance.yaml is for the tools-environment Metabase
+# read-only endpoint only; dev doesn't run Metabase against its DB.
+$patch: delete
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ClusterInstance
+metadata:
+  name: agentfarm-postgres-reader-instance

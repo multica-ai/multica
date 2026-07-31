@@ -30,3 +30,58 @@ spec:
 
   providerConfigRef:
     name: agentfarm-provider-aws-upbound-config
+---
+# Second cluster member, read-only role. Adding a 2nd instance to an Aurora
+# cluster makes AWS auto-provision the cluster's reader endpoint
+# (<cluster-id>.cluster-ro-<region>.rds.amazonaws.com) with no separate
+# resource — Upbound/Crossplane then picks that up and publishes it into
+# agentfarm-rds-connection-secret as an additional `reader_endpoint` key,
+# alongside the existing `endpoint` (writer) key. No changes needed to
+# rds-cluster.yaml's writeConnectionSecretToRef for this to happen.
+#
+# promotionTier: 15 (max) keeps this instance last in line for automatic
+# failover promotion — it exists for read traffic (Metabase), not HA. Aurora
+# still uses it as a failover target if the writer and every lower-tier
+# instance are unavailable, but under normal operation it never becomes
+# writer.
+#
+# Consumers (e.g. a future Metabase Deployment) should read
+# agentfarm-rds-connection-secret's `reader_endpoint` key via secretKeyRef,
+# the same $(VAR)-composition pattern deployment-backend.yaml already uses
+# for `endpoint` — see agentfarm-metabase-ro-init-job.yaml for the
+# reader-role bootstrap and docs/plans/2026-07-31-001-analytics-metabase-dashboard-plan.md
+# for the overall design.
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ClusterInstance
+metadata:
+  name: agentfarm-postgres-reader-instance
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    engine: aurora-postgresql
+    instanceClass: db.serverless
+    clusterIdentifierRef:
+      name: agentfarm-postgres-cluster
+    promotionTier: 15
+
+    # Performance monitoring
+    performanceInsightsEnabled: true
+    performanceInsightsRetentionPeriod: 7
+
+    # Public accessibility
+    publiclyAccessible: false
+    autoMinorVersionUpgrade: false
+
+    # Tags
+    tags:
+      Owner: DevOps
+      Production: "false"
+      Name: agentfarm-postgres-reader-instance
+      Environment: tools
+      CostCenter: shared
+      Application: agentfarm
+      Purpose: "read-only endpoint for analytics (Metabase)"
+
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config
