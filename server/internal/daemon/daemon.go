@@ -301,6 +301,12 @@ type Daemon struct {
 	// (MUL-5439). Guarded by skippedAgentsMu.
 	skippedAgentsMu sync.RWMutex
 	skippedAgents   map[string]string // provider -> human-readable reason
+	// belowMinimumAgents is the subset of skippedAgents dropped for a CONFIRMED
+	// below-minimum version (provider -> the version detected), as opposed to one
+	// whose version simply could not be read. Only the confirmed case may be
+	// acted on: a runtime for a binary verified too old must stop accepting work,
+	// while an unreadable version is transient and must leave it alone.
+	belowMinimumAgents map[string]string
 
 	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
 	// The daemon pins each agent's absolute path at startup so a later PATH
@@ -1525,6 +1531,25 @@ var runtimeVersionProbeRetryDelay = 500 * time.Millisecond
 // Overridable for tests.
 var runtimeVersionProbeRetryWindow = time.Second
 
+// builtinProbeVerdict distinguishes the two ways a provider can fail its probe,
+// which callers must treat differently.
+//
+// "Could not read a version" is transient by construction — the CLI was busy,
+// mid-upgrade, or fork/exec hiccuped — so the right response is to leave
+// whatever is registered alone and try again. "Read a version and it is below
+// the minimum supported one" is a confirmed verdict about a binary that is on
+// disk right now, and leaving it registered means the daemon keeps handing it
+// work it cannot run correctly. Collapsing both into one bool made the second
+// case indistinguishable from a hiccup, which is what let a downgraded CLI keep
+// claiming tasks.
+type builtinProbeVerdict int
+
+const (
+	builtinProbeOK builtinProbeVerdict = iota
+	builtinProbeUnavailable
+	builtinProbeBelowMinimum
+)
+
 // probeBuiltinRuntime resolves and version-detects one built-in provider,
 // retrying a fast failure up to runtimeVersionProbeAttempts times. It returns
 // false when the provider must be dropped from this round's registration
@@ -1535,7 +1560,7 @@ var runtimeVersionProbeRetryWindow = time.Second
 // It is surfaced on /health as skipped_agents so a user can tell "CLI not
 // installed" apart from "CLI installed but dropped at registration", which was
 // previously only visible in the daemon log (MUL-5439).
-func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, bool) {
+func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
 	var (
 		lastErr  error
 		attempts int
@@ -1585,19 +1610,21 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		// so a retry would reach the same conclusion — drop the provider now.
 		if err := checkAgentMinVersion(name, version); err != nil {
 			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
-			return "", err.Error(), false
+			// The version is returned even though the provider is dropped: the
+			// caller needs it to report what it demoted.
+			return version, err.Error(), builtinProbeBelowMinimum
 		}
 		d.setAgentVersion(name, version)
 		d.refreshHealedVersion(name, resolved.Path, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
-		return version, "", true
+		return version, "", builtinProbeOK
 	}
 	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
 	reason := "version detection failed"
 	if lastErr != nil {
 		reason = fmt.Sprintf("version detection failed: %v", lastErr)
 	}
-	return "", reason, false
+	return "", reason, builtinProbeUnavailable
 }
 
 // detectBuiltinRuntimes version-detects every configured built-in agent CLI and
@@ -1630,19 +1657,23 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 		version string
 	}
 	var (
-		mu      sync.Mutex
-		results []detected
-		skipped = map[string]string{}
-		g       errgroup.Group
+		mu       sync.Mutex
+		results  []detected
+		skipped  = map[string]string{}
+		belowMin = map[string]string{}
+		g        errgroup.Group
 	)
 	g.SetLimit(runtimeVersionProbeConcurrency)
 	for name, entry := range d.agents() {
 		name, entry := name, entry
 		g.Go(func() error {
-			version, reason, ok := d.probeBuiltinRuntime(ctx, name, entry)
-			if !ok {
+			version, reason, verdict := d.probeBuiltinRuntime(ctx, name, entry)
+			if verdict != builtinProbeOK {
 				mu.Lock()
 				skipped[name] = reason
+				if verdict == builtinProbeBelowMinimum {
+					belowMin[name] = version
+				}
 				mu.Unlock()
 				return nil
 			}
@@ -1659,7 +1690,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 	// Publish this round's drops for /health. Replacing (not merging) keeps the
 	// diagnostic honest: a provider that registered successfully this round must
 	// not stay listed as skipped.
-	d.setSkippedAgents(skipped)
+	d.setSkippedAgents(skipped, belowMin)
 
 	// Source iteration (a map) and parallel completion order are both
 	// nondeterministic; sort by provider so the registration payload is stable
@@ -3492,7 +3523,11 @@ func (d *Daemon) exitClaim() {
 func (d *Daemon) trySetClaimBarrier() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+	// Refuse when the barrier is already held. Without this the function silently
+	// double-acquires: two holders both believe they own it, and whichever
+	// finishes first releases it out from under the other. tryBeginServerUpdate
+	// makes the same check for the same reason.
+	if d.pauseClaims || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
 		return false
 	}
 	d.pauseClaims = true

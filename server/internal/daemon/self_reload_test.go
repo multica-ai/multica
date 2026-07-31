@@ -457,3 +457,130 @@ func TestTryAutoUpdate_ResumesClaimingWhenRestartCannotBeScheduled(t *testing.T)
 		t.Error("updating flag held for a restart that will never happen — no later update or reload could run")
 	}
 }
+
+// TestTrySelfReload_YieldsToAServerTriggeredUpdate closes the ownership race,
+// interleaved the way it actually happens rather than pre-set.
+//
+// The bug isn't "updating was already true" — a plain Load() catches that. It is
+// the window *after* the look: handleUpdate wins the CAS while this path is
+// still probing, starts replacing the binary, and this path carries on to
+// triggerRestart anyway — re-execing a half-written file and cutting the
+// update's status reporting off partway. The claim barrier arbitrates nothing
+// here, because handleUpdate reaches it through tryBeginServerUpdate and the two
+// never inspect each other's state. Acquiring ownership up front is what makes
+// the window unreachable.
+func TestTrySelfReload_YieldsToAServerTriggeredUpdate(t *testing.T) {
+	d, restartCalls := newSelfReloadTestDaemon(t, "0.3.7")
+
+	// The server-triggered path tries to take ownership mid-probe, exactly as
+	// handleUpdate would via tryBeginServerUpdate's CAS.
+	var serverUpdateWon atomic.Bool
+	orig := detectSelfVersion
+	t.Cleanup(func() { detectSelfVersion = orig })
+	detectSelfVersion = func(context.Context, string) (string, error) {
+		if d.updating.CompareAndSwap(false, true) {
+			serverUpdateWon.Store(true)
+		}
+		return "0.3.8", nil
+	}
+
+	d.trySelfReload(context.Background())
+
+	if serverUpdateWon.Load() {
+		t.Fatalf("a server-triggered update acquired ownership mid-reload (restarts fired: %d) — "+
+			"this path only sampled the flag instead of taking it, so both could act on the binary at once",
+			restartCalls.Load())
+	}
+}
+
+// TestTrySelfReload_SkipsWhenOwnershipIsAlreadyHeld is the simpler half: an
+// update already in flight when the tick fires.
+func TestTrySelfReload_SkipsWhenOwnershipIsAlreadyHeld(t *testing.T) {
+	d, restartCalls := newSelfReloadTestDaemon(t, "0.3.7")
+	probes := stubSelfVersion(t, "0.3.8", nil)
+	if !d.updating.CompareAndSwap(false, true) {
+		t.Fatal("precondition: updating should have been free")
+	}
+
+	d.trySelfReload(context.Background())
+
+	if restartCalls.Load() != 0 {
+		t.Fatal("restarted while a server-triggered update was replacing the binary")
+	}
+	if claimsPaused(t, d) {
+		t.Error("took the claim barrier out from under the in-flight update")
+	}
+	if probes.Load() != 0 {
+		t.Error("ownership must be settled before paying for a probe")
+	}
+	if !d.updating.Load() {
+		t.Error("released the other path's update ownership")
+	}
+}
+
+// TestTrySelfReload_ReleasesUpdateOwnershipOnEveryNonRestartPath: holding the
+// flag after deciding not to restart would block every later update — the
+// server-triggered one included — with nothing to clear it.
+func TestTrySelfReload_ReleasesUpdateOwnershipOnEveryNonRestartPath(t *testing.T) {
+	cases := []struct {
+		name    string
+		onDisk  string
+		probeer error
+		busy    bool
+	}{
+		{name: "probe failed", probeer: errors.New("text file busy")},
+		{name: "no change", onDisk: "0.3.7"},
+		{name: "blank on disk", onDisk: ""},
+		{name: "deferred while busy", onDisk: "0.3.8", busy: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _ := newSelfReloadTestDaemon(t, "0.3.7")
+			stubSelfVersion(t, tc.onDisk, tc.probeer)
+			if tc.busy {
+				d.activeTasks.Store(1)
+			}
+
+			d.trySelfReload(context.Background())
+
+			if d.updating.Load() {
+				t.Fatal("update ownership held after declining to restart; nothing would ever clear it")
+			}
+		})
+	}
+}
+
+// TestTrySelfReload_HoldsUpdateOwnershipAcrossRestart is the one path that must
+// keep it: the process is going down, and clearing it would let a second
+// attempt start mid-shutdown.
+func TestTrySelfReload_HoldsUpdateOwnershipAcrossRestart(t *testing.T) {
+	d, restartCalls := newSelfReloadTestDaemon(t, "0.3.7")
+	stubSelfVersion(t, "0.3.8", nil)
+
+	d.trySelfReload(context.Background())
+
+	if restartCalls.Load() != 1 {
+		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
+	}
+	if !d.updating.Load() {
+		t.Error("update ownership must survive the restart kick")
+	}
+}
+
+// TestTrySetClaimBarrier_RefusesWhenAlreadyHeld: without this the function
+// silently double-acquires, and whichever holder finishes first releases the
+// barrier out from under the other.
+func TestTrySetClaimBarrier_RefusesWhenAlreadyHeld(t *testing.T) {
+	d := &Daemon{}
+
+	if !d.trySetClaimBarrier() {
+		t.Fatal("first acquisition should succeed on an idle daemon")
+	}
+	if d.trySetClaimBarrier() {
+		t.Fatal("second acquisition succeeded while the barrier was already held")
+	}
+	d.releaseClaimBarrier()
+	if !d.trySetClaimBarrier() {
+		t.Fatal("acquisition should succeed again after release")
+	}
+}

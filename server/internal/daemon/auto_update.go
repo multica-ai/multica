@@ -310,12 +310,31 @@ func (d *Daemon) trySelfReload(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	// Don't race the two upgrade paths that also end in triggerRestart. The
-	// GitHub half shares this goroutine so it cannot be mid-flight here, but
-	// the server-triggered handleUpdate runs on its own.
-	if d.updating.Load() || d.RestartBinary() != "" {
+	if d.RestartBinary() != "" {
 		return
 	}
+	// Acquire update ownership rather than sampling it. A plain Load() is only a
+	// hint: handleUpdate could win the CAS in the gap between the read and
+	// triggerRestart, and this path would then cancel the root context while the
+	// binary is still being replaced — re-execing a half-written file and cutting
+	// the server-triggered update's status reporting off partway. The CAS is the
+	// only thing that actually arbitrates, because the claim barrier does not:
+	// handleUpdate reaches it through tryBeginServerUpdate, and the two never
+	// inspect each other's state. Same shape tryAutoUpdate uses.
+	//
+	// Released on every exit below except a successful handoff, where the process
+	// is about to go down and clearing it would let a second attempt start
+	// mid-shutdown.
+	if !d.updating.CompareAndSwap(false, true) {
+		d.logger.Debug("auto-reload: skip — update already in progress")
+		return
+	}
+	released := false
+	defer func() {
+		if !released {
+			d.updating.Store(false)
+		}
+	}()
 
 	// Probe the binary the restart would actually exec, not os.Executable():
 	// under brew those differ, and following the stable symlink is the whole
@@ -355,14 +374,23 @@ func (d *Daemon) trySelfReload(ctx context.Context) {
 		d.logger.Info("auto-reload: deferring — task or claim in flight at barrier check", "reason", reason)
 		return
 	}
+	barrierReleased := false
+	defer func() {
+		if !barrierReleased {
+			d.releaseClaimBarrier()
+		}
+	}()
+
 	d.logger.Info("auto-reload: restarting into the binary on disk", "reason", reason, "binary", target)
 	if !d.triggerRestart() {
-		// Resolution failed at the handoff. Resume claiming so a failed restart
-		// never costs the daemon its ability to pick up work, and retry next
-		// tick — the probe is re-run from scratch, so there is no stale
-		// baseline to keep re-detecting the same change.
-		d.releaseClaimBarrier()
+		// Resolution failed at the handoff. Both deferred restores run: a failed
+		// restart must never cost the daemon its ability to claim, nor leave the
+		// update flag held against a restart that is not coming. The next tick
+		// re-probes from scratch, so there is no stale baseline to re-detect.
+		return
 	}
+	released = true
+	barrierReleased = true
 }
 
 // setReloadPending records that a multica version change is confirmed but the

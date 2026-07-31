@@ -113,6 +113,110 @@ func TestRefreshAgentVersions_UpdatesTheVersionTasksActuallyRead(t *testing.T) {
 	}
 }
 
+// TestRefreshAgentVersions_BlankToRealVersionReRegisters covers a provider that
+// registered while its version probe was failing: the server shows a blank
+// version for it, and nothing else will ever fix that.
+//
+// Converge only looks at providers MISSING a runtime and this one has one, so it
+// never revisits it. And the ordering inside a refresh round hides it from the
+// refresh too — detectBuiltinRuntimes calls setAgentVersion with the real
+// version before the comparison runs, so by the next round the cache already
+// matches and there is no change to see. Blank -> real has exactly one chance to
+// be reported.
+func TestRefreshAgentVersions_BlankToRealVersionReRegisters(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{"codex": {Path: "/fake/codex"}})
+
+	// Register while the CLI reports no version at all.
+	fx.setProbeVersion("")
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "" {
+		t.Fatalf("registered codex version = %q, want blank for this setup", got)
+	}
+
+	// The probe recovers.
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Errorf("registered codex version = %q, want 10.0.0 — a blank version would stay on the server forever", got)
+	}
+
+	// And it settles: no further rounds re-register.
+	calls := fx.registerCallCount()
+	d.refreshAgentVersions(context.Background())
+	if got := fx.registerCallCount() - calls; got != 0 {
+		t.Errorf("made %d Register calls after settling, want 0", got)
+	}
+}
+
+// TestRefreshAgentVersions_DemotesRuntimeDowngradedBelowMinimum is the downgrade
+// case nothing reacted to.
+//
+// probeBuiltinRuntime drops a below-minimum provider from the payload, so there
+// is no version left to compare; the runtime row survives because the built-in
+// merge is additive; and the provider is absent from providersMissingRuntimes
+// precisely because it still holds that runtime. Every path looks idle while the
+// daemon keeps routing tasks to a binary it has already verified is too old.
+func TestRefreshAgentVersions_DemotesRuntimeDowngradedBelowMinimum(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers before downgrade = %v, want [codex]", got)
+	}
+
+	// The CLI is downgraded in place to a version below the minimum.
+	origCheck := checkAgentMinVersion
+	t.Cleanup(func() { checkAgentMinVersion = origCheck })
+	checkAgentMinVersion = func(_, version string) error {
+		if version == "0.0.1" {
+			return errors.New("version 0.0.1 is below minimum required 1.0.0")
+		}
+		return nil
+	}
+	fx.setProbeVersion("0.0.1")
+
+	d.refreshAgentVersions(context.Background())
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Errorf("providers after downgrade = %v, want none — a binary confirmed below the minimum "+
+			"must stop accepting work", got)
+	}
+	if got := fx.deregisteredCount(); got == 0 {
+		t.Error("runtimes were dropped locally but the server was never told, so it would keep routing tasks")
+	}
+	// Recovery needs no new machinery: with no runtime it is missing again, so
+	// the converge path owns bringing it back after an upgrade.
+	if missing := d.providersMissingRuntimes(); len(missing) != 1 || missing[0] != "codex" {
+		t.Errorf("providersMissingRuntimes = %v, want [codex] so converge can restore it after an upgrade", missing)
+	}
+}
+
+// TestRefreshAgentVersions_KeepsRuntimeWhenTheProbeMerelyFailed is the other half
+// of that rule. An unreadable version is transient — the CLI was busy or
+// mid-upgrade — and tearing down a working runtime over one is the mistake
+// refreshAgentAvailability's one-directional rule exists to avoid.
+func TestRefreshAgentVersions_KeepsRuntimeWhenTheProbeMerelyFailed(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+	fx.setProbeErr(func(string, int) error { return errors.New("fork/exec: text file busy") })
+
+	d.refreshAgentVersions(context.Background())
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Errorf("providers after a failed probe = %v, want [codex] kept", got)
+	}
+	if got := fx.deregisteredCount(); got != 0 {
+		t.Errorf("deregistered %d runtimes over a probe failure, want 0", got)
+	}
+}
+
 // TestRefreshAgentVersions_DoesNotDisturbTheRuntimeSet pins the "scoped so one
 // provider's update doesn't disturb other providers or workspaces" criterion.
 //

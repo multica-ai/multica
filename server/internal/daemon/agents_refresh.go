@@ -115,12 +115,34 @@ func (d *Daemon) agents() map[string]AgentEntry {
 }
 
 // setSkippedAgents replaces the diagnostic "discovered but not registered" set
-// reported on /health. Called at the end of every registration round with the
+// reported on /health, together with the subset that was dropped for a CONFIRMED
+// below-minimum version. Called at the end of every registration round with the
 // providers that round dropped.
-func (d *Daemon) setSkippedAgents(skipped map[string]string) {
+//
+// The two are published together, under one lock, because they describe the same
+// round: a reader that sees a provider listed as skipped must be able to tell
+// whether the daemon merely failed to read its version or actually verified it
+// is too old, and a torn view of that pair would be worse than either alone.
+func (d *Daemon) setSkippedAgents(skipped, belowMinimum map[string]string) {
 	d.skippedAgentsMu.Lock()
 	defer d.skippedAgentsMu.Unlock()
 	d.skippedAgents = skipped
+	d.belowMinimumAgents = belowMinimum
+}
+
+// belowMinimumAgentsSnapshot copies the providers whose last probe confirmed a
+// version below the minimum supported one, mapped to that version.
+func (d *Daemon) belowMinimumAgentsSnapshot() map[string]string {
+	d.skippedAgentsMu.RLock()
+	defer d.skippedAgentsMu.RUnlock()
+	if len(d.belowMinimumAgents) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(d.belowMinimumAgents))
+	for provider, version := range d.belowMinimumAgents {
+		out[provider] = version
+	}
+	return out
 }
 
 // skippedAgentsSnapshot copies the current skip reasons for the health handler.
@@ -218,6 +240,12 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	}
 
 	builtins := d.detectBuiltinRuntimes(ctx)
+	// Runs before the early return below: a downgrade drops the provider from
+	// builtins entirely, so there is no version change left to detect and the
+	// machine could otherwise look idle while a too-old CLI keeps taking work.
+	if belowMinimum := d.belowMinimumAgentsSnapshot(); len(belowMinimum) > 0 {
+		d.demoteBelowMinimumRuntimes(ctx, belowMinimum)
+	}
 	if len(builtins) == 0 {
 		return
 	}
@@ -233,9 +261,17 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	changed := make(map[string]string)
 	for provider, version := range carried {
 		prev, known := before[provider]
-		// An unknown or blank previous version means this provider has not
-		// registered a version yet; that is the converge path's job, not a change.
-		if !known || prev == "" || prev == version {
+		// A provider we have never seen has no runtime yet, so bringing it online
+		// is the converge path's job, not a version change.
+		//
+		// A provider we know at a BLANK version is the opposite: it registered —
+		// it has a runtime — while its version probe was failing, so the server is
+		// displaying nothing for it. Nothing else will ever fix that. Converge
+		// only looks at providers missing a runtime, and by the next round
+		// setAgentVersion has already stored the real version, so no later round
+		// sees a change either. Blank -> real is a change, and the only chance to
+		// report it is now.
+		if !known || prev == version {
 			continue
 		}
 		// A blank *new* version reaches here for any provider with no entry in
@@ -286,6 +322,71 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	// Every workspace accepted this payload, so the server now knows about the
 	// versions it carried — and only those.
 	d.confirmAgentVersionsRegistered(carried)
+}
+
+// demoteBelowMinimumRuntimes takes offline the built-in runtimes of providers
+// whose re-probe confirmed a version below the minimum supported one.
+//
+// Without this, an in-place DOWNGRADE is the one machine change nothing reacts
+// to. probeBuiltinRuntime drops the provider from the registration payload, so
+// refreshAgentVersions sees no version to compare; the runtime row survives
+// because the built-in merge is additive; and the provider is absent from
+// providersMissingRuntimes precisely because it still holds a runtime — so
+// converge ignores it too. The daemon keeps routing tasks to a binary it has
+// already verified it cannot run correctly, under the previously cached
+// version's policy.
+//
+// Deregistering is the narrowest honest response. It stops the server routing
+// work there, the reason is already visible in skipped_agents, and recovery
+// needs no new machinery: once the provider is upgraded it has no runtime, which
+// puts it back in providersMissingRuntimes and lets the converge path register
+// it again. The alternative — keeping the runtime and refusing the launch — puts
+// a check on the hot path and leaves the UI advertising a runtime that rejects
+// everything.
+//
+// Only ever acts on builtinProbeBelowMinimum, never on a probe that merely
+// failed: an unreadable version is transient, and tearing down a working
+// runtime over one is exactly the mistake refreshAgentAvailability's
+// one-directional rule exists to avoid.
+func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum map[string]string) {
+	d.mu.Lock()
+	var demoted []string
+	demotedProviders := make(map[string]string)
+	for _, ws := range d.workspaces {
+		kept := ws.runtimeIDs[:0]
+		for _, rid := range ws.runtimeIDs {
+			rt, ok := d.runtimeIndex[rid]
+			if !ok || rt.ProfileID != "" {
+				kept = append(kept, rid)
+				continue
+			}
+			version, below := belowMinimum[rt.Provider]
+			if !below {
+				kept = append(kept, rid)
+				continue
+			}
+			delete(d.runtimeIndex, rid)
+			demoted = append(demoted, rid)
+			demotedProviders[rt.Provider] = version
+		}
+		ws.runtimeIDs = kept
+	}
+	d.mu.Unlock()
+
+	if len(demoted) == 0 {
+		return
+	}
+	d.logger.Warn("agent CLI downgraded below the minimum supported version; taking its runtimes offline",
+		"providers", demotedProviders, "runtime_ids", demoted)
+
+	// Best-effort, like every other deregistration path: the daemon has already
+	// stopped heartbeating these rows, so the server's stale-heartbeat sweep is
+	// the backstop if this call fails.
+	if err := d.client.Deregister(ctx, demoted); err != nil {
+		d.logger.Warn("deregister after below-minimum downgrade failed",
+			"runtime_ids", demoted, "error", err)
+	}
+	d.notifyRuntimeSetChanged()
 }
 
 // reregisterBuiltins re-sends the built-in registration payload for every

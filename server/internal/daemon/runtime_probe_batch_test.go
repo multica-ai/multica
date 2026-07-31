@@ -55,6 +55,9 @@ type batchFixture struct {
 	// best-effort profile fetch failing while a discovery-driven registration
 	// is in flight.
 	profilesFail bool
+	// deregistered accumulates every runtime ID sent to /api/daemon/deregister,
+	// so a test can assert the server was actually told to stop routing work.
+	deregistered []string
 }
 
 // failRegister toggles register failure for every workspace.
@@ -159,6 +162,13 @@ func (fx *batchFixture) registrationFor(workspaceID string) ([]string, int) {
 	return types, calls
 }
 
+// deregisteredCount returns how many runtime IDs were deregistered server-side.
+func (fx *batchFixture) deregisteredCount() int {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return len(fx.deregistered)
+}
+
 func (fx *batchFixture) registerCallCount() int {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
@@ -233,6 +243,15 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			fx.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
+		case r.URL.Path == "/api/daemon/deregister":
+			var body struct {
+				RuntimeIDs []string `json:"runtime_ids"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.mu.Lock()
+			fx.deregistered = append(fx.deregistered, body.RuntimeIDs...)
+			fx.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):
 			if fx.profilesShouldFail() {
 				w.WriteHeader(http.StatusInternalServerError)
