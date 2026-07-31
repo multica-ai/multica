@@ -775,8 +775,18 @@ func (s *ProjectSyncService) IssueCreateTopicHookForAgentTask(
 	}
 	installationID := binding.InstallationID
 	return func(hookCtx context.Context, tx pgx.Tx, issue db.Issue) error {
+		// Resolve the active project binding so the topic binding
+		// is linked to its parent project binding. If no active
+		// binding exists (e.g. project was already unbound), fall
+		// back to NULL — finishProjectUnbind will clean it up later.
+		projectBindingID := pgtype.UUID{}
+		if pb, pbErr := s.store.getActiveProjectBindingByGroup(
+			hookCtx, tx, installationID, chatID,
+		); pbErr == nil {
+			projectBindingID = pb.ID
+		}
 		if _, err := s.store.createIssueTopic(
-			hookCtx, tx, issue.WorkspaceID, installationID, pgtype.UUID{}, issue.ProjectID,
+			hookCtx, tx, issue.WorkspaceID, installationID, projectBindingID, issue.ProjectID,
 			issue.ID, chatID, rootID, threadID, "issue_created_in_topic", createdBy,
 		); err != nil {
 			return translateProjectSyncConstraint(err)

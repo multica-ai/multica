@@ -325,6 +325,23 @@ func (s *projectSyncStore) finishProjectUnbind(ctx context.Context, q projectSyn
 		b.WorkspaceID, b.ID); err != nil {
 		return err
 	}
+	// Also clean up orphan topic bindings that were created by
+	// IssueCreateTopicHookForAgentTask with NULL project_binding_id
+	// after the project binding was already unbound. Without this,
+	// these orphans block future topic bindings on the same chat.
+	if b.ChannelChatID.Valid && b.ChannelChatID.String != "" {
+		if _, err := q.Exec(ctx, `
+			UPDATE channel_issue_topic_binding
+			SET state = 'project_unbound', unbound_at = now(), updated_at = now()
+			WHERE workspace_id = $1
+			  AND installation_id = $2
+			  AND channel_chat_id = $3
+			  AND project_binding_id IS NULL
+			  AND state = 'active'`,
+			b.WorkspaceID, b.InstallationID, b.ChannelChatID); err != nil {
+			return err
+		}
+	}
 	_, err := q.Exec(ctx, `
 		UPDATE channel_notification_outbox
 		SET status = 'dead', last_error = $1, locked_at = NULL, locked_by = NULL
