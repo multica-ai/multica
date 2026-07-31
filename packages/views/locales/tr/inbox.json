@@ -19,7 +19,7 @@
       "hours": "{{count}} sa",
       "days": "{{count}} g"
     },
-    "archived_title": "Arşivlendi",
+    "archived_title": "Arşivlenmiş",
     "archived_empty": "Arşivlenmiş bildirim yok",
     "unarchive_tooltip": "Arşivden çıkar"
   },

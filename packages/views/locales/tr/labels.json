@@ -1,5 +1,5 @@
 {
-  "remove_label": "{{name}} etiket'ını kaldır",
+  "remove_label": "{{name}} etiketini kaldır",
   "resource_picker": {
     "empty": "Etiket yok",
     "add": "Etiket ekle",
