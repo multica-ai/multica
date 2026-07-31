@@ -551,7 +551,7 @@
       "failed_label": "failed"
     },
     "composio_mcp": {
-      "subtitle": "Bu ajanın bir toolkit'i MCP sunucusu olarak bağlamasına izin vermek için seçin. Bu izin yalnızca çalıştırmayı doğrudan veya bir alt ajan zinciri üzerinden başlatan kişi siz olduğunuzda, yani ajanın oluşturucusu siz olduğunuzda geçerlidir.",
+      "subtitle": "Bu ajanın bir toolkit'i MCP sunucusu olarak bağlamasına izin vermek için seçin. Bu izin yalnızca çalıştırmayı doğrudan veya bir alt ajan zinciri üzerinden başlatan kişi sizseniz, yani ajanın oluşturucusuysanız geçerlidir.",
       "loading": "Loading your connections…",
       "load_failed": "Couldn't load your connected apps. Try again shortly.",
       "empty_title": "No connected apps yet",
