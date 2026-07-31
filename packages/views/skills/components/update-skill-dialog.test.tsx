@@ -30,10 +30,10 @@ function wrap(qc: QueryClient) {
   return Wrapper;
 }
 
-function row(): SkillRow {
+function row(id = "s1"): SkillRow {
   return {
     skill: {
-      id: "s1",
+      id,
       workspace_id: "ws1",
       name: "My Skill",
       description: "",
@@ -60,7 +60,7 @@ describe("UpdateSkillDialog", () => {
     mockReimportSkill.mockResolvedValue({});
     const qc = new QueryClient();
     const invalidate = vi.spyOn(qc, "invalidateQueries");
-    render(<UpdateSkillDialog row={row()} ctx={ctx} open onOpenChange={() => {}} />, {
+    render(<UpdateSkillDialog rows={[row()]} ctx={ctx} open onOpenChange={() => {}} />, {
       wrapper: wrap(qc),
     });
     fireEvent.click(screen.getByRole("button", { name: "Update" }));
@@ -70,10 +70,29 @@ describe("UpdateSkillDialog", () => {
     });
   });
 
+  it("re-imports every selected skill on batch confirm", async () => {
+    mockReimportSkill.mockClear();
+    mockReimportSkill.mockResolvedValue({});
+    const qc = new QueryClient();
+    render(
+      <UpdateSkillDialog
+        rows={[row("s1"), row("s2")]}
+        ctx={ctx}
+        open
+        onOpenChange={() => {}}
+      />,
+      { wrapper: wrap(qc) },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(mockReimportSkill).toHaveBeenCalledTimes(2));
+    expect(mockReimportSkill).toHaveBeenCalledWith("s1");
+    expect(mockReimportSkill).toHaveBeenCalledWith("s2");
+  });
+
   it("does not throw on failure (error toast path)", async () => {
     mockReimportSkill.mockRejectedValue(new Error("boom"));
     const qc = new QueryClient();
-    render(<UpdateSkillDialog row={row()} ctx={ctx} open onOpenChange={() => {}} />, {
+    render(<UpdateSkillDialog rows={[row()]} ctx={ctx} open onOpenChange={() => {}} />, {
       wrapper: wrap(qc),
     });
     fireEvent.click(screen.getByRole("button", { name: "Update" }));
