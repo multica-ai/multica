@@ -163,7 +163,7 @@
       },
       "success": {
         "title": "Her şey hazır!",
-        "subtitle": "Bekleyin; {{ajanName}} işin üzerinde ☕",
+        "subtitle": "Bekleyin; {{agentName}} işin üzerinde ☕",
         "tip_inbox": "İlerleme olduğunda Gelen Kutunuzda göreceksiniz.",
         "tip_chat": "Canlı chat ister misiniz? Sağ alttaki chat balonuna tıklayın.",
         "got_it": "Anladım →"
