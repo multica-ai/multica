@@ -26,6 +26,12 @@ spec:
         # Paired with the PDB in pdb.yaml (belt-and-suspenders — see AIPLAT-153).
         cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
+      # entrypoint.sh (AIPLAT-168) holds SIGTERM and drains in-flight agent
+      # tasks (polling active_task_count) before forwarding it to the daemon,
+      # up to a ~9.5 min cap — this must exceed that cap plus the daemon's own
+      # teardown (~30s taskWG wait + subprocess grace) or kubelet SIGKILLs
+      # mid-drain.
+      terminationGracePeriodSeconds: 660
       serviceAccountName: agentrunner
       imagePullSecrets:
         - name: regcred

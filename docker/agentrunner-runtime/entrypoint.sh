@@ -248,5 +248,27 @@ fi
 git-ai install-hooks 2>/dev/null \
   || echo "entrypoint: WARNING git-ai install-hooks failed — AI attribution hooks may not be active" >&2
 
-# ── Run daemon in foreground ──────────────────────────────────────────────────
-exec multica daemon start --foreground --device-name "${DEVICE_NAME}"
+# ── Run daemon in foreground, draining in-flight tasks before shutdown ────────
+# Not exec'd: the daemon's own SIGTERM handling cancels an in-flight task's
+# runCtx immediately (it's derived from the same root ctx the signal cancels),
+# so a mid-run agent session gets killed within seconds on a deploy/pod delete
+# (AIPLAT-168). Running the daemon as a background child makes this script
+# PID 1, so it receives SIGTERM first and can hold it until the daemon reports
+# no active tasks (or a capped wait elapses) before forwarding it.
+multica daemon start --foreground --device-name "${DEVICE_NAME}" &
+DAEMON_PID=$!
+
+drain_and_forward() {
+  echo "entrypoint: SIGTERM received, draining active tasks before signaling daemon..." >&2
+  local waited=0 max_wait="${DRAIN_MAX_SECONDS:-570}" interval=5 active
+  while (( waited < max_wait )); do
+    active=$(multica daemon status --output json 2>/dev/null | jq -r '.active_task_count // 0' 2>/dev/null || echo 1)
+    [[ "${active}" == "0" ]] && break
+    sleep "${interval}"
+    waited=$((waited + interval))
+  done
+  echo "entrypoint: forwarding SIGTERM to daemon (waited ${waited}s)" >&2
+  kill -TERM "${DAEMON_PID}" 2>/dev/null || true
+}
+trap drain_and_forward SIGTERM SIGINT
+wait "${DAEMON_PID}"
