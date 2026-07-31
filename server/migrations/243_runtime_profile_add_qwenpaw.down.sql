@@ -1,6 +1,4 @@
--- Add QwenPaw (`qwenpaw`) to the built-in runtime profile protocol whitelist.
--- Kept in lockstep with agent.SupportedTypes and agent.New().  NOT VALID
--- preserves the historical-row tolerance used by the prior family additions.
+-- Revert QwenPaw (`qwenpaw`) from the built-in runtime profile protocol whitelist.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
@@ -18,9 +16,9 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'kiro',
         'antigravity',
         'qoder',
+        'qoderclicn',
         'traecli',
         'deveco',
         'grok',
-        'qwen',
-        'qwenpaw'
+        'qwen'
     )) NOT VALID;
