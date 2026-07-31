@@ -545,6 +545,61 @@ func TestContinueTaskInChat_ArchivedAgentRejected(t *testing.T) {
 	}
 }
 
+// TestContinueTaskInChat_SecondMemberGetsOwnConversation pins a deliberate design
+// choice that looks like a bug from the outside, so it must not be "tightened" by
+// accident: uniqueness is (task, creator), NOT (task). Two members continuing the
+// same run each get their own conversation, both seeded with the same provider
+// session id.
+//
+// Why per-creator and not global: chat sessions are private to their creator, so
+// a single shared continuation would expose one member's conversation to another.
+// Why this is safe despite both rows naming one session: dispatch is sequential
+// per chat_session (a session has at most one active task), so the two chats take
+// the provider session in turn rather than concurrently, and each diverges onto
+// its own session after its first turn.
+func TestContinueTaskInChat_SecondMemberGetsOwnConversation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	other := createWorkspaceMemberUser(t, "Continue Chat Second Member", "continue-chat-second@multica.ai")
+	agentID := createHandlerTestAgent(t, "ContinueChatTwoMembersAgent", []byte("[]"))
+	issueID := createTestIssue(t, "Continue in chat two members", "todo", "medium")
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+	taskID := createTerminalIssueTask(t, agentID, issueID, handlerTestRuntimeID(t), "completed", "sess-shared", "/work/shared")
+
+	first := httptest.NewRecorder()
+	testHandler.ContinueTaskInChat(first, continueInChatRequest(t, testUserID, taskID))
+	if first.Code != http.StatusCreated {
+		t.Fatalf("owner: expected 201, got %d: %s", first.Code, first.Body.String())
+	}
+	firstResp := decodeContinueResponse(t, first)
+
+	second := httptest.NewRecorder()
+	testHandler.ContinueTaskInChat(second, continueInChatRequest(t, other, taskID))
+	if second.Code != http.StatusCreated {
+		t.Fatalf("second member: expected 201 (own conversation), got %d: %s",
+			second.Code, second.Body.String())
+	}
+	secondResp := decodeContinueResponse(t, second)
+
+	if secondResp.Reopened {
+		t.Errorf("reopened = true; the second member must get their OWN conversation, " +
+			"not the first member's private one")
+	}
+	if secondResp.ChatSession.ID == firstResp.ChatSession.ID {
+		t.Fatalf("both members share chat session %s; chat sessions are private to their creator",
+			secondResp.ChatSession.ID)
+	}
+	if got := readChatSessionRow(t, secondResp.ChatSession.ID); got.SessionID.String != "sess-shared" {
+		t.Errorf("second member's session_id = %q, want the same resume pointer sess-shared",
+			got.SessionID.String)
+	}
+	if got := uuidToString(readChatSessionRow(t, secondResp.ChatSession.ID).CreatorID); got != other {
+		t.Errorf("second continuation creator = %s, want %s", got, other)
+	}
+}
+
 // TestContinueTaskInChat_SeedsTitleFromIssue: the chat list is the surface a
 // member scans, so a continuation has to be identifiable there without waiting
 // for the auto-titler.

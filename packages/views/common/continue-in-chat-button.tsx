@@ -76,6 +76,12 @@ export function ContinueInChatButton({
       //  - task_not_terminal: the run went live again between render and click.
       //  - already_chat_task: only reachable by calling the endpoint directly,
       //    but the message should still make sense.
+      //
+      // Note the two different fields: `reason_code` is the shared
+      // dispatch-blocked shape that writeDispatchBlocked emits for the 403, so it
+      // is read via dispatchReasonCode; the 409s carry a plain `reason`. Not
+      // symmetric, but reusing the dispatch enum for a non-admission refusal
+      // would be worse.
       const reason =
         e instanceof ApiError && e.body && typeof e.body === "object"
           ? (e.body as { reason?: unknown }).reason

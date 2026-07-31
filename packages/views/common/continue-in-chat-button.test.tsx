@@ -82,18 +82,29 @@ describe("canContinueTaskInChat", () => {
   // The gate exists because a live task still owns its provider session and its
   // work_dir, and a reused work_dir has no mutual exclusion — offering the button
   // there would invite two runs into one directory.
+  //
+  // Typed as a total map over AgentTask["status"] rather than a pair of string
+  // arrays: adding a status to that union then fails to compile here until it is
+  // classified, instead of silently defaulting to "not continuable". The DB CHECK
+  // also permits 'deferred', which this union does not carry — that wider domain
+  // is enumerated in the Go test (TestIsTerminalTaskStatus), which is where the
+  // authoritative status list lives.
   it("admits only terminal statuses", () => {
-    for (const status of ["completed", "failed", "cancelled"]) {
-      expect(canContinueTaskInChat(makeTask({ status }))).toBe(true);
-    }
-    for (const status of [
-      "queued",
-      "dispatched",
-      "running",
-      "waiting_local_directory",
-      "deferred",
-    ]) {
-      expect(canContinueTaskInChat(makeTask({ status }))).toBe(false);
+    const expected: Record<NonNullable<AgentTask["status"]>, boolean> = {
+      completed: true,
+      failed: true,
+      cancelled: true,
+      queued: false,
+      dispatched: false,
+      running: false,
+      waiting_local_directory: false,
+    };
+    for (const [status, want] of Object.entries(expected)) {
+      expect(
+        canContinueTaskInChat(
+          makeTask({ status: status as AgentTask["status"] }),
+        ),
+      ).toBe(want);
     }
   });
 });
