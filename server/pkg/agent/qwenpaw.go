@@ -37,9 +37,14 @@ var qwenpawBlockedArgs = map[string]blockedArgMode{
 // Notable contract with QwenPaw v2.0.1:
 //   - `session/new` and `session/load` accept `_meta["qwenpaw.coding_project_dir"]`
 //     to enable Coding Mode (qwenpaw.coding_project_dir meta key).
-//   - `session/set_model` is NOT supported — the daemon does not send it.
-//   - Skills are discovered from the workspace's `skill_pool` directory
-//     (not `skills`) — see execenv/qwenpaw_workspace.go.
+//   - `session/new` response includes a `models` field (SessionModelState)
+//     for model discovery (QwenPaw v2.0.1+, agentscope-ai/QwenPaw#6531).
+//     ListModels uses this to populate the model picker. However,
+//     `session/set_model` is NOT called — it persists to agent.json at the
+//     agent scope (not session-scoped), so calling it would mutate the
+//     user's shared agent config. Model override is declared unsupported.
+//   - Skills are discovered from the workspace's `skills` directory
+//     (not `skill_pool`) — see execenv/qwenpaw_workspace.go.
 type qwenpawBackend struct {
 	cfg Config
 }

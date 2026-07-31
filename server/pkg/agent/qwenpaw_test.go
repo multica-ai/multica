@@ -198,10 +198,19 @@ func TestQwenpawSessionLoadNotFound(t *testing.T) {
 
 func TestQwenpawListModels(t *testing.T) {
 	t.Parallel()
-	// qwenpaw is no longer a supported agent type; ListModels should reject it.
-	_, err := ListModels(context.Background(), "qwenpaw", "")
+	// ListModels for qwenpaw now uses ACP session/new model discovery
+	// (QwenPaw v2.0.1+ via agentscope-ai/QwenPaw#6531). Without a real
+	// qwenpaw binary and configured agent, discovery fails — but the
+	// error must come from the discovery layer, not from "unknown agent
+	// type". We verify qwenpaw is a recognized type by asserting the
+	// error is NOT the unknown-type error.
+	_, err := ListModels(context.Background(), "qwenpaw", "/nonexistent/qwenpaw")
 	if err == nil {
-		t.Fatal("expected error for unknown agent type qwenpaw")
+		// Discovery may succeed if a real qwenpaw is on PATH; that's fine.
+		return
+	}
+	if strings.Contains(err.Error(), "unknown agent type") {
+		t.Fatalf("qwenpaw should be a recognized agent type in ListModels, got: %v", err)
 	}
 }
 

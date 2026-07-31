@@ -205,6 +205,15 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "qwenpaw":
+		// QwenPaw is ACP-native (`qwenpaw acp`); model catalog comes from
+		// session/new. QwenPaw v2.0.1+ includes the `models` field
+		// (SessionModelState) in the session/new response, added by
+		// agentscope-ai/QwenPaw#6531. On older versions or auth failure,
+		// the empty fallback keeps manual model entry available.
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverQwenpawModels(ctx, executablePath))
+		})
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -424,6 +433,20 @@ func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model,
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-traecli-discovery-",
 		acpArgs:      []string{"acp", "serve", "--yolo"},
+	})
+}
+
+// discoverQwenpawModels spins up `qwenpaw acp` and parses the model
+// catalog from the session/new response. QwenPaw v2.0.1+ populates
+// the `models` field (SessionModelState) via _build_model_state()
+// (agentscope-ai/QwenPaw#6531). Requires a configured QwenPaw agent;
+// falls back to manual entry on any failure.
+func discoverQwenpawModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "qwenpaw",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-qwenpaw-discovery-",
+		acpArgs:      []string{"acp"},
 	})
 }
 
