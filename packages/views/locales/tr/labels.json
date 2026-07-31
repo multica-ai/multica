@@ -1,10 +1,10 @@
 {
   "remove_label": "{{name}} etiket'ını kaldır",
   "resource_picker": {
-    "empty": "No labels",
-    "add": "Add labels",
-    "search": "Search labels...",
-    "no_labels": "Create labels in Settings first",
-    "no_results": "No matching labels"
+    "empty": "Etiket yok",
+    "add": "Etiket ekle",
+    "search": "Etiketlerde ara...",
+    "no_labels": "Önce Ayarlar'da etiket oluşturun",
+    "no_results": "Eşleşen etiket yok"
   }
 }

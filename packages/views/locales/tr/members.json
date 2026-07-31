@@ -1,8 +1,8 @@
 {
   "role": {
-    "owner": "Owner",
-    "admin": "Admin",
-    "member": "Member"
+    "owner": "Sahip",
+    "admin": "Yönetici",
+    "member": "Üye"
   },
   "card": {
     "unavailable": "Üye kullanılamıyor",

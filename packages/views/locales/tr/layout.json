@@ -4,7 +4,7 @@
     "my_issues": "Issue'larım",
     "issues": "Issue'lar",
     "projects": "Projeler",
-    "autopilots": "Autopilot",
+    "autopilots": "Otomasyon",
     "agents": "Ajanlar",
     "squads": "Ekipler",
     "usage": "Kullanım",
@@ -19,7 +19,7 @@
     "changelog": "Değişiklikler",
     "feedback": "Geri bildirim",
     "discord": "Discord",
-    "server_version": "Server version {{version}}"
+    "server_version": "Sunucu sürümü: {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "Çalışma alanı yükleniyor…",
@@ -41,22 +41,22 @@
     "configure_group": "Yapılandır",
     "unread_overflow": "99+",
     "discord_card": {
-      "title": "Join our Discord",
-      "dismiss": "Dismiss"
+      "title": "Discord'umuza katılın",
+      "dismiss": "Kapat"
     }
   },
   "tab": {
     "issue": "Issue",
-    "project": "Project",
-    "autopilot": "Autopilot",
-    "agent": "Agent",
-    "member": "Member",
-    "squad": "Squad",
+    "project": "Proje",
+    "autopilot": "Otomasyon",
+    "agent": "Ajan",
+    "member": "Üye",
+    "squad": "Ekip",
     "skill": "Skill",
-    "machine": "Machine",
-    "runtime": "Runtime",
-    "attachment": "Attachment",
-    "create_agent": "Create Agent",
-    "unknown": "Unknown page"
+    "machine": "Makine",
+    "runtime": "Çalışma ortamı",
+    "attachment": "Ek",
+    "create_agent": "Ajan oluştur",
+    "unknown": "Bilinmeyen sayfa"
   }
 }

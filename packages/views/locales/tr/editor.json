@@ -18,15 +18,15 @@
     "list_dropdown": {
       "bullet_list": "Madde işaretli liste",
       "ordered_list": "Numaralı liste",
-      "task_list": "Task List"
+      "task_list": "Görev listesi"
     },
     "sub_issue": {
       "tooltip": "Seçimden alt issue oluştur",
       "created": "{{identifier}} oluşturuldu",
       "create_failed": "Alt issue oluşturulamadı"
     },
-    "highlight": "Highlight",
-    "task_list": "Task list"
+    "highlight": "Vurgula",
+    "task_list": "Görev listesi"
   },
   "image": {
     "view": "Görseli görüntüle",
@@ -35,7 +35,7 @@
     "delete": "Sil",
     "link_copied": "Bağlantı kopyalandı",
     "copy_link_failed": "Bağlantı kopyalanamadı",
-    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size."
+    "canvas_label": "Görsel tuvali. Kaydırmak için sürükleyin, yakınlaştırmak için kaydırın, gerçek boyutu açıp kapatmak için çift tıklayın."
   },
   "attachment": {
     "download_failed": "İndirme bağlantısı alınamadı. Birazdan tekrar deneyin.",
@@ -60,9 +60,9 @@
     "all_members": "Tüm üyeler",
     "searching": "Aranıyor...",
     "no_results": "Sonuç yok",
-    "group_current": "Current page",
-    "group_recent": "Recently viewed",
-    "group_search": "Search results"
+    "group_current": "Geçerli sayfa",
+    "group_recent": "Son görüntülenenler",
+    "group_search": "Arama sonuçları"
   },
   "code_block": {
     "copy_code": "Kodu kopyala",
@@ -79,37 +79,37 @@
   "mermaid": {
     "render_error": "Mermaid diyagramı oluşturulamadı.",
     "rendering": "Diyagram oluşturuluyor…",
-    "viewer_title": "Diagram",
-    "canvas_label": "Diagram canvas. Drag to pan, scroll to zoom.",
-    "open_viewer": "Open diagram viewer",
-    "close_viewer": "Close",
-    "copy_source": "Copy diagram source",
-    "show_source": "Show source",
-    "show_diagram": "Show diagram",
-    "export": "Export",
-    "export_png": "Download PNG",
-    "export_svg": "Download SVG",
-    "export_source": "Download .mmd"
+    "viewer_title": "Diyagram",
+    "canvas_label": "Diyagram tuvali. Kaydırmak için sürükleyin, yakınlaştırmak için kaydırın.",
+    "open_viewer": "Diyagram görüntüleyicisini aç",
+    "close_viewer": "Kapat",
+    "copy_source": "Diyagram kaynağını kopyala",
+    "show_source": "Kaynağı göster",
+    "show_diagram": "Diyagramı göster",
+    "export": "Dışa aktar",
+    "export_png": "PNG indir",
+    "export_svg": "SVG indir",
+    "export_source": ".mmd indir"
   },
   "canvas": {
-    "zoom_in": "Zoom in",
-    "zoom_out": "Zoom out",
-    "zoom_fit": "Fit to view",
-    "zoom_actual": "Actual size"
+    "zoom_in": "Yakınlaştır",
+    "zoom_out": "Uzaklaştır",
+    "zoom_fit": "Görünüme sığdır",
+    "zoom_actual": "Gerçek boyut"
   },
   "slash_command": {
-    "no_skills_configured": "No skills configured",
-    "no_results": "No matching skills",
+    "no_skills_configured": "Yapılandırılmış skill yok",
+    "no_results": "Eşleşen skill yok",
     "commands": {
-      "note": "Add a note — won't trigger any agents"
+      "note": "Not ekle — hiçbir ajanı tetiklemez"
     }
   },
   "upload": {
-    "failed": "Couldn't upload {{filename}}: {{reason}}",
-    "in_progress": "Uploading…",
-    "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
-    "remove": "Remove",
-    "uploading_label": "Uploading {{filename}}…",
-    "failed_label": "Couldn’t upload {{filename}}"
+    "failed": "{{filename}} yüklenemedi: {{reason}}",
+    "in_progress": "Yükleniyor…",
+    "interrupted": "Yükleme kesildi — dosya kaydedilmedi. Yeniden ekleyin.",
+    "remove": "Kaldır",
+    "uploading_label": "{{filename}} yükleniyor…",
+    "failed_label": "{{filename}} yüklenemedi"
   }
 }

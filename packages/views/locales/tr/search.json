@@ -29,8 +29,8 @@
     "switch_to_light": "Açık temaya geç",
     "switch_to_dark": "Koyu temaya geç",
     "use_system_theme": "Sistem temasını kullan",
-    "fold_all_comments": "Fold All Comments",
-    "unfold_all_comments": "Unfold All Comments"
+    "fold_all_comments": "Tüm yorumları daralt",
+    "unfold_all_comments": "Tüm yorumları genişlet"
   },
   "toast": {
     "link_copied": "Bağlantı kopyalandı",
