@@ -30,9 +30,9 @@
     "metric_time": "Süre",
     "metric_tasks": "Görevler",
     "no_data": "Bu aralıkta kullanım yok.",
-    "title_errors": "Daily errors",
-    "metric_errors": "Errors",
-    "metric_label": "Metric"
+    "title_errors": "Günlük hatalar",
+    "metric_errors": "Hatalar",
+    "metric_label": "Metrik"
   },
   "weekly": {
     "title_cost": "Haftalık maliyet",
@@ -40,7 +40,7 @@
     "title_time": "Haftalık çalışma süresi",
     "title_tasks": "Haftalık görevler",
     "partial_label": "{{range}} (kısmi · {{covered}} / 7 gün)",
-    "title_errors": "Weekly errors"
+    "title_errors": "Haftalık hatalar"
   },
   "leaderboard": {
     "title": "Liderlik tablosu",
@@ -51,12 +51,12 @@
     "header_time": "Süre",
     "header_tasks": "Görevler",
     "no_data": "Bu aralıkta ajan etkinliği yok.",
-    "caption_with_deleted": "{{count}} agents · {{deleted}} deleted",
-    "sort_label": "Rank agents by",
-    "deleted_agents": "Deleted agents",
-    "other_agents": "Other agents",
-    "show_all": "Show all",
-    "show_less": "Show top {{count}}"
+    "caption_with_deleted": "{{count}} ajan · {{deleted}} silindi",
+    "sort_label": "Ajanları şuna göre sırala",
+    "deleted_agents": "Silinen ajanlar",
+    "other_agents": "Diğer ajanlar",
+    "show_all": "Tümünü göster",
+    "show_less": "İlk {{count}} taneyi göster"
   },
   "empty": {
     "title": "Henüz kullanım yok",
@@ -66,35 +66,35 @@
     "less_than_minute": "<1d"
   },
   "errors": {
-    "tooltip_rate": "Error rate",
+    "tooltip_rate": "Hata oranı",
     "class": {
-      "auth": "Auth",
-      "rate_limit": "Rate limit",
-      "timeout": "Timeout",
+      "auth": "Kimlik doğrulama",
+      "rate_limit": "Hız sınırı",
+      "timeout": "Zaman aşımı",
       "provider": "Provider",
-      "runtime": "Runtime",
-      "agent": "Agent",
-      "other": "Other"
+      "runtime": "Çalışma ortamı",
+      "agent": "Ajan",
+      "other": "Diğer"
     },
-    "title": "Errors",
-    "summary": "{{failed}} of {{total}} runs failed · {{rate}}",
-    "mix_title": "Failure mix · {{failed}}",
-    "mix_label": "Failure mix",
-    "codes_label": "Error codes",
-    "by_agent": "Top offenders",
-    "sort_label": "Rank offenders by",
-    "sort_failed": "Failures",
-    "sort_rate": "Rate",
-    "header_agent": "Agent",
-    "header_failed": "Failed",
-    "header_runs": "Runs",
-    "header_rate": "Rate",
-    "other_agents": "Other agents",
-    "low_sample": "Fewer than {{count}} runs in this window — this rate is not meaningful.",
-    "no_data": "No failed runs in this window.",
-    "show_reasons": "Show error codes",
-    "hide_reasons": "Hide error codes",
-    "show_all": "Show all {{count}}",
-    "show_less": "Show top {{count}}"
+    "title": "Hatalar",
+    "summary": "{{total}} çalışmanın {{failed}} tanesi başarısız oldu · {{rate}}",
+    "mix_title": "Başarısızlık dağılımı · {{failed}}",
+    "mix_label": "Başarısızlık dağılımı",
+    "codes_label": "Hata kodları",
+    "by_agent": "En çok hata yapanlar",
+    "sort_label": "Hata yapanları şuna göre sırala",
+    "sort_failed": "Başarısızlıklar",
+    "sort_rate": "Oran",
+    "header_agent": "Ajan",
+    "header_failed": "Başarısız",
+    "header_runs": "Çalışmalar",
+    "header_rate": "Oran",
+    "other_agents": "Diğer ajanlar",
+    "low_sample": "Bu aralıkta {{count}} çalışmadan az var; bu oran anlamlı değil.",
+    "no_data": "Bu aralıkta başarısız çalışma yok.",
+    "show_reasons": "Hata kodlarını göster",
+    "hide_reasons": "Hata kodlarını gizle",
+    "show_all": "{{count}} tanesinin tümünü göster",
+    "show_less": "İlk {{count}} taneyi göster"
   }
 }
