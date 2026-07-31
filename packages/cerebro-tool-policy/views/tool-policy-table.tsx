@@ -536,25 +536,40 @@ export function ToolPolicyTable({
   }
 
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
-    let skipped = 0;
+    let locked = 0;
+    let externallyManaged = 0;
     for (const row of filtered) {
+      if (row.managed_externally) {
+        externallyManaged += 1;
+        continue;
+      }
       // TECH-3287 hul 6: "Allow all" can't loosen a row a higher layer blocks —
       // skip those instead of firing a silent dead write that reverts on refetch.
       if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) {
-        skipped += 1;
+        locked += 1;
         continue;
       }
       setPolicy.mutate({ tool_key: row.tool_key, layer: editLayer, subject_id: subjectId, setting });
     }
-    // Skipping silently looked like the bulk action half-failed (FIR-2706
-    // follow-up) — say how many rows a higher layer holds locked.
-    if (skipped > 0) {
-      toast.info(
-        skipped === 1
-          ? "1 permission was left unchanged — a higher layer locks it. The lock icon on the row names the blocker."
-          : `${skipped} permissions were left unchanged — higher layers lock them. The lock icon on each row names the blocker.`,
-        { duration: 8000 },
+    // A bulk edit must never hide a skipped permission: external security
+    // boundaries and higher-layer locks remain visibly explainable.
+    const skipped = [];
+    if (externallyManaged > 0) {
+      skipped.push(
+        externallyManaged === 1
+          ? "1 externally managed permission was left unchanged. Its row names the security owner."
+          : `${externallyManaged} externally managed permissions were left unchanged. Each row names the security owner.`,
       );
+    }
+    if (locked > 0) {
+      skipped.push(
+        locked === 1
+          ? "1 permission was left unchanged because a higher layer locks it."
+          : `${locked} permissions were left unchanged because higher layers lock them.`,
+      );
+    }
+    if (skipped.length > 0) {
+      toast.info(skipped.join(" "), { duration: 8000 });
     }
   }
 
@@ -581,7 +596,7 @@ export function ToolPolicyTable({
       <LinkedDecisionControl
         rows={linkedRows}
         editLayer={editLayer}
-        disabled={busy}
+        disabled={busy || linkedRows.some((linkedRow) => linkedRow.managed_externally)}
         onDecision={(setting) => {
           for (const linkedRow of linkedRows) {
             applySetting(
@@ -596,7 +611,7 @@ export function ToolPolicyTable({
       <CatalogDecisionControl
         row={row}
         editLayer={editLayer}
-        disabled={busy}
+        disabled={busy || row.managed_externally}
         onDecision={(s) =>
           applySetting(row.tool_key, s, row.resource_pattern || undefined)
         }
@@ -767,7 +782,9 @@ export function ToolPolicyTable({
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <TypeTag row={row} />
-                        {row.managed_externally && <ManagedExternallyTag />}
+                        {row.managed_externally && (
+                          <ManagedExternallyTag owner={row.external_security_owner} />
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -775,13 +792,13 @@ export function ToolPolicyTable({
                         <DecisionControl
                           row={row}
                           editLayer={editLayer}
-                          disabled={busy}
+                          disabled={busy || row.managed_externally}
                           onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
                         />
                         <ConditionControl
                           row={row}
                           editLayer={editLayer}
-                          disabled={busy}
+                          disabled={busy || row.managed_externally}
                           onChange={(c) => applyCondition(row, c)}
                           wsId={wsId}
                           argScopeConfig={argScopeConfig}
@@ -874,19 +891,21 @@ export function ToolPolicyTable({
                     <DecisionControl
                       row={row}
                       editLayer={editLayer}
-                      disabled={busy}
+                      disabled={busy || row.managed_externally}
                       onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
                     />
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <TypeTag row={row} />
-                  {row.managed_externally && <ManagedExternallyTag />}
+                  {row.managed_externally && (
+                    <ManagedExternallyTag owner={row.external_security_owner} />
+                  )}
                   <OriginTag row={row} editLayer={editLayer} />
                   <ConditionControl
                     row={row}
                     editLayer={editLayer}
-                    disabled={busy}
+                    disabled={busy || row.managed_externally}
                     onChange={(c) => applyCondition(row, c)}
                     wsId={wsId}
                     argScopeConfig={argScopeConfig}
@@ -956,14 +975,20 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 // another mechanism (membership ACL, daemon token, webhook secret), so its
 // Allow/Ask/Deny choice here is advisory rather than the enforcement point
 // (FIR-2594). Shown so an admin sees the platform exposes the action.
-function ManagedExternallyTag() {
+function ManagedExternallyTag({ owner }: { owner?: string }) {
+  const ownerLabel = owner || "Security owner not specified";
+  const detail = owner
+    ? `Access is enforced by ${owner}, not by the tool-policy gate. Settings cannot change this permission.`
+    : "Access is governed outside the tool-policy gate. Settings cannot change this permission.";
   return (
     <Badge
       variant="outline"
-      className="border-dashed font-normal text-muted-foreground"
-      title="Access is governed outside the tool-policy gate (membership, daemon token, or webhook secret). Listed for visibility."
+      className="h-auto max-w-full shrink flex-wrap justify-start border-dashed font-normal whitespace-normal text-muted-foreground"
+      title={detail}
     >
-      Managed externally
+      <span>Managed externally</span>
+      <span aria-hidden="true">·</span>
+      <span>{ownerLabel}</span>
     </Badge>
   );
 }

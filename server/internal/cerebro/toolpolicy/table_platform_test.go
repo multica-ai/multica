@@ -8,10 +8,13 @@ package toolpolicy
 // the store_test.go fixture (TestMain) and skip when no test database is reachable.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
@@ -55,12 +58,26 @@ func TestSettingsTableAlwaysIncludesPlatformPermissions(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode Settings response: %v", err)
 	}
+	catalog := map[string]platformcatalog.Capability{}
+	for _, capability := range platformcatalog.All() {
+		catalog[capability.Key] = capability
+	}
+	foundCreateIssue := false
 	for _, row := range response.Tools {
 		if row.ToolKey == "create_issue" {
-			return
+			foundCreateIssue = true
+		}
+		capability, ok := catalog[row.ToolKey]
+		if !ok || !capability.ManagedExternally {
+			continue
+		}
+		if row.ExternalSecurityOwner != capability.ExternalSecurityOwner {
+			t.Errorf("Settings response %q external security owner = %q, want %q", row.ToolKey, row.ExternalSecurityOwner, capability.ExternalSecurityOwner)
 		}
 	}
-	t.Fatal("Settings response hid create_issue behind the retired rollout flag")
+	if !foundCreateIssue {
+		t.Fatal("Settings response hid create_issue behind the retired rollout flag")
+	}
 }
 
 // TestTable_PlatformRowsGatedByIncludeFlag proves the catalog is appended only
@@ -97,6 +114,9 @@ func TestTable_PlatformRowsGatedByIncludeFlag(t *testing.T) {
 		}
 		if row.ManagedExternally != c.ManagedExternally {
 			t.Errorf("%q managed_externally = %v, want %v", c.Key, row.ManagedExternally, c.ManagedExternally)
+		}
+		if row.ExternalSecurityOwner != c.ExternalSecurityOwner {
+			t.Errorf("%q external security owner = %q, want %q", c.Key, row.ExternalSecurityOwner, c.ExternalSecurityOwner)
 		}
 		// Ordinary policy capabilities inherit the Base. Capabilities with a
 		// code-owned actor contract fail closed when this workspace-only query
@@ -176,7 +196,7 @@ func TestTable_WorkflowHookRowsMatchAgentEnforcement(t *testing.T) {
 // TestTable_PlatformRowSettable proves a platform action carries its stored
 // per-layer settings and resolves the chain exactly like a reported tool: an
 // agent Ask capped by a user Deny resolves to Deny.
-func TestTable_PlatformRowSettable(t *testing.T) {
+func TestTable_PolicyGatedPlatformRowSettable(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
 	clearCaps(t, s)
@@ -184,13 +204,13 @@ func TestTable_PlatformRowSettable(t *testing.T) {
 
 	agent, user := uuidByte(2), tpTestUserID
 	if _, err := s.Set(ctx, SetParams{
-		WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
+		WorkspaceID: tpTestWorkspaceID, ToolKey: "create_issue",
 		Layer: LayerAgent, SubjectID: agent, Setting: SettingAsk, UpdatedBy: user,
 	}); err != nil {
 		t.Fatalf("set agent Ask: %v", err)
 	}
 	if _, err := s.Set(ctx, SetParams{
-		WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
+		WorkspaceID: tpTestWorkspaceID, ToolKey: "create_issue",
 		Layer: LayerUser, SubjectID: user, Setting: SettingDeny, UpdatedBy: user,
 	}); err != nil {
 		t.Fatalf("set user Deny: %v", err)
@@ -205,9 +225,9 @@ func TestTable_PlatformRowSettable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Table: %v", err)
 	}
-	row, ok := findRow(rows, "trigger_autopilot")
+	row, ok := findRow(rows, "create_issue")
 	if !ok {
-		t.Fatal("trigger_autopilot row missing")
+		t.Fatal("create_issue row missing")
 	}
 	if got := row.Layers[LayerAgent]; got != SettingAsk {
 		t.Errorf("agent layer = %q, want ask", got)
@@ -220,6 +240,53 @@ func TestTable_PlatformRowSettable(t *testing.T) {
 	}
 	if row.Effective.CappedBy != LayerUser {
 		t.Errorf("capped_by = %q, want user", row.Effective.CappedBy)
+	}
+}
+
+func TestHandlerRejectsEveryExternallyManagedPlatformCapabilityWrite(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+
+	h := NewHandler(s)
+	for _, capability := range platformcatalog.All() {
+		if !capability.ManagedExternally {
+			continue
+		}
+		t.Run(capability.Key, func(t *testing.T) {
+			body, err := json.Marshal(setRequest{
+				ToolKey:   capability.Key,
+				Layer:     string(LayerAgent),
+				SubjectID: tpTestUserID.String(),
+				Setting:   string(SettingAllow),
+			})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			req := usageRequest("admin", "")
+			req.Method = http.MethodPut
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+			h.Set(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+			}
+			if !bytes.Contains(rec.Body.Bytes(), []byte(capability.ExternalSecurityOwner)) {
+				t.Fatalf("response does not name security owner %q: %s", capability.ExternalSecurityOwner, rec.Body.String())
+			}
+
+			clearReq := usageRequest("admin", "")
+			clearReq.Method = http.MethodDelete
+			clearReq.URL.RawQuery = url.Values{
+				"tool_key":   {capability.Key},
+				"layer":      {string(LayerAgent)},
+				"subject_id": {tpTestUserID.String()},
+			}.Encode()
+			clearRec := httptest.NewRecorder()
+			h.Clear(clearRec, clearReq)
+			if clearRec.Code != http.StatusConflict {
+				t.Fatalf("clear status = %d, want 409 (body %s)", clearRec.Code, clearRec.Body.String())
+			}
+		})
 	}
 }
 
@@ -237,17 +304,17 @@ func TestTable_PlatformRowsUseTheCompleteActorContext(t *testing.T) {
 	condition := &Condition{Actions: []string{"run"}}
 	for _, p := range []SetParams{
 		{
-			WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
+			WorkspaceID: tpTestWorkspaceID, ToolKey: "create_issue",
 			Layer: LayerAgent, SubjectID: agent, Setting: SettingAllow,
 			Conditions: condition, UpdatedBy: tpTestUserID,
 		},
 		{
-			WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
+			WorkspaceID: tpTestWorkspaceID, ToolKey: "create_issue",
 			Layer: LayerSystem, SubjectID: system, Setting: SettingAsk,
 			UpdatedBy: tpTestUserID,
 		},
 		{
-			WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
+			WorkspaceID: tpTestWorkspaceID, ToolKey: "create_issue",
 			Layer: LayerOnBehalfOf, SubjectID: member, Setting: SettingDeny,
 			UpdatedBy: tpTestUserID,
 		},
@@ -269,9 +336,9 @@ func TestTable_PlatformRowsUseTheCompleteActorContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Table: %v", err)
 	}
-	row, ok := findRow(rows, "trigger_autopilot")
+	row, ok := findRow(rows, "create_issue")
 	if !ok {
-		t.Fatal("trigger_autopilot row missing")
+		t.Fatal("create_issue row missing")
 	}
 	if got := row.Layers[LayerSystem]; got != SettingAsk {
 		t.Errorf("system layer = %q, want ask", got)

@@ -146,6 +146,40 @@ test("Settings Permissions writes the canonical policy and persists after reload
   }
 });
 
+test("Settings identifies externally enforced permissions without offering an advisory change", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const api = await createTestApi();
+
+  try {
+    await api.setWorkspaceFeatureFlag("cerebro_tool_policy", true);
+    await api.setWorkspaceFeatureFlag("cerebro_agent_page_redesign", true);
+    const workspaceSlug = await loginAsDefault(page);
+    await page.goto(`/${workspaceSlug}/settings?tab=permissions`, {
+      waitUntil: "domcontentloaded",
+    });
+    await dismissAttributionSurvey(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    const row = page.getByTestId("tool-card-rerun_issue");
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Managed externally", { exact: true })).toBeVisible();
+    const owner = row.getByText(
+      "Issue visibility, private-agent access, and task-to-issue integrity",
+      { exact: true },
+    );
+    await expect(owner).toBeVisible();
+    const [ownerBox, rowBox] = await Promise.all([owner.boundingBox(), row.boundingBox()]);
+    expect(ownerBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    expect(ownerBox!.x + ownerBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+    await expect(row.getByRole("button", { name: /^Decision:/ })).toBeDisabled();
+  } finally {
+    await api.cleanup();
+  }
+});
+
 test("Roles are created, assigned, explained, and enforced through the same permission decision", async ({
   page,
 }) => {
@@ -318,7 +352,9 @@ test("Roles are created, assigned, explained, and enforced through the same perm
     await expect(
       page.getByRole("heading", { name: roleName, exact: true }),
     ).toBeVisible();
-    await expect(page.getByText(agentName, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("tabpanel", { name: /^Roles\b/ }).getByText(agentName, { exact: true }),
+    ).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,

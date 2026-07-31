@@ -21,6 +21,7 @@ import {
   Plug,
   Terminal,
 } from "lucide-react";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { cn } from "@multica/ui/lib/utils";
 import type { ToolEffectiveSetting, ToolPolicyRow } from "../core";
 import {
@@ -233,6 +234,9 @@ export function CapabilityCatalog({
                           <span className="block truncate font-mono text-xs text-muted-foreground">
                             {row.tool_key}
                           </span>
+                          {row.managed_externally ? (
+                            <ExternalSecurityOwner owner={row.external_security_owner} />
+                          ) : null}
                         </span>
                       </button>
                     ) : onOpenPermission && !composite ? (
@@ -249,6 +253,9 @@ export function CapabilityCatalog({
                           <span className="block truncate font-mono text-xs text-muted-foreground">
                             {row.tool_key}
                           </span>
+                          {row.managed_externally ? (
+                            <ExternalSecurityOwner owner={row.external_security_owner} />
+                          ) : null}
                         </span>
                         <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
                       </button>
@@ -264,6 +271,9 @@ export function CapabilityCatalog({
                                 .join(" · ")
                             : row.tool_key}
                         </div>
+                        {row.managed_externally ? (
+                          <ExternalSecurityOwner owner={row.external_security_owner} />
+                        ) : null}
                       </div>
                     )}
                     <div className="flex shrink-0 items-center justify-end gap-2">
@@ -295,5 +305,23 @@ export function CapabilityCatalog({
         );
       })}
     </div>
+  );
+}
+
+function ExternalSecurityOwner({ owner }: { owner?: string }) {
+  const ownerLabel = owner || "Security owner not specified";
+  const detail = owner
+    ? `Access is enforced by ${owner}, not by the tool-policy gate. Settings cannot change this permission.`
+    : "Access is governed outside the tool-policy gate. Settings cannot change this permission.";
+  return (
+    <Badge
+      variant="outline"
+      className="mt-1 h-auto max-w-full shrink flex-wrap justify-start border-dashed font-normal whitespace-normal text-muted-foreground"
+      title={detail}
+    >
+      <span>Managed externally</span>
+      <span aria-hidden="true">·</span>
+      <span>{ownerLabel}</span>
+    </Badge>
   );
 }

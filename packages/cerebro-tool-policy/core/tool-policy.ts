@@ -157,9 +157,14 @@ export interface ToolPolicyRow {
   /**
    * FIR-2594: true for a platform action whose enforcement point is not the
    * tool-policy gate (workspace-membership ACL, daemon token, webhook secret).
-   * The row is shown for visibility but its Allow/Ask/Deny choice is advisory.
+   * The row is shown for visibility but remains read-only in Settings.
    */
   managed_externally: boolean;
+  /**
+   * The concrete security boundary that decides a managed-external capability.
+   * Empty for ordinary tool-policy rows. Optional for older server responses.
+   */
+  external_security_owner?: string;
   /**
    * Which WHEN condition kinds actually bite for this capability (FIR-1708 C),
    * computed server-side from the gate facts so the editor renders only the
@@ -393,6 +398,7 @@ const toolPolicyRowSchema = z.object({
   // tool-policy gate (membership ACL, daemon token, …). Defaults false so older
   // backends that omit the field render as a normal, gated row.
   managed_externally: z.boolean().default(false),
+  external_security_owner: z.string().default(""),
   // FIR-1708 C: the WHEN kinds the gate actually evaluates for this capability.
   // Left optional (not defaulted to []) so the editor can tell "older backend
   // omitted it" (undefined → heuristic fallback) from "no kind bites" ([]).
