@@ -116,6 +116,12 @@ type skillOverwriteInput struct {
 	Content      string
 	Config       any
 	Files        []CreateSkillFileRequest
+	// AllowWorkspaceManager lets a workspace owner/admin who is not the skill's
+	// creator overwrite it. The reimport path sets this because ReimportSkill
+	// already authorized the caller via canManageSkill (owner/admin/creator);
+	// the import-conflict overwrite path leaves it false to keep its stricter
+	// creator-only rule (see canOverwriteSkillByLocalImport).
+	AllowWorkspaceManager bool
 }
 
 // overwriteSkillWithFiles re-imports a bundle onto an existing skill in a single
@@ -157,7 +163,7 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		}
 		return SkillWithFilesResponse{}, err
 	}
-	if !canOverwriteSkillByLocalImport(input.UserID, existing) {
+	if !input.AllowWorkspaceManager && !canOverwriteSkillByLocalImport(input.UserID, existing) {
 		return SkillWithFilesResponse{}, errSkillOverwriteForbidden
 	}
 	// The overwrite is keyed on target_skill_id, but the conflict the user
