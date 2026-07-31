@@ -426,6 +426,39 @@ func canOverwriteSkillByLocalImport(userID string, skill db.Skill) bool {
 	return skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID
 }
 
+// updatableSkillOrigin is the subset of skill.config.origin that ReimportSkill
+// needs: the source type and the re-fetchable URL. Only URL-based imports
+// (github / skills_sh / clawhub) carry a source_url; runtime_local and manual
+// skills do not, and are not updatable from a URL.
+type updatableSkillOrigin struct {
+	Type      string `json:"type"`
+	SourceURL string `json:"source_url"`
+}
+
+// parseUpdatableSkillOrigin reads config.origin and reports whether the skill
+// can be re-imported from a stored URL source. ok is false for manual skills,
+// runtime_local skills, unparseable config, or a URL source missing its
+// source_url.
+func parseUpdatableSkillOrigin(config []byte) (updatableSkillOrigin, bool) {
+	if len(config) == 0 {
+		return updatableSkillOrigin{}, false
+	}
+	var wrapper struct {
+		Origin updatableSkillOrigin `json:"origin"`
+	}
+	if err := json.Unmarshal(config, &wrapper); err != nil {
+		return updatableSkillOrigin{}, false
+	}
+	o := wrapper.Origin
+	switch o.Type {
+	case "github", "skills_sh", "clawhub":
+		if strings.TrimSpace(o.SourceURL) != "" {
+			return o, true
+		}
+	}
+	return o, false
+}
+
 func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	skill, ok := h.loadSkillForUser(w, r, id)
@@ -2159,6 +2192,21 @@ func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Requ
 
 // --- Import handler ---
 
+// fetchImportedSkill dispatches to the per-source fetcher for a detected import
+// source. Shared by ImportSkill (hosted-URL body) and ReimportSkill (stored
+// provenance) so both go through exactly one fetch path.
+func fetchImportedSkill(ctx context.Context, client *http.Client, source importSource, normalized string) (*importedSkill, error) {
+	switch source {
+	case sourceClawHub:
+		return fetchFromClawHub(ctx, client, normalized)
+	case sourceSkillsSh:
+		return fetchFromSkillsSh(ctx, client, normalized)
+	case sourceGitHub:
+		return fetchFromGitHub(ctx, client, normalized)
+	}
+	return nil, fmt.Errorf("unsupported import source")
+}
+
 func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -2211,15 +2259,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), importFetchTimeout)
 	defer cancel()
 
-	var imported *importedSkill
-	switch source {
-	case sourceClawHub:
-		imported, err = fetchFromClawHub(ctx, httpClient, normalized)
-	case sourceSkillsSh:
-		imported, err = fetchFromSkillsSh(ctx, httpClient, normalized)
-	case sourceGitHub:
-		imported, err = fetchFromGitHub(ctx, httpClient, normalized)
-	}
+	imported, err := fetchImportedSkill(ctx, httpClient, source, normalized)
 	if err != nil {
 		status, msg := importFetchErrorResponse(ctx, err)
 		writeError(w, status, msg)
@@ -2227,6 +2267,87 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.finishSkillImport(w, r, workspaceID, workspaceUUID, creatorUUID, creatorID, strategy, structuredResult, imported)
+}
+
+// ReimportSkill re-runs a skill's original URL import in place. The source URL
+// is read server-side from the skill's stored config.origin — the client never
+// supplies it — so a caller cannot repoint the update at an arbitrary URL, and a
+// locally renamed skill still updates (we target by id, not by name collision).
+// Creator-only, mirroring canOverwriteSkillByLocalImport.
+func (h *Handler) ReimportSkill(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	skill, ok := h.loadSkillForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !canOverwriteSkillByLocalImport(userID, skill) {
+		writeError(w, http.StatusForbidden, "only the skill creator can update it from its source")
+		return
+	}
+
+	origin, ok := parseUpdatableSkillOrigin(skill.Config)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, "this skill was not imported from an updatable source")
+		return
+	}
+
+	source, normalized, err := detectImportSource(origin.SourceURL)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "stored source is no longer valid: "+err.Error())
+		return
+	}
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	ctx, cancel := context.WithTimeout(r.Context(), importFetchTimeout)
+	defer cancel()
+
+	imported, err := fetchImportedSkill(ctx, httpClient, source, normalized)
+	if err != nil {
+		status, msg := importFetchErrorResponse(ctx, err)
+		writeError(w, status, msg)
+		return
+	}
+
+	// Map the fetched bundle exactly as finishSkillImport does.
+	files := make([]CreateSkillFileRequest, 0, len(imported.files))
+	for _, f := range imported.files {
+		if !validateFilePath(f.path) {
+			continue
+		}
+		files = append(files, CreateSkillFileRequest{Path: f.path, Content: f.content})
+	}
+	config := map[string]any{}
+	if imported.origin != nil {
+		config["origin"] = imported.origin
+	}
+
+	// Overwrite in place, targeting THIS skill by id. ExpectedName = the skill's
+	// current name preserves identity and satisfies the overwrite name guard.
+	resp, err := h.overwriteSkillWithFiles(r.Context(), skillOverwriteInput{
+		WorkspaceID:   skill.WorkspaceID,
+		TargetSkillID: skill.ID,
+		UserID:        userID,
+		ExpectedName:  skill.Name,
+		Description:   imported.description,
+		Content:       imported.content,
+		Config:        config,
+		Files:         files,
+	})
+	if err != nil {
+		status, reason := skillImportOverwriteFailure(err)
+		writeError(w, status, reason)
+		return
+	}
+
+	workspaceID := uuidToString(skill.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	h.publish(protocol.EventSkillUpdated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // importFetchTimeout bounds the total time spent fetching a skill's files from
