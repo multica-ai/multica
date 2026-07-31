@@ -121,7 +121,7 @@
     "returning_title_named": "Merhaba, ben {{name}}",
     "returning_title_default": "Multica'ya hoş geldiniz",
     "returning_subtitle": "Şunu sormayı deneyin",
-    "chat_with_named": "{{name}} ile sohbet et"
+    "chat_with_named": "{{name}} ile sohbet edin"
   },
   "starter_prompts": {
     "list_open": "Açık task'larımı önceliğe göre listele",
@@ -167,7 +167,7 @@
     "no_response_preview": "Metin yanıtı yok",
     "quick_agents": "Sık kullanılan ajanlar",
     "add": "Ekle",
-    "add_agent": "Sık kullanılan ajan ekle",
+    "add_agent": "Sık kullanılanlara ajan ekle",
     "unpin_agent": "Sık kullanılanlardan kaldır",
     "waiting": "Yanıt bekleniyor",
     "pin": "Sabitle",

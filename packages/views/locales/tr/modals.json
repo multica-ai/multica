@@ -195,7 +195,7 @@
     "customize_fields": "Alanları özelleştir..."
     },
     "toast_link_labels_failed": "Etiketler eklenemedi",
-    "toast_set_properties_failed": "{{count}} özel özellik değerleri ayarlanamadı",
+    "toast_set_properties_failed": "{{count}} özel özellik değeri ayarlanamadı",
     "set_due_date": "Bitiş tarihi ayarla...",
     "set_status": "Durum ayarla...",
     "set_priority": "Öncelik ayarla...",
@@ -207,8 +207,8 @@
   },
   "run_confirm": {
     "title_assign": "Atama onaylansın mı?",
-    "assign_single": "Bu issue'yu {{name}} adlı kişiye ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
-    "assign_batch": "{{count}} issue'yu {{name}} adlı kişiye ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
+    "assign_single": "Bu issue'yu {{name}} adlı ajana ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
+    "assign_batch": "{{count}} issue'yu {{name}} adlı ajana ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
     "note_label": "Devretme notu (isteğe bağlı)",
     "note_placeholder": "Önemli noktaları belirtin — kapsam, odak veya kaçınılacaklar…",
     "note_unsupported": "Çalışma ortamları bu devretme notunu alabilmek için çok eski; not okunmayabilir.",
