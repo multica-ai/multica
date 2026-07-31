@@ -254,6 +254,16 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	}
 
 	d.logger.Info("auto-update: upgrade completed, restarting", "target", release.TagName, "output", output)
+	if !d.triggerRestart() {
+		// The upgrade landed but the handoff target could not be resolved, so
+		// no process exit is coming. Fall through to both deferred restores:
+		// holding the updating flag and the claim barrier for a restart that
+		// will never happen stops this daemon from claiming any task, forever.
+		// The next tick retries — and since the binary on disk is already the
+		// new one, trySelfReload will keep trying too.
+		d.logger.Error("auto-update: upgrade completed but restart could not be scheduled — resuming claims")
+		return
+	}
 	// triggerRestart cancels the root context, which causes Run() to return
 	// and the parent (cmd_daemon.go) to re-exec the new binary. Leave both
 	// the updating flag and the claim barrier held — process exit is
@@ -261,7 +271,6 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	// second auto-update tick to fire mid-shutdown.
 	released = true
 	barrierReleased = true
-	d.triggerRestart()
 }
 
 // trySelfReload restarts the daemon when the multica binary on disk no longer

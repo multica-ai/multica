@@ -424,3 +424,36 @@ func claimsPaused(t *testing.T, d *Daemon) bool {
 	defer d.claimMu.Unlock()
 	return d.pauseClaims
 }
+
+// TestTryAutoUpdate_ResumesClaimingWhenRestartCannotBeScheduled is the
+// permanent-stall case. tryAutoUpdate marks both cleanup switches as released
+// just before the handoff, on the assumption that the process is about to exit.
+// If triggerRestart cannot resolve a target, no exit is coming — and holding the
+// updating flag and the claim barrier for a restart that never happens leaves
+// the daemon alive but claiming nothing, forever. Every poller's tryEnterClaim
+// returns false and nothing ever clears it.
+//
+// Note this outlived the void-returning triggerRestart it came from: the failure
+// was unobservable before. trySelfReload handles the same failure, so the two
+// halves of one loop must not disagree about it.
+func TestTryAutoUpdate_ResumesClaimingWhenRestartCannotBeScheduled(t *testing.T) {
+	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.1.13")
+	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.1.14"}, nil)
+	d.runUpdateFn = func(string) (string, error) { return "upgraded", nil }
+
+	origResolve := resolveSelfExecutable
+	t.Cleanup(func() { resolveSelfExecutable = origResolve })
+	resolveSelfExecutable = func() (string, error) { return "", errors.New("cannot resolve executable") }
+
+	d.tryAutoUpdate(context.Background())
+
+	if restartCalls.Load() != 0 {
+		t.Fatal("cancelFunc fired without a restart binary")
+	}
+	if claimsPaused(t, d) {
+		t.Error("pauseClaims held for a restart that will never happen — the daemon would claim nothing forever")
+	}
+	if d.updating.Load() {
+		t.Error("updating flag held for a restart that will never happen — no later update or reload could run")
+	}
+}

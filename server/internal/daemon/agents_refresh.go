@@ -221,9 +221,17 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	if len(builtins) == 0 {
 		return
 	}
-	var changes []string
+	// What this round's payload actually carries, per provider. A provider whose
+	// probe failed is absent, which is what stops its pending entry from being
+	// confirmed by a registration that never mentioned it.
+	carried := make(map[string]string, len(builtins))
 	for _, rt := range builtins {
-		provider, version := rt["type"], rt["version"]
+		carried[rt["type"]] = rt["version"]
+	}
+
+	var changes []string
+	changed := make(map[string]string)
+	for provider, version := range carried {
 		prev, known := before[provider]
 		// An unknown or blank previous version means this provider has not
 		// registered a version yet; that is the converge path's job, not a change.
@@ -234,25 +242,50 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 		// agent.MinVersions, since the gate passes it through. Treating it as a
 		// change would re-register the provider with no version at all, replacing
 		// a version the server had with nothing — the same "couldn't read it is
-		// not a change" rule trySelfReload applies.
+		// not a change" rule trySelfReload applies. setAgentVersion refuses the
+		// blank too, so the daemon's own cache keeps the previous value.
 		if version == "" {
 			d.logger.Warn("agent CLI reported no version; keeping the previous one",
 				"provider", provider, "previous", prev)
 			continue
 		}
+		changed[provider] = version
 		changes = append(changes, fmt.Sprintf("%s %s -> %s", provider, prev, version))
 	}
-	// A round whose register call failed is retried on the next one even though
-	// the version cache has already moved on, so a transient 5xx doesn't leave
-	// the server displaying a version the daemon stopped using.
-	if len(changes) == 0 && !d.agentReregisterPending.Load() {
+	d.markAgentVersionsPending(changed)
+
+	// Register only when this round can actually advance something: some pending
+	// version that this round's payload carries. Anything marked just above
+	// qualifies by construction, so this covers fresh changes too.
+	//
+	// The narrower condition matters because a pending entry can outlive its
+	// provider. An uninstalled CLI is never dropped from the availability set
+	// (refreshAgentAvailability is deliberately one-directional), so it keeps
+	// failing its probe and never reappears in the payload — and "retry whenever
+	// anything is pending" would turn that into one register call per workspace
+	// every few minutes, forever. Holding the entry costs nothing; acting on a
+	// payload that cannot confirm it costs a request storm.
+	pending := d.pendingAgentVersionsSnapshot()
+	advances := false
+	for provider, version := range pending {
+		if carried[provider] == version {
+			advances = true
+			break
+		}
+	}
+	if !advances {
 		return
 	}
 	if len(changes) > 0 {
 		sort.Strings(changes)
 		d.logger.Info("agent CLI version changed; refreshing registration without a restart", "changes", changes)
 	}
-	d.agentReregisterPending.Store(!d.reregisterBuiltins(ctx, builtins))
+	if !d.reregisterBuiltins(ctx, builtins) {
+		return
+	}
+	// Every workspace accepted this payload, so the server now knows about the
+	// versions it carried — and only those.
+	d.confirmAgentVersionsRegistered(carried)
 }
 
 // reregisterBuiltins re-sends the built-in registration payload for every

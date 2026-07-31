@@ -271,11 +271,18 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
-	// agentReregisterPending is set when refreshAgentVersions detected a CLI
-	// version change but at least one workspace's re-register call failed. The
-	// version cache has already moved on by then, so the next round would see no
-	// change; this flag is what makes it retry the register anyway.
-	agentReregisterPending atomic.Bool
+	// pendingAgentVersions maps provider -> the version refreshAgentVersions
+	// detected but has not confirmed the server was told about. Guarded by
+	// versionsMu alongside agentVersions, which is the cache that makes it
+	// necessary: setAgentVersion has already moved on by the time a register
+	// call fails, so without this the next round would see no change and never
+	// retry.
+	//
+	// Per-provider rather than a single flag on purpose. A round whose probe
+	// dropped one provider still registers the others, and clearing a shared
+	// flag there would strand the dropped provider's version — its cache is
+	// already current, so no later round would report it as a change either.
+	pendingAgentVersions map[string]string
 
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
@@ -496,9 +503,19 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 
 // setAgentVersion records the detected CLI version for an agent provider so
 // later task-dispatch code (e.g. Codex sandbox policy) can read it.
+//
+// A blank detection never replaces a version we already know. checkAgentMinVersion
+// returns nil for any provider with no MinVersions entry, so a CLI whose
+// `--version` exits 0 without printing anything parseable reaches here with an
+// empty string — and overwriting the cache with it would strip the input every
+// version-keyed policy reads, on a provider that was working a moment ago.
+// "Couldn't read it" is not a version.
 func (d *Daemon) setAgentVersion(provider, version string) {
 	d.versionsMu.Lock()
 	defer d.versionsMu.Unlock()
+	if version == "" && d.agentVersions[provider] != "" {
+		return
+	}
 	d.agentVersions[provider] = version
 }
 
@@ -508,6 +525,74 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+// markAgentVersionsPending records provider versions the server has not been
+// confirmed to know yet, so a failed re-register is retried on a later round.
+func (d *Daemon) markAgentVersionsPending(pending map[string]string) {
+	if len(pending) == 0 {
+		return
+	}
+	d.versionsMu.Lock()
+	defer d.versionsMu.Unlock()
+	if d.pendingAgentVersions == nil {
+		d.pendingAgentVersions = make(map[string]string, len(pending))
+	}
+	for provider, version := range pending {
+		d.pendingAgentVersions[provider] = version
+	}
+}
+
+// confirmAgentVersionsRegistered drops the pending entries that registered is
+// known to have carried. An entry whose version doesn't match what was sent —
+// the provider's probe failed this round, so it never made the payload — stays
+// pending for a round that actually reports it.
+func (d *Daemon) confirmAgentVersionsRegistered(registered map[string]string) {
+	d.versionsMu.Lock()
+	defer d.versionsMu.Unlock()
+	for provider, version := range d.pendingAgentVersions {
+		if sent, ok := registered[provider]; ok && sent == version {
+			delete(d.pendingAgentVersions, provider)
+		}
+	}
+}
+
+// pendingAgentVersionsSnapshot copies the not-yet-confirmed set.
+func (d *Daemon) pendingAgentVersionsSnapshot() map[string]string {
+	d.versionsMu.RLock()
+	defer d.versionsMu.RUnlock()
+	out := make(map[string]string, len(d.pendingAgentVersions))
+	for provider, version := range d.pendingAgentVersions {
+		out[provider] = version
+	}
+	return out
+}
+
+// refreshHealedVersion keeps a self-healed {path, version} pair honest when the
+// healed binary is later replaced in place.
+//
+// resolveAgentEntry deliberately returns healed.version rather than the shared
+// agentVersions cache whenever a previous self-heal is still live, so that a
+// reader which observes the healed path necessarily observes the version
+// detected for it. Nothing refreshed that pair when the SAME path was
+// subsequently overwritten, so the daemon kept keying version-sensitive policy
+// — the Codex sandbox in runTask — off the version captured at heal time. A
+// re-probe would update agentVersions and the version reported to the server
+// while tasks silently kept running under the old policy.
+//
+// Only touches the entry when the path still matches the one just probed: a
+// heal that has since moved the provider elsewhere owns its own pairing.
+func (d *Daemon) refreshHealedVersion(provider, path, version string) {
+	if version == "" {
+		return
+	}
+	d.resolvedPathsMu.Lock()
+	defer d.resolvedPathsMu.Unlock()
+	healed, ok := d.resolvedPaths[provider]
+	if !ok || healed.path != path || healed.version == version {
+		return
+	}
+	d.resolvedPaths[provider] = healedAgent{path: path, version: version}
 }
 
 // agentVersionSnapshot copies the detected-version cache. refreshAgentVersions
@@ -1503,6 +1588,7 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 			return "", err.Error(), false
 		}
 		d.setAgentVersion(name, version)
+		d.refreshHealedVersion(name, resolved.Path, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
 		return version, "", true
 	}

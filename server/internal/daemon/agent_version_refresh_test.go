@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,6 +63,53 @@ func TestRefreshAgentVersions_HotRefreshesWithoutRestart(t *testing.T) {
 	}
 	if got := d.RestartBinary(); got != "" {
 		t.Errorf("restart binary = %q, want empty", got)
+	}
+}
+
+// TestRefreshAgentVersions_UpdatesTheVersionTasksActuallyRead is the end-to-end
+// half of the healed-pair fix. The unit test covers refreshHealedVersion; this
+// one proves the refresh path reaches it, which is the part that was missing.
+//
+// For a provider that has been self-healed — the version-manager population most
+// likely to upgrade in place again — resolveAgentEntry returns healed.version,
+// not the shared cache. Refreshing only the cache told the server a new version
+// while every task kept launching under the old one.
+func TestRefreshAgentVersions_UpdatesTheVersionTasksActuallyRead(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+
+	// A real on-disk binary, since resolveAgentEntry gates the healed path on it
+	// actually being present.
+	healedPath := filepath.Join(t.TempDir(), "codex")
+	writeExecStub(t, healedPath)
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: healedPath, Command: "codex"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{"codex": {Path: healedPath, Command: "codex"}})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Pretend a self-heal previously adopted this binary at 9.9.9. (freshDaemon
+	// leaves resolvedPaths nil, like a daemon that has never healed anything.)
+	d.resolvedPathsMu.Lock()
+	d.resolvedPaths = map[string]healedAgent{"codex": {path: healedPath, version: "9.9.9"}}
+	d.resolvedPathsMu.Unlock()
+
+	entry := d.cfg.Agents["codex"]
+	if _, version := d.resolveAgentEntry(context.Background(), "codex", entry); version != "9.9.9" {
+		t.Fatalf("baseline resolveAgentEntry version = %q, want 9.9.9", version)
+	}
+
+	// codex is upgraded in place at the same path.
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+
+	if _, version := d.resolveAgentEntry(context.Background(), "codex", entry); version != "10.0.0" {
+		t.Errorf("resolveAgentEntry version = %q, want 10.0.0 — this is the value runTask keys the Codex "+
+			"sandbox policy off, so tasks would still run under the old version's rules", version)
+	}
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Errorf("ws-1 registered codex version = %q, want 10.0.0", got)
 	}
 }
 
@@ -163,12 +212,20 @@ func TestRefreshAgentVersions_BlankVersionKeepsThePreviousOne(t *testing.T) {
 	if got := fx.registeredVersionFor("ws-1", "codex"); got != "9.9.9" {
 		t.Errorf("ws-1 registered codex version = %q, want the previous 9.9.9 intact", got)
 	}
+	// The half that actually mattered and was missed the first time: the probe
+	// runs setAgentVersion BEFORE refreshAgentVersions gets to inspect anything,
+	// so protecting only the payload leaves the daemon's own cache wiped — and
+	// that cache, not the payload, is what version-keyed policy reads.
+	if got := d.agentVersion("codex"); got != "9.9.9" {
+		t.Errorf("cached codex version = %q, want the previous 9.9.9 — a blank probe must not wipe the cache "+
+			"every version-keyed policy reads", got)
+	}
 }
 
 // TestRefreshAgentVersions_RetriesAfterRegisterFailure closes the hole the
 // version cache creates: setAgentVersion has already moved on by the time the
-// register call fails, so the next round sees no change. Without the retry flag
-// a transient 5xx would leave the server displaying a version the daemon
+// register call fails, so the next round sees no change. Without a pending
+// record a transient 5xx would leave the server displaying a version the daemon
 // stopped using, until something unrelated re-registered.
 func TestRefreshAgentVersions_RetriesAfterRegisterFailure(t *testing.T) {
 	fx := newVersionRefreshFixture(t)
@@ -181,8 +238,8 @@ func TestRefreshAgentVersions_RetriesAfterRegisterFailure(t *testing.T) {
 	if got := fx.registeredVersionFor("ws-2", "codex"); got == "10.0.0" {
 		t.Fatal("ws-2 register was supposed to fail")
 	}
-	if !d.agentReregisterPending.Load() {
-		t.Fatal("a failed re-register must arm the retry, or the version change is lost")
+	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
+		t.Fatalf("pending = %v, want codex 10.0.0 held for retry or the version change is lost", got)
 	}
 
 	fx.failRegisterFor("ws-2", false)
@@ -191,8 +248,127 @@ func TestRefreshAgentVersions_RetriesAfterRegisterFailure(t *testing.T) {
 	if got := fx.registeredVersionFor("ws-2", "codex"); got != "10.0.0" {
 		t.Errorf("ws-2 registered codex version = %q after the retry, want 10.0.0", got)
 	}
-	if d.agentReregisterPending.Load() {
-		t.Error("retry flag must clear once every workspace re-registered")
+	if got := d.pendingAgentVersionsSnapshot(); len(got) != 0 {
+		t.Errorf("pending = %v, want empty once every workspace re-registered", got)
+	}
+}
+
+// TestRefreshAgentVersions_PendingSurvivesAnIncompletePayload is why the pending
+// record is per-provider rather than one flag.
+//
+// codex's new version fails to register, then codex's probe fails on the next
+// round while claude's succeeds. That round registers a payload with no codex in
+// it at all. A shared flag would be cleared by that success — and because
+// codex's cache already holds the new version, no later round would report it as
+// a change, so the server would keep showing the old version indefinitely.
+func TestRefreshAgentVersions_PendingSurvivesAnIncompletePayload(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Round 1: both upgrade, the register fails.
+	fx.failRegister(true)
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
+		t.Fatalf("pending after failed register = %v, want codex 10.0.0", got)
+	}
+
+	// Round 2: register recovers, but codex's probe now fails, so codex is
+	// dropped from the payload while claude registers fine.
+	fx.failRegister(false)
+	fx.setProbeErr(func(path string, _ int) error {
+		if strings.Contains(path, "codex") {
+			return errors.New("fork/exec: text file busy")
+		}
+		return nil
+	})
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-1", "claude"); got != "10.0.0" {
+		t.Errorf("claude registered version = %q, want 10.0.0 — a dropped provider must not block the others", got)
+	}
+	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
+		t.Fatalf("pending = %v, want codex still held: that payload never mentioned it", got)
+	}
+
+	// Round 3: codex's probe recovers. Its cache already reads 10.0.0, so
+	// nothing here is a "change" — the pending record is the only reason the
+	// server ever learns about it.
+	fx.setProbeErr(nil)
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Errorf("codex registered version = %q, want 10.0.0 once its probe recovered", got)
+	}
+	if got := d.pendingAgentVersionsSnapshot(); len(got) != 0 {
+		t.Errorf("pending = %v, want empty", got)
+	}
+}
+
+// TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer guards the
+// regression the pending map invites: an entry can outlive its provider.
+//
+// refreshAgentAvailability is deliberately one-directional, so an uninstalled
+// CLI is never dropped from the availability set — it just keeps failing its
+// probe and never reappears in the payload, leaving its pending entry
+// unconfirmable forever. Retrying on "anything pending" would turn that into one
+// register call per workspace every few minutes for the life of the daemon.
+func TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Both upgrade; the register fails, so both are pending.
+	fx.failRegister(true)
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+
+	// codex is then uninstalled — its probe fails from here on, permanently.
+	fx.failRegister(false)
+	fx.setProbeErr(func(path string, _ int) error {
+		if strings.Contains(path, "codex") {
+			return errors.New("executable file not found")
+		}
+		return nil
+	})
+
+	// The round that can still confirm claude registers once.
+	d.refreshAgentVersions(context.Background())
+	settled := fx.registerCallCount()
+	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
+		t.Fatalf("pending = %v, want codex still held", got)
+	}
+
+	// Every later round can confirm nothing, so it must issue no requests at all.
+	for i := 0; i < 5; i++ {
+		d.refreshAgentVersions(context.Background())
+	}
+	if got := fx.registerCallCount() - settled; got != 0 {
+		t.Errorf("made %d Register calls across 5 rounds that could confirm nothing, want 0 — "+
+			"a permanently unreachable provider must not become a request storm", got)
 	}
 }
 
