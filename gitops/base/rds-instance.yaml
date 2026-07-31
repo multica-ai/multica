@@ -81,7 +81,7 @@ spec:
       Environment: tools
       CostCenter: shared
       Application: agentfarm
-      Purpose: "read-only endpoint for analytics (Metabase)"
+      Purpose: "read-only endpoint for analytics - Metabase"
 
   providerConfigRef:
     name: agentfarm-provider-aws-upbound-config
