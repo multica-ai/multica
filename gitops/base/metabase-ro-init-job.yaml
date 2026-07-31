@@ -78,23 +78,24 @@ spec:
           # -v passes the password as a psql variable (:'metabase_ro_password'),
           # not shell/string interpolation into the SQL text, so it can't be
           # used for SQL injection regardless of what characters it contains.
-          # Named dollar-quote tag (do), not the bare/empty tag — Kubernetes
-          # expands two adjacent dollar signs in container command/args down
-          # to a single one (its escape sequence for $(VAR) interpolation),
-          # which mangles a bare dollar-quoted DO block into invalid SQL
-          # before psql ever sees it. A named tag has no adjacent-dollar
-          # substring, so it survives untouched.
+          #
+          # This must NOT be a dollar-quoted "DO ... END" PL/pgSQL block:
+          # psql's :'var' substitution is a client-side textual scan, and
+          # psql deliberately skips substitution inside dollar-quoted
+          # strings (that text is opaque server-side body content to
+          # psql). :'metabase_ro_password' inside a DO block reaches
+          # Postgres un-substituted as the literal text
+          # ":'metabase_ro_password'" -> syntax error at or near ":".
+          # \gset + \if keep everything as plain top-level SQL/psql
+          # meta-commands instead, so the substitution actually happens.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
             -v metabase_ro_password="$PGVAR_METABASE_RO_PASSWORD" <<'SQL'
-          DO $do$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metabase_ro') THEN
-              CREATE ROLE metabase_ro LOGIN PASSWORD :'metabase_ro_password';
-            ELSE
-              ALTER ROLE metabase_ro WITH LOGIN PASSWORD :'metabase_ro_password';
-            END IF;
-          END
-          $do$;
+          SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metabase_ro') AS role_exists \gset
+          \if :role_exists
+          ALTER ROLE metabase_ro WITH LOGIN PASSWORD :'metabase_ro_password';
+          \else
+          CREATE ROLE metabase_ro LOGIN PASSWORD :'metabase_ro_password';
+          \endif
           SQL
 
           echo "Granting read-only privileges..."
