@@ -706,10 +706,14 @@ describe("ToolPolicyTable (Condition editor)", () => {
     mockToast.info.mockClear();
 
     renderCondTable();
-    const row = await screen.findByTestId("tool-card-rerun_issue");
-    expect(within(row).getByText("Managed externally", { exact: true })).toBeInTheDocument();
-    expect(within(row).getByTitle(/Issue access and task ownership gates/)).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: /Decision:/ })).toBeDisabled();
+    const card = await screen.findByTestId("tool-card-rerun_issue");
+    expect(
+      within(card).getByText("Managed externally", { exact: true }),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByText("Issue access and task ownership gates", { exact: true }),
+    ).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: /Decision:/ })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Allow all" }));
     expect(findPutCalls()).toHaveLength(0);
@@ -717,6 +721,60 @@ describe("ToolPolicyTable (Condition editor)", () => {
       expect.stringContaining("externally managed permission was left unchanged"),
       expect.any(Object),
     );
+  });
+
+  it("shows the external security owner in the classic desktop and responsive layouts", async () => {
+    mockUseFeatureFlag.mockReturnValue(false);
+    mockCerebroRequest.mockResolvedValueOnce({
+      tools: [
+        {
+          tool_key: "rerun_issue",
+          title: "Re-run / cancel issue agent",
+          category: "Issues",
+          source: "platform",
+          managed_externally: true,
+          external_security_owner: "Issue access and task ownership gates",
+          enforced_conditions: [],
+          layers: { runtime: null, agent: null, group: null, user: null },
+          effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+        },
+      ],
+    });
+
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-rerun_issue");
+    const card = screen.getByTestId("tool-card-rerun_issue");
+    for (const presentation of [row, card]) {
+      expect(
+        within(presentation).getByText("Issue access and task ownership gates", { exact: true }),
+      ).toBeInTheDocument();
+      expect(within(presentation).getByRole("button", { name: /Decision:/ })).toBeDisabled();
+    }
+  });
+
+  it("shows a clear inline fallback when an external security owner is absent", async () => {
+    mockUseFeatureFlag.mockImplementation((key: string) => key === "cerebro_tool_policy");
+    mockCerebroRequest.mockResolvedValueOnce({
+      tools: [
+        {
+          tool_key: "legacy_external_gate",
+          title: "Legacy external gate",
+          category: "Issues",
+          source: "platform",
+          managed_externally: true,
+          external_security_owner: "",
+          enforced_conditions: [],
+          layers: { runtime: null, agent: null, group: null, user: null },
+          effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+        },
+      ],
+    });
+
+    renderCondTable();
+    const card = await screen.findByTestId("tool-card-legacy_external_gate");
+    expect(
+      within(card).getByText("Security owner not specified", { exact: true }),
+    ).toBeInTheDocument();
   });
 
   it("renders only the server-reported condition kinds (action hidden, CEL shown)", async () => {

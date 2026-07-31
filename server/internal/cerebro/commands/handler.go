@@ -29,8 +29,9 @@ func (h *Handler) WithActorResolver(resolve ActorResolver) *Handler {
 	return h
 }
 
-func (h *Handler) Routes() http.Handler {
+func (h *Handler) Routes(middlewares ...func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
+	r.Use(middlewares...)
 	r.Get("/", h.List)
 	r.Post("/", h.Create)
 	r.Get("/{id}", h.Get)
