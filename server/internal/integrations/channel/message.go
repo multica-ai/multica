@@ -151,10 +151,9 @@ type InboundMessage struct {
 	// arrays, parent ids) stay in Raw.
 	AddressedToBot bool
 
-	// ForceFresh asks the core to start a fresh agent session for this
-	// message instead of resuming the prior one (the platform's "/fresh"
-	// affordance). The adapter normalizes its platform-specific trigger
-	// into this boolean; the core only reads the flag.
+	// ForceFresh asks the core to start a fresh agent session for this message
+	// instead of resuming the prior one. Router recognizes the shared /new text
+	// command; adapters may also set this flag for a native platform affordance.
 	ForceFresh bool
 
 	// Raw is the untouched platform payload. Adapters stash platform-

@@ -177,6 +177,17 @@ var ErrNoResolverSet = errors.New("channel router: no resolver set for channel t
 // infrastructure failures (the adapter reconnects). Product outcomes (dropped,
 // needs-binding, …) are not errors.
 func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
+	// /new is a channel-wide product command, not an adapter capability. Parse
+	// it here so every adapter that delivers it as message text gets the same
+	// fresh-session behavior. Feishu already strips /new before its context
+	// enricher runs and sets ForceFresh; the guard preserves that enriched body.
+	if !msg.ForceFresh {
+		if body, ok := ParseFreshSessionCommand(msg.Text); ok {
+			msg.ForceFresh = true
+			msg.Text = body
+		}
+	}
+
 	r.mu.RLock()
 	set, ok := r.sets[msg.Source.ChannelType]
 	r.mu.RUnlock()

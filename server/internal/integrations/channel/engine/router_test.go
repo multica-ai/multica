@@ -874,6 +874,45 @@ func TestRouter_ForceFresh_Propagates(t *testing.T) {
 	}
 }
 
+func TestRouter_NewCommand_ForcesFreshAndStripsDirective(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Source.ChannelType = channel.Type("test-channel")
+	msg.Text = "/new answer with the current model"
+	h.router.Register(msg.Source.ChannelType, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		OriginType:   "test_chat",
+	})
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("/new must enqueue a fresh provider session")
+	}
+	if got := h.binder.lastAppend.Message.Text; got != "answer with the current model" {
+		t.Fatalf("appended text=%q, want command stripped", got)
+	}
+}
+
+func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := h.binder.lastAppend.Message.Text; got != msg.Text {
+		t.Fatalf("adapter-enriched body changed: got %q want %q", got, msg.Text)
+	}
+}
+
 func TestRouter_DrainJoinsReplies(t *testing.T) {
 	h := newHarness(t)
 	h.ident.err = ErrSenderUnbound // triggers a NeedsBinding reply goroutine
