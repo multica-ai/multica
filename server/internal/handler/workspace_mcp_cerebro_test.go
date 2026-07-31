@@ -305,7 +305,6 @@ func exerciseWorkspaceMCPAsAgent(t *testing.T, payload map[string]any) *httptest
 	t.Helper()
 	agentID := createHandlerTestAgent(t, "workspace-mcp-permission-"+uuid.NewString(), []byte(`{}`))
 	taskID := createHandlerTestTaskForAgent(t, agentID)
-	issuePlatformActionMandate(t, taskID, agentID, createIssuePlatformAction)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/mcp", bytes.NewReader(mustJSON(t, payload)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
@@ -329,7 +328,6 @@ func exerciseWorkspaceMCPAsAgentWithDecision(t *testing.T, decision string, payl
 	t.Helper()
 	agentID := createHandlerTestAgent(t, "workspace-mcp-decided-"+uuid.NewString(), []byte(`{}`))
 	taskID := createHandlerTestTaskForAgent(t, agentID)
-	issuePlatformActionMandate(t, taskID, agentID, createIssuePlatformAction)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/mcp", bytes.NewReader(mustJSON(t, payload)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
@@ -337,7 +335,7 @@ func exerciseWorkspaceMCPAsAgentWithDecision(t *testing.T, decision string, payl
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
-	ctx, cancel := context.WithTimeout(req.Context(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(req.Context(), 4*time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)
 
@@ -349,7 +347,7 @@ func exerciseWorkspaceMCPAsAgentWithDecision(t *testing.T, decision string, payl
 	}()
 
 	var approvalID string
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		err := testPool.QueryRow(ctx, `
 			SELECT id::text

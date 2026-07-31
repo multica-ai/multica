@@ -73,9 +73,6 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
-		t.Fatalf("clear seeded task mandate: %v", err)
-	}
 	// The real claim path (cerebroEffectiveToolsForClaim) snapshots CAPABILITY KEYS
 	// into the mandate — built-ins as "tools:<Name>", because the daemon capability
 	// snapshot reports them under the "tools" kind (verified in
@@ -245,9 +242,6 @@ func TestResolveDaemonToolPolicy_NormalizesCursorHookNames(t *testing.T) {
 		RETURNING id
 	`, agentID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
-		t.Fatalf("clear seeded task mandate: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)

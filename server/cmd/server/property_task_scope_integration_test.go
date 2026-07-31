@@ -170,4 +170,24 @@ func TestTaskTokenCompatibilityModeRestoresGeneralRoutes(t *testing.T) {
 		t.Fatalf("list issues: expected 200, got %d: %s", resp.StatusCode, body)
 	}
 	resp.Body.Close()
+
+	resp = taskTokenRequest(t, token, http.MethodPut, "/api/issues/"+ownIssueID, map[string]any{
+		"title": "Task-scoped issue updated",
+	})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("update own issue: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = taskTokenRequest(t, token, http.MethodPost, "/api/issues/"+ownIssueID+"/comments", map[string]any{
+		"content": "FIR-4076 rollback regression check",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("comment on own issue: expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
 }

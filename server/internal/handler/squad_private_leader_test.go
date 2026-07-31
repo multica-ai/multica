@@ -336,7 +336,6 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 	`, otherAgentID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create agent task: %v", err)
 	}
-	issueHandlerTestTaskMandate(t, taskID, otherAgentID, "add_comment")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})

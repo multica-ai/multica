@@ -31,9 +31,7 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
-	taskID := ensureAgentTask(t, agentID)
-	ensureAgentCommentMandate(t, taskID, agentID)
-	req.Header.Set("X-Task-ID", taskID)
+	req.Header.Set("X-Task-ID", ensureAgentTask(t, agentID))
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -71,22 +69,6 @@ func ensureAgentTask(t *testing.T, agentID string) string {
 		t.Fatalf("ensureAgentTask: insert task for agent %s: %v", agentID, err)
 	}
 	return taskID
-}
-
-func ensureAgentCommentMandate(t *testing.T, taskID, agentID string) {
-	t.Helper()
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
-		VALUES ($1, $2, $3, '["add_comment"]'::jsonb, now() + interval '1 hour')
-		ON CONFLICT (task_id) DO UPDATE SET
-			workspace_id = EXCLUDED.workspace_id,
-			agent_id = EXCLUDED.agent_id,
-			allowed_tools = EXCLUDED.allowed_tools,
-			issued_at = now(),
-			expires_at = EXCLUDED.expires_at
-	`, taskID, testWorkspaceID, agentID); err != nil {
-		t.Fatalf("ensureAgentCommentMandate: %v", err)
-	}
 }
 
 // countPendingTasks returns the number of queued/dispatched tasks for an issue.

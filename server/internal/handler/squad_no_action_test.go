@@ -52,7 +52,6 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 	`, fx.LeaderID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("create running squad leader task: %v", err)
 	}
-	issueHandlerTestTaskMandate(t, taskID, fx.LeaderID, "add_comment")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})

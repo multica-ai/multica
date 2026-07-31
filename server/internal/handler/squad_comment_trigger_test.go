@@ -531,7 +531,6 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	`, fx.LeaderID, runtimeID, issueID, testUserID).Scan(&workerTaskID); err != nil {
 		t.Fatalf("seed worker task: %v", err)
 	}
-	issueHandlerTestTaskMandate(t, workerTaskID, fx.LeaderID, "add_comment")
 
 	// L posts a comment in its agent identity (X-Agent-ID + X-Task-ID, the
 	// pair required by resolveActor to trust the agent header).
