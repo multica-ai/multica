@@ -93,6 +93,12 @@ async function loadModelsDev() {
     // OpenAI Codex CLI default; models.dev currently prices this lower than
     // the published $1.25 / $10 tier the dashboard tests are pinned to.
     { key: "gpt-5-codex",           input: 1.25, output: 10,   cache_read: 0.125, cache_write: 1.25 },
+    // OpenAI's official gpt-5.6 announcement rates; models.dev currently
+    // prices these bare keys lower than the published tiers the dashboard
+    // tests are pinned to (provider-prefixed rows like github-copilot/* and
+    // opencode/* already carry the correct rate).
+    { key: "gpt-5.6-luna",          input: 1,    output: 6,    cache_read: 0.1,   cache_write: 1.25 },
+    { key: "gpt-5.6-terra",         input: 2.5,  output: 15,   cache_read: 0.25,  cache_write: 3.125 },
     // z.ai ships *-flash family members at $0; models.dev omits these entries.
     { key: "glm-4.5-flash",         input: 0,    output: 0,    cache_read: 0,     cache_write: 0 },
     { key: "glm-4.7-flash",         input: 0,    output: 0,    cache_read: 0,     cache_write: 0 },

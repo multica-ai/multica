@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-07-27
+// Snapshot: 2026-07-31
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -166,9 +166,12 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "openai/gpt-4o-2024-05-13": { input: 5, output: 15, cacheRead: 5, cacheWrite: 5 },
   "openai/gpt-5.2-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "openai/gpt-5.3-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
+  "openai/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
+  "openai/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "opencode-go/gpt-5.6-luna": { input: 0.1, output: 0.6, cacheRead: 0.01, cacheWrite: 0.125 },
   "opencode-go/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "opencode-go/minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 },
   "opencode/deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
@@ -181,6 +184,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode/gpt-5": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5-codex": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5.1": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
+  "opencode/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "opencode/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "opencode/kimi-k2-thinking": { input: 0.4, output: 2.5, cacheRead: 0.4, cacheWrite: 0.4 },
   "opencode/kimi-k2.5": { input: 0.6, output: 3, cacheRead: 0.08, cacheWrite: 0.6 },
