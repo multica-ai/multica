@@ -14,12 +14,12 @@ import (
 // `qwenpaw acp` so the QwenPaw agent discovers the skills natively through
 // QwenPaw's workspace skill discovery mechanism.
 //
-// Skills are written into <workspace>/skill_pool/<slug>/SKILL.md and a
+// Skills are written into <workspace>/skills/<slug>/SKILL.md and a
 // pre-populated skill.json manifest is created with enabled: true for each
 // bound skill, so QwenPaw's reconcile_workspace_manifest (registry.py) resolves
 // them as effective without the user having to enable them manually.
 //
-// The function is idempotent: it always removes the existing skill_pool dir and
+// The function is idempotent: it always removes the existing skills dir and
 // manifest before rebuilding, so an added/removed/edited skill is reflected
 // without accumulating stale state. This includes the empty-skills case — when
 // all skills are unbound, any previously written files are cleaned up, matching
@@ -32,12 +32,12 @@ func prepareQwenpawWorkspace(qwenpawWorkspace string, workspaceSkills []SkillCon
 		return fmt.Errorf("create qwenpaw workspace dir: %w", err)
 	}
 
-	// Remove existing skill_pool dir and manifest so an added/removed/edited
+	// Remove existing skills dir and manifest so an added/removed/edited
 	// skill is reflected without accumulating stale state. This mirrors the
 	// pattern used by writeHermesBoundSkills (hermes_home.go:738).
-	skillsDir := filepath.Join(qwenpawWorkspace, "skill_pool")
+	skillsDir := filepath.Join(qwenpawWorkspace, "skills")
 	if err := os.RemoveAll(skillsDir); err != nil {
-		return fmt.Errorf("remove existing skill_pool dir: %w", err)
+		return fmt.Errorf("remove existing skills dir: %w", err)
 	}
 	manifestPath := filepath.Join(qwenpawWorkspace, "skill.json")
 	if err := os.RemoveAll(manifestPath); err != nil {
@@ -50,11 +50,11 @@ func prepareQwenpawWorkspace(qwenpawWorkspace string, workspaceSkills []SkillCon
 		return nil
 	}
 
-	// Write skills into <workspace>/skill_pool/.
-	// QwenPaw's store.py reads workspace skills from the "skill_pool" directory;
-	// see qwenpaw/agents/skill_system/store.py get_workspace_skills_dir.
+	// Write skills into <workspace>/skills/.
+	// QwenPaw's store.py reads workspace skills from the "skills" directory
+	// via get_workspace_skills_dir(); see qwenpaw/agents/skill_system/store.py.
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		return fmt.Errorf("create qwenpaw skill_pool dir: %w", err)
+		return fmt.Errorf("create qwenpaw skills dir: %w", err)
 	}
 
 	skillNames := make([]string, 0, len(workspaceSkills))
@@ -62,7 +62,7 @@ func prepareQwenpawWorkspace(qwenpawWorkspace string, workspaceSkills []SkillCon
 		slug := sanitizeSkillName(skill.Name)
 		skillDir := filepath.Join(skillsDir, slug)
 
-		// No collision guard needed: we just removed the entire skill_pool dir
+		// No collision guard needed: we just removed the entire skills dir
 		// above, so every slug is available. The per-task workspace is
 		// daemon-owned and never coexists with user files.
 
