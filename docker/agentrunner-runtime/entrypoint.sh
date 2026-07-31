@@ -226,6 +226,44 @@ mkdir -p "${HOME}/.agents/skills"
 cp -r "${HOME}/ai-enhancement-hub/skills/." "${HOME}/.agents/skills/"
 rm -rf "${HOME}/ai-enhancement-hub"
 
+# ── Codex LLM proxy config ────────────────────────────────────────────────────
+# Codex has no env-var override for its built-in OpenAI provider — only a
+# config.toml one (see agent-runtime-base/README.md's "LLM proxy routing").
+# agent-runtime-base/Dockerfile seeds /home/agent/.codex/config.toml with the
+# llmproxy provider at build time, but gitops/base/agent-runtime/storage.yaml
+# mounts an EFS PVC over the *entire* /home/agent, which shadows that image
+# layer on every boot — the seed never actually reaches disk here. What does
+# create ~/.codex/config.toml on first boot is `git-ai install-hooks` below,
+# which writes only its own [features]/[[hooks.*]] tables, leaving Codex with
+# no model_provider and stuck on its default OpenAI auth flow (prompts for an
+# auth method even with OPENAI_API_KEY set). Self-heal here, before git-ai
+# runs, the same way ~/.multica/config.json is rewritten unconditionally above
+# instead of relying on a one-time image COPY the PVC can defeat.
+#
+# model_provider is a bare top-level TOML key: it must appear before the file's
+# first [table] header (git-ai's [features]) or a TOML parser silently attaches
+# it to whichever table is last in the file instead of the document root — so
+# it's prepended, never appended.
+codex_config="${HOME}/.codex/config.toml"
+mkdir -p "${HOME}/.codex"
+touch "${codex_config}"
+if ! grep -q '^model_provider' "${codex_config}"; then
+  codex_config_tmp="$(mktemp)"
+  { printf 'model_provider = "openai_http"\n\n'; cat "${codex_config}"; } > "${codex_config_tmp}"
+  mv "${codex_config_tmp}" "${codex_config}"
+fi
+if ! grep -q '^\[model_providers.openai_http\]' "${codex_config}"; then
+  cat >> "${codex_config}" <<'TOML'
+
+[model_providers.openai_http]
+base_url = "https://llmproxy.g2.com/v1"
+name = "OpenAI HTTP only"
+env_key = "OPENAI_API_KEY"
+supports_websockets = false
+wire_api = "responses"
+TOML
+fi
+
 # ── git-ai setup ──────────────────────────────────────────────────────────────
 # git-ai is baked into the image at /usr/local/bin/git-ai but its user config
 # dir (~/.git-ai/) lives on the work PVC, so setup must happen here at runtime.
