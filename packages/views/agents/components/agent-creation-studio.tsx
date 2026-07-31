@@ -287,8 +287,9 @@ export function AgentCreationStudio() {
       const sessionId = builderSessionIdRef.current;
       if (sessionId) {
         // Covers route/sidebar navigation that bypasses the Studio back button.
-        // The endpoint atomically cancels any running task before deletion.
-        void api.deleteChatSession(sessionId).catch(() => {
+        // Archive instead of delete so accidental navigation does not destroy
+        // the builder conversation permanently (#6246).
+        void api.setChatSessionArchived(sessionId, true).catch(() => {
           // A hard page unload may interrupt cleanup; runtime teardown remains
           // the final safety net for an orphaned hidden Builder Agent.
         });
