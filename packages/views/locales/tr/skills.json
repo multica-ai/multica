@@ -123,8 +123,8 @@
         "double_dot": "Pathler \"..\" içeremez.",
         "reserved": "SKILL.md ana dosya için ayrılmıştır.",
         "exists": "Bu pathte zaten bir dosya var.",
-      "is_directory": "Bu adda bir klasör zaten var",
-      "under_file": "Bu konumda bir dosya zaten var"
+        "is_directory": "Bu adda bir klasör zaten var",
+        "under_file": "Bu konumda bir dosya zaten var"
       }
     },
     "header": {

@@ -364,7 +364,7 @@
     "add_custom": "Özel çalışma ortamı ekle",
     "this_machine": "bu makine",
     "unassigned_title": "Makinesiz özel çalışma ortamları",
-    "unassigned_description": "Bu çalışma alanı çalışma ortamları hiçbir makineye bağlı değil. Eşleşen komutlara sahip bir makine bağlayın veya düzenlemek ya da silmek için satır eylemlerini kullanın.",
+    "unassigned_description": "Bu çalışma alanındaki çalışma ortamları hiçbir makineye bağlı değil. Eşleşen komutlara sahip bir makine bağlayın veya düzenlemek ya da silmek için satır eylemlerini kullanın.",
     "dialog_title": "Özel çalışma ortamları",
     "dialog_description": "Özel çalışma ortamı tanımları tüm çalışma alanında geçerlidir ve bağlı her makineyle senkronize edilir. Bir makine, komut kullanılabilir olduğunda çalışma ortamını kaydeder.",
     "create_dialog_description": "{{machine}} üzerinden özel bir komut ayarlayın. Tanım tüm çalışma alanıyla senkronize edilir ve yalnızca bu komutun kullanılabildiği makinelerde kaydedilir.",
