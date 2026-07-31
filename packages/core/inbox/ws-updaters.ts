@@ -23,11 +23,21 @@ export function patchInboxIssueStatus(
   issueId: string,
   status: IssueStatus,
 ) {
-  const patch = (old: InboxItem[] | undefined) =>
-    old?.map((i) => (i.issue_id === issueId ? { ...i, issue_status: status } : i));
-  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), patch);
-  // Archived rows render the same status icon, so they need the same patch.
-  qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), patch);
+  patchInboxIssue(qc, wsId, issueId, { issue_status: status });
+}
+
+export function patchInboxIssue(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: Partial<Pick<InboxItem, "title" | "issue_status">>,
+) {
+  const patchRows = (old: InboxItem[] | undefined) =>
+    old?.map((i) => (i.issue_id === issueId ? { ...i, ...patch } : i));
+  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), patchRows);
+  // Archived rows render the same issue title and status projection, so they
+  // follow issue edits too.
+  qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), patchRows);
 }
 
 export function onInboxIssueStatusChanged(

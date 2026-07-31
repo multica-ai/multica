@@ -32,6 +32,7 @@ const membersKey = issueKeys.myListSorted(
   sort,
 );
 const inboxKey = inboxKeys.list(WS_ID);
+const archivedInboxKey = inboxKeys.archived(WS_ID);
 const flatKey = issueKeys.flat(WS_ID, "workspace:all", {}, sort);
 const flatTitleKey = issueKeys.flat(
   WS_ID,
@@ -131,6 +132,32 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   };
 }
 
+function makeInboxItem(
+  id: string,
+  issueId: string,
+  overrides: Partial<InboxItem> = {},
+): InboxItem {
+  return {
+    id,
+    workspace_id: WS_ID,
+    recipient_type: "member",
+    recipient_id: "me",
+    actor_type: null,
+    actor_id: null,
+    type: "mentioned",
+    severity: "info",
+    issue_id: issueId,
+    title: `Inbox ${id}`,
+    body: null,
+    issue_status: "todo",
+    read: false,
+    archived: false,
+    created_at: "2025-01-01T00:00:00Z",
+    details: null,
+    ...overrides,
+  };
+}
+
 function bucketed(issues: Issue[], extraTotal = 0): ListIssuesCache {
   return {
     byStatus: {
@@ -187,6 +214,42 @@ describe("applyIssueChange", () => {
       "renamed",
     );
     expect(result.staleKeys).toEqual([]);
+  });
+
+  it("patches and rolls back the issue title in active and archived inbox rows", () => {
+    const activeInbox = [
+      makeInboxItem("inbox-1", "issue-1", { title: "Old title" }),
+      makeInboxItem("inbox-2", "issue-2", { title: "Other issue" }),
+    ];
+    const archivedInbox = [
+      makeInboxItem("archived-1", "issue-1", {
+        title: "Old title",
+        archived: true,
+      }),
+    ];
+    qc.setQueryData<InboxItem[]>(inboxKey, activeInbox);
+    qc.setQueryData<InboxItem[]>(archivedInboxKey, archivedInbox);
+
+    const patch = { title: "Renamed issue" };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    expect(qc.getQueryData<InboxItem[]>(inboxKey)).toEqual([
+      { ...activeInbox[0], title: "Renamed issue" },
+      activeInbox[1],
+    ]);
+    expect(qc.getQueryData<InboxItem[]>(archivedInboxKey)).toEqual([
+      { ...archivedInbox[0], title: "Renamed issue" },
+    ]);
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+
+    expect(qc.getQueryData<InboxItem[]>(inboxKey)).toEqual(activeInbox);
+    expect(qc.getQueryData<InboxItem[]>(archivedInboxKey)).toEqual(
+      archivedInbox,
+    );
   });
 
   it("patches a loaded flat row without refetching an unrelated position window", () => {

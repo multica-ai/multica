@@ -53,6 +53,10 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 }
 
 func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
+	title := r.Title
+	if r.IssueTitle.Valid {
+		title = r.IssueTitle.String
+	}
 	return InboxItemResponse{
 		ID:            uuidToString(r.ID),
 		WorkspaceID:   uuidToString(r.WorkspaceID),
@@ -61,7 +65,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		Type:          r.Type,
 		Severity:      r.Severity,
 		IssueID:       uuidToPtr(r.IssueID),
-		Title:         r.Title,
+		Title:         title,
 		Body:          textToPtr(r.Body),
 		Read:          r.Read,
 		Archived:      r.Archived,
@@ -74,9 +78,10 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 }
 
 // ListArchivedInboxItemsRow carries the same columns as ListInboxItemsRow (both
-// queries select `inbox_item.*` plus the joined issue status), so the archived
-// row converts to the active one and reuses its mapper. If either query's
-// column list drifts, this conversion stops compiling — which is the point.
+// queries select `inbox_item.*` plus the joined issue status and title), so the
+// archived row converts to the active one and reuses its mapper. If either
+// query's column list drifts, this conversion stops compiling — which is the
+// point.
 func archivedInboxRowToResponse(r db.ListArchivedInboxItemsRow) InboxItemResponse {
 	return inboxRowToResponse(db.ListInboxItemsRow(r))
 }
