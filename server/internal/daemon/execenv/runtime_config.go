@@ -800,6 +800,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("Without MCP, drive the same flow from the skill's page in the Multica web UI. Either way: propose and let the owner review — that is how skill changes are meant to land.\n\n")
 
 	b.WriteString("## Mentions\n\n")
+	// CEREBRO-PATCH(agent-handoff-runtime-check): FIR-4217 silently verify recipient availability before handoff.
+	b.WriteString("Before handing work to another agent through issue assignment or a `mention://agent/...` link, silently match that agent's `runtime_id` from `multica agent list --output json` to `multica runtime list --output json` and check the runtime's `status`. This check is informational only: do not change, block, or delay the requested assignment or mention based on the result.\n\n")
 	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
 	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **sends a notification to a human**\n")

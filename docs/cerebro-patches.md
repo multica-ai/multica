@@ -3,6 +3,17 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4217 — Check recipient runtime before agent handoff
+
+- `server/internal/daemon/execenv/runtime_config.go:803-804` adds a silent,
+  informational runtime-status check before issue assignment or
+  `mention://agent/...`; it explicitly preserves the requested handoff.
+- `server/internal/daemon/execenv/execenv_test.go:3317` keeps the instruction in
+  the generated runtime brief.
+- **Why:** agents handed off work without correlating the recipient agent's
+  `runtime_id` with `multica runtime list --output json`, so an offline recipient
+  was invisible to the sender. Approved by Jesper Hvejsel on 2026-07-31.
+
 ## FIR-3986 — Names are copied, never translated
 
 - `server/internal/daemon/execenv/runtime_config_names_verbatim_cerebro.go`
