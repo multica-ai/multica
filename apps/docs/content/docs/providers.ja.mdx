@@ -66,12 +66,12 @@ Antigravity、GitHub Copilot CLI、DevEco Code、Pi は、現時点ではエー�
 MCP server のコマンド、引数、環境変数は、エージェント設定の一部としてサーバーに保存されます。共有する必要がないローカルの認証情報を設定へ直接入力しないでください。
 </Callout>
 
-## Codex サンドボックスと HOME
+## ホストアクセスと分離
 
-Multica は Linux と macOS で `sandbox_mode = "danger-full-access"` を使って Codex タスクを実行します。Windows もネイティブの `windows.sandbox` を設定していない限り同様です。タスクは daemon ユーザーの実際の `HOME` と XDG 環境を保持するため、ホスト上で設定済みの CLI（git、gh、クラウド CLI、`~/.config` 配下のアプリ）はタスク内でも既存の設定と認証情報をそのまま利用できます。タスクごとの `CODEX_HOME` は引き続き独立しており、管理された Codex 設定・セッション・MCP・スキルに使われます。Multica が `approval_policy` を書き換えることはありません。
+エージェントは、Multica daemon を実行しているアカウントとしてランタイムマシン上でコマンドを実行し、タスクにはそのアカウントの通常の環境が見えます。マシン上で設定済みのツール（git、GitHub CLI、クラウド CLI、ホームディレクトリ以下のその他の設定）は、既存の設定と認証情報のままタスク内でも利用できます。Windows で Codex のネイティブサンドボックスを設定している場合、Multica はそれを維持します。
 
 <Callout type="warning">
-`danger-full-access` では、タスクのコマンドは daemon ユーザーがアクセスできるすべてのファイルを読み書きでき、ネットワークにもアクセスできます。隔離が必要な場合は daemon の外側で確保してください（VM、コンテナ、専用 OS アカウントでの実行など）。
+タスクは daemon アカウントがアクセスできるすべてのファイルを読み書きでき、ネットワークにもアクセスできます。タスクの到達範囲を制限したい場合は、daemon を VM、コンテナ、または専用の OS アカウントで実行してください。
 </Callout>
 
 ## スキルの注入方法

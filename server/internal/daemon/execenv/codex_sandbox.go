@@ -22,9 +22,11 @@ import (
 //
 // Until a fixed Codex release ships, the per-task Codex config on macOS needs
 // to fall back to `sandbox_mode = "danger-full-access"` so the agent can
-// actually reach the Multica API. On Linux (and on macOS once the upstream
-// fix is released), the normal `workspace-write` + `network_access = true`
-// combo is preferred because it keeps the filesystem sandbox intact.
+// actually reach the Multica API. Linux uses danger-full-access by design so
+// tasks keep the daemon user's real HOME (#6218; see codexSandboxPolicyFor),
+// so the `workspace-write` + `network_access = true` combo remains relevant
+// only for a future fixed macOS release and for a Windows native-sandbox
+// opt-in.
 //
 // CodexDarwinNetworkAccessFixedVersion is the earliest Codex CLI version in
 // which `network_access = true` is honored under Seatbelt on macOS. Bump this

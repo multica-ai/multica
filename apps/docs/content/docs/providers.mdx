@@ -66,12 +66,12 @@ Antigravity, GitHub Copilot CLI, DevEco Code, and Pi do not read the MCP configu
 MCP server commands, arguments, and environment variables are saved server-side with the agent configuration. Do not write local credentials you have no need to share into the configuration.
 </Callout>
 
-## Codex sandbox and HOME
+## Host access and isolation
 
-Multica runs Codex tasks with `sandbox_mode = "danger-full-access"` on Linux and macOS, and on Windows unless a native `windows.sandbox` is configured. Tasks keep the daemon user's real `HOME` and XDG environment, so CLIs you have configured on the host (git, gh, cloud CLIs, and any `~/.config` app) find their existing configuration and credentials inside tasks. The per-task `CODEX_HOME` stays isolated for managed Codex config, sessions, MCP, and skills, and Multica never rewrites your `approval_policy`.
+Agents run commands on the runtime machine as the account that runs the Multica daemon, and tasks see that account's normal environment. Tools you have already set up on the machine — git, GitHub CLI, cloud CLIs, and anything configured in your home directory — keep working inside tasks with their existing configuration and credentials. On Windows, if you have configured Codex's native sandbox, Multica keeps it enabled.
 
 <Callout type="warning">
-Under `danger-full-access`, task commands can read and write anything the daemon user can and have network access. When tasks need containment, provide it around the daemon: run it in a VM, a container, or under a dedicated OS account.
+A task can read and write whatever the daemon account can, and it has network access. To limit what tasks can reach, run the daemon inside a VM, a container, or a dedicated OS account.
 </Callout>
 
 ## Skill injection

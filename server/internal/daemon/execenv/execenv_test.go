@@ -3071,6 +3071,9 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 	}{
 		{"linux any version", "linux", "0.100.0", "danger-full-access", false, true},
 		{"linux unknown version", "linux", "", "danger-full-access", false, true},
+		// Only linux gets the real-HOME full-access default; other non-darwin
+		// Unix platforms keep the conservative workspace-write baseline.
+		{"other unix keeps workspace-write", "freebsd", "0.100.0", "workspace-write", true, false},
 		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
 		{"windows unknown version", "windows", "", "danger-full-access", false, false},
 		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
@@ -3436,6 +3439,13 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 	if !strings.Contains(string(data), multicaManagedBeginMarker) {
 		t.Error("reused config.toml missing multica-managed block")
+	}
+
+	// Neither Prepare nor Reuse may create a per-task ordinary HOME — the
+	// redirection mechanism was retired (#6218). The env root must hold no
+	// home/ directory on any platform.
+	if _, err := os.Stat(filepath.Join(env.RootDir, "home")); !os.IsNotExist(err) {
+		t.Errorf("env root must not contain a per-task home/ directory, stat err = %v", err)
 	}
 }
 
