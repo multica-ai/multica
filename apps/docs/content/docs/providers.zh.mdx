@@ -66,6 +66,14 @@ Antigravity、GitHub Copilot CLI、DevEco Code 和 Pi 暂不读取智能体中�
 MCP server 的命令、参数和环境变量会随智能体配置保存在服务器端。不要把不需要共享的本地凭据直接写入配置。
 </Callout>
 
+## Codex 沙箱与 HOME
+
+Multica 在 Linux 和 macOS 上以 `sandbox_mode = "danger-full-access"` 运行 Codex 任务；Windows 上除非配置了原生 `windows.sandbox`，也是如此。任务保留 daemon 用户的真实 `HOME` 和 XDG 环境，因此你在宿主机上配置好的 CLI（git、gh、云厂商 CLI 及任何 `~/.config` 应用）在任务内能直接找到已有配置和凭据。单次执行的 `CODEX_HOME` 仍然独立，用于托管 Codex 配置、会话、MCP 和 skill；Multica 不会改写你的 `approval_policy`。
+
+<Callout type="warning">
+在 `danger-full-access` 下，任务命令可以读写 daemon 用户能访问的任何文件，并可以访问网络。需要隔离时，请在 daemon 外层提供：把 daemon 运行在虚拟机、容器或专用系统账户中。
+</Callout>
+
 ## Skill 注入方式
 
 执行开始前，Multica 会把智能体绑定的 skill 写入上表对应的位置，让工具通过自己的原生机制发现它们。

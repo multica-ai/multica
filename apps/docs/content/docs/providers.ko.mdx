@@ -66,6 +66,14 @@ Antigravity, GitHub Copilot CLI, DevEco Code, Pi는 현재 에이전트의 MCP �
 MCP server의 명령, 인수, 환경 변수는 에이전트 설정과 함께 서버에 저장됩니다. 공유할 필요가 없는 로컬 자격 증명을 설정에 직접 넣지 마세요.
 </Callout>
 
+## Codex 샌드박스와 HOME
+
+Multica는 Linux와 macOS에서 `sandbox_mode = "danger-full-access"`로 Codex 작업을 실행합니다. Windows도 네이티브 `windows.sandbox`를 설정하지 않는 한 동일합니다. 작업은 daemon 사용자의 실제 `HOME`과 XDG 환경을 유지하므로, 호스트에 설정된 CLI(git, gh, 클라우드 CLI 및 `~/.config` 아래의 앱)가 작업 안에서도 기존 설정과 자격 증명을 그대로 사용할 수 있습니다. 작업별 `CODEX_HOME`은 여전히 분리되어 관리형 Codex 설정, 세션, MCP, 스킬에 사용됩니다. Multica는 `approval_policy`를 변경하지 않습니다.
+
+<Callout type="warning">
+`danger-full-access`에서는 작업 명령이 daemon 사용자가 접근할 수 있는 모든 파일을 읽고 쓸 수 있으며 네트워크에도 접근할 수 있습니다. 격리가 필요하다면 daemon 바깥에서 제공하세요. 예: VM, 컨테이너 또는 전용 OS 계정에서 실행.
+</Callout>
+
 ## 스킬 주입 방식
 
 실행을 시작하기 전에 Multica가 에이전트에 연결된 스킬을 위 표의 해당 위치에 기록해 도구가 자체 기본 메커니즘으로 발견할 수 있게 합니다.

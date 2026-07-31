@@ -101,10 +101,18 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 			Reason: "codex on windows: compatibility fallback; no native windows.sandbox configured, so workspace-write cannot be enforced (MUL-4957)",
 		}
 	}
-	if goos != "darwin" {
+	if goos == "linux" {
 		return codexSandboxPolicy{
 			Mode:   "danger-full-access",
 			Reason: "codex on linux: real-HOME full access; workspace-write kept the real HOME read-only and required a per-task HOME redirection that hid host configuration outside its seed allowlist (#6218)",
+			Hint:   "containment now comes from the boundary the daemon runs inside — use a VM, container, or dedicated user when tasks must be contained",
+		}
+	}
+	if goos != "darwin" {
+		return codexSandboxPolicy{
+			Mode:          "workspace-write",
+			NetworkAccess: true,
+			Reason:        "non-darwin platform — seatbelt bug does not apply",
 		}
 	}
 	if codexDarwinNetworkAccessFixed(detectedVersion) {
@@ -421,8 +429,8 @@ func stripLegacySandboxDirectives(content string) string {
 // twice produces the same file contents. The file is created if it doesn't
 // exist.
 //
-// The function logs (at warn level) when it falls back to danger-full-access
-// on macOS so the incident is visible in daemon logs.
+// The function logs (at warn level) whenever the policy selects
+// danger-full-access so the effective posture is visible in daemon logs.
 func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, detectedVersion string, logger *slog.Logger) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {

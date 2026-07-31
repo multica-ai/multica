@@ -2769,6 +2769,10 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	if strings.Contains(s, "sandbox_workspace_write") {
 		t.Errorf("linux default must not emit any workspace-write keys, got:\n%s", s)
 	}
+	// Sandbox selection must not touch approval_policy (#6218 non-goal).
+	if strings.Contains(s, "approval_policy") {
+		t.Errorf("managed block must not emit approval_policy, got:\n%s", s)
+	}
 }
 
 func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
@@ -3059,14 +3063,14 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 		version  string
 		wantMode string
 		wantNet  bool
-		// wantHint is whether the policy carries an actionable upgrade hint.
-		// Only the macOS seatbelt fallback has one; the Windows compatibility
-		// fallback has no generic upgrade action, so it must not surface a
-		// misleading macOS hint.
+		// wantHint is whether the policy carries an actionable hint. Linux
+		// carries an outer-containment hint and the macOS seatbelt fallback an
+		// upgrade hint; the Windows compatibility fallback has no generic
+		// action, so it must not surface either.
 		wantHint bool
 	}{
-		{"linux any version", "linux", "0.100.0", "danger-full-access", false, false},
-		{"linux unknown version", "linux", "", "danger-full-access", false, false},
+		{"linux any version", "linux", "0.100.0", "danger-full-access", false, true},
+		{"linux unknown version", "linux", "", "danger-full-access", false, true},
 		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
 		{"windows unknown version", "windows", "", "danger-full-access", false, false},
 		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
@@ -3362,7 +3366,7 @@ func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
 	}
 }
 
-func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
+func TestPrepareCodexHomeUsesLinuxFullAccessDefault(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	// Empty shared home — no config.toml to copy.
@@ -3370,7 +3374,7 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
-	// Default prepareCodexHome assumes linux-like behavior.
+	// Default prepareCodexHome uses the Linux sandbox policy.
 	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}

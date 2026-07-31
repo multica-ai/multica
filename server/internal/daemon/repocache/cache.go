@@ -434,9 +434,10 @@ type WorktreeParams struct {
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
 	// IsolatedGitMetadata creates a local clone whose .git directory lives
 	// inside WorkDir instead of a linked worktree whose gitdir lives under the
-	// shared cache. Linux Codex tasks need this because workspace-write keeps a
-	// resolved external worktree gitdir read-only even when it is explicitly
-	// listed as a writable root (multica-ai/multica#2925).
+	// shared cache. Linux Codex tasks use this to keep task Git writes out of
+	// the shared cache and to stay functional under an explicit
+	// workspace-write override, where a resolved external worktree gitdir is
+	// read-only even when listed as a writable root (multica-ai/multica#2925).
 	IsolatedGitMetadata bool
 }
 

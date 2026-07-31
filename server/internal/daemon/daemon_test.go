@@ -314,7 +314,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 		}
 	})
 
-	t.Run("Codex without task home fails closed", func(t *testing.T) {
+	t.Run("Codex without CODEX_HOME fails closed", func(t *testing.T) {
 		t.Parallel()
 		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, nil, slog.Default())
 		if err == nil || !strings.Contains(err.Error(), "CODEX_HOME is missing") {
