@@ -77,12 +77,6 @@ type CodexHomeOptions struct {
 	// task with no issue), in which case sessions/ stays task-local. See
 	// codexSessionStoreDir and prepareCodexSessionsDir (MUL-4424).
 	SessionStoreKey string
-	// WritableRoots are extra absolute paths written into the config.toml
-	// `[sandbox_workspace_write] writable_roots` so the workspace-write sandbox
-	// (Linux) can write outside the task workdir — the per-task writable HOME.
-	// Only meaningful when the policy resolves to workspace-write; ignored on
-	// darwin danger-full-access. See task_home.go and MUL-4856.
-	WritableRoots []string
 	// CodexCustomArgs are the effective Codex CLI args this task will launch
 	// with (daemon defaults + profile-fixed + per-agent custom_args). Only the
 	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
@@ -92,9 +86,8 @@ type CodexHomeOptions struct {
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
-// tests that don't care about platform-aware sandbox configuration. It
-// assumes a Linux-like environment where workspace-write + network_access
-// works correctly.
+// tests that don't care about platform-aware sandbox configuration. It assumes
+// a Linux environment (danger-full-access with the real HOME, see #6218).
 func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, logger)
 }
@@ -271,20 +264,20 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
 
-	// Write a daemon-managed sandbox block into config.toml. On macOS we may
-	// need to fall back to danger-full-access because of openai/codex#10390,
-	// and on Windows the daemon defaults to danger-full-access unless the user
-	// opted into a native windows.sandbox; see codex_sandbox.go for the full
-	// rationale. On Windows, resolve the native-sandbox state across the copied
-	// config and the effective custom args so an explicit user opt-in is honored
-	// and an undecidable config fails closed instead of loosening.
+	// Write a daemon-managed sandbox block into config.toml. Linux defaults to
+	// danger-full-access with the real HOME (#6218), macOS falls back to
+	// danger-full-access because of openai/codex#10390, and Windows defaults to
+	// danger-full-access unless the user opted into a native windows.sandbox;
+	// see codex_sandbox.go for the full rationale. On Windows, resolve the
+	// native-sandbox state across the copied config and the effective custom
+	// args so an explicit user opt-in is honored and an undecidable config
+	// fails closed instead of loosening.
 	configFile := filepath.Join(codexHome, "config.toml")
 	winState := windowsSandboxAbsent
 	if resolveGOOS(opts.GOOS) == "windows" {
 		winState = resolveWindowsSandboxState(configFile, configSyncErr, statSharedCodexConfig(sharedHome), opts.CodexCustomArgs, logger)
 	}
 	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
-	policy.WritableRoots = opts.WritableRoots
 	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
 		// The managed block is the authoritative on-disk sandbox policy. If it
 		// can't be written, config.toml keeps whatever it already had — on a

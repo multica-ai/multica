@@ -2300,14 +2300,14 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("config.json content = %q", data)
 	}
 
-	// config.toml should be copied and have network access appended.
+	// config.toml should be copied and have the managed sandbox block appended.
 	data, _ = os.ReadFile(filepath.Join(codexHome, "config.toml"))
 	tomlStr := string(data)
 	if !strings.Contains(tomlStr, `model = "o3"`) {
 		t.Errorf("config.toml missing original model setting, got: %q", tomlStr)
 	}
-	if !strings.Contains(tomlStr, "network_access = true") {
-		t.Errorf("config.toml missing network_access, got: %q", tomlStr)
+	if !strings.Contains(tomlStr, `sandbox_mode = "danger-full-access"`) {
+		t.Errorf("config.toml missing managed sandbox_mode, got: %q", tomlStr)
 	}
 
 	// instructions.md should be copied.
@@ -2761,18 +2761,13 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	if !strings.Contains(s, multicaManagedBeginMarker) || !strings.Contains(s, multicaManagedEndMarker) {
 		t.Errorf("missing managed block markers, got:\n%s", s)
 	}
-	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
-		t.Error("missing sandbox_mode")
+	// Linux runs with the real HOME under danger-full-access (#6218): the
+	// managed block must select full access and emit no workspace-write keys.
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
+		t.Errorf("missing danger-full-access sandbox_mode, got:\n%s", s)
 	}
-	// The managed block uses TOML dotted-key form rather than a
-	// `[sandbox_workspace_write]` section header so it cannot leak into or
-	// inherit from any surrounding table scope. See upsertMulticaManagedBlock
-	// for why.
-	if strings.Contains(s, "[sandbox_workspace_write]") {
-		t.Errorf("managed block must not open a [sandbox_workspace_write] table header, got:\n%s", s)
-	}
-	if !strings.Contains(s, "sandbox_workspace_write.network_access = true") {
-		t.Errorf("missing dotted-key network_access = true, got:\n%s", s)
+	if strings.Contains(s, "sandbox_workspace_write") {
+		t.Errorf("linux default must not emit any workspace-write keys, got:\n%s", s)
 	}
 }
 
@@ -2908,8 +2903,8 @@ approval_policy = "on-failure"
 	if !strings.Contains(s, "approval_policy") {
 		t.Error("lost existing approval_policy")
 	}
-	if !strings.Contains(s, "network_access = true") {
-		t.Error("missing network_access = true")
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
+		t.Error("missing managed sandbox_mode")
 	}
 }
 
@@ -3070,8 +3065,8 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 		// misleading macOS hint.
 		wantHint bool
 	}{
-		{"linux any version", "linux", "0.100.0", "workspace-write", true, false},
-		{"linux unknown version", "linux", "", "workspace-write", true, false},
+		{"linux any version", "linux", "0.100.0", "danger-full-access", false, false},
+		{"linux unknown version", "linux", "", "danger-full-access", false, false},
 		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
 		{"windows unknown version", "windows", "", "danger-full-access", false, false},
 		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
@@ -3112,7 +3107,7 @@ func TestCodexSandboxPolicyForConfig(t *testing.T) {
 		{"windows undecidable fails closed", "windows", windowsSandboxUndecidable, "workspace-write", true},
 		{"windows absent falls back", "windows", windowsSandboxAbsent, "danger-full-access", false},
 		// Non-Windows platforms ignore winState entirely.
-		{"linux ignores winState", "linux", windowsSandboxNative, "workspace-write", true},
+		{"linux ignores winState", "linux", windowsSandboxNative, "danger-full-access", false},
 		{"darwin ignores winState", "darwin", windowsSandboxNative, "danger-full-access", false},
 	}
 	for _, tc := range cases {
@@ -3380,17 +3375,17 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// config.toml should be created with network access defaults.
+	// config.toml should be created with the managed Linux sandbox default.
 	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
 	if err != nil {
 		t.Fatalf("config.toml not created: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "network_access = true") {
-		t.Error("config.toml missing network_access = true")
-	}
-	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
 		t.Error("config.toml missing sandbox_mode")
+	}
+	if strings.Contains(s, "sandbox_workspace_write") {
+		t.Errorf("linux default must not emit workspace-write keys, got:\n%s", s)
 	}
 }
 
