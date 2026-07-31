@@ -90,8 +90,14 @@ export function TranscriptButton({
   // authoritative backfill on the running→terminal transition.
   const [liveSession, setLiveSession] = useState(false);
   useEffect(() => {
-    if (!open) setLiveSession(false);
-  }, [open]);
+    if (!open) {
+      setLiveSession(false);
+      return;
+    }
+    if (liveCacheMode) {
+      setLiveSession(true);
+    }
+  }, [liveCacheMode, open]);
 
   // Live mode renders from the cache; lazy/provided modes from local state.
   const items = providedItems ?? loadedItems ?? [];
@@ -123,7 +129,7 @@ export function TranscriptButton({
         })
         .finally(() => setLoading(false));
     },
-    [liveCacheMode, providedItems, loadedItems, task.id],
+    [liveCacheMode, providedItems, loadedItems, setOpen, task.id],
   );
 
   useEffect(() => {
@@ -137,7 +143,7 @@ export function TranscriptButton({
     return () => {
       window.removeEventListener("multica:navigate", handleGlobalNavigate);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   return (
     <>
