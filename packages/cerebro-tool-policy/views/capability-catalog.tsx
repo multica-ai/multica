@@ -309,16 +309,19 @@ export function CapabilityCatalog({
 }
 
 function ExternalSecurityOwner({ owner }: { owner?: string }) {
+  const ownerLabel = owner || "Security owner not specified";
   const detail = owner
     ? `Access is enforced by ${owner}, not by the tool-policy gate. Settings cannot change this permission.`
     : "Access is governed outside the tool-policy gate. Settings cannot change this permission.";
   return (
     <Badge
       variant="outline"
-      className="mt-1 border-dashed font-normal text-muted-foreground"
+      className="mt-1 h-auto max-w-full shrink flex-wrap justify-start border-dashed font-normal whitespace-normal text-muted-foreground"
       title={detail}
     >
-      Managed externally
+      <span>Managed externally</span>
+      <span aria-hidden="true">·</span>
+      <span>{ownerLabel}</span>
     </Badge>
   );
 }
