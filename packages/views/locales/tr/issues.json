@@ -226,7 +226,7 @@
     "quick_action_runs_as": "{{name}} olarak çalışır",
     "quick_action_target_fallback": "ajan",
     "quick_action_queued": "{{name}} çalışmaya başladı",
-    "quick_action_coalesced": "{{name}} adlı ajanın mevcut çalıştırmasına eklendi",
+    "quick_action_coalesced": "{{name}} hedefinin mevcut çalıştırmasına eklendi",
     "quick_action_deferred": "{{name}} çevrimdışı — tekrar çevrimiçi olduğunda başlayacak",
     "quick_action_blocked": "{{name}} tetiklenemedi",
     "quick_action_posted": "Yorum gönderildi",
