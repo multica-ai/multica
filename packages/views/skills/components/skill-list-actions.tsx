@@ -52,7 +52,7 @@ import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
-import { canReimportSkill, readOrigin } from "../lib/origin";
+import { isUpdatableOrigin, readOrigin } from "../lib/origin";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -619,7 +619,9 @@ export function SkillRowActions({
   const [addOpen, setAddOpen] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const canReimport = canReimportSkill(row.skill, ctx.currentUserId);
+  // Anyone who can edit the skill (workspace owner/admin, or its creator) may
+  // update it from source — mirrors the server's canManageSkill authorization.
+  const canReimport = row.canEdit && isUpdatableOrigin(readOrigin(row.skill));
 
   return (
     <span

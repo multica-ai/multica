@@ -2273,20 +2273,21 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 // is read server-side from the skill's stored config.origin — the client never
 // supplies it — so a caller cannot repoint the update at an arbitrary URL, and a
 // locally renamed skill still updates (we target by id, not by name collision).
-// Creator-only, mirroring canOverwriteSkillByLocalImport.
+// Authorized to anyone who may edit the skill (workspace owner/admin, or the
+// creator) via canManageSkill — the same "who can edit a skill" rule the UI
+// gates the action on.
 func (h *Handler) ReimportSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	skill, ok := h.loadSkillForUser(w, r, id)
-	if !ok {
-		return
-	}
 
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
-	if !canOverwriteSkillByLocalImport(userID, skill) {
-		writeError(w, http.StatusForbidden, "only the skill creator can update it from its source")
+	skill, ok := h.loadSkillForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageSkill(w, r, skill) {
 		return
 	}
 
@@ -2337,6 +2338,9 @@ func (h *Handler) ReimportSkill(w http.ResponseWriter, r *http.Request) {
 		Content:       imported.content,
 		Config:        config,
 		Files:         files,
+		// Authorized above via canManageSkill (owner/admin/creator), so exempt
+		// this write from the shared overwrite's stricter creator-only re-check.
+		AllowWorkspaceManager: true,
 	})
 	if err != nil {
 		status, reason := skillImportOverwriteFailure(err)

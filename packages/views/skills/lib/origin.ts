@@ -45,22 +45,6 @@ export function isUpdatableOrigin(origin: OriginInfo): boolean {
 }
 
 /**
- * Whether the current user may re-import (update) the skill. Creator-only,
- * mirroring the server rule (`canOverwriteSkillByLocalImport`): admins/owners
- * who did not create the skill must edit it in-app rather than re-import.
- */
-export function canReimportSkill(
-  skill: SkillSummary,
-  currentUserId: string | null,
-): boolean {
-  return (
-    isUpdatableOrigin(readOrigin(skill)) &&
-    !!currentUserId &&
-    skill.created_by === currentUserId
-  );
-}
-
-/**
  * SKILL.md is always present plus any additional attached files. Accepts a
  * `SkillSummary` because list endpoints don't return the `files` array — in
  * that case we only know the body exists, so the count falls back to 1.

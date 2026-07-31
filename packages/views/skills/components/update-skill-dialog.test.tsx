@@ -53,15 +53,8 @@ function row(): SkillRow {
 const ctx = { wsId: "ws1", agents: [], currentUserId: "u1", isAdmin: false };
 
 describe("UpdateSkillDialog", () => {
-  // No beforeEach reset: each test below sets its own mock implementation
-  // (mockResolvedValue / mockRejectedValue) before use, so a shared
-  // beforeEach isn't needed for isolation. (mockReimportSkill.mockReset()
-  // in a beforeEach here reproducibly triggers a Vitest 4.1.0/tinyspy false
-  // "unhandled rejection" on the second test even though the component's
-  // try/catch fully handles the rejection — verified by tracing execution
-  // order with temporary logging; the catch, toast.error, and finally all
-  // run before the test completes. Isolate the two tests' mock state via
-  // explicit mockResolvedValue/mockRejectedValue instead of a reset hook.)
+  // Each test sets its own mock outcome (mockResolvedValue / mockRejectedValue),
+  // so no shared reset hook is needed.
 
   it("calls reimportSkill and invalidates skills on confirm", async () => {
     mockReimportSkill.mockResolvedValue({});
