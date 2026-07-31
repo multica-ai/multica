@@ -87,3 +87,4 @@ patches:
                       name: agentrunner-secrets
                   - secretRef:
                       name: agentrunner-1password-secrets
+                      optional: true
