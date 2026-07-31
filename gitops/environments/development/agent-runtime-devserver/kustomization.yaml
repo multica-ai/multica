@@ -61,7 +61,7 @@ patches:
         template:
           spec:
             containers:
-              - name: opencode
+              - name: main
                 env:
                   - name: MULTICA_SERVER_URL
                     value: https://agentfarm.development.g2.com
@@ -81,7 +81,7 @@ patches:
         template:
           spec:
             containers:
-              - name: opencode
+              - name: main
                 envFrom:
                   - secretRef:
                       name: agentrunner-secrets

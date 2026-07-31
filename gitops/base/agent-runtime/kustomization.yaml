@@ -5,5 +5,6 @@ resources:
   - namespace.yaml
   - service-account.yaml
   - external-secret.yaml
+  - storage.yaml
   - deployment.yaml
   - pdb.yaml

@@ -1,0 +1,37 @@
+# AIPLAT-165: per-namespace EFS-backed $HOME so npm/uv installs, the git-ai
+# config dir, and hermes's version-check cache survive pod restarts instead of
+# being wiped every time (currently: entirely the container's ephemeral
+# writable layer — see deployment.yaml's securityContext comment).
+#
+# Mirrors kustomize/DevOps/devenv/base/storage.yaml (g2crowd/configuration):
+# same shared `efs-sc` StorageClass (dynamic per-PVC access points — devenv
+# already validated this isolation model, no separate ACK/Crossplane
+# provisioning needed here), same Delete=false so an ArgoCD prune/resync of
+# this Application can't take the workspace's persisted installs with it.
+#
+# Unlike devenv, this mounts the *entire* /home/agent onto one PVC (see the
+# mountPath on the `home` volume in deployment.yaml) rather than several
+# subPath mounts onto specific subdirectories. That is intentional: several
+# Dockerfile/entrypoint.sh comments already assume "the work PVC" covers all
+# of $HOME (~/.git-ai, ~/.hermes, ~/.npm-global, ~/.local/share/uv, ...), and
+# the goal is zero runner-side awareness of the mount — entrypoint.sh should
+# not need to know which of its paths are persisted and which aren't.
+#
+# Known tradeoff (flagged, not solved here): per-task Codex scratch dirs under
+# ~/multica_workspaces also land on this PVC and write/GC there for as long as
+# they exist (usually <24h) instead of on ephemeral local disk. Decided
+# acceptable for now — see issue discussion, "storage is cheap" — revisit only
+# if EFS write volume becomes a real cost driver.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agentrunner-home
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+spec:
+  storageClassName: efs-sc
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
