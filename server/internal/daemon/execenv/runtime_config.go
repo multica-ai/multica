@@ -801,7 +801,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Mentions\n\n")
 	// CEREBRO-PATCH(agent-handoff-runtime-check): FIR-4217 silently verify recipient availability before handoff.
-	b.WriteString("Before handing work to another agent through issue assignment or a `mention://agent/...` link, silently read that agent's `runtime_id` with `multica agent get <agent-id> --output json` and check that runtime's `STATUS` in `multica runtime list`. Use these two narrow lookups — never `multica agent list --output json`, which returns every agent's full instructions. This check is informational only: do not change, block, or delay the requested assignment or mention based on the result.\n\n")
+	b.WriteString("Before handing work to another agent through issue assignment or a `mention://agent/...` link, silently read that agent's `runtime_id` with `multica agent get <agent-id> --output json` and check that runtime's `STATUS` in `multica runtime list`. Never block or delay the handoff on the result — always complete the requested assignment or mention. If that runtime is not `online`, add one short line to the same comment naming the agent and saying the work stays queued until its runtime is back.\n\n")
 	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
 	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **sends a notification to a human**\n")
