@@ -207,8 +207,8 @@
   },
   "run_confirm": {
     "title_assign": "Atama onaylansın mı?",
-    "assign_single": "Bu issue'yu {{name}} hedefine ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
-    "assign_batch": "{{count}} issue'yu {{name}} hedefine ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
+    "assign_single": "Bu issue'yu {{name}} adlı hedefe ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
+    "assign_batch": "{{count}} issue'yu {{name}} adlı hedefe ata. Çalıştırma koşulları karşılanırsa hemen başlayacak.",
     "note_label": "Devretme notu (isteğe bağlı)",
     "note_placeholder": "Önemli noktaları belirtin — kapsam, odak veya kaçınılacaklar…",
     "note_unsupported": "Çalışma ortamları bu devretme notunu alabilmek için çok eski; not okunmayabilir.",
