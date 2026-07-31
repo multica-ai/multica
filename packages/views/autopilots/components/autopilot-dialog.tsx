@@ -252,18 +252,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const scheduleWillBeWritten =
     triggerKind === "schedule" && !schedulePillDisabled && (isCreate || scheduleDirty);
 
-  // One value for the button, its tooltip, the inline errors and handleSubmit,
-  // so a rendered affordance can never disagree with what submitting does. It
-  // names the FIRST unmet requirement in reading order — the user fixes one
-  // field, the next surfaces — which is also the field the click focuses.
-  const submitBlock: "title" | "assignee" | "schedule" | null =
-    title.trim().length === 0
-      ? "title"
-      : assigneeId.length === 0
-        ? "assignee"
-        : scheduleWillBeWritten && !scheduleGate.scheduleValid
-          ? "schedule"
-          : null;
+  // The FIRST empty required field in reading order — the user fills one, the
+  // next surfaces. Only these two are answered here: a rejected schedule is
+  // re-checked against the server below, which toasts its actual reason.
+  const missingField: "title" | "assignee" | null =
+    title.trim().length === 0 ? "title" : assigneeId.length === 0 ? "assignee" : null;
 
   // Inline errors appear only after a submit attempt: a form that opens already
   // shouting at the user for fields they have not reached yet is worse than the
@@ -272,20 +265,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [showErrors, setShowErrors] = useState(false);
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const assigneeTriggerRef = useRef<HTMLButtonElement>(null);
-  const scheduleSectionRef = useRef<HTMLDivElement>(null);
   const assigneeErrorId = useId();
 
   const handleSubmit = async () => {
     if (submitting) return;
-    if (submitBlock !== null) {
-      // Reveal the inline errors and take the user to the field at fault.
-      // Focusing scrolls the config column to it on its own; the schedule's
-      // rejection is already rendered by the editor, so that one only has to
-      // be brought into view.
+    if (missingField !== null) {
+      // Reveal the inline errors and take the user to the field at fault;
+      // focusing scrolls the config column to it on its own.
       setShowErrors(true);
-      if (submitBlock === "title") titleEditorRef.current?.focus();
-      else if (submitBlock === "assignee") assigneeTriggerRef.current?.focus();
-      else scheduleSectionRef.current?.scrollIntoView({ block: "nearest" });
+      if (missingField === "title") titleEditorRef.current?.focus();
+      else assigneeTriggerRef.current?.focus();
       return;
     }
     setSubmitting(true);
@@ -432,42 +421,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   };
 
   const contentKey = isCreate ? "create" : props.autopilotId;
-
-  const submitBlockMessage =
-    submitBlock === "title"
-      ? t(($) => $.dialog.error_title_required)
-      : submitBlock === "assignee"
-        ? t(($) => $.dialog.error_assignee_required)
-        : t(($) => $.dialog.error_schedule_invalid);
-
-  // Built once so both footer branches render the same control. Native
-  // `disabled` only for the in-flight save; an unmet requirement uses
-  // `aria-disabled`, because a natively disabled button is neither hoverable
-  // nor focusable — it can host neither the tooltip that names what is missing
-  // nor the click that reveals the inline errors, which is exactly the dead end
-  // reported in #6231. `handleSubmit` is the real gate either way.
-  const submitButton = (
-    <Button
-      size="sm"
-      onClick={handleSubmit}
-      disabled={submitting}
-      aria-disabled={submitBlock !== null || undefined}
-      aria-busy={submitting || undefined}
-      // The Button base only dims on native `disabled`, so aria-disabled would
-      // otherwise stay a fully lit, pressable-looking primary button. No
-      // `pointer-events-none`: this control still has to take the hover and the
-      // click.
-      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
-    >
-      {submitting
-        ? isCreate
-          ? t(($) => $.dialog.creating)
-          : t(($) => $.dialog.saving)
-        : isCreate
-          ? t(($) => $.dialog.create)
-          : t(($) => $.dialog.save)}
-    </Button>
-  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -660,16 +613,18 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             )}
 
             {triggerKind === "schedule" ? (
-              <div ref={scheduleSectionRef}>
+              <div>
                 <SectionLabel>{t(($) => $.dialog.section_schedule)}</SectionLabel>
+                {/* No `onValidityChange` / `clearRejection` here, unlike the
+                    detail page's add-trigger dialog: nothing in this footer is
+                    gated on the schedule's validity any more, so the gate's
+                    `scheduleValid` would have no reader. The editor still shows
+                    its own inline rejection, and `ensureAccepted` re-asks the
+                    server on submit and toasts what it says. */}
                 <ScheduleEditor
                   value={schedule}
-                  onChange={(next) => {
-                    scheduleGate.clearRejection();
-                    setSchedule(next);
-                  }}
+                  onChange={setSchedule}
                   wsId={wsId}
-                  onValidityChange={scheduleGate.onValidityChange}
                   // Locked while the save is in flight: the submit path validates
                   // over the network and then writes the schedule it read before
                   // that round trip, so an edit made in between would be dropped
@@ -702,14 +657,25 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
               {t(($) => $.dialog.cancel)}
             </Button>
-            {submitBlock !== null ? (
-              <Tooltip>
-                <TooltipTrigger render={submitButton} />
-                <TooltipContent side="top">{submitBlockMessage}</TooltipContent>
-              </Tooltip>
-            ) : (
-              submitButton
-            )}
+            {/* Live whenever a save isn't already in flight — an unmet
+                requirement never dims it. A greyed-out button is a dead end
+                with no room for a reason (#6231); a live one answers the click
+                with an inline error on the field at fault, which says more than
+                any disabled state could. `handleSubmit` is the gate. */}
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              disabled={submitting}
+              aria-busy={submitting || undefined}
+            >
+              {submitting
+                ? isCreate
+                  ? t(($) => $.dialog.creating)
+                  : t(($) => $.dialog.saving)
+                : isCreate
+                  ? t(($) => $.dialog.create)
+                  : t(($) => $.dialog.save)}
+            </Button>
           </div>
         </div>
           </>

@@ -308,7 +308,6 @@
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
     "error_title_required": "请填写自动化名称。",
     "error_assignee_required": "请选择运行该自动化的智能体或小队。",
-    "error_schedule_invalid": "请先修正时间表再保存。",
     "output_modes": {
       "create_issue": {
         "label": "创建 issue",

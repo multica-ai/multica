@@ -5,11 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderWithI18n } from "../../test/i18n";
 
-// Regression cover for GitHub #6231: "Create Autopilot" was a natively
-// disabled button whenever a required field was empty, so a user who had not
-// picked an assignee saw a dead control and no reason for it. The dialog now
-// keeps the button clickable (aria-disabled) and answers the click with an
-// inline error on the field at fault.
+// Regression cover for GitHub #6231: "Create Autopilot" was disabled whenever
+// a required field was empty, so a user who had not picked an assignee saw a
+// dead control and no reason for it. The button is now live whenever a save
+// isn't already in flight, and the click it accepts is what surfaces an inline
+// error on the field at fault.
 
 const mockCreateAutopilot = vi.hoisted(() => vi.fn());
 const mockCreateTrigger = vi.hoisted(() => vi.fn());
@@ -120,12 +120,13 @@ describe("AutopilotDialog required-field feedback", () => {
     mockCreateTrigger.mockReset();
   });
 
-  it("leaves the create button clickable while required fields are empty", () => {
+  it("leaves the create button fully live while required fields are empty", () => {
     renderCreateDialog();
-    // Native `disabled` is what made the bug unreportable: nothing to hover,
-    // nothing to click, no way to learn what was missing.
+    // A dimmed button is a dead end with no room for a reason. Neither the
+    // native attribute nor the ARIA one may be set: the click is the whole
+    // feedback channel.
     expect(createButton()).not.toBeDisabled();
-    expect(createButton()).toHaveAttribute("aria-disabled", "true");
+    expect(createButton()).not.toHaveAttribute("aria-disabled");
   });
 
   it("names the missing title on a blocked submit instead of doing nothing", async () => {
@@ -174,7 +175,6 @@ describe("AutopilotDialog required-field feedback", () => {
         screen.queryByText("Choose the agent or squad that will run this autopilot."),
       ).not.toBeInTheDocument();
     });
-    expect(createButton()).not.toHaveAttribute("aria-disabled");
 
     await user.click(createButton());
     await waitFor(() => expect(mockCreateAutopilot).toHaveBeenCalledTimes(1));

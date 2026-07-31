@@ -308,7 +308,6 @@
     "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
     "error_title_required": "オートパイロット名を入力してください。",
     "error_assignee_required": "実行するエージェントまたはスクワッドを選択してください。",
-    "error_schedule_invalid": "保存する前にスケジュールを修正してください。",
     "output_modes": {
       "create_issue": {
         "label": "イシューを作成",
