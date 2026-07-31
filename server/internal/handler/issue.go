@@ -3054,10 +3054,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if answer := h.authorizePlatformAction(r.Context(), r, prevIssue.WorkspaceID, actorType, actorID, updateIssuePlatformAction, "rest_api", map[string]any{"issue_id": uuidToString(prevIssue.ID)}, req, false); !answer.Allowed { // CEREBRO-PATCH(issue-update-platform-action): FIR-4076 require Task Mandate + Permissions before agent mutation.
-		writePlatformAction(w, updateIssuePlatformAction, answer)
-		return
-	}
 
 	// CEREBRO-PATCH(issue-status-gate): FIR-3659 — agent status changes may be blocked by before.issue.status_change hook policies; see cerebro_issue_status_gate.go.
 	if code, msg := h.cerebroGateIssueStatusChange(r, prevIssue, req.Status, actorType, actorID); code != 0 {

@@ -107,7 +107,7 @@ host conditions, workspace membership, target scope, self-target protection,
 and credential checks remain independent safety intersections; they do not
 select a second permission resolver for the same key.
 
-### Issue writes are always-on platform actions
+### Create issue is an always-on platform action
 
 `create_issue` is enforced before mutation for authoritative agent/task actors
 by `server/internal/cerebro/platformaction` on REST/CLI, workspace HTTP MCP, and
@@ -136,14 +136,6 @@ either `cerebro_approvals` or `cerebro_approval_gate` is enabled: navigation,
 inline query and realtime subscriptions use that same combined condition. This
 prevents an active Ask gate from hiding the human decision path. Neither flag
 disables the server permission floor.
-
-`update_issue` and `add_comment` use the same pre-mutation intersection on
-task-token REST routes: the immutable Task Mandate must contain the canonical
-platform action, the current Permissions decision must admit it, and
-`AllowTaskScopeForIssue` must still bind the URL target to the task's issue.
-A missing/expired mandate or absent capability returns `task_mandate_denied`;
-a Permissions Deny returns `platform_action_denied`. Human member calls are
-unchanged.
 
 > **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
 > gate IS deciding a call (question 1), a workspace uses the
@@ -348,6 +340,13 @@ capabilities. Property definition handlers and other owner-only handlers keep
 their independent actor guards. The permanent FIR-4076 change must replace this
 pass-through with Task Mandate, Permissions, and resource-scope enforcement for
 every agent route.
+
+**Rollback record (2026-07-31).** The first permanent attempt added Task Mandate
+checks directly to `add_comment` and `update_issue`. It was rolled back after a
+real comment-triggered task received HTTP 403 `task_mandate_denied` while
+replying on its own issue. See
+[`FIR-4076-task-mandate-regression.md`](../incidents/FIR-4076-task-mandate-regression.md)
+for the incident timeline, root cause, rollback boundary, and re-entry gate.
 
 Before every managed tool call the extension asks the existing daemon
 `/tool-policy/resolve` endpoint for the acting task's decision. `Allow`
