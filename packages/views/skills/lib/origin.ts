@@ -25,6 +25,41 @@ export function readOrigin(skill: SkillSummary): OriginInfo {
   return { type: "manual" };
 }
 
+const UPDATABLE_ORIGIN_TYPES = new Set<OriginInfo["type"]>([
+  "github",
+  "skills_sh",
+  "clawhub",
+]);
+
+/**
+ * Whether a skill's origin can be re-imported from a stored URL. True only for
+ * the URL-based sources (github / skills_sh / clawhub) that carry a re-fetchable
+ * `source_url`; runtime_local and manual skills return false.
+ */
+export function isUpdatableOrigin(origin: OriginInfo): boolean {
+  return (
+    UPDATABLE_ORIGIN_TYPES.has(origin.type) &&
+    typeof origin.source_url === "string" &&
+    origin.source_url.length > 0
+  );
+}
+
+/**
+ * Whether the current user may re-import (update) the skill. Creator-only,
+ * mirroring the server rule (`canOverwriteSkillByLocalImport`): admins/owners
+ * who did not create the skill must edit it in-app rather than re-import.
+ */
+export function canReimportSkill(
+  skill: SkillSummary,
+  currentUserId: string | null,
+): boolean {
+  return (
+    isUpdatableOrigin(readOrigin(skill)) &&
+    !!currentUserId &&
+    skill.created_by === currentUserId
+  );
+}
+
 /**
  * SKILL.md is always present plus any additional attached files. Accepts a
  * `SkillSummary` because list endpoints don't return the `files` array — in

@@ -2225,6 +2225,12 @@ export class ApiClient {
     });
   }
 
+  // Re-imports a URL-sourced skill in place from its stored config.origin.
+  // No body — the server reads the source URL from the skill's provenance.
+  async reimportSkill(id: string): Promise<Skill> {
+    return this.fetch(`/api/skills/${id}/reimport`, { method: "POST" });
+  }
+
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
