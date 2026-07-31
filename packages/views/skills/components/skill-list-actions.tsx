@@ -7,6 +7,7 @@ import {
   Loader2,
   MoreHorizontal,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   X,
@@ -48,6 +49,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { canReimportSkill, readOrigin } from "../lib/origin";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -505,6 +507,94 @@ export function DeleteSkillsDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Update-from-source confirmation (single row; creator + URL origin only)
+// ---------------------------------------------------------------------------
+
+export function UpdateSkillDialog({
+  row,
+  ctx,
+  open,
+  onOpenChange,
+}: {
+  row: SkillRow;
+  ctx: SkillActionsContext;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useT("skills");
+  const qc = useQueryClient();
+  const [updating, setUpdating] = useState(false);
+  const sourceUrl = readOrigin(row.skill).source_url ?? "";
+
+  const handleConfirm = async () => {
+    setUpdating(true);
+    try {
+      await api.reimportSkill(row.skill.id);
+      // Prefix key invalidates both the skills list and the skill detail; the
+      // agent list carries each skill's name/description inline, so refresh it too.
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(ctx.wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(ctx.wsId) });
+      toast.success(t(($) => $.actions.updated_toast, { name: row.skill.name }));
+      onOpenChange(false);
+    } catch (e) {
+      toast.error(
+        e instanceof Error && e.message
+          ? e.message
+          : t(($) => $.actions.update_failed_toast),
+      );
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!updating) onOpenChange(v);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.actions.update_dialog_title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.actions.update_dialog_desc, { name: row.skill.name })}
+          </DialogDescription>
+        </DialogHeader>
+        {sourceUrl && (
+          <div className="truncate rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
+            {t(($) => $.actions.update_dialog_source, { url: sourceUrl })}
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={updating}
+          >
+            {t(($) => $.actions.cancel)}
+          </Button>
+          <Button type="button" onClick={handleConfirm} disabled={updating}>
+            {updating ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t(($) => $.actions.updating)}
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3 w-3" />
+                {t(($) => $.actions.update_confirm)}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row kebab
 // ---------------------------------------------------------------------------
 
@@ -521,7 +611,9 @@ export function SkillRowActions({
 }) {
   const { t } = useT("skills");
   const [addOpen, setAddOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const canReimport = canReimportSkill(row.skill, ctx.currentUserId);
 
   return (
     <span
@@ -545,6 +637,12 @@ export function SkillRowActions({
             <Plus className="size-3.5" />
             {t(($) => $.actions.add_to_agent)}
           </DropdownMenuItem>
+          {canReimport && (
+            <DropdownMenuItem onClick={() => setUpdateOpen(true)}>
+              <RefreshCw className="size-3.5" />
+              {t(($) => $.actions.update)}
+            </DropdownMenuItem>
+          )}
           {row.canEdit && (
             <>
               <DropdownMenuSeparator />
@@ -565,6 +663,14 @@ export function SkillRowActions({
         open={addOpen}
         onOpenChange={setAddOpen}
       />
+      {canReimport && (
+        <UpdateSkillDialog
+          row={row}
+          ctx={ctx}
+          open={updateOpen}
+          onOpenChange={setUpdateOpen}
+        />
+      )}
       <DeleteSkillsDialog
         rows={[row]}
         ctx={ctx}

@@ -87,7 +87,15 @@
     "cancel": "취소",
     "add_confirm": "추가 ({{num}})",
     "adding": "추가 중...",
-    "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다"
+    "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다",
+    "update": "업데이트",
+    "update_dialog_title": "소스에서 업데이트할까요?",
+    "update_dialog_desc": "\"{{name}}\"을(를) 소스의 최신 버전으로 교체합니다. 이 스킬의 로컬 변경 사항은 사라집니다.",
+    "update_dialog_source": "소스: {{url}}",
+    "update_confirm": "업데이트",
+    "updating": "업데이트 중...",
+    "updated_toast": "{{name}}을(를) 소스에서 업데이트했습니다",
+    "update_failed_toast": "스킬 업데이트에 실패했습니다"
   },
   "toolbar": {
     "result_count_title": "일치하는 스킬 / 전체 스킬",
