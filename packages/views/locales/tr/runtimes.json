@@ -61,6 +61,25 @@
       "cli": "CLI",
       "cloud_worker": "Cloud worker",
       "local_daemon": "Local daemon"
+    },
+    "pending_custom_runtimes": "Pending custom runtimes",
+    "select_runtime": "Built-in runtimes appear automatically. Select one for settings, or add a custom command.",
+    "no_runtimes_title": "No runtimes registered",
+    "no_runtimes_hint": "Start or reconnect this machine's daemon. Its installed CLI runtimes will appear here automatically.",
+    "not_found_title": "Machine not found",
+    "not_found_hint": "It may be offline, removed, or no longer available to you.",
+    "rename": "Rename machine",
+    "rename_dialog": {
+      "title": "Rename machine",
+      "description": "Give this machine a name you'll recognize. It applies to every runtime on this machine and shows up when you pick a runtime for an agent.",
+      "placeholder": "e.g. Bohan's MacBook",
+      "hint": "Leave empty to use the device's default name.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving...",
+      "toast_saved": "Machine renamed",
+      "toast_cleared": "Machine name cleared",
+      "toast_failed": "Failed to rename machine"
     }
   },
   "health": {
@@ -85,7 +104,6 @@
     "all_runtimes": "Tüm çalışma ortamları",
     "read_only": "Salt okunur",
     "delete_button": "Çalışma ortamını sil",
-    "delete_disabled_tooltip": "Bu çalışma ortamı çalışan bir local daemon tarafından yönetiliyor ve birkaç saniye içinde kendini yeniden kaydedecek. Kalıcı olarak kaldırmak için daemon sürecini durdurun.",
     "last_seen": "son görülme {{when}}",
     "fact_owner": "Sahip",
     "fact_device": "Cihaz",
@@ -131,7 +149,6 @@
         "confirm_one": "{{count}} ajan arşivle ve çalışma ortamını sil",
         "confirm_other": "{{count}} ajan arşivle ve çalışma ortamını sil",
         "submitting": "Arşivleniyor ve siliniyor...",
-        "self_healing_blocked_toast": "Bu çalışma ortamı çalışan bir local daemon tarafından yönetiliyor ve kendini yeniden kaydedecek.",
         "delete_failed_toast": "Çalışma ortamı silinemedi",
         "table": {
           "header_agent": "Ajan",
@@ -149,14 +166,17 @@
           "visibility_workspace": "Çalışma alanı",
           "visibility_private": "Özel"
         }
-      }
+      },
+      "self_heal_notice": "This runtime is managed by a running local daemon. Deleting it will succeed, but the daemon will re-register a fresh runtime within seconds — stop the daemon process first to remove it permanently.",
+      "profile_backed_notice": "This runtime was registered from a custom runtime profile. Deleting it removes only the current runtime instance; a running daemon can register it again while the profile remains. Delete the custom runtime profile from Custom runtimes to remove it permanently."
     },
     "toast_deleted": "Çalışma ortamı silindi",
     "toast_delete_failed": "Çalışma ortamı silinemedi",
     "running_chip_one": "· {{count}} çalışıyor",
     "running_chip_other": "· {{count}} çalışıyor",
     "queued_chip_one": "· {{count}} kuyrukta",
-    "queued_chip_other": "· {{count}} kuyrukta"
+    "queued_chip_other": "· {{count}} kuyrukta",
+    "never_seen": "never connected"
   },
   "detail_page": {
     "not_found_title": "Çalışma ortamı bulunamadı",
@@ -245,7 +265,9 @@
       "completed": "Güncelleme tamamlandı. Daemon yeniden başlatılıyor...",
       "failed": "Güncelleme başarısız",
       "timeout": "Zaman aşımı"
-    }
+    },
+    "read_only": "Read-only",
+    "read_only_title": "Only runtime owners and workspace admins can update the CLI."
   },
   "charts": {
     "heatmap_less": "Daha az",
@@ -257,17 +279,25 @@
     "col_health": "Sağlık",
     "col_owner": "Sahip",
     "col_agents": "Ajanlar",
-    "col_workload": "İş yükü",
     "col_cost": "Maliyet · 7g",
     "col_cli": "CLI",
     "cost_delta_flat": "sabit",
     "cli_managed_badge": "Desktop",
-    "cli_update_available_aria": "Güncelleme mevcut",
-    "cli_update_available_tooltip": "Güncelleme mevcut: {{version}}",
     "row_actions_aria": "Satır eylemleri",
     "delete_action": "Sil",
     "delete_permission_hint": "Bu çalışma ortamını yalnızca çalışma ortamı sahibi ve çalışma alanı adminleri silebilir",
-    "delete_admin_hint": "Bir çalışma ortamını yalnızca çalışma ortamı sahibi ve çalışma alanı adminleri silebilir."
+    "delete_admin_hint": "Bir çalışma ortamını yalnızca çalışma ortamı sahibi ve çalışma alanı adminleri silebilir.",
+    "edit_action": "Edit custom runtime",
+    "delete_profile_action": "Delete from workspace",
+    "badge_builtin": "Built-in",
+    "badge_custom": "Custom",
+    "badge_registering": "Registering",
+    "badge_disabled": "Disabled",
+    "pending_health": "Registering with daemon",
+    "pending_health_warning": "Waiting for daemon sync",
+    "pending_health_error": "Registration error",
+    "pending_health_disabled": "Disabled",
+    "pending_cli_unknown": "waiting"
   },
   "usage": {
     "period_label": "Dönem",
@@ -308,7 +338,9 @@
       "unit_hint": "Tüm ücretler 1M token başına USD'dir. Override'ı kaldırmak için tüm alanları boş bırakın.",
       "remove_aria": "Özel fiyatı kaldır",
       "cancel": "İptal",
-      "save": "Kaydet"
+      "save": "Kaydet",
+      "edit_button": "Edit custom prices",
+      "active_notice": "Some models in this period are priced with your custom rates."
     },
     "cost_by_title_agent": "Ajan bazında maliyet",
     "cost_by_title_model": "Model bazında maliyet",
@@ -326,5 +358,90 @@
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
     "no_data": "Henüz kullanım verisi yok"
+  },
+  "profiles": {
+    "cta": "Add runtime",
+    "add_custom": "Add custom runtime",
+    "this_machine": "this machine",
+    "unassigned_title": "Custom runtimes without a machine",
+    "unassigned_description": "These workspace runtimes are not connected to any machine. Connect a machine with the matching commands, or use a row's actions to edit or delete them.",
+    "dialog_title": "Custom runtimes",
+    "dialog_description": "Custom runtime definitions are workspace-wide and sync to every connected machine. A machine registers the runtime when the command is available there.",
+    "create_dialog_description": "Set up a custom command from {{machine}}. The definition syncs workspace-wide and registers only on machines where that command is available.",
+    "learn_more": "View setup guide",
+    "close": "Close",
+    "add_new": "New custom runtime",
+    "list_title": "Runtime backends",
+    "custom_section_title": "Custom runtimes ({{count}})",
+    "custom_section_aria": "Custom runtimes",
+    "builtin_section_title": "Supported base protocols ({{count}})",
+    "builtin_section_hint": "Built-in families are read-only reference options.",
+    "builtin_section_aria": "Supported built-in protocol families",
+    "builtin_reference": "Reference",
+    "empty_title": "Create your first custom runtime",
+    "empty_description": "Pick a base protocol family, then point Multica at the command to run.",
+    "badge_builtin": "Built-in",
+    "badge_custom": "Custom",
+    "badge_disabled": "Disabled",
+    "builtin_detail": {
+      "title": "Built-in protocol family",
+      "description": "{{family}} is a built-in protocol family. It can't be edited or removed.",
+      "read_only": "Read-only"
+    },
+    "detail": {
+      "base_family": "Base protocol family",
+      "command": "Command",
+      "description": "Description",
+      "no_description": "No description",
+      "edit": "Edit",
+      "delete": "Delete",
+      "default_title": "Select a runtime",
+      "default_description": "Pick one from the list to see its details."
+    },
+    "form": {
+      "create_title": "New custom runtime",
+      "edit_title": "Edit custom runtime",
+      "step_family_label": "Choose a base protocol family",
+      "step_family_hint": "The underlying CLI protocol this runtime speaks.",
+      "step_details_label": "Configure the runtime",
+      "step_progress": "Step {{current}} of {{total}}",
+      "family_label": "Base protocol family",
+      "family_locked_hint": "The base protocol family can't be changed after creation.",
+      "display_name_label": "Display name",
+      "display_name_placeholder": "e.g. My custom Claude…",
+      "command_name_label": "Command",
+      "command_name_placeholder": "e.g. agent --model composer-2.5…",
+      "description_label": "Description",
+      "description_placeholder": "What this runtime is for (optional)…",
+      "error_display_name_required": "Display name is required.",
+      "error_command_required": "Command is required.",
+      "error_command_unclosed_quote": "Close the quote before saving.",
+      "error_command_trailing_escape": "Complete or remove the trailing backslash before saving.",
+      "error_command_shell_syntax": "Shell pipelines, redirects, and control operators are not supported. Use a wrapper script for that.",
+      "error_command_shell_expansion": "Shell variable and command expansion is not supported. Use an absolute path or wrapper script.",
+      "command_preview_executable": "Executable:",
+      "command_preview_args": "Args:",
+      "back": "Back",
+      "cancel": "Cancel",
+      "next": "Next",
+      "create": "Create runtime",
+      "creating": "Creating…",
+      "save": "Save changes",
+      "saving": "Saving…",
+      "toast_created": "Custom runtime created",
+      "toast_updated": "Custom runtime updated",
+      "error_duplicate_name": "A runtime with this display name already exists.",
+      "error_generic": "Failed to save the runtime."
+    },
+    "delete_dialog": {
+      "title": "Delete custom runtime from workspace?",
+      "description": "\"{{name}}\" will be removed from this workspace and every machine where it is registered. This can't be undone.",
+      "confirm": "Delete from workspace",
+      "cancel": "Cancel",
+      "deleting": "Deleting…",
+      "toast_deleted": "Custom runtime deleted from workspace",
+      "error_bound": "This runtime can't be deleted while agents are still using it.",
+      "error_generic": "Failed to delete the runtime."
+    }
   }
 }

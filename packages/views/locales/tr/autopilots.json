@@ -8,13 +8,21 @@
       "agent": "Ajan",
       "mode": "Mod",
       "status": "Durum",
-      "last_run": "Son çalışma"
+      "last_run": "Son çalışma",
+      "created_by": "Created by",
+      "assignee": "Assignee",
+      "trigger": "Trigger",
+      "next_run": "Next run",
+      "created": "Created"
     },
     "last_run_empty": "--",
     "empty": {
       "title": "Henüz autopilot yok",
       "hint": "AI ajanlarınız için yinelenen görevler zamanlayın. Bir şablon seçin veya sıfırdan başlayın."
-    }
+    },
+    "scope_all": "All",
+    "no_matches": "No automations match",
+    "retry": "Retry"
   },
   "status": {
     "active": "Aktif",
@@ -88,7 +96,16 @@
       "cancel": "İptal",
       "confirm": "Sil",
       "deleting": "Siliniyor..."
-    }
+    },
+    "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
+    "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
+    "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
+    "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
+    "run_blocked_already_active": "Not triggered — a recent run already covers this",
+    "run_blocked_generic": "Not triggered — the run was blocked",
+    "field_created_by": "Created by",
+    "field_subscribers": "Subscribers",
+    "field_subscribers_none": "None"
   },
   "run_status": {
     "issue_created": "Issue Oluşturuldu",
@@ -151,7 +168,10 @@
       "cancel": "İptal",
       "confirm": "Sil",
       "deleting": "Siliniyor..."
-    }
+    },
+    "show_url": "Show URL",
+    "hide_url": "Hide URL",
+    "hidden_url_aria": "Webhook URL hidden — click to show"
   },
   "deliveries": {
     "section_title": "Webhook Teslimatları",
@@ -186,7 +206,9 @@
       "error_label": "Hata",
       "raw_body": "Ham body",
       "selected_headers": "Headerlar",
-      "response_body": "Yanıt body"
+      "response_body": "Yanıt body",
+      "dispatch_attempts": "Dispatch attempts",
+      "available_at": "Next dispatch"
     },
     "replay": {
       "action": "Yeniden oynat",
@@ -263,7 +285,6 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "Yalnızca bu olaylarla eşleşen webhook'ları işle. Tümünü kabul etmek için boş bırakın.",
     "schedule_disabled_reason": "Bu autopilot'un birden fazla zamanlaması var — detay sayfasından düzenleyin.",
-    "next_run_label": "Sonraki çalışma:",
     "output_modes": {
       "create_issue": {
         "label": "Issue oluştur",
@@ -274,67 +295,13 @@
         "description": "Sessiz çalışma, issue oluşturulmaz"
       }
     },
-    "frequency_long": {
-      "hourly": "Her saat",
-      "daily": "Her gün",
-      "weekdays": "Her hafta içi",
-      "weekly": "Her hafta",
-      "custom": "Özel cron"
-    },
-    "days": {
-      "sunday": "Pazar",
-      "monday": "Pazartesi",
-      "tuesday": "Salı",
-      "wednesday": "Çarşamba",
-      "thursday": "Perşembe",
-      "friday": "Cuma",
-      "saturday": "Cumartesi"
-    }
-  },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "Saatlik",
-      "daily": "Günlük",
-      "weekdays": "Hafta içi",
-      "weekly": "Günler",
-      "custom": "Özel"
-    },
-    "days_short": {
-      "sun": "Paz",
-      "mon": "Pzt",
-      "tue": "Sal",
-      "wed": "Çar",
-      "thu": "Per",
-      "fri": "Cum",
-      "sat": "Cmt"
-    },
-    "cron_label": "Cron İfadesi",
-    "cron_hint": "Standart 5 alanlı cron (min hour dom month dow)",
-    "minute_label": "Dakika",
-    "time_label": "Saat",
-    "timezone_label": "Saat dilimi",
-    "days_label": "Günler",
-    "summary": {
-      "hourly": "Saatlik · :{{min}}",
-      "daily": "Günlük {{time}}",
-      "weekdays": "Hafta içi {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "Özel cron",
-      "no_days": "—"
-    },
-    "describe": {
-      "hourly": "Her saat :{{min}} geçe çalışır",
-      "daily": "Her gün {{time}} {{offset}} saatinde çalışır",
-      "weekdays": "Hafta içi {{time}} {{offset}} saatinde çalışır",
-      "weekly": "Her {{days}} {{time}} {{offset}} saatinde çalışır",
-      "custom": "Özel zamanlama: {{cron}}"
-    },
-    "countdown": {
-      "days_hours": "{{days}}g {{hours}}s",
-      "hours_minutes": "{{hours}}s {{minutes}}d",
-      "minutes": "{{minutes}}d",
-      "less_than_minute": "<1d"
-    }
+    "section_subscribers": "Subscribers",
+    "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
+    "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
+    "subscribers_add": "Add subscriber",
+    "subscribers_search_placeholder": "Search members by name…",
+    "subscribers_no_results": "No matching members",
+    "subscribers_remove_tooltip": "Remove"
   },
   "agent_picker": {
     "filter_placeholder": "Ajan veya ekip filtrele...",
@@ -345,5 +312,139 @@
   },
   "timezone_picker": {
     "search_placeholder": "Saat dilimi ara..."
+  },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
+  },
+  "schedule_editor": {
+    "time_label": "Time",
+    "time_at": "At a time",
+    "time_every": "At an interval",
+    "every_prefix": "Every",
+    "unit_hours": "hours",
+    "unit_minutes": "minutes",
+    "days_label": "Days",
+    "days_every": "Every day",
+    "days_weekly": "Days of week",
+    "days_monthly": "Day of month",
+    "monthly_short_month_hint": "Months without day {{day}} are skipped.",
+    "days_short": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "timezone_label": "Timezone",
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "click to edit",
+    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
+    "cron_invalid": "This cron expression isn't valid.",
+    "timezone_invalid": "This timezone isn't recognized by the server.",
+    "advanced_hint": "This expression uses features the visual editor can't represent. Edit the cron text directly, or simplify it to re-enable the controls.",
+    "advanced_unverified": "The server couldn't be reached to check this expression, so the controls stay off. Make sure the cron text is right before saving.",
+    "advanced_checking": "Checking this expression with the server. The controls stay off until it answers.",
+    "next_runs_label": "Next runs",
+    "next_in": "in {{countdown}}",
+    "preview_unavailable": "Next runs unavailable right now.",
+    "no_upcoming_runs": "This expression has no upcoming runs.",
+    "describe": {
+      "days_every": "Every day",
+      "days_monthly": "Day {{day}} of the month",
+      "days_long": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "At {{time}}",
+      "time_every_hour": "Every hour at :{{minute}}",
+      "time_every_hours": "Every {{interval}} hours at :{{minute}}",
+      "time_every_hour_window": "Every hour",
+      "time_every_hours_window": "Every {{interval}} hours",
+      "time_every_minute": "Every minute",
+      "time_every_minutes": "Every {{interval}} minutes",
+      "window": "{{from}}–{{to}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}h {{minutes}}m",
+      "hours_minutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    },
+    "a11y": {
+      "fixed_hour": "Hour",
+      "fixed_minute": "Minute",
+      "interval": "Interval",
+      "interval_unit": "Interval unit",
+      "window_start_hour": "Window start hour",
+      "window_start_minute": "Window start minute",
+      "window_end_hour": "Window end hour",
+      "window_end_minute": "Window end minute",
+      "day_pattern": "Day pattern",
+      "day_of_month": "Day of month",
+      "timezone": "Timezone",
+      "days_full": {
+        "sun": "Sunday",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday"
+      }
+    }
+  },
+  "toolbar": {
+    "result_count_title": "Matching automations / all automations",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_assignee": "Assignee",
+    "section_mode": "Mode",
+    "section_trigger": "Trigger",
+    "section_creator": "Created by",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns"
+  },
+  "actions": {
+    "row_menu": "Automation actions",
+    "pause": "Pause",
+    "resume": "Resume",
+    "delete": "Delete",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "delete_dialog": {
+      "title": "Delete automation?",
+      "description_one": "This will permanently delete \"{{name}}\" and its run history.",
+      "description_other": "This will permanently delete {{count}} automations and their run history.",
+      "warning": "This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete permanently",
+      "deleting": "Deleting…"
+    }
   }
 }

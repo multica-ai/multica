@@ -40,7 +40,9 @@
     "back": "Geri",
     "continue": "Devam et",
     "skip": "Atla",
-    "cancel": "İptal"
+    "cancel": "İptal",
+    "close": "Close",
+    "log_out": "Log out"
   },
   "questions": {
     "eyebrow_about_you": "Hakkınızda",
@@ -86,6 +88,9 @@
       "evaluate": "Sadece keşfediyorum",
       "other": "Diğer",
       "other_placeholder": "örn. çalışma grubu koordinasyonu"
+    },
+    "about_you": {
+      "question": "Tell us a bit about you."
     }
   },
   "option_card": {
@@ -126,59 +131,6 @@
     "on_list": "Listedesiniz",
     "success_toast": "Listedesiniz. Cloud çalışma ortamları yayına alındığında e-posta göndereceğiz.",
     "failed_toast": "Bekleme listesine katılınamadı"
-  },
-  "first_issue": {
-    "error_title": "Bir şeyler ters gitti",
-    "retry": "Tekrar dene",
-    "retry_failed": "Tekrar deneme başarısız",
-    "finishing": "Tamamlanıyor",
-    "opening": "Neredeyse bitti; çalışma alanınız açılıyor."
-  },
-  "step_agent": {
-    "eyebrow": "İlk ajanınız",
-    "headline": "İlk ekip arkadaşınızla tanışın.",
-    "lede_prefix": "Yanıtlarınız bir ",
-    "lede_suffix": " işaret ediyor. Dört seçenekten size uyanı seçin; her template ilk issue'sunu almaya hazır gelir. Talimatlarını daha sonra ajan ayarları sayfasından yeniden düzenleyebilirsiniz.",
-    "footer_hint": "Başlamak için bir ajan yeterli. Daha sonra sidebar'dan yenilerini ekleyin.",
-    "create_action": "{{name}} oluştur",
-    "create_failed": "Ajan oluşturulamadı",
-    "recommended_badge": "Önerilen",
-    "templates": {
-      "coding": {
-        "label": "Coding Ajan",
-        "blurb": "Kod yazar, refactor eder ve ship eder. Repo'nuzu okur.",
-        "instructions": "Bir product team'de Coding Ajan olarak çalışıyorsunuz. Coding issue'larını alın: özellikleri implement edin, bug'ları düzeltin, test yazın ve pull request açın. Başlamadan önce repository'yi okuyun, mevcut code convention'ları izleyin ve diff'leri odaklı tutun. Acceptance criteria belirsiz olduğunda açıklama isteyin."
-      },
-      "planning": {
-        "label": "Planning Ajan",
-        "blurb": "İşi parçalara ayırır, spec taslakları çıkarır, panoyu düzenli tutar.",
-        "instructions": "Bir Planning Ajan olarak çalışıyorsunuz. Dağınık fikirleri ve açık issue'ları kapsamı belirli, çalışmaya hazır işlere dönüştürün: alt task'lere bölün, acceptance criteria yazın, owner ve sıralama önerin. Hız yerine netliği tercih edin. Eksik bağlam nedeniyle bloklandıysanız tahmin etmek yerine tek ve spesifik bir soru sorun."
-      },
-      "writing": {
-        "label": "Writing Ajan",
-        "blurb": "Taslak hazırlar, özetler, araştırır. Uzun format için uygundur.",
-        "instructions": "Bir Writing Ajan olarak çalışıyorsunuz. Doküman taslakları hazırlayın, uzun içerikleri özetleyin ve gerektiğinde web'de konu araştırın. Çıktınızı outline olarak değil, okuyucunun doğrudan kullanabileceği tamamlanmış metin olarak yapılandırın. Kaynaklardan yararlandığınızda alıntı verin. Issue'da kullanıcının belirlediği tona uyun."
-      },
-      "assistant": {
-        "label": "Assistant",
-        "blurb": "Genel amaçlı. Task belirsiz olduğunda iyi varsayılan.",
-        "instructions": "Genel amaçlı bir ekip arkadaşısınız. Hafif coding, yazı, araştırma, planlama gibi çeşitli task'leri ele alın ve kapsam konusunda pragmatik kalın. Task belirsiz olduğunda işe dalmadan önce bir netleştirme sorusu sorun. Kapsamlı çıktılar yerine kısa ve faydalı çıktıları varsayılan alın."
-      }
-    },
-    "about_eyebrow": "Ajan nedir?",
-    "about_headline": "Çalışma alanınızde yaşayan bir AI ekip arkadaşı.",
-    "about_body": "Ajanlar her assignee picker'da diğer iş arkadaşları gibi görünür; tek fark, verdiğiniz çalışma ortamı üzerinde 7/24 çalışabilmeleridir.",
-    "ways_eyebrow": "Bir ajan ile çalışma yolları",
-    "way_assign_title": "Bir issue atayın",
-    "way_assign_body": "Task'i alır ve thread'de geri bildirim verir.",
-    "way_mention_title": "Yorumda @mention edin",
-    "way_mention_body": "Hızlı bir görüş için onu konuşmaya dahil edin.",
-    "way_chat_title": "Bire bir chat",
-    "way_chat_body": "Issue oluşturmadan hızlı sorular sorun.",
-    "way_autopilot_title": "Autopilot'a alın",
-    "way_autopilot_body": "Günlük triage, haftalık özet, aylık audit; zamanlanmış şekilde.",
-    "add_more_hint": "İstediğiniz zaman daha fazla ajan ekleyin. Uzmanlaşmış küçük bir ajan ekibi, her işi yapan tek bir ajandan daha iyidir.",
-    "docs_link": "İlk ajanınızı oluşturma →"
   },
   "welcome_after_onboarding": {
     "loading_helper": "Helper'ınız hazırlanıyor…",
@@ -373,5 +325,11 @@
   },
   "errors": {
     "skip_failed": "Onboarding tamamlanamadı"
+  },
+  "source_backfill": {
+    "eyebrow": "Quick question",
+    "lede": "One quick question — it helps us understand who finds Multica useful. Answer once and you're back to your work.",
+    "submit": "Submit",
+    "hint_ready": "Looks good. Hit Submit when you're ready."
   }
 }

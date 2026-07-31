@@ -10,13 +10,16 @@
     "usage": "Kullanım",
     "runtimes": "Çalışma ortamları",
     "skills": "Skill'ler",
-    "settings": "Ayarlar"
+    "settings": "Ayarlar",
+    "chat": "Chat"
   },
   "help": {
     "trigger": "Yardım",
     "docs": "Dokümanlar",
     "changelog": "Değişiklikler",
-    "feedback": "Geri bildirim"
+    "feedback": "Geri bildirim",
+    "discord": "Discord",
+    "server_version": "Server version {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "Çalışma alanı yükleniyor…",
@@ -36,6 +39,24 @@
     "pinned_label": "Sabitlenenler",
     "workspace_group": "Çalışma alanı",
     "configure_group": "Yapılandır",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Join our Discord",
+      "dismiss": "Dismiss"
+    }
+  },
+  "tab": {
+    "issue": "Issue",
+    "project": "Project",
+    "autopilot": "Autopilot",
+    "agent": "Agent",
+    "member": "Member",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Machine",
+    "runtime": "Runtime",
+    "attachment": "Attachment",
+    "create_agent": "Create Agent",
+    "unknown": "Unknown page"
   }
 }

@@ -51,7 +51,6 @@
     "used_by": "Kullanan",
     "source": "Kaynak · Ekleyen",
     "updated": "Güncellendi",
-    "no_description": "Açıklama yok",
     "lock_tooltip": "Salt okunur — yalnızca oluşturan veya admin düzenleyebilir",
     "unused": "— kullanılmıyor",
     "by_creator": "{{name}} tarafından",
@@ -61,7 +60,9 @@
     "source_runtime_unknown": "Bir çalışma ortamından",
     "source_clawhub": "ClawHub'dan",
     "source_skills_sh": "Skills.sh'den",
-    "source_github": "GitHub'dan"
+    "source_github": "GitHub'dan",
+    "created_by": "Added by",
+    "created": "Created"
   },
   "detail": {
     "all_skills": "Tüm skill'ler",
@@ -69,13 +70,8 @@
     "delete_aria": "Skill'i sil",
     "delete_tooltip": "Skill'i sil",
     "supporting_data_warning": "Bazı çalışma alanı verileri yüklenemedi. Oluşturan bilgisi, çalışma ortamı adları veya düzenleme izinleri sonraki yenilemeye kadar eksik görünebilir.",
-    "files_label": "Dosyalar · {{count}}",
-    "add_file_aria": "Dosya ekle",
-    "add_file_tooltip": "Dosya ekle",
     "delete_file": "Dosyayı sil",
-    "name_aria": "Skill adı",
     "name_placeholder": "skill-name",
-    "description_label": "Açıklama",
     "description_placeholder": "Bir ajanın bu skill'i ne zaman kullanması gerektiğini anlatan tek cümle…",
     "subline": {
       "origin_runtime_named": "Local çalışma ortamı · {{name}}",
@@ -84,42 +80,19 @@
       "origin_clawhub": "İçe aktarıldı · ClawHub",
       "origin_skills_sh": "İçe aktarıldı · Skills.sh",
       "origin_github": "İçe aktarıldı · GitHub",
-      "origin_workspace": "Çalışma alanı",
-      "updated_label": "{{when}} güncellendi",
-      "by_creator": "{{name}} tarafından"
+      "origin_workspace": "Çalışma alanı"
     },
     "conflict_banner": {
       "title": "Başka biri bu skill'i güncelledi",
       "body": "Düzenlemeleriniz korundu. Onların değişikliklerini almak için vazgeçin veya üzerine yazmak için kaydedin."
     },
     "save_bar": {
-      "unsaved": "Kaydedilmemiş değişiklikler — kaydettiğinizde canlı skill'in üzerine yazılacak",
       "discard": "Vazgeç",
       "save": "Değişiklikleri kaydet",
-      "saving": "Kaydediliyor…"
-    },
-    "sidebar": {
-      "metadata": "Meta veri",
-      "created": "Oluşturuldu",
-      "updated": "Güncellendi",
-      "created_by": "Oluşturan",
-      "files": "Dosyalar",
-      "id": "ID",
-      "origin": "Köken",
-      "used_by_one": "{{count}} ajan kullanıyor",
-      "used_by_other": "{{count}} ajan kullanıyor",
-      "permissions": "İzinler",
-      "permissions_owner": "Bu skill'i düzenleyebilir ve silebilirsiniz. Değişiklikler sonraki ajan çalışmasında etkili olur.",
-      "permissions_locked_creator": "Bu skill'i yalnızca oluşturan ({{name}}) veya bir çalışma alanı admini düzenleyebilir.",
-      "permissions_locked": "Bu skill'i yalnızca oluşturan veya bir çalışma alanı admini düzenleyebilir.",
-      "used_by_empty": "Henüz hiçbir ajana atanmadı. Atamak için bir ajanın Skills sekmesini açın."
-    },
-    "origin_card": {
-      "imported_runtime": "Local çalışma ortamından içe aktarıldı",
-      "imported_clawhub": "ClawHub'dan içe aktarıldı",
-      "imported_skills_sh": "Skills.sh'den içe aktarıldı",
-      "imported_github": "GitHub'dan içe aktarıldı",
-      "provider": "provider · {{provider}}"
+      "saving": "Kaydediliyor…",
+      "changed_summary": "Changed: {{parts}}",
+      "changed_files_one": "{{count}} file",
+      "changed_files_other": "{{count}} files"
     },
     "not_found": {
       "title": "Skill bulunamadı",
@@ -149,8 +122,49 @@
         "absolute": "Absolute pathlere izin verilmez.",
         "double_dot": "Pathler \"..\" içeremez.",
         "reserved": "SKILL.md ana dosya için ayrılmıştır.",
-        "exists": "Bu pathte zaten bir dosya var."
+        "exists": "Bu pathte zaten bir dosya var.",
+        "is_directory": "A folder with this name already exists",
+        "under_file": "A file already exists at that location"
       }
+    },
+    "header": {
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "used_by_one": "{{count}} agent",
+      "used_by_other": "{{count}} agents",
+      "updated": "Updated {{when}}",
+      "updated_by": "Updated {{when}} by {{name}}"
+    },
+    "tabs": {
+      "aria": "Skill sections",
+      "overview": "Overview",
+      "files_one": "Files {{count}}",
+      "files_other": "Files {{count}}"
+    },
+    "overview": {
+      "properties": "Properties",
+      "properties_hint": "These fields stay in sync with the SKILL.md frontmatter.",
+      "name": "Name",
+      "description": "Description",
+      "description_hint": "{{count}} characters. Agents read this to decide whether to load the skill.",
+      "labels": "Labels",
+      "used_by_one": "Used by {{count}} agent",
+      "used_by_other": "Used by {{count}} agents",
+      "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign.",
+      "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
+      "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
+      "permissions_locked": "Only the creator or a workspace admin can edit this skill."
+    },
+    "files": {
+      "list_aria": "Skill files",
+      "main": "Main file",
+      "supporting_one": "Supporting {{count}}",
+      "supporting_other": "Supporting {{count}}",
+      "supporting_empty": "No supporting files.",
+      "add_file": "New file",
+      "mode_aria": "File view",
+      "mode_preview": "Preview",
+      "mode_raw": "Plain text"
     }
   },
   "create": {
@@ -243,18 +257,85 @@
     "bulk_complete_hint": "İçe aktarma tamamlandı.",
     "bulk_cancelled_hint": "İçe aktarma iptal edildi.",
     "bulk_done_button": "Tamam",
-    "bulk_summary_imported": "İçe aktarıldı",
     "bulk_summary_skipped": "Atlandı",
-    "bulk_summary_failed": "Başarısız"
+    "bulk_summary_failed": "Başarısız",
+    "search_placeholder": "Search local skills",
+    "no_search_results_title": "No matching local skills",
+    "no_search_results_hint": "No local skills match \"{{query}}\".",
+    "bulk_summary_created": "Created",
+    "bulk_summary_updated": "Updated",
+    "bulk_summary_conflicts": "Conflicts",
+    "conflict_single_title": "A skill with this name already exists",
+    "conflict_bulk_title": "{{count}} skills need a decision",
+    "conflict_hint": "Choose whether to overwrite the existing workspace skill, import with a new name, or skip it.",
+    "conflict_locked_creator": "This skill was created by {{creator}}. Only the creator can overwrite it from local import; edit it from the Skill detail page if you need to change it.",
+    "conflict_locked": "Only the creator can overwrite this skill from local import; edit it from the Skill detail page if you need to change it.",
+    "conflict_overwrite": "Overwrite",
+    "conflict_rename": "Rename",
+    "conflict_skip": "Skip",
+    "conflict_cancel": "Cancel",
+    "conflict_overwrite_all": "Overwrite all",
+    "conflict_skip_all": "Skip all",
+    "conflict_rename_label": "New skill name",
+    "conflict_footer": "{{count}} conflict decisions pending.",
+    "conflict_apply_button": "Apply decisions",
+    "conflict_missing_resolution": "Choose how to resolve this conflict.",
+    "conflict_name_still_exists": "That name already exists. Choose another name or skip."
   },
   "file_tree": {
-    "no_files": "Dosya yok"
+    "no_files": "Dosya yok",
+    "actions": {
+      "label": "Actions for {{path}}",
+      "rename": "Rename",
+      "delete": "Delete"
+    }
   },
   "file_viewer": {
-    "edit_tooltip": "Düzenle",
-    "preview_tooltip": "Önizle",
     "no_content": "*Henüz içerik yok*",
     "markdown_placeholder": "Markdown içeriği yazın...",
-    "raw_placeholder": "Dosya içeriği..."
+    "raw_placeholder": "Dosya içeriği...",
+    "raw_aria": "Plain text content of {{path}}"
+  },
+  "actions": {
+    "row_menu": "Actions",
+    "add_to_agent": "Add to agent",
+    "my_agents": "My agents",
+    "other_agents": "Other agents",
+    "no_agents": "No agents available",
+    "search_placeholder": "Search agents…",
+    "no_agents_match": "No agents match your search.",
+    "has_partial": "{{owned}}/{{total}} added",
+    "added_toast": "Added to {{name}}",
+    "add_failed_toast": "Failed to add skill",
+    "delete": "Delete",
+    "selected": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "delete_no_permission": "Selection includes skills only their creator or an admin can delete",
+    "delete_dialog_title_one": "Delete {{count}} skill?",
+    "delete_dialog_title_other": "Delete {{count}} skills?",
+    "delete_dialog_desc_one": "This will permanently delete the selected skill and remove it from all agents.",
+    "delete_dialog_desc_other": "This will permanently delete the {{count}} selected skills and remove them from all agents.",
+    "deleted_toast_one": "Deleted {{count}} skill",
+    "deleted_toast_other": "Deleted {{count}} skills",
+    "delete_failed_toast": "Failed to delete skills",
+    "add_dialog_description": "Select the agents that should get the selected skills.",
+    "cancel": "Cancel",
+    "add_confirm": "Add ({{num}})",
+    "adding": "Adding...",
+    "added_multi_toast_one": "Added to {{count}} agent",
+    "added_multi_toast_other": "Added to {{count}} agents"
+  },
+  "toolbar": {
+    "result_count_title": "Matching skills / all skills",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_usage": "Usage",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns"
   }
 }

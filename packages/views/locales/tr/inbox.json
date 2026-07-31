@@ -18,14 +18,18 @@
       "minutes": "{{count}} dk",
       "hours": "{{count}} sa",
       "days": "{{count}} g"
-    }
+    },
+    "archived_title": "Archived",
+    "archived_empty": "No archived notifications",
+    "unarchive_tooltip": "Unarchive"
   },
   "detail": {
     "select_prompt": "Detayları görüntülemek için bir bildirim seçin",
     "empty": "Gelen Kutusu boş",
     "original_input": "Orijinal girdi",
     "edit_advanced": "Gelişmiş formda düzenle",
-    "archive": "Arşivle"
+    "archive": "Arşivle",
+    "unarchive": "Unarchive"
   },
   "types": {
     "issue_assigned": "Atandı",
@@ -44,7 +48,9 @@
     "agent_completed": "Ajan tamamladı",
     "reaction_added": "Tepki verildi",
     "quick_create_done": "Ajan ile oluşturuldu",
-    "quick_create_failed": "Ajan ile oluşturma başarısız"
+    "quick_create_failed": "Ajan ile oluşturma başarısız",
+    "issue_subscribed": "Subscribed",
+    "quick_create_unconfirmed": "Create with agent unconfirmed"
   },
   "labels": {
     "set_status_to": "Durumu şuna ayarla",
@@ -66,6 +72,15 @@
     "mark_all_read_failed": "Tümü okundu olarak işaretlenemedi",
     "archive_all_failed": "Tümü arşivlenemedi",
     "archive_all_read_failed": "Okunan öğeler arşivlenemedi",
-    "archive_completed_failed": "Tamamlananlar arşivlenemedi"
+    "archive_completed_failed": "Tamamlananlar arşivlenemedi",
+    "mark_unread_failed": "Failed to mark as unread",
+    "unarchive_failed": "Failed to unarchive",
+    "archived_load_failed": "Failed to load archived notifications"
+  },
+  "context_menu": {
+    "mark_read": "Mark as read",
+    "mark_unread": "Mark as unread",
+    "archive": "Archive",
+    "unarchive": "Unarchive"
   }
 }

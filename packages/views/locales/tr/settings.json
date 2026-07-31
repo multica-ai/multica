@@ -20,6 +20,15 @@
       "browser_suffix": " (tarayıcı)",
       "hint": "Dashboard'lar, grafikler ve size gösterilen tüm 'bugün' etiketleri için kullanılır. Tüm çalışma alanlarınızda geçerli kişisel bir tercihtir.",
       "sync_failed": "Saat dilimi tercihiniz kaydedilemedi."
+    },
+    "general_title": "General",
+    "sticky_comment_bar": {
+      "title": "Sticky comment bar",
+      "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "issue_link_new_tab": {
+      "title": "Open issue links in new tab",
+      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "page": {
@@ -36,7 +45,13 @@
       "github": "GitHub",
       "integrations": "Entegrasyonlar",
       "labs": "Labs",
-      "members": "Üyeler"
+      "members": "Üyeler",
+      "shortcuts": "Shortcuts",
+      "issue": "Issue",
+      "chat": "Chat",
+      "labels": "Labels",
+      "properties": "Properties",
+      "quick_actions": "Quick Actions"
     }
   },
   "account": {
@@ -52,7 +67,8 @@
     "toast_avatar_updated": "Avatar güncellendi",
     "toast_avatar_failed": "Avatar yüklenemedi",
     "toast_profile_updated": "Profil güncellendi",
-    "toast_profile_failed": "Profil güncellenemedi"
+    "toast_profile_failed": "Profil güncellenemedi",
+    "avatar_label": "Avatar"
   },
   "notifications": {
     "title": "Gelen Kutusu Bildirimleri",
@@ -85,6 +101,14 @@
       "description": "Multica arka plandayken gösterilen yerel işletim sistemi bildirim banner'larını kontrol edin.",
       "label": "Sistem bildirimlerini göster",
       "hint": "Uygulama odakta değilken yeni gelen kutusu öğeleri için işletim sisteminizden bir banner göster."
+    },
+    "browser": {
+      "label": "Browser notifications",
+      "hint": "Allow this browser to show notification banners for new inbox items.",
+      "enable": "Enable",
+      "granted": "This browser can show notification banners.",
+      "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
+      "enabled_badge": "Enabled"
     }
   },
   "tokens": {
@@ -117,10 +141,18 @@
     },
     "created_dialog": {
       "title": "Token oluşturuldu",
-      "description": "Kişisel erişim token'ınızı şimdi kopyalayın. Bir daha göremeyeceksiniz.",
       "copy_tooltip": "Token'ı kopyala",
-      "done": "Bitti"
-    }
+      "done": "Bitti",
+      "warning_prefix": "Your new personal access token has been created. For security reasons, it is ",
+      "warning_emphasis": "displayed only once",
+      "warning_suffix": " — store it securely and never share it. A lost token cannot be recovered; revoke it and create a new one instead.",
+      "confirm_stored": "I have securely stored this token.",
+      "cli_hint": "Sign in to the CLI with:",
+      "copy_command_tooltip": "Copy command"
+    },
+    "security_note": "A token grants full access to your account — treat it like a password.",
+    "empty": "No API tokens yet. Create one above to get started.",
+    "load_failed": "Could not load your API tokens. Reload the page to try again."
   },
   "workspace": {
     "section_general": "Genel",
@@ -159,7 +191,8 @@
     "deleting": "Siliniyor...",
     "toast_delete_failed": "Çalışma alanı silinemedi",
     "confirm_cancel": "İptal",
-    "confirm_action": "Onayla"
+    "confirm_action": "Onayla",
+    "logo_label": "Workspace logo"
   },
   "delete_workspace_dialog": {
     "title": "Çalışma alanını sil",
@@ -174,12 +207,6 @@
     "section_placeholder_title": "Henüz deney yok",
     "section_placeholder_description": "Deneysel ayarlar yayınlandıkça burada yer alacak. Bugün bu sekme bilerek boş.",
     "toast_failed": "Ayar güncellenemedi"
-  },
-  "integrations": {
-    "section_title": "Entegrasyonlar",
-    "empty_title": "Henüz üçüncü taraf entegrasyon yok",
-    "empty_description": "Slack, Linear ve diğer entegrasyonlar bağlandığında burada görünecek. GitHub kendi sekmesine taşındı.",
-    "manage_hint": "Entegrasyonları yalnızca admin'ler ve owner'lar yönetebilir."
   },
   "github": {
     "page_description": "Bir GitHub App bağlayın, Pull Request'lerin Multica içinde nasıl görüneceğini kontrol edin ve ajanlarınızın commit geçmişinde ne bırakacağına karar verin.",
@@ -240,7 +267,32 @@
     "delete_aria": "Repository'yi sil",
     "manage_hint": "Repository'leri yalnızca admin'ler ve owner'lar yönetebilir.",
     "toast_saved": "Repository'ler kaydedildi",
-    "toast_save_failed": "Repository'ler kaydedilemedi"
+    "toast_save_failed": "Repository'ler kaydedilemedi",
+    "connect_github": "Connect GitHub",
+    "choose_from_github": "Choose from GitHub",
+    "github_not_configured": "GitHub connection is not configured for this deployment.",
+    "github_browse_not_configured": "Repository browsing requires GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.",
+    "github_connect_failed": "Could not connect GitHub. Try again.",
+    "github_picker_title": "Choose GitHub repositories",
+    "github_picker_description": "Select repositories to add to this workspace. Existing manual entries stay unchanged.",
+    "github_account": "GitHub account",
+    "github_search_placeholder": "Search loaded repositories",
+    "github_loading": "Loading repositories…",
+    "github_load_failed": "Could not load repositories from GitHub. Check the installation access and try again.",
+    "github_empty": "This installation has no accessible repositories.",
+    "github_no_search_results": "No loaded repositories match this search.",
+    "github_private": "Private",
+    "github_archived": "Archived",
+    "github_added": "Added",
+    "github_load_more": "Load more",
+    "github_selected_count": "{{count}} selected",
+    "github_cancel": "Cancel",
+    "github_import": "Add repositories",
+    "complete_manual_entry_first": "Complete or remove the empty manual repository before importing.",
+    "delete_confirm_title": "Delete repository?",
+    "delete_confirm_description": "This repository will be removed from the workspace immediately.",
+    "delete_confirm_cancel": "Cancel",
+    "delete_confirm_action": "Delete repository"
   },
   "desktop": {
     "tabs": {
@@ -255,7 +307,10 @@
       "up_to_date": "En son sürümdesiniz.",
       "downloading": "v{{version}} arka planda indiriliyor; kuruluma hazır olduğunda bilgilendirileceksiniz.",
       "check_now": "Şimdi kontrol et",
-      "checking": "Kontrol ediliyor…"
+      "checking": "Kontrol ediliyor…",
+      "automatic_updates_title": "Automatic background updates",
+      "automatic_updates_description": "Check shortly after launch and every hour, then download available updates in the background.",
+      "automatic_updates_save_failed": "Failed to save automatic update settings"
     }
   },
   "members": {
@@ -300,5 +355,497 @@
         "description": "Issue oluşturur ve issue'lar üzerinde çalışır"
       }
     }
+  },
+  "quick_actions": {
+    "title": "Quick Actions",
+    "description": "Preset an agent and a prompt once, then trigger it from any issue's sidebar with a single click.",
+    "add": "New quick action",
+    "search_placeholder": "Search quick actions",
+    "loading": "Loading quick actions…",
+    "no_results": "No quick actions match your search",
+    "actions_open": "Open actions for {{name}}",
+    "columns": {
+      "name": "Name",
+      "target": "Runs as",
+      "visibility": "Who",
+      "usage": "Used",
+      "updated": "Updated"
+    },
+    "empty_title": "No quick actions yet",
+    "empty_hint": "Create one for the work you ask an agent to do again and again — code review, writing tests, a security pass.",
+    "archived": "Archived",
+    "visibility_public": "Team",
+    "visibility_private": "Just me",
+    "visibility_public_hint": "Everyone in the workspace",
+    "visibility_private_hint": "Only you",
+    "field_visibility": "Who can use it",
+    "public_target_hint": "Must be an agent everyone can trigger.",
+    "target_private": "private",
+    "target_missing": "Target unavailable",
+    "archive": "Archive",
+    "unarchive": "Restore",
+    "edit": "Edit",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "save": "Save",
+    "never_used": "Never used",
+    "used_count": "Used {{count}}×",
+    "create_title": "New quick action",
+    "edit_title": "Edit quick action",
+    "dialog_description": "Runs as a comment on the issue, like an @mention.",
+    "field_name": "Name",
+    "field_name_placeholder": "Code Review",
+    "field_target": "Runs as",
+    "field_prompt": "Prompt",
+    "field_prompt_placeholder": "Review the code linked to this issue. Focus on correctness and edge cases.",
+    "prompt_hint": "Sent as written. The agent already sees the issue.",
+    "template_not_supported": "Variables aren’t supported yet — remove {{token}}. The agent already reads this issue.",
+    "delete_title": "Delete this quick action?",
+    "delete_description": "It disappears from every issue sidebar. Past runs stay in the execution log. Archive instead if you may want it back."
+  },
+  "auto_save": {
+    "saving": "Saving…",
+    "saved": "Saved",
+    "failed": "Couldn't save",
+    "toast_saved": "Changes saved"
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "description": "Customize product actions on this device. Click a shortcut, then press the new key combination.",
+    "search_placeholder": "Search actions...",
+    "reset_all": "Restore defaults",
+    "reset_confirm": {
+      "title": "Restore all shortcut defaults?",
+      "description": "This will remove every custom shortcut and restore the defaults on this device.",
+      "cancel": "Cancel",
+      "confirm": "Restore all defaults"
+    },
+    "reset": "Reset",
+    "disable": "Disable",
+    "reset_action": "Reset {{action}}",
+    "disable_action": "Disable {{action}} shortcut",
+    "record_aria": "Change shortcut for {{action}}",
+    "recording": "Press keys",
+    "record_hint": "Esc cancels · Delete clears",
+    "unassigned": "Unassigned",
+    "no_results": "No matching shortcut actions.",
+    "conflict_error": "Already used by {{action}}.",
+    "reserved_error": "Reserved by the browser or desktop window.",
+    "send_error": "Send can only use Enter or Mod+Enter.",
+    "unsafe_error": "This key would interfere with typing or basic keyboard navigation.",
+    "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
+    "categories": {
+      "general": "General",
+      "navigation": "Navigation"
+    },
+    "actions": {
+      "openSearch": {
+        "label": "Open search",
+        "description": "Search and run commands from anywhere."
+      },
+      "createIssue": {
+        "label": "Create issue",
+        "description": "Open your preferred issue creation flow."
+      },
+      "toggleSidebar": {
+        "label": "Toggle sidebar",
+        "description": "Show or hide the main sidebar."
+      },
+      "toggleChat": {
+        "label": "Toggle chat window",
+        "description": "Open or close the floating chat window. Opening it focuses the message input."
+      },
+      "findInIssue": {
+        "label": "Find in issue",
+        "description": "Search within the open issue detail."
+      },
+      "send": {
+        "label": "Send",
+        "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog."
+      },
+      "goInbox": {
+        "label": "Go to Inbox",
+        "description": "Open the workspace inbox."
+      },
+      "goChat": {
+        "label": "Go to Chat",
+        "description": "Open workspace chat."
+      },
+      "goMyIssues": {
+        "label": "Go to My Issues",
+        "description": "Open issues assigned to you."
+      },
+      "goIssues": {
+        "label": "Go to Issues",
+        "description": "Open the issue list."
+      },
+      "goProjects": {
+        "label": "Go to Projects",
+        "description": "Open the project list."
+      },
+      "goAutopilots": {
+        "label": "Go to Autopilot",
+        "description": "Open workspace automations."
+      },
+      "goAgents": {
+        "label": "Go to Agents",
+        "description": "Open the agent list."
+      },
+      "goSquads": {
+        "label": "Go to Squads",
+        "description": "Open the squad list."
+      },
+      "goUsage": {
+        "label": "Go to Usage",
+        "description": "Open usage analytics."
+      },
+      "goRuntimes": {
+        "label": "Go to Runtimes",
+        "description": "Open runtime configuration."
+      },
+      "goSkills": {
+        "label": "Go to Skills",
+        "description": "Open the skill library."
+      },
+      "goSettings": {
+        "label": "Go to Settings",
+        "description": "Open workspace settings."
+      }
+    },
+    "fixed": {
+      "title": "Fixed system shortcuts",
+      "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "close_tab": "Close active tab",
+      "zoom_in": "Zoom in",
+      "zoom_out": "Zoom out",
+      "reset_zoom": "Reset zoom",
+      "close_dialog": "Close dialog or menu"
+    }
+  },
+  "chat": {
+    "floating_title": "Floating window",
+    "floating_label": "Floating chat window",
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab.",
+    "quick_actions_title": "Suggested follow-ups",
+    "quick_actions_label": "Generate suggested follow-ups",
+    "quick_actions_hint": "Generate up to three follow-up suggestions after each agent reply. When off, messages sent from this device no longer trigger generation; existing suggestions stay visible."
+  },
+  "issue": {
+    "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
+    "quick_create_title": "Create with agent",
+    "quick_create_description": "Fields shown in the quick create toolbar.",
+    "manual_create_title": "Create manually",
+    "manual_create_description": "Fields shown in the manual create toolbar.",
+    "fields": {
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "labels": "Labels",
+      "project": "Project",
+      "due_date": "Due date",
+      "start_date": "Start date"
+    }
+  },
+  "properties": {
+    "title": "Properties",
+    "description": "Define typed custom properties for issues in this workspace. Values are set on each issue and are readable and writable by agents.",
+    "search_placeholder": "Filter by name...",
+    "new_property": "New property",
+    "show_archived": "Show archived",
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "options": "Options",
+      "usage": "Used by",
+      "updated": "Updated"
+    },
+    "usage_count_one": "{{count}} issue",
+    "usage_count_other": "{{count}} issues",
+    "loading": "Loading properties...",
+    "empty": "No properties yet",
+    "empty_hint": "Create typed fields like Severity or Environment — agents can read and write them with validation.",
+    "no_results": "No matching properties",
+    "save_failed": "Couldn't save property",
+    "limit_hint": "{{count}}/{{max}} active properties",
+    "archived_badge": "Archived",
+    "types": {
+      "text": "Text",
+      "number": "Number",
+      "select": "Select",
+      "multi_select": "Multi-select",
+      "date": "Date",
+      "checkbox": "Checkbox",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "archive": "Archive",
+      "unarchive": "Restore"
+    },
+    "editor": {
+      "create_title": "New property",
+      "edit_title": "Edit property",
+      "admin_hint": "Only workspace owners and admins can manage property definitions.",
+      "icon": "Icon",
+      "choose_icon": "Choose icon",
+      "remove_icon": "Remove icon",
+      "name": "Name",
+      "name_placeholder": "e.g. Severity",
+      "type": "Type",
+      "type_locked_hint": "Type can't be changed after creation.",
+      "description": "Description",
+      "description_placeholder": "What this property means and when to set it",
+      "options": "Options",
+      "option_name_placeholder": "Option name",
+      "add_option": "Add option",
+      "remove_option": "Remove option",
+      "cancel": "Cancel",
+      "save": "Save property",
+      "saving": "Saving..."
+    },
+    "archive_dialog": {
+      "title": "Archive property?",
+      "description": "\"{{name}}\" will be hidden from pickers and filters. Existing values on issues are preserved. You can restore it later.",
+      "cancel": "Cancel",
+      "confirm": "Archive property",
+      "failed": "Couldn't archive property"
+    }
+  },
+  "labels": {
+    "title": "Labels",
+    "description": "Manage the separate label catalogs used to organize issues, agents, and skills in this workspace.",
+    "scopes": {
+      "issue": "Issues",
+      "agent": "Agents",
+      "skill": "Skills"
+    },
+    "search_placeholder": "Filter by name or description...",
+    "new_label": "New label",
+    "columns": {
+      "name": "Name",
+      "description": "Description",
+      "usage": "Used by",
+      "updated": "Updated"
+    },
+    "usage_count": "{{count}} used",
+    "loading": "Loading labels...",
+    "empty": "No {{scope}} labels yet",
+    "no_results": "No matching labels",
+    "save_failed": "Couldn't save label",
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "editor": {
+      "create_title": "New label",
+      "edit_title": "Edit label",
+      "scope_hint": "This label belongs only to the {{scope}} catalog.",
+      "name": "Name",
+      "name_placeholder": "e.g. Bug",
+      "description": "Description",
+      "description_placeholder": "Describe when this label should be used",
+      "color": "Color",
+      "cancel": "Cancel",
+      "save": "Save label",
+      "saving": "Saving..."
+    },
+    "delete_dialog": {
+      "title": "Delete label?",
+      "description": "Delete \"{{name}}\"? It will be removed from {{count}} resources. This can't be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete label",
+      "failed": "Couldn't delete label"
+    }
+  },
+  "vcs": {
+    "section_title": "Git providers (self-hosted)",
+    "page_description": "Connect a self-hosted Forgejo, Gitea, or GitLab instance to mirror pull requests onto issues. Each connection uses an access token; agents push branches and open PRs using the runtime's own Git credentials.",
+    "connect_title": "Connect a provider instance",
+    "connected_as": "Connected as {{login}}",
+    "form_provider_label": "Provider",
+    "form_instance_url_label": "Instance URL",
+    "form_token_label": "Access token",
+    "form_token_placeholder": "Access token",
+    "form_token_hint": "Create an access token with read access to repositories. Forgejo/Gitea: Settings, Applications. GitLab: a personal access token with the read_api scope.",
+    "connect": "Connect",
+    "connecting": "Connecting...",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting...",
+    "not_configured": "Git provider integration is not configured on this server. Ask an administrator to set",
+    "contact_admin": "Ask a workspace admin to connect a Git provider instance.",
+    "webhook_setup_title": "Finish setup in your provider",
+    "webhook_setup_description": "Add a webhook on your repository or organisation with the URL and secret below. Forgejo/Gitea: choose the Gitea format and the Pull Request (and Commit Status) events. GitLab: paste the secret as the token and enable Merge request and Pipeline events.",
+    "webhook_url_label": "Webhook URL",
+    "webhook_secret_label": "Webhook secret",
+    "webhook_secret_warning": "Copy the secret now. It is shown only once and cannot be retrieved later.",
+    "copy": "Copy",
+    "copied": "Copied to clipboard",
+    "copy_failed": "Could not copy",
+    "disconnect_confirm_title": "Disconnect this provider?",
+    "disconnect_confirm_description": "Mirrored pull requests and their issue links for this connection will be removed. This cannot be undone.",
+    "disconnect_confirm_cancel": "Cancel",
+    "disconnect_confirm_action": "Disconnect",
+    "toast_connected": "Provider connected",
+    "toast_connect_failed": "Could not connect to the provider",
+    "toast_disconnected": "Provider disconnected",
+    "toast_disconnect_failed": "Could not disconnect",
+    "regenerate_webhook": "Regenerate webhook",
+    "rotate_confirm_title": "Regenerate webhook secret?",
+    "rotate_confirm_description": "The current webhook secret will stop working immediately. Deliveries from your Git provider will fail until you update the webhook secret in provider settings.",
+    "rotate_confirm_cancel": "Cancel",
+    "rotate_confirm_action": "Regenerate",
+    "rotating": "Regenerating...",
+    "toast_rotated": "Webhook secret regenerated",
+    "toast_rotate_failed": "Could not regenerate webhook secret"
+  },
+  "lark": {
+    "section_title": "Lark",
+    "page_description": "Connect each Multica Agent to a Lark (飞书) PersonalAgent Bot. Members can DM the Bot, @ it in groups, and type /issue to spin up a new Multica issue.",
+    "not_enabled_title": "Lark integration not enabled",
+    "not_enabled_description_prefix": "Set",
+    "not_enabled_description_suffix": "on the server to enable Lark Bot installations.",
+    "not_enabled_self_host_hint": "Self-hosters: see the project README for details.",
+    "preview_title": "Lark Bot installation coming soon",
+    "preview_description": "The at-rest key is set, but the Lark HTTP client is not wired in this build. The install entry point will appear here once the transport is enabled in a follow-up release.",
+    "connected_bots": "Connected bots",
+    "loading": "Loading…",
+    "empty_title": "No bots connected yet",
+    "empty_description_prefix": "Open an Agent in this workspace and click",
+    "empty_description_cta": "Bind to Lark",
+    "empty_description_suffix": "to install a Bot for it.",
+    "revoked_badge": "revoked",
+    "region_feishu": "Feishu",
+    "region_lark": "Lark",
+    "installed_at_label": "Installed {{when}}",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "disconnect_confirm_title": "Disconnect this Lark bot?",
+    "disconnect_confirm_description": "The Bot will stop receiving Lark messages and the WebSocket connection will be torn down. The installation row is kept for audit; you can re-install later from the same Agent.",
+    "disconnect_confirm_cancel": "Cancel",
+    "toast_disconnected": "Disconnected Lark bot",
+    "toast_disconnect_failed": "Disconnect failed",
+    "bind_button": "Bind to Lark",
+    "bind_button_title": "Bind {{agent}} to a Lark Bot",
+    "bind_button_feishu": "Bind to Feishu",
+    "bind_button_lark": "Bind to Lark",
+    "bind_button_feishu_title": "Bind {{agent}} to a Feishu (mainland) Bot",
+    "bind_button_lark_title": "Bind {{agent}} to a Lark (international) Bot",
+    "agent_bot_connected_label": "Connected to Lark",
+    "agent_bot_manage_link": "Manage in Lark",
+    "agent_bot_manage_tooltip": "Open this Bot's app page in Lark — manage scopes, edit display name, request additional permissions.",
+    "agent_bot_connected_label_feishu": "Connected to Feishu",
+    "agent_bot_connected_label_lark": "Connected to Lark",
+    "agent_bot_manage_link_feishu": "Manage in Feishu",
+    "agent_bot_manage_link_lark": "Manage in Lark",
+    "agent_bot_manage_tooltip_feishu": "Open this Bot's app page in Feishu — manage scopes, edit display name, request additional permissions.",
+    "agent_bot_manage_tooltip_lark": "Open this Bot's app page in Lark — manage scopes, edit display name, request additional permissions.",
+    "agent_bot_disconnect_tooltip": "Unbind this Lark Bot from the Agent. The Bot will stop receiving Lark messages.",
+    "install_dialog_title": "Bind to Lark",
+    "install_dialog_description": "Open Lark on your phone and scan the code below to create a PersonalAgent Bot.",
+    "install_dialog_description_for_agent": "Open Lark on your phone and scan the code below to create a Bot for {{agent}}.",
+    "install_dialog_title_feishu": "Bind to Feishu",
+    "install_dialog_title_lark": "Bind to Lark",
+    "install_dialog_description_feishu": "Open Feishu on your phone and scan the code below to create a PersonalAgent Bot.",
+    "install_dialog_description_lark": "Open Lark on your phone and scan the code below to create a PersonalAgent Bot.",
+    "install_dialog_description_for_agent_feishu": "Open Feishu on your phone and scan the code below to create a Bot for {{agent}}.",
+    "install_dialog_description_for_agent_lark": "Open Lark on your phone and scan the code below to create a Bot for {{agent}}.",
+    "install_starting": "Preparing QR code…",
+    "install_scan_hint": "Lark → Scan → authorize the new PersonalAgent.",
+    "install_open_link_fallback": "Or tap here to open in Lark",
+    "install_success": "Install complete — your Bot is online.",
+    "install_success_toast": "Lark Bot installed",
+    "install_scan_hint_feishu": "Feishu → Scan → authorize the new PersonalAgent.",
+    "install_scan_hint_lark": "Lark → Scan → authorize the new PersonalAgent.",
+    "install_open_link_fallback_feishu": "Or tap here to open in Feishu",
+    "install_open_link_fallback_lark": "Or tap here to open in Lark",
+    "install_success_toast_feishu": "Feishu Bot installed",
+    "install_success_toast_lark": "Lark Bot installed",
+    "install_close": "Close",
+    "install_retry": "Scan again",
+    "install_poll_retry": "Network blip while checking install status — retrying.",
+    "install_error_expired": "QR expired before authorization. Scan again.",
+    "install_error_access_denied": "Install cancelled in Lark.",
+    "install_error_protocol": "Lark refused the install — try again.",
+    "install_error_bot_info": "Authorized, but Multica couldn't fetch the Bot's identity. Try again.",
+    "install_error_conflict": "Could not save the installation. Another bot may already be bound to this agent.",
+    "install_error_installer_bind": "Installed the bot, but could not bind your Lark identity. Try again or contact support.",
+    "install_error_session_lost": "Install session expired or was lost. Scan again to start over.",
+    "install_error_forbidden": "You no longer have permission to install Lark Bots in this workspace. Ask a workspace admin to continue.",
+    "install_error_generic": "Install failed. Try again."
+  },
+  "composio": {
+    "section_title": "Composio",
+    "page_description": "Connect the Composio apps your agents can act on. Only apps configured with an enabled auth config in your Composio project appear here.",
+    "not_enabled_title": "Composio integration not enabled",
+    "not_enabled_description_prefix": "Set",
+    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
+    "loading": "Loading toolkits…",
+    "load_failed": "Failed to load Composio toolkits.",
+    "empty_title": "No connectable apps yet",
+    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
+    "search_placeholder": "Search toolkits…",
+    "connect": "Connect",
+    "connecting": "Connecting…",
+    "connected": "Connected",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "connect_failed": "Couldn't start the connection. Please try again.",
+    "disconnect_failed": "Couldn't disconnect. Please try again.",
+    "toast_disconnected": "Disconnected",
+    "disconnect_confirm_title": "Disconnect this app?",
+    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
+    "disconnect_confirm_cancel": "Cancel",
+    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
+    "toast_connected": "Connected",
+    "toast_connect_failed": "Couldn't complete the connection. Please try again.",
+    "last_used": "Last used {{when}}",
+    "last_used_never": "Never used",
+    "expired": "Token expired",
+    "reconnect": "Reconnect"
+  },
+  "slack": {
+    "section_title": "Slack",
+    "page_description": "Connect each Multica Agent to its own Slack bot. Members can DM the bot, @mention it in a channel, and type /issue to spin up a new Multica issue.",
+    "not_enabled_title": "Slack integration not enabled",
+    "not_enabled_description_prefix": "Set",
+    "not_enabled_description_suffix": "on the server to enable Slack bot installations.",
+    "not_enabled_self_host_hint": "Self-hosters: see the project README for details.",
+    "preview_title": "Slack install coming soon",
+    "preview_description": "The at-rest key is set, but the hosted Slack app's OAuth credentials are not configured in this deployment. The Connect button will appear here once they are set.",
+    "connected_bots": "Connected bots",
+    "loading": "Loading…",
+    "empty_title": "No bots connected yet",
+    "empty_description_prefix": "Open an Agent in this workspace and click",
+    "empty_description_cta": "Connect Slack",
+    "empty_description_suffix": "to install a bot for it.",
+    "revoked_badge": "revoked",
+    "installed_at_label": "Installed {{when}}",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "disconnect_confirm_title": "Disconnect this Slack bot?",
+    "disconnect_confirm_description": "The bot will stop receiving Slack messages for this workspace. The installation row is kept for audit; you can re-install later from the same Agent.",
+    "disconnect_confirm_cancel": "Cancel",
+    "toast_disconnected": "Disconnected Slack bot",
+    "toast_disconnect_failed": "Disconnect failed",
+    "bind_button": "Connect Slack",
+    "bind_button_title": "Connect {{agent}} to a Slack bot",
+    "connecting": "Opening Slack…",
+    "connect_failed_toast": "Could not start the Slack install",
+    "agent_bot_connected_label": "Connected to Slack",
+    "agent_bot_disconnect_tooltip": "Unbind this Slack bot from the Agent. The bot will stop receiving Slack messages.",
+    "agent_bot_manage_link": "Open in Slack",
+    "agent_bot_manage_tooltip": "Open this bot's Slack workspace.",
+    "byo_dialog_title": "Connect a Slack bot",
+    "byo_video_cta": "Watch the setup walkthrough",
+    "byo_docs_link": "Step-by-step: connect your Multica agent to Slack",
+    "byo_bot_token_label": "Bot token (xoxb-)",
+    "byo_app_token_label": "App-level token (xapp-)",
+    "byo_submit": "Connect",
+    "byo_submitting": "Connecting…",
+    "byo_cancel": "Cancel",
+    "byo_success_toast": "Slack bot connected",
+    "byo_failed_toast": "Could not connect the Slack bot"
   }
 }

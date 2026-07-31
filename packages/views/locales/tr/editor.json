@@ -17,13 +17,16 @@
     },
     "list_dropdown": {
       "bullet_list": "Madde işaretli liste",
-      "ordered_list": "Numaralı liste"
+      "ordered_list": "Numaralı liste",
+      "task_list": "Task List"
     },
     "sub_issue": {
       "tooltip": "Seçimden alt issue oluştur",
       "created": "{{identifier}} oluşturuldu",
       "create_failed": "Alt issue oluşturulamadı"
-    }
+    },
+    "highlight": "Highlight",
+    "task_list": "Task list"
   },
   "image": {
     "view": "Görseli görüntüle",
@@ -31,7 +34,8 @@
     "copy_link": "Bağlantıyı kopyala",
     "delete": "Sil",
     "link_copied": "Bağlantı kopyalandı",
-    "copy_link_failed": "Bağlantı kopyalanamadı"
+    "copy_link_failed": "Bağlantı kopyalanamadı",
+    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size."
   },
   "attachment": {
     "download_failed": "İndirme bağlantısı alınamadı. Birazdan tekrar deneyin.",
@@ -55,7 +59,10 @@
     "group_issues": "Issue'lar",
     "all_members": "Tüm üyeler",
     "searching": "Aranıyor...",
-    "no_results": "Sonuç yok"
+    "no_results": "Sonuç yok",
+    "group_current": "Current page",
+    "group_recent": "Recently viewed",
+    "group_search": "Search results"
   },
   "code_block": {
     "copy_code": "Kodu kopyala",
@@ -71,6 +78,38 @@
   },
   "mermaid": {
     "render_error": "Mermaid diyagramı oluşturulamadı.",
-    "rendering": "Diyagram oluşturuluyor…"
+    "rendering": "Diyagram oluşturuluyor…",
+    "viewer_title": "Diagram",
+    "canvas_label": "Diagram canvas. Drag to pan, scroll to zoom.",
+    "open_viewer": "Open diagram viewer",
+    "close_viewer": "Close",
+    "copy_source": "Copy diagram source",
+    "show_source": "Show source",
+    "show_diagram": "Show diagram",
+    "export": "Export",
+    "export_png": "Download PNG",
+    "export_svg": "Download SVG",
+    "export_source": "Download .mmd"
+  },
+  "canvas": {
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_fit": "Fit to view",
+    "zoom_actual": "Actual size"
+  },
+  "slash_command": {
+    "no_skills_configured": "No skills configured",
+    "no_results": "No matching skills",
+    "commands": {
+      "note": "Add a note — won't trigger any agents"
+    }
+  },
+  "upload": {
+    "failed": "Couldn't upload {{filename}}: {{reason}}",
+    "in_progress": "Uploading…",
+    "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
+    "remove": "Remove",
+    "uploading_label": "Uploading {{filename}}…",
+    "failed_label": "Couldn’t upload {{filename}}"
   }
 }

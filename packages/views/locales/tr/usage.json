@@ -29,14 +29,18 @@
     "metric_tokens": "Tokenlar",
     "metric_time": "Süre",
     "metric_tasks": "Görevler",
-    "no_data": "Bu aralıkta kullanım yok."
+    "no_data": "Bu aralıkta kullanım yok.",
+    "title_errors": "Daily errors",
+    "metric_errors": "Errors",
+    "metric_label": "Metric"
   },
   "weekly": {
     "title_cost": "Haftalık maliyet",
     "title_tokens": "Haftalık tokenlar",
     "title_time": "Haftalık çalışma süresi",
     "title_tasks": "Haftalık görevler",
-    "partial_label": "{{range}} (kısmi · {{covered}} / 7 gün)"
+    "partial_label": "{{range}} (kısmi · {{covered}} / 7 gün)",
+    "title_errors": "Weekly errors"
   },
   "leaderboard": {
     "title": "Liderlik tablosu",
@@ -46,7 +50,13 @@
     "header_cost": "Maliyet",
     "header_time": "Süre",
     "header_tasks": "Görevler",
-    "no_data": "Bu aralıkta ajan etkinliği yok."
+    "no_data": "Bu aralıkta ajan etkinliği yok.",
+    "caption_with_deleted": "{{count}} agents · {{deleted}} deleted",
+    "sort_label": "Rank agents by",
+    "deleted_agents": "Deleted agents",
+    "other_agents": "Other agents",
+    "show_all": "Show all",
+    "show_less": "Show top {{count}}"
   },
   "empty": {
     "title": "Henüz kullanım yok",
@@ -54,5 +64,37 @@
   },
   "duration": {
     "less_than_minute": "<1d"
+  },
+  "errors": {
+    "tooltip_rate": "Error rate",
+    "class": {
+      "auth": "Auth",
+      "rate_limit": "Rate limit",
+      "timeout": "Timeout",
+      "provider": "Provider",
+      "runtime": "Runtime",
+      "agent": "Agent",
+      "other": "Other"
+    },
+    "title": "Errors",
+    "summary": "{{failed}} of {{total}} runs failed · {{rate}}",
+    "mix_title": "Failure mix · {{failed}}",
+    "mix_label": "Failure mix",
+    "codes_label": "Error codes",
+    "by_agent": "Top offenders",
+    "sort_label": "Rank offenders by",
+    "sort_failed": "Failures",
+    "sort_rate": "Rate",
+    "header_agent": "Agent",
+    "header_failed": "Failed",
+    "header_runs": "Runs",
+    "header_rate": "Rate",
+    "other_agents": "Other agents",
+    "low_sample": "Fewer than {{count}} runs in this window — this rate is not meaningful.",
+    "no_data": "No failed runs in this window.",
+    "show_reasons": "Show error codes",
+    "hide_reasons": "Hide error codes",
+    "show_all": "Show all {{count}}",
+    "show_less": "Show top {{count}}"
   }
 }

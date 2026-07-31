@@ -50,9 +50,6 @@
     "toast_failed": "Alt issue eklenemedi",
     "toast_success": "{{identifier}} alt issue olarak eklendi"
   },
-  "backlog_hint": {
-    "toast_status_failed": "Durum güncellenemedi"
-  },
   "create_squad": {
     "title": "Ekip oluştur",
     "description": "Lider ajan ve isteğe bağlı ek üyelerle birlikte çalışan bir ekip oluşturun.",
@@ -123,7 +120,11 @@
     "local_clear": "Temizle",
     "local_pick_failed": "Dizin seçici açılamadı.",
     "local_invalid_dir": "Bu dizin kullanılamaz. Başka birini seçin.",
-    "local_hint": "Diğer makinelerdeki ajanlar bu yolu göremez — başlatılamazlar. Paylaşımlı çalışma için repo'ları kullanın."
+    "local_hint": "Diğer makinelerdeki ajanlar bu yolu göremez — başlatılamazlar. Paylaşımlı çalışma için repo'ları kullanın.",
+    "description_hint": "Shared with agents as context for every task in this project.",
+    "set_start_date": "Set start date...",
+    "set_due_date": "Set due date...",
+    "more_options_aria": "More options"
   },
   "create_issue": {
     "sr_manual": "Yeni issue",
@@ -186,7 +187,36 @@
       "error_agent_unavailable_fallback": "Ajan kullanılamıyor. Başka bir ajan seçin.",
       "error_daemon_version": "Bu ajanın daemon CLI sürümü ({{current}}), gereken {{min}} sürümünün altında. Ajan ile oluşturmayı kullanmak için daemon'ı yükseltin.",
       "error_unknown": "Gönderilemedi. Tekrar deneyin.",
-      "sub_issue_of": "{{identifier}} alt issue'su"
-    }
+      "sub_issue_of": "{{identifier}} alt issue'su",
+      "more_fields_aria": "More fields",
+      "set_project": "Set project...",
+      "set_priority": "Set priority...",
+      "set_due_date": "Set due date...",
+      "customize_fields": "Customize fields..."
+    },
+    "toast_link_labels_failed": "Failed to attach labels",
+    "toast_set_properties_failed": "Could not set {{count}} custom property values",
+    "set_due_date": "Set due date...",
+    "set_status": "Set status...",
+    "set_priority": "Set priority...",
+    "set_assignee": "Set assignee...",
+    "set_labels": "Set labels...",
+    "set_project": "Set project...",
+    "customize_fields": "Customize fields...",
+    "custom_properties": "Custom properties"
+  },
+  "run_confirm": {
+    "title_assign": "Confirm assignment?",
+    "assign_single": "Assign this issue to {{name}}. They'll start right away if the run conditions are met.",
+    "assign_batch": "Assign {{count}} issues to {{name}}. They'll start right away if the run conditions are met.",
+    "note_label": "Handoff note (optional)",
+    "note_placeholder": "Tell them what matters — scope, focus, or what to avoid…",
+    "note_unsupported": "Their runtime is too old to receive this handoff note; it may not be read.",
+    "confirm_assign": "Confirm assignment",
+    "dont_start": "Don't start yet",
+    "toast_failed": "Action failed",
+    "create_will_start": "{{name}} will start working right after creation.",
+    "create_will_start_squad": "{{name}}'s leader will review it and start assigning work right after creation.",
+    "create_parked": "Assigned — won't start working in Backlog."
   }
 }

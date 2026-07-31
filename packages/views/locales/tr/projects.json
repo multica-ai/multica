@@ -7,7 +7,17 @@
     "view_compact": "Kompakt",
     "view_comfortable": "Rahat",
     "search_placeholder": "Proje ara...",
-    "no_search_results": "Aramanızla eşleşen sonuç yok"
+    "no_search_results": "Aramanızla eşleşen sonuç yok",
+    "view_table": "Table",
+    "view_cards": "Cards",
+    "row_menu": "Project actions",
+    "pin": "Pin to sidebar",
+    "unpin": "Unpin",
+    "delete": "Delete",
+    "no_matches": "No projects match",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection"
   },
   "table": {
     "name": "Ad",
@@ -15,7 +25,8 @@
     "status": "Durum",
     "progress": "İlerleme",
     "lead": "Lead",
-    "created": "Oluşturuldu"
+    "created": "Oluşturuldu",
+    "issues": "Issues"
   },
   "status": {
     "planned": "Planlandı",
@@ -64,7 +75,11 @@
     "no_issues_yet": "Henüz issue yok",
     "toast_link_copied": "Bağlantı kopyalandı",
     "toast_project_deleted": "Proje silindi",
-    "toast_move_issue_failed": "Issue taşınamadı"
+    "toast_move_issue_failed": "Issue taşınamadı",
+    "prop_start_date": "Start date",
+    "prop_due_date": "Due date",
+    "clear_date": "Clear date",
+    "description_hint": "Shared with agents as context for every task in this project."
   },
   "resources": {
     "section_header": "Kaynaklar",
@@ -112,9 +127,26 @@
   "picker": {
     "no_project": "Proje yok",
     "remove": "Projeden kaldır",
-    "empty": "Henüz proje yok"
+    "empty": "Henüz proje yok",
+    "search_placeholder": "Search projects..."
   },
   "chip": {
     "fallback_label": "Proje"
+  },
+  "toolbar": {
+    "result_count_title": "Matching projects / all projects",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_status": "Status",
+    "section_priority": "Priority",
+    "section_lead": "Lead",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "view": "View"
   }
 }

@@ -11,13 +11,23 @@
     "placeholder_named": "{{name}} için yapılacakları yazın…",
     "placeholder_default": "Ne yapmam gerektiğini yazın…",
     "send_tooltip": "Gönder",
-    "stop_tooltip": "Durdur"
+    "stop_tooltip": "Durdur",
+    "placeholder_archived_agent": "This agent has been archived",
+    "send_failed_toast": "Failed to send message",
+    "send_blocked_toast": "Message not sent — you no longer have permission to use this agent",
+    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
+    "add_tooltip": "Add",
+    "upload_file": "Image or files",
+    "project_context": "Project context",
+    "change_project_context": "Change project context",
+    "remove_project_context": "Remove project context",
+    "no_projects": "No projects yet",
+    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade"
   },
   "message_list": {
     "show_details": "Detayları göster",
     "replied_in": "{{elapsed}} içinde yanıtladı",
     "failed_after": "{{elapsed}} sonra başarısız oldu",
-    "task_failed_fallback": "Task başarısız oldu",
     "tools_one": "{{count}} araç",
     "tools_other": "{{count}} araç",
     "tool_result_named": "{{tool}} sonucu: ",
@@ -26,7 +36,30 @@
     "process_steps_other": "{{count}} adım",
     "copy_action": "Kopyala",
     "copied_toast": "Kopyalandı",
-    "copy_failed_toast": "Kopyalanamadı"
+    "copy_failed_toast": "Kopyalanamadı",
+    "finished_in": "Finished in {{elapsed}}",
+    "no_response": "The agent finished this turn without a text reply.",
+    "failure": {
+      "agent_error": "The agent ran into an error and couldn't finish replying. Please try again.",
+      "timeout": "The agent took too long and stopped before finishing. Try again, or break your request into smaller steps.",
+      "codex_semantic_inactivity": "The agent went idle and stopped before finishing. Please try again.",
+      "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
+      "runtime_recovery": "The agent restarted before it could finish. Please try again.",
+      "manual": "This reply was cancelled.",
+      "skill_bundle_unavailable": "The agent's skills couldn't be downloaded, so it never got started. This is usually a connection problem — please try again.",
+      "provider_network": "The connection to the model provider dropped before the reply finished. Check your network and try again.",
+      "provider_auth_or_access": "The agent's model account isn't signed in any more. Sign in again, then retry.",
+      "provider_quota_limit": "The agent's model account has run out of credit. Top it up or switch accounts, then retry.",
+      "provider_capacity_or_rate_limit": "The model provider is busy or rate-limiting this account. Please try again in a moment.",
+      "context_overflow": "This conversation got too long for the model. Start a new session, or break your request into smaller steps.",
+      "runtime_missing_executable": "The agent's CLI couldn't be found on this machine. Check that it's installed and on PATH, then retry.",
+      "runtime_version_unsupported": "The agent's CLI is too old for this runtime. Upgrade it, then retry.",
+      "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
+    },
+    "loading_older": "Loading older messages…",
+    "quick_actions_heading": "Follow-up questions",
+    "quick_actions_regenerate": "Regenerate suggestions",
+    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
   },
   "session_history": {
     "untitled": "Başlıksız",
@@ -76,7 +109,8 @@
     "my_agents": "Ajanlarım",
     "others": "Diğerleri",
     "no_agents": "Ajan yok",
-    "history_group": "Sohbet geçmişi"
+    "history_group": "Sohbet geçmişi",
+    "agent_filter_placeholder": "Search agents..."
   },
   "empty_state": {
     "first_time_title": "Ajanlarınızla sohbet edin",
@@ -86,23 +120,13 @@
     "first_time_actions": "Özet isteyin, gününüzü planlayın veya hızlı bir task devredin.",
     "returning_title_named": "Merhaba, ben {{name}}",
     "returning_title_default": "Multica'ya hoş geldiniz",
-    "returning_subtitle": "Şunu sormayı deneyin"
+    "returning_subtitle": "Şunu sormayı deneyin",
+    "chat_with_named": "Chat with {{name}}"
   },
   "starter_prompts": {
     "list_open": "Açık task'larımı önceliğe göre listele",
     "summarize_today": "Bugün yaptıklarımı özetle",
     "plan_next": "Sırada ne üzerinde çalışacağımı planla"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "Bu sayfada Multica ile paylaşılacak bir şey yok",
-    "tooltip_off": "Multica'ya ne görüntülediğinizi bildirin",
-    "tooltip_on_issue": "Multica {{etiket}} görüntülediğinizi biliyor · Kapatmak için tıklayın",
-    "tooltip_on_project": "Multica \"{{etiket}}\" projesini görüntülediğinizi biliyor · Kapatmak için tıklayın",
-    "card_tooltip_issue_with_subtitle": "Multica {{etiket}} görüntülediğinizi biliyor — {{subtitle}}",
-    "card_tooltip_issue": "Multica {{etiket}} görüntülediğinizi biliyor",
-    "card_tooltip_project": "Multica \"{{etiket}}\" projesini görüntülediğinizi biliyor",
-    "aria_stop": "Geçerli sayfayı paylaşmayı durdur",
-    "aria_start": "Geçerli sayfayı Multica ile paylaş"
   },
   "no_agent_banner": "Sohbete başlamak için bir ajan gerekir.",
   "offline_banner": {
@@ -128,5 +152,36 @@
       "searching_web": "Web'de arıyor",
       "fallback": "Çalışıyor"
     }
+  },
+  "page": {
+    "title": "Chat",
+    "select_prompt": "Pick a conversation, or start a new one with +",
+    "agent_link_no_access": "You don't have access to chat with this agent."
+  },
+  "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
+  "list": {
+    "typing": "Typing…",
+    "failed": "Failed to send",
+    "you_prefix": "You: ",
+    "no_messages": "No messages yet",
+    "no_response_preview": "No text reply",
+    "quick_agents": "Frequent agents",
+    "add": "Add",
+    "add_agent": "Add a frequent agent",
+    "unpin_agent": "Remove from frequent",
+    "waiting": "Waiting for reply",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinned": "Pinned",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "archived_title": "Archived"
+  },
+  "header": {
+    "view_profile": "View agent profile",
+    "rename": "Rename chat",
+    "archive": "Archive chat",
+    "unarchive": "Unarchive chat",
+    "delete": "Delete chat"
   }
 }

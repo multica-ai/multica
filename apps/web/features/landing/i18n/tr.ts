@@ -1335,10 +1335,9 @@ export function createTrDict(allowSignup: boolean): LandingDict {
       },
       macIntel: {
         title: "Multica for macOS",
-        sub: "Apple Silicon gerekli - Intel Mac'ler henüz desteklenmiyor.",
-        disabledCta: "Apple Silicon gerekli",
-        intelHint:
-          "Intel Mac mi kullanıyorsunuz? Aşağıdaki CLI'ı kullanın; aynı daemonı çalıştırır.",
+        sub: "Intel · bundled daemon, sıfır kurulum",
+        primary: "İndir (.dmg)",
+        altZip: "veya .zip indir",
       },
       winX64: {
         title: "Multica for Windows",
@@ -1365,7 +1364,8 @@ export function createTrDict(allowSignup: boolean): LandingDict {
     },
     allPlatforms: {
       title: "Tüm platformlar",
-      macLabel: "macOS · Apple Silicon",
+      macArm64Label: "macOS · Apple Silicon",
+      macX64Label: "macOS · Intel",
       winX64Label: "Windows · x64",
       winArm64Label: "Windows · ARM64",
       linuxX64Label: "Linux · x64",
@@ -1376,8 +1376,6 @@ export function createTrDict(allowSignup: boolean): LandingDict {
       formatAppImage: ".AppImage",
       formatDeb: ".deb",
       formatRpm: ".rpm",
-      intelNote:
-        "Yalnızca Apple Silicon - Intel Mac'ler bu sürümde desteklenmiyor.",
       unavailable: "Kullanılamıyor",
     },
     cli: {
