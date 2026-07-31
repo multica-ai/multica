@@ -2904,8 +2904,10 @@ approval_policy = "on-failure"
 	if !strings.Contains(s, `model = "o3"`) {
 		t.Error("lost existing model setting")
 	}
-	if !strings.Contains(s, "approval_policy") {
-		t.Error("lost existing approval_policy")
+	// The user's approval_policy must survive verbatim, exactly once — the
+	// managed block owns sandbox_mode only and never emits approval keys.
+	if strings.Count(s, `approval_policy = "on-failure"`) != 1 {
+		t.Errorf("existing approval_policy lost or duplicated, got:\n%s", s)
 	}
 	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
 		t.Error("missing managed sandbox_mode")
