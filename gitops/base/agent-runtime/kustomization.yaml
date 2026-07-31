@@ -6,5 +6,7 @@ resources:
   - service-account.yaml
   - external-secret.yaml
   - storage.yaml
+  - secret-store.yaml
+  - onepassword-external-secret.yaml
   - deployment.yaml
   - pdb.yaml

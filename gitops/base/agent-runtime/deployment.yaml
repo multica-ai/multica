@@ -102,6 +102,14 @@ spec:
           envFrom:
             - secretRef:
                 name: agentrunner-secrets
+            # 1Password per-workspace secrets (onepassword-external-secret.yaml,
+            # AIPLAT-161). optional: true because the target Secret doesn't exist
+            # at all when the workspace has no onepassword_vault configured, and
+            # is deleted (deletionPolicy: Delete) on a zero-tag-match sweep — both
+            # cases must not block pod startup.
+            - secretRef:
+                name: agentrunner-1password-secrets
+                optional: true
           volumeMounts:
             # AIPLAT-165: EFS-backed $HOME so npm/uv installs, git-ai config,
             # and hermes's cache persist across restarts. Mounted at the

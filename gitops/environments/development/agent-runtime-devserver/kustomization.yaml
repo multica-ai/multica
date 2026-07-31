@@ -8,13 +8,10 @@ kind: Kustomization
 # the server URL. The agentrunner-dev-appset (g2crowd/configuration) sources this
 # path and patches PLACEHOLDER -> the workspace slug per Application.
 #
-# secret-store.yaml / external-secret.yaml: per-workspace 1Password integration.
-# SecretStore defines vault per namespace; auth refs the centralized SA token
-# in agentfarm namespace (not exposed to pod env). Scoped to this pipeline only.
+# 1Password integration (secret-store.yaml / onepassword-external-secret.yaml)
+# lives in base/agent-runtime — both pipelines inherit it identically.
 resources:
   - ../../../base/agent-runtime
-  - secret-store.yaml
-  - external-secret.yaml
 images:
   - name: ghcr.io/g2crowd/agentrunner-runtime-prod
     newName: ghcr.io/g2crowd/agentrunner-runtime-dev
@@ -65,26 +62,3 @@ patches:
                 env:
                   - name: MULTICA_SERVER_URL
                     value: https://agentfarm.development.g2.com
-  # Add the 1Password Secret as a 2nd envFrom, after the SSM-backed one
-  # (AIPLAT-106 phase-1). Protected identity vars (GIT_USER_*, GITHUB_APP_ID,
-  # ...) are plain `env` entries in base's deployment.yaml, which always
-  # outrank envFrom regardless of order.
-  - target:
-      kind: Deployment
-      name: agentrunner
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: agentrunner
-      spec:
-        template:
-          spec:
-            containers:
-              - name: main
-                envFrom:
-                  - secretRef:
-                      name: agentrunner-secrets
-                  - secretRef:
-                      name: agentrunner-1password-secrets
-                      optional: true
