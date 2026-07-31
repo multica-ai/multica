@@ -160,11 +160,20 @@ test("Settings identifies externally enforced permissions without offering an ad
       waitUntil: "domcontentloaded",
     });
     await dismissAttributionSurvey(page);
+    await page.setViewportSize({ width: 390, height: 844 });
 
     const row = page.getByTestId("tool-card-rerun_issue");
     await expect(row).toBeVisible();
     await expect(row.getByText("Managed externally", { exact: true })).toBeVisible();
-    await expect(row.getByTitle(/Issue access and task ownership gates/)).toBeVisible();
+    const owner = row.getByText(
+      "Issue visibility, private-agent access, and task-to-issue integrity",
+      { exact: true },
+    );
+    await expect(owner).toBeVisible();
+    const [ownerBox, rowBox] = await Promise.all([owner.boundingBox(), row.boundingBox()]);
+    expect(ownerBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    expect(ownerBox!.x + ownerBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
     await expect(row.getByRole("button", { name: /^Decision:/ })).toBeDisabled();
   } finally {
     await api.cleanup();

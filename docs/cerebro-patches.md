@@ -2111,3 +2111,8 @@ values above and nothing else.
 |---|---|---|
 | `agent-claude-result-subtype` | `server/pkg/agent/claude.go` (1 marked branch), `server/pkg/agent/cerebro_claude_result_subtype.go` (new) | When a failed `result` carries no text, render its `subtype` instead. Turns `claude execution failed` into `claude stopped: the run reached its maximum number of turns (error_max_turns)`. The wording is deliberately checked against `taskfailure.Classify` so it cannot trip a rule it does not belong to — it still classifies as `agent_error.unknown` until the taxonomy gains a turn-cap reason of its own. |
 | `session-mode-no-profile-fallback` | `server/internal/daemon/session_mode_profile.go` (1 marked line) | No Mode selected means no Mode profile. Removes the invisible 80-turn cap and 120-minute timeout from every run nobody labelled, restoring core Multica behaviour; runs that DO carry a Mode keep their published profile unchanged. |
+
+# `manage-workflows-gate`
+
+- **Why:** FIR-4196 requires every agent mutation under the existing Workflows, Commands, and Evals route families to enforce the `manage_workflows` decision through the shared Task Mandate and `PlatformActionGate` boundary.
+- **Where:** `server/cmd/server/router.go` mounts `Handler.RequireManageWorkflows` around `/api/cerebro/workflows`, `/api/cerebro/commands`, and `/api/cerebro/evals`. The implementation remains in the Cerebro carve-out `server/internal/handler/workflow_permission_cerebro.go`.

@@ -2235,6 +2235,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
 			r.Route("/api/cerebro/workflows", func(r chi.Router) {
+				r.Use(h.RequireManageWorkflows) // CEREBRO-PATCH(manage-workflows-gate): FIR-4196 shared agent mutation permission boundary.
 				r.Get("/", cerebroWorkflowsHandler.List)
 				r.Post("/", cerebroWorkflowsHandler.Create)
 				r.Get("/runs", cerebroWorkflowsHandler.Runs)
@@ -2258,8 +2259,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
 			})
 			r.Mount("/api/cerebro/workflow-hooks", workflowHooksFeature.Routes()) // CEREBRO-PATCH(workflow-hooks-routes): FIR-3101 fork-owned management API.
-			r.Mount("/api/cerebro/evals", cerebroEvalsHandler.Routes())           // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 catalog, runs, and workflow bindings.
-			r.Mount("/api/cerebro/commands", cerebroCommandsHandler.Routes())     // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
+			r.Mount("/api/cerebro/evals", cerebroEvalsHandler.Routes(h.RequireManageWorkflows))       // CEREBRO-PATCH(manage-workflows-gate): FIR-4196 shared agent mutation permission boundary.
+			r.Mount("/api/cerebro/commands", cerebroCommandsHandler.Routes(h.RequireManageWorkflows)) // CEREBRO-PATCH(manage-workflows-gate): FIR-4196 shared agent mutation permission boundary.
 			// CEREBRO-PATCH(session-mode-config-routes): FIR-3111 versioned Mode configuration.
 			r.Route("/api/cerebro/session-modes", func(r chi.Router) {
 				r.Get("/", cerebroSessionModeHandler.List)

@@ -250,7 +250,9 @@ does nothing. They are a permanent code-only set, not a backlog item.
 
 Workflow Hook capabilities are independent of `manage_workflows`. `platformcatalog` binds each concrete hook tool to one permission key; `platformaccess` owns that key's contract, and `toolpolicy.ResolvePermission` projects it into the capability card, claim-time tool list, and call-time authorizer. Agents receive `hooks:read`, while `hooks:write` needs an explicit grant, `hooks:enforce` rejects agent actors, and `hooks:manage_managed` accepts only the workspace owner. Tool registration therefore means only `available`; it never implies `allowed` or `callable`. The complete eight-key special-contract list lives in `permission-system.md`; this architecture document does not duplicate it.
 
-Eval catalog mutations (`POST`/`PUT`/`DELETE /api/cerebro/evals*`) belong to `manage_workflows`: eval definitions, immutable run records, and workflow bindings are part of the workflow delivery-gate contract, not a separate permission family. Their CLI/MCP wrappers call those same classified routes.
+Workflow, Command, and Eval mutations under `/api/cerebro/workflows*`, `/api/cerebro/commands*`, and `/api/cerebro/evals*` share one agent enforcement boundary: `handler.RequireManageWorkflows` checks Task Mandate and `PlatformActionGate` against `manage_workflows` before the route handler can mutate state. Reads and member behavior remain unchanged, and the independent `/api/cerebro/workflow-hooks*` family keeps its `hooks:*` contracts. Settings → Permissions is therefore the only authoring surface for `manage_workflows`; CLI/MCP wrappers inherit the HTTP decision.
+
+Externally managed catalog rows remain read-only and render `external_security_owner` inline beside `Managed externally` in both permission catalog presentations. An older response without an owner renders `Security owner not specified`, so the management location never depends on hover or disappears silently.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
   permissions, keyed on action.
 - **Runtime tool capabilities** — the per-tool dimension keyed on `tool_key` values like
