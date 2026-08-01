@@ -20,7 +20,7 @@ import (
 // the V1 surface — they're enforced both in the handler and at the DB:
 //
 //   - keys match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$` (handler)
-//   - at most 50 keys per issue (handler)
+//   - at most 500 keys per issue (handler)
 //   - values are primitive: string / number / bool (handler)
 //   - JSONB column is an object and ≤ 8KB (DB CHECK; defense in depth)
 //
@@ -28,7 +28,7 @@ import (
 // any whole-blob overwrite would race with concurrent agent writes (see the
 // design discussion on MUL-2017).
 const (
-	maxIssueMetadataKeys = 50
+	maxIssueMetadataKeys = 500
 )
 
 var issueMetadataKeyRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`)

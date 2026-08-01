@@ -137,11 +137,15 @@ func TestIssueMetadataSizeLimit(t *testing.T) {
 	}
 }
 
-// The 50-key cap is enforced in the handler with a clear 400.
+// The 500-key cap is enforced in the handler with a clear 400.
 func TestIssueMetadataKeyCountCap(t *testing.T) {
 	issueID := createMetadataTestIssue(t, "Metadata key count cap")
+	const wantMaxMetadataKeys = 500
+	if maxIssueMetadataKeys != wantMaxMetadataKeys {
+		t.Fatalf("maxIssueMetadataKeys: expected %d, got %d", wantMaxMetadataKeys, maxIssueMetadataKeys)
+	}
 
-	for i := 0; i < maxIssueMetadataKeys; i++ {
+	for i := 0; i < wantMaxMetadataKeys; i++ {
 		key := fmt.Sprintf("k_%d", i)
 		w := httptest.NewRecorder()
 		req := newRequest("PUT", "/api/issues/"+issueID+"/metadata/"+key, json.RawMessage(`{"value":"v"}`))
@@ -157,6 +161,9 @@ func TestIssueMetadataKeyCountCap(t *testing.T) {
 	testHandler.SetIssueMetadataKey(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("overflow key: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if want := `"error":"metadata cannot exceed 500 keys"`; !strings.Contains(w.Body.String(), want) {
+		t.Fatalf("overflow key: expected error %s, got %s", want, w.Body.String())
 	}
 
 	// Updating an existing key past the cap is still allowed — only new keys
