@@ -600,8 +600,10 @@ func (c *Client) usesLegacyWorkspaceEndpoint() bool {
 
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
 type IssueGCStatus struct {
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Status                 string    `json:"status"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	WorkdirProtectionKnown bool      `json:"workdir_protection_known"`
+	ProtectedWorkDirs      []string  `json:"protected_work_dirs"`
 }
 
 // IssueGCCheckResult is one explicit issue result from the workspace batch
@@ -609,11 +611,13 @@ type IssueGCStatus struct {
 // outside the requested workspace, preserving the server's anti-enumeration
 // contract. Err is only populated by the legacy per-issue fallback.
 type IssueGCCheckResult struct {
-	ID        string    `json:"id"`
-	Found     bool      `json:"found"`
-	Status    string    `json:"status,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
-	Err       error     `json:"-"`
+	ID                     string    `json:"id"`
+	Found                  bool      `json:"found"`
+	Status                 string    `json:"status,omitempty"`
+	UpdatedAt              time.Time `json:"updated_at,omitempty"`
+	WorkdirProtectionKnown bool      `json:"workdir_protection_known,omitempty"`
+	ProtectedWorkDirs      []string  `json:"protected_work_dirs,omitempty"`
+	Err                    error     `json:"-"`
 }
 
 type issueGCBatchResponse struct {
@@ -677,10 +681,12 @@ func (c *Client) getLegacyIssueGCChecks(ctx context.Context, issueIDs []string) 
 			continue
 		}
 		results[issueID] = IssueGCCheckResult{
-			ID:        issueID,
-			Found:     true,
-			Status:    status.Status,
-			UpdatedAt: status.UpdatedAt,
+			ID:                     issueID,
+			Found:                  true,
+			Status:                 status.Status,
+			UpdatedAt:              status.UpdatedAt,
+			WorkdirProtectionKnown: status.WorkdirProtectionKnown,
+			ProtectedWorkDirs:      status.ProtectedWorkDirs,
 		}
 	}
 	return results

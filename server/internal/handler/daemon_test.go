@@ -1332,8 +1332,8 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	// Create an issue in the test workspace. The daemon GC endpoint returns
-	// only status + updated_at, so a "done" issue exercises the typical path.
+	// Create an issue in the test workspace. A "done" issue with no task rows
+	// exercises the known-empty workdir protection response.
 	var issueID string
 	err := testPool.QueryRow(context.Background(), `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
@@ -1369,8 +1369,10 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 
 	var resp struct {
-		Status    string `json:"status"`
-		UpdatedAt string `json:"updated_at"`
+		Status                 string   `json:"status"`
+		UpdatedAt              string   `json:"updated_at"`
+		WorkdirProtectionKnown bool     `json:"workdir_protection_known"`
+		ProtectedWorkDirs      []string `json:"protected_work_dirs"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -1380,6 +1382,9 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 	if resp.UpdatedAt == "" {
 		t.Fatal("expected updated_at to be set")
+	}
+	if !resp.WorkdirProtectionKnown || len(resp.ProtectedWorkDirs) != 0 {
+		t.Fatalf("expected authoritative empty workdir protection, got %+v", resp)
 	}
 }
 
@@ -1412,10 +1417,11 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 	}
 	var resp struct {
 		Issues []struct {
-			ID        string `json:"id"`
-			Found     bool   `json:"found"`
-			Status    string `json:"status"`
-			UpdatedAt string `json:"updated_at"`
+			ID                     string `json:"id"`
+			Found                  bool   `json:"found"`
+			Status                 string `json:"status"`
+			UpdatedAt              string `json:"updated_at"`
+			WorkdirProtectionKnown bool   `json:"workdir_protection_known"`
 		} `json:"issues"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1424,7 +1430,7 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 	if len(resp.Issues) != 2 {
 		t.Fatalf("issues length = %d, want 2", len(resp.Issues))
 	}
-	if got := resp.Issues[0]; got.ID != issueID || !got.Found || got.Status != "done" || got.UpdatedAt == "" {
+	if got := resp.Issues[0]; got.ID != issueID || !got.Found || got.Status != "done" || got.UpdatedAt == "" || !got.WorkdirProtectionKnown {
 		t.Fatalf("found issue result = %+v", got)
 	}
 	if got := resp.Issues[1]; got.ID != missingID || got.Found || got.Status != "" || got.UpdatedAt != "" {
@@ -1440,6 +1446,115 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 	testHandler.BatchIssueGCCheck(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("cross-workspace batch: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBatchIssueGCCheck_ReturnsOnlyAuthoritativeProtectedWorkDirs(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: resolve agent: %v", err)
+	}
+
+	var issueID string
+	issueNumber := nextWorkspaceIssueNumber(t)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number)
+		VALUES ($1, 'batch-gc-protected-workdirs', 'in_progress', 'medium', $2, 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueNumber).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	var issueWithoutWorkDirID string
+	issueWithoutWorkDirNumber := nextWorkspaceIssueNumber(t)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number)
+		VALUES ($1, 'batch-gc-newest-resume-without-workdir', 'in_progress', 'medium', $2, 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueWithoutWorkDirNumber).Scan(&issueWithoutWorkDirID); err != nil {
+		t.Fatalf("setup: create no-workdir issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, issueID, issueWithoutWorkDirID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id IN ($1, $2)`, issueID, issueWithoutWorkDirID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue
+			(agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, error, retired_session_id)
+		VALUES
+			($1, $2, $3, 'completed', 0, now() - interval '6 hours', now() - interval '6 hours', 'gc-fallback-session', '/tmp/gc-fallback', NULL, NULL),
+			($1, $2, $3, 'completed', 0, now() - interval '5 hours', now() - interval '5 hours', 'gc-poisoned-session', '/tmp/gc-poisoned', NULL, NULL),
+			($1, $2, $3, 'failed',    0, now() - interval '4 hours', now() - interval '4 hours', 'gc-poisoned-session', '/tmp/gc-poisoned', '400 invalid_request_error', NULL),
+			($1, $2, $3, 'completed', 0, now() - interval '3 hours', now() - interval '3 hours', 'gc-retired-session', '/tmp/gc-retired', NULL, NULL),
+			($1, $2, $3, 'running',   0, now() - interval '1 hour',  NULL,                         NULL,                 '/tmp/gc-active', NULL, 'gc-retired-session'),
+			($1, $2, $3, 'deferred',  0, NULL,                         NULL,                         NULL,                 '/tmp/gc-deferred', NULL, NULL)
+	`, agentID, testRuntimeID, issueID); err != nil {
+		t.Fatalf("setup: create resume and active tasks: %v", err)
+	}
+
+	var rerunSourceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue
+			(agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 hours', now() - interval '2 hours', '/tmp/gc-rerun-source')
+		RETURNING id
+	`, agentID, testRuntimeID, issueID).Scan(&rerunSourceID); err != nil {
+		t.Fatalf("setup: create rerun source: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue
+			(agent_id, runtime_id, issue_id, status, priority, rerun_of_task_id, force_fresh_session)
+		VALUES ($1, $2, $3, 'queued', 0, $4, true)
+	`, agentID, testRuntimeID, issueID, rerunSourceID); err != nil {
+		t.Fatalf("setup: create active rerun: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue
+			(agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES
+			($1, $2, $3, 'completed', 0, now() - interval '2 hours', now() - interval '2 hours', 'gc-older-with-workdir', '/tmp/gc-must-not-fallback'),
+			($1, $2, $3, 'completed', 0, now() - interval '1 hour',  now() - interval '1 hour',  'gc-newest-without-workdir', NULL)
+	`, agentID, testRuntimeID, issueWithoutWorkDirID); err != nil {
+		t.Fatalf("setup: create no-workdir resume tasks: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"issue_ids": []string{issueID, issueWithoutWorkDirID},
+	}, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	testHandler.BatchIssueGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchIssueGCCheck: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Issues []struct {
+			ID                     string   `json:"id"`
+			WorkdirProtectionKnown bool     `json:"workdir_protection_known"`
+			ProtectedWorkDirs      []string `json:"protected_work_dirs"`
+		} `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Issues) != 2 || resp.Issues[0].ID != issueID || !resp.Issues[0].WorkdirProtectionKnown {
+		t.Fatalf("unexpected protection response: %+v", resp.Issues)
+	}
+	got := strings.Join(resp.Issues[0].ProtectedWorkDirs, ",")
+	want := strings.Join([]string{"/tmp/gc-active", "/tmp/gc-deferred", "/tmp/gc-fallback", "/tmp/gc-rerun-source"}, ",")
+	if got != want {
+		t.Fatalf("protected_work_dirs = %q, want %q", got, want)
+	}
+	if resp.Issues[1].ID != issueWithoutWorkDirID || !resp.Issues[1].WorkdirProtectionKnown || len(resp.Issues[1].ProtectedWorkDirs) != 0 {
+		t.Fatalf("newest resumable session without workdir must not protect an older workdir: %+v", resp.Issues[1])
 	}
 }
 

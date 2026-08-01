@@ -14,7 +14,8 @@ import (
 )
 
 // gcLoop periodically scans local workspace directories and removes those
-// whose issue is done/cancelled and hasn't been updated within the configured TTL.
+// whose parent is terminal or whose open-issue workdir is superseded beyond
+// the configured TTL.
 func (d *Daemon) gcLoop(ctx context.Context) {
 	if !d.cfg.GCEnabled {
 		d.logger.Info("gc: disabled")
@@ -50,7 +51,7 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
-	cleaned         int            // whole task dirs removed (issue done/cancelled)
+	cleaned         int            // whole task dirs removed (terminal parent or superseded issue run)
 	orphaned        int            // whole task dirs removed (no meta / unreachable issue)
 	skipped         int            // task dirs left untouched
 	artifactDirs    int            // task dirs that had at least one artifact reclaimed
@@ -271,7 +272,7 @@ type gcAction int
 
 const (
 	gcActionSkip                  gcAction = iota
-	gcActionClean                          // issue is done/cancelled and stale
+	gcActionClean                          // terminal parent or superseded issue run is stale
 	gcActionOrphan                         // no meta or unknown issue and dir is old
 	gcActionCleanArtifacts                 // task completed long enough ago; drop regenerable artifacts only
 	gcActionCleanManagedArtifacts          // preserve the task and drop exact daemon-managed artifacts only
@@ -395,10 +396,12 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 	}
 
 	return d.gcDecisionIssueResult(taskDir, meta, IssueGCCheckResult{
-		ID:        meta.IssueID,
-		Found:     true,
-		Status:    status.Status,
-		UpdatedAt: status.UpdatedAt,
+		ID:                     meta.IssueID,
+		Found:                  true,
+		Status:                 status.Status,
+		UpdatedAt:              status.UpdatedAt,
+		WorkdirProtectionKnown: status.WorkdirProtectionKnown,
+		ProtectedWorkDirs:      status.ProtectedWorkDirs,
 	})
 }
 
@@ -415,6 +418,19 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 			"issue", meta.IssueID,
 			"status", result.Status,
 			"updated_at", result.UpdatedAt.Format(time.RFC3339),
+		)
+		return gcActionClean
+	}
+
+	if issueAllowsSupersededWorkdirGC(result.Status) && result.WorkdirProtectionKnown && !meta.CompletedAt.IsZero() &&
+		time.Since(meta.CompletedAt) > d.cfg.GCTTL &&
+		!issueWorkDirProtected(taskDir, result.ProtectedWorkDirs) {
+		d.logger.Info("gc: superseded issue workdir eligible for cleanup",
+			"dir", filepath.Base(taskDir),
+			"kind", "issue",
+			"issue", meta.IssueID,
+			"status", result.Status,
+			"completed_at", meta.CompletedAt.Format(time.RFC3339),
 		)
 		return gcActionClean
 	}
@@ -449,6 +465,25 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	}
 
 	return gcActionSkip
+}
+
+func issueAllowsSupersededWorkdirGC(status string) bool {
+	switch status {
+	case "backlog", "todo", "in_progress", "in_review", "blocked":
+		return true
+	default:
+		return false
+	}
+}
+
+func issueWorkDirProtected(taskDir string, protectedWorkDirs []string) bool {
+	candidate := filepath.Clean(filepath.Join(taskDir, "workdir"))
+	for _, protected := range protectedWorkDirs {
+		if strings.TrimSpace(protected) != "" && filepath.Clean(protected) == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func gcMetaFileAge(taskDir string) (time.Duration, bool) {
