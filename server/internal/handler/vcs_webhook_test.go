@@ -564,6 +564,81 @@ func TestVCSWebhook_GitlabPostTerminalUpdatePreservesCloseIntent(t *testing.T) {
 	}
 }
 
+func TestVCSWebhook_GitlabClosedUpdateTerminalSemantics(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+
+	t.Run("first upsert records close intent", func(t *testing.T) {
+		connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+		issue := newVCSIssue(t, "GitLab closed update first upsert")
+		t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Closes "+issue.Identifier,
+			"2026-05-02 00:00:00 UTC",
+		))
+
+		closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+		if !closeIntent || referenceOnly {
+			t.Fatalf("closed first upsert flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+		}
+		rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+		if len(rows) != 1 || rows[0].State != "closed" {
+			t.Fatalf("closed first upsert row = %+v, want one closed row", rows)
+		}
+	})
+
+	t.Run("first terminal transition recomputes close intent", func(t *testing.T) {
+		connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+		issue := newVCSIssue(t, "GitLab closed update transition")
+		t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "opened",
+			"WIP "+issue.Identifier,
+			"Related "+issue.Identifier,
+			"2026-05-03 00:00:00 UTC",
+		))
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Closes "+issue.Identifier,
+			"2026-05-04 00:00:00 UTC",
+		))
+
+		closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+		if !closeIntent || referenceOnly {
+			t.Fatalf("closed transition flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+		}
+	})
+
+	t.Run("later terminal update preserves link flags", func(t *testing.T) {
+		connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+		issue := newVCSIssue(t, "GitLab closed update preservation")
+		t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Closes "+issue.Identifier,
+			"2026-05-05 00:00:00 UTC",
+		))
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Related "+issue.Identifier,
+			"2026-05-06 00:00:00 UTC",
+		))
+
+		closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+		if !closeIntent || referenceOnly {
+			t.Fatalf("closed preservation flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+		}
+	})
+}
+
 func TestVCSWebhook_GitlabEqualTimestampNonterminalReplayDoesNotClearTerminal(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)

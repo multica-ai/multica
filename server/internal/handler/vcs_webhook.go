@@ -236,7 +236,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	// Recompute close_intent on the first terminal transition, then freeze it
 	// for later terminal updates whose raw provider action is non-terminal
 	// (e.g. GitLab state=merged/action=update redeliveries).
-	preserveCloseIntent := !ev.Terminal() && vcsPullRequestStateTerminal(ev.State) && pr.PreviousState.Valid && vcsPullRequestStateTerminal(pr.PreviousState.String)
+	previouslyTerminal := pr.PreviousState.Valid && vcsPullRequestStateTerminal(pr.PreviousState.String)
 	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
 	reevalIssues := make([]db.Issue, 0, len(idents))
 	for _, id := range idents {
@@ -245,6 +245,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 			continue
 		}
 		_, declared := closingIdents[id]
+		preserveCloseIntent := !ev.Terminal() && vcsPullRequestStateTerminal(ev.State) && (previouslyTerminal || !declared)
 		closeIntent := declared && !preserveCloseIntent
 		_, qualifies := qualifyingIdents[id]
 		referenceOnly := !qualifies
