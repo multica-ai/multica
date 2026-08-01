@@ -23,7 +23,7 @@
 import { useRef } from "react";
 import { Tabs } from "expo-router";
 import { Image } from "expo-image";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -33,6 +33,7 @@ import {
   useChatUnreadMessageCount,
 } from "@/lib/unread-counts";
 import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
+import { TabletTabBar } from "@/components/nav/tablet-tab-bar";
 
 // Only override backgroundColor — @react-navigation/elements Badge internally
 // sets borderRadius = size/2, height = size, minWidth = size, so a single
@@ -57,6 +58,7 @@ export default function TabsLayout() {
     inboxUnread > 0 ? (inboxUnread > 99 ? "99+" : String(inboxUnread)) : undefined;
   const chatBadge =
     chatUnread > 0 ? (chatUnread > 99 ? "99+" : String(chatUnread)) : undefined;
+  const isIPad = Platform.OS === "ios" && Platform.isPad;
 
   // Imperative handle into the More tab's dropdown — listeners.tabPress
   // calls .open(); the @rn-primitives Trigger measures itself inside
@@ -66,8 +68,20 @@ export default function TabsLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Tabs
+        tabBar={
+          isIPad
+            ? (props) => (
+                <TabletTabBar
+                  state={props.state}
+                  navigation={props.navigation}
+                  inboxBadge={inboxBadge}
+                />
+              )
+            : undefined
+        }
         screenOptions={{
           headerShown: false,
+          tabBarPosition: isIPad ? "left" : "bottom",
           tabBarActiveTintColor: t.foreground,
           tabBarInactiveTintColor: t.mutedForeground,
           tabBarStyle: { backgroundColor: t.background },
@@ -93,6 +107,7 @@ export default function TabsLayout() {
           name="my-issues"
           options={{
             title: "My Issues",
+            tabBarButton: isIPad ? () => null : undefined,
             tabBarIcon: ({ color, size, focused }) => (
               <Image
                 source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
@@ -106,6 +121,7 @@ export default function TabsLayout() {
           name="chat"
           options={{
             title: "Chat",
+            tabBarButton: isIPad ? () => null : undefined,
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
@@ -121,6 +137,7 @@ export default function TabsLayout() {
           name="more"
           options={{
             title: "More",
+            tabBarButton: isIPad ? () => null : undefined,
             tabBarIcon: ({ color, size }) => (
               <Image
                 source="sf:ellipsis"
@@ -140,9 +157,37 @@ export default function TabsLayout() {
             },
           })}
         />
+        <Tabs.Screen
+          name="issues"
+          options={{
+            title: "Issues",
+            tabBarButton: isIPad ? undefined : () => null,
+          }}
+        />
+        <Tabs.Screen
+          name="projects"
+          options={{
+            title: "Projects",
+            tabBarButton: isIPad ? undefined : () => null,
+          }}
+        />
+        <Tabs.Screen
+          name="agents"
+          options={{
+            title: "Agents",
+            tabBarButton: isIPad ? undefined : () => null,
+          }}
+        />
+        <Tabs.Screen
+          name="settings"
+          options={{
+            title: "Settings",
+            tabBarButton: isIPad ? undefined : () => null,
+          }}
+        />
       </Tabs>
 
-      <MoreTabDropdownAnchor triggerRef={moreTriggerRef} />
+      {!isIPad ? <MoreTabDropdownAnchor triggerRef={moreTriggerRef} /> : null}
     </View>
   );
 }

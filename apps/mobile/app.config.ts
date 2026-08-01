@@ -31,7 +31,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // iOS icon size from this single PNG.
     icon: "./assets/icon.png",
     ios: {
-      supportsTablet: false,
+      supportsTablet: true,
+      // Keep the phone experience portrait-only while allowing the iPad
+      // workbench to follow the device. Expo's top-level `orientation`
+      // applies to both idioms, so the iPad-specific Info.plist override is
+      // the only way to preserve the existing iPhone behavior.
+      infoPlist: {
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
+      },
       // Per-variant bundle id overrides exist for one reason: an Apple ID
       // can only sign bundle prefixes it owns, so contributors not on the
       // Multica Apple Developer team (and external users self-building a
