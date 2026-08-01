@@ -104,6 +104,44 @@ func giteaSig(raw []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func fireGitLabMRWebhook(t *testing.T, connID string, attrs map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{
+		"object_kind":       "merge_request",
+		"user":              map[string]any{"username": "alice"},
+		"project":           map[string]any{"path_with_namespace": "acme/widget"},
+		"object_attributes": attrs,
+	})
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": vcsTestSecret,
+	}, raw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("GitLab MR webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func gitLabMRAttrs(action, state, title, description, updatedAt string) map[string]any {
+	return map[string]any{
+		"iid": 42, "title": title, "description": description,
+		"state": state, "action": action, "source_branch": "feat",
+		"url":        "https://gitlab.test/acme/widget/-/merge_requests/42",
+		"created_at": "2026-05-01 00:00:00 UTC", "updated_at": updatedAt,
+		"last_commit": map[string]any{"id": "deadbeef"},
+	}
+}
+
+func vcsLinkFlags(t *testing.T, ctx context.Context, issueID string) (bool, bool) {
+	t.Helper()
+	var closeIntent, referenceOnly bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT close_intent, reference_only FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issueID).Scan(&closeIntent, &referenceOnly); err != nil {
+		t.Fatalf("select VCS link flags: %v", err)
+	}
+	return closeIntent, referenceOnly
+}
+
 func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
@@ -439,6 +477,121 @@ func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
 	if updated.Status != "done" {
 		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabMergedUpdateFirstUpsertClosesIssue(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab merged update")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Add "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		"2026-05-02 00:00:00 UTC",
+	))
+
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("link flags after first terminal upsert = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if updated.Status != "done" {
+		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabFirstTerminalTransitionRecomputesCloseIntent(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab transition update")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "opened",
+		"WIP "+issue.Identifier,
+		"Related "+issue.Identifier,
+		"2026-05-01 00:00:00 UTC",
+	))
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if closeIntent || referenceOnly {
+		t.Fatalf("non-terminal update flags = close_intent:%v reference_only:%v, want false/false", closeIntent, referenceOnly)
+	}
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Finish "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		"2026-05-02 00:00:00 UTC",
+	))
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("first terminal transition flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if updated.Status != "done" {
+		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabPostTerminalUpdatePreservesCloseIntent(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab terminal preservation")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"merge", "merged",
+		"Finish "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		"2026-05-02 00:00:00 UTC",
+	))
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Finish "+issue.Identifier,
+		"Related "+issue.Identifier,
+		"2026-05-03 00:00:00 UTC",
+	))
+
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("post-terminal update flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+}
+
+func TestVCSWebhook_GitlabEqualTimestampNonterminalReplayDoesNotClearTerminal(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab equal timestamp replay")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	sameTimestamp := "2026-05-02 00:00:00 UTC"
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Finish "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		sameTimestamp,
+	))
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "opened",
+		"WIP "+issue.Identifier,
+		"Related "+issue.Identifier,
+		sameTimestamp,
+	))
+
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("equal timestamp replay flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+	rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+	if len(rows) != 1 || rows[0].State != "merged" {
+		t.Fatalf("equal timestamp replay regressed PR row: %+v", rows)
 	}
 }
 

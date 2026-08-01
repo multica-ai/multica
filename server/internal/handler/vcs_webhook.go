@@ -46,6 +46,10 @@ func vcsPullRequestToResponse(p db.VcsPullRequest) GitHubPullRequestResponse {
 	}
 }
 
+func vcsPullRequestStateTerminal(state string) bool {
+	return state == "merged" || state == "closed"
+}
+
 // vcsPullRequestRowToResponse maps an issue's PR-list row, which carries the
 // aggregated commit-status counts, onto the shared response shape.
 func vcsPullRequestRowToResponse(p db.ListVCSPullRequestsByIssueRow) GitHubPullRequestResponse {
@@ -198,12 +202,12 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	// published — stop here. (An event with no usable timestamp falls back to
 	// now(), which is never strictly after the stored value, so it proceeds.)
 	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
-	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
+	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && (pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) || (pr.PrUpdatedAt.Time.Equal(evUpdatedAt.Time) && pr.State != ev.State)) {
 		return
 	}
 
 	workspaceID := uuidToString(conn.WorkspaceID)
-	resp := vcsPullRequestToResponse(pr)
+	resp := vcsPullRequestToResponse(pr.VcsPullRequest)
 
 	// Auto-link to issues by identifiers in title/body/branch. Connecting a
 	// a provider is the opt-in, so there is no separate per-workspace flag. The
@@ -229,8 +233,10 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	for c := range closingIdents {
 		qualifyingIdents[c] = struct{}{}
 	}
-	// Freeze close_intent once the terminal merge/close event has arrived.
-	preserveCloseIntent := !ev.Terminal() && (ev.State == "merged" || ev.State == "closed")
+	// Recompute close_intent on the first terminal transition, then freeze it
+	// for later terminal updates whose raw provider action is non-terminal
+	// (e.g. GitLab state=merged/action=update redeliveries).
+	preserveCloseIntent := !ev.Terminal() && vcsPullRequestStateTerminal(ev.State) && pr.PreviousState.Valid && vcsPullRequestStateTerminal(pr.PreviousState.String)
 	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
 	reevalIssues := make([]db.Issue, 0, len(idents))
 	for _, id := range idents {
@@ -258,7 +264,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		reevalIssues = append(reevalIssues, issue)
 	}
 
-	if ev.State == "merged" || ev.State == "closed" {
+	if vcsPullRequestStateTerminal(ev.State) {
 		for _, issue := range reevalIssues {
 			if issue.Status == "done" || issue.Status == "cancelled" {
 				continue
