@@ -2,13 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 
-const { getAttachmentTextContentMock, downloadAttachmentMock, flagState } =
+const {
+  getAttachmentTextContentMock,
+  downloadAttachmentMock,
+  flagState,
+  resolvedIssueState,
+} =
   vi.hoisted(() => ({
     getAttachmentTextContentMock: vi.fn(),
     downloadAttachmentMock: vi.fn(),
     // cerebro_attachment_chips defaults ON (registry default); the legacy
     // grey-row file-card tests flip it OFF in their own beforeEach.
     flagState: { chips: true },
+    resolvedIssueState: { current: null as { id: string } | null },
   }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
@@ -68,6 +74,10 @@ vi.mock("../issues/components/issue-chip", () => ({
   ),
 }));
 
+vi.mock("../issues/hooks", () => ({
+  useResolveIssueIdentifier: () => resolvedIssueState.current,
+}));
+
 vi.mock("./extensions/image-view", () => ({
   ImageLightbox: () => null,
 }));
@@ -108,8 +118,28 @@ import { ReadonlyContent } from "./readonly-content";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resolvedIssueState.current = null;
   useIsMobileMock.mockReturnValue(false);
   useIssueLinkOpenModeMock.mockReturnValue("modifier_click");
+});
+
+describe("ReadonlyContent issue identifier autolinking", () => {
+  it("keeps a bare issue identifier layout-stable when it resolves", () => {
+    const view = render(<ReadonlyContent content="FIR-123" />);
+
+    expect(view.container.textContent).toBe("FIR-123");
+    expect(view.container.querySelector("a")).toBeNull();
+
+    resolvedIssueState.current = { id: "issue-123" };
+    view.rerender(<ReadonlyContent key="resolved" content="FIR-123" />);
+
+    expect(view.container.textContent).toBe("FIR-123");
+    expect(view.container.querySelector("a")).toHaveAttribute(
+      "href",
+      "/test/issues/issue-123",
+    );
+    expect(view.queryByTestId("issue-chip")).toBeNull();
+  });
 });
 
 afterEach(() => {

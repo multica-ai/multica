@@ -89,6 +89,8 @@ type TaskContextForEnv struct {
 	SessionModeAllowedTools   []string
 	SessionModeDataSources    []string
 	SessionModeApprovalPolicy string
+	SessionModeWorkflowID     string   `json:",omitempty"` // CEREBRO-PATCH(execenv-session-mode-workflow-compat): FIR-4198 decode-only compatibility with a running pre-removal daemon.
+	SessionModeEvalSkillIDs   []string `json:",omitempty"` // CEREBRO-PATCH(execenv-session-mode-eval-skill-compat): FIR-4076 decode-only compatibility with a running pre-removal daemon.
 	SessionModeEvalIDs        []string // CEREBRO-PATCH(session-mode-evals): FIR-4047 evaluations the server runs at completion.
 	// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks are platform activity, not synthetic comments.
 	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup

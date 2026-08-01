@@ -3,6 +3,7 @@ package execenv
 // CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -138,5 +139,67 @@ func TestPreparationHelperRoundTripsProjectResources(t *testing.T) {
 	if resource.ID != want.ID || resource.ResourceType != want.ResourceType ||
 		resource.Label != want.Label || ref.URL != "https://github.com/firtal-group/firtal-cerebro" {
 		t.Fatalf("project resource = %#v, want all fields preserved", resource)
+	}
+}
+
+// CEREBRO-PATCH(execenv-session-mode-workflow-compat): regression coverage for mixed-version reuse.
+func TestPreparationHelperAcceptsRetiredSessionModeWorkflowID(t *testing.T) {
+	current, err := json.Marshal(TaskContextForEnv{})
+	if err != nil {
+		t.Fatalf("marshal current task context: %v", err)
+	}
+	if bytes.Contains(current, []byte(`"SessionModeWorkflowID"`)) {
+		t.Fatalf("current task context still emits retired SessionModeWorkflowID: %s", current)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"action": "reuse",
+		"reuse": map[string]any{
+			"WorkDir":  t.TempDir(),
+			"Provider": "claude",
+			"Task": map[string]any{
+				"SessionModeWorkflowID": "workflow-1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy preparation request: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var out bytes.Buffer
+	if err := RunPreparationHelper(bytes.NewReader(payload), &out, logger); err != nil {
+		t.Fatalf("RunPreparationHelper rejected legacy SessionModeWorkflowID: %v", err)
+	}
+}
+
+// CEREBRO-PATCH(execenv-session-mode-eval-skill-compat): regression coverage for mixed-version reuse.
+func TestPreparationHelperAcceptsRetiredSessionModeEvalSkillIDs(t *testing.T) {
+	current, err := json.Marshal(TaskContextForEnv{})
+	if err != nil {
+		t.Fatalf("marshal current task context: %v", err)
+	}
+	if bytes.Contains(current, []byte(`"SessionModeEvalSkillIDs"`)) {
+		t.Fatalf("current task context still emits retired SessionModeEvalSkillIDs: %s", current)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"action": "reuse",
+		"reuse": map[string]any{
+			"WorkDir":  t.TempDir(),
+			"Provider": "claude",
+			"Task": map[string]any{
+				"SessionModeEvalSkillIDs": []string{"skill-1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy preparation request: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var out bytes.Buffer
+	if err := RunPreparationHelper(bytes.NewReader(payload), &out, logger); err != nil {
+		t.Fatalf("RunPreparationHelper rejected legacy SessionModeEvalSkillIDs: %v", err)
 	}
 }

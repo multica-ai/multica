@@ -3,6 +3,24 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4217 — Check recipient runtime before agent handoff
+
+- `server/internal/daemon/execenv/runtime_config.go:803-804` adds a silent,
+  informational runtime-status check before issue assignment or
+  `mention://agent/...`; it explicitly preserves the requested handoff.
+- `server/internal/daemon/execenv/execenv_test.go:3317` keeps the instruction in
+  the generated runtime brief.
+- **Why:** agents handed off work without correlating the recipient agent's
+  `runtime_id` with the runtime's status, so an offline recipient was invisible
+  to the sender. Approved by Jesper Hvejsel on 2026-07-31.
+- **Cost constraint:** the instruction must name `multica agent get <agent-id>
+  --output json` (~12 KB) + `multica runtime list` (~8 KB). It must NOT name the
+  bulk list command for agents (~780 KB — it embeds every agent's full
+  instructions); `TestInjectRuntimeConfigAvailableCommandsCoreOnly` bans that
+  string from the brief anyway.
+- **Reporting:** an offline recipient is surfaced as one extra line in the
+  sender's own comment. The handoff itself is never blocked or delayed.
+
 ## FIR-3986 — Names are copied, never translated
 
 - `server/internal/daemon/execenv/runtime_config_names_verbatim_cerebro.go`
@@ -2283,3 +2301,10 @@ The brief-rendering block moved out of `execenv/context.go` into a sibling
 |---|---|---|
 | `session-mode-config-brief` | `server/internal/daemon/execenv/context.go` (1 marked line), `server/internal/daemon/execenv/cerebro_session_mode_brief.go` (new) | The whole Settings-managed policy paragraph — write scope, allowed tools, data sources, approval policy, evaluations — now renders from a cerebro sibling file. Replaces the previous 23-line inline block, so the upstream file holds one call instead of the policy text itself. |
 | `session-mode-evals` | `server/internal/daemon/execenv/execenv.go` (1 marked line), `server/internal/daemon/daemon.go` (1 marked line), `server/internal/daemon/execenv/session_mode_test.go` (1 marked line), `server/internal/handler/daemon.go` (2 marked lines), `server/internal/handler/handler.go` (1 marked line), `server/cmd/server/router.go` (1 marked line), `server/internal/handler/cerebro_session_mode_evals.go` (new) | Carries the Mode's eval IDs into the runtime brief, and runs them against the issue at task completion via the shared eval run executor. Also removes the old skill-merge block, since a Mode no longer grants skills, and drops `SessionModeWorkflowID`, which nothing read. |
+| `execenv-session-mode-workflow-compat` | `server/internal/daemon/execenv/execenv.go` (1 marked line), `server/internal/daemon/execenv/isolation_test.go` (1 marked line) | Keeps the retired `SessionModeWorkflowID` JSON name as decode-only compatibility while a running pre-removal daemon overlaps a replaced helper binary. New requests leave it empty and omit it. |
+| `execenv-session-mode-eval-skill-compat` | `server/internal/daemon/execenv/execenv.go` (1 marked line), `server/internal/daemon/execenv/isolation_test.go` (1 marked line) | Keeps the retired `SessionModeEvalSkillIDs` JSON name as decode-only compatibility while a running pre-removal daemon overlaps a replaced helper binary. New requests leave it empty and omit it. |
+
+# `manage-workflows-gate`
+
+- **Why:** FIR-4196 requires every agent mutation under the existing Workflows, Commands, and Evals route families to enforce the `manage_workflows` decision through the shared Task Mandate and `PlatformActionGate` boundary.
+- **Where:** `server/cmd/server/router.go` mounts `Handler.RequireManageWorkflows` around `/api/cerebro/workflows`, `/api/cerebro/commands`, and `/api/cerebro/evals`. The implementation remains in the Cerebro carve-out `server/internal/handler/workflow_permission_cerebro.go`.

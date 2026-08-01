@@ -48,6 +48,22 @@ func TestApplyTaskMandateDeniesAPIConnectionEndpointOnCapabilitiesCard(t *testin
 	}
 }
 
+func TestApplyTaskMandateDoesNotDenyPlatformActionsAfterRollback(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Tools: []AgentCapabilityTool{{
+		Key: "read_issues", Permission: "allow", Allowed: true, Callable: true,
+	}}}
+
+	ApplyTaskMandate(context.Background(), rejectingCapabilityMandate{
+		denied: map[string]bool{"read_issues": true},
+	}, id, id, id, &card)
+
+	got := card.Tools[0]
+	if got.Permission != "allow" || !got.Allowed || !got.Callable || got.BlockedReason != "" {
+		t.Fatalf("platform action must retain its permission decision after Task Mandate enforcement rollback: %+v", got)
+	}
+}
+
 func (c *capabilityTableCapture) Table(_ context.Context, in cerebrotoolpolicy.TableQuery) ([]cerebrotoolpolicy.TableRow, error) {
 	c.query = in
 	return nil, nil
