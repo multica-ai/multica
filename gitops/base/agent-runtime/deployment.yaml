@@ -200,6 +200,15 @@ spec:
                     values:
                       - auto
                       - fargate
+                  # AIPLAT-153: agentrunner-runtime is a multi-arch image; require
+                  # Graviton now that the arm64 agentrunner-graviton node group
+                  # exists alongside the x86 one. This is the cutover trigger —
+                  # every existing singleton Deployment gets a new pod template
+                  # hash on merge/sync and rolls onto arm64 capacity.
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - arm64
       tolerations:
         - key: CostCenter
           operator: Equal
