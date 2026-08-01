@@ -693,6 +693,12 @@ func (h *Handler) RequireToolPolicyWritePolicy(param string) func(http.Handler) 
 // called from non-CreateAgent paths in the future); the description simply
 // omits the agent line in that case.
 func (h *Handler) cerebroRequireRuntimeAccess(w http.ResponseWriter, r *http.Request, workspaceID string, runtimeID pgtype.UUID, agentName string) bool {
+	// FIR-4220 slice 2: the authored Allow/Ask/Deny for use_other_runtime is
+	// the live gate for agent actors; the group allowlist below stays the
+	// tighten-only ceiling. Member requests pass through unchanged.
+	if !h.allowPlatformCapability(w, r, useOtherRuntimePlatformAction) {
+		return false
+	}
 	if h.GroupPermissions == nil {
 		return true
 	}

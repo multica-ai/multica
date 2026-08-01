@@ -83,6 +83,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   conditionFacets,
   isLockedFromElsewhere,
+  isRowSettable,
   permissionDescription,
   toolPolicyTableOptions,
   useClearToolPolicy,
@@ -596,7 +597,7 @@ export function ToolPolicyTable({
       <LinkedDecisionControl
         rows={linkedRows}
         editLayer={editLayer}
-        disabled={busy || linkedRows.some((linkedRow) => linkedRow.managed_externally)}
+        disabled={busy || linkedRows.some((linkedRow) => !isRowSettable(linkedRow, editLayer))}
         onDecision={(setting) => {
           for (const linkedRow of linkedRows) {
             applySetting(
@@ -611,7 +612,7 @@ export function ToolPolicyTable({
       <CatalogDecisionControl
         row={row}
         editLayer={editLayer}
-        disabled={busy || row.managed_externally}
+        disabled={busy || !isRowSettable(row, editLayer)}
         onDecision={(s) =>
           applySetting(row.tool_key, s, row.resource_pattern || undefined)
         }
@@ -782,9 +783,7 @@ export function ToolPolicyTable({
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <TypeTag row={row} />
-                        {row.managed_externally && (
-                          <ManagedExternallyTag owner={row.external_security_owner} />
-                        )}
+                        {row.managed_externally && <ManagedExternallyTag row={row} />}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -792,7 +791,7 @@ export function ToolPolicyTable({
                         <DecisionControl
                           row={row}
                           editLayer={editLayer}
-                          disabled={busy || row.managed_externally}
+                          disabled={busy || !isRowSettable(row, editLayer)}
                           onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
                         />
                         <ConditionControl
@@ -891,16 +890,14 @@ export function ToolPolicyTable({
                     <DecisionControl
                       row={row}
                       editLayer={editLayer}
-                      disabled={busy || row.managed_externally}
+                      disabled={busy || !isRowSettable(row, editLayer)}
                       onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
                     />
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <TypeTag row={row} />
-                  {row.managed_externally && (
-                    <ManagedExternallyTag owner={row.external_security_owner} />
-                  )}
+                  {row.managed_externally && <ManagedExternallyTag row={row} />}
                   <OriginTag row={row} editLayer={editLayer} />
                   <ConditionControl
                     row={row}
@@ -971,12 +968,29 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 
 // --- row cells --------------------------------------------------------------
 
-// ManagedExternallyTag marks a platform action whose access is decided by
-// another mechanism (membership ACL, daemon token, webhook secret), so its
-// Allow/Ask/Deny choice here is advisory rather than the enforcement point
-// (FIR-2594). Shown so an admin sees the platform exposes the action.
-function ManagedExternallyTag({ owner }: { owner?: string }) {
+// ManagedExternallyTag names the real control point of a platform action the
+// tool-policy chain does not fully decide (FIR-4220, previously miscited as
+// FIR-2594). After FIR-4220 only the machine-intake boundaries remain marked:
+// those render "Governed by" plus a note that the workspace-layer decision is
+// the live off-switch. A plain managed-external row (defensive: none ship
+// today) keeps the read-only wording.
+function ManagedExternallyTag({ row }: { row: ToolPolicyRow }) {
+  const owner = row.external_security_owner;
   const ownerLabel = owner || "Security owner not specified";
+  if (row.workspace_intake_switch) {
+    return (
+      <Badge
+        variant="outline"
+        className="h-auto max-w-full shrink flex-wrap justify-start border-dashed font-normal whitespace-normal text-muted-foreground"
+        title={`Machine intake authenticated by ${ownerLabel}. The Workspace-layer decision is a live off-switch: Deny or Disable turns this intake off.`}
+      >
+        <span>Governed by</span>
+        <span>{ownerLabel}</span>
+        <span aria-hidden="true">·</span>
+        <span>Workspace off-switch</span>
+      </Badge>
+    );
+  }
   const detail = owner
     ? `Access is enforced by ${owner}, not by the tool-policy gate. Settings cannot change this permission.`
     : "Access is governed outside the tool-policy gate. Settings cannot change this permission.";

@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -232,7 +233,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// shared dispatch choke-point so every Gateway transport, including the
 	// create_issue early-return path, performs a fresh expiry and membership
 	// read immediately before execution.
-	if e.taskMandates != nil {
+	if e.taskMandates != nil && e.taskMandateEnforcementEnabled(ctx, workspaceID) {
 		taskID := optionalGatewayUUID(meta.TaskID)
 		if !taskID.Valid {
 			return false, "task mandate missing"
@@ -337,6 +338,19 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
 	}
 	return true, ""
+}
+
+func (e *FirtalGatewayExecutor) taskMandateEnforcementEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if e == nil {
+		return false
+	}
+	if e.taskMandateEnforcement != nil {
+		return e.taskMandateEnforcement(ctx, workspaceID)
+	}
+	if e.cerebro == nil {
+		return false
+	}
+	return taskmandate.EnforcementEnabled(ctx, e.cerebro, workspaceID)
 }
 
 func (e *FirtalGatewayExecutor) guardCanonicalAsk(

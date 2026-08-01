@@ -21,6 +21,7 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setTaskMandateEnforcement(t, true)
 
 	orig := testHandler.CerebroQueries
 	testHandler.CerebroQueries = cerebrodb.New(testPool)
@@ -177,6 +178,14 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	}
 	if !visible {
 		t.Fatalf("Task Mandate denial is missing from Capabilities observed access: %+v", observed)
+	}
+
+	// The rollout circuit breaker restores the policy-only decision without a
+	// deploy or mandate rewrite. Bash is Allow in policy and remains outside the
+	// immutable snapshot, so turning enforcement off must immediately allow it.
+	setTaskMandateEnforcement(t, false)
+	if r := resolve(deniedTool); r["allowed"] != true || r["decision"] != "allow" {
+		t.Fatalf("default-off Task Mandate circuit breaker: got allowed=%v decision=%v, want true/allow", r["allowed"], r["decision"])
 	}
 
 	// ENFORCE: an unconfigured tool resolves to the Base default (Allow) — tools

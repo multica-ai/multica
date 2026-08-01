@@ -484,6 +484,13 @@
       "default": true
     },
     {
+      "key": "cerebro_task_mandate_enforcement",
+      "label": "Task Mandate enforcement",
+      "description": "Enforce the immutable Task Mandate on every local and Firtal Gateway call. Keep this off while validating that every callable offered to an agent is present in the same mandate generation. FIR-4220.",
+      "group": "permissions",
+      "default": false
+    },
+    {
       "key": "cerebro_approvals",
       "label": "Approval inbox",
       "description": "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. The inbox remains visible whenever Tool approval enforcement is on, so an Ask can never wait without a human decision path. FIR-2131, FIR-3388.",

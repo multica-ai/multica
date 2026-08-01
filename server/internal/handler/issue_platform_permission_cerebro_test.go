@@ -51,6 +51,25 @@ func setCreateIssueWorkspacePolicy(t *testing.T, setting toolpolicy.Setting) {
 	setPlatformActionWorkspacePolicy(t, createIssuePermissionToolKey, setting)
 }
 
+func setTaskMandateEnforcement(t *testing.T, enabled bool) {
+	t.Helper()
+	const workspaceUserID = "00000000-0000-0000-0000-000000000000"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
+		VALUES ($1, $2, $3, $4, true)
+		ON CONFLICT (workspace_id, user_id, flag_key)
+		DO UPDATE SET enabled = EXCLUDED.enabled, locked = true
+	`, testWorkspaceID, workspaceUserID, taskmandate.EnforcementFlagKey, enabled); err != nil {
+		t.Fatalf("set %s: %v", taskmandate.EnforcementFlagKey, err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_feature_flags
+			WHERE workspace_id = $1 AND user_id = $2 AND flag_key = $3
+		`, testWorkspaceID, workspaceUserID, taskmandate.EnforcementFlagKey)
+	})
+}
+
 func issuePlatformActionMandate(t *testing.T, taskID, agentID string, actions ...string) {
 	t.Helper()
 	taskUUID, err := util.ParseUUID(taskID)
@@ -157,6 +176,7 @@ func TestCreateIssuePermission_RESTDenyBlocksAgentIssueWithoutMutation(t *testin
 }
 
 func TestCreateIssuePermission_RESTTaskMandateDenyBlocksBeforeMutation(t *testing.T) {
+	setTaskMandateEnforcement(t, true)
 	setCreateIssueWorkspacePolicy(t, toolpolicy.SettingAllow)
 	title := "REST mandate denied issue " + uuid.NewString()
 	cleanupIssuesByTitle(t, title)
@@ -182,7 +202,32 @@ func TestCreateIssuePermission_RESTTaskMandateDenyBlocksBeforeMutation(t *testin
 	}
 }
 
+func TestCreateIssuePermission_TaskMandateEnforcementDefaultOffRestoresMutation(t *testing.T) {
+	setTaskMandateEnforcement(t, false)
+	setCreateIssueWorkspacePolicy(t, toolpolicy.SettingAllow)
+	title := "REST mandate circuit breaker issue " + uuid.NewString()
+	cleanupIssuesByTitle(t, title)
+
+	agentID := createHandlerTestAgent(t, "create-issue-circuit-breaker-"+uuid.NewString(), []byte(`{}`))
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+	issuePlatformActionMandate(t, taskID, agentID)
+	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": title, "allow_duplicate": true,
+	})
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("default-off Task Mandate circuit breaker: status=%d body=%s, want 201", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateIssuePermission_TaskMandateAndPermissionsBothRequired(t *testing.T) {
+	setTaskMandateEnforcement(t, true)
 	issueID := createPermissionTestParent(t)
 	var originalTitle string
 	if err := testPool.QueryRow(context.Background(), `SELECT title FROM issue WHERE id = $1`, issueID).Scan(&originalTitle); err != nil {
@@ -236,6 +281,7 @@ func TestUpdateIssuePermission_TaskMandateAndPermissionsBothRequired(t *testing.
 }
 
 func TestCreateCommentPermission_TaskMandateAndPermissionsBothRequired(t *testing.T) {
+	setTaskMandateEnforcement(t, true)
 	issueID := createPermissionTestParent(t)
 
 	t.Run("Task Mandate denies before mutation", func(t *testing.T) {

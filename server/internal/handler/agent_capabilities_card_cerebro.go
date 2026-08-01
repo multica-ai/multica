@@ -115,6 +115,10 @@ type AgentCapabilityTool struct {
 	Reason                string   `json:"reason,omitempty"`
 	ManagedExternally     bool     `json:"managed_externally"`
 	ExternalSecurityOwner string   `json:"external_security_owner,omitempty"` // CEREBRO-PATCH(agent-capabilities-external-security-owner): expose the real owner of read-only permissions.
+	// WorkspaceIntakeSwitch marks a managed-external machine-intake boundary
+	// whose workspace-layer policy row is a live off-switch (FIR-4220), so the
+	// card can say WHERE the deciding control lives instead of "not wired".
+	WorkspaceIntakeSwitch bool     `json:"workspace_intake_switch,omitempty"`
 	CappedByGroups        []string `json:"capped_by_groups,omitempty"`
 	// The effective truth model keeps the distinct questions separate: policy,
 	// runtime presence, live enforcement, callability, and observed proof.
@@ -735,6 +739,7 @@ func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 		Reason:                row.Effective.Reason,
 		ManagedExternally:     row.ManagedExternally,
 		ExternalSecurityOwner: row.ExternalSecurityOwner, // CEREBRO-PATCH(agent-capabilities-external-security-owner): keep Capabilities aligned with Settings.
+		WorkspaceIntakeSwitch: row.WorkspaceIntakeSwitch,
 		Allowed:               row.Effective.Setting == cerebrotoolpolicy.SettingAllow,
 		Enforced:              true,
 	}
@@ -780,6 +785,14 @@ func setCapabilityBlockExplanation(tool *AgentCapabilityTool) {
 			tool.HowToFix = "Change the effective permission at the deciding layer."
 		}
 	case !tool.Enforced:
+		if tool.WorkspaceIntakeSwitch {
+			// FIR-4220: intake boundaries ARE enforced — at the machine-intake
+			// point, by their authenticator plus the workspace-layer off-switch —
+			// they are just not part of an agent's own policy-gated call surface.
+			tool.BlockedReason = "This is a machine-intake boundary authenticated by " + tool.ExternalSecurityOwner + ", not an agent-callable action"
+			tool.HowToFix = "Turn the intake on or off with the workspace-layer decision in Settings → Permissions."
+			return
+		}
 		tool.BlockedReason = "This capability is not wired to a live enforcement point"
 		tool.HowToFix = "Wire the capability to its call-time authorizer before relying on it."
 	case !tool.Available:

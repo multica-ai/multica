@@ -439,6 +439,60 @@ while its unknown check receives no credential.
 Every row here actively allows or denies an agent action right now, with default
 configuration. Verified against the code.
 
+### Platform capabilities enforced through the tool-policy engine (FIR-4220)
+
+The former advisory "Managed externally" rows in Settings → Permissions are now
+live gates. Eight platform capabilities resolve the authored Allow/Ask/Deny
+through the tool-policy chain for **agent actors** (members pass through to the
+existing role/membership gates, which stay as tighten-only ceilings — a policy
+Allow can never open what those checks close):
+
+- `rerun_issue`, `trigger_autopilot`, `autopilot_scope`,
+  `schedule_agent_wakeup`, `manage_project_access` (slice 1) — route middleware
+  `RequirePlatformCapability` in
+  `server/internal/handler/platform_capability_gate_cerebro.go`;
+  `autopilot_scope` is additionally gated in `cerebroApplyScopeOnCreate`.
+- `use_other_runtime` (slice 2) — gated in `cerebroRequireRuntimeAccess`
+  (create-agent / create-from-template paths); the group runtime allowlist
+  (`CanUseRuntime`) stays the ceiling.
+- `read_issues`, `read_projects` (slice 2) — `RequirePlatformReadCapability`
+  wraps the issue and project read route groups (GET/HEAD only; the read-shaped
+  `POST /api/issues/query` is gated explicitly). Workspace membership and
+  project visibility stay the human ceiling. No row authored → agents keep
+  reads (`Base: Allow`).
+
+These capability keys are not runtime tool names, so a task-mandate snapshot
+never contains them — the gate is mandate-optional and the policy chain alone
+decides (see `authorizePlatformActionWithMandate`).
+
+The three machine-intake boundaries stay `ManagedExternally` — an external
+caller authenticates with a secret/token and there is no actor for
+Allow/Ask/Deny to judge — but each now honours a **workspace-layer off-switch**
+(`WorkspaceIntakeSwitch` in `platformcatalog`, resolved by
+`platformaction.IntakeAllowed`): an authored workspace Deny/Disable switches
+the intake off; Allow, Ask, and no row leave it on; authentication is
+unchanged. Settings accepts workspace-layer writes for exactly these keys and
+rejects every other layer:
+
+- `autopilot_webhook` — checked in `HandleAutopilotWebhook` after the token
+  and autopilot lookups.
+- `daemon_runtime_callback` — `RequireDaemonIntake` middleware on the daemon
+  register/deregister/heartbeat/claim/refresh-capabilities routes (daemon-token
+  path; PAT-path requests keep their own membership gates).
+- `gateway_channel_delivery` — checked in `webhookgateway.Deliverer.Handle`
+  before the channel-membership gate.
+
+Intake resolution is fail-open on lookup errors by design: the policy row is an
+availability switch layered over unchanged authentication, so a policy-store
+outage must not take heartbeats or webhook deliveries down.
+
+Migrations `9165` (slice 1) and `9166` (slice 2) purge legacy advisory
+`cerebro_tool_policy` rows for these keys so a stale pre-enforcement row cannot
+change live behaviour on deploy. The tripwire test
+`platformcatalog/catalog_advisory_tripwire_test.go` pins the exact
+`ManagedExternally` set to the three intake keys — a new advisory row cannot
+land without an explicit reviewed edit.
+
 ### Canonical runtime-tool path (FIR-3403)
 
 Runtime-tool access no longer has a separate enable/grant cascade or a

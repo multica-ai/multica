@@ -1,7 +1,7 @@
 package toolpolicy
 
 // Integration tests for the platform-capability rows (table_platform.go,
-// FIR-2594). They prove the three things the admin screen depends on: the
+// FIR-4220). They prove the three things the admin screen depends on: the
 // code-owned platform catalog appears in the table (and only when
 // IncludePlatform is set), a platform action is settable Allow/Ask/Deny like any
 // reported tool, and the externally-managed marker is carried through. They share
@@ -19,6 +19,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 func TestSettingsTableAlwaysIncludesPlatformPermissions(t *testing.T) {
@@ -82,7 +83,7 @@ func TestSettingsTableAlwaysIncludesPlatformPermissions(t *testing.T) {
 
 // TestTable_PlatformRowsGatedByIncludeFlag proves the catalog is appended only
 // when IncludePlatform is true, so an unflagged workspace lists exactly what it
-// did before FIR-2594.
+// did before the platform catalog shipped (see FIR-4220 for its governance).
 func TestTable_PlatformRowsGatedByIncludeFlag(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
@@ -287,6 +288,49 @@ func TestHandlerRejectsEveryExternallyManagedPlatformCapabilityWrite(t *testing.
 				t.Fatalf("clear status = %d, want 409 (body %s)", clearRec.Code, clearRec.Body.String())
 			}
 		})
+	}
+}
+
+// TestHandlerAcceptsWorkspaceIntakeSwitchWrite proves the FIR-4220 slice 2
+// exception: a WorkspaceIntakeSwitch capability (machine-intake boundary)
+// accepts a workspace-layer Set and Clear — that row is the live intake
+// off-switch read by platformaction.IntakeAllowed — while every other layer
+// stays rejected (covered by the test above).
+func TestHandlerAcceptsWorkspaceIntakeSwitchWrite(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+
+	h := NewHandler(s)
+	wsID := util.UUIDToString(tpTestWorkspaceID)
+	body, err := json.Marshal(setRequest{
+		ToolKey:   "autopilot_webhook",
+		Layer:     string(LayerWorkspace),
+		SubjectID: wsID,
+		Setting:   string(SettingDeny),
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := usageRequest("admin", "")
+	req.Method = http.MethodPut
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.Set(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("workspace-layer set status = %d, want 204 (body %s)", rec.Code, rec.Body.String())
+	}
+
+	clearReq := usageRequest("admin", "")
+	clearReq.Method = http.MethodDelete
+	clearReq.URL.RawQuery = url.Values{
+		"tool_key":   {"autopilot_webhook"},
+		"layer":      {string(LayerWorkspace)},
+		"subject_id": {wsID},
+	}.Encode()
+	clearRec := httptest.NewRecorder()
+	h.Clear(clearRec, clearReq)
+	if clearRec.Code != http.StatusNoContent {
+		t.Fatalf("workspace-layer clear status = %d, want 204 (body %s)", clearRec.Code, clearRec.Body.String())
 	}
 }
 

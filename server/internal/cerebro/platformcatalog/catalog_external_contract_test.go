@@ -14,27 +14,23 @@ type externalContractSuite struct {
 	tests        []string
 }
 
-// TestEveryExternallyManagedPermissionHasBehavioralProof keeps the 11
-// read-only catalog entries honest. A named owner is not enough: this test
+// TestEveryExternallyManagedPermissionHasBehavioralProof keeps the read-only
+// catalog entries honest. A named owner is not enough: this test
 // runs the focused gate tests that exercise the security boundary which admits
 // or rejects each operation. A source reference alone would only prove that a
 // test name exists, not that the action still blocks in the running code.
 func TestEveryExternallyManagedPermissionHasBehavioralProof(t *testing.T) {
 	contracts := []externalContractSuite{
-		{[]string{"rerun_issue", "autopilot_webhook", "use_other_runtime", "manage_project_access", "gateway_channel_delivery", "read_issues", "read_projects"}, "./internal/handler", []string{
-			"TestCancelTaskByUser_PrivateAgent_PlainMember_Returns403",
+		// Eight capabilities moved to real tool-policy enforcement (FIR-4220
+		// slices 1+2) — their gate proof lives in the policy-engine tests,
+		// while their old checks survive as tighten-only ceilings. Only the
+		// three machine-intake boundaries remain here.
+		{[]string{"autopilot_webhook", "gateway_channel_delivery"}, "./internal/handler", []string{
 			"TestWebhookHandler_404OnUnknownToken",
-			"TestCanUseRuntimeForAgent_Pure",
-			"TestUpdateProjectAccess_MemberRejected",
 			"TestSearchChannelMessages_NonParticipantForbidden",
-			"TestListIssues_FiltersRestrictedForOutsider",
-			"TestCanAccessProject_MemberOnlyOpenAndExplicitRestricted",
 		}},
-		{[]string{"trigger_autopilot", "autopilot_scope"}, "./internal/cerebro/access", []string{"TestCanTrigger"}},
 		{[]string{"daemon_runtime_callback"}, "./internal/middleware", []string{"TestDaemonAuth_MissingAuth"}},
-		{[]string{"schedule_agent_wakeup"}, "./internal/cerebro/wakeup", []string{"TestValidateIssueAndAgentRejectsForeignWorkspaceOrAgent"}},
 		{[]string{"gateway_channel_delivery"}, "./internal/cerebro/webhookgateway", []string{"TestAuthorized"}},
-		{[]string{"read_projects"}, "./internal/cerebro/grouppermissions", []string{"TestProjectGroupAccess_RoundTrip"}},
 	}
 
 	seen := map[string]bool{}

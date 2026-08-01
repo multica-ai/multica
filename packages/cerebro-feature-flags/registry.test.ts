@@ -45,6 +45,13 @@ describe("cerebro feature flag grouping", () => {
     );
   });
 
+  it("ships Task Mandate enforcement behind a default-off circuit breaker", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_task_mandate_enforcement).toBe(false);
+    expect(
+      CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_task_mandate_enforcement")?.group,
+    ).toBe("permissions");
+  });
+
   it("keeps mini apps unavailable until an admin enables the product", () => {
     expect(CEREBRO_FLAGS.some((flag) => flag.key === "cerebro_mini_apps")).toBe(true);
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_mini_apps).toBe(false);

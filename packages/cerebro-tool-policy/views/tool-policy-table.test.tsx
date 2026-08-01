@@ -752,6 +752,45 @@ describe("ToolPolicyTable (Condition editor)", () => {
     }
   });
 
+  // FIR-4220: an intake off-switch row (managed_externally + workspace_intake_switch)
+  // says WHERE it is governed and is settable at the workspace layer ONLY.
+  const INTAKE_ROW = {
+    tool_key: "autopilot_webhook",
+    title: "Autopilot inbound webhook",
+    category: "Autopilots",
+    source: "platform",
+    managed_externally: true,
+    external_security_owner: "Autopilot webhook secret",
+    workspace_intake_switch: true,
+    enforced_conditions: [],
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  };
+
+  it("renders an intake off-switch as workspace-governed and read-only on the agent page", async () => {
+    mockUseFeatureFlag.mockReturnValue(false);
+    mockCerebroRequest.mockResolvedValueOnce({ tools: [INTAKE_ROW] });
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-autopilot_webhook");
+    expect(within(row).getByText("Governed by", { exact: true })).toBeInTheDocument();
+    expect(within(row).getByText("Autopilot webhook secret", { exact: true })).toBeInTheDocument();
+    expect(within(row).getByText("Workspace off-switch", { exact: true })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /Decision:/ })).toBeDisabled();
+  });
+
+  it("lets the workspace page author the intake off-switch decision", async () => {
+    mockUseFeatureFlag.mockReturnValue(false);
+    mockCerebroRequest.mockResolvedValue({ tools: [INTAKE_ROW] });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view="workspace" subjectId="ws-1" />
+      </QueryClientProvider>,
+    );
+    const row = await screen.findByTestId("tool-row-autopilot_webhook");
+    expect(within(row).getByRole("button", { name: /Decision:/ })).toBeEnabled();
+  });
+
   it("shows a clear inline fallback when an external security owner is absent", async () => {
     mockUseFeatureFlag.mockImplementation((key: string) => key === "cerebro_tool_policy");
     mockCerebroRequest.mockResolvedValueOnce({

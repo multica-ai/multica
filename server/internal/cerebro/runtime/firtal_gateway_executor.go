@@ -100,6 +100,9 @@ type FirtalGatewayExecutor struct {
 	// for every Gateway list and call decision. nil fails closed.
 	accessDecisions *accessdecision.Service
 	taskMandates    taskMandateStore
+	// taskMandateEnforcement is a test seam for the workspace circuit breaker.
+	// Production resolves the shared default-off flag from e.cerebro.
+	taskMandateEnforcement func(context.Context, pgtype.UUID) bool
 
 	// routerHandler is the server's own HTTP router, used by the FIR-1449
 	// in-process bridge to reach the full CLI/MCP tool surface via a loopback

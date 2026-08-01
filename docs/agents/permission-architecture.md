@@ -228,7 +228,7 @@ engine-owned; the other entries name the external access gate that owns their en
 | Runtimes | `manage_runtime`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
 | Groups | `manage_group`, `manage_group_members` |
 | Permissions | `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval`, `manage_credential_access`, `manage_group_overrides`, `manage_workspace_overrides`, `manage_collections` |
-| Projects | `manage_project`, `manage_project_access` ⚠, `manage_status_models`, `manage_project_sprints` |
+| Projects | `manage_project`, `manage_project_access`, `manage_status_models`, `manage_project_sprints` |
 | Workspace | `manage_entity_folders`, `manage_workspace_members`, `manage_workspace_settings`, `delete_workspace`, `manage_integrations`, `manage_analytics`, `manage_model_registry` |
 | Skills | `manage_skills` |
 | Squads | `manage_squad` |
@@ -236,15 +236,23 @@ engine-owned; the other entries name the external access gate that owns their en
 | Credentials | `manage_credentials` |
 | Workflows | `manage_workflows`, `hooks:read`, `hooks:write`, `hooks:enforce`, `hooks:manage_managed` |
 | Channels | `manage_channels`, `gateway_channel_delivery` ⚠ |
-| Read access | `read_issues` ⚠, `read_projects` ⚠ |
+| Read access | `read_issues`, `read_projects` |
 
 (`manage_share_tokens` was removed with the share-token feature and no longer exists; drop it if
 you find it cited elsewhere.)
 
-⚠ = `ManagedExternally: true` (6 total: `autopilot_webhook`, `daemon_runtime_callback`,
-`manage_project_access`, `read_issues`, `read_projects`, `gateway_channel_delivery`). For these the tool-policy gate is
-**not** the enforcement point — they are listed for visibility only and a policy row on them
-does nothing. They are a permanent code-only set, not a backlog item.
+⚠ = `ManagedExternally: true` (3 total after FIR-4220: `autopilot_webhook`,
+`daemon_runtime_callback`, `gateway_channel_delivery`). These are machine-intake boundaries —
+authenticated by webhook secret, daemon token, and gateway service token respectively — with no
+person or agent for Allow/Ask/Deny to judge. Each carries `WorkspaceIntakeSwitch: true`: its
+workspace-layer policy row IS read at the intake point (`platformaction.IntakeAllowed`) as a live
+off-switch (Deny/Disable turns the intake off; lookup errors fail open), and Settings accepts
+workspace-layer writes only. Every other formerly-advisory platform key (`rerun_issue`,
+`trigger_autopilot`, `autopilot_scope`, `schedule_agent_wakeup`, `use_other_runtime`,
+`manage_project_access`, `read_issues`, `read_projects`) is enforced by the tool-policy engine
+since FIR-4220 — a policy row on them is the real gate, with the pre-existing code checks kept as
+tighten-only ceilings. `catalog_advisory_tripwire_test.go` pins this exact 3-key set so a new
+advisory row cannot appear silently.
 
 **Two dimensions, do not confuse them:**
 
@@ -252,7 +260,7 @@ Workflow Hook capabilities are independent of `manage_workflows`. `platformcatal
 
 Workflow, Command, and Eval mutations under `/api/cerebro/workflows*`, `/api/cerebro/commands*`, and `/api/cerebro/evals*` share one agent enforcement boundary: `handler.RequireManageWorkflows` checks Task Mandate and `PlatformActionGate` against `manage_workflows` before the route handler can mutate state. Reads and member behavior remain unchanged, and the independent `/api/cerebro/workflow-hooks*` family keeps its `hooks:*` contracts. Settings → Permissions is therefore the only authoring surface for `manage_workflows`; CLI/MCP wrappers inherit the HTTP decision.
 
-Externally managed catalog rows remain read-only and render `external_security_owner` inline beside `Managed externally` in both permission catalog presentations. An older response without an owner renders `Security owner not specified`, so the management location never depends on hover or disappears silently.
+The three intake rows render `Governed by: <external_security_owner> · Workspace off-switch` in both permission catalog presentations, with the decision control enabled on the workspace page only (`isRowSettable` in `packages/cerebro-tool-policy/core/tool-policy.ts`, mirroring the server's `externallyManagedWriteError`). An older response without an owner renders `Security owner not specified`, so the management location never depends on hover or disappears silently.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
   permissions, keyed on action.
 - **Runtime tool capabilities** — the per-tool dimension keyed on `tool_key` values like

@@ -26,6 +26,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -39,10 +41,21 @@ type Deliverer struct {
 	// Token is the shared gateway delivery secret. When empty the endpoint is
 	// disabled (acts as the feature kill switch) and every call 404s.
 	Token string
+	// Policy resolves the workspace-layer off-switch for
+	// gateway_channel_delivery (FIR-4220 slice 2). nil keeps the intake on —
+	// the gateway token and channel membership stay the security boundary.
+	Policy *toolpolicy.Store
 }
 
 func New(queries *db.Queries, bus *events.Bus, token string) *Deliverer {
 	return &Deliverer{Queries: queries, Bus: bus, Token: token}
+}
+
+// WithPolicy wires the tool-policy store that carries the workspace-layer
+// gateway_channel_delivery off-switch (FIR-4220 slice 2).
+func (d *Deliverer) WithPolicy(policy *toolpolicy.Store) *Deliverer {
+	d.Policy = policy
+	return d
 }
 
 // Enabled reports whether the endpoint is live (a delivery token is configured).
@@ -106,6 +119,14 @@ func (d *Deliverer) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if issue.Kind != "channel" && issue.Kind != "dm" {
 		writeError(w, http.StatusBadRequest, "target is not a channel")
+		return
+	}
+
+	// FIR-4220 slice 2: a workspace-layer Deny on gateway_channel_delivery
+	// switches the intake off for that workspace; token + membership below
+	// stay the security boundary.
+	if !platformaction.IntakeAllowed(r.Context(), d.Policy, issue.WorkspaceID, "gateway_channel_delivery") {
+		writeError(w, http.StatusForbidden, "gateway deliveries are turned off by workspace policy")
 		return
 	}
 
