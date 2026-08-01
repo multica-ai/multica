@@ -281,7 +281,9 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
-	})
+	}, func(opts *s3.Options) {
+        opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+    })
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}

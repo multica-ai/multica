@@ -76,6 +76,102 @@ func TestS3StorageUploadStreamRejectsUnknownLength(t *testing.T) {
 	}
 }
 
+func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
+	type observedRequest struct {
+		contentSHA256 string
+		trailer       string
+		checksumCRC32 string
+		encoding      string
+		body          string
+	}
+
+	newRecordingServer := func(t *testing.T, observed chan<- observedRequest) *httptest.Server {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read request body: %v", err)
+			}
+			observed <- observedRequest{
+				contentSHA256: r.Header.Get("X-Amz-Content-Sha256"),
+				trailer:       r.Header.Get("X-Amz-Trailer"),
+				checksumCRC32: r.Header.Get("X-Amz-Checksum-Crc32"),
+				encoding:      r.Header.Get("Content-Encoding"),
+				body:          string(body),
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+
+	newStore := func(endpoint string) *S3Storage {
+		return &S3Storage{
+			client: s3.New(s3.Options{
+				Region:       "us-east-1",
+				Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+				BaseEndpoint: aws.String(endpoint),
+				UsePathStyle: true,
+			}),
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			endpointURL:  endpoint,
+			usePathStyle: true,
+		}
+	}
+
+	// S3-compatible backends such as Aliyun OSS and Tencent COS reject
+	// aws-chunked framing outright, so neither upload path may emit a
+	// trailing checksum.
+	assertNoTrailer := func(t *testing.T, got observedRequest, payload string) {
+		t.Helper()
+		if got.contentSHA256 == "STREAMING-UNSIGNED-PAYLOAD-TRAILER" {
+			t.Fatalf("x-amz-content-sha256 = %q, want a non-chunked value", got.contentSHA256)
+		}
+		if got.trailer != "" {
+			t.Fatalf("x-amz-trailer = %q, want empty", got.trailer)
+		}
+		if got.checksumCRC32 != "" {
+			t.Fatalf("x-amz-checksum-crc32 = %q, want empty", got.checksumCRC32)
+		}
+		if strings.Contains(got.encoding, "aws-chunked") {
+			t.Fatalf("content-encoding = %q, want no aws-chunked framing", got.encoding)
+		}
+		if got.body != payload {
+			t.Fatalf("request body = %q, want %q", got.body, payload)
+		}
+	}
+
+	t.Run("buffered upload", func(t *testing.T) {
+		observed := make(chan observedRequest, 1)
+		server := newRecordingServer(t, observed)
+		payload := "buffered payload"
+
+		if _, err := newStore(server.URL).Upload(
+			context.Background(), "uploads/media.bin", []byte(payload),
+			"application/octet-stream", "media.bin",
+		); err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+		assertNoTrailer(t, <-observed, payload)
+	})
+
+	t.Run("streaming upload", func(t *testing.T) {
+		observed := make(chan observedRequest, 1)
+		server := newRecordingServer(t, observed)
+		payload := "streamed payload"
+		nonSeekable := io.LimitReader(strings.NewReader(payload), int64(len(payload)))
+
+		if _, err := newStore(server.URL).UploadStream(
+			context.Background(), "uploads/media.bin", nonSeekable, int64(len(payload)),
+			"application/octet-stream", "media.bin",
+		); err != nil {
+			t.Fatalf("UploadStream: %v", err)
+		}
+		assertNoTrailer(t, <-observed, payload)
+	})
+}
+
 func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
 	s := &S3Storage{
 		bucket:      "test-bucket",
