@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -113,6 +115,50 @@ func TestRefreshAgentVersions_UpdatesTheVersionTasksActuallyRead(t *testing.T) {
 	}
 }
 
+// TestRefreshAgentVersions_ReachesWorkspacesAnotherPathDidNotRegister covers the
+// hole in treating the version cache as a record of what the server knows.
+//
+// Every path that registers probes through setAgentVersion — the converge round,
+// a new workspace's sync, a runtime_gone re-register, a self-heal at task launch
+// — and each of them tells only the workspaces it happened to be working on, or
+// none at all. Whichever writer lands first leaves the cache matching what is on
+// disk, so a before/after diff of the cache sees nothing to do, and every
+// workspace that writer skipped keeps the old version until the daemon restarts.
+//
+// The population most exposed is the one this feature exists for: a version
+// manager upgrading in place deletes the pinned path, so the next task launch
+// self-heals and advances the cache before any refresh round runs.
+func TestRefreshAgentVersions_ReachesWorkspacesAnotherPathDidNotRegister(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	// codex is upgraded, and something other than the refresh round probes it
+	// first. detectBuiltinRuntimes is exactly what those paths call.
+	fx.setProbeVersion("10.0.0")
+	if _, belowMin := d.detectBuiltinRuntimes(context.Background()); len(belowMin) != 0 {
+		t.Fatalf("below-minimum = %v, want none", belowMin)
+	}
+	if got := d.agentVersion("codex"); got != "10.0.0" {
+		t.Fatalf("cached codex version = %q, want the other path to have advanced it to 10.0.0", got)
+	}
+
+	d.refreshAgentVersions(context.Background())
+
+	for _, workspaceID := range []string{"ws-1", "ws-2"} {
+		if got := fx.registeredVersionFor(workspaceID, "codex"); got != "10.0.0" {
+			t.Errorf("%s registered codex version = %q, want 10.0.0 — the cache moving first must not "+
+				"swallow the change for the workspaces nothing re-registered", workspaceID, got)
+		}
+	}
+
+	// And it settles rather than re-registering every round from here on.
+	calls := fx.registerCallCount()
+	d.refreshAgentVersions(context.Background())
+	if got := fx.registerCallCount() - calls; got != 0 {
+		t.Errorf("made %d Register calls after settling, want 0", got)
+	}
+}
+
 // TestRefreshAgentVersions_BlankToRealVersionReRegisters covers a provider that
 // registered while its version probe was failing: the server shows a blank
 // version for it, and nothing else will ever fix that.
@@ -214,6 +260,50 @@ func TestRefreshAgentVersions_KeepsRuntimeWhenTheProbeMerelyFailed(t *testing.T)
 	}
 	if got := fx.deregisteredCount(); got != 0 {
 		t.Errorf("deregistered %d runtimes over a probe failure, want 0", got)
+	}
+}
+
+// TestDemoteBelowMinimumRuntimes_DoesNotRaceTheHealthHandler pins why the filter
+// allocates instead of reusing the slice.
+//
+// healthHandler copies each workspace's runtimeIDs header under d.mu and
+// serializes it after releasing the lock, so filtering in place writes into a
+// slice another goroutine is reading — a genuine data race even when the value
+// written is identical. removeStaleRuntime already follows the same rule.
+//
+// The assertion is the race detector; the demotion assertion below only proves
+// the loop did the work it was supposed to be racing on.
+func TestDemoteBelowMinimumRuntimes_DoesNotRaceTheHealthHandler(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	handler := d.healthHandler(time.Now())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		d.demoteBelowMinimumRuntimes(context.Background(), map[string]string{"codex": "0.0.1"})
+	}
+	<-done
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("providers after demotion = %v, want [claude]", got)
 	}
 }
 

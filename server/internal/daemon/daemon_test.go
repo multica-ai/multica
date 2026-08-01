@@ -3768,6 +3768,52 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 	}
 }
 
+// TestHandleTask_UntrackedRuntimeFailsBackForRetry covers the window between a
+// batch claim leaving with a runtime ID and the claimed task arriving here.
+//
+// A below-minimum demotion or a drift convergence to zero drops runtime rows
+// without coordinating with in-flight claims — deliberately, since gating claims
+// on that is the machinery this daemon does not have. So the task can arrive for
+// a runtime the daemon no longer holds, and the unchecked map read used to hand
+// it a zero-value Runtime: an empty provider that died hundreds of lines later
+// as `no agent configured for provider ""`, a reason the server does not retry.
+func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
+	t.Parallel()
+
+	var failBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		failBody.Store(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runtimeIndex:       map[string]Runtime{},
+		cancelPollInterval: time.Hour,
+	}
+	d.runner = taskRunnerFunc(func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error) {
+		t.Error("runner ran for a runtime the daemon no longer hosts")
+		return TaskResult{}, nil
+	})
+
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
+
+	body, _ := failBody.Load().(map[string]any)
+	if body == nil {
+		t.Fatal("task was never reported as failed; the server would wait out its dispatch timeout")
+	}
+	if got := body["failure_reason"]; got != "runtime_offline" {
+		t.Errorf("failure_reason = %v, want runtime_offline — the reason the server auto-retries on", got)
+	}
+}
+
 // TestHandleTask_ReportsUsageBeforeCancel verifies that ReportTaskUsage is called
 // even when the server marks the task as cancelled during the post-run status
 // check. Regression test for the ordering bug where the cancel check ran before

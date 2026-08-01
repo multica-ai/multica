@@ -115,34 +115,17 @@ func (d *Daemon) agents() map[string]AgentEntry {
 }
 
 // setSkippedAgents replaces the diagnostic "discovered but not registered" set
-// reported on /health, together with the subset that was dropped for a CONFIRMED
-// below-minimum version. Called at the end of every registration round with the
+// reported on /health. Called at the end of every registration round with the
 // providers that round dropped.
 //
-// The two are published together, under one lock, because they describe the same
-// round: a reader that sees a provider listed as skipped must be able to tell
-// whether the daemon merely failed to read its version or actually verified it
-// is too old, and a torn view of that pair would be worse than either alone.
-func (d *Daemon) setSkippedAgents(skipped, belowMinimum map[string]string) {
+// Purely diagnostic, and deliberately so: it is last-writer-wins across every
+// goroutine that probes, so nothing may steer behavior off it. A caller that
+// needs to act on a verdict takes it from detectBuiltinRuntimes' return value,
+// which describes its own round.
+func (d *Daemon) setSkippedAgents(skipped map[string]string) {
 	d.skippedAgentsMu.Lock()
 	defer d.skippedAgentsMu.Unlock()
 	d.skippedAgents = skipped
-	d.belowMinimumAgents = belowMinimum
-}
-
-// belowMinimumAgentsSnapshot copies the providers whose last probe confirmed a
-// version below the minimum supported one, mapped to that version.
-func (d *Daemon) belowMinimumAgentsSnapshot() map[string]string {
-	d.skippedAgentsMu.RLock()
-	defer d.skippedAgentsMu.RUnlock()
-	if len(d.belowMinimumAgents) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(d.belowMinimumAgents))
-	for provider, version := range d.belowMinimumAgents {
-		out[provider] = version
-	}
-	return out
 }
 
 // skippedAgentsSnapshot copies the current skip reasons for the health handler.
@@ -201,9 +184,9 @@ func (d *Daemon) refreshAgentAvailability() []string {
 	return gained
 }
 
-// refreshAgentVersions re-probes every installed agent CLI and, when one now
-// reports a different version, refreshes the daemon's cached version and
-// re-registers the built-in runtimes so the server reports what is on disk.
+// refreshAgentVersions re-probes every installed agent CLI and re-registers the
+// built-in runtimes whenever the server has not been told a version this daemon
+// has already detected, so what the server reports matches what is on disk.
 //
 // This is the agent-CLI counterpart to trySelfReload, and it deliberately does
 // NOT restart. What a user needs when codex or claude upgrades is that
@@ -220,6 +203,15 @@ func (d *Daemon) refreshAgentAvailability() []string {
 // the minimum-version gate still applies. A provider whose probe fails this
 // round keeps its previous version and is retried next round — a failed probe
 // never looks like a version change.
+//
+// What to send is decided from the PENDING set, not from a before/after diff of
+// the version cache. The cache is written by every path that probes, so a diff
+// only sees a change when this round happens to be the first writer: a converge
+// round, a new workspace registering, or a self-heal at task launch will all
+// move it first and leave this round seeing nothing to do — while the
+// workspaces those paths did not touch keep the old version indefinitely.
+// setAgentVersion records the obligation at the write, and it is discharged here
+// once every tracked workspace has accepted the version.
 //
 // Re-registration carries the whole built-in set because that is the shape the
 // register endpoint upserts, so one provider's upgrade re-sends its neighbours
@@ -239,11 +231,11 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 		return
 	}
 
-	builtins := d.detectBuiltinRuntimes(ctx)
+	builtins, belowMinimum := d.detectBuiltinRuntimes(ctx)
 	// Runs before the early return below: a downgrade drops the provider from
 	// builtins entirely, so there is no version change left to detect and the
 	// machine could otherwise look idle while a too-old CLI keeps taking work.
-	if belowMinimum := d.belowMinimumAgentsSnapshot(); len(belowMinimum) > 0 {
+	if len(belowMinimum) > 0 {
 		d.demoteBelowMinimumRuntimes(ctx, belowMinimum)
 	}
 	if len(builtins) == 0 {
@@ -257,42 +249,8 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 		carried[rt["type"]] = rt["version"]
 	}
 
-	var changes []string
-	changed := make(map[string]string)
-	for provider, version := range carried {
-		prev, known := before[provider]
-		// A provider we have never seen has no runtime yet, so bringing it online
-		// is the converge path's job, not a version change.
-		//
-		// A provider we know at a BLANK version is the opposite: it registered —
-		// it has a runtime — while its version probe was failing, so the server is
-		// displaying nothing for it. Nothing else will ever fix that. Converge
-		// only looks at providers missing a runtime, and by the next round
-		// setAgentVersion has already stored the real version, so no later round
-		// sees a change either. Blank -> real is a change, and the only chance to
-		// report it is now.
-		if !known || prev == version {
-			continue
-		}
-		// A blank *new* version reaches here for any provider with no entry in
-		// agent.MinVersions, since the gate passes it through. Treating it as a
-		// change would re-register the provider with no version at all, replacing
-		// a version the server had with nothing — the same "couldn't read it is
-		// not a change" rule trySelfReload applies. setAgentVersion refuses the
-		// blank too, so the daemon's own cache keeps the previous value.
-		if version == "" {
-			d.logger.Warn("agent CLI reported no version; keeping the previous one",
-				"provider", provider, "previous", prev)
-			continue
-		}
-		changed[provider] = version
-		changes = append(changes, fmt.Sprintf("%s %s -> %s", provider, prev, version))
-	}
-	d.markAgentVersionsPending(changed)
-
 	// Register only when this round can actually advance something: some pending
-	// version that this round's payload carries. Anything marked just above
-	// qualifies by construction, so this covers fresh changes too.
+	// version that this round's payload carries.
 	//
 	// The narrower condition matters because a pending entry can outlive its
 	// provider. An uninstalled CLI is never dropped from the availability set
@@ -301,21 +259,25 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	// anything is pending" would turn that into one register call per workspace
 	// every few minutes, forever. Holding the entry costs nothing; acting on a
 	// payload that cannot confirm it costs a request storm.
-	pending := d.pendingAgentVersionsSnapshot()
-	advances := false
-	for provider, version := range pending {
-		if carried[provider] == version {
-			advances = true
-			break
+	var advancing []string
+	for provider, version := range d.pendingAgentVersionsSnapshot() {
+		if carried[provider] != version {
+			continue
 		}
+		if prev, known := before[provider]; known && prev != version {
+			advancing = append(advancing, fmt.Sprintf("%s %s -> %s", provider, prev, version))
+			continue
+		}
+		// Detected by an earlier round, or by another path this round: the cache
+		// already holds it, so only the server is behind.
+		advancing = append(advancing, fmt.Sprintf("%s %s", provider, version))
 	}
-	if !advances {
+	if len(advancing) == 0 {
 		return
 	}
-	if len(changes) > 0 {
-		sort.Strings(changes)
-		d.logger.Info("agent CLI version changed; refreshing registration without a restart", "changes", changes)
-	}
+	sort.Strings(advancing)
+	d.logger.Info("agent CLI version not yet on the server; refreshing registration without a restart",
+		"versions", advancing)
 	if !d.reregisterBuiltins(ctx, builtins) {
 		return
 	}
@@ -353,7 +315,11 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 	var demoted []string
 	demotedProviders := make(map[string]string)
 	for _, ws := range d.workspaces {
-		kept := ws.runtimeIDs[:0]
+		// A fresh array, not ws.runtimeIDs[:0]: the health handler copies this
+		// slice header under d.mu and serializes it after releasing the lock
+		// (removeStaleRuntime keeps the same rule), so filtering in place would
+		// write into a slice another goroutine is reading.
+		kept := ws.runtimeIDs[:0:0]
 		for _, rid := range ws.runtimeIDs {
 			rt, ok := d.runtimeIndex[rid]
 			if !ok || rt.ProfileID != "" {
@@ -493,7 +459,7 @@ func (d *Daemon) convergeRuntimeRegistrations(ctx context.Context) {
 	// detectBuiltinRuntimes version-gates the availability set and publishes
 	// this round's drops for /health, so a provider that cannot register still
 	// gets a visible reason even though registration is skipped.
-	builtins := d.detectBuiltinRuntimes(ctx)
+	builtins, _ := d.detectBuiltinRuntimes(ctx)
 	if len(builtins) == 0 {
 		return
 	}

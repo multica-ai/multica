@@ -301,12 +301,6 @@ type Daemon struct {
 	// (MUL-5439). Guarded by skippedAgentsMu.
 	skippedAgentsMu sync.RWMutex
 	skippedAgents   map[string]string // provider -> human-readable reason
-	// belowMinimumAgents is the subset of skippedAgents dropped for a CONFIRMED
-	// below-minimum version (provider -> the version detected), as opposed to one
-	// whose version simply could not be read. Only the confirmed case may be
-	// acted on: a runtime for a binary verified too old must stop accepting work,
-	// while an unreadable version is transient and must leave it alone.
-	belowMinimumAgents map[string]string
 
 	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
 	// The daemon pins each agent's absolute path at startup so a later PATH
@@ -516,13 +510,37 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 // empty string — and overwriting the cache with it would strip the input every
 // version-keyed policy reads, on a provider that was working a moment ago.
 // "Couldn't read it" is not a version.
+//
+// Advancing a KNOWN provider's version also records it as pending, because this
+// cache is not a record of what the server knows. Every path that probes writes
+// through here — the converge round, the workspace sync, a self-heal at task
+// launch — and each of those re-registers only the workspaces it happened to be
+// working on, or none at all. Whichever writer lands first destroys the
+// before/after difference refreshAgentVersions would otherwise have detected, so
+// the write itself has to carry the obligation; refreshAgentVersions clears it
+// once every tracked workspace has accepted the version.
+//
+// A FIRST sighting is deliberately not pending: that provider has no runtime
+// yet, so bringing it online is the converge path's job, and marking every
+// provider at startup would buy one pointless re-registration round per
+// workspace.
 func (d *Daemon) setAgentVersion(provider, version string) {
 	d.versionsMu.Lock()
-	defer d.versionsMu.Unlock()
-	if version == "" && d.agentVersions[provider] != "" {
+	prev, known := d.agentVersions[provider]
+	if version == "" && prev != "" {
+		d.versionsMu.Unlock()
+		d.logger.Warn("agent CLI reported no version; keeping the previous one",
+			"provider", provider, "previous", prev)
 		return
 	}
 	d.agentVersions[provider] = version
+	if known && version != "" && version != prev {
+		if d.pendingAgentVersions == nil {
+			d.pendingAgentVersions = make(map[string]string)
+		}
+		d.pendingAgentVersions[provider] = version
+	}
+	d.versionsMu.Unlock()
 }
 
 // agentVersion returns the last-detected CLI version for an agent provider,
@@ -531,22 +549,6 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
-}
-
-// markAgentVersionsPending records provider versions the server has not been
-// confirmed to know yet, so a failed re-register is retried on a later round.
-func (d *Daemon) markAgentVersionsPending(pending map[string]string) {
-	if len(pending) == 0 {
-		return
-	}
-	d.versionsMu.Lock()
-	defer d.versionsMu.Unlock()
-	if d.pendingAgentVersions == nil {
-		d.pendingAgentVersions = make(map[string]string, len(pending))
-	}
-	for provider, version := range pending {
-		d.pendingAgentVersions[provider] = version
-	}
 }
 
 // confirmAgentVersionsRegistered drops the pending entries that registered is
@@ -1651,7 +1653,16 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // The result describes the machine, not a workspace, so a caller registering a
 // batch of workspaces at once calls this ONCE and passes the payload to
 // registerRuntimesForWorkspaceBatch for each workspace (MUL-5225).
-func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
+//
+// The second return value is THIS round's below-minimum verdicts, provider to
+// the version that was read and rejected. It is returned rather than read back
+// out of skippedAgents because that pair is a diagnostic snapshot of whichever
+// round published last: four different goroutines call this (the discovery
+// loop, the workspace sync, a runtime_gone re-register, a profile drift
+// refresh), so a caller acting on the shared copy can act on someone else's
+// probe — and demoting a runtime is not a decision to make on another round's
+// evidence.
+func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]string) {
 	type detected struct {
 		name    string
 		version string
@@ -1690,7 +1701,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 	// Publish this round's drops for /health. Replacing (not merging) keeps the
 	// diagnostic honest: a provider that registered successfully this round must
 	// not stay listed as skipped.
-	d.setSkippedAgents(skipped, belowMin)
+	d.setSkippedAgents(skipped)
 
 	// Source iteration (a map) and parallel completion order are both
 	// nondeterministic; sort by provider so the registration payload is stable
@@ -1710,7 +1721,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 			"status":  "online",
 		})
 	}
-	return runtimes
+	return runtimes, belowMin
 }
 
 // cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
@@ -1739,7 +1750,8 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // registerRuntimesForWorkspaceBatch instead, which shares one probe round
 // across the batch.
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
-	return d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, d.detectBuiltinRuntimes(ctx))
+	builtins, _ := d.detectBuiltinRuntimes(ctx)
+	return d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, builtins)
 }
 
 // registerRuntimesForWorkspaceBatch registers one workspace against an already
@@ -2680,7 +2692,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	)
 	probeBuiltins := func() []map[string]string {
 		if !builtinsProbed {
-			builtins = d.detectBuiltinRuntimes(ctx)
+			builtins, _ = d.detectBuiltinRuntimes(ctx)
 			builtinsProbed = true
 		}
 		return builtins
@@ -3946,8 +3958,28 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
-	rt := d.runtimeIndex[task.RuntimeID]
+	rt, tracked := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
+	// The runtime can go offline between the batch claim leaving with its ID and
+	// the claimed task arriving here — a below-minimum demotion or a drift
+	// convergence to zero both drop rows while a claim is in flight. Reporting it
+	// as runtime_offline is what the server already retries on; without this the
+	// zero-value Runtime carries an empty provider and the task dies several
+	// hundred lines later as `no agent configured for provider ""`, which reads
+	// like a misconfigured host and is not retried.
+	if !tracked {
+		d.logger.Warn("claimed task targets a runtime this daemon no longer hosts; failing it back for retry",
+			"task", shortID(task.ID), "runtime_id", task.RuntimeID)
+		if err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  "runtime went offline before the task started",
+			failureReason: taskfailure.ReasonRuntimeOffline.String(),
+		}); err != nil {
+			d.logger.Error("fail task callback failed", "task", shortID(task.ID), "error", err)
+		}
+		return
+	}
 	provider := rt.Provider
 
 	// Task-scoped logger with short ID for readable concurrent logs.

@@ -507,7 +507,7 @@ func TestDetectBuiltinRuntimes_DropsProviderAfterRetriesExhausted(t *testing.T) 
 		return nil
 	})
 
-	runtimes := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _ := d.detectBuiltinRuntimes(context.Background())
 
 	if got := fx.probeCount("/fake/codex"); got != runtimeVersionProbeAttempts {
 		t.Errorf("probed /fake/codex %d times, want %d (retry must stay bounded)", got, runtimeVersionProbeAttempts)
@@ -532,7 +532,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe(t *testing.T) {
 		return errors.New("signal: killed")
 	})
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {
@@ -606,7 +606,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := probes.Load(); got != 2 {
@@ -642,7 +642,7 @@ func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v (healed path %q), want none: a below-minimum candidate must not be adopted", runtimes, healed)
 	}
 	// Two attempts, each paying one self-heal probe plus one outer probe.
@@ -666,7 +666,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetryMinVersionRejection(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {
