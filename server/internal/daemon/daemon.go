@@ -665,6 +665,30 @@ type healedAgent struct {
 //     below the minimum supported version -> entry is returned unchanged so the
 //     candidate is never launched and the downstream error still surfaces.
 func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
+	resolved, version, _ := d.resolveAgentEntryWithHeal(ctx, provider, entry)
+	return resolved, version
+}
+
+// healOutcome is what one self-heal attempt concluded. At most one half is
+// meaningful: adopted names a binary that cleared the same gates registration
+// applies, while rejectedVersion names a candidate that was found and
+// version-detected but refused for being below the minimum supported version.
+type healOutcome struct {
+	adopted         healedAgent
+	rejectedVersion string
+	rejectedReason  string
+}
+
+// resolveAgentEntryWithHeal is resolveAgentEntry plus what the self-heal
+// concluded, for the one caller that must act on a refusal rather than just
+// decline to launch it.
+//
+// A refusal is a verdict about disk, not a transient failure: the pinned path
+// is gone AND the binary its command now resolves to is too old. Registration
+// needs to hear that, because otherwise it goes on to probe the vanished path,
+// fails, and reports "version detection failed" — which by design leaves the
+// runtime online, claiming tasks for a CLI that cannot launch.
+func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
 	// A prior self-heal wins over the original pinned path: it carries a
 	// {path, version} pair we already verified together, so it can never regress
 	// to the mismatched pairing a reappearing stale path would produce.
@@ -673,15 +697,15 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 	d.resolvedPathsMu.RUnlock()
 	if ok && agentExecutablePresent(healed.path) {
 		entry.Path = healed.path
-		return entry, healed.version
+		return entry, healed.version, healOutcome{adopted: healed}
 	}
 
 	if agentExecutablePresent(entry.Path) {
-		return entry, d.agentVersion(provider)
+		return entry, d.agentVersion(provider), healOutcome{}
 	}
 
 	if entry.Command == "" {
-		return entry, d.agentVersion(provider)
+		return entry, d.agentVersion(provider), healOutcome{}
 	}
 
 	// Coalesce concurrent heals for the same provider: the first task through
@@ -691,12 +715,12 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 	v, _, _ := d.healGroup.Do(provider, func() (any, error) {
 		return d.healAgentPath(ctx, provider, command), nil
 	})
-	healed, _ = v.(healedAgent)
-	if healed.path == "" {
-		return entry, d.agentVersion(provider)
+	outcome, _ := v.(healOutcome)
+	if outcome.adopted.path == "" {
+		return entry, d.agentVersion(provider), outcome
 	}
-	entry.Path = healed.path
-	return entry, healed.version
+	entry.Path = outcome.adopted.path
+	return entry, outcome.adopted.version, outcome
 }
 
 // healAgentPath re-resolves command for provider and, if a usable binary is
@@ -705,10 +729,14 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 // registration enforces. Path and version are published together under
 // resolvedPathsMu so any observer of the path also sees the matching version;
 // the shared d.agentVersion cache is refreshed too, for registration hygiene.
-// It returns a zero healedAgent when nothing usable was found, so the caller
+// It returns a zero adopted pair when nothing usable was found, so the caller
 // keeps the (stale) pinned entry and the candidate is never launched. Runs
 // under healGroup, one invocation at a time per provider.
-func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) healedAgent {
+//
+// A candidate refused by the minimum-version gate is reported back rather than
+// swallowed: not launching it is right, but it is also the whole verdict a
+// registration round needs to take the provider's runtimes offline.
+func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) healOutcome {
 	// Re-check the cache: a predecessor under the same singleflight key may have
 	// already populated it, or a prior heal completed between the read above and
 	// entering here.
@@ -716,12 +744,12 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	cached, ok := d.resolvedPaths[provider]
 	d.resolvedPathsMu.RUnlock()
 	if ok && agentExecutablePresent(cached.path) {
-		return cached
+		return healOutcome{adopted: cached}
 	}
 
 	newPath, found := reresolveAgentCommand(command)
 	if !found {
-		return healedAgent{}
+		return healOutcome{}
 	}
 
 	// Verify before adopting. An in-place "upgrade" that actually repoints at an
@@ -732,12 +760,12 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
-		return healedAgent{}
+		return healOutcome{}
 	}
 	if err := checkAgentMinVersion(provider, version); err != nil {
 		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
 			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
-		return healedAgent{}
+		return healOutcome{rejectedVersion: version, rejectedReason: err.Error()}
 	}
 
 	adopted := healedAgent{path: newPath, version: version}
@@ -757,7 +785,7 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 
 	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
 		"provider", provider, "command", command, "new_path", newPath, "version", version)
-	return adopted
+	return healOutcome{adopted: adopted}
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
@@ -1596,7 +1624,19 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		// It is re-run per attempt because the heal itself can be what a retry
 		// fixes: the upgrade that removed the old path may not have published
 		// the new one yet on the first attempt.
-		resolved, _ := d.resolveAgentEntry(ctx, name, entry)
+		resolved, _, heal := d.resolveAgentEntryWithHeal(ctx, name, entry)
+		// The pinned path is gone and the binary its command resolves to now is
+		// too old. Concluding here is the same rule the direct case below
+		// applies — the verdict is a pure function of a version already read, so
+		// a retry reaches it again — and it is the only way this shape reaches
+		// the caller: probing the vanished path can only produce "version
+		// detection failed", which by design leaves the runtime online and
+		// claiming tasks for a CLI that cannot launch.
+		if heal.rejectedVersion != "" {
+			d.logger.Warn("skip registering runtime: re-resolved version too old",
+				"name", name, "version", heal.rejectedVersion, "error", heal.rejectedReason)
+			return heal.rejectedVersion, heal.rejectedReason, builtinProbeBelowMinimum
+		}
 		version, err := detectAgentVersion(ctx, resolved.Path)
 		if err != nil {
 			lastErr = err

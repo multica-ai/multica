@@ -244,6 +244,67 @@ func TestRefreshAgentVersions_DemotesRuntimeDowngradedBelowMinimum(t *testing.T)
 	}
 }
 
+// TestRefreshAgentVersions_DemotesWhenTheDowngradeMovedThePath is the same
+// downgrade through the shape a version manager actually produces: the pinned
+// path is deleted rather than overwritten, so the daemon reaches the too-old
+// binary through the self-heal instead of a direct probe.
+//
+// The heal refuses to adopt it, which is right — it must never be launched — but
+// the refusal is also the verdict. Swallowed, the probe falls back to the
+// vanished path and can only report "version detection failed", which by design
+// leaves the runtime alone; the daemon then keeps claiming tasks for a CLI that
+// fails at launch, every time.
+func TestRefreshAgentVersions_DemotesWhenTheDowngradeMovedThePath(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+
+	pinned := filepath.Join(t.TempDir(), "codex")
+	writeExecStub(t, pinned)
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: pinned, Command: "codex"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{"codex": {Path: pinned, Command: "codex"}})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers before the downgrade = %v, want [codex]", got)
+	}
+
+	// The downgrade: the pinned path is gone, and the command now resolves on
+	// PATH to an older install that the gate rejects.
+	missing, _ := vanishedPinnedPath(t)
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
+	d.agentsAvailable.Store(&map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}})
+	// A probe of the deleted path has to fail the way it does in production, or
+	// the test quietly exercises the direct below-minimum branch instead of the
+	// self-heal one and passes with the verdict still swallowed.
+	fx.setProbeErr(func(path string, _ int) error {
+		if !agentExecutablePresent(path) {
+			return errors.New("fork/exec: no such file or directory")
+		}
+		return nil
+	})
+	origCheck := checkAgentMinVersion
+	t.Cleanup(func() { checkAgentMinVersion = origCheck })
+	checkAgentMinVersion = func(_, version string) error {
+		if version == "0.0.1" {
+			return errors.New("version 0.0.1 is below minimum required 1.0.0")
+		}
+		return nil
+	}
+	fx.setProbeVersion("0.0.1")
+
+	d.refreshAgentVersions(context.Background())
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Errorf("providers after the downgrade = %v, want none — the daemon has verified this binary "+
+			"cannot run and must stop accepting work for it", got)
+	}
+	if got := fx.deregisteredCount(); got == 0 {
+		t.Error("runtime was dropped locally but the server was never told, so it would keep routing tasks")
+	}
+}
+
 // TestRefreshAgentVersions_KeepsRuntimeWhenTheProbeMerelyFailed is the other half
 // of that rule. An unreadable version is transient — the CLI was busy or
 // mid-upgrade — and tearing down a working runtime over one is the mistake

@@ -614,13 +614,16 @@ func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing
 	}
 }
 
-// TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion documents the
-// cost of the case the retry cannot tell apart: a self-heal candidate rejected
-// by the min-version gate leaves the stale path in place, and the outer probe
-// then fails fast — indistinguishable from a transient failure, so the attempt
-// is retried. The verdict is deterministic, so that retry is wasted work; what
-// matters is that it stays bounded and cheap (every probe in it fails fast).
-func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.T) {
+// TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict covers the
+// downgrade shape a version manager produces: the pinned path is deleted and the
+// command now resolves to a binary below the minimum supported version.
+//
+// The self-heal refuses to adopt it — correctly, it must never be launched — but
+// that refusal IS the below-minimum verdict, and swallowing it made the outer
+// probe fall back to the vanished path, fail, and report "version detection
+// failed" instead. That reads as transient by design, which leaves the runtime
+// online and claiming tasks for a CLI that cannot start.
+func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH/exec-bit stub layout is POSIX-specific")
 	}
@@ -642,12 +645,21 @@ func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	runtimes, belowMin := d.detectBuiltinRuntimes(context.Background())
+	if len(runtimes) != 0 {
 		t.Fatalf("detected %v (healed path %q), want none: a below-minimum candidate must not be adopted", runtimes, healed)
 	}
-	// Two attempts, each paying one self-heal probe plus one outer probe.
-	if got := probes.Load(); got != int32(2*runtimeVersionProbeAttempts) {
-		t.Errorf("ran %d version probes, want %d (%d bounded attempts)", got, 2*runtimeVersionProbeAttempts, runtimeVersionProbeAttempts)
+	// The refusal is the verdict, not a probe failure. Without carrying it out of
+	// the heal, the loop goes on to probe the vanished pinned path, can only
+	// report "version detection failed", and the runtime stays online serving a
+	// CLI that cannot launch.
+	if belowMin["codex"] != "0.0.1" {
+		t.Errorf("below-minimum verdict = %v, want codex 0.0.1", belowMin)
+	}
+	// And it concludes on the first attempt: the verdict is a pure function of a
+	// version already read, so retrying could only reach it again.
+	if got := probes.Load(); got != 1 {
+		t.Errorf("ran %d version probes, want 1", got)
 	}
 }
 
