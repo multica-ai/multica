@@ -88,31 +88,21 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 	return snapshot, nil
 }
 
-// Issue snapshots the exact tools a task may call. Re-issuing for the same task
-// replaces the snapshot atomically, which supports a task being reclaimed.
+// Issue snapshots the exact tools a task may call through the immutable claim
+// finalizer. It remains as the compatibility entry point for existing callers.
 func (s *Store) Issue(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tools []string, expiresAt time.Time) error {
-	if s == nil || s.db == nil || !taskID.Valid || !workspaceID.Valid || !agentID.Valid {
-		return fmt.Errorf("task mandate: invalid issue input")
-	}
-	if !expiresAt.After(s.now()) {
-		return ErrExpired
-	}
-	if tools == nil {
-		tools = []string{}
-	}
-	raw, err := json.Marshal(tools)
+	input, err := newContractInput(
+		taskID,
+		workspaceID,
+		agentID,
+		tools,
+		nil,
+		"taskmandate:v1",
+	)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `
-		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
-		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (task_id) DO UPDATE SET
-		  workspace_id=EXCLUDED.workspace_id,
-		  agent_id=EXCLUDED.agent_id,
-		  allowed_tools=EXCLUDED.allowed_tools,
-		  issued_at=now(),
-		  expires_at=EXCLUDED.expires_at`, taskID, workspaceID, agentID, raw, expiresAt)
+	_, err = s.FinalizeClaim(ctx, input, "taskmandate.Store", "taskmandate.Store", expiresAt)
 	return err
 }
 
