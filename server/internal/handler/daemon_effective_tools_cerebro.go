@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -188,6 +189,7 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 
 	out := make([]AgentTaskToolEntry, 0, len(rows))
 	mandateTools := make([]string, 0, len(rows))
+	var supplementalMandateTools []string
 	for _, v := range rows {
 		if !v.ExposureEffective.Effective {
 			continue // not actually exposed to this agent → omit
@@ -255,7 +257,7 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			if prefix := strings.TrimSpace(t.MandatePrefix); prefix != "" {
 				if _, dup := seen[prefix]; !dup {
 					seen[prefix] = struct{}{}
-					mandateTools = append(mandateTools, prefix)
+					supplementalMandateTools = append(supplementalMandateTools, prefix)
 				}
 			}
 			if _, dup := seen[name]; dup {
@@ -297,6 +299,10 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 		// mandate for it (no error).
 		return nil, nil, nil
 	}
+	// Exact callable identities stay positionally aligned with out. Supplemental
+	// raw-server wildcards follow them so SessionMode filtering cannot replace an
+	// offered callable with its wildcard authorization identity.
+	mandateTools = append(mandateTools, supplementalMandateTools...)
 	return out, mandateTools, nil
 }
 
@@ -317,12 +323,22 @@ func filterClaimToolsForSessionMode(tools []AgentTaskToolEntry, mandateTools, al
 		if i < len(mandateTools) {
 			callableName = mandateTools[i]
 			_, callableAllowed = allowed[strings.ToLower(strings.TrimSpace(callableName))]
+			if !callableAllowed {
+				if wildcard := taskmandate.MCPServerWildcard(callableName); wildcard != "" {
+					_, callableAllowed = allowed[strings.ToLower(wildcard)]
+				}
+			}
 		}
 		if displayAllowed || callableAllowed {
 			filteredTools = append(filteredTools, tool)
 			if callableName != "" {
 				filteredMandate = append(filteredMandate, callableName)
 			}
+		}
+	}
+	for _, supplemental := range mandateTools[min(len(tools), len(mandateTools)):] {
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(supplemental))]; ok {
+			filteredMandate = append(filteredMandate, supplemental)
 		}
 	}
 	return filteredTools, filteredMandate
