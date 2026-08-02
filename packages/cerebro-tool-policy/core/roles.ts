@@ -98,7 +98,7 @@ export function useCreatePermissionRole(workspaceId: string) {
       client.invalidateQueries({ queryKey: permissionRoleKeys.all(workspaceId) });
       client.invalidateQueries({ queryKey: toolPolicyKeys.all(workspaceId) });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to create role"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to create profile"),
   });
 }
 
@@ -115,7 +115,7 @@ export function useUpdatePermissionRole(workspaceId: string) {
       client.invalidateQueries({ queryKey: permissionRoleKeys.all(workspaceId) });
       client.invalidateQueries({ queryKey: toolPolicyKeys.all(workspaceId) });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to update role"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to update profile"),
   });
 }
 
@@ -127,7 +127,7 @@ export function useArchivePermissionRole(workspaceId: string) {
       client.invalidateQueries({ queryKey: permissionRoleKeys.all(workspaceId) });
       client.invalidateQueries({ queryKey: toolPolicyKeys.all(workspaceId) });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to archive role"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to archive profile"),
   });
 }
 
@@ -143,7 +143,7 @@ export function useAssignPermissionRole(workspaceId: string, roleId: string) {
       client.invalidateQueries({ queryKey: permissionRoleKeys.assignments(workspaceId, roleId) });
       client.invalidateQueries({ queryKey: toolPolicyKeys.all(workspaceId) });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to assign role"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to assign profile"),
   });
 }
 
@@ -156,6 +156,6 @@ export function useUnassignPermissionRole(workspaceId: string, roleId: string) {
       client.invalidateQueries({ queryKey: permissionRoleKeys.assignments(workspaceId, roleId) });
       client.invalidateQueries({ queryKey: toolPolicyKeys.all(workspaceId) });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to remove role assignment"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to remove profile assignment"),
   });
 }

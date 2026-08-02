@@ -36,7 +36,7 @@ func (m rejectingTaskMandates) Authorize(_ context.Context, _, _, _ pgtype.UUID,
 	return nil
 }
 
-func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
+func TestGetAgentCapabilitiesKeepsPlatformPermissionsAndAppliesConnectionTaskMandate(t *testing.T) {
 	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	tool := FirtalGetAgentCapabilitiesTool{
 		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Tools: []handler.AgentCapabilityTool{
@@ -85,14 +85,11 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	if got := card.Tools[0].Permission; got != "allow" {
 		t.Errorf("allowed tool permission = %q, want allow", got)
 	}
-	if got := card.Tools[1].Permission; got != "deny" {
-		t.Errorf("rejected tool permission = %q, want deny", got)
+	if got := card.Tools[1].Permission; got != "allow" {
+		t.Errorf("platform tool permission = %q, want allow", got)
 	}
-	if card.Tools[1].Reason == "" {
-		t.Error("rejected task mandate must explain the denial")
-	}
-	if card.Tools[1].Allowed || card.Tools[1].Callable || card.Tools[1].BlockedReason == "" || card.Tools[1].HowToFix == "" {
-		t.Fatalf("rejected task mandate left a positive or unexplained truth verdict: %+v", card.Tools[1])
+	if !card.Tools[1].Allowed || !card.Tools[1].Callable || card.Tools[1].BlockedReason != "" {
+		t.Fatalf("task mandate changed a platform permission after the FIR-4076 rollback: %+v", card.Tools[1])
 	}
 	if got := card.Connections[0].Tools[0].Permission; got != "allow" {
 		t.Errorf("mandate-allowed connection tool permission = %q, want allow", got)
@@ -140,7 +137,9 @@ func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
 
 	reg := NewRegistry(nil)
 	reg.Register(&APIConnectionTool{toolName: endpoint, connName: "infisical-admin", method: "GET", path: "/secrets"})
-	executor := (&FirtalGatewayExecutor{}).SetTaskMandates(mandates)
+	executor := (&FirtalGatewayExecutor{
+		taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
+	}).SetTaskMandates(mandates)
 	allowed, reason := executor.guardToolCall(context.Background(), id, id, endpoint, nil, reg, GatewayRequestMeta{TaskID: util.UUIDToString(id)})
 	if allowed || !strings.Contains(reason, "outside the issued task mandate") {
 		t.Fatalf("gateway call = (%v, %q), want the same mandate denial", allowed, reason)

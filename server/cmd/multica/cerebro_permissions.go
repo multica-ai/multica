@@ -57,14 +57,22 @@ type permLayers struct {
 }
 
 type permRow struct {
-	ToolKey         string          `json:"tool_key"`
-	ResourcePattern string          `json:"resource_pattern"`
-	Title           string          `json:"title"`
-	Category        string          `json:"category"`
-	Source          string          `json:"source"`
-	Layers          permLayers      `json:"layers"`
-	Effective       permEffective   `json:"effective"`
-	CappedByGroups  []permGroupAttr `json:"capped_by_groups"`
+	ToolKey         string     `json:"tool_key"`
+	ResourcePattern string     `json:"resource_pattern"`
+	Title           string     `json:"title"`
+	Category        string     `json:"category"`
+	Source          string     `json:"source"`
+	Layers          permLayers `json:"layers"`
+	// ManagedExternally + ExternalSecurityOwner + WorkspaceIntakeSwitch mirror
+	// the FIR-4220 read model: a managed-external row is decided by the named
+	// boundary, and an intake-switch row additionally reads its workspace-layer
+	// policy row as a live off-switch — explain must say so instead of letting
+	// the chain verdict imply full Allow/Ask/Deny settability.
+	ManagedExternally     bool            `json:"managed_externally"`
+	ExternalSecurityOwner string          `json:"external_security_owner"`
+	WorkspaceIntakeSwitch bool            `json:"workspace_intake_switch"`
+	Effective             permEffective   `json:"effective"`
+	CappedByGroups        []permGroupAttr `json:"capped_by_groups"`
 }
 
 type permTableResponse struct {
@@ -310,9 +318,22 @@ func filterPermRows(rows []permRow, toolFilter string, blockedOnly bool) []permR
 }
 
 // permWhy renders the human reason plus any group attribution behind a cap, so an
-// operator sees "Capped by group <name> (owner: <person>)" inline.
+// operator sees "Capped by group <name> (owner: <person>)" inline. Managed-external
+// rows name their real deciding boundary (FIR-4220) so explain never implies the
+// policy chain alone decides them.
 func permWhy(r permRow) string {
 	why := r.Effective.Reason
+	if r.ManagedExternally {
+		governed := "governed by " + permDash(r.ExternalSecurityOwner)
+		if r.WorkspaceIntakeSwitch {
+			governed += "; workspace-layer row is the live off-switch"
+		}
+		if why == "" {
+			why = governed
+		} else {
+			why = why + " — " + governed
+		}
+	}
 	if len(r.CappedByGroups) > 0 {
 		names := make([]string, 0, len(r.CappedByGroups))
 		for _, g := range r.CappedByGroups {

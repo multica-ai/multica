@@ -1235,6 +1235,29 @@ func TestTargetForAllowsTheCerebroPublicEdgeWithAccessHeaders(t *testing.T) {
 	if target.CodeSelector == "" || target.SubmitButtonName == "" {
 		t.Fatal("cerebro needs both the code field and the submit button for the two-step login")
 	}
+	if !target.NavigateExactText {
+		t.Fatal("cerebro navigation must not assume the current Issues row exposes role=link")
+	}
+}
+
+func TestTargetForCerebroPermissionProfilesUsesTheFirtalSettingsRoute(t *testing.T) {
+	target, err := TargetFor("cerebro-permission-profiles")
+	if err != nil {
+		t.Fatalf("TargetFor(cerebro-permission-profiles) failed: %v", err)
+	}
+	if target.NavigatePath != "/firtal/settings?tab=permissions" {
+		t.Fatalf("navigate path = %q, want /firtal/settings?tab=permissions", target.NavigatePath)
+	}
+	if target.NavigateTabName != "Permission profiles" {
+		t.Fatalf("navigate tab = %q, want Permission profiles", target.NavigateTabName)
+	}
+	if target.ExpectedPathSuffix != "/firtal/settings" {
+		t.Fatalf("expected path suffix = %q, want /firtal/settings", target.ExpectedPathSuffix)
+	}
+	wantMarkers := []string{"Permission profiles", "When should I use a Permission profile?", "One agent", "Several agents or members"}
+	if strings.Join(target.ExpectedText, "|") != strings.Join(wantMarkers, "|") {
+		t.Fatalf("markers = %v, want %v", target.ExpectedText, wantMarkers)
+	}
 }
 
 // Only a target that carries Access headers may leave the internal network. A

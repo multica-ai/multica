@@ -1,5 +1,6 @@
 // Package platformcatalog is the complete, code-owned catalog of Multica
-// platform actions (FIR-2594 phase 1). The runtime tool catalog comes from the
+// platform actions (governance: FIR-4220 — formerly miscited as FIR-2594,
+// an unrelated issue). The runtime tool catalog comes from the
 // capability register (cerebro_capability) — runtimes report the CLI/MCP tools
 // they expose. But the platform's own mutating operations and hardcoded policy
 // checks (create an issue, trigger someone else's agent, manage
@@ -107,6 +108,13 @@ type Capability struct {
 	// ManagedExternally is true, so a registered permission can never degrade to
 	// an unowned "not wired" status.
 	ExternalSecurityOwner string
+	// WorkspaceIntakeSwitch marks a ManagedExternally machine-intake boundary
+	// (no person or agent for Allow/Ask/Deny to judge) whose workspace-layer
+	// policy row IS consulted at the intake point as an off-switch: an authored
+	// workspace Deny/Disable turns the intake off, everything else leaves it on
+	// (FIR-4220 slice 2, see platformaction.IntakeAllowed). Settings accepts
+	// workspace-layer writes for these keys and rejects every other layer.
+	WorkspaceIntakeSwitch bool
 	// ToolBindings names runtime tools that invoke this platform capability.
 	// Registration remains separate from permission, but the binding makes the
 	// relationship complete and mechanically testable.
@@ -222,14 +230,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "rerun_issue",
-		Title:                 "Re-run / cancel issue agent",
-		Category:              CategoryIssues,
-		Surfaced:              true,
-		Description:           "Re-trigger the assigned agent on an issue, or cancel a running task.",
-		DescriptionZh:         "重新触发工单上分配的 agent，或取消正在运行的任务。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Issue visibility, private-agent access, and task-to-issue integrity",
+		Key:           "rerun_issue",
+		Title:         "Re-run / cancel issue agent",
+		Category:      CategoryIssues,
+		Surfaced:      true,
+		Description:   "Re-trigger the assigned agent on an issue, or cancel a running task.",
+		DescriptionZh: "重新触发工单上分配的 agent，或取消正在运行的任务。",
 		Ops: []string{
 			"POST /api/issues/{id}/rerun",
 			"POST /api/issues/{id}/tasks/{taskId}/cancel",
@@ -357,27 +363,23 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "trigger_autopilot",
-		Title:                 "Trigger autopilot",
-		Category:              CategoryAutopilots,
-		Surfaced:              true,
-		Description:           "Fire an autopilot manually, or replay a past delivery.",
-		DescriptionZh:         "手动触发 autopilot，或重放一次过往投递。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Autopilot scope gate",
+		Key:           "trigger_autopilot",
+		Title:         "Trigger autopilot",
+		Category:      CategoryAutopilots,
+		Surfaced:      true,
+		Description:   "Fire an autopilot manually, or replay a past delivery.",
+		DescriptionZh: "手动触发 autopilot，或重放一次过往投递。",
 		Ops: []string{
 			"POST /api/autopilots/{id}/trigger",
 			"POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
 		},
 	},
 	{
-		Key:                   "autopilot_scope",
-		Title:                 "Autopilot scope (who may see/edit/trigger)",
-		Category:              CategoryAutopilots,
-		Description:           "The hardcoded owner/group scope rule deciding who may see, edit, or trigger an autopilot. Today a code check, not on the controllable engine.",
-		DescriptionZh:         "决定谁可查看、编辑或触发 autopilot 的硬编码所有者/群组范围规则。目前为代码检查，尚未纳入可控引擎。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Autopilot scope gate",
+		Key:           "autopilot_scope",
+		Title:         "Autopilot scope (who may see/edit/trigger)",
+		Category:      CategoryAutopilots,
+		Description:   "Set a non-default owner/group scope on an autopilot, deciding who may see, edit, or trigger it. The scope rule itself stays as the tighten-only ceiling.",
+		DescriptionZh: "为 autopilot 设置非默认的所有者/群组范围，决定谁可查看、编辑或触发。范围规则本身仍作为只收紧的上限保留。",
 		Evidence: []string{
 			"server/internal/cerebro/access/autopilot_scope.go:48",  // ValidateScope
 			"server/internal/cerebro/access/autopilot_scope.go:150", // CanEdit
@@ -388,9 +390,10 @@ var catalog = []Capability{
 		Key:                   "autopilot_webhook",
 		Title:                 "Autopilot inbound webhook",
 		Category:              CategoryAutopilots,
-		Description:           "An external caller firing an autopilot via its webhook URL. Governed by the per-trigger webhook secret, not the tool-policy gate.",
-		DescriptionZh:         "外部调用方通过 webhook URL 触发 autopilot。由每个触发器的 webhook 密钥管控，而非工具策略门。",
+		Description:           "An external caller firing an autopilot via its webhook URL. Authenticated by the per-trigger webhook secret (no actor to judge); a workspace-layer Deny switches the intake off (FIR-4220).",
+		DescriptionZh:         "外部调用方通过 webhook URL 触发 autopilot。由每个触发器的 webhook 密钥认证（无执行者可判定）；工作区层的 Deny 会关闭该入口（FIR-4220）。",
 		ManagedExternally:     true,
+		WorkspaceIntakeSwitch: true,
 		ExternalSecurityOwner: "Autopilot webhook secret",
 		Ops: []string{
 			"POST /api/webhooks/autopilots/{token}",
@@ -556,14 +559,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "schedule_agent_wakeup",
-		Title:                 "Schedule agent wakeup",
-		Category:              CategoryAgents,
-		Surfaced:              true,
-		Description:           "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
-		DescriptionZh:         "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "User authentication, workspace membership, and issue/agent workspace integrity",
+		Key:           "schedule_agent_wakeup",
+		Title:         "Schedule agent wakeup",
+		Category:      CategoryAgents,
+		Surfaced:      true,
+		Description:   "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
+		DescriptionZh: "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
 		Ops: []string{
 			"POST /api/cerebro/wakeups/",
 			"POST /api/cerebro/wakeups/{id}/cancel",
@@ -664,25 +665,24 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "use_other_runtime",
-		Title:                 "Use someone else's runtime",
-		Category:              CategoryRuntimes,
-		Description:           "Whether you may point an agent at a runtime you do not own. Today a hardcoded group allowlist, NOT on the controllable engine — the runtime twin of trigger_other_agent.",
-		DescriptionZh:         "是否可将 agent 指向不属于你的 runtime。目前为硬编码群组白名单，尚未纳入可控引擎——trigger_other_agent 的 runtime 对应物。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Group permission runtime access gate",
+		Key:           "use_other_runtime",
+		Title:         "Use someone else's runtime",
+		Category:      CategoryRuntimes,
+		Description:   "Whether you may point an agent at a runtime you do not own. Enforced through the tool-policy engine for agent actors (FIR-4220); the group runtime allowlist stays as a tighten-only ceiling.",
+		DescriptionZh: "是否可将 agent 指向不属于你的 runtime。通过工具策略引擎对 agent 执行者强制执行（FIR-4220）；群组 runtime 白名单保留为只收紧的上限。",
 		Evidence: []string{
-			"server/internal/cerebro/grouppermissions/permissions.go:322", // CanUseRuntime
-			"server/internal/handler/group_permissions_cerebro.go:187",    // cerebroRequireRuntimeAccess call site
+			"server/internal/cerebro/grouppermissions/permissions.go:322", // CanUseRuntime (ceiling)
+			"server/internal/handler/group_permissions_cerebro.go:187",    // cerebroRequireRuntimeAccess call site (policy gate + ceiling)
 		},
 	},
 	{
 		Key:                   "daemon_runtime_callback",
 		Title:                 "Daemon runtime callbacks",
 		Category:              CategoryRuntimes,
-		Description:           "The local daemon reporting heartbeats, claiming tasks, and posting results. Governed by the daemon token, not the tool-policy gate.",
-		DescriptionZh:         "本地守护进程上报心跳、领取任务并提交结果。由守护进程令牌管控，而非工具策略门。",
+		Description:           "The local daemon reporting heartbeats, claiming tasks, and posting results. Authenticated by the daemon token (no actor to judge); a workspace-layer Deny switches the intake off (FIR-4220).",
+		DescriptionZh:         "本地守护进程上报心跳、领取任务并提交结果。由守护进程令牌认证（无执行者可判定）；工作区层的 Deny 会关闭该入口（FIR-4220）。",
 		ManagedExternally:     true,
+		WorkspaceIntakeSwitch: true,
 		ExternalSecurityOwner: "Daemon token middleware",
 		Ops: []string{
 			"POST /api/daemon/register",
@@ -828,13 +828,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "manage_project_access",
-		Title:                 "Manage project access",
-		Category:              CategoryProjects,
-		Description:           "Add/remove project members and group access. Governed by the workspace owner/admin role gate, not the tool-policy gate.",
-		DescriptionZh:         "添加或移除项目成员和群组访问权限。由工作区所有者/管理员角色检查管理，而不是工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Workspace owner/admin role gate",
+		Key:           "manage_project_access",
+		Title:         "Manage project access",
+		Category:      CategoryProjects,
+		Description:   "Add/remove project members and group access. The workspace owner/admin role gate stays as the tighten-only ceiling.",
+		DescriptionZh: "添加或移除项目成员和群组访问权限。工作区所有者/管理员角色检查仍作为只收紧的上限保留。",
 		Ops: []string{
 			"PATCH /api/projects/{id}/access",
 			"POST /api/projects/{id}/members",
@@ -1192,9 +1190,10 @@ var catalog = []Capability{
 		Key:                   "gateway_channel_delivery",
 		Title:                 "Gateway inbound channel message",
 		Category:              CategoryChannels,
-		Description:           "The Firtal Gateway delivering a webhook into a channel on behalf of a chosen principal (FIR-1766). Governed by the gateway service token plus the acting principal's channel membership, not the tool-policy gate.",
-		DescriptionZh:         "Firtal Gateway 代表选定主体将 webhook 投递到频道（FIR-1766）。由网关服务令牌加上执行主体的频道成员资格管控，而非工具策略门。",
+		Description:           "The Firtal Gateway delivering a webhook into a channel on behalf of a chosen principal (FIR-1766). Authenticated by the gateway service token plus the principal's channel membership; a workspace-layer Deny switches the intake off (FIR-4220).",
+		DescriptionZh:         "Firtal Gateway 代表选定主体将 webhook 投递到频道（FIR-1766）。由网关服务令牌加上执行主体的频道成员资格认证；工作区层的 Deny 会关闭该入口（FIR-4220）。",
 		ManagedExternally:     true,
+		WorkspaceIntakeSwitch: true,
 		ExternalSecurityOwner: "Gateway service token and channel membership",
 		Ops: []string{
 			"POST /api/webhooks/gateway/channel-message",
@@ -1206,26 +1205,22 @@ var catalog = []Capability{
 	// the tool-policy gate; listed (marked) so an admin can see the platform
 	// exposes them and a future phase can choose to gate them.
 	{
-		Key:                   "read_issues",
-		Title:                 "Read issues",
-		Category:              CategoryReadAccess,
-		Description:           "View issues, comments, and their history. Governed by workspace membership and project visibility rules, not the tool-policy gate.",
-		DescriptionZh:         "查看工单、评论及其历史。由工作区成员身份和项目可见性规则控制，而不是工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Workspace membership and project visibility gates",
+		Key:           "read_issues",
+		Title:         "Read issues",
+		Category:      CategoryReadAccess,
+		Description:   "View issues, comments, and their history. Enforced through the tool-policy engine for agent actors (FIR-4220); workspace membership and project visibility stay the human ceiling.",
+		DescriptionZh: "查看工单、评论及其历史。通过工具策略引擎对 agent 执行者强制执行（FIR-4220）；工作区成员身份和项目可见性仍是人员上限。",
 		Evidence: []string{
 			"server/internal/middleware/workspace.go (RequireWorkspaceMember)",
 			"server/internal/handler/access.go (canAccessProject)",
 		},
 	},
 	{
-		Key:                   "read_projects",
-		Title:                 "Read projects",
-		Category:              CategoryReadAccess,
-		Description:           "View projects and their contents. Governed by the project access list (and a group-membership path), not the tool-policy gate.",
-		DescriptionZh:         "查看项目及其内容。由项目访问列表（及群组成员路径）管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Project access control list",
+		Key:           "read_projects",
+		Title:         "Read projects",
+		Category:      CategoryReadAccess,
+		Description:   "View projects and their contents. Enforced through the tool-policy engine for agent actors (FIR-4220); the project access list (and group-membership path) stays the human ceiling.",
+		DescriptionZh: "查看项目及其内容。通过工具策略引擎对 agent 执行者强制执行（FIR-4220）；项目访问列表（及群组成员路径）仍是人员上限。",
 		Evidence: []string{
 			"server/internal/handler/project_access.go (canAccessProject)",
 			"server/internal/cerebro/grouppermissions/permissions.go:352", // CanSeeProjectViaGroup

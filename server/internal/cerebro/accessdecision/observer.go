@@ -54,10 +54,11 @@ type Call struct {
 // canonical policy with live runtime evidence and records each enforced
 // decision.
 type Service struct {
-	policy   PolicyResolver
-	evidence EvidenceLookup
-	writer   Writer
-	mandates MandateAuthorizer
+	policy             PolicyResolver
+	evidence           EvidenceLookup
+	writer             Writer
+	mandates           MandateAuthorizer
+	mandateEnforcement func(context.Context, pgtype.UUID) bool
 }
 
 func NewService(policy PolicyResolver, evidence EvidenceLookup, writer Writer) *Service {
@@ -69,13 +70,19 @@ func (s *Service) WithMandates(m MandateAuthorizer) *Service {
 	return s
 }
 
+func (s *Service) WithMandateEnforcement(enabled func(context.Context, pgtype.UUID) bool) *Service {
+	s.mandateEnforcement = enabled
+	return s
+}
+
 // Decide returns the authoritative fail-closed decision for one Gateway call.
 // Policy lookup failures, missing canonical identities, absent runtime
 // capabilities, Ask, and Deny all become Deny. Ledger persistence is
 // best-effort and never changes the returned decision.
 func (s *Service) Decide(ctx context.Context, call Call) Entry {
 	policyDecision := PolicyError
-	mandateDenied := call.TaskID.Valid && (s == nil || s.mandates == nil || s.mandates.Authorize(ctx, call.TaskID, call.WorkspaceID, call.AgentID, call.ObservedToolName) != nil)
+	mandateEnforced := s != nil && s.mandateEnforcement != nil && s.mandateEnforcement(ctx, call.WorkspaceID)
+	mandateDenied := mandateEnforced && call.TaskID.Valid && (s.mandates == nil || s.mandates.Authorize(ctx, call.TaskID, call.WorkspaceID, call.AgentID, call.ObservedToolName) != nil)
 	// Never resolve a policy for an uncanonicalized input. For a known
 	// capability, ObservedToolName is the catalog-validated policy form used by
 	// the existing table; the stable capability ID remains the decision key.

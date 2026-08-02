@@ -265,6 +265,25 @@ func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Con
 	return scanRows(rows)
 }
 
+// ListAllEnabledMCP returns every enabled mcp_http connection across all
+// workspaces. Used by the nightly tool-list refresh sweeper, which is a
+// platform-wide job and therefore the one read here that is not workspace
+// scoped — every caller that serves a request must keep using ListEnabled.
+func (s *Store) ListAllEnabledMCP(ctx context.Context) ([]Connection, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, workspace_id, name, display_name, type, url, internal,
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
+		FROM workspace_connection
+		WHERE enabled = true AND type = $1
+		ORDER BY created_at ASC
+	`, TypeMCPHTTP)
+	if err != nil {
+		return nil, fmt.Errorf("connections: list all enabled mcp: %w", err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
 // Get returns one connection by ID, scoped to the workspace.
 func (s *Store) Get(ctx context.Context, id, workspaceID pgtype.UUID) (Connection, error) {
 	row := s.pool.QueryRow(ctx, `

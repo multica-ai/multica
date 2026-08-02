@@ -155,9 +155,10 @@ export interface ToolPolicyRow {
   description_zh?: string;
   source: string;
   /**
-   * FIR-2594: true for a platform action whose enforcement point is not the
-   * tool-policy gate (workspace-membership ACL, daemon token, webhook secret).
-   * The row is shown for visibility but remains read-only in Settings.
+   * True for a platform action whose enforcement point is not the tool-policy
+   * gate. After FIR-4220 only the machine-intake boundaries (webhook secret,
+   * daemon token, gateway service token) remain marked; every other platform
+   * row is policy-enforced and fully editable.
    */
   managed_externally: boolean;
   /**
@@ -165,6 +166,13 @@ export interface ToolPolicyRow {
    * Empty for ordinary tool-policy rows. Optional for older server responses.
    */
   external_security_owner?: string;
+  /**
+   * FIR-4220: true for a managed-external machine-intake boundary whose
+   * workspace-layer policy row is read at the intake point as a live
+   * off-switch. The UI renders a workspace-layer-only decision control for it
+   * (see isRowSettable). Optional for older server responses (defaults false).
+   */
+  workspace_intake_switch?: boolean;
   /**
    * Which WHEN condition kinds actually bite for this capability (FIR-1708 C),
    * computed server-side from the gate facts so the editor renders only the
@@ -322,6 +330,20 @@ export function isLockedFromElsewhere(
 }
 
 /**
+ * Whether the Settings screen may author a decision on this row at this layer
+ * (FIR-4220). Ordinary rows are always settable (the lock logic above handles
+ * ceilings separately). A managed-external row is settable ONLY when it is a
+ * workspace-intake off-switch AND the page is editing the workspace layer —
+ * mirroring the server's externallyManagedWriteError, so the UI never offers a
+ * write the server rejects. Lives in core so the table and the catalog share
+ * one definition.
+ */
+export function isRowSettable(row: ToolPolicyRow, editLayer: ToolLayer): boolean {
+  if (!row.managed_externally) return true;
+  return row.workspace_intake_switch === true && editLayer === "workspace";
+}
+
+/**
  * Pick the plain-language permission explanation to show for the active UI
  * language (FIR-2175 phase 3). Returns the Chinese text for any `zh*` locale
  * (e.g. "zh-Hans", "zh-Hans-CN") when it is present, otherwise the English
@@ -394,11 +416,15 @@ const toolPolicyRowSchema = z.object({
   description: z.string().default(""),
   description_zh: z.string().default(""),
   source: z.string().default(""),
-  // FIR-2594: true for platform actions whose enforcement point is not the
-  // tool-policy gate (membership ACL, daemon token, …). Defaults false so older
-  // backends that omit the field render as a normal, gated row.
+  // True for platform actions whose enforcement point is not the tool-policy
+  // gate — after FIR-4220 that is only the machine-intake boundaries. Defaults
+  // false so older backends that omit the field render as a normal, gated row.
   managed_externally: z.boolean().default(false),
   external_security_owner: z.string().default(""),
+  // FIR-4220: workspace-layer row is a live intake off-switch. Defaults false
+  // so an older backend renders the row fully read-only (the safer, pre-fix
+  // behaviour) rather than offering a write the server would reject.
+  workspace_intake_switch: z.boolean().default(false),
   // FIR-1708 C: the WHEN kinds the gate actually evaluates for this capability.
   // Left optional (not defaulted to []) so the editor can tell "older backend
   // omitted it" (undefined → heuristic fallback) from "no kind bites" ([]).

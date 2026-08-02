@@ -12,7 +12,10 @@ const DEFAULT_E2E_WORKSPACE = "e2e-workspace";
  *
  * Returns the E2E workspace slug so callers can build workspace-scoped URLs.
  */
-export async function loginAsDefault(page: Page): Promise<string> {
+export async function loginAsDefault(
+  page: Page,
+  options?: { workspaceReadyTimeout?: number },
+): Promise<string> {
   const api = new TestApiClient();
   await api.login(DEFAULT_E2E_EMAIL, DEFAULT_E2E_NAME);
   const workspace = await api.ensureWorkspace(
@@ -39,7 +42,7 @@ export async function loginAsDefault(page: Page): Promise<string> {
   // phone widths. The page heading proves the workspace route has rendered
   // in both layouts.
   await expect(page.getByRole("heading", { name: "Issues", exact: true })).toBeVisible({
-    timeout: 15000,
+    timeout: options?.workspaceReadyTimeout ?? 15000,
   });
   return workspace.slug;
 }

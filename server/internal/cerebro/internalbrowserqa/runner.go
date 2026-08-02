@@ -106,8 +106,18 @@ var targets = map[string]Target{
 		// Login can preserve /workspaces/new from an earlier session. Opening
 		// the root is the browser-equivalent of that page's Back action and
 		// lets the workspace router select the user's existing workspace.
-		NavigatePath: "/", NavigateLinkName: "Issues",
+		NavigatePath: "/", NavigateLinkName: "Issues", NavigateExactText: true,
 		ExpectedText: []string{"Issues", "Agents", "Settings"},
+	},
+	"cerebro-permission-profiles": {
+		Name: "cerebro-permission-profiles", URL: "https://cerebro.firtal.com/login",
+		Vault: "Shared/browser-login/cerebro", AccessHeaders: true,
+		AccessClientIDKey: "CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "CF_ACCESS_CLIENT_SECRET",
+		UsernameSelector: "#login-email", SubmitButtonName: "Continue",
+		CodeSelector: "input[data-input-otp]",
+		NavigatePath: "/firtal/settings?tab=permissions", NavigateTabName: "Permission profiles",
+		ExpectedPathSuffix: "/firtal/settings",
+		ExpectedText: []string{"Permission profiles", "When should I use a Permission profile?", "One agent", "Several agents or members"},
 	},
 	"registry": {
 		// Registry and the verifier run on different Sliplane servers. Internal

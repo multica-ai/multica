@@ -648,7 +648,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	cerebroCompanyBrainCensusHandler := cerebrocompanybraincensus.NewHandler(queries, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 report uses Connections, policy, and its default-off workspace flag.
-	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
+	h.ConnectionsInjector = cerebroConnectionsHandler.Store                                                                                                              // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-api-connection-resolver): FIR-2388 shared api-connection tool resolver — one filter for the local MCP handler and the claim brief (cloud gateway builds its own from the same stores).
 	cerebroAPIConnResolver := cerebroruntime.NewAPIConnectionResolver(cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil)
 	cerebroAppsHandler.WithConnectionCaller(cerebroAPIConnResolver)
@@ -856,8 +856,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroCommandsHandler := cerebrocommands.NewHandler(pool).WithActorResolver(h.ResolveActor)                                                                                                                          // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
 	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor))                                                            // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                                                                                                                                            // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
-	h.IssueStatusGate = workflowHooksFeature.StatusGate                                                                                                                                                                  // CEREBRO-PATCH(issue-status-gate-wire): FIR-3659 before.issue.status_change gate into UpdateIssue.
-	workflowHooksFeature.FailureGate.Attach(bus)                                                                                                                                                                         // CEREBRO-PATCH(task-failure-gate-wire): FIR-3760 fire on.task.failure from the task:failed bus broadcast.
+	h.IssueStatusGate = workflowHooksFeature.StatusGate                                                                                                                                                                   // CEREBRO-PATCH(issue-status-gate-wire): FIR-3659 before.issue.status_change gate into UpdateIssue.
+	workflowHooksFeature.FailureGate.Attach(bus)                                                                                                                                                                          // CEREBRO-PATCH(task-failure-gate-wire): FIR-3760 fire on.task.failure from the task:failed bus broadcast.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
 	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
@@ -1064,15 +1064,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HandleCloudBillingStripeWebhook for the rationale).
 	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
 	// CEREBRO-PATCH(cerebro-webhook-gateway-delivery): FIR-1766 — the Firtal Gateway posts a channel message on behalf of a chosen principal (agent/member), gated by channel membership (IsIssueSubscriber). Bearer token IS the credential; disabled (404) when CEREBRO_GATEWAY_TOKEN is unset. Mounted OUTSIDE auth by design, like the webhook routes above.
-	r.Post("/api/webhooks/gateway/channel-message", cerebrowebhookgateway.New(queries, bus, strings.TrimSpace(os.Getenv("CEREBRO_GATEWAY_TOKEN"))).Handle)
+	r.Post("/api/webhooks/gateway/channel-message", cerebrowebhookgateway.New(queries, bus, strings.TrimSpace(os.Getenv("CEREBRO_GATEWAY_TOKEN"))).WithPolicy(cerebrotoolpolicy.NewStore(pool)).Handle) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 gateway_channel_delivery workspace off-switch.
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
 
-		r.Post("/register", h.DaemonRegister)
-		r.Post("/deregister", h.DaemonDeregister)
-		r.Post("/heartbeat", h.DaemonHeartbeat)
+		r.With(h.RequireDaemonIntake).Post("/register", h.DaemonRegister)     // CEREBRO-PATCH(platform-capability-gates): FIR-4220 daemon_runtime_callback workspace off-switch.
+		r.With(h.RequireDaemonIntake).Post("/deregister", h.DaemonDeregister) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 daemon_runtime_callback workspace off-switch.
+		r.With(h.RequireDaemonIntake).Post("/heartbeat", h.DaemonHeartbeat)   // CEREBRO-PATCH(platform-capability-gates): FIR-4220 daemon_runtime_callback workspace off-switch.
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
 		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability)                         // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
@@ -1080,14 +1080,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/workspaces/{workspaceId}/tool-policy/resolve", h.ResolveDaemonToolPolicy)                  // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 per-tool resolve for local CLI runtimes
 		r.Get("/workspaces/{workspaceId}/tool-policy/resolve/{approvalId}", h.PollDaemonToolPolicyApproval) // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 poll a local-runtime tool approval
 
-		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
-		r.Get("/runtimes/{runtimeId}/trace-config", h.GetTraceConfig) // CEREBRO-PATCH(trace-config-route): TECH-3621 fleet trace-upload config for daemons (runtime-scoped, same guard as siblings)
+		r.With(h.RequireDaemonIntake).Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 daemon_runtime_callback workspace off-switch.
+		r.Get("/runtimes/{runtimeId}/trace-config", h.GetTraceConfig)                                 // CEREBRO-PATCH(trace-config-route): TECH-3621 fleet trace-upload config for daemons (runtime-scoped, same guard as siblings)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
-		r.Post("/runtimes/{runtimeId}/refresh-capabilities", h.RefreshRuntimeCapabilities)
+		r.With(h.RequireDaemonIntake).Post("/runtimes/{runtimeId}/refresh-capabilities", h.RefreshRuntimeCapabilities) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 daemon_runtime_callback workspace off-switch.
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
@@ -1172,15 +1172,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// unreachable. RequireUserScope keeps the route seam explicit;
 			// CEREBRO-PATCH(task-scope-hotfix): FIR-4076 temporarily lets
 			// task tokens pass this seam until platform-action gates land.
-			r.With(middleware.RequireUserScope).Get("/api/issues/search", h.SearchIssues)
-			r.With(middleware.RequireUserScope).Get("/api/issues/child-progress", h.ChildIssueProgress)
-			r.With(middleware.RequireUserScope).Get("/api/issues/grouped", h.ListGroupedIssues)
+			issueReadGate := h.RequirePlatformCapability("read_issues")                                                // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues policy gate for machine actors.
+			r.With(middleware.RequireUserScope, issueReadGate).Get("/api/issues/search", h.SearchIssues)               // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
+			r.With(middleware.RequireUserScope, issueReadGate).Get("/api/issues/child-progress", h.ChildIssueProgress) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
+			r.With(middleware.RequireUserScope, issueReadGate).Get("/api/issues/grouped", h.ListGroupedIssues)         // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
 			issueScope := middleware.AllowTaskScopeForIssue("id")
-			r.With(issueScope).Get("/api/issues/{id}", h.GetIssue)
+			r.With(issueScope, issueReadGate).Get("/api/issues/{id}", h.GetIssue) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
 			// CEREBRO-PATCH(issue-context-bundle-route): FIR-2384 — bundled issue+comments+members+labels read for the `multica issue context` cost saving.
-			r.With(issueScope).Get("/api/issues/{id}/context", h.GetIssueContext)
+			r.With(issueScope, issueReadGate).Get("/api/issues/{id}/context", h.GetIssueContext) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
-			r.With(issueScope).Get("/api/issues/{id}/comments", h.ListComments)
+			r.With(issueScope, issueReadGate).Get("/api/issues/{id}/comments", h.ListComments) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
 			r.With(issueScope).Post("/api/issues/{id}/comments", h.CreateComment)
 			// CEREBRO-PATCH(property-task-routes): FIR-3447 expose value writes and definition reads through the task-scoped allowlist while keeping definition management human-only.
 			r.With(issueScope).Put("/api/issues/{id}/properties/{propertyId}", h.SetIssueProperty)
@@ -1197,7 +1198,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(middleware.RequireUserScope).Delete("/api/scheduled-messages/{scheduledMessageId}", h.DeleteScheduledMessage)
 			r.With(middleware.RequireUserScope).Post("/api/scheduled-messages/{scheduledMessageId}/send", h.SendScheduledMessageNow)
 			// CEREBRO-PATCH(references-routes): JEH-837 issue-attached references.
-			r.With(issueScope).Get("/api/issues/{id}/references", cerebroReferencesHandler.ListByIssue)
+			r.With(issueScope, issueReadGate).Get("/api/issues/{id}/references", cerebroReferencesHandler.ListByIssue) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues.
 			r.With(issueScope).Post("/api/issues/{id}/references", cerebroReferencesHandler.Create)
 		})
 
@@ -1593,9 +1594,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup scheduling API.
 			r.Route("/api/cerebro/wakeups", func(r chi.Router) {
 				r.Get("/", cerebroWakeupHandler.List)
-				r.Post("/", cerebroWakeupHandler.Create)
+				r.With(h.RequirePlatformCapability("schedule_agent_wakeup")).Post("/", cerebroWakeupHandler.Create) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 schedule_agent_wakeup policy gate.
 				r.Get("/{id}", cerebroWakeupHandler.Get)
-				r.Post("/{id}/cancel", cerebroWakeupHandler.Cancel)
+				r.With(h.RequirePlatformCapability("schedule_agent_wakeup")).Post("/{id}/cancel", cerebroWakeupHandler.Cancel) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 schedule_agent_wakeup policy gate.
 			})
 
 			// CEREBRO-PATCH(cerebro-rounds-routes): FIR-2736 round CRUD, membership and starts.
@@ -1618,12 +1619,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
+				r.Use(h.RequirePlatformReadCapability("read_issues"))                            // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues policy gate for machine actors (GET/HEAD only).
+				r.With(h.RequirePlatformCapability("read_issues")).Post("/query", h.QueryIssues) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_issues — /query is a read via POST.
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
-				r.Post("/query", h.QueryIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/batch-update", h.BatchUpdateIssues)
@@ -1638,9 +1640,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
-					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
-					r.Post("/rerun", h.RerunIssue)
-					r.Get("/failed-runs", cerebroInboxHandler.ListDeadFailedRunsForIssue) // CEREBRO-PATCH(dead-failed-runs-routes): FIR-3901 red failed bar.
+					r.With(h.RequirePlatformCapability("rerun_issue")).Post("/tasks/{taskId}/cancel", h.CancelTask) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 rerun_issue policy gate.
+					r.With(h.RequirePlatformCapability("rerun_issue")).Post("/rerun", h.RerunIssue)                 // CEREBRO-PATCH(platform-capability-gates): FIR-4220 rerun_issue policy gate.
+					r.Get("/failed-runs", cerebroInboxHandler.ListDeadFailedRunsForIssue)                           // CEREBRO-PATCH(dead-failed-runs-routes): FIR-3901 red failed bar.
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
 					// CEREBRO-PATCH(comment-cost-route): FIR-39 per-comment cost badge.
@@ -1701,6 +1703,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
+				r.Use(h.RequirePlatformReadCapability("read_projects")) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 read_projects policy gate for machine actors (GET/HEAD only).
 				r.Get("/search", h.SearchProjects)
 				r.Get("/by-repo", h.GetProjectByRepo)
 				// CEREBRO-PATCH(project-nesting-routes): fork-specific nested project endpoints.
@@ -1714,14 +1717,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 					// CEREBRO-PATCH(project-access-control): cerebro project membership + access endpoints.
-					r.Patch("/access", h.UpdateProjectAccess)
+					r.With(h.RequirePlatformCapability("manage_project_access")).Patch("/access", h.UpdateProjectAccess) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
 					r.Get("/members", h.ListProjectMembers)
-					r.Post("/members", h.AddProjectMember)
-					r.Delete("/members/{userId}", h.RemoveProjectMember)
+					r.With(h.RequirePlatformCapability("manage_project_access")).Post("/members", h.AddProjectMember)               // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
+					r.With(h.RequirePlatformCapability("manage_project_access")).Delete("/members/{userId}", h.RemoveProjectMember) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
 					// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 project group access.
 					r.Get("/group-access", cerebroGroupPermissionsHandler.ListProjectGroups)
-					r.Post("/group-access", cerebroGroupPermissionsHandler.AddProjectGroup)
-					r.Delete("/group-access/{groupId}", cerebroGroupPermissionsHandler.RemoveProjectGroup)
+					r.With(h.RequirePlatformCapability("manage_project_access")).Post("/group-access", cerebroGroupPermissionsHandler.AddProjectGroup)                // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
+					r.With(h.RequirePlatformCapability("manage_project_access")).Delete("/group-access/{groupId}", cerebroGroupPermissionsHandler.RemoveProjectGroup) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
 					r.Get("/artifacts", h.ListArtifactsForProject)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
@@ -1760,12 +1763,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetAutopilot)
 					r.Patch("/", h.UpdateAutopilot)
 					r.Delete("/", h.DeleteAutopilot)
-					r.Post("/trigger", h.TriggerAutopilot)
+					r.With(h.RequirePlatformCapability("trigger_autopilot")).Post("/trigger", h.TriggerAutopilot) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 trigger_autopilot policy gate.
 					r.Get("/runs", h.ListAutopilotRuns)
 					r.Get("/runs/{runId}", h.GetAutopilotRun)
 					r.Get("/deliveries", h.ListAutopilotDeliveries)
 					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
-					r.Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery)
+					r.With(h.RequirePlatformCapability("trigger_autopilot")).Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 trigger_autopilot policy gate.
 					r.Post("/triggers", h.CreateAutopilotTrigger)
 					r.Route("/triggers/{triggerId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateAutopilotTrigger)
@@ -2017,7 +2020,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Tasks (user-facing, with ownership check)
-			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
+			r.With(h.RequirePlatformCapability("rerun_issue")).Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 rerun_issue policy gate.
 
 			// CEREBRO-PATCH(channels-routes): multi-party chat (issues with kind in channel,dm).
 			r.Route("/api/channels", func(r chi.Router) {
@@ -2142,7 +2145,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only handler.
 				r.Get("/active-issue-tasks", cerebroInboxHandler.ListActiveIssueTasks)
 				r.Get("/failed-issue-tasks", cerebroInboxHandler.ListDeadFailedIssueTasks) // CEREBRO-PATCH(dead-failed-runs-routes): FIR-3901 red inbox pip.
-				r.Post("/reminders", cerebroInboxHandler.CreateReminder) // CEREBRO-PATCH(inbox-reminders-route): legacy shape, writes cerebro_reminder.
+				r.Post("/reminders", cerebroInboxHandler.CreateReminder)                   // CEREBRO-PATCH(inbox-reminders-route): legacy shape, writes cerebro_reminder.
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
@@ -2198,9 +2201,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
 			// CEREBRO-PATCH(personal-browser-authorize-route): FIR-2037 per-action personal-browser gate (agent token; host-conditioned, Base=Deny).
 			r.Post("/api/cerebro/personal-browser/authorize", h.AuthorizePersonalBrowser)
-			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser)   // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
-			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth)   // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
-			r.Post("/api/cerebro/agent-browser/internal-verify", h.VerifyInternalAgentBrowser) // CEREBRO-PATCH(internal-agent-browser-qa-route): FIR-3006
+			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser)                   // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
+			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth)                   // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
+			r.Post("/api/cerebro/agent-browser/internal-verify", h.VerifyInternalAgentBrowser)                 // CEREBRO-PATCH(internal-agent-browser-qa-route): FIR-3006
 			r.Get("/api/cerebro/agent-browser/internal-verify/{jobId}", h.GetInternalAgentBrowserVerification) // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
 			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
@@ -2268,7 +2271,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{id}/loop-runs", cerebroWorkflowsHandler.LoopRuns)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
 			})
-			r.Mount("/api/cerebro/workflow-hooks", workflowHooksFeature.Routes()) // CEREBRO-PATCH(workflow-hooks-routes): FIR-3101 fork-owned management API.
+			r.Mount("/api/cerebro/workflow-hooks", workflowHooksFeature.Routes())                     // CEREBRO-PATCH(workflow-hooks-routes): FIR-3101 fork-owned management API.
 			r.Mount("/api/cerebro/evals", cerebroEvalsHandler.Routes(h.RequireManageWorkflows))       // CEREBRO-PATCH(manage-workflows-gate): FIR-4196 shared agent mutation permission boundary.
 			r.Mount("/api/cerebro/commands", cerebroCommandsHandler.Routes(h.RequireManageWorkflows)) // CEREBRO-PATCH(manage-workflows-gate): FIR-4196 shared agent mutation permission boundary.
 			// CEREBRO-PATCH(session-mode-config-routes): FIR-3111 versioned Mode configuration.
@@ -2341,8 +2344,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// CEREBRO-PATCH(cerebro-project-grants-routes): FIR-2125 Collections per-project access grants (This project/Inherited).
 			r.Route("/api/cerebro/project-grants", func(r chi.Router) {
 				r.Get("/", cerebroProjectGrantHandler.ListGrants)
-				r.Put("/", cerebroProjectGrantHandler.UpsertGrant)
-				r.Delete("/", cerebroProjectGrantHandler.RemoveGrant)
+				r.With(h.RequirePlatformCapability("manage_project_access")).Put("/", cerebroProjectGrantHandler.UpsertGrant)    // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
+				r.With(h.RequirePlatformCapability("manage_project_access")).Delete("/", cerebroProjectGrantHandler.RemoveGrant) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 manage_project_access policy gate.
 			})
 			// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint REST surface.
 			r.Route("/api/cerebro/projects/{projectID}/sprint-settings", func(r chi.Router) {

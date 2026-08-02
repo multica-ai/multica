@@ -37,6 +37,12 @@ Forklaringerne følger appens sprog (engelsk, eller kinesisk hvis appen er sat t
 
 [Skærmbillede: viser info-ikonet ved en tilladelse med forklaringsboblen der dukker op]
 
+## For administratorer: alle linjer bestemmer nu selv
+
+Hver linje i tabellen håndhæves af sin egen **Allow**/**Ask**/**Deny**-beslutning — det du vælger, er det der faktisk sker. Der findes ikke længere linjer hvor knappen kun er vejledende.
+
+Tre linjer er en særlig slags: maskine-indgange (webhooks og system-kald, hvor der ikke er et menneske eller en agent at spørge). De viser mærket **Governed by** efterfulgt af navnet på den mekanisme der godkender indgangen, plus **Workspace off-switch**. For dem kan beslutningen kun sættes på arbejdsområde-niveau, og den virker som en kontakt: **Deny** eller **Disable** slukker helt for indgangen, alt andet lader den være tændt.
+
 ## De mest almindelige grunde
 
 **Du er ikke ejer af det du prøver at ændre.** Nogle handlinger - som at slette et projekt eller fjerne et medlem - kan kun gøres af den der har oprettet det, eller en administrator.

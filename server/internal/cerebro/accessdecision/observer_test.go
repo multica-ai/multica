@@ -56,6 +56,16 @@ type observerWriter struct {
 	err     error
 }
 
+type observerMandates struct {
+	calls int
+	err   error
+}
+
+func (m *observerMandates) Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error {
+	m.calls++
+	return m.err
+}
+
 func (w *observerWriter) Append(_ context.Context, entry Entry) error {
 	w.entries = append(w.entries, entry)
 	return w.err
@@ -184,6 +194,42 @@ func TestPolicyDecisionServiceUsesDeclaredPermissionContract(t *testing.T) {
 	if entry.PolicyDecision != PolicyAllow || entry.Decision != DecisionAllow {
 		t.Fatalf("declared contract decision = %+v, want allow", entry)
 	}
+}
+
+func TestDecisionServiceTaskMandateCircuitBreaker(t *testing.T) {
+	allow := toolpolicy.SettingAllow
+	call := Call{
+		WorkspaceID:           observerUUID(9),
+		AgentID:               observerUUID(1),
+		TaskID:                observerUUID(7),
+		CanonicalCapabilityID: "platform:web_fetch",
+		ObservedToolName:      "web_fetch",
+		EvidenceLevel:         availabilityevidence.LevelVerified,
+	}
+
+	t.Run("default off preserves the policy decision", func(t *testing.T) {
+		mandates := &observerMandates{err: errors.New("task mandate missing")}
+		service := NewService(observerPolicy{declared: &allow}, nil, nil).WithMandates(mandates)
+
+		entry := service.Decide(context.Background(), call)
+
+		if entry.Decision != DecisionAllow || mandates.calls != 0 {
+			t.Fatalf("default-off decision = %q and calls = %d, want allow and zero mandate calls", entry.Decision, mandates.calls)
+		}
+	})
+
+	t.Run("explicit on enforces the Task Mandate", func(t *testing.T) {
+		mandates := &observerMandates{err: errors.New("task mandate missing")}
+		service := NewService(observerPolicy{declared: &allow}, nil, nil).
+			WithMandates(mandates).
+			WithMandateEnforcement(func(context.Context, pgtype.UUID) bool { return true })
+
+		entry := service.Decide(context.Background(), call)
+
+		if entry.Decision != DecisionDeny || mandates.calls != 1 {
+			t.Fatalf("enforced decision = %q and calls = %d, want deny and one mandate call", entry.Decision, mandates.calls)
+		}
+	})
 }
 
 func TestDecisionServiceFailsClosedOnUnknownCapabilityAndPolicyError(t *testing.T) {

@@ -144,7 +144,7 @@ jobs:
             --grep 'Settings Permissions writes the canonical policy and persists after reload'
           pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts \
             --project=chromium \
-            --grep 'Roles are created, assigned, explained, and enforced through the same permission decision'
+            --grep 'Permission profiles are separated, explained, assigned, and enforced through the same permission decision'
           pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts \
             --project=chromium \
             --grep 'Ask enforcement keeps the Approvals path visible'

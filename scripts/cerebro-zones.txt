@@ -69,5 +69,6 @@ server/**
 # carry an inline CEREBRO-PATCH marker cleanly, so the directory is carved out.
 # One explicit line per cerebro skill keeps edits to UPSTREAM skills still caught.
 !server/internal/service/builtin_skills/multica-personal-browser/**
+!server/internal/service/builtin_skills/multica-work-sessions/**
 !**/*.test.*
 !**/*.spec.*

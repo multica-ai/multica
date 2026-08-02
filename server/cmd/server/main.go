@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	cerebroaccessdecision "github.com/multica-ai/multica/server/internal/cerebro/accessdecision"     // CEREBRO-PATCH(main-access-decision-service): FIR-3388 canonical Gateway Policy Decision Service.
@@ -449,6 +450,8 @@ func main() {
 	go cerebroevals.NewScheduleSweeper(cerebroevals.NewStore(pool), cerebroevalrun.New(pool)).Run(sweepCtx, time.Minute)
 	// CEREBRO-PATCH(main-eval-drift-sweeper): FIR-3496 daily eval drift alarm (fail + pass-rate regression). Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED.
 	go cerebroevals.NewDriftSweeper(cerebroevals.NewStore(pool), cerebrodb.New(pool), queries, bus).Run(sweepCtx, 24*time.Hour)
+	// CEREBRO-PATCH(main-connection-tool-refresh-sweeper): FIR-4187 nightly MCP tool-list refresh. An undiscovered tool has no permission row and resolves ungated, so a stale list is a permission hole.
+	go cerebroconnections.NewToolRefreshSweeper(cerebroconnections.New(pool)).Run(sweepCtx, cerebroconnections.DefaultRefreshInterval)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)
@@ -470,7 +473,10 @@ func main() {
 		h.CapabilityEvidence = cerebroruntime.NewGatewayAvailabilityLedger(gatewayRuntimeCtx, h, queries)
 		mandates := cerebrotaskmandate.NewStore(pool)
 		gatewayExecutor.SetTaskMandates(mandates)
-		gatewayExecutor.SetAccessDecisionService(cerebroaccessdecision.NewService(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates)) // CEREBRO-PATCH(main-access-decision-service): FIR-3388 canonical Gateway decision.
+		mandateFlags := cerebrodb.New(pool)
+		gatewayExecutor.SetAccessDecisionService(cerebroaccessdecision.NewService(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates).WithMandateEnforcement(func(ctx context.Context, workspaceID pgtype.UUID) bool { // CEREBRO-PATCH(task-mandate-enforcement-circuit-breaker): FIR-4220 keep duplicate Gateway decision enforcement on the same default-off workspace flag.
+			return cerebrotaskmandate.EnforcementEnabled(ctx, mandateFlags, workspaceID)
+		}))
 		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 policy-controlled in-process bridge to the full CLI tool surface.
 		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)

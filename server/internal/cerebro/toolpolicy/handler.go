@@ -147,7 +147,11 @@ type toolPolicyRow struct {
 	Source                string          `json:"source"`
 	ManagedExternally     bool            `json:"managed_externally"`
 	ExternalSecurityOwner string          `json:"external_security_owner"`
-	Layers                layerSettings   `json:"layers"`
+	// WorkspaceIntakeSwitch marks a managed-external machine-intake boundary
+	// whose workspace-layer row is a live off-switch (FIR-4220): the UI renders
+	// a workspace-layer-only decision control for it instead of a read-only row.
+	WorkspaceIntakeSwitch bool          `json:"workspace_intake_switch"`
+	Layers                layerSettings `json:"layers"`
 	Conditions            layerConditions `json:"conditions"`
 	// EnforcedConditions names the WHEN condition kinds (action/host/cel) that
 	// actually bite for this capability, so the editor renders only those
@@ -386,7 +390,7 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tool_key required")
 		return
 	}
-	if message, externallyManaged := externallyManagedWriteError(req.ToolKey); externallyManaged {
+	if message, externallyManaged := externallyManagedWriteError(req.ToolKey, Layer(req.Layer)); externallyManaged {
 		writeError(w, http.StatusConflict, message)
 		return
 	}
@@ -515,7 +519,7 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tool_key required")
 		return
 	}
-	if message, externallyManaged := externallyManagedWriteError(toolKey); externallyManaged {
+	if message, externallyManaged := externallyManagedWriteError(toolKey, Layer(q.Get("layer"))); externallyManaged {
 		writeError(w, http.StatusConflict, message)
 		return
 	}
@@ -715,10 +719,19 @@ func (h *Handler) loadWorkspace(w http.ResponseWriter, r *http.Request) (db.Memb
 // externallyManagedWriteError rejects Settings writes for a capability whose
 // actual enforcement point is a separate security boundary. Accepting the row
 // would store an advisory Allow/Ask/Deny choice that call time never reads.
-func externallyManagedWriteError(toolKey string) (string, bool) {
+// Exception (FIR-4220 slice 2): a WorkspaceIntakeSwitch capability's
+// workspace-layer row IS read at its intake point as an off-switch, so that
+// one layer accepts writes; every other layer stays rejected.
+func externallyManagedWriteError(toolKey string, layer Layer) (string, bool) {
 	capability, ok := platformcatalog.ByKey(toolKey)
 	if !ok || !capability.ManagedExternally {
 		return "", false
+	}
+	if capability.WorkspaceIntakeSwitch {
+		if layer == LayerWorkspace {
+			return "", false
+		}
+		return fmt.Sprintf("%s is authenticated by %s; only the workspace-layer off-switch can be set in Settings", capability.Title, capability.ExternalSecurityOwner), true
 	}
 	return fmt.Sprintf("%s is enforced by %s and cannot be changed in Settings", capability.Title, capability.ExternalSecurityOwner), true
 }
@@ -748,6 +761,7 @@ func toRowResponse(row TableRow) toolPolicyRow {
 		Source:                row.Source,
 		ManagedExternally:     row.ManagedExternally,
 		ExternalSecurityOwner: row.ExternalSecurityOwner,
+		WorkspaceIntakeSwitch: row.WorkspaceIntakeSwitch,
 		EnforcedConditions:    enforcedStrs,
 		Layers: layerSettings{
 			Workspace: settingPtr(row.Layers, LayerWorkspace),

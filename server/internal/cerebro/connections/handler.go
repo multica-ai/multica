@@ -152,6 +152,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = SyncCapability(r.Context(), h.pool, wsID, c)
+	// Discover and persist the tool list so the new connection's tools are
+	// gateable immediately, instead of staying ungated until someone presses
+	// Test in the editor (FIR-4187).
+	refreshInBackground(h.Store, c)
 	writeJSON(w, http.StatusCreated, mask(c))
 }
 
@@ -210,6 +214,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = SyncCapability(r.Context(), h.pool, wsID, c)
+	// A saved URL or credential change can point at a different tool set, so
+	// re-discover rather than leaving the previous list in place (FIR-4187).
+	refreshInBackground(h.Store, c)
 	writeJSON(w, http.StatusOK, mask(c))
 }
 

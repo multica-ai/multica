@@ -425,6 +425,12 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// CEREBRO-PATCH(platform-capability-gates): FIR-4220 slice 2 — a workspace-layer Deny on autopilot_webhook switches the intake off; the webhook secret stays the auth boundary.
+	if !h.platformIntakeAllowed(r.Context(), autopilot.WorkspaceID, autopilotWebhookPlatformAction) { // CEREBRO-PATCH(platform-capability-gates)
+		writeError(w, http.StatusForbidden, "autopilot webhooks are turned off by workspace policy") // CEREBRO-PATCH(platform-capability-gates)
+		return                                                                                       // CEREBRO-PATCH(platform-capability-gates)
+	} // CEREBRO-PATCH(platform-capability-gates)
+
 	// 6. Normalize body. Invalid JSON → 400 without persistence: we have no
 	//    dedupe identifier from the body, and replaying an unparsable payload
 	//    is not useful.

@@ -353,11 +353,7 @@ When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI f
 **ALWAYS verify the smoke-test target before drawing conclusions:**
 
 1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
-2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
-   - `cerebro.firtal.com` → Firtal **staging** (Sliplane containers, runs `origin/main`)
-   - `Multica.firtal.com` → Firtal **production** (Sliplane containers, runs `origin/production`)
-   - `sara.tailbde0.ts.net/...` → also Firtal staging (tailscale alias for the same mac mini)
-   - any tailscale `.ts.net` host → another machine
+2. If it points at a tunnel, a deployed host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. The deployed hosts and the branch each one serves are listed in [DEPLOY.md](DEPLOY.md); any tailscale `.ts.net` host is another machine.
 3. To test your branch's running dev server, navigate explicitly to the port from your worktree's `.env.worktree` (`FRONTEND_PORT`, typically 13083 or 3000).
 4. Authenticating on your local dev: cerebro has removed the upstream `888888` master code as a security patch (`server/internal/handler/auth_master_code_test.go` enforces this). Use the real "Send code" flow — the code is printed to `/tmp/multica-server.log` when `RESEND_API_KEY` is unset.
 
@@ -446,27 +442,9 @@ test("example", async ({ page }) => {
 
 ## Verification — mandatory before claiming done
 
-After writing or modifying code, always run the full verification pipeline. Never mark work complete, open a PR, or claim a fix works without green checks — evidence before assertions.
+Never mark work complete, open a PR, or claim a fix works without green checks — evidence before assertions.
 
-```bash
-make check    # Runs all checks: typecheck, unit tests, Go tests, E2E
-```
-
-**Workflow:**
-- Write code to satisfy the requirement
-- Run `make check`
-- If any step fails, read the error output, fix the code, and re-run
-- Repeat until all checks pass
-- Only then consider the task complete
-
-**Quick iteration:** while iterating, run the targeted check for the layer you touched, then finish with a full `make check` before marking work complete:
-
-```bash
-pnpm typecheck        # TypeScript type errors only
-pnpm test             # TS unit tests only (Vitest, all packages)
-make test             # Go tests only
-pnpm exec playwright test   # E2E only (requires backend + frontend running)
-```
+**[VERIFY.md](VERIFY.md) is the single source of truth.** It tells you which check command your checkout needs (`make check-worktree` in a worktree, `make check` in the main checkout — they load different env files), which targeted commands to use while iterating, and the browser contracts that must pass. This file does not restate them so the two cannot drift.
 
 ## Environments + Deploy
 
@@ -475,34 +453,9 @@ pnpm exec playwright test   # E2E only (requires backend + frontend running)
 | `main` | Staging | `https://cerebro.firtal.com` | Sliplane (Docker containers) |
 | `production` | Production | `https://Multica.firtal.com` | Sliplane (Docker containers) |
 
-**Staging** runs on Sliplane as Docker containers (`multica-staging-web`, `multica-staging-backend`, plus its own Postgres and a Cloudflare tunnel), built from `Dockerfile.web` and `Dockerfile`. It tracks `origin/main` and rebuilds on each push.
+**[DEPLOY.md](DEPLOY.md) is the single source of truth** for this repository's deploy mechanics: the release-issue flow, the `staging-only` / `prod-ready` label rule, who approves which change, verification, rollback, and the Sliplane services. The `deploy` skill owns the cross-cutting process (gate rules, waiting, escalation) and defers to DEPLOY.md for anything repo-specific. This file restates neither, so the three cannot drift.
 
-**Production** runs on Sliplane as Docker containers built from `Dockerfile.web` (frontend) and `Dockerfile` (backend). It tracks `origin/production` and rebuilds on each push to that branch.
-
-**Gate rules for merge → live: see the `deploy` skill, section "Gate rules".** Summary: `main` (staging, `cerebro.firtal.com`) merges itself when CI is green AND the change is reversible; only irreversible changes (destructive DB migrations, infra-mutations, prod-data) need approval before merge. `production` (prod, `Multica.firtal.com`) is a separate gated promotion — see the deploy-review flow below. This CLAUDE.md does not restate the rule so the two versions can't drift; the deploy skill is the single source of truth.
-
-End-to-end:
-
-1. PR merges into `main` (continuous, all day).
-2. `auto-deploy-trigger` autopilot fires (via GitHub webhook, with a scheduled fallback that polls `main` vs `production`). It looks up the app in `registry.firtal.com`, runs the `release-review` checklist on the `main..production` diff, and creates **one** release-issue in the Deployments project (`ecb4fb83-0995-48a5-97d2-3adce73aa800`) per pending release wave. Subsequent merges update the same issue (idempotent on repo + main-head-sha), so 5 PRs in 10 minutes land as 1 approval, not 5.
-3. App owner (or Jesper) comments `approve` + tags the agent on the release-issue. The agent merges the standing `main → production` PR via the GitHub API.
-4. The push to `origin/production` triggers the runner's webhook (port 9000, `com.multica.webhook`), which executes `.deploy/deploy.sh`.
-5. `.deploy/deploy.sh` resets to `origin/production`, runs `pnpm install --frozen-lockfile`, `make build`, `make migrate-up`, builds `apps/web` (deleting `.next` first to avoid stale client-reference-manifest entries — Next.js 16 quirk), and `launchctl kickstart -k`'s backend + frontend + daemon (JEH-438; binary is overwritten but the launchd process keeps the old one until kickstart).
-
-The committed `.deploy/deploy.sh.example` is the canonical script; the runner's `.deploy/deploy.sh` is gitignored because it embeds local paths. Both should track `origin/production` — update the example whenever the live script changes.
-
-**Manual fallback** — when the autopilot is silent or the runner was offline:
-
-```bash
-ssh sara@<runner-host>
-bash ~/code/firtal-cerebro/.deploy/deploy.sh
-```
-
-Logs land in `.deploy/logs/deploy-latest.log` on the runner.
-
-**Verifying a deploy from outside the runner.** Check `https://Multica.firtal.com` for production (Sliplane containers) or `https://cerebro.firtal.com` for staging (Sliplane). The server exposes a `/version` endpoint (commit SHA) for programmatic verification.
-
-**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to `Multica.firtal.com`. Prod always runs `origin/production`, regardless of the latest CLI tag. The two pipelines are fully independent.
+One consequence is worth naming here because it surprises people: **cutting a CLI tag is not a production deploy** — see the next section.
 
 ## CLI Release (binary distribution)
 
@@ -526,32 +479,13 @@ All queries filter by `workspace_id`. Membership checks gate access. `X-Workspac
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
 
-## Multica MCP Integration
+## Built-in agent skills
 
-When the `multica` MCP server is connected, log activity to YOUR work session at natural milestones using `report_activity`. This costs minimal tokens and gives visibility in the Multica UI.
+`server/internal/service/builtin_skills/<name>/SKILL.md` are the platform's built-in skills — every agent gets them on top of its workspace-bound skills, and they are loaded on demand rather than pasted into every run. The loader discovers directories automatically, so adding a skill is a new directory and no Go change.
 
-**Routing — every activity tool needs an explicit `work_session_id`.**
-The MCP server does NOT pick the target session for you. `get_me.active_session` is an *ambient* pointer shared across this MCP process — parallel subagents will overwrite it. Always pass the `work_session_id` you got from `attach_session` (or `resume_session` / `fork_session`) to `report_activity` and `complete_work`.
+Two rules when you add or edit one:
 
-**Session lifecycle:**
-1. `attach_session(issue_id)` at the start of work — returns a `work_session_id`. **Capture and remember it.** Auto-reports git context.
-2. `report_activity(work_session_id=..., type=..., summary=...)` at milestones (see list below).
-3. `complete_work(work_session_id=..., summary=...)` when done. Auto-captures git diff.
-4. If interrupted without `complete_work`, the next MCP startup re-exposes the ambient session via `get_me` so a single agent can resume.
+- A net-new cerebro skill directory needs its own exclusion line in `scripts/cerebro-zones.txt`; editing an **upstream** skill still requires a CEREBRO-PATCH marker.
+- If you change a CLI command, an API field, or product behavior that a built-in skill documents, update that skill's `SKILL.md` **and** its `references/*-source-map.md` in the same PR — see Coding Rules.
 
-**Parallel subagents (parent + N children sharing one MCP process):**
-- Children call `attach_session(issue_id, set_active=false)` so the parent's `get_me.active_session` pointer is preserved.
-- Each child uses the `work_session_id` it received — **never** read it back from `get_me`.
-- A child completing its session does not affect the parent's session.
-
-**When to call `report_activity`:**
-- `decision` — after choosing between two or more approaches
-- `verification` — after running tests, typecheck, or build (include pass/fail)
-- `blocker` — when stuck or needing user input
-- `dependency` — after adding a package, creating a migration, or changing infra
-- `error` — after encountering and fixing an error (what failed + what fixed it)
-
-**When NOT to call it:**
-- After every file edit (captured automatically at `complete_work`)
-- For routine tool calls (reading files, searching)
-- For formatting or minor changes
+How an agent should behave at runtime belongs in a skill or in the runtime brief, never in this file. This file is about the codebase only.
