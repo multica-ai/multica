@@ -467,6 +467,7 @@ func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *test
 	// A tiny representative file keeps the regression fast; the reported
 	// Windows executable is about 325 MiB but has identical GC semantics.
 	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 325)
+	writeFile(t, filepath.Join(taskDir, "codex-home/.tmp/plugin/cache.bin"), 205)
 	for _, rel := range []string{
 		"codex-home/auth.json",
 		"codex-home/config.toml",
@@ -474,6 +475,7 @@ func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *test
 		"output/result.txt",
 		"logs/task.log",
 		"workdir/repo/.sandbox-bin/user-owned",
+		"workdir/repo/.tmp/user-owned",
 	} {
 		writeFile(t, filepath.Join(taskDir, filepath.FromSlash(rel)), 10)
 	}
@@ -484,6 +486,9 @@ func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *test
 	if _, err := os.Stat(filepath.Join(taskDir, "codex-home/.sandbox-bin")); !os.IsNotExist(err) {
 		t.Fatalf("managed Codex sandbox should be removed, stat err=%v", err)
 	}
+	if _, err := os.Stat(filepath.Join(taskDir, "codex-home/.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("managed Codex temporary cache should be removed, stat err=%v", err)
+	}
 	for _, rel := range []string{
 		"codex-home/auth.json",
 		"codex-home/config.toml",
@@ -491,18 +496,20 @@ func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *test
 		"output/result.txt",
 		"logs/task.log",
 		"workdir/repo/.sandbox-bin/user-owned",
+		"workdir/repo/.tmp/user-owned",
 		".gc_meta.json",
 	} {
 		if _, err := os.Stat(filepath.Join(taskDir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("expected %s to be preserved: %v", rel, err)
 		}
 	}
-	managedPattern := managedArtifactPatternPrefix + "codex-home/.sandbox-bin"
-	if stats.artifactDirs != 1 || stats.artifactRemoved != 1 || stats.bytesReclaimed != 325 || stats.skipped != 1 {
+	sandboxPattern := managedArtifactPatternPrefix + "codex-home/.sandbox-bin"
+	tempPattern := managedArtifactPatternPrefix + "codex-home/.tmp"
+	if stats.artifactDirs != 1 || stats.artifactRemoved != 2 || stats.bytesReclaimed != 530 || stats.skipped != 1 {
 		t.Fatalf("unexpected managed cleanup stats: %+v", stats)
 	}
-	if stats.byPattern[managedPattern] != 1 {
-		t.Fatalf("managed pattern stats = %+v, want %q=1", stats.byPattern, managedPattern)
+	if stats.byPattern[sandboxPattern] != 1 || stats.byPattern[tempPattern] != 1 {
+		t.Fatalf("managed pattern stats = %+v, want %q=1 and %q=1", stats.byPattern, sandboxPattern, tempPattern)
 	}
 }
 
@@ -875,17 +882,20 @@ func TestCleanTaskArtifacts_ManagedPathIsExactAndDeduplicated(t *testing.T) {
 	t.Run("managed only", func(t *testing.T) {
 		taskDir := t.TempDir()
 		writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+		writeFile(t, filepath.Join(taskDir, "codex-home/.tmp/plugin/cache.bin"), 200)
 		writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/keep"), 400)
+		writeFile(t, filepath.Join(taskDir, "workdir/repo/.tmp/keep"), 500)
 		writeFile(t, filepath.Join(taskDir, "codex-home/auth.json"), 10)
 
 		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, nil)
-		if removed != 1 || bytes != 300 {
-			t.Fatalf("removed=%d bytes=%d, want 1/300", removed, bytes)
+		if removed != 2 || bytes != 500 {
+			t.Fatalf("removed=%d bytes=%d, want 2/500", removed, bytes)
 		}
-		if perPattern[managedArtifactPatternPrefix+"codex-home/.sandbox-bin"] != 1 {
+		if perPattern[managedArtifactPatternPrefix+"codex-home/.sandbox-bin"] != 1 ||
+			perPattern[managedArtifactPatternPrefix+"codex-home/.tmp"] != 1 {
 			t.Fatalf("unexpected per-pattern stats: %+v", perPattern)
 		}
-		for _, rel := range []string{"workdir/repo/.sandbox-bin/keep", "codex-home/auth.json"} {
+		for _, rel := range []string{"workdir/repo/.sandbox-bin/keep", "workdir/repo/.tmp/keep", "codex-home/auth.json"} {
 			if _, err := os.Stat(filepath.Join(taskDir, filepath.FromSlash(rel))); err != nil {
 				t.Errorf("expected %s to be preserved: %v", rel, err)
 			}
@@ -895,13 +905,17 @@ func TestCleanTaskArtifacts_ManagedPathIsExactAndDeduplicated(t *testing.T) {
 	t.Run("explicit broad basename", func(t *testing.T) {
 		taskDir := t.TempDir()
 		writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+		writeFile(t, filepath.Join(taskDir, "codex-home/.tmp/plugin/cache.bin"), 200)
 		writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+		writeFile(t, filepath.Join(taskDir, "workdir/repo/.tmp/cache"), 500)
 
-		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, []string{".sandbox-bin"})
-		if removed != 2 || bytes != 700 {
-			t.Fatalf("removed=%d bytes=%d, want 2/700 without double counting", removed, bytes)
+		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, []string{".sandbox-bin", ".tmp"})
+		if removed != 4 || bytes != 1400 {
+			t.Fatalf("removed=%d bytes=%d, want 4/1400 without double counting", removed, bytes)
 		}
-		if perPattern[managedArtifactPatternPrefix+"codex-home/.sandbox-bin"] != 1 || perPattern[".sandbox-bin"] != 1 {
+		if perPattern[managedArtifactPatternPrefix+"codex-home/.sandbox-bin"] != 1 ||
+			perPattern[managedArtifactPatternPrefix+"codex-home/.tmp"] != 1 ||
+			perPattern[".sandbox-bin"] != 1 || perPattern[".tmp"] != 1 {
 			t.Fatalf("unexpected per-pattern stats: %+v", perPattern)
 		}
 	})
@@ -917,6 +931,7 @@ func TestCleanTaskArtifacts_ManagedPathDoesNotFollowSymlinks(t *testing.T) {
 		linkPath string
 	}{
 		{name: "leaf", linkPath: "codex-home/.sandbox-bin"},
+		{name: "temp leaf", linkPath: "codex-home/.tmp"},
 		{name: "parent", linkPath: "codex-home"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
