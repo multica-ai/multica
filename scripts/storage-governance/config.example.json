@@ -1,0 +1,22 @@
+{
+  "internal_path": "/",
+  "external_path": "/Volumes/MacMini-HotSSD",
+  "level1_free_gib": 25,
+  "level1_clear_gib": 28,
+  "level2_free_gib": 18,
+  "level2_clear_gib": 21,
+  "external_min_free_gib": 100,
+  "safety_floor_gib": 25,
+  "burst_reserve_gib": 10,
+  "minimum_observation_hours": 48,
+  "observer_labels": [
+    "ai.multica.ws2512.m0-shadow-observer"
+  ],
+  "nonproduction_launchagents": [],
+  "lark_open_id": "",
+  "alert_cooldown_seconds": 3600,
+  "legacy_sigstop_fallback": false,
+  "state_path": "/Users/example/.local/state/storage-governance/guard-state.json",
+  "metrics_path": "/Users/example/.local/state/storage-governance/host-samples.jsonl",
+  "capacity_report_path": "/Users/example/.local/state/storage-governance/capacity-report.json"
+}
