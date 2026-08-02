@@ -16,6 +16,8 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+const vcsPullRequestLockTimeout = "500ms"
+
 // ── Response mappers ────────────────────────────────────────────────────────
 
 // vcsPullRequestToResponse maps a stored VCS PR onto the shared PR response
@@ -210,6 +212,10 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		return
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('lock_timeout', $1, true)", vcsPullRequestLockTimeout); err != nil {
+		slog.Warn("vcs: set pr mirror lock timeout failed", "err", err)
+		return
+	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", vcsPullRequestLockKey(conn, ev)); err != nil {
 		slog.Warn("vcs: acquire pr mirror lock failed", "err", err)
 		return
