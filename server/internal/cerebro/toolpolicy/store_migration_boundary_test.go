@@ -679,4 +679,19 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	if archived["mode"] != "restricted" {
 		t.Fatalf("archived config = %v, want complete legacy payload", archived)
 	}
+
+	replayMigration(t, ctx, tx, "9167_cerebro_permission_profile_names.up.sql")
+	var profileName, profileDescription string
+	if err := tx.QueryRow(ctx, `
+		SELECT name, description FROM cerebro_role
+		WHERE workspace_id = $1 AND id IN (
+			SELECT role_id FROM cerebro_role_assignment
+			WHERE subject_type = 'agent' AND subject_id = $2
+		)
+	`, tpTestWorkspaceID, agent).Scan(&profileName, &profileDescription); err != nil {
+		t.Fatalf("read human-named permission profile: %v", err)
+	}
+	if profileName != "Migration replay agent" || profileDescription != "Keeps the permissions that were previously configured directly for Migration replay agent." {
+		t.Fatalf("permission profile = %q / %q, want the assigned agent's readable name and description", profileName, profileDescription)
+	}
 }

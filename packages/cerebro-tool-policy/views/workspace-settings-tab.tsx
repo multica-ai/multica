@@ -11,13 +11,21 @@ import {
   Eye,
   Layers3,
   ListChecks,
+  LockKeyhole,
   ShieldCheck,
+  UsersRound,
   UserRound,
   Wrench,
 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { WebFetchPolicySettingsTab } from "@multica/cerebro-web-fetch-policy/views";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@multica/ui/components/ui/tabs";
 import { ToolPolicyTabs } from "./tool-policy-table";
 import { CapabilityIsolationSections } from "./capability-isolation-sections";
 import { PermissionRoles } from "./permission-roles";
@@ -39,8 +47,8 @@ function PermissionDecisionGuide() {
   const steps = [
     {
       icon: ShieldCheck,
-      title: "Roles",
-      body: "Reusable permission profiles assigned to agents or members.",
+      title: "Permission profiles",
+      body: "Reusable sets of access rules assigned to agents or members.",
     },
     {
       icon: Layers3,
@@ -122,32 +130,76 @@ export function WorkspacePermissionsTab({
       <div>
         <h2 className="text-base font-semibold">Permissions</h2>
         <p className="text-sm text-muted-foreground">
-          The workspace-wide starting point for every tool. More specific rules
-          may change general access, while Disable and protected security floors
-          cannot be opened downstream.
+          Manage workspace defaults, reusable profiles and security controls in
+          separate views.
         </p>
       </div>
-      <PermissionDecisionGuide />
-      <PermissionRoles workspaceId={wsId} />
-      <ToolPolicyTabs
-        wsId={wsId}
-        view="workspace"
-        subjectId={wsId}
-        onOpenPermission={onOpenPermission}
-      />
-      {/* FIR-3091 slice 3: the OS-sandbox network profiles, per-runtime
-          overrides, and per-agent blocked MCP servers — a parallel isolation
-          layer shown alongside the tool-policy catalog, rehomed from the retired
-          "Agent capabilities" settings tab. */}
-      <CapabilityIsolationSections />
-      {/* FIR-3091 slice 5: the web_fetch host allow/deny list, rehomed from the
-          standalone "Web fetch" settings tab so all permission surfaces live on
-          one screen. Gated so the move is reversible. */}
-      {webFetchInPermissions ? (
-        <div className="border-t pt-6">
-          <WebFetchPolicySettingsTab />
-        </div>
-      ) : null}
+      <Tabs defaultValue="access-rules" className="gap-4">
+        <TabsList className="grid h-auto w-full grid-cols-1 gap-1 p-1 sm:w-fit sm:grid-cols-3">
+          <TabsTrigger value="access-rules" className="justify-start px-3 py-1.5 sm:justify-center">
+            <ListChecks className="size-4" /> Access rules
+          </TabsTrigger>
+          <TabsTrigger value="permission-profiles" className="justify-start px-3 py-1.5 sm:justify-center">
+            <UsersRound className="size-4" /> Permission profiles
+          </TabsTrigger>
+          <TabsTrigger value="security-controls" className="justify-start px-3 py-1.5 sm:justify-center">
+            <LockKeyhole className="size-4" /> Security controls
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="access-rules" className="space-y-4">
+          <PermissionDecisionGuide />
+          <ToolPolicyTabs
+            wsId={wsId}
+            view="workspace"
+            subjectId={wsId}
+            onOpenPermission={onOpenPermission}
+          />
+        </TabsContent>
+
+        <TabsContent value="permission-profiles" className="space-y-4">
+          <section className="overflow-hidden rounded-lg border bg-card" aria-labelledby="permission-profile-guide">
+            <div className="border-b p-4">
+              <h3 id="permission-profile-guide" className="text-sm font-semibold">
+                When should I use a Permission profile?
+              </h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Both paths use the same permission engine. Choose the path that
+                matches how many people or agents need the rule.
+              </p>
+            </div>
+            <div className="grid gap-px bg-border md:grid-cols-2">
+              <div className="bg-card p-4">
+                <p className="text-sm font-medium">One agent</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Use the agent&apos;s Tools page when a permission choice belongs
+                  only to that agent.
+                </p>
+              </div>
+              <div className="bg-card p-4">
+                <p className="text-sm font-medium">Several agents or members</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Create one Permission profile, assign it to everyone who needs
+                  it, and update the shared profile once when access changes.
+                </p>
+              </div>
+            </div>
+          </section>
+          <PermissionRoles workspaceId={wsId} />
+        </TabsContent>
+
+        <TabsContent value="security-controls" className="space-y-4">
+          {/* FIR-3091 slice 3: the OS-sandbox network profiles, per-runtime
+              overrides, and per-agent blocked MCP servers — a parallel isolation
+              layer shown alongside the tool-policy catalog, rehomed from the retired
+              "Agent capabilities" settings tab. */}
+          <CapabilityIsolationSections />
+          {/* FIR-3091 slice 5: the web_fetch host allow/deny list, rehomed from the
+              standalone "Web fetch" settings tab so all permission surfaces live on
+              one screen. Gated so the move is reversible. */}
+          {webFetchInPermissions ? <WebFetchPolicySettingsTab /> : null}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
