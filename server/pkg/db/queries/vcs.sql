@@ -68,15 +68,18 @@ RETURNING *;
 -- name: UpsertVCSPullRequest :one
 -- pr_updated_at guards against an out-of-order webhook redelivery regressing
 -- the PR state, mirroring the updated_at guard on UpsertVCSCommitStatus. Each
--- mutable column is applied only when the incoming event is newer than the
--- stored row, and the incoming event is not trying to clear an already-terminal
--- state. The row is still touched (and thus RETURNED) either way, so callers
+-- mutable column is applied only when the incoming event is not older than the
+-- stored row and is not trying to clear an already-terminal state. The row is
+-- still touched (and thus RETURNED) either way, so callers
 -- always get the current PR and the previous state needed to freeze close
 -- intent only after the first terminal transition.
 WITH existing AS (
     SELECT id, state
     FROM vcs_pull_request
-    WHERE connection_id = $2 AND repo_owner = $4 AND repo_name = $5 AND pr_number = $6
+    WHERE vcs_pull_request.connection_id = $2
+      AND vcs_pull_request.repo_owner = $4
+      AND vcs_pull_request.repo_name = $5
+      AND vcs_pull_request.pr_number = $6
     FOR UPDATE
 ),
 upserted AS (

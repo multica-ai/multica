@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -179,7 +181,8 @@ func TestUpsertVCSPullRequestTerminalStateMonotonicity(t *testing.T) {
 			WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: connUUID,
 			Provider: "gitlab", RepoOwner: "acme", RepoName: "widget", PrNumber: number,
 			Title: "PR", State: state, HtmlUrl: "https://gitlab.test/acme/widget/-/merge_requests/test",
-			MergedAt: mergedAt, ClosedAt: closedAt, PrCreatedAt: created, PrUpdatedAt: updated, HeadSha: state + "-sha",
+			MergedAt: mergedAt, ClosedAt: closedAt, PrCreatedAt: created, PrUpdatedAt: updated,
+			Additions: 1, Deletions: 2, ChangedFiles: 3, HeadSha: state + "-sha",
 		})
 		if err != nil {
 			t.Fatalf("UpsertVCSPullRequest(%d, %s): %v", number, state, err)
@@ -189,19 +192,84 @@ func TestUpsertVCSPullRequestTerminalStateMonotonicity(t *testing.T) {
 
 	upsert(101, "merged", t1, t1, pgtype.Timestamptz{})
 	row := upsert(101, "open", t2, pgtype.Timestamptz{}, pgtype.Timestamptz{})
-	if row.State != "merged" || !row.MergedAt.Valid || row.PrUpdatedAt.Time != t1.Time {
-		t.Fatalf("merged -> newer open regressed: state=%q merged_at=%v pr_updated_at=%v", row.State, row.MergedAt.Valid, row.PrUpdatedAt.Time)
+	if row.State != "merged" || !row.MergedAt.Valid || !row.PrUpdatedAt.Time.Equal(t1.Time) || row.HeadSha != "merged-sha" {
+		t.Fatalf("merged -> newer open regressed: state=%q merged_at=%v pr_updated_at=%v head_sha=%q", row.State, row.MergedAt.Valid, row.PrUpdatedAt.Time, row.HeadSha)
 	}
 
 	upsert(102, "closed", t1, pgtype.Timestamptz{}, t1)
 	row = upsert(102, "open", t2, pgtype.Timestamptz{}, pgtype.Timestamptz{})
-	if row.State != "closed" || !row.ClosedAt.Valid || row.PrUpdatedAt.Time != t1.Time {
-		t.Fatalf("closed -> newer open regressed: state=%q closed_at=%v pr_updated_at=%v", row.State, row.ClosedAt.Valid, row.PrUpdatedAt.Time)
+	if row.State != "closed" || !row.ClosedAt.Valid || !row.PrUpdatedAt.Time.Equal(t1.Time) || row.HeadSha != "closed-sha" {
+		t.Fatalf("closed -> newer open regressed: state=%q closed_at=%v pr_updated_at=%v head_sha=%q", row.State, row.ClosedAt.Valid, row.PrUpdatedAt.Time, row.HeadSha)
 	}
 
 	row = upsert(101, "closed", t2, t1, t2)
-	if row.State != "closed" || !row.MergedAt.Valid || !row.ClosedAt.Valid || row.PrUpdatedAt.Time != t2.Time {
-		t.Fatalf("terminal -> terminal should advance: state=%q merged_at=%v closed_at=%v pr_updated_at=%v", row.State, row.MergedAt.Valid, row.ClosedAt.Valid, row.PrUpdatedAt.Time)
+	if row.State != "closed" || !row.MergedAt.Valid || !row.ClosedAt.Valid || !row.PrUpdatedAt.Time.Equal(t2.Time) || row.HeadSha != "closed-sha" {
+		t.Fatalf("terminal -> terminal should advance: state=%q merged_at=%v closed_at=%v pr_updated_at=%v head_sha=%q", row.State, row.MergedAt.Valid, row.ClosedAt.Valid, row.PrUpdatedAt.Time, row.HeadSha)
+	}
+}
+
+func TestVCSWebhookConcurrentFirstUpsertKeepsAcceptedEventLinkFlags(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Concurrent terminal")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	conn, err := testHandler.Queries.GetVCSConnectionByID(ctx, parseUUID(connID))
+	if err != nil {
+		t.Fatalf("GetVCSConnectionByID: %v", err)
+	}
+
+	openEv := vcs.PullRequestEvent{
+		Action: "opened", RepoOwner: "acme", RepoName: "widget", Number: 88,
+		Title: "Docs", Body: "Related " + issue.Identifier, State: "open",
+		HTMLURL: "https://forgejo.test/acme/widget/pulls/88", Branch: "docs", HeadSHA: "open-sha",
+		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-01T00:00:00Z",
+	}
+	mergedEv := vcs.PullRequestEvent{
+		Action: "closed", RepoOwner: "acme", RepoName: "widget", Number: 88,
+		Title: "Fix " + issue.Identifier, Body: "Closes " + issue.Identifier, State: "merged",
+		HTMLURL: "https://forgejo.test/acme/widget/pulls/88", Branch: "fix", HeadSHA: "merged-sha",
+		MergedAt: "2026-05-02T00:00:00Z", ClosedAt: "2026-05-02T00:00:00Z",
+		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-02T00:00:00Z",
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for _, ev := range []vcs.PullRequestEvent{openEv, mergedEv} {
+		ev := ev
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			testHandler.mirrorVCSPullRequest(ctx, conn, ev)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	wantMergedAt := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+	pr := vcsPullRequestByNumber(t, ctx, connID, 88)
+	if pr.State != "merged" || pr.HeadSha != "merged-sha" || !pr.PrUpdatedAt.Time.Equal(wantMergedAt) {
+		t.Fatalf("concurrent first upsert persisted %q/%q/%v, want merged/merged-sha/2026-05-02", pr.State, pr.HeadSha, pr.PrUpdatedAt.Time)
+	}
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("concurrent link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	rejected := openEv
+	rejected.UpdatedAt = "2026-05-03T00:00:00Z"
+	rejected.HeadSHA = "rejected-open-sha"
+	testHandler.mirrorVCSPullRequest(ctx, conn, rejected)
+
+	pr = vcsPullRequestByNumber(t, ctx, connID, 88)
+	if pr.State != "merged" || pr.HeadSha != "merged-sha" || !pr.PrUpdatedAt.Time.Equal(wantMergedAt) {
+		t.Fatalf("newer open replay after concurrent terminal persisted %q/%q/%v, want merged/merged-sha/2026-05-02", pr.State, pr.HeadSha, pr.PrUpdatedAt.Time)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("rejected replay link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
 	}
 }
 
