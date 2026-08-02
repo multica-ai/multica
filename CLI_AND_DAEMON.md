@@ -190,13 +190,17 @@ Daemon behavior is configured via flags or environment variables:
 
 #### Workspace garbage collection
 
-The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space in three modes:
+On every task preparation or reuse, the daemon creates `.metadata_never_index` at `MULTICA_WORKSPACES_ROOT`. macOS Spotlight treats this empty marker as an instruction not to index the workspace tree; other platforms safely ignore it. The marker is self-healing and a write failure is non-fatal.
+
+Codex keeps its marketplace and plugin caches isolated under each task's `codex-home/.tmp` while the process is running. After the process exits, the daemon removes the exact managed paths `codex-home/.tmp` and `codex-home/.sandbox-bin` before reporting the terminal result. This applies to completed, failed, timed-out, and cancelled runs. It does not remove Codex sessions, auth/config, task logs, output, source work, or other user-created files.
+
+The daemon also periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space in three modes:
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
-- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
+- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims legacy copies of the exact managed paths `codex-home/.sandbox-bin` and `codex-home/.tmp`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
 
-Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
+Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. Managed Codex caches are matched by exact relative path, so a repository's own `.sandbox-bin` or `.tmp` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). Setting `MULTICA_GC_ARTIFACT_TTL=0` disables periodic artifact cleanup, but the immediate post-process cleanup of task-local Codex caches still runs.
 
 Agent-specific overrides:
 
