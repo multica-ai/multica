@@ -188,6 +188,7 @@ export type CerebroFlagKey =
   // turns it on, and access is deny-by-default until a box is granted.
   | "cerebro_credentials_per_actor"
   | "cerebro_web_fetch_policy"
+  | "cerebro_task_mandate_enforcement"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
@@ -585,7 +586,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // until an admin turns it on and grants a box to an actor.
   cerebro_credentials_per_actor: false,
   cerebro_web_fetch_policy: true,
-  // FIR-2594: surface the Multica platform actions (create issue, add comment,
+  // FIR-4220: kill switch for call-time Task Mandate enforcement. Keep OFF
+  // until mandate generation covers every callable offered to the agent.
+  cerebro_task_mandate_enforcement: false,
+  // FIR-4220 (formerly miscited as FIR-2594): surface the Multica platform
+  // actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
   // new appears until an admin turns it on.
@@ -1419,6 +1424,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let workspace admins control which URLs agents may fetch with the web_fetch tool. Choose a mode — allow-list (only listed hosts) or disallow-list (everything except listed hosts) — and manage the host rules (github.com, *.github.com). The active list is shown to agents so they can explain to the user when a host is blocked. When off, the legacy hardcoded allow-list applies. Default ON. TECH-3522.",
   },
   {
+    key: "cerebro_task_mandate_enforcement",
+    label: "Task Mandate enforcement",
+    group: "permissions",
+    description:
+      "Enforce the immutable Task Mandate on every local and Firtal Gateway call. Keep this off while validating that every callable offered to an agent is present in the same mandate generation. FIR-4220.",
+  },
+  {
     key: "cerebro_approvals",
     label: "Approval inbox",
     group: "permissions",
@@ -2090,6 +2102,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_tool_policy: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
   cerebro_web_fetch_permissions: "tool_permissions",
+  cerebro_task_mandate_enforcement: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_policy_cel: "tool_permissions",

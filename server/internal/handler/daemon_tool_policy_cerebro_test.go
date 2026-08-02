@@ -15,12 +15,33 @@ import (
 	"testing"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 )
+
+func setTaskMandateEnforcement(t *testing.T, enabled bool) {
+	t.Helper()
+	const workspaceUserID = "00000000-0000-0000-0000-000000000000"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
+		VALUES ($1, $2, $3, $4, true)
+		ON CONFLICT (workspace_id, user_id, flag_key)
+		DO UPDATE SET enabled = EXCLUDED.enabled, locked = true
+	`, testWorkspaceID, workspaceUserID, taskmandate.EnforcementFlagKey, enabled); err != nil {
+		t.Fatalf("set %s: %v", taskmandate.EnforcementFlagKey, err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_feature_flags
+			WHERE workspace_id = $1 AND user_id = $2 AND flag_key = $3
+		`, testWorkspaceID, workspaceUserID, taskmandate.EnforcementFlagKey)
+	})
+}
 
 func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setTaskMandateEnforcement(t, true)
 
 	orig := testHandler.CerebroQueries
 	testHandler.CerebroQueries = cerebrodb.New(testPool)
@@ -174,6 +195,14 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	}
 	if !visible {
 		t.Fatalf("Task Mandate denial is missing from Capabilities observed access: %+v", observed)
+	}
+
+	// The rollout circuit breaker restores the policy-only decision without a
+	// deploy or mandate rewrite. Bash is Allow in policy and remains outside the
+	// immutable snapshot, so turning enforcement off must immediately allow it.
+	setTaskMandateEnforcement(t, false)
+	if r := resolve(deniedTool); r["allowed"] != true || r["decision"] != "allow" {
+		t.Fatalf("default-off Task Mandate circuit breaker: got allowed=%v decision=%v, want true/allow", r["allowed"], r["decision"])
 	}
 
 	// ENFORCE: an unconfigured tool resolves to the Base default (Allow) — tools

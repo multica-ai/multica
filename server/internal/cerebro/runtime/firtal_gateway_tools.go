@@ -61,6 +61,8 @@ type ToolContext struct {
 	// self-lookup applies it to the returned card so the answer matches the same
 	// call-time guard every tool execution passes through.
 	TaskMandates taskMandateStore
+	// TaskMandateEnforcement is the shared workspace circuit breaker used by the capability self-lookup.
+	TaskMandateEnforcement func(context.Context, pgtype.UUID) bool
 	// LoopStep is a server-derived capability for the exact workflow block step
 	// represented by the current task. Nil means this task may not open another
 	// step. Agents never supply these IDs or limits themselves.
