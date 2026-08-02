@@ -1,0 +1,49 @@
+---
+title: Projeler
+description: İlgili issue'ları gruplayın ve öncelik, durum, ilerleme ve owner ile tek bir birim olarak takip edin.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica'da **proje**, ilgili [issue'lar](/issues) için bir kapsayıcıdır. Bir iş kümesi tek bir issue'dan büyük ama tam bir çalışma alanından küçük olduğunda kullanın — launch, migration, çok parçalı bir özellik veya birkaç kola ayrılan bir araştırma.
+
+Her projenin bir adı, ikonu, açıklaması, **lead**'i (üye veya [ajan](/agents)), **durumu** (`planned` / `in_progress` / `paused` / `completed` / `cancelled`), **önceliği** (`urgent` / `high` / `medium` / `low` / `none`) ve bağlı issue'larının durumundan otomatik türetilen bir **ilerleme** yüzdesi vardır.
+
+## Projeler issue'larla nasıl ilişkilidir
+
+Projeler ve issue'lar, many-to-one ilişkiye sahip bağımsız nesnelerdir: bir issue **en fazla bir** projeye ait olabilir; bir proje **istenen sayıda** issue tutabilir. Bağlama ve bağlantıyı kaldırma her zaman geri alınabilir — pano görünümünde sürükleyin veya issue'nun sağ taraftaki özellikler panelindeki proje seçiciyi kullanın.
+
+Bir projenin ilerleme çubuğu bağlı issue'larından hesaplanır — ne kadar çok issue `done` olursa o kadar dolar. `cancelled` durumundaki issue'lar sayımdan çıkarılır; `backlog` durumundaki issue'lar paydaya dahil edilir ama paya dahil edilmez.
+
+## Sidebar'a pinleme
+
+Bir projeyi sidebar'daki pinlenmiş listenize eklemek için projenin sağ üst köşesindeki pin ikonuna tıklayın. Pinlenmiş projeler çalışma alanında nerede olursanız olun tek tık uzakta kalır; ekipteki herkes bağımsız olarak pinleyebilir — pinler kişiseldir.
+
+Sidebar'daki **Workspace → Projects** bağlantısı her zaman çalışma alanındaki tüm projeleri gösterir; pinleme bunun üzerinde kişisel bir kısayoldur.
+
+## Kaynak ekleme
+
+Her projede GitHub repository'leri ekleyebileceğiniz bir **Resources** bölümü vardır. Eklendikten sonra, bu projedeki issue'lara atanan herhangi bir [ajan](/agents) görev yürütürken bu repo'ları okuyup yazabilir — Multica repo URL'lerini bağlam olarak [daemon](/daemon-runtimes)'a geçirir.
+
+Kaynaklar proje bazındadır; birden fazla proje aynı repo'yu paylaşıyorsa her birine ayrı ayrı ekleyin.
+
+## Proje silme
+
+Bir projeyi silmek **issue'larını silmez**. Bağlı issue'ların yalnızca bağlantısı kaldırılır ve çalışma alanının düz issue listesine dönerler. Bu bilinçli bir tercihtir — proje çerçevesi değişse bile projeye kapsamlanmış iş nadiren çöpe atılacak iştir.
+
+<Callout type="info">
+İşi de silmek istiyorsanız önce issue'ları arşivleyin veya silin, sonra projeyi silin.
+</Callout>
+
+## Proje lead'i
+
+Lead, projeden sorumlu kişi — veya ajan — anlamına gelir. Bu yumuşak bir sinyaldir, erişim kontrolü değildir: lead kim olursa olsun herhangi bir çalışma alanı üyesi projeyi düzenleyebilir. Bir projenin lead'i şunlardan biri olabilir:
+
+- Bir çalışma alanı üyesi (insan ekip arkadaşı)
+- Bir [ajan](/agents) — projenin işi çoğunlukla bir ajana devredilmişse kullanışlıdır (ör. triage ajanının yönettiği "Weekly bug triage")
+
+## Sonraki
+
+- [Issues](/issues) — projelerin içinde yaşayan iş birimi
+- [Agents as project lead](/agents) — ajanın doğru owner olduğu durumlar
+- [How Multica works](/how-multica-works) — büyük resim

@@ -1,0 +1,307 @@
+---
+title: Kurallar
+description: Kod adlandırma, i18n çeviri sözlüğü ve Türkçe ürün dili için tek kaynak.
+---
+
+Bu sayfa kod adlandırma, i18n çeviri sözlüğü ve Türkçe ürün dili için tek kaynaktır. Eskiden `packages/views/locales/glossary.md` içinde veya dağınık yorumlarda yaşayan her şey artık burada.
+
+Multica kodu yazıyor, çeviri değiştiriyor veya Türkçe ürün metni yazıyorsanız referans alacağınız sayfa budur.
+
+---
+
+## 1. Kod adlandırma
+
+### Routes
+
+Pre-workspace route'lar (kullanıcı bir çalışma alanına girmeden önce var olan route'lar) ya tek kelime ya da `/{noun}/{verb}` kalıbını kullanmak ZORUNDADIR.
+
+- ✅ `/login`, `/inbox`, `/workspaces/new`
+- ❌ `/new-workspace`, `/create-team`, `/accept-invite`
+
+Root'taki tireli kelime grupları kullanıcıların seçtiği çalışma alanı slug'larıyla çakışır ve bitmeyen reserved-slug denetimlerine yol açar. İsmi (`workspaces`) rezerve etmek tüm `/workspaces/*` alt ağacını otomatik korur.
+
+### Workspace-scoped routes
+
+Her zaman `/{slug}/{section}` altında yaşar: `/{slug}/issues`, `/{slug}/agents`, `/{slug}/settings`. Çalışma alanı routing mantığını asla kopyalamayın; paylaşılan koddan `useNavigation().push()` kullanın, framework'e özel link API'larını kullanmayın.
+
+### Paketler ve modüller
+
+Monorepo sıkı paket sınırları uygular:
+
+| Package | May depend on | Must NOT depend on |
+| --- | --- | --- |
+| `packages/core` | app'e özel hiçbir şey | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
+| `packages/ui` | hiçbir şey | `@multica/core`, business logic |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
+| `apps/web/platform/` | `next/*` | other apps |
+| `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
+
+Mantık iki app'te de görünüyorsa paylaşılan pakete çıkarılmak ZORUNDADIR. "Küçük" tekrarlar için istisna yoktur.
+
+### Dosyalar ve bileşenler
+
+- Files: `kebab-case.tsx` / `kebab-case.ts` (e.g. `agent-row-actions.tsx`)
+- Components: `PascalCase` (e.g. `AgentRowActions`)
+- Hooks: `useCamelCase` (e.g. `useWorkspaceId`)
+- Tests: aynı yerde `<file>.test.ts(x)`
+- Stores (Zustand): `<feature>-store.ts`, `use<Feature>Store` olarak export edilir
+
+### Database (Go + sqlc)
+
+- Tables: `snake_case` tekil (`user`, `workspace`, `agent_runtime`)
+- Columns: `snake_case` (`workspace_id`, `created_at`, `last_seen_at`)
+- Foreign keys: `<table>_id`
+- Booleans: `is_<state>` veya `<state>_at` (state değişimleri için timestamp formu tercih edilir)
+- Migration files: `NNN_descriptive_name.up.sql` + `.down.sql`; iki yönü de her zaman sağlayın
+
+### Go
+
+- Standart `gofmt` + `go vet`. İstisna yok.
+- Handler dosyaları domain'i yansıtır: `agent.go`, `auth.go`, `runtime.go`
+- Tests: aynı yerde `<file>_test.go`
+- Handler'larda UUID parse etmek için root `CLAUDE.md` içindeki kuralı izleyin: boundary input için `parseUUIDOrBadRequest`, güvenilir round-trip'ler için `parseUUID` (panic eder), hatayı kontrol etmeden asla doğrudan `util.ParseUUID` kullanmayın.
+
+### TypeScript
+
+- Wire üzerindeki API yanıtları `snake_case`; api client sınırda `camelCase` değerine çevirir. TS kodu içinde **her zaman camelCase**.
+- Types: `PascalCase` (`Issue`, `AgentRuntime`); asla `IPrefix`, asla `_t` suffix.
+- Enums: string literal union tercih edin; `enum` değerini runtime'da iterate edilmesi gereken durumlara ayırın.
+- TanStack Query keys: `<feature>/queries.ts` içinde factory fonksiyonları, örn. `issueKeys.detail(id)`.
+
+### Issue key'leri
+
+Her issue, `MUL-123` gibi insan tarafından okunabilir bir key'e sahiptir: çalışma alanı `issue_prefix` değeri (büyük harfler ve rakamlar, genelde 3 karakter, maksimum 10) + sıra numarası. Çalışma alanı admin'leri prefix'i Settings → General altında değiştirebilir; değiştirmek her mevcut issue'yu yeniden numaralandırır, bu yüzden eski prefix'i içeren dış referanslar (PR başlıkları, branch adları, docs ve chat içindeki linkler) çözümlenmez.
+
+### Koddaki yorumlar
+
+Yalnızca İngilizce. Repo bunu hem Go hem TypeScript için uygular. Kodda Türkçe, Çince veya başka dilde yorum görürseniz bu bug'dır; İngilizceyle değiştirin.
+
+### Commit mesajları
+
+Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `test(scope)`, `chore(scope)`. Intent'e göre gruplanmış atomic commit'ler.
+
+---
+
+## 2. i18n çeviri sözlüğü
+
+Bu, her çeviri PR'ı için **zorunlu** sözlüktür. Eskiden `packages/views/locales/glossary.md` içinde yaşıyordu; o dosya artık burayı gösteren stub'dır.
+
+### Çekirdek ayrım: entity ve concept
+
+Multica'nın ürün isimleri iki kategoriye ayrılır:
+
+- **Entity** — URL'si, veritabanı satırı veya API type'ı vardır. Türkçe metinde teknik ürün varlığı olarak okunması gereken terimler bazen İngilizce bırakılır (`issue`, `skill`, `task` gibi).
+- **Concept** — veritabanı entity'si olmayan genel isim. Türkçe kullanıcıya akıcı gelen yerleşik karşılığı varsa tamamen çevrilir.
+
+Bu kural, Türkçe ürün metninde teknik netlik ile doğal okuma arasında denge kurmak içindir. Markalar, acronyms ve route/code identifier'ları çevrilmez.
+
+### Entities — karma kural (`issue` / `skill` / `task`)
+
+`issue` / `skill` / `task`, Multica'nın çekirdek entity'leridir. Schema column'ları, API field'ları ve birçok ürün UI label'ı İngilizcedir. Türkçede bağlama göre karma kural uygulanır:
+
+| Context | Render | Example |
+| --- | --- | --- |
+| **UI strings, state names, code references** | lowercase English | "queued task", "alt issue oluştur", "ajana skill ekle" |
+| **Doc titles / section headings** | Title-case English **veya** Türkçe terim | "Issue'lar ve projeler", "Skills", "Görev çalıştırmaları" |
+| **Long-form doc prose, entity cümlenin ana konusuysa** | İlk geçişte English bırakın veya kısa açıklama ekleyin | "Her task, ajanın tek bir çalışma denemesini temsil eder" |
+| **API / DB fields** | her zaman `task` / `issue` / `skill` | `task_id`, `issue_status`, `skill_uuid` |
+
+Türkçe terim referansı:
+
+- `task` ↔ `görev` (teknik UI state'lerinde `task` bırakılabilir)
+- `issue` ↔ `issue` ("sorun" kullanmayın)
+- `skill` ↔ `skill` (Multica'ya özel teknik kavram; çevirmeyin)
+
+**Neden `issue` / `skill` / `task` tamamen Türkçeye zorlanmıyor:**
+
+- **`issue`**: "sorun" yanlış ürün hissi verir ve bug/problem çağrışımı yapar. Ekiplerin kullandığı teknik terim olarak `issue` bırakılır.
+- **`task`**: "görev" akıcı prose içinde iyidir, ancak execution unit veya state adı olarak `task` daha nettir.
+- **`skill`**: Multica'ya özel kavramdır; "beceri" ürün dilinde yapay durur.
+- **`project` → "proje"**: Türkçede yerleşik ana ürün kavramıdır.
+- **`autopilot`**: Özellik adı olarak İngilizce bırakılır; gerektiğinde "otomasyon" açıklamasıyla desteklenebilir.
+
+### Çevirmeyin — markalar ve acronyms
+
+| Category | Terms |
+| --- | --- |
+| Brands | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira, Claude Code, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Docker, Kubernetes, Helm |
+| Acronyms | API, CLI, URL, SDK, OAuth, JWT, SSO, WebSocket, HTTP, JSON, YAML, SQL |
+
+### Tam çevir — concepts
+
+| English | Turkish |
+| --- | --- |
+| Workspace | **çalışma alanı** |
+| Agent | **ajan** |
+| Squad | **ekip** |
+| Project | **proje** |
+| Autopilot | **autopilot** |
+| Daemon | **daemon** |
+| Runtime | **çalışma ortamı** |
+| Inbox | **gelen kutusu** |
+| Board | **pano** |
+| Comment | **yorum** |
+| Reply | **yanıt** |
+| Notifications | **bildirimler** |
+| Member | **üye** |
+| Label | **etiket** |
+| Settings | **ayarlar** |
+| Onboarding | **onboarding** |
+
+### Tam çevir — genel UI kelimeleri
+
+| English | Turkish |
+| --- | --- |
+| Invite / Invitation | davet / davetiye |
+| Search | ara / arama |
+| Email | e-posta |
+| Password | parola |
+| Sign in / Log in | oturum aç |
+| Sign up | kayıt ol |
+| Sign out / Log out | çıkış yap |
+| Save / Cancel / Delete | kaydet / iptal / sil |
+| Confirm / Continue / Back | onayla / devam et / geri |
+| Edit / New / Create / Add | düzenle / yeni / oluştur / ekle |
+| Remove / Send / Open / Close | kaldır / gönder / aç / kapat |
+| Preview / Download / Upload | önizle / indir / yükle |
+| Done / Loading... | tamamlandı / yükleniyor... |
+| Profile / Account / Appearance | profil / hesap / görünüm |
+| Theme / Language | tema / dil |
+| Light / Dark / System | açık / koyu / sistem |
+| Active / Archived | aktif / arşivlenmiş |
+| Status / Priority | durum / öncelik |
+| Assignee / Reporter | atanan / raporlayan |
+| Description / Title | açıklama / başlık |
+| Date / Time | tarih / saat |
+| Today / Yesterday / Tomorrow | bugün / dün / yarın |
+| Empty / Failed / Success | boş / başarısız / başarılı |
+| Error / Warning | hata / uyarı |
+
+### Role ve status enum'ları (lowercase English, çevrilmez)
+
+Bunlar schema-level identifier'lardır; Türkçe bağlamda bile lowercase English yazın.
+
+- Roles: `owner` / `admin` / `member`
+- Issue status: `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
+
+UI'da İngilizce gösterin (isteğe bağlı `code-style` ile):
+
+- "owner yetkisi gerekir"
+- "in_progress durumuna geçildi"
+
+### Kelime birleştirme kuralları
+
+Türkçe ek alması gereken İngilizce teknik terimlerde kesme işareti kullanın; route, code ve env var değerlerine ek getirmemeye çalışın.
+
+- "Create new issue" → "Yeni issue oluştur"
+- "Assign to agent" → "Ajana ata"
+- "Configure runtime" → "Çalışma ortamını yapılandır"
+- "Stop daemon" → "Daemon'ı durdur"
+
+İngilizce marka / acronym / entity ile Türkçe kelimeler arasında normal boşluk kullanın. Gereksiz tırnak veya italik eklemeyin.
+
+### Çoğullar ve sayılar
+
+i18next `_one` / `_other` kullanır; Türkçede çoğul eki çoğu ürün metninde gerekmez. Sayıyla birlikte tekil isim kullanın ve yalnızca `_other` doldurmak çoğu durumda yeterlidir.
+
+```json
+// en/issues.json
+{
+  "issue_count_one": "{{count}} issue",
+  "issue_count_other": "{{count}} issues"
+}
+
+// tr/issues.json
+{
+  "issue_count_other": "{{count}} issue"
+}
+```
+
+Yaygın sayı formatları:
+
+- `{{count}} issues` → `{{count}} issue`
+- `{{count}} agents` → `{{count}} ajan`
+- `{{count}} workspaces` → `{{count}} çalışma alanı`
+- `{{count}} comments` → `{{count}} yorum`
+- `{{count}} members` → `{{count}} üye`
+- `{{count}} skills` → `{{count}} skill`
+
+### Interpolation
+
+`{{var}}` kullanın. Türkçe çeviriler doğal cümle akışı için değişkenleri yeniden sıralayabilir.
+
+```json
+// en
+{ "welcome_message": "Welcome back, {{name}}!" }
+
+// tr
+{ "welcome_message": "Tekrar hoş geldin, {{name}}!" }
+```
+
+### Translation key naming
+
+Üç seviyeli nesting: `feature.component.action`.
+
+```json
+{
+  "feature_or_component": {
+    "subcomponent_or_section": {
+      "action_or_label": "..."
+    }
+  }
+}
+```
+
+Örnekler:
+
+- `issues.toolbar.batch_update_success`
+- `issues.detail.comment_form.placeholder`
+- `inbox.empty.title`
+- `settings.preferences.language.title`
+
+### Web-only / desktop-only copy
+
+- Shared copy: namespace JSON'ın top level'ı
+- Web-only: `web` bölümü
+- Desktop-only: `desktop` bölümü
+
+Canonical örnek için `auth.json` dosyasına bakın (`web` bölümü `prefer_desktop` / `desktop_handoff.*` içerir).
+
+---
+
+## 3. Türkçe ses ve stil
+
+### Noktalama
+
+- Standart Türkçe noktalama kullanın: `, . : ; ! ?`
+- Tırnaklar: English source ile uyum için düz çift tırnak `"..."`. Curly quotes kullanmayın.
+- Ellipsis: tek karakter `…` yerine üç nokta `...`. English source ile eşleştirin.
+- Mixed Turkish-English: İngilizce terimin etrafında normal boşluk ve gerekiyorsa kesme işareti kullanın (Kelime birleştirme kurallarına bakın).
+
+### Stil ilkeleri
+
+- **Kısa ve doğrudan.** Çeviri kokan yapılardan kaçının: "X açısından", "X olarak", gereksiz "bizim".
+- **Hata mesajları**: nazik ama net. "Değişiklikler kaydedilemedi" ifadesi "Değişiklikleri kaydetme başarısız oldu!" ifadesinden iyidir.
+- **Butonlar**: fiil odaklı, kısa. "İptal", "Kaydet", "Senkronize et".
+- **Tooltips**: kısa tam cümle. "Bağlantıyı panoya kopyalar."
+- **Placeholders**: örnek gibi. "Issue başlığı girin...".
+
+### Emin olmadığınızda nereye bakmalı
+
+Sözlük bir terimi kapsamıyorsa şuralara bakın:
+
+1. `apps/docs/content/docs/*.tr.mdx` — Türkçe docs dili için fiili standart
+2. `packages/views/locales/tr/*.json` — JSON yapısı ve yerleşik terimler (varsa)
+3. `packages/views/auth/login-page.tsx` — component-level selector API çağrı yeri
+4. `packages/views/settings/components/preferences-tab.tsx` — language switcher referansı
+
+---
+
+## Bu sayfayı güncelleme
+
+Burada bir kural değiştirirseniz şunları da yapın:
+
+1. İlgili locale JSON'larında / CLAUDE.md / docs sayfasında uygulayın
+2. PR açıklamasında değişikliği not edin ki reviewer'lar downstream sweep gerektiğini bilsin
+
+Bu sayfa sözleşmedir; başka hiçbir şey bunun üzerine çıkmaz.

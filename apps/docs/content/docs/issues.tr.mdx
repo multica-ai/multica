@@ -1,0 +1,79 @@
+---
+title: Issue'lar ve projeler
+description: Multica'nın temel iş birimi — bir kişiye veya ajana atanabilir.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Issue, Multica'da bağımsız bir iş birimidir — bug, yeni özellik veya yapılması gereken herhangi bir şey. Her issue'nun bir **başlığı**, **açıklaması** (Markdown desteklenir), **durumu**, **önceliği**, **atanan kişisi** vardır ve opsiyonel olarak bir **projeye** ait olabilir. Linear veya Jira kullandıysanız yapı aynıdır.
+
+**Multica'nın ayırt edici özelliği, bir issue'nun atanan kişisinin insan veya [ajan](/agents) olabilmesidir** — buradan başlayacağız.
+
+## Issue'yu ajana atama
+
+Bir issue'yu ajana [atamak](/assigning-issues), o işi ona devreder. Ajan **otomatik başlar** — saniyeler içinde yürütmeye geçer, yorumlarda ilerlemeyi bildirir ve bittiğinde durumu done yapar. İşi ekip arkadaşınıza devretmekten tek farkı, ajanın offline olmaması, hatırlatmaya ihtiyaç duymaması ve 7/24 hazır olmasıdır.
+
+<Callout type="info">
+Ajan kimliği, yapılandırması ve nerede çalıştıkları için [Agents](/agents) sayfasına bakın.
+</Callout>
+
+Private ajanlar issue'lara yalnızca çalışma alanı owner ve admin'leri tarafından atanabilir. Rol izinleri için [Members and roles](/members-roles) sayfasına bakın.
+
+## Durum
+
+Multica'da yedi durum vardır. **Her durum doğrudan herhangi başka bir duruma geçebilir** — Multica bir workflow dayatmaz ve `backlog` durumundan doğrudan `done` durumuna atlamanızı engellemez.
+
+| Status | Meaning |
+|---|---|
+| `backlog` | Henüz planlanmadı |
+| `todo` | Planlandı, başlamaya hazır |
+| `in_progress` | Üzerinde çalışılıyor |
+| `in_review` | İnceleme bekliyor |
+| `done` | Tamamlandı |
+| `blocked` | Dış bir faktöre takıldı |
+| `cancelled` | İptal edildi |
+
+Bir issue ajana atandığında ajan durumu otomatik olarak `backlog` / `todo` durumundan `in_progress` durumuna, tamamlandığında da `done` durumuna taşır. İstediğiniz zaman elle de değiştirebilirsiniz.
+
+## Öncelik
+
+Öncelik, varsayılan issue listesini sıralamak için kullanılan beş seviyeye sahiptir:
+
+| Priority | Use |
+|---|---|
+| `No priority` | Henüz karar verilmedi (varsayılan) |
+| `Urgent` | Acil |
+| `High` | Yüksek |
+| `Medium` | Orta |
+| `Low` | Düşük |
+
+## Issue numaraları
+
+Her issue'nun çalışma alanı içinde benzersiz, `<prefix>-<digits>` formatında bir numarası vardır — örneğin `MUL-123`. Numara oluşturma anında sistem tarafından atanır ve **asla değişmez**. Bkz. [Workspaces → Issue numbers](/workspaces#issue-numbers).
+
+## Yorumlar
+
+Bir issue altındaki yorum akışı işbirliğinin gerçekleştiği yerdir — bir yoruma yanıt verin, `@` ile kişi veya ajandan bahsedin, tepki ekleyin.
+
+Bir yorumda `@` ile ajandan bahsetmek **onu otomatik tetikler** — bu, "atana" ek olarak bir ajanı başlatmanın ikinci yoludur. Bkz. [Comments and mentions](/comments) ve [Mentioning agents in comments](/mentioning-agents).
+
+## Issue silme
+
+<Callout type="warning">
+Bir issue'yu silmek, altındaki her yorumu, tepkiyi ve eki, ayrıca kuyruğa alınmış tüm ajan görevlerini **hemen** temizler (çalışan görevler iptal edilir). **Geri alınamaz.**
+
+Issue'yu yalnızca gözden kaldırmak istiyorsanız, **durumu `cancelled` yapmak silmekten daha güvenlidir** — veri kalır ve daha sonra geri alabilirsiniz.
+</Callout>
+
+## Projeler
+
+Proje, birden fazla issue'yu birlikte gruplayan bir kapsayıcıdır. Bir issue en fazla bir projeye ait olabilir veya hiçbir projeye ait olmayabilir.
+
+Projelerin kendi **lead**'i vardır — **tıpkı bir issue'nun atanan kişisi gibi, lead de insan veya ajan olabilir**.
+
+Bir projeyi silmek **içindeki issue'ları silmez**: bu issue'lar yalnızca projeden ayrılır ve çalışma alanında kalır.
+
+## Sonraki
+
+- [Comments and mentions](/comments) — issue altında işbirliği
+- [Agents](/agents) — "ajana ata" işleminin gerçekten nasıl çalıştığını anlayın

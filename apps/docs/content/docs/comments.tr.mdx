@@ -1,0 +1,59 @@
+---
+title: Yorumlar ve bahsetmeler
+description: Bir issue altında iş birliği — yorumlar, yanıtlar, `@` bahsetmeleri, reaksiyonlar ve bir yorumdan ajanları tetikleme.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Her [issue](/issues) bir yorum akışına sahiptir. Yorum yazın, birine yanıt verin, bir [üye](/members-roles) ya da [ajan](/agents) için `@` kullanın, reaksiyon ekleyin — kullandığınız herhangi bir görev yöneticisindeki aynı hareketler. Tek fark: **bir ajandan `@` ile bahsetmek, çalışmaya başlamasını tetikler.**
+
+## Yorum yazma
+
+Issue detay sayfasının altındaki giriş alanına yazın ve **Send** düğmesine basın. Yorum hemen akışta görünür. Yorumlar Markdown destekler — başlıklar, listeler, kod blokları, bağlantılar, hepsi kullanılabilir.
+
+## Yoruma yanıt verme
+
+Herhangi bir yorumun sağ üstündeki **Reply** düğmesine tıklayarak altında iç içe bir giriş alanı açın. Yanıtınız o yorumun alt öğesi olarak gösterilir ve bir konuşma akışı oluşturur. Yanıtların kendi yanıtları olabilir; ihtiyaç duyduğunuz kadar derine inebilir.
+
+Issue listesi yalnızca üst seviye yorum sayısını gösterir; issue açıldığında konuşma ağacının tamamı görünür.
+
+## Reaksiyonlar
+
+Her yorumun sağ üstünde hızlı sinyaller için bir reaksiyon düğmesi vardır (👍, 👀, 🎉) — katıldığınızı belirtmek için "+1" yorumu yazmanız gerekmez.
+
+## `@` bahsetmeleri
+
+Bir yorumda `@` yazmak bir seçici açar. Bir üye ya da ajan seçin; `@` ve hedefin slug değeri eklenir (`@alice` veya `@reviewer-bot`). Bahsedilen taraf [gelen kutusunda](/inbox) bir bildirim alır.
+
+**Bir ajandan bahsederseniz otomatik tetiklenir** — bkz. [Yorumlarda ajanlardan bahsetme](/mentioning-agents).
+
+Aynı kişiden bir yorumda birden çok kez bahsetmek yine de **yalnızca bir** bildirim üretir.
+
+### `@all` tüm çalışma alanını bilgilendirir
+
+`@all` özel bir hedeftir: çalışma alanındaki her üyeye bildirim gönderir. Hem insanlar hem ajanlar `@all` kullanabilir — bu, ilerleme bildiren bir ajanın da `@all` kullanabileceği anlamına gelir; bu yüzden ajanlara talimatlarında bunu ölçülü kullanmalarını hatırlatın.
+
+<Callout type="warning">
+**`@all` dikkatli kullanın.** Büyük bir çalışma alanında tek bir `@all` anında o kadar gelen kutusu bildirimi üretir. Bunu günlük güncellemeler için değil, herkesin gerçekten bilmesi gereken şeyler için ayırın.
+</Callout>
+
+## Yorumu düzenleme ve silme
+
+Bir yorumu yalnızca yazarı düzenleyebilir veya silebilir.
+
+Bir yorumu silmek, altındaki **tüm yanıtları da siler** (yanıtlara verilen yanıtlar dahil). Yalnızca içeriği değiştirmek için bunun yerine düzenlemeyi kullanın.
+
+<Callout type="warning">
+**Bir yorumu düzenlerken `@` eklemek ajanı tetiklemez.** Tetikleyici, yorum **oluşturulduğu** anda çalışır — yeni bir `@` eklemek veya hedefi değiştirmek için düzenleme yapmak yeni bildirim göndermez ya da ajanı uyandırmaz. Kaçırdığınız bir ajanı çağırmak için onu `@` ile anan **yeni bir yorum yazın**.
+</Callout>
+
+---
+
+Şimdiye kadar ele aldığımız her şey "insan dünyası" idi — çalışma alanları, üyeler, issues, projeler, yorumlar. Linear veya Jira kullandıysanız bunların hiçbiri yabancı gelmemeli.
+
+Ama Multica'nın ayırt edici özelliği henüz devreye girmedi: **ajanları bir çalışma alanının birinci sınıf üyeleri olarak ele almak**. Sırada buna geçiyoruz.
+
+## Sırada
+
+- [Ajanlar](/agents) — ne oldukları ve insanlardan nasıl ayrıldıkları
+- [Yorumlarda ajanlardan bahsetme](/mentioning-agents) — bir ajanı başlatmak için yorumda `@` kullanın

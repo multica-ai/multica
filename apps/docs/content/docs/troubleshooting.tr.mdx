@@ -1,0 +1,168 @@
+---
+title: Sorun giderme
+description: "Multica self-host ederken en yaygın 7 problem: belirtiler, nedenler, tanılama ve çözüm."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Belirtiye göre bakın. Her kayıt size **belirti / olası nedenler / nasıl tanılanır / nasıl düzeltilir** bilgisini verir. Durumunuz listede yoksa [GitHub](https://github.com/multica-ai/multica/issues) üzerinde issue açın.
+
+## Daemon sunucuya bağlanamıyor
+
+**Belirti**: [`multica daemon`](/cli) `status` komutu `offline` veya `connection refused` gösterir; sunucu loglarında `/api/daemon/register` veya `/api/daemon/heartbeat` istekleri görünmez. Daemon mekanizmasının nasıl çalıştığı için [Daemon ve çalışma ortamları](/daemon-runtimes) sayfasına bakın.
+
+**Olası nedenler**:
+
+1. **`MULTICA_SERVER_URL` yanlış adresi gösteriyor** — varsayılan `ws://localhost:8080/ws`; self-host bunu sunucu adresinizle değiştirmelidir
+2. **Ağ / firewall engeli** — daemon ve sunucu aynı ağda değildir veya outbound trafik engellenmiştir
+3. **Token süresi dolmuş veya geçersiz** — hiç `multica login` çalıştırmadınız ya da PAT revoke edildi
+4. **Sunucu kaydı reddetti** — oturum açtığınız hesap hedef çalışma alanında değil (register 403 döner)
+5. **DNS çözümleme hatası** — host adı daemon makinesinde çözümlenmiyor
+
+**Nasıl tanılanır**:
+
+```bash
+multica daemon logs --lines 100    # look for daemon-side errors
+echo $MULTICA_SERVER_URL          # confirm the address is set
+curl -i http://<server-host>:8080/health   # hit the server directly
+curl -i http://<server-host>:8080/readyz  # include DB + migration readiness
+cat ~/.multica/config.json        # verify api_token exists
+multica workspace list            # confirm you're a member of the target workspace
+```
+
+**Nasıl düzeltilir**: yukarıdaki her nedeni ele alın. En yaygın iki çözüm **`MULTICA_SERVER_URL` değerini değiştirip daemon'ı yeniden başlatmak** (`multica daemon restart`) ve **yeniden oturum açmaktır** (`multica logout && multica login`).
+
+## Görevler `queued` durumunda takılı kalıyor
+
+**Belirti**: Bir issue bir ajana atandıktan sonra issue durumu hemen `in_progress` olur, ancak sayfada uzun süre ajan çalıştırmasına dair hiçbir işaret görünmez; `multica daemon status` daemon'ı `online` gösterir.
+
+**Olası nedenler** (sıklığa göre):
+
+1. **Ajan eşzamanlılık limiti doldu** — bu ajanın `max_concurrent_tasks` değeri (varsayılan 6) başka çalışan görevlerle tamamen dolu
+2. **Aynı ajanın aynı issue üzerindeki başka bir görevi hâlâ çalışıyor** — aynı ajan × aynı issue sıralı çalışmaya zorlanır (çift çalıştırmayı önler)
+3. **Ajan arşivlenmiş** — arşivden sonra yeni görevler yine kuyruğa girer ama claim edilemez ve 5 dakika sonra timeout olur (code-issue G-01)
+4. **Daemon bu çalışma ortamını mevcut çalışma alanında kaydetmemiş** — daemon'ı yeniden başlatın veya UI'da çalışma ortamını yeniden seçin
+5. **Daemon bağlantısı koptu** — son 45 saniyede heartbeat yok. `daemon status` komutunun `online` bildirmesi çok yakın tarihli bir kopmayı yansıtmayabilir
+
+**Nasıl tanılanır**:
+
+```bash
+multica daemon status --output json       # runtime list + last_seen_at
+multica agent list                         # check agent archived state
+multica issue show <issue-id>             # inspect task history
+```
+
+Sunucu tarafında (self-host), claim sonucunu görmek için `"no_tasks"` / `"no_capacity"` arayın.
+
+**Nasıl düzeltilir**:
+
+- Eşzamanlılık dolu → çalışan görevlerin bitmesini bekleyin veya tavanı yükseltmek için `multica agent update <id> --max-concurrent-tasks 10` çalıştırın
+- Aynı issue serileştirmesi → önceki görevin bitmesini bekleyin veya farklı bir ajana atayın
+- Ajan arşivlenmiş → `multica agent restore <id>`
+- Çalışma ortamı kayıtlı değil → `multica daemon restart`; daemon yeniden kaydolur
+
+## WebSocket bağlanamıyor
+
+**Belirti**: tarayıcı konsolu `WebSocket is closed` loglar; sayfa real-time güncellemeleri (görev ilerlemesi, yorumlar, gelen kutusu) göstermez ve görmek için yenileme gerekir; backend görevleri çalışmaya devam eder.
+
+**Olası nedenler**:
+
+1. **Origin kontrolü başarısız** — frontend alan adınız sunucunun CORS izin listesinde değil. Varsayılan izin listesi yalnızca `localhost:3000/5173/5174` içerir; public internette self-host için `FRONTEND_ORIGIN` gerekir
+2. **Protokol uyumsuzluğu** — `https://` üzerindeki frontend `wss://` ister; HTTP `ws://` kullanır
+3. **Reverse proxy WebSocket upgrade etkinleştirmiyor** — Nginx / Envoy / HAProxy varsayılan olarak `Upgrade` header'ını iletmez
+4. **JWT cookie süresi dolmuş veya eksik** — 30 günlük süreden sonra tekrar oturum açılmamış
+
+**Nasıl tanılanır**:
+
+- Browser DevTools → Network → "WS" ile filtreleyin ve bağlantı durumunu ve status code değerini kontrol edin
+- Sunucu loglarında `"rejected origin"` / `"websocket"` arayın; origin problemi kendini açıkça yazar
+- `curl -i http://<server-host>:8080/ws`, (`Upgrade` header'ı ile) `101 Switching Protocols` döndürmelidir
+
+**Nasıl düzeltilir**:
+
+- Yanlış origin → sunucunun `.env` dosyasında `FRONTEND_ORIGIN=https://multica.yourdomain.com` ayarlayın (veya virgülle ayrılmış `CORS_ALLOWED_ORIGINS`) ve sunucuyu yeniden başlatın
+- Protokol uyumsuzluğu → `FRONTEND_ORIGIN` protokolünün frontend protokolüyle eşleştiğinden emin olun
+- Reverse proxy → Nginx içinde `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` ekleyin
+- Cookie süresi doldu → sayfayı yenileyin ve yeniden oturum açın
+
+## E-postalar gelmiyor
+
+**Belirti**: oturum açma veya davet kabulü sırasında e-posta gönderdikten sonra doğrulama kodu ne gelen kutusunda ne spam klasöründe görünür.
+
+**Olası nedenler**:
+
+1. **`RESEND_API_KEY` ayarlı değil** — sunucu sessizce fallback yapar ve kodu hata vermeden **kendi stdout çıktısına yazar**. Production ortamında kolayca gözden kaçar
+2. **Resend API anahtarı geçersiz / kota dolu** — sunucu loglarında `"failed to send verification code"` görünür
+3. **`RESEND_FROM_EMAIL` alan adı Resend içinde doğrulanmamış** — Resend göndermeyi reddeder
+4. **E-posta gönderildi ama alıcının ISP'si spam olarak işaretledi** — Resend dashboard ve spam klasörünü kontrol edin
+
+**Nasıl tanılanır**:
+
+- Sunucu loglarında `"[DEV] Verification code for"` arayın; varsa Resend yapılandırılmamıştır ve kod stdout'a yazılmıştır
+- Gönderim geçmişi için [Resend dashboard](https://resend.com/) → Emails
+- `RESEND_FROM_EMAIL` alan adının Resend console içindeki "Verified Domains" listesinde olduğunu doğrulayın
+
+**Nasıl düzeltilir**:
+
+- API anahtarı eksik → yapılandırmak ve sunucuyu yeniden başlatmak için [Oturum açma ve kayıt yapılandırması → E-posta nasıl çalışır](/auth-setup#how-email--verification-code-sign-in-works) adımlarını izleyin
+- Alan adı doğrulanmamış → Resend console içinde DNS doğrulama akışını çalıştırın (SPF / DKIM kayıtları ekleyin)
+- Acil durumda (dahili test) → sunucu loglarında `[DEV]` altında yazdırılan kodu kopyalayın
+
+## Sabit yerel test kodu çalışmıyor
+
+**Belirti**: self-hosted instance üzerinde `888888` gibi sabit yerel test koduyla oturum açmayı deniyorsunuz ve `invalid or expired code` ile reddediliyor.
+
+**Olası nedenler** (birbirini dışlar):
+
+1. **`MULTICA_DEV_VERIFICATION_CODE` boş** — sabit kodlar varsayılan olarak devre dışıdır
+2. **`APP_ENV=production`** — bu **doğru** production yapılandırmasıdır; sabit yerel test kodları production ortamında yok sayılır
+3. **Yapılandırılan kod 6 haneli değil** — kısa yol yalnızca 6 haneli değer kabul eder
+
+**Nasıl tanılanır**:
+
+```bash
+cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+```
+
+Gerçek doğrulama kodu için gelen kutunuzu (spam dahil) kontrol edin.
+
+**Nasıl düzeltilir**:
+
+- Production ortamında `MULTICA_DEV_VERIFICATION_CODE` değerini boş bırakın; Resend'i yapılandırın ve gerçek kodlar kullanın
+- Yerel geliştirme veya dahili test için üretilen kodu sunucu loglarından kopyalayın ya da `APP_ENV=development` ile birlikte `MULTICA_DEV_VERIFICATION_CODE=888888` ayarlayın; public instance üzerinde sabit kodu asla etkinleştirmeyin ([Oturum açma ve kayıt yapılandırması → Sabit yerel test kodları](/auth-setup#fixed-local-testing-codes) bölümüne bakın)
+
+## Port çakışmaları
+
+**Belirti**: `multica server` veya `multica daemon start`, `address already in use` hatasıyla başarısız olur.
+
+**Olası nedenler**:
+
+1. **Sunucu portu dolu** (varsayılan `8080`)
+2. **Daemon health portu dolu** (varsayılan `19514`, profile başına hash ile offset uygulanır)
+3. **Web dev server port çakışması** (`3000` / `5173`)
+4. **Port için yetersiz yetki** (`< 1024` privileged port bağlamak sudo gerektirir)
+
+**Nasıl tanılanır**:
+
+```bash
+lsof -i :8080        # macOS / Linux
+netstat -ano | findstr :8080    # Windows
+```
+
+**Nasıl düzeltilir**:
+
+- Çakışan process'i öldürün (`kill -9 <PID>`) veya portları `PORT=9000` ile değiştirin
+- 80 / 443 kullanmak için → doğrudan bind etmeyin; öne bir reverse proxy (Nginx / Caddy) koyup yüksek porta yönlendirin
+
+## Loglar nerede bulunur
+
+| Component | Location | Command |
+|---|---|---|
+| **Daemon** | `~/.multica/daemon.log` (background mode) veya foreground stdout | `multica daemon logs -f --lines 100` |
+| **Server (Docker)** | Container stdout | `docker logs -f <container>` |
+| **Server (systemd)** | journal | `journalctl -u multica-server -f` |
+| **Frontend (dev)** | `pnpm dev` çalıştıran terminal | Doğrudan okuyun |
+| **Frontend (browser)** | DevTools → Console | `F12` tuşuna basın |
+
+Daha ayrıntılı daemon logları için background moddan foreground moda alın: `multica daemon stop && multica daemon start --foreground`.

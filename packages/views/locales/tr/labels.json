@@ -1,0 +1,10 @@
+{
+  "remove_label": "{{name}} etiketini kaldır",
+  "resource_picker": {
+    "empty": "Etiket yok",
+    "add": "Etiket ekle",
+    "search": "Etiketlerde ara...",
+    "no_labels": "Önce Ayarlar'da etiket oluşturun",
+    "no_results": "Eşleşen etiket yok"
+  }
+}

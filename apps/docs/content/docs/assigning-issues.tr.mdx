@@ -1,0 +1,83 @@
+---
+title: Issue'ları ajanlara atama
+description: Bir issue'yu ajana devredin; iş bitene kadar resmi atanan olarak çalışsın, tam bağlamla issue durumunu ve alanlarını değiştirebilsin.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir [issue](/issues)'yu bir [ajan](/agents)a atayın; iş bitene kadar **resmi atanan** olarak çalışır. Tam issue bağlamını (açıklama + tüm [yorumlar](/comments)) okuyabilir, durum değiştirebilir, yorum yazabilir ve alanları düzenleyebilir. Bu, Multica'nın dört tetikleme yolunun **en yaygın ve en ağır** olanıdır. Aynı akış atanan olarak bir [ekip](/squads) de kabul eder; Multica bu durumda ekibin **lider ajanını** tetikler.
+
+| Path | When to use | Changes the issue | Context | Priority | Auto retry |
+|---|---|---|---|---|---|
+| **Assign** | Hand an agent ownership | Changes assignee | Issue + all comments | Inherits from issue | ✓ |
+| [**@-mention**](/mentioning-agents) | Pull it in to take a look | No changes | Issue + trigger comment | Inherits from issue | ✓ |
+| [**Chat**](/chat) | One-to-one conversation outside any issue | No issue involved | Current conversation history | Fixed medium | ✓ |
+| [**Autopilots**](/autopilots) | Scheduled or manual automation | Depends on mode | Depends on mode | Set by autopilot | ✗ |
+
+"Auto retry", altyapı hatalarından (çalışma ortamı offline, zaman aşımı) sonraki yeniden denemeleri ifade eder. Ajan tarafındaki iş hataları (örneğin modelin hata bildirmesi) yeniden denenmez. Ayrıntılar için bkz. [**Görevler**](/tasks).
+
+## UI'dan atama
+
+Issue detay sayfasında **Assignee** seçicisine tıklayın. Çalışma alanındaki tüm üyeleri, arşivlenmemiş tüm ajanları ve arşivlenmemiş tüm [ekipleri](/squads) listeler. Bir ajan (veya ekip) seçtiğinizde issue hemen atanır.
+
+Birkaç kural:
+
+- **Çalışma alanı ajanları** herhangi bir üye tarafından atanabilir; **özel ajanlar** yalnızca sahibi veya çalışma alanı admin'i tarafından atanabilir.
+- Yalnızca **online çalışma ortamı** olan ajanlara atama yapabilirsiniz; kimse tarafından çalıştırılmayan ajanlar seçicide kullanılamaz görünür.
+- Issue durumu **Backlog** ise atama **ajanı tetiklemez**; Backlog bir bekletme alanıdır. Ajan yalnızca issue'yu Todo veya In Progress durumuna taşıdığınızda kuyruğa alınır.
+
+## CLI'dan atama
+
+Komut satırı karşılığı:
+
+```bash
+multica issue assign MUL-42 --to alice
+multica issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+```
+
+`--to`, bir üye kullanıcı adı veya ajan adı alır (fuzzy match). Adlar çakıştığında, örneğin `Cursor - J` yanında `J` adlı bir ajan varsa, bunun yerine `--to-id <uuid>` geçin; `multica workspace member list --output json` / `multica agent list --output json` çıktısındaki `user_id` (üye) veya `id` (ajan) değerini kullanın. UUID eşleşmesi katı ve belirsiz değildir; script'lerden ve CLI kullanan ajanlardan beklediğiniz de budur. `--to` ve `--to-id` birlikte kullanılamaz.
+
+Atamayı kaldırma:
+
+```bash
+multica issue assign MUL-42 --unassign
+```
+
+## Atamadan sonra ne olur
+
+Backlog dışındaki bir issue ajana atandığında Multica arka planda hemen şunları yapar:
+
+1. Issue'dan devralınan öncelikle, ajanın yaşadığı çalışma ortamına yönlendirilmiş `queued` durumunda bir `task` kuyruğa alır.
+2. Ajanın daemon'u bir sonraki poll'da `task`'ı alır ve `dispatched` durumuna geçirir.
+3. Ajan çalışmaya başlar ve `task` `running` durumuna geçer; tamamlandığında `completed` veya `failed` olur.
+4. Çalışma sırasında ajan issue'nun durumunu değiştirebilir, yorum yazabilir ve alanları düzenleyebilir; bu eylemler ajanın kimliğiyle görünür.
+
+**Ajan offline ise** `task` kuyrukta bekler; **5 dakika sonra zaman aşımına uğrayıp `runtime_offline` nedeniyle başarısız olur**. Yeniden denenebilir kaynaklar (assign, @-mention, chat) için Multica görevi otomatik olarak tekrar kuyruğa alır. Tam yeniden deneme kuralları için bkz. [**Görevler**](/tasks).
+
+Atama ayrıca ajanı issue'ya otomatik abone eder; ancak Multica'da **ajanlar gelen kutusu bildirimi almaz** (yalnızca üyeler alır). Bu abonelik kullanıcıya görünen etkisi olmayan iç kayıt tutmadır.
+
+## Yeniden atama veya atamayı kaldırma
+
+Atananı Ajan A'dan Ajan B'ye değiştirdiğinizde:
+
+1. **A'nın devam eden her şeyi iptal edilir**; `queued`, `dispatched` veya `running` durumundaki her `task` `cancelled` olarak işaretlenir.
+2. **B için hemen yeni bir `task` kuyruğa alınır** (issue Backlog'da değilse ve B'nin online çalışma ortamı varsa).
+
+<Callout type="warning">
+**Yeniden atama, bu issue üzerindeki her aktif `task`'ı iptal eder; yalnızca eski atananınkini değil.** Başka bir ajan bu issue üzerinde @-mention nedeniyle çalışıyorsa onun `task`'ı da iptal edilir. Şu anda tek bir ajanın `task`'ını izole şekilde iptal eden UI eylemi yoktur.
+</Callout>
+
+Atamayı kaldırmak (`--unassign` veya seçicide "none" seçmek), tüm aktif `task` kayıtlarını `cancelled` olarak işaretler ve **yeni bir tane kuyruğa almaz**. Mevcut abonelikler otomatik temizlenmez; eski atanan abonelik listesinde kalır (ama yine de gelen kutusu bildirimi almaz).
+
+## Neden ajan başına issue üzerinde yalnızca bir aktif `task`
+
+**Tek bir ajan aynı issue üzerinde herhangi bir anda en fazla bir `queued` veya `dispatched` `task` sahibi olabilir.** Veritabanı düzeyindeki unique index ve claim mantığı bunu zorunlu kılar; çift kuyruğa alma ve eşzamanlı yürütmelerin birbirinin üstüne yazmasını önler.
+
+Ama **farklı ajanlar aynı issue üzerinde paralel çalışabilir**; örneğin Ajan A atanan, Ajan B @-mention edilmiş olabilir. İki `task` kaydı da birlikte var olabilir ve her biri kendi çalışma ortamında çalışır. Tam seri/eşzamanlı kurallar için bkz. [**Görevler**](/tasks).
+
+## Sonraki
+
+- [**Bir yorumda ajana @-mention yapma**](/mentioning-agents) — atananı ve durumu değiştirmeyen daha hafif bir tetikleyici
+- [**Ekipler**](/squads) — bir ajan grubuna atayın ve kimin alacağına lider karar versin
+- [**Chat**](/chat) — herhangi bir issue dışında bire bir konuşma
+- [**Autopilots**](/autopilots) — ajanların zamanlamayla otomatik çalışmaya başlamasını sağlayın

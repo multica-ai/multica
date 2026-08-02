@@ -1,0 +1,117 @@
+---
+title: Görevler
+description: Net bir durum makinesi, zaman aşımı ve yeniden deneme kurallarıyla her ajan çalıştırmasının iş birimi.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+**Görev**, her [ajan](/agents) çalıştırmasının iş birimidir: [bir issue'yu ajana atamak](/assigning-issues), bir yorumda [ajana @-mention yapmak](/mentioning-agents), [chat](/chat) içinde mesaj göndermek veya bir [Autopilot](/autopilots)'ın zamanında tetiklenmesi bir görev üretir. Multica bunu kuyruğa koyar; bir [daemon](/daemon-runtimes) görevi alır, ilgili [AI coding tool](/providers)'a devreder ve iş bittiğinde sonucu sunucuya geri yazar.
+
+Görevler ve [issue'lar](/issues) iki farklı nesnedir. Tek bir issue atanabilir, @-mention edilebilir ve birçok kez elle yeniden çalıştırılabilir; her biri **yeni** bir görev üretir.
+
+## Bir görevin geçtiği durumlar
+
+<Mermaid chart={`
+graph LR
+    Q["Queued<br/>queued"] -->|daemon picks up| D["Dispatched<br/>dispatched"]
+    D -->|agent starts| R["Running<br/>running"]
+    R -->|success| C["Completed<br/>completed"]
+    R -->|error or timeout| F["Failed<br/>failed"]
+    Q -->|user cancels| X["Cancelled<br/>cancelled"]
+    D -->|user cancels| X
+    R -->|user cancels| X
+    F -.retryable reason.-> Q
+`} />
+
+- **Queued** — görev yeni oluşturuldu ve bir daemon tarafından alınmayı bekliyor
+- **Dispatched** — bir daemon görevi üstlendi ve AI coding tool'u başlatıyor
+- **Running** — AI coding tool gerçekten işi yapıyor
+- **Completed** — başarıyla bitti; çıktı (yorumlar, kod commit'leri, durum değişiklikleri) sunucuya yazıldı
+- **Failed** — hata veya zaman aşımıyla durdu; hata nedeni yeniden denenebilirse görev otomatik olarak başka bir deneme için `queued` durumuna döner
+- **Cancelled** — kullanıcı iptal etti
+
+## Bir görev zaman aşımına uğradığında ne olur
+
+Multica sunucusu her 30 saniyede bir tarama yapar. İki tür zaman aşımı hatayı tetikler:
+
+| Durum | Zaman aşımı |
+|---|---|
+| Dispatched ama hiç başlamadı (daemon aldı ama AI tool'u başlatmadı) | **5 dakika** |
+| Çok uzun çalışıyor | **2,5 saat** |
+
+İki zaman aşımı da `timeout` hata nedenini kullanır ve **otomatik yeniden denenir** (sonraki bölüm). İlgili çalışma ortamı eksikliği kontrolü için bkz. [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+
+## Hangi hatalar otomatik yeniden denenir, hangileri denenmez
+
+Hatalar iki kategoriye ayrılır: **yeniden denenebilir** ve **yeniden denenemez**.
+
+**Yeniden denenebilir** (Multica otomatik olarak tekrar kuyruğa alır):
+
+- `runtime_offline` — görev dispatched olduktan sonra daemon kayboldu
+- `runtime_recovery` — daemon çöktü ve yeniden başladı, bitiremediği görevleri geri aldı
+- `timeout` — çalışma ortamı veya dispatch zaman aşımı
+
+**Yeniden denenemez** (görev failed durumunda kalır):
+
+- `agent_error` — AI coding tool'un kendisi hata bildirdi (API hatası, kota aşımı, iç hata). Altta yatan problemler yeniden denenmez; aksi halde sonsuz döngü oluşur.
+
+Otomatik yeniden denemenin iki ek koşulu daha vardır:
+
+1. **En fazla 2 deneme** — 1 ilk deneme + 1 yeniden deneme. Yeniden deneme de başarısız olursa neden yeniden denenebilir olsa bile başka deneme yapılmaz.
+2. **Yalnızca issue ve chat tetiklemeli görevler için** — Autopilot tetiklemeli görevler otomatik yeniden denenmez.
+
+<Callout type="warning">
+**Autopilot görevleri tasarım gereği otomatik yeniden denenmez.** Bir Autopilot'ın kendi tetiklenme ritmi vardır (ör. günlük); hata sonrası otomatik yeniden deneme, sıradaki planlı çalıştırmayla çakışırdı. Hata sonrası hemen yeniden çalıştırmanız gerekiyorsa elle yeniden çalıştırma kullanın (sonraki bölüm).
+
+**Bir Autopilot görevinin başarısız olduğunu nasıl anlarsınız**: [gelen kutusu](/inbox)'na bir bildirim düşer ve ilişkili issue'nun durumu `in_progress` durumundan tekrar `todo` durumuna döner. [Autopilots](/autopilots) sayfası da autopilot başına son çalıştırma sonucunu gösterir.
+</Callout>
+
+## Elle yeniden çalıştırma ve otomatik yeniden deneme
+
+**Elle yeniden çalıştırma**, CLI veya API üzerinden tetiklediğiniz çalıştırmadır (`POST /api/issues/{id}/rerun`):
+
+```bash
+multica issue rerun <issue-id>
+```
+
+Davranış:
+
+- Varsayılan olarak issue'nun **mevcut ajan atananını** hedefler; önceki görevi kimin çalıştırdığından bağımsız olarak yeniden çalıştırmanın mevcut atamayı izlemesini istediğinizde kullanışlıdır.
+- Belirli bir satırdaki execution-log retry düğmesi, o satırın görev ID'sini de gönderir; böylece yeniden çalıştırma **o görevi gerçekten çalıştıran ajanı** hedefler, mevcut atananı değil. Bu, satır bazlı yeniden denemeyi ekip çalışanları, paralel @-mention ajanları veya sonradan yeniden atamayla yerinden edilmiş ajanlara ait satırlar için anlamlı kılar.
+- Hedef ajanın bu issue üzerindeki queued veya running görevini **iptal eder** (varsa). Aynı issue üzerinde başka ajanlara ait görevler (ör. paralel @-mention çalıştırmaları) olduğu gibi kalır.
+- **Yepyeni** bir görev oluşturur; ilk görev deneme sınırına takılmış olsa bile deneme sayısı 1'e sıfırlanır.
+- **Yeni bir ajan oturumu** başlatır; önceki oturum ID'si **devralınmaz**. Elle yeniden çalıştırma, önceki çıktıyı kötü bulduğunuz anlamına gelir; aynı konuşmayı sürdürmek aynı bozulmuş durumu tekrar oynatırdı. (Buna karşılık otomatik yeniden deneme oturumu devralır; bu yol kötü çıktı için değil, altyapı hataları içindir.)
+
+Karşılaştırma:
+
+| Boyut | Otomatik yeniden deneme | Elle yeniden çalıştırma |
+|---|---|---|
+| Tetikleyici | Sistem, hata nedenine göre | Siz, elle |
+| Sınır | 2 deneme | Sınır yok |
+| Uygulanabilir kaynaklar | Issue'lar, chat | Ajan atananı olan issue'lar |
+| Seçilen ajan | Başarısız görevle aynı ajan | Kaynak görevin ajanı (UI satır bazlı retry) veya issue'nun mevcut atananı (CLI / task_id yok) |
+| Oturum devralma | Evet (önceki oturumu sürdürür) | Hayır (yeni oturum) |
+
+## Başarısız görev issue durumunu nasıl etkiler
+
+Issue tetiklemeli bir görev, issue bir ajana atandığı için başarısız olursa (ve otomatik yeniden deneme başarıya ulaşmazsa), **issue'nun durumu otomatik olarak `in_progress` durumundan `todo` durumuna geri alınır**. Böylece panoyu açtığınızda "buna tekrar bakmak gerekiyor" bilgisini hemen görürsünüz. Bkz. [Issues and projects](/issues).
+
+## Bir görev önceki bağlamdan devam edebilir mi
+
+Evet; AI coding tool oturum sürdürmeyi desteklediği sürece.
+
+Multica görev sırasında oturum ID'sini **iki kez** sabitler: bir kez başlangıçta (AI tool ilk sistem mesajını döndürdüğünde), bir kez de sonda (tamamlandığında veya başarısız olduğunda). İlki, daemon çalışma ortasında çökerse toparlanmayı sağlar; ikincisi, ajan önceki konuşmayı ve dosya durumunu sürdürebilsin diye bu ID'nin geri verildiği bir sonraki **otomatik yeniden deneme** için saklanır. **Elle yeniden çalıştırma bunu özellikle atlar** ve yeni oturum başlatır; bkz. [Elle yeniden çalıştırma ve otomatik yeniden deneme](#manual-rerun-vs-automatic-retry).
+
+Ama **hangi AI coding tool'ların bunu gerçekten desteklediği** çok değişir:
+
+- ✅ **Gerçek destek** — Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi
+- ⚠️ **Kod var ama kullanılamıyor** — Codex, Cursor
+- ❌ **Destek yok** — Gemini
+
+Bkz. [Providers Matrix → Session resumption](/providers#session-resumption-who-really-supports-it).
+
+## Sonraki
+
+- [Providers Matrix](/providers) — 11 AI coding tool arasındaki yetenek farkları (tam oturum sürdürme durumu dahil)
+- [Issue'ları ajanlara atama](/assigning-issues) / [Yorumlarda ajanlara @-mention yapma](/mentioning-agents) / [Chat](/chat) / [Autopilots](/autopilots) — görev tetiklemenin dört yolu

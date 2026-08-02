@@ -1,0 +1,79 @@
+{
+  "save": "Kaydet",
+  "cancel": "İptal",
+  "delete": "Sil",
+  "confirm": "Onayla",
+  "loading": "Yükleniyor...",
+  "time": {
+    "just_now": "az önce",
+    "minutes_ago": "{{count}} dk önce",
+    "hours_ago": "{{count}} sa önce",
+    "days_ago": "{{count}} gün önce"
+  },
+  "avatar_upload": {
+    "change": "Avatarı değiştir",
+    "remove": "Kaldır",
+    "select_image": "Lütfen bir görsel dosyası seçin.",
+    "updated": "Avatar güncellendi",
+    "failed": "Avatar yüklenemedi",
+    "upload_image": "Görsel yükle",
+    "emoji_label": "Emoji",
+    "more_emojis": "Daha fazla emoji…",
+    "emoji_loading": "Yükleniyor…"
+  },
+  "avatar_crop": {
+    "title": "Avatarı düzenle",
+    "zoom": "Yakınlaştırma",
+    "zoom_in": "Yakınlaştır",
+    "zoom_out": "Uzaklaştır",
+    "rotate": "Döndür",
+    "reset": "Sıfırla",
+    "cancel": "İptal",
+    "apply": "Kaydet",
+    "uploading": "Yükleniyor…",
+    "loading": "Yükleniyor…",
+    "load_failed": "Görsel yüklenemedi"
+  },
+  "color_picker": {
+    "saturation": "Doygunluk ve parlaklık",
+    "hue": "Ton",
+    "hex": "Hex rengi",
+    "eyedropper": "Ekrandan bir renk seç",
+    "presets": "Hazır ayarlar",
+    "random": "Rastgele"
+  },
+  "lark_bind": {
+    "page_title": "Lark hesabını bağla",
+    "redeeming": "Bağlama belirteci kullanılıyor…",
+    "needs_auth_description": "Bağlamayı tamamlamak için Multica'da oturum açın. Bağlantıdaki belirteç, Lark hesabınızı bu Multica kullanıcısına bağlar; bu nedenle önce oturum açmış olmanız gerekir.",
+    "sign_in": "Oturum aç",
+    "done_title": "Bağlandı.",
+    "done_description": "Lark'taki Bot'a göndereceğiniz sonraki mesaj doğrudan Ajan'a iletilecek. Bu sekmeyi kapatabilirsiniz.",
+    "error_title": "Bağlama tamamlanamadı",
+    "error_admin_hint": "Bu sorun devam ederse çalışma alanı yöneticisinden Lark üzerinden bağlama bağlantısını yeniden göndermesini isteyin.",
+    "error_missing_token": "Bağlantıda bağlama belirteci eksik. Bot'tan Lark'ta yeni bir tane göndermesini isteyin.",
+    "error_expired": "Bu bağlama bağlantısı geçersiz veya süresi dolmuş (bağlantılar 15 dakika geçerlidir). Bot'tan yeni bir tane göndermesini isteyin.",
+    "error_already_bound": "Bu Lark hesabı zaten farklı bir Multica kullanıcısına bağlı. Hesap aktarımı için önce açıkça bağlantının kaldırılması gerekir.",
+    "error_not_member": "Çalışma alanının üyesi olmayan bir Multica hesabıyla oturum açtınız.",
+    "error_unknown": "Bir şeyler ters gitti. Tekrar deneyin; sorun devam ederse çalışma alanı yöneticisiyle iletişime geçin."
+  },
+  "slack_bind": {
+    "page_title": "Slack hesabını bağla",
+    "redeeming": "Hesabınız bağlanıyor…",
+    "needs_auth_description": "Bağlantıyı tamamlamak için Multica'da oturum açın. Bağlantıdaki belirteç, Slack hesabınızı bu Multica kullanıcısına bağlar; bu nedenle önce oturum açmış olmanız gerekir.",
+    "sign_in": "Oturum aç",
+    "done_title": "Bağlandı.",
+    "done_description": "Slack'teki bot'a göndereceğiniz sonraki mesaj doğrudan ajana iletilecek. Bu sekmeyi kapatabilirsiniz.",
+    "error_title": "Bağlantı tamamlanamadı",
+    "error_admin_hint": "Bu sorun devam ederse yeni bir bağlantı almak için Slack'te bota tekrar mesaj gönderin.",
+    "error_missing_token": "Bağlantıda belirteç eksik. Yeni bir tane almak için Slack'te bota tekrar mesaj gönderin.",
+    "error_expired": "Bu bağlantı geçersiz veya süresi dolmuş (bağlantılar 15 dakika geçerlidir). Yeni bir tane almak için bota tekrar mesaj gönderin.",
+    "error_already_bound": "Bu Slack hesabı zaten farklı bir Multica kullanıcısına bağlı. Hesap aktarımı için önce açıkça bağlantının kaldırılması gerekir.",
+    "error_not_member": "Çalışma alanının üyesi olmayan bir Multica hesabıyla oturum açtınız.",
+    "error_unknown": "Bir şeyler ters gitti. Tekrar deneyin; sorun devam ederse çalışma alanı yöneticisiyle iletişime geçin."
+  },
+  "expandable_description": {
+    "expand": "Daha fazlasını göster",
+    "collapse": "Daha azını göster"
+  }
+}

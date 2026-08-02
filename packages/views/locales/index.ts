@@ -99,6 +99,31 @@ import jaUsage from "./ja/usage.json";
 import jaUi from "./ja/ui.json";
 import jaSquads from "./ja/squads.json";
 import jaBilling from "./ja/billing.json";
+import trCommon from "./tr/common.json";
+import trAuth from "./tr/auth.json";
+import trSettings from "./tr/settings.json";
+import trIssues from "./tr/issues.json";
+import trAgents from "./tr/agents.json";
+import trEditor from "./tr/editor.json";
+import trOnboarding from "./tr/onboarding.json";
+import trInvite from "./tr/invite.json";
+import trLabels from "./tr/labels.json";
+import trMembers from "./tr/members.json";
+import trMyIssues from "./tr/my-issues.json";
+import trSearch from "./tr/search.json";
+import trInbox from "./tr/inbox.json";
+import trWorkspace from "./tr/workspace.json";
+import trProjects from "./tr/projects.json";
+import trAutopilots from "./tr/autopilots.json";
+import trSkills from "./tr/skills.json";
+import trChat from "./tr/chat.json";
+import trModals from "./tr/modals.json";
+import trRuntimes from "./tr/runtimes.json";
+import trLayout from "./tr/layout.json";
+import trUsage from "./tr/usage.json";
+import trUi from "./tr/ui.json";
+import trSquads from "./tr/squads.json";
+import trBilling from "./tr/billing.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -211,5 +236,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: jaUi,
     squads: jaSquads,
     billing: jaBilling,
+  },
+  tr: {
+    common: trCommon,
+    auth: trAuth,
+    settings: trSettings,
+    issues: trIssues,
+    agents: trAgents,
+    editor: trEditor,
+    onboarding: trOnboarding,
+    invite: trInvite,
+    labels: trLabels,
+    members: trMembers,
+    "my-issues": trMyIssues,
+    search: trSearch,
+    inbox: trInbox,
+    workspace: trWorkspace,
+    projects: trProjects,
+    autopilots: trAutopilots,
+    skills: trSkills,
+    chat: trChat,
+    modals: trModals,
+    runtimes: trRuntimes,
+    layout: trLayout,
+    usage: trUsage,
+    ui: trUi,
+    squads: trSquads,
+    billing: trBilling,
   },
 };

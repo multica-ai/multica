@@ -1,0 +1,147 @@
+---
+title: CLI komut referansı
+description: Her üst seviye Multica CLI komutunun tek sayfalık özeti. Tam kullanım için `multica <command> --help` çalıştırın.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica CLI, Web UI'ın yapabildiği neredeyse her şeyi yansıtır ([issue](/issues) oluşturma, [ajan](/agents) atama, [daemon](/daemon-runtimes) başlatma ve daha fazlası). Bu sayfa her üst seviye komutu tek satırlık açıklamayla listeler. Tüm flag'ler ve örnekler için `multica <command> --help` çalıştırın.
+
+## Kimlik doğrulama
+
+CLI'ı ilk kez kullandığınızda **personal access token (PAT)** almak için bunu çalıştırın:
+
+```bash
+multica login
+```
+
+Tarayıcınız otomatik açılır. Web app içinde onayladıktan sonra CLI, PAT'yi (`mul_` ile başlayan) `~/.multica/config.json` içine kaydeder. Sonraki her komut bu PAT ile kimlik doğrular.
+
+<Callout type="tip">
+CI veya headless ortamlar için tarayıcı akışını atlayın: web app içinde **Settings → Personal Access Tokens** altında PAT oluşturun, sonra doğrudan vermek için `multica login --token <mul_...>` çalıştırın.
+</Callout>
+
+Token türleri arasındaki fark için [Kimlik doğrulama ve token'lar](/auth-tokens) sayfasına bakın.
+
+## Auth ve kurulum
+
+| Command | Purpose |
+|---|---|
+| `multica login` | Oturum açar ve PAT kaydeder |
+| `multica auth status` | Mevcut oturum durumunu, kullanıcıyı ve çalışma alanını gösterir |
+| `multica auth logout` | Yerel PAT'yi temizler |
+| `multica setup cloud` | Multica Cloud için tek adımlık kurulum (login + daemon kurulumu) |
+| `multica setup self-host` | Self-hosted backend için tek adımlık kurulum |
+
+## Çalışma alanları ve üyeler
+
+| Command | Purpose |
+|---|---|
+| `multica workspace list` | Erişebildiğiniz tüm çalışma alanlarını listeler |
+| `multica workspace get <slug>` | Bir çalışma alanının ayrıntılarını gösterir |
+| `multica workspace member list` | Mevcut çalışma alanının üyelerini listeler |
+| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Çalışma alanı metadata'sını günceller (admin/owner). Uzun alanlar `--description-stdin` / `--context-stdin` kabul eder. |
+
+## Issue'lar ve projeler
+
+<Callout type="info">
+`list` komutları (`multica issue list`, `autopilot list`, `project list` vb.) varsayılan olarak kısa, kopyala-yapıştır hazır ID'ler yazdırır: issue'lar için `MUL-123` gibi issue key'leri, diğerleri için kısa UUID prefix'leri. Aşağıdaki takip komutlarında `<id>` argümanı kısa ID'yi veya tam UUID'yi kabul eder; tipik akış `multica issue list` → key'i kopyala → `multica issue get MUL-123` şeklindedir. Canonical UUID gerektiğinde list komutuna `--full-id` geçin.
+</Callout>
+
+| Command | Purpose |
+|---|---|
+| `multica issue list` | Issue'ları listeler (kopyala-yapıştır hazır issue key'leri yazdırır) |
+| `multica issue get <id>` | Tek bir issue gösterir (issue key veya UUID kabul eder) |
+| `multica issue create --title "..."` | Yeni issue oluşturur |
+| `multica issue update <id> ...` | Issue'yu günceller (status, priority, assignee vb.) |
+| `multica issue assign <id> --agent <slug>` | Bir ajana atar (hemen görev tetikler) |
+| `multica issue status <id> --set <status>` | Status değiştirmek için kısa yol |
+| `multica issue search <query>` | Anahtar kelime araması |
+| `multica issue runs <id>` | Bir issue üzerindeki ajan run'larını gösterir |
+| `multica issue rerun <id>` | Issue'nun mevcut ajan assignee'si için yeni bir görevi tekrar kuyruğa alır |
+| `multica issue comment <id> ...` | İç içe: yorumları görüntüle / gönder |
+| `multica issue subscriber <id> ...` | İç içe: abone ol / abonelikten çık |
+| `multica project list/get/create/update/delete/status` | Proje CRUD |
+
+## Ajanlar ve skill'ler
+
+| Command | Purpose |
+|---|---|
+| `multica agent list` | Çalışma alanının ajanlarını listeler |
+| `multica agent get <slug>` | Bir ajanın yapılandırmasını gösterir |
+| `multica agent create ...` | Ajan oluşturur |
+| `multica agent update <slug> ...` | Ajanı günceller |
+| `multica agent archive <slug>` | Arşivler |
+| `multica agent restore <slug>` | Arşivlenmiş ajanı geri yükler |
+| `multica agent tasks <slug>` | Bir ajanın görev geçmişini gösterir |
+| `multica agent skills ...` | İç içe: skill ekle / çıkar |
+| `multica skill list/get/create/update/delete` | Skill CRUD |
+| `multica skill import ...` | GitHub, ClawHub veya yerel makineden skill içe aktarır |
+| `multica skill files ...` | İç içe: bir skill'in dosyalarını yönet |
+
+## Ekipler
+
+| Command | Purpose |
+|---|---|
+| `multica squad list` | Çalışma alanındaki ekipleri listeler |
+| `multica squad get <id>` | Tek bir ekibi gösterir |
+| `multica squad create --name "..." --leader <agent>` | Ekip oluşturur (owner / admin) |
+| `multica squad update <id> ...` | Ad, açıklama, talimatlar, lider veya avatar günceller |
+| `multica squad delete <id>` | Arşivler (soft-delete); atanmış issue'ları lidere aktarır |
+| `multica squad member list/add/remove <squad-id>` | Ekip üyelerini yönetir |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Ekip lideri ajanlar tarafından her tur için değerlendirme kaydetmekte kullanılır |
+
+Tam model için [Ekipler](/squads) sayfasına bakın.
+
+## Autopilot'lar
+
+| Command | Purpose |
+|---|---|
+| `multica autopilot list` | Çalışma alanındaki tüm autopilot'ları listeler |
+| `multica autopilot get <id>` | Tek bir autopilot gösterir |
+| `multica autopilot create ...` | Autopilot oluşturur |
+| `multica autopilot update <id> ...` | Günceller |
+| `multica autopilot delete <id>` | Siler |
+| `multica autopilot runs <id>` | Run geçmişini gösterir |
+| `multica autopilot trigger <id>` | Run'ı elle tetikler |
+
+## Daemon ve çalışma ortamları
+
+| Command | Purpose |
+|---|---|
+| `multica daemon start` | Daemon'ı başlatır (varsayılan background; foreground çalıştırmak için `--foreground` ekleyin) |
+| `multica daemon stop` | Daemon'ı durdurur |
+| `multica daemon restart` | Daemon'ı yeniden başlatır |
+| `multica daemon status` | Daemon'ın online olup olmadığını ve concurrency değerini kontrol eder |
+| `multica daemon logs` | Daemon loglarını görüntüler |
+| `multica runtime list` | Mevcut çalışma alanındaki çalışma ortamlarını listeler |
+| `multica runtime usage` | Kaynak kullanımını gösterir |
+| `multica runtime activity` | Son aktivite logu |
+| `multica runtime update <id> ...` | Bir çalışma ortamının yapılandırmasını günceller |
+
+## Diğer
+
+| Command | Purpose |
+|---|---|
+| `multica repo checkout <url>` | Ajanların kullanması için bir repo'yu yerel olarak clone eder |
+| `multica config` | Yerel CLI yapılandırmasını görüntüler veya düzenler |
+| `multica version` | CLI sürümünü yazdırır |
+| `multica update` | CLI'ı en son release'e yükseltir |
+| `multica attachment download <id>` | Bir issue veya yorumdan eki indirir |
+
+## Tüm flag'leri görme
+
+Her komut `--help` destekler:
+
+```bash
+multica issue create --help
+multica agent update --help
+```
+
+v2, her komut için özel ayrıntılı referans sayfasıyla gelecek.
+
+## Sonraki adımlar
+
+- [Kimlik doğrulama ve token'lar](/auth-tokens) — PAT vs. JWT vs. daemon token
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — `daemon` komutlarının arka planda nasıl çalıştığı
+- [Ajan oluşturma ve yapılandırma](/agents-create) — `multica agent create` için tüm seçenekler
