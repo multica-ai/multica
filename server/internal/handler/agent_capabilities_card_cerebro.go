@@ -385,13 +385,29 @@ type AgentCapabilityTaskMandate interface {
 	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
 }
 
-// ApplyTaskMandate overlays the immutable task ceiling on connection calls.
-// Platform actions intentionally keep their canonical permission result: the
-// FIR-4076 rollback removed Task Mandate enforcement from those HTTP actions,
-// and their capability keys are not issued in the connection/tool mandate.
+// ApplyTaskMandate overlays the immutable task ceiling on runtime tools and
+// connections. Platform actions intentionally keep their canonical permission
+// result: the FIR-4076 rollback removed Task Mandate enforcement from those
+// HTTP actions, and their capability keys are not issued in the
+// connection/tool mandate.
 func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) {
 	if mandates == nil || card == nil || !taskID.Valid {
 		return
+	}
+	for i := range card.Tools {
+		tool := &card.Tools[i]
+		if _, isPlatformAction := platformcatalog.ByKey(tool.Key); isPlatformAction {
+			continue
+		}
+		if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, tool.Key); err != nil {
+			reason := fmt.Sprintf("task mandate denied the capability: %v", err)
+			tool.Permission = "deny"
+			tool.Allowed = false
+			tool.Callable = false
+			tool.Reason = reason
+			tool.BlockedReason = reason
+			tool.HowToFix = "Start a new task whose issued mandate includes this capability."
+		}
 	}
 	for i := range card.Connections {
 		for j := range card.Connections[i].Tools {
