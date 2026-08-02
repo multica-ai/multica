@@ -63,9 +63,10 @@ func TestGetAgentCapabilitiesKeepsPlatformPermissionsAndAppliesConnectionTaskMan
 			},
 		}}},
 		tctx: ToolContext{
-			AgentID:     id,
-			WorkspaceID: id,
-			TaskID:      id,
+			AgentID:                id,
+			WorkspaceID:            id,
+			TaskID:                 id,
+			TaskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
 			TaskMandates: rejectingTaskMandates{rejected: map[string]bool{
 				"rejected_tool":                true,
 				"mcp__company-brain__whoami":   true,
@@ -119,7 +120,7 @@ func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
 				Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true,
 			}},
 		}}}},
-		tctx: ToolContext{AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates},
+		tctx: ToolContext{AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates, TaskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true }},
 	}
 
 	raw, err := lookup.Call(context.Background(), nil)
@@ -143,5 +144,43 @@ func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
 	allowed, reason := executor.guardToolCall(context.Background(), id, id, endpoint, nil, reg, GatewayRequestMeta{TaskID: util.UUIDToString(id)})
 	if allowed || !strings.Contains(reason, "outside the issued task mandate") {
 		t.Fatalf("gateway call = (%v, %q), want the same mandate denial", allowed, reason)
+	}
+}
+
+func TestGetAgentCapabilitiesTaskMandateOffPreservesAllResolvedPermissions(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	mandates := rejectingTaskMandates{rejected: map[string]bool{
+		"mcp__company-brain__allowed": true,
+		"mcp__company-brain__denied":  true,
+	}}
+	lookup := FirtalGetAgentCapabilitiesTool{
+		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Connections: []handler.AgentCapabilityConnection{{
+			Name: "company-brain",
+			Tools: []handler.AgentCapabilityConnTool{
+				{Name: "allowed", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+				{Name: "denied", Permission: "deny", Allowed: false, Available: true, Enforced: true, Callable: false, BlockedReason: "Tool Policy denied the capability"},
+			},
+		}}}},
+		tctx: ToolContext{
+			AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates,
+			TaskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return false },
+		},
+	}
+
+	raw, err := lookup.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("capabilities lookup: %v", err)
+	}
+	var card handler.AgentCapabilities
+	if err := json.Unmarshal([]byte(raw), &card); err != nil {
+		t.Fatalf("decode capabilities card: %v", err)
+	}
+	allowed := card.Connections[0].Tools[0]
+	if allowed.Permission != "allow" || !allowed.Allowed || !allowed.Callable || allowed.BlockedReason != "" {
+		t.Fatalf("Task Mandate off changed Tool Policy Allow: %+v", allowed)
+	}
+	denied := card.Connections[0].Tools[1]
+	if denied.Permission != "deny" || denied.Allowed || denied.Callable || denied.BlockedReason != "Tool Policy denied the capability" {
+		t.Fatalf("Task Mandate off changed Tool Policy Deny: %+v", denied)
 	}
 }

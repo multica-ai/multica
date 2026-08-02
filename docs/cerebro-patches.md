@@ -2297,3 +2297,8 @@ The brief-rendering block moved out of `execenv/context.go` into a sibling
 
 - **Why:** FIR-4220 needs Task Mandate issuance and observation to continue while call-time enforcement remains safely reversible. `cerebro_task_mandate_enforcement` is therefore a workspace flag that defaults off; an operator can restore the policy-only behavior immediately without a deploy or mandate rewrite.
 - **Where:** The shared resolver lives in `server/internal/cerebro/taskmandate/enforcement.go`. Cerebro-owned Gateway and access-decision paths consume it directly. The local handler seam is `server/internal/handler/task_mandate_enforcement_cerebro.go`; the marked checks in `platform_action_guard_cerebro.go` and `daemon_tool_policy_cerebro.go` only call `Authorize` while the flag is on. `server/cmd/server/main.go` has one marked wiring block so the duplicate Gateway decision check uses the same flag.
+
+# `task-mandate-capabilities-circuit-breaker`
+
+- **Why:** FIR-4289 requires `get_agent_capabilities` and the HTTP Capabilities card to match call-time behavior. With `cerebro_task_mandate_enforcement` off, Task Mandate cannot turn an otherwise allowed capability into Deny; Tool Policy, credentials, sandbox, repository, and approval ceilings remain unchanged.
+- **Where:** `server/internal/handler/agent_capabilities_card_cerebro.go` threads the existing workspace flag into `ApplyTaskMandate`. Gateway wiring stays in `server/internal/cerebro/runtime`, so both capability surfaces use the same circuit breaker as dispatch.

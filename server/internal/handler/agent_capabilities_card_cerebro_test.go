@@ -41,7 +41,7 @@ func TestApplyTaskMandateDeniesAPIConnectionEndpointOnCapabilitiesCard(t *testin
 		Name:      "infisical-admin",
 		Endpoints: []AgentCapabilityConnEndpoint{{Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true}},
 	}}}
-	ApplyTaskMandate(context.Background(), rejectingCapabilityMandate{denied: map[string]bool{"infisical_admin__get_secrets": true}}, id, id, id, &card)
+	ApplyTaskMandate(context.Background(), true, rejectingCapabilityMandate{denied: map[string]bool{"infisical_admin__get_secrets": true}}, id, id, id, &card)
 	got := card.Connections[0].Endpoints[0]
 	if got.Permission != "deny" || got.Allowed || got.Callable || got.BlockedReason == "" || got.HowToFix == "" {
 		t.Fatalf("API endpoint mandate denial must be visible on the capabilities card: %+v", got)
@@ -54,13 +54,39 @@ func TestApplyTaskMandateDoesNotDenyPlatformActionsAfterRollback(t *testing.T) {
 		Key: "read_issues", Permission: "allow", Allowed: true, Callable: true,
 	}}}
 
-	ApplyTaskMandate(context.Background(), rejectingCapabilityMandate{
+	ApplyTaskMandate(context.Background(), true, rejectingCapabilityMandate{
 		denied: map[string]bool{"read_issues": true},
 	}, id, id, id, &card)
 
 	got := card.Tools[0]
 	if got.Permission != "allow" || !got.Allowed || !got.Callable || got.BlockedReason != "" {
 		t.Fatalf("platform action must retain its permission decision after Task Mandate enforcement rollback: %+v", got)
+	}
+}
+
+func TestApplyTaskMandateDisabledPreservesResolvedPermissions(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Connections: []AgentCapabilityConnection{{
+		Name: "infisical-admin",
+		Endpoints: []AgentCapabilityConnEndpoint{
+			{Path: "/allowed", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true},
+			{Path: "/denied", Methods: []string{"GET"}, Permission: "deny", Allowed: false, Callable: false, BlockedReason: "Tool Policy denied the capability"},
+		},
+	}}}
+	mandates := rejectingCapabilityMandate{denied: map[string]bool{
+		"infisical_admin__get_allowed": true,
+		"infisical_admin__get_denied":  true,
+	}}
+
+	ApplyTaskMandate(context.Background(), false, mandates, id, id, id, &card)
+
+	allowed := card.Connections[0].Endpoints[0]
+	if allowed.Permission != "allow" || !allowed.Allowed || !allowed.Callable || allowed.BlockedReason != "" {
+		t.Fatalf("disabled Task Mandate changed Tool Policy Allow: %+v", allowed)
+	}
+	denied := card.Connections[0].Endpoints[1]
+	if denied.Permission != "deny" || denied.Allowed || denied.Callable || denied.BlockedReason != "Tool Policy denied the capability" {
+		t.Fatalf("disabled Task Mandate changed Tool Policy Deny: %+v", denied)
 	}
 }
 

@@ -106,15 +106,15 @@ const (
 // AgentCapabilityTool is one tool/permission resolved for this agent, with the
 // effective verdict and which layer decided it.
 type AgentCapabilityTool struct {
-	Key                   string   `json:"key"`
-	Title                 string   `json:"title,omitempty"`
-	Source                string   `json:"source,omitempty"`
-	Category              string   `json:"category,omitempty"`
-	Permission            string   `json:"permission"`           // allow | ask | deny
-	DecidedBy             string   `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
-	Reason                string   `json:"reason,omitempty"`
-	ManagedExternally     bool     `json:"managed_externally"`
-	ExternalSecurityOwner string   `json:"external_security_owner,omitempty"` // CEREBRO-PATCH(agent-capabilities-external-security-owner): expose the real owner of read-only permissions.
+	Key                   string `json:"key"`
+	Title                 string `json:"title,omitempty"`
+	Source                string `json:"source,omitempty"`
+	Category              string `json:"category,omitempty"`
+	Permission            string `json:"permission"`           // allow | ask | deny
+	DecidedBy             string `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
+	Reason                string `json:"reason,omitempty"`
+	ManagedExternally     bool   `json:"managed_externally"`
+	ExternalSecurityOwner string `json:"external_security_owner,omitempty"` // CEREBRO-PATCH(agent-capabilities-external-security-owner): expose the real owner of read-only permissions.
 	// WorkspaceIntakeSwitch marks a managed-external machine-intake boundary
 	// whose workspace-layer policy row is a live off-switch (FIR-4220), so the
 	// card can say WHERE the deciding control lives instead of "not wired".
@@ -378,7 +378,7 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid task scope", http.StatusForbidden)
 			return
 		}
-		ApplyTaskMandate(r.Context(), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card)
+		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
 	}
 	writeJSON(w, http.StatusOK, card)
 }
@@ -393,8 +393,8 @@ type AgentCapabilityTaskMandate interface {
 // Platform actions intentionally keep their canonical permission result: the
 // FIR-4076 rollback removed Task Mandate enforcement from those HTTP actions,
 // and their capability keys are not issued in the connection/tool mandate.
-func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) {
-	if mandates == nil || card == nil || !taskID.Valid {
+func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
+	if !enforcementEnabled || mandates == nil || card == nil || !taskID.Valid {
 		return
 	}
 	for i := range card.Connections {

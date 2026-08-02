@@ -84,7 +84,8 @@ surfaces must project the same effective decision:
 - **Capabilities** and `get_agent_capabilities` tell the agent what is available,
   allowed, approval-gated or denied using that same effective decision. A
   read-only, externally managed permission also names the concrete security
-  owner that admits or rejects it.
+  owner that admits or rejects it. The Task Mandate overlay is applied only
+  while `cerebro_task_mandate_enforcement` is on, matching both call-time gates.
 - The task transcript and `multica permissions task <id>` show the immutable
   Task Mandate captured for the run, including whether it is active or ended.
   `get_agent_capabilities` is the single deliberate mandate exception: it
