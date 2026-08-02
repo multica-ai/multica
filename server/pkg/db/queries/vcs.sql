@@ -69,10 +69,10 @@ RETURNING *;
 -- pr_updated_at guards against an out-of-order webhook redelivery regressing
 -- the PR state, mirroring the updated_at guard on UpsertVCSCommitStatus. Each
 -- mutable column is applied only when the incoming event is newer than the
--- stored row, or when it has the same timestamp without trying to clear an
--- already-terminal state. The row is still touched (and thus RETURNED) either
--- way, so callers always get the current PR and the previous state needed to
--- freeze close intent only after the first terminal transition.
+-- stored row, and the incoming event is not trying to clear an already-terminal
+-- state. The row is still touched (and thus RETURNED) either way, so callers
+-- always get the current PR and the previous state needed to freeze close
+-- intent only after the first terminal transition.
 WITH existing AS (
     SELECT id, state
     FROM vcs_pull_request
@@ -92,21 +92,21 @@ INSERT INTO vcs_pull_request (
     $12, $13, $14, $15
 )
 ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
-    workspace_id      = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.workspace_id      ELSE vcs_pull_request.workspace_id      END,
-    provider          = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.provider          ELSE vcs_pull_request.provider          END,
-    title             = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.title             ELSE vcs_pull_request.title             END,
-    state             = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.state             ELSE vcs_pull_request.state             END,
-    html_url          = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.html_url          ELSE vcs_pull_request.html_url          END,
-    branch            = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.branch            ELSE vcs_pull_request.branch            END,
-    author_login      = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.author_login      ELSE vcs_pull_request.author_login      END,
-    author_avatar_url = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.author_avatar_url ELSE vcs_pull_request.author_avatar_url END,
-    merged_at         = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.merged_at         ELSE vcs_pull_request.merged_at         END,
-    closed_at         = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.closed_at         ELSE vcs_pull_request.closed_at         END,
-    pr_updated_at     = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.pr_updated_at     ELSE vcs_pull_request.pr_updated_at     END,
-    additions         = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.additions         ELSE vcs_pull_request.additions         END,
-    deletions         = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.deletions         ELSE vcs_pull_request.deletions         END,
-    changed_files     = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.changed_files     ELSE vcs_pull_request.changed_files     END,
-    head_sha          = CASE WHEN EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at OR (EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed'))) THEN EXCLUDED.head_sha          ELSE vcs_pull_request.head_sha          END,
+    workspace_id      = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.workspace_id      ELSE vcs_pull_request.workspace_id      END,
+    provider          = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.provider          ELSE vcs_pull_request.provider          END,
+    title             = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.title             ELSE vcs_pull_request.title             END,
+    state             = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.state             ELSE vcs_pull_request.state             END,
+    html_url          = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.html_url          ELSE vcs_pull_request.html_url          END,
+    branch            = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.branch            ELSE vcs_pull_request.branch            END,
+    author_login      = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.author_login      ELSE vcs_pull_request.author_login      END,
+    author_avatar_url = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.author_avatar_url ELSE vcs_pull_request.author_avatar_url END,
+    merged_at         = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.merged_at         ELSE vcs_pull_request.merged_at         END,
+    closed_at         = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.closed_at         ELSE vcs_pull_request.closed_at         END,
+    pr_updated_at     = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.pr_updated_at     ELSE vcs_pull_request.pr_updated_at     END,
+    additions         = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.additions         ELSE vcs_pull_request.additions         END,
+    deletions         = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.deletions         ELSE vcs_pull_request.deletions         END,
+    changed_files     = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.changed_files     ELSE vcs_pull_request.changed_files     END,
+    head_sha          = CASE WHEN (EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at) AND NOT (vcs_pull_request.state IN ('merged', 'closed') AND EXCLUDED.state NOT IN ('merged', 'closed')) THEN EXCLUDED.head_sha          ELSE vcs_pull_request.head_sha          END,
     updated_at        = now()
 RETURNING *
 )

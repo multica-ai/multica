@@ -142,6 +142,126 @@ func vcsLinkFlags(t *testing.T, ctx context.Context, issueID string) (bool, bool
 	return closeIntent, referenceOnly
 }
 
+func vcsPullRequestByNumber(t *testing.T, ctx context.Context, connID string, number int32) db.VcsPullRequest {
+	t.Helper()
+	var pr db.VcsPullRequest
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state,
+		       html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at,
+		       pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at
+		FROM vcs_pull_request
+		WHERE connection_id = $1 AND pr_number = $2
+	`, connID, number).Scan(
+		&pr.ID, &pr.WorkspaceID, &pr.ConnectionID, &pr.Provider, &pr.RepoOwner, &pr.RepoName, &pr.PrNumber,
+		&pr.Title, &pr.State, &pr.HtmlUrl, &pr.Branch, &pr.HeadSha, &pr.AuthorLogin, &pr.AuthorAvatarUrl,
+		&pr.MergedAt, &pr.ClosedAt, &pr.PrCreatedAt, &pr.PrUpdatedAt, &pr.Additions, &pr.Deletions,
+		&pr.ChangedFiles, &pr.CreatedAt, &pr.UpdatedAt,
+	); err != nil {
+		t.Fatalf("select VCS PR #%d: %v", number, err)
+	}
+	return pr
+}
+
+func TestUpsertVCSPullRequestTerminalStateMonotonicity(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	t.Cleanup(func() { cleanupVCS(ctx, "") })
+
+	connUUID := parseUUID(connID)
+	created := pgtype.Timestamptz{Time: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Valid: true}
+	t1 := pgtype.Timestamptz{Time: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC), Valid: true}
+	t2 := pgtype.Timestamptz{Time: time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC), Valid: true}
+
+	upsert := func(number int32, state string, updated pgtype.Timestamptz, mergedAt, closedAt pgtype.Timestamptz) db.UpsertVCSPullRequestRow {
+		t.Helper()
+		row, err := testHandler.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+			WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: connUUID,
+			Provider: "gitlab", RepoOwner: "acme", RepoName: "widget", PrNumber: number,
+			Title: "PR", State: state, HtmlUrl: "https://gitlab.test/acme/widget/-/merge_requests/test",
+			MergedAt: mergedAt, ClosedAt: closedAt, PrCreatedAt: created, PrUpdatedAt: updated, HeadSha: state + "-sha",
+		})
+		if err != nil {
+			t.Fatalf("UpsertVCSPullRequest(%d, %s): %v", number, state, err)
+		}
+		return row
+	}
+
+	upsert(101, "merged", t1, t1, pgtype.Timestamptz{})
+	row := upsert(101, "open", t2, pgtype.Timestamptz{}, pgtype.Timestamptz{})
+	if row.State != "merged" || !row.MergedAt.Valid || row.PrUpdatedAt.Time != t1.Time {
+		t.Fatalf("merged -> newer open regressed: state=%q merged_at=%v pr_updated_at=%v", row.State, row.MergedAt.Valid, row.PrUpdatedAt.Time)
+	}
+
+	upsert(102, "closed", t1, pgtype.Timestamptz{}, t1)
+	row = upsert(102, "open", t2, pgtype.Timestamptz{}, pgtype.Timestamptz{})
+	if row.State != "closed" || !row.ClosedAt.Valid || row.PrUpdatedAt.Time != t1.Time {
+		t.Fatalf("closed -> newer open regressed: state=%q closed_at=%v pr_updated_at=%v", row.State, row.ClosedAt.Valid, row.PrUpdatedAt.Time)
+	}
+
+	row = upsert(101, "closed", t2, t1, t2)
+	if row.State != "closed" || !row.MergedAt.Valid || !row.ClosedAt.Valid || row.PrUpdatedAt.Time != t2.Time {
+		t.Fatalf("terminal -> terminal should advance: state=%q merged_at=%v closed_at=%v pr_updated_at=%v", row.State, row.MergedAt.Valid, row.ClosedAt.Valid, row.PrUpdatedAt.Time)
+	}
+}
+
+func TestVCSWebhookRejectedTerminalReplayDoesNotRewriteLinkFlags(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Terminal replay")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireForgejo := func(action, state, updatedAt, title, body, branch string) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{
+			"action": action,
+			"pull_request": map[string]any{
+				"number": 77, "html_url": "https://forgejo.test/acme/widget/pulls/77",
+				"title": title, "body": body, "state": state, "merged": state == "merged",
+				"merged_at": "2026-05-02T00:00:00Z", "closed_at": "2026-05-02T00:00:00Z",
+				"created_at": "2026-05-01T00:00:00Z", "updated_at": updatedAt,
+				"head": map[string]any{"ref": branch, "sha": state + "-sha"},
+				"user": map[string]any{"username": "octo"},
+			},
+			"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+		})
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("Forgejo PR webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+		}
+	}
+
+	fireForgejo("closed", "merged", "2026-05-02T00:00:00Z", "Fix "+issue.Identifier, "Closes "+issue.Identifier, "fix")
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("merged link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	fireForgejo("opened", "open", "2026-05-03T00:00:00Z", "Docs", "Related "+issue.Identifier, "docs")
+	pr := vcsPullRequestByNumber(t, ctx, connID, 77)
+	if pr.State != "merged" || !pr.MergedAt.Valid {
+		t.Fatalf("newer terminal replay regressed PR: state=%q merged_at=%v", pr.State, pr.MergedAt.Valid)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("rejected newer open rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	fireForgejo("opened", "open", "not-a-time", "Docs", "Related "+issue.Identifier, "docs")
+	pr = vcsPullRequestByNumber(t, ctx, connID, 77)
+	if pr.State != "merged" || !pr.MergedAt.Valid {
+		t.Fatalf("fallback-now terminal replay regressed PR: state=%q merged_at=%v", pr.State, pr.MergedAt.Valid)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("fallback-now replay rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+}
+
 func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
