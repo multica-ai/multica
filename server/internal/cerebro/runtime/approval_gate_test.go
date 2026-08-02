@@ -129,7 +129,12 @@ func TestGuardToolCallTaskMandateDeniesEveryCallPathBeforePolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mandates := &gateFakeTaskMandates{authorizeErr: tc.err}
-			e := (&FirtalGatewayExecutor{logger: slog.Default()}).SetTaskMandates(mandates)
+			e := (&FirtalGatewayExecutor{
+				logger: slog.Default(),
+				taskMandateEnforcement: func(context.Context, pgtype.UUID) bool {
+					return true
+				},
+			}).SetTaskMandates(mandates)
 			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, nil, meta)
 			if allowed || !strings.Contains(reason, tc.err.Error()) {
 				t.Fatalf("guardToolCall() = (%v, %q), want denial containing %q", allowed, reason, tc.err)
@@ -147,8 +152,8 @@ func TestGuardToolCallMissingTaskMandateFailsClosed(t *testing.T) {
 		e    *FirtalGatewayExecutor
 		meta GatewayRequestMeta
 	}{
-		{name: "task id has no mandate row", e: (&FirtalGatewayExecutor{logger: slog.Default()}).SetTaskMandates(&gateFakeTaskMandates{authorizeErr: errors.New("task mandate missing")}), meta: GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))}},
-		{name: "wired store has no task id", e: (&FirtalGatewayExecutor{logger: slog.Default()}).SetTaskMandates(&gateFakeTaskMandates{})},
+		{name: "task id has no mandate row", e: (&FirtalGatewayExecutor{logger: slog.Default(), taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true }}).SetTaskMandates(&gateFakeTaskMandates{authorizeErr: errors.New("task mandate missing")}), meta: GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))}},
+		{name: "wired store has no task id", e: (&FirtalGatewayExecutor{logger: slog.Default(), taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true }}).SetTaskMandates(&gateFakeTaskMandates{})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allowed, reason := tc.e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil, tc.meta)

@@ -29,6 +29,17 @@ type platformActionAnswer struct {
 // and updates deliberately do not call it while FIR-4076 compatibility mode
 // is active; their existing task-resource scope remains the boundary.
 func (h *Handler) authorizePlatformAction(ctx context.Context, r *http.Request, workspaceID pgtype.UUID, actorType, actorID, capability, surface string, actionContext map[string]any, resourcePayload any, wait bool) platformActionAnswer {
+	return h.authorizePlatformActionWithMandate(ctx, r, workspaceID, actorType, actorID, capability, surface, actionContext, resourcePayload, wait, true)
+}
+
+// authorizePlatformActionWithMandate is the shared implementation. requireMandate
+// distinguishes the two capability families: keys that are also runtime tool
+// names (create_issue, add_comment, …) sit inside the task-mandate allowlist and
+// keep that ceiling; catalog-only keys (rerun_issue, schedule_agent_wakeup, …
+// FIR-4220) never appear in a mandate snapshot, so requiring one would deny every
+// agent call regardless of the authored policy — for those the tool-policy engine
+// alone is the gate.
+func (h *Handler) authorizePlatformActionWithMandate(ctx context.Context, r *http.Request, workspaceID pgtype.UUID, actorType, actorID, capability, surface string, actionContext map[string]any, resourcePayload any, wait, requireMandate bool) platformActionAnswer {
 	if actorType != "agent" {
 		return platformActionAnswer{Allowed: true}
 	}
@@ -37,14 +48,17 @@ func (h *Handler) authorizePlatformAction(ctx context.Context, r *http.Request, 
 		return platformActionAnswer{Reason: "platform action gate unavailable"}
 	}
 	var taskID pgtype.UUID
+	mandateEnforced := requireMandate && h.taskMandateEnforcementEnabled(ctx, workspaceID)
 	if raw := r.Header.Get("X-Task-ID"); raw != "" {
 		taskID, err = util.ParseUUID(raw)
 	}
-	if err != nil || !taskID.Valid {
+	if mandateEnforced && (err != nil || !taskID.Valid) {
 		return platformActionAnswer{MandateDenied: true, Reason: "valid task identity is required"}
 	}
-	if err := taskmandate.NewStoreDB(h.DB).Authorize(ctx, taskID, workspaceID, agentID, capability); err != nil {
-		return platformActionAnswer{MandateDenied: true, Reason: err.Error()}
+	if mandateEnforced {
+		if err := taskmandate.NewStoreDB(h.DB).Authorize(ctx, taskID, workspaceID, agentID, capability); err != nil {
+			return platformActionAnswer{MandateDenied: true, Reason: err.Error()}
+		}
 	}
 	var approvalID pgtype.UUID
 	if raw := r.Header.Get("X-Platform-Approval-ID"); raw != "" {

@@ -100,6 +100,9 @@ type FirtalGatewayExecutor struct {
 	// for every Gateway list and call decision. nil fails closed.
 	accessDecisions *accessdecision.Service
 	taskMandates    taskMandateStore
+	// taskMandateEnforcement is a test seam for the workspace circuit breaker.
+	// Production resolves the shared default-off flag from e.cerebro.
+	taskMandateEnforcement func(context.Context, pgtype.UUID) bool
 
 	// routerHandler is the server's own HTTP router, used by the FIR-1449
 	// in-process bridge to reach the full CLI/MCP tool surface via a loopback
@@ -1015,7 +1018,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// FIR-2668: carry the calling agent to API-connection dispatch so
 	// on_behalf_of-enabled connections stamp the agent's delegated identity.
 	ctx = WithConnectionAgent(ctx, meta.AgentID)
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398: thread the self-lookup card provider and task mandate.
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398/FIR-4289: thread the self-lookup card provider, mandate, and circuit breaker.
 	if taskID, err := util.ParseUUID(meta.TaskID); err == nil {
 		tctx.TaskID = taskID
 		if e.queries != nil {

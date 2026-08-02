@@ -373,7 +373,7 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid task scope", http.StatusForbidden)
 			return
 		}
-		ApplyTaskMandate(r.Context(), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card)
+		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
 	}
 	writeJSON(w, http.StatusOK, card)
 }
@@ -386,8 +386,8 @@ type AgentCapabilityTaskMandate interface {
 
 // ApplyTaskMandate overlays the immutable task ceiling on a canonical card.
 // Both the HTTP route and Gateway tool call this exact function.
-func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) {
-	if mandates == nil || card == nil || !taskID.Valid {
+func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
+	if !enforcementEnabled || mandates == nil || card == nil || !taskID.Valid {
 		return
 	}
 	for i := range card.Tools {

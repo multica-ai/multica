@@ -6,6 +6,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"sort"
 	"testing"
@@ -23,6 +24,41 @@ import (
 
 type capabilityTableCapture struct {
 	query cerebrotoolpolicy.TableQuery
+}
+
+type rejectingCapabilityMandate struct{ denied map[string]bool }
+
+func (m rejectingCapabilityMandate) Authorize(_ context.Context, _, _, _ pgtype.UUID, tool string) error {
+	if m.denied[tool] {
+		return fmt.Errorf("tool is outside task mandate")
+	}
+	return nil
+}
+
+func TestApplyTaskMandateDisabledPreservesResolvedPermissions(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Connections: []AgentCapabilityConnection{{
+		Name: "company-brain",
+		Tools: []AgentCapabilityConnTool{
+			{Name: "allowed", Permission: "allow", Allowed: true, Callable: true},
+			{Name: "denied", Permission: "deny", Allowed: false, Callable: false, BlockedReason: "Tool Policy denied the capability"},
+		},
+	}}}
+	mandates := rejectingCapabilityMandate{denied: map[string]bool{
+		"mcp__company-brain__allowed": true,
+		"mcp__company-brain__denied":  true,
+	}}
+
+	ApplyTaskMandate(context.Background(), false, mandates, id, id, id, &card)
+
+	allowed := card.Connections[0].Tools[0]
+	if allowed.Permission != "allow" || !allowed.Allowed || !allowed.Callable || allowed.BlockedReason != "" {
+		t.Fatalf("disabled Task Mandate changed Tool Policy Allow: %+v", allowed)
+	}
+	denied := card.Connections[0].Tools[1]
+	if denied.Permission != "deny" || denied.Allowed || denied.Callable || denied.BlockedReason != "Tool Policy denied the capability" {
+		t.Fatalf("disabled Task Mandate changed Tool Policy Deny: %+v", denied)
+	}
 }
 
 func (c *capabilityTableCapture) Table(_ context.Context, in cerebrotoolpolicy.TableQuery) ([]cerebrotoolpolicy.TableRow, error) {
