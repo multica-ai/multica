@@ -144,6 +144,28 @@ func vcsLinkFlags(t *testing.T, ctx context.Context, issueID string) (bool, bool
 	return closeIntent, referenceOnly
 }
 
+func vcsPullRequestExists(t *testing.T, ctx context.Context, connID string, number int32) bool {
+	t.Helper()
+	var exists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM vcs_pull_request WHERE connection_id = $1 AND pr_number = $2)`,
+		connID, number).Scan(&exists); err != nil {
+		t.Fatalf("select VCS PR exists #%d: %v", number, err)
+	}
+	return exists
+}
+
+func vcsLinkCount(t *testing.T, ctx context.Context, issueID string) int {
+	t.Helper()
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issueID).Scan(&count); err != nil {
+		t.Fatalf("select VCS link count: %v", err)
+	}
+	return count
+}
+
 func vcsPullRequestByNumber(t *testing.T, ctx context.Context, connID string, number int32) db.VcsPullRequest {
 	t.Helper()
 	var pr db.VcsPullRequest
@@ -234,6 +256,15 @@ func TestVCSWebhookConcurrentFirstUpsertKeepsAcceptedEventLinkFlags(t *testing.T
 		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-02T00:00:00Z",
 	}
 
+	lockTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback(ctx)
+	if _, err := lockTx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", vcsPullRequestLockKey(conn, mergedEv)); err != nil {
+		t.Fatalf("hold PR advisory lock: %v", err)
+	}
+
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for _, ev := range []vcs.PullRequestEvent{openEv, mergedEv} {
@@ -246,6 +277,13 @@ func TestVCSWebhookConcurrentFirstUpsertKeepsAcceptedEventLinkFlags(t *testing.T
 		}()
 	}
 	close(start)
+	time.Sleep(50 * time.Millisecond)
+	if vcsPullRequestExists(t, ctx, connID, 88) || vcsLinkCount(t, ctx, issue.ID) != 0 {
+		t.Fatal("PR/link wrote while the per-PR advisory lock was held")
+	}
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatalf("release PR advisory lock: %v", err)
+	}
 	wg.Wait()
 
 	wantMergedAt := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
@@ -270,6 +308,49 @@ func TestVCSWebhookConcurrentFirstUpsertKeepsAcceptedEventLinkFlags(t *testing.T
 	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
 	if !closeIntent || referenceOnly {
 		t.Fatalf("rejected replay link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+}
+
+func TestVCSWebhookPullRequestLockTimeoutRollsBack(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Lock timeout")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	conn, err := testHandler.Queries.GetVCSConnectionByID(ctx, parseUUID(connID))
+	if err != nil {
+		t.Fatalf("GetVCSConnectionByID: %v", err)
+	}
+	ev := vcs.PullRequestEvent{
+		Action: "closed", RepoOwner: "acme", RepoName: "widget", Number: 89,
+		Title: "Fix " + issue.Identifier, Body: "Closes " + issue.Identifier, State: "merged",
+		HTMLURL: "https://forgejo.test/acme/widget/pulls/89", Branch: "fix", HeadSHA: "merged-sha",
+		MergedAt: "2026-05-02T00:00:00Z", ClosedAt: "2026-05-02T00:00:00Z",
+		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-02T00:00:00Z",
+	}
+
+	lockTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback(ctx)
+	if _, err := lockTx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", vcsPullRequestLockKey(conn, ev)); err != nil {
+		t.Fatalf("hold PR advisory lock: %v", err)
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	testHandler.mirrorVCSPullRequest(callCtx, conn, ev)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("PR mirror did not exit within bounded lock timeout: %s", elapsed)
+	}
+	if vcsPullRequestExists(t, ctx, connID, 89) {
+		t.Fatal("PR row was written after lock timeout")
+	}
+	if count := vcsLinkCount(t, ctx, issue.ID); count != 0 {
+		t.Fatalf("link rows after lock timeout = %d, want 0", count)
 	}
 }
 
@@ -327,6 +408,16 @@ func TestVCSWebhookRejectedTerminalReplayDoesNotRewriteLinkFlags(t *testing.T) {
 	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
 	if !closeIntent || referenceOnly {
 		t.Fatalf("fallback-now replay rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	fireForgejo("opened", "open", "", "Docs", "Related "+issue.Identifier, "docs")
+	pr = vcsPullRequestByNumber(t, ctx, connID, 77)
+	if pr.State != "merged" || !pr.MergedAt.Valid {
+		t.Fatalf("missing-timestamp terminal replay regressed PR: state=%q merged_at=%v", pr.State, pr.MergedAt.Valid)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("missing-timestamp replay rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
 	}
 }
 
