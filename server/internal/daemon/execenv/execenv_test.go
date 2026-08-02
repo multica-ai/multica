@@ -1558,6 +1558,33 @@ func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesQoderCNNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "qoderclicn-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "qoderclicn", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".qoder", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .qoder/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Qoder CN provider")
+	}
+}
+
 func TestWriteContextFilesQwenNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1681,6 +1708,28 @@ func TestInjectRuntimeConfigQoder(t *testing.T) {
 	}
 	if !strings.Contains(s, "discovered automatically") {
 		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+}
+
+func TestInjectRuntimeConfigQoderCN(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-qoderclicn-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "qoderclicn", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(content), "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
 	}
 }
 
@@ -2296,14 +2345,14 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("config.json content = %q", data)
 	}
 
-	// config.toml should be copied and have network access appended.
+	// config.toml should be copied and have the managed sandbox block prepended.
 	data, _ = os.ReadFile(filepath.Join(codexHome, "config.toml"))
 	tomlStr := string(data)
 	if !strings.Contains(tomlStr, `model = "o3"`) {
 		t.Errorf("config.toml missing original model setting, got: %q", tomlStr)
 	}
-	if !strings.Contains(tomlStr, "network_access = true") {
-		t.Errorf("config.toml missing network_access, got: %q", tomlStr)
+	if !strings.Contains(tomlStr, "sandbox_mode = ") {
+		t.Errorf("config.toml missing managed sandbox_mode, got: %q", tomlStr)
 	}
 
 	// instructions.md should be copied.
@@ -2757,18 +2806,14 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	if !strings.Contains(s, multicaManagedBeginMarker) || !strings.Contains(s, multicaManagedEndMarker) {
 		t.Errorf("missing managed block markers, got:\n%s", s)
 	}
-	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
 		t.Error("missing sandbox_mode")
 	}
-	// The managed block uses TOML dotted-key form rather than a
-	// `[sandbox_workspace_write]` section header so it cannot leak into or
-	// inherit from any surrounding table scope. See upsertMulticaManagedBlock
-	// for why.
-	if strings.Contains(s, "[sandbox_workspace_write]") {
-		t.Errorf("managed block must not open a [sandbox_workspace_write] table header, got:\n%s", s)
-	}
-	if !strings.Contains(s, "sandbox_workspace_write.network_access = true") {
-		t.Errorf("missing dotted-key network_access = true, got:\n%s", s)
+	// Linux tasks run unsandboxed on the daemon user's real HOME, so nothing
+	// under sandbox_workspace_write applies — neither the table header nor the
+	// dotted-key form should be emitted (MUL-5578).
+	if strings.Contains(s, "sandbox_workspace_write") {
+		t.Errorf("must not emit any sandbox_workspace_write key under danger-full-access, got:\n%s", s)
 	}
 }
 
@@ -2904,8 +2949,8 @@ approval_policy = "on-failure"
 	if !strings.Contains(s, "approval_policy") {
 		t.Error("lost existing approval_policy")
 	}
-	if !strings.Contains(s, "network_access = true") {
-		t.Error("missing network_access = true")
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
+		t.Error("missing managed sandbox_mode")
 	}
 }
 
@@ -3060,14 +3105,16 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 		version  string
 		wantMode string
 		wantNet  bool
-		// wantHint is whether the policy carries an actionable upgrade hint.
-		// Only the macOS seatbelt fallback has one; the Windows compatibility
-		// fallback has no generic upgrade action, so it must not surface a
-		// misleading macOS hint.
+		// wantHint is whether the policy carries an actionable remediation hint.
+		// macOS points at a Codex upgrade and Linux at running the daemon inside
+		// an outer boundary; the Windows compatibility fallback has no generic
+		// action, so it must not surface a misleading macOS hint.
 		wantHint bool
 	}{
-		{"linux any version", "linux", "0.100.0", "workspace-write", true, false},
-		{"linux unknown version", "linux", "", "workspace-write", true, false},
+		// Linux runs unsandboxed by product decision, on any Codex version
+		// (MUL-5578) — there is no version-dependent branch to exercise here.
+		{"linux any version", "linux", "0.100.0", "danger-full-access", false, true},
+		{"linux unknown version", "linux", "", "danger-full-access", false, true},
 		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
 		{"windows unknown version", "windows", "", "danger-full-access", false, false},
 		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
@@ -3108,7 +3155,7 @@ func TestCodexSandboxPolicyForConfig(t *testing.T) {
 		{"windows undecidable fails closed", "windows", windowsSandboxUndecidable, "workspace-write", true},
 		{"windows absent falls back", "windows", windowsSandboxAbsent, "danger-full-access", false},
 		// Non-Windows platforms ignore winState entirely.
-		{"linux ignores winState", "linux", windowsSandboxNative, "workspace-write", true},
+		{"linux ignores winState", "linux", windowsSandboxNative, "danger-full-access", false},
 		{"darwin ignores winState", "darwin", windowsSandboxNative, "danger-full-access", false},
 	}
 	for _, tc := range cases {
@@ -3363,7 +3410,12 @@ func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
 	}
 }
 
-func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
+// TestPrepareCodexHomeWritesManagedSandboxBlock checks that preparing a codex
+// home wires the resolved policy all the way into config.toml. With an empty
+// shared home the resolved mode is danger-full-access on every platform — Linux
+// and macOS by their own defaults, Windows because no native windows.sandbox is
+// configured — so the expectation is host-independent.
+func TestPrepareCodexHomeWritesManagedSandboxBlock(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	// Empty shared home — no config.toml to copy.
@@ -3371,22 +3423,25 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
-	// Default prepareCodexHome assumes linux-like behavior.
 	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// config.toml should be created with network access defaults.
 	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
 	if err != nil {
 		t.Fatalf("config.toml not created: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "network_access = true") {
-		t.Error("config.toml missing network_access = true")
+	if !strings.Contains(s, multicaManagedBeginMarker) {
+		t.Errorf("config.toml missing managed block, got:\n%s", s)
 	}
-	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
-		t.Error("config.toml missing sandbox_mode")
+	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
+		t.Errorf("config.toml missing danger-full-access sandbox_mode, got:\n%s", s)
+	}
+	// Nothing under sandbox_workspace_write applies when the filesystem is not
+	// sandboxed; emitting it would imply containment that does not exist.
+	if strings.Contains(s, "sandbox_workspace_write") {
+		t.Errorf("config.toml must not emit sandbox_workspace_write under danger-full-access, got:\n%s", s)
 	}
 }
 

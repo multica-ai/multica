@@ -667,10 +667,6 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
-	// QuickActionsEnabled lets the sender opt this turn out of follow-up
-	// suggestion generation (Settings → Chat toggle). Pointer so an absent
-	// field (older clients) means enabled — only an explicit false disables.
-	QuickActionsEnabled *bool `json:"quick_actions_enabled"`
 }
 
 type SendChatMessageResponse struct {
@@ -792,8 +788,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// creator-only), so they are the task initiator — surfaced to the agent
 	// under `## Task Initiator`. actorType/actorID were resolved above for the
 	// invoke gate.
-	quickActionsDisabled := req.QuickActionsEnabled != nil && !*req.QuickActionsEnabled
-	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), quickActionsDisabled)
+	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
 		return
@@ -909,14 +904,13 @@ type RegenerateChatQuickActionsRequest struct {
 
 type RegenerateChatQuickActionsResponse struct {
 	MessageID string `json:"message_id"`
-	TaskID    string `json:"task_id"`
 }
 
-// RegenerateChatQuickActions re-runs the daemon suggestion pass for a session's
-// latest assistant turn on explicit user request (the "refresh" button on the
-// quick-actions row, MUL-5149). It enqueues a background regenerate task; the
-// refreshed pills arrive over the same chat:quick_actions realtime path as the
-// automatic pass. Same gate as sending a message — it enqueues an agent run.
+// RegenerateChatQuickActions re-runs the suggestion pass for a session's latest
+// assistant turn on explicit user request (the "refresh" button on the
+// quick-actions row, MUL-5149). Generation is server-side, so this spawns no
+// agent run; the refreshed pills arrive over the same chat:quick_actions
+// realtime path as the automatic pass.
 func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -942,13 +936,11 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusConflict, "chat agent is archived")
 		return
 	}
-	if !agent.RuntimeID.Valid {
-		writeError(w, http.StatusConflict, "chat agent has no runtime")
-		return
-	}
-	// Enqueuing a suggestion pass runs the agent and spends quota, so it must
-	// clear the same INVOKE gate as a normal send (MUL-4525), not just the
-	// softer view gate in gateChatSessionForUser.
+	// The refresh no longer runs the agent, but it is still a user-triggered
+	// spend against that agent's conversation, so it keeps clearing the same
+	// INVOKE gate as a send (MUL-4525) rather than the softer view gate in
+	// gateChatSessionForUser. Deliberately NOT relaxed as a side effect of
+	// moving generation server-side.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
@@ -965,7 +957,7 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	messageID, task, err := h.TaskService.RegenerateChatQuickActions(r.Context(), session, parseUUID(userID), expectedMessageID)
+	messageID, targetTask, err := h.TaskService.RegenerateChatQuickActions(r.Context(), session, expectedMessageID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatQuickActionsStale):
@@ -974,26 +966,24 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 			// its optimistic marker and re-offers refresh on the new turn.
 			writeError(w, http.StatusConflict, "a newer reply arrived — refresh it instead")
 		case errors.Is(err, service.ErrChatQuickActionsBusy):
-			// A turn or another refresh is already running for this session; the
-			// result would be stale or a duplicate. 409 → the client rolls back
+			// A turn is already running for this session; it is about to replace
+			// the reply these pills would hang on. 409 → the client rolls back
 			// and can refresh once the session settles.
 			writeError(w, http.StatusConflict, "still working — try refreshing in a moment")
 		case errors.Is(err, service.ErrChatQuickActionsNoTurn):
 			writeError(w, http.StatusConflict, "no assistant reply to refresh yet")
-		case errors.Is(err, service.ErrChatQuickActionsNotResumable):
-			writeError(w, http.StatusConflict, "this conversation can't be refreshed right now")
-		case errors.Is(err, service.ErrChatTaskAgentArchived):
-			writeError(w, http.StatusConflict, "chat agent is archived")
-		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
-			writeError(w, http.StatusConflict, "chat agent has no runtime")
+		case errors.Is(err, service.ErrChatQuickActionsUnavailable):
+			writeError(w, http.StatusServiceUnavailable, "suggestions are not available on this deployment")
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to regenerate quick actions")
 		}
 		return
 	}
+	// Detached like the automatic pass: answer 202 now, deliver the refreshed
+	// pills over chat:quick_actions.
+	h.TaskService.GenerateChatQuickActionsAsync(targetTask, service.ChatQuickActionsRefresh)
 	writeJSON(w, http.StatusAccepted, RegenerateChatQuickActionsResponse{
 		MessageID: uuidToString(messageID),
-		TaskID:    uuidToString(task.ID),
 	})
 }
 

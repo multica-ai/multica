@@ -27,7 +27,7 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
       href={p.issueDetail(issueId)}
       target={openInNewTab ? "_blank" : undefined}
       newTabTitle={fallbackLabel}
-      className="issue-mention not-prose align-middle"
+      className="issue-mention align-middle"
     >
       <IssueChip
         issueId={issueId}

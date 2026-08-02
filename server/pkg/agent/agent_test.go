@@ -62,8 +62,27 @@ func TestNewReturnsQoderBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(qoder) error: %v", err)
 	}
-	if _, ok := b.(*qoderBackend); !ok {
+	qoder, ok := b.(*qoderBackend)
+	if !ok {
 		t.Fatalf("expected *qoderBackend, got %T", b)
+	}
+	if qoder.defaultExecutable != "qodercli" {
+		t.Fatalf("default executable = %q, want qodercli", qoder.defaultExecutable)
+	}
+}
+
+func TestNewReturnsQoderCNBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("qoderclicn", Config{})
+	if err != nil {
+		t.Fatalf("New(qoderclicn) error: %v", err)
+	}
+	qoder, ok := b.(*qoderBackend)
+	if !ok {
+		t.Fatalf("expected *qoderBackend, got %T", b)
+	}
+	if qoder.defaultExecutable != "qoderclicn" {
+		t.Fatalf("default executable = %q, want qoderclicn", qoder.defaultExecutable)
 	}
 }
 

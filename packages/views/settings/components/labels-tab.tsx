@@ -45,7 +45,14 @@ import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
-const RESOURCE_TYPES: LabelResourceType[] = ["issue", "agent", "skill"];
+/**
+ * Label scopes this settings tab manages. Narrower than `LabelResourceType`:
+ * the backend still models agent labels, but the product no longer exposes
+ * any way to create, apply, or view them, so they are not manageable here.
+ */
+type LabelScope = Extract<LabelResourceType, "issue" | "skill">;
+
+const RESOURCE_TYPES: LabelScope[] = ["issue", "skill"];
 
 interface LabelDraft {
   name: string;
@@ -63,7 +70,7 @@ export function LabelsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
 
-  const [resourceType, setResourceType] = useState<LabelResourceType>("issue");
+  const [resourceType, setResourceType] = useState<LabelScope>("issue");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Label | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -236,7 +243,7 @@ function LabelEditorDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  resourceType: LabelResourceType;
+  resourceType: LabelScope;
   label?: Label | null;
 }) {
   const { t } = useT("settings");

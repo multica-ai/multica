@@ -23,21 +23,22 @@ const (
 	chatQuickActionPromptMax = 500
 )
 
-// parseChatQuickActionsOutput parses the daemon suggestion pass's raw output
-// into sanitized actions. The pass is instructed to emit a bare JSON array,
-// but this parser is deliberately lenient — models wrap output in code fences
-// or lead with a sentence often enough that strict parsing would silently
-// drop good suggestions. Anything unparseable degrades to "no suggestions";
-// this output never reaches the transcript, so there is nothing to leak.
+// parseChatQuickActionsOutput parses the suggestion pass's raw output into
+// sanitized actions. The pass is instructed to emit {"actions":[...]}, but this
+// parser is deliberately lenient — models wrap output in code fences, drop the
+// wrapper, or lead with a sentence often enough that strict parsing would
+// silently drop good suggestions. Anything unparseable degrades to "no
+// suggestions"; this output never reaches the transcript, so there is nothing
+// to leak.
 func parseChatQuickActionsOutput(raw string) []protocol.ChatQuickAction {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
-	// Attempt order narrows from strict to desperate: the bare array the pass
-	// was asked for, then the inside of a code fence, then the outermost
-	// bracket span. The bracket scan runs last because leading prose may
-	// itself contain brackets ("here's [my] take: [...]"), which would
+	// Attempt order narrows from strict to desperate: the object the pass was
+	// asked for (or a bare array), then the inside of a code fence, then the
+	// outermost bracket span. The bracket scan runs last because leading prose
+	// may itself contain brackets ("here's [my] take: [...]"), which would
 	// misalign the slice if it were tried first.
 	for _, candidate := range []string{raw, insideCodeFence(raw)} {
 		if actions, ok := unmarshalChatQuickActions(candidate); ok {
@@ -77,6 +78,16 @@ func unmarshalChatQuickActions(raw string) ([]protocol.ChatQuickAction, bool) {
 	if raw == "" {
 		return nil, false
 	}
+	// The pass asks for {"actions":[...]} because response_format=json_object
+	// requires a top-level object. A bare array is still accepted: the bracket
+	// fallback below extracts one out of prose, and a model that drops the
+	// wrapper should not cost the user their suggestions.
+	var wrapper struct {
+		Actions []protocol.ChatQuickAction `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrapper); err == nil && wrapper.Actions != nil {
+		return sanitizeChatQuickActions(wrapper.Actions), true
+	}
 	var candidates []protocol.ChatQuickAction
 	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
 		return nil, false
@@ -89,11 +100,11 @@ func unmarshalChatQuickActions(raw string) ([]protocol.ChatQuickAction, bool) {
 // when its JSON is malformed, so private control syntax never leaks into Chat.
 // A mid-response fence is ordinary user-visible markdown and is left intact.
 //
-// The in-band footer is no longer the primary suggestion source — the daemon
-// suggestion pass is (parseChatQuickActionsOutput). This split stays for two
-// reasons: older daemons still inject the retired brief instruction, and
-// provider sessions created before the upgrade carry the syntax in their own
-// history, so agents keep emitting footers for a while either way.
+// Suggestions are generated server-side now, so this is no longer a source of
+// actions — but the split stays as a defensive stripper. Provider sessions
+// created before the retirement carry the footer syntax in their own history,
+// so agents keep emitting it for a while; without this the raw fence would land
+// in a stored transcript.
 func splitChatQuickActions(output string) (string, []protocol.ChatQuickAction) {
 	normalized := strings.ReplaceAll(output, "\r\n", "\n")
 	trimmed := strings.TrimRight(normalized, " \t\n")
@@ -182,27 +193,42 @@ func truncateChatQuickAction(value string, maxRunes int) string {
 	return string(runes[:maxRunes-1]) + "…"
 }
 
-// chatQuickActionsPending decides whether the chat:done broadcast should tell
-// clients to expect a chat:quick_actions supplement: the daemon declared one
-// on the complete callback, an ordinary assistant message was written, and no
-// actions are attached yet (an in-band fallback already delivered would make
-// a placeholder pointless).
-func chatQuickActionsPending(result []byte, msg *db.ChatMessage) bool {
-	var payload protocol.TaskCompletedPayload
-	_ = json.Unmarshal(result, &payload)
-	if !payload.QuickActionsPending || msg == nil {
+// chatQuickActionsEligible decides whether a completed turn gets a suggestion
+// pass — and therefore whether the chat:done broadcast should tell clients to
+// expect a chat:quick_actions supplement.
+//
+// The decision is the server's own: suggestions are generated here now, so
+// nothing the daemon reports can grant or withhold them.
+func (s *TaskService) chatQuickActionsEligible(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage) bool {
+	if s.QuickActions == nil || !s.QuickActions.Enabled() {
 		return false
 	}
-	if msg.MessageKind != protocol.ChatMessageKindMessage {
+	if !task.ChatSessionID.Valid {
 		return false
 	}
-	var existing []protocol.ChatQuickAction
-	_ = json.Unmarshal(msg.QuickActions, &existing)
-	return len(existing) == 0
+	// Only an ordinary reply can seed suggestions: a no_response outcome has
+	// nothing to build on, and an attachment-only reply has no text to anchor in.
+	if msg == nil || msg.MessageKind != protocol.ChatMessageKindMessage {
+		return false
+	}
+	if strings.TrimSpace(msg.Content) == "" {
+		return false
+	}
+	// Channel-backed sessions (Slack / Lark) have no pill surface. Same
+	// discriminator writeChatCompletionOutcome uses: the immutable
+	// channel_ingested stamp on the turn's owned input batch. A NULL owner is
+	// an agent-initiated intro turn, which does render in Chat.
+	if task.ChatInputTaskID.Valid {
+		channelIngested, err := s.Queries.TaskHasChannelIngestedMessages(ctx, task.ChatInputTaskID)
+		if err != nil || channelIngested {
+			return false
+		}
+	}
+	return true
 }
 
-// SupplementChatQuickActions attaches the daemon suggestion pass's output to
-// the completed turn's assistant message and broadcasts chat:quick_actions.
+// SupplementChatQuickActions attaches a suggestion pass's raw output to the
+// completed turn's assistant message and broadcasts chat:quick_actions.
 // Best-effort semantics: an unparseable or empty result still broadcasts the
 // row's current (usually empty) actions so pending placeholders resolve. A
 // turn that never wrote an assistant row (no_response, channel empty-drop)

@@ -120,6 +120,7 @@ You also need at least one AI agent CLI installed:
 - Kimi (`kimi` on PATH)
 - Kiro CLI (`kiro-cli` on PATH)
 - Qoder CLI (`qodercli` on PATH)
+- Qoder CN CLI (`qoderclicn` on PATH)
 - Trae CLI (`traecli` on PATH)
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)

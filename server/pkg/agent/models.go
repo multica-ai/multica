@@ -173,9 +173,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, executablePath))
 		})
-	case "qoder":
+	case "qoder", "qoderclicn":
 		return cachedDiscovery(providerType, func() (Catalog, error) {
-			return discovered(discoverQoderModels(ctx, executablePath))
+			return discovered(discoverQoderModels(ctx, executablePath, qoderDefaultBinary(providerType)))
 		})
 	case "opencode":
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
@@ -927,10 +927,11 @@ func discoverCopilotModels(ctx context.Context, executablePath string) (Catalog,
 	return Catalog{Models: models}, nil
 }
 
-// discoverQoderModels spins up `qodercli --yolo --acp` and parses models from session/new.
-func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, error) {
+// discoverQoderModels spins up a Qoder CLI binary with `--yolo --acp` and
+// parses models from session/new.
+func discoverQoderModels(ctx context.Context, executablePath, defaultBin string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:   "qodercli",
+		defaultBin:   defaultBin,
 		clientName:   "multica-model-discovery",
 		acpArgs:      []string{"--yolo", "--acp"},
 		tmpdirPrefix: "multica-qoder-discovery-",

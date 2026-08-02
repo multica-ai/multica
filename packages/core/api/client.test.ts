@@ -1641,3 +1641,68 @@ describe("ApiClient model discovery response schema", () => {
     expect(result.status).toBe("completed");
   });
 });
+
+/**
+ * Mixed-version contract for subtree unsubscribe (MUL-5483).
+ *
+ * Web/desktop staging deploys on merge while the backend is deployed by hand,
+ * so this client routinely runs against an older server. Subtree unsubscribe
+ * must therefore be carried by its own PATH, never by a body field: Go's JSON
+ * decoder drops unknown fields, so an old server would unsubscribe only the
+ * root and still answer 200 — telling the user the whole tree was muted while
+ * every child kept notifying. An unknown path 404s, which surfaces as a
+ * rejected mutation the user can act on.
+ */
+describe("ApiClient unsubscribe endpoints", () => {
+  function stubOK() {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function requestOf(fetchMock: ReturnType<typeof vi.fn>) {
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    return { url, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> };
+  }
+
+  it("sends the subtree variant to its own endpoint", async () => {
+    const fetchMock = stubOK();
+
+    await new ApiClient("https://api.example.test")
+      .unsubscribeFromIssueSubtree("issue-1", "user-1", "member");
+
+    const { url, body } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/api/issues/issue-1/unsubscribe/subtree");
+    expect(body).toEqual({ user_id: "user-1", user_type: "member" });
+  });
+
+  it("never encodes subtree as a body field on the shared endpoint", async () => {
+    const fetchMock = stubOK();
+
+    await new ApiClient("https://api.example.test")
+      .unsubscribeFromIssue("issue-1", "user-1", "member");
+
+    const { url, body } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/api/issues/issue-1/unsubscribe");
+    // A `subtree` key here would be silently ignored by an older backend,
+    // which is the exact silent-success failure this split exists to prevent.
+    expect(body).not.toHaveProperty("subtree");
+  });
+
+  it("rejects when the backend does not know the subtree route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test")
+        .unsubscribeFromIssueSubtree("issue-1", "user-1", "member"),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});

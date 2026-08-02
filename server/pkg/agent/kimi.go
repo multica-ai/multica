@@ -18,6 +18,11 @@ var kimiBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
 }
 
+// kimiReaderDrainGrace bounds how long the turn waits for trailing ACP
+// notifications after the session/prompt response. A var, not a const, so
+// tests can shorten it. Mirrors qoderReaderDrainGrace / traecliReaderDrainGrace.
+var kimiReaderDrainGrace = 2 * time.Second
+
 // kimiBackend implements Backend by spawning `kimi acp` and communicating
 // via the ACP (Agent Client Protocol) JSON-RPC 2.0 over stdin/stdout.
 //
@@ -116,6 +121,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var deliverable acpDeliverableTracker
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	// Reuse the hermesClient ACP transport — Kimi speaks the same protocol.
 	c := &hermesClient{
@@ -123,6 +129,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
+		},
 		onMessage: func(msg Message) {
 			// hermesClient.handleToolCallStart has already mapped
 			// the raw ACP title via hermesToolNameFromTitle — which
@@ -350,6 +362,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kimiReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)

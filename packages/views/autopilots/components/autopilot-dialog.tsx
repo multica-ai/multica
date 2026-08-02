@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -53,7 +53,7 @@ import type {
   AutopilotExecutionMode,
   AutopilotTrigger,
 } from "@multica/core/types";
-import { TitleEditor, ContentEditor } from "../../editor";
+import { TitleEditor, ContentEditor, type TitleEditorRef } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -251,14 +251,32 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   // edits to the title, prompt or assignee.
   const scheduleWillBeWritten =
     triggerKind === "schedule" && !schedulePillDisabled && (isCreate || scheduleDirty);
-  const canSubmit =
-    title.trim().length > 0 &&
-    assigneeId.length > 0 &&
-    !submitting &&
-    (!scheduleWillBeWritten || scheduleGate.scheduleValid);
+
+  // The FIRST empty required field in reading order — the user fills one, the
+  // next surfaces. Only these two are answered here: a rejected schedule is
+  // re-checked against the server below, which toasts its actual reason.
+  const missingField: "title" | "assignee" | null =
+    title.trim().length === 0 ? "title" : assigneeId.length === 0 ? "assignee" : null;
+
+  // Inline errors appear only after a submit attempt: a form that opens already
+  // shouting at the user for fields they have not reached yet is worse than the
+  // silence this replaces. Rendered as `showErrors && <field is still empty>`,
+  // so filling the field clears its error without a second submit.
+  const [showErrors, setShowErrors] = useState(false);
+  const titleEditorRef = useRef<TitleEditorRef>(null);
+  const assigneeTriggerRef = useRef<HTMLButtonElement>(null);
+  const assigneeErrorId = useId();
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (submitting) return;
+    if (missingField !== null) {
+      // Reveal the inline errors and take the user to the field at fault;
+      // focusing scrolls the config column to it on its own.
+      setShowErrors(true);
+      if (missingField === "title") titleEditorRef.current?.focus();
+      else assigneeTriggerRef.current?.focus();
+      return;
+    }
     setSubmitting(true);
     try {
       if (scheduleWillBeWritten && !(await scheduleGate.ensureAccepted(schedule))) {
@@ -519,6 +537,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           <div className="flex-none lg:flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
+                ref={titleEditorRef}
                 autoFocus={isCreate}
                 defaultValue={initial.title ?? ""}
                 placeholder={t(($) => $.dialog.title_placeholder)}
@@ -526,6 +545,15 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 onChange={setTitle}
                 onSubmit={handleSubmit}
               />
+              {/* role="alert": the title is a contenteditable, so there is no
+                  input to hang aria-describedby off — announcing the error is
+                  the only way a screen-reader user learns why Create did
+                  nothing. */}
+              {showErrors && title.trim().length === 0 && (
+                <p role="alert" className="mt-1.5 text-caption text-destructive">
+                  {t(($) => $.dialog.error_title_required)}
+                </p>
+              )}
             </div>
 
             <div className="px-6 pb-2 shrink-0 flex items-baseline gap-2">
@@ -553,11 +581,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           {/* Right: Configuration */}
           <aside className="w-full lg:w-[380px] shrink-0 overflow-visible lg:overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
             <AgentSection
+              ref={assigneeTriggerRef}
               selectedType={assigneeType}
               selectedId={assigneeId}
               onChange={handleAssigneeChange}
               selectedName={selectedAssignee?.name}
               selectedDescription={selectedAssignee?.description}
+              invalid={showErrors && assigneeId.length === 0}
+              errorId={assigneeErrorId}
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
@@ -584,14 +615,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             {triggerKind === "schedule" ? (
               <div>
                 <SectionLabel>{t(($) => $.dialog.section_schedule)}</SectionLabel>
+                {/* No `onValidityChange` / `clearRejection` here, unlike the
+                    detail page's add-trigger dialog: nothing in this footer is
+                    gated on the schedule's validity any more, so the gate's
+                    `scheduleValid` would have no reader. The editor still shows
+                    its own inline rejection, and `ensureAccepted` re-asks the
+                    server on submit and toasts what it says. */}
                 <ScheduleEditor
                   value={schedule}
-                  onChange={(next) => {
-                    scheduleGate.clearRejection();
-                    setSchedule(next);
-                  }}
+                  onChange={setSchedule}
                   wsId={wsId}
-                  onValidityChange={scheduleGate.onValidityChange}
                   // Locked while the save is in flight: the submit path validates
                   // over the network and then writes the schedule it read before
                   // that round trip, so an edit made in between would be dropped
@@ -624,14 +657,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
               {t(($) => $.dialog.cancel)}
             </Button>
-            <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
+            {/* Live whenever a save isn't already in flight — an unmet
+                requirement never dims it. A greyed-out button is a dead end
+                with no room for a reason (#6231); a live one answers the click
+                with an inline error on the field at fault, which says more than
+                any disabled state could. `handleSubmit` is the gate. */}
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              disabled={submitting}
+              aria-busy={submitting || undefined}
+            >
               {submitting
                 ? isCreate
                   ? t(($) => $.dialog.creating)
                   : t(($) => $.dialog.saving)
                 : isCreate
-                ? t(($) => $.dialog.create)
-                : t(($) => $.dialog.save)}
+                  ? t(($) => $.dialog.create)
+                  : t(($) => $.dialog.save)}
             </Button>
           </div>
         </div>
@@ -646,42 +689,71 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 // Right column sections
 // ---------------------------------------------------------------------------
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({
+  children,
+  required,
+}: {
+  children: React.ReactNode;
+  // Purely the sighted user's advance warning. `aria-required` is not supported
+  // on `role="button"`, so the picker cannot carry it; what a screen reader
+  // gets instead is the blocked submit's error, wired to the trigger through
+  // aria-describedby and announced by its own role="alert".
+  required?: boolean;
+}) {
   return (
     <div className="text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
       {children}
+      {required === true && (
+        <span aria-hidden className="ml-0.5 text-destructive">
+          *
+        </span>
+      )}
     </div>
   );
 }
 
 function AgentSection({
+  ref,
   selectedType,
   selectedId,
   onChange,
   selectedName,
   selectedDescription,
+  invalid,
+  errorId,
 }: {
+  ref: React.Ref<HTMLButtonElement>;
   selectedType: AutopilotAssigneeType;
   selectedId: string;
   onChange: (next: AssigneeSelection) => void;
   selectedName?: string;
   selectedDescription?: string;
+  /** A submit was attempted with no assignee picked. */
+  invalid: boolean;
+  errorId: string;
 }) {
   const { t } = useT("autopilots");
   const hasSelection = selectedId.length > 0;
   return (
     <div>
-      <SectionLabel>{t(($) => $.dialog.section_assignee)}</SectionLabel>
+      {/* Marked required, unlike the Project and Subscribers pickers below it:
+          the three look identical, and nothing else told the user that only
+          this one blocks Create (#6231). */}
+      <SectionLabel required>{t(($) => $.dialog.section_assignee)}</SectionLabel>
       <AgentPicker
         assignee={hasSelection ? { type: selectedType, id: selectedId } : null}
         onChange={onChange}
         align="start"
         triggerRender={
           <button
+            ref={ref}
             type="button"
+            aria-invalid={invalid || undefined}
+            aria-describedby={invalid ? errorId : undefined}
             className={cn(
               "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-left",
               "hover:bg-accent/40 transition-colors cursor-pointer",
+              invalid && "border-destructive",
             )}
           >
             {hasSelection ? (
@@ -710,6 +782,11 @@ function AgentSection({
           </button>
         }
       />
+      {invalid && (
+        <p id={errorId} role="alert" className="mt-1.5 text-caption text-destructive">
+          {t(($) => $.dialog.error_assignee_required)}
+        </p>
+      )}
     </div>
   );
 }

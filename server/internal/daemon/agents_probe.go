@@ -199,6 +199,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QODER_PATH", "qodercli", "MULTICA_QODER_MODEL"); ok {
 		agents["qoder"] = e
 	}
+	// Qoder CN CLI exposes the same ACP transport as Qoder CLI under a
+	// separate `qoderclicn` binary and account/config root. Register it as an
+	// independent provider so hosts with either or both editions get the
+	// matching runtime without a custom profile.
+	if e, ok := probe("MULTICA_QODERCLICN_PATH", "qoderclicn", "MULTICA_QODERCLICN_MODEL"); ok {
+		agents["qoderclicn"] = e
+	}
 	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
 	// driven over ACP via `traecli acp serve --yolo`. MULTICA_TRAECLI_MODEL seeds
 	// the daemon-wide default model (a model id from the user's logged-in traecli

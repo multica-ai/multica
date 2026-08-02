@@ -921,6 +921,38 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Updated")).toBeInTheDocument();
   });
 
+  // Details is creator + immutable timestamps, so it ranks below the
+  // execution log, which is what people actually open the sidebar for.
+  it("orders the Details section after the execution log", async () => {
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-past",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: "2026-06-08T08:00:00Z",
+        completed_at: "2026-06-08T08:05:00Z",
+        result: null,
+        error: null,
+        created_at: "2026-06-08T08:00:00Z",
+        trigger_summary: "Started from comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    const executionLog = await screen.findByText("Execution log");
+    const details = screen.getByText("Details");
+
+    // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
+    expect(
+      executionLog.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("shows 'not found' message when issue does not exist", async () => {
     mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
 

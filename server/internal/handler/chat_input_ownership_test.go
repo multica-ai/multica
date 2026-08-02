@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/service"
@@ -41,7 +42,7 @@ func sendDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, conte
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID), false)
+	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID))
 	if err != nil {
 		t.Fatalf("SendDirectChatMessage: %v", err)
 	}
@@ -501,18 +502,22 @@ func TestCompleteTask_ChatQuickActions(t *testing.T) {
 	if rows[0].Content != "Here is the plan." || rows[0].MessageKind != protocol.ChatMessageKindMessage {
 		t.Fatalf("persisted reply = kind %q content %q", rows[0].MessageKind, rows[0].Content)
 	}
+	// The footer's actions are DISCARDED, not persisted: suggestions come from
+	// the server-side pass now. Honouring an in-band footer would pin a
+	// pre-upgrade provider session to the retired, lower-quality suggestions and
+	// suppress the pass that replaces them.
 	var actions []protocol.ChatQuickAction
 	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
 		t.Fatalf("decode quick actions: %v", err)
 	}
-	if len(actions) != 2 || actions[0].Prompt != "Draft the complete plan" || !actions[0].Primary {
-		t.Fatalf("persisted quick actions = %+v", actions)
+	if len(actions) != 0 {
+		t.Fatalf("in-band footer actions must not be persisted, got %+v", actions)
 	}
 
 	// An actions-only turn (quick-actions footer with no visible text) must NOT
 	// become an empty-content message: older Desktop / mobile clients ignore
 	// quick_actions and would render an empty bubble. It falls through to the
-	// visible no_response fallback instead, and the chips are dropped (MUL-4351).
+	// visible no_response fallback instead (MUL-4351).
 	actionsOnlyTask := sendDirectChat(t, ctx, agentID, sessionID, "give me options only")
 	markTaskRunning(t, ctx, actionsOnlyTask)
 	actionsOnly := "```quick-actions\n[{\"label\":\"Continue\",\"prompt\":\"Continue the plan\"}]\n```"
@@ -546,7 +551,7 @@ func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
 
 	output := "Main reply.\n\n```quick-actions\n" +
 		`[{"label":"From footer","prompt":"in-band fallback"}]` + "\n```"
-	req := TaskCompleteRequest{Output: output, QuickActionsPending: true}
+	req := TaskCompleteRequest{Output: output}
 	result, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal complete request: %v", err)
@@ -574,7 +579,7 @@ func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
 		t.Fatalf("decode quick actions: %v", err)
 	}
 	if len(actions) != 1 || actions[0].Label != "From pass" || !actions[0].Primary {
-		t.Fatalf("supplement must overwrite the in-band fallback, got %+v", actions)
+		t.Fatalf("supplement must attach the pass's actions, got %+v", actions)
 	}
 
 	// An empty supplement must not clobber existing actions (it only resolves
@@ -592,37 +597,92 @@ func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
 	}
 }
 
-func TestDirectChat_QuickActionsOptOutStampsTask(t *testing.T) {
+// stubChatQuickActionsLLM is an enabled ChatQuickActionsLLM that never dials an
+// upstream, so the refresh gates below can be exercised on a deployment-shaped
+// TaskService (RegenerateChatQuickActions refuses outright when the LLM layer
+// is unconfigured).
+type stubChatQuickActionsLLM struct {
+	// lastPrompt records the rendered conversation the pass was given, so a
+	// test can assert WHICH turn the suggestions were built from.
+	lastPrompt *string
+}
+
+func (stubChatQuickActionsLLM) Enabled() bool { return true }
+
+func (s stubChatQuickActionsLLM) GenerateJSON(_ context.Context, _, _, userPrompt string, _ float64, _ int64) (string, error) {
+	if s.lastPrompt != nil {
+		*s.lastPrompt = userPrompt
+	}
+	return `{"actions":[{"label":"Next","prompt":"do the next thing","primary":true}]}`, nil
+}
+
+// TestChatQuickActions_ContextAnchorsOnTargetTurn pins the anchoring contract:
+// generation runs on a detached goroutine, so by the time it executes the
+// session may already carry a newer turn. The context it builds must end at the
+// assistant turn the pills are written to — not at whatever is newest when the
+// read happens.
+//
+// Without the anchor, a user who types a follow-up in the second after the
+// reply lands leaves the window ending on a user row with no reply to build on,
+// and that turn silently never gets pills.
+func TestChatQuickActions_ContextAnchorsOnTargetTurn(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "opt-out chat")
-	sess, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "quick-actions anchor")
+
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "first question")
+	markTaskRunning(t, ctx, taskID)
+	task, err := testHandler.TaskService.CompleteTask(
+		ctx, parseUUID(taskID), completeResult(t, "ANCHOR REPLY"), "", "", false, "")
 	if err != nil {
-		t.Fatalf("load chat session: %v", err)
-	}
-	ag, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
-	if err != nil {
-		t.Fatalf("load agent: %v", err)
+		t.Fatalf("complete turn 1: %v", err)
 	}
 
-	optedOut, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "no suggestions", nil, "member", parseUUID(testUserID), true)
-	if err != nil {
-		t.Fatalf("send opted-out message: %v", err)
-	}
-	if !optedOut.Task.QuickActionsDisabled {
-		t.Fatal("opt-out send must stamp quick_actions_disabled on the task")
+	// The race: a newer user message lands before the pass reads the session.
+	sendDirectChat(t, ctx, agentID, sessionID, "NEWER USER MESSAGE")
+
+	var prompt string
+	prev := testHandler.TaskService.QuickActions
+	testHandler.TaskService.QuickActions = stubChatQuickActionsLLM{lastPrompt: &prompt}
+	defer func() { testHandler.TaskService.QuickActions = prev }()
+
+	if err := testHandler.TaskService.GenerateChatQuickActionsForTask(
+		ctx, *task, service.ChatQuickActionsAutomatic); err != nil {
+		t.Fatalf("generate quick actions: %v", err)
 	}
 
-	// Default (older clients / toggle on) stays enabled.
-	normal, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "with suggestions", nil, "member", parseUUID(testUserID), false)
-	if err != nil {
-		t.Fatalf("send normal message: %v", err)
+	if !strings.Contains(prompt, "ANCHOR REPLY") {
+		t.Fatalf("context must end at the target reply, got:\n%s", prompt)
 	}
-	if normal.Task.QuickActionsDisabled {
-		t.Fatal("default send must leave quick_actions_disabled false")
+	if strings.Contains(prompt, "NEWER USER MESSAGE") {
+		t.Fatalf("context must exclude turns newer than the target, got:\n%s", prompt)
 	}
+
+	// And the pills land on the target turn, not the newer one.
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant row, got %d", len(rows))
+	}
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "Next" {
+		t.Fatalf("target turn quick actions = %+v", actions)
+	}
+}
+
+// installStubQuickActions enables suggestion generation and returns the undo.
+// Scoped tightly around the synchronous RegenerateChatQuickActions calls rather
+// than installed for a whole test: CompleteTask starts a background pass when
+// the feature is on, and a goroutine writing quick_actions mid-test would race
+// these assertions.
+func installStubQuickActions() func() {
+	prev := testHandler.TaskService.QuickActions
+	testHandler.TaskService.QuickActions = stubChatQuickActionsLLM{}
+	return func() { testHandler.TaskService.QuickActions = prev }
 }
 
 // TestRegenerateChatQuickActions_StaleTargetRejected pins the ack-alignment
@@ -655,20 +715,14 @@ func TestRegenerateChatQuickActions_StaleTargetRejected(t *testing.T) {
 	m1 := rows[0].ID
 
 	// Refreshing the current latest turn is accepted and targets exactly it.
-	target, regenTask, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1)
+	restore := installStubQuickActions()
+	target, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, m1)
+	restore()
 	if err != nil {
 		t.Fatalf("regenerate latest turn: %v", err)
 	}
 	if target != m1 {
 		t.Fatalf("regenerate target = %v, want the latest turn %v", target, m1)
-	}
-	// That refresh enqueues a regen pass that occupies the session until the
-	// daemon finishes it. Settle it so the session is idle again — this test
-	// isolates the STALE check; the busy-rejection path has its own tests.
-	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1`,
-		uuidToString(regenTask.ID)); err != nil {
-		t.Fatalf("settle regen task: %v", err)
 	}
 
 	// Turn 2 lands, so m1 is no longer the latest.
@@ -688,10 +742,12 @@ func TestRegenerateChatQuickActions_StaleTargetRejected(t *testing.T) {
 	m2 := rows[1].ID
 
 	// Refreshing the now-stale m1 is refused; refreshing the new latest m2 works.
-	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsStale) {
+	restore = installStubQuickActions()
+	defer restore()
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, m1); !errors.Is(err, service.ErrChatQuickActionsStale) {
 		t.Fatalf("stale-target regenerate error = %v, want ErrChatQuickActionsStale", err)
 	}
-	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m2); err != nil {
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, m2); err != nil {
 		t.Fatalf("regenerate new latest turn: %v", err)
 	}
 }
@@ -730,45 +786,10 @@ func TestRegenerateChatQuickActions_ActiveTurnRejected(t *testing.T) {
 	t2 := sendDirectChat(t, ctx, agentID, sessionID, "second")
 	markTaskRunning(t, ctx, t2)
 
-	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
+	restore := installStubQuickActions()
+	defer restore()
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
 		t.Fatalf("busy-session regenerate error = %v, want ErrChatQuickActionsBusy", err)
-	}
-}
-
-// TestRegenerateChatQuickActions_ConcurrentRefreshRejected pins finding §2 of
-// the MUL-5149 review: a second refresh of the same turn while the first pass is
-// still in flight is refused rather than enqueuing a duplicate, quota-spending
-// pass. A per-client disabled button cannot stop a second client, so the guard
-// lives under the session lock next to the enqueue.
-func TestRegenerateChatQuickActions_ConcurrentRefreshRejected(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "regen dedup chat")
-
-	t1 := sendDirectChat(t, ctx, agentID, sessionID, "q")
-	markTaskRunning(t, ctx, t1)
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(t1), completeResult(t, "a"), "sess-1", "/tmp/wd", false, ""); err != nil {
-		t.Fatalf("complete turn 1: %v", err)
-	}
-	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
-	if err != nil {
-		t.Fatalf("reload session: %v", err)
-	}
-	rows := assistantRows(t, ctx, sessionID)
-	if len(rows) != 1 {
-		t.Fatalf("expected one assistant turn, got %d", len(rows))
-	}
-	m1 := rows[0].ID
-
-	// First refresh is accepted and enqueues a regen pass that now occupies the session.
-	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); err != nil {
-		t.Fatalf("first refresh: %v", err)
-	}
-	// Second refresh of the same turn while the first pass is still queued is refused.
-	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
-		t.Fatalf("concurrent refresh error = %v, want ErrChatQuickActionsBusy", err)
 	}
 }
 
@@ -811,7 +832,9 @@ func TestRegenerateChatQuickActions_DeferredActiveTurnRejected(t *testing.T) {
 		t.Fatalf("defer turn 2: %v", err)
 	}
 
-	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, parseUUID(testUserID), m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
+	restore := installStubQuickActions()
+	defer restore()
+	if _, _, err := testHandler.TaskService.RegenerateChatQuickActions(ctx, session, m1); !errors.Is(err, service.ErrChatQuickActionsBusy) {
 		t.Fatalf("deferred-active regenerate error = %v, want ErrChatQuickActionsBusy", err)
 	}
 }

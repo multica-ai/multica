@@ -169,6 +169,10 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 
 下面的命令在**运行 AI 编程工具的电脑**上执行，不一定是运行 Docker 的服务器。
 
+<Callout type="warning">
+任务以运行守护进程的用户的全部权限执行——该用户能读写的一切，任务都能读写。请用专用 Unix 用户、容器或虚拟机来运行守护进程，而不是你的个人账号。详见[安全模型](/security-model)。
+</Callout>
+
 先安装 Multica CLI：
 
 **macOS / Linux**

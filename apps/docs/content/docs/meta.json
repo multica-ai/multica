@@ -43,6 +43,7 @@
     "desktop-app",
     "mobile-app",
     "---Self-hosting---",
+    "security-model",
     "environment-variables",
     "auth-setup",
     "troubleshooting",

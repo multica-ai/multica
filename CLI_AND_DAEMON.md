@@ -150,6 +150,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
+| [Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/product-overview/what-is-qoder-cli-cn) | `qoderclicn` | Qoder CN ACP coding agent |
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
@@ -227,6 +228,8 @@ Agent-specific overrides:
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
+| `MULTICA_QODERCLICN_PATH` | Custom path to the `qoderclicn` binary |
+| `MULTICA_QODERCLICN_MODEL` | Override the Qoder CN model used |
 | `MULTICA_TRAECLI_PATH` | Custom path to the `traecli` binary |
 | `MULTICA_TRAECLI_MODEL` | Override the Trae model used (a model id from your logged-in traecli catalog, e.g. `Doubao-Seed-2.1-Pro`) |
 | `MULTICA_GROK_PATH` | Custom path to the `grok` binary (defaults to `grok` on PATH; often `~/.grok/bin/grok`) |
@@ -237,7 +240,7 @@ Agent-specific overrides:
 
 If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
 
-The daemon launches Qoder as `qodercli --yolo --acp`, matching Qoder’s ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
+The daemon launches Qoder and Qoder CN as `qodercli --yolo --acp` and `qoderclicn --yolo --acp`, respectively, matching their ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`. It writes the task brief to `QWEN.md`; when an agent has managed `mcp_config`, the daemon writes a 0600 per-run JSON file and passes it through `--mcp-config <path>`, then removes it after the process exits. A null config preserves Qwen Code native MCP settings.
 
 

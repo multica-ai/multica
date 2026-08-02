@@ -37,6 +37,12 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -1461,7 +1467,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    subscribers, isSubscribed, subscriptionReason,
+    toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    unsubscribeFromSubtree: handleUnsubscribeSubtree,
   } = useIssueSubscribers(id, user?.id);
 
   // Token usage
@@ -2064,7 +2072,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
-      {/* Details */}
+      {/* Execution log — active runs + collapsed past runs. Self-contained;
+          owns its own collapse state and WS subscriptions. Hides itself
+          when there are no runs to show. */}
+      <ExecutionLogSection issueId={id} />
+
+      {/* Details — creator and timestamps. Sits below the execution log
+          because it is the least-read block in the sidebar: the values
+          never change once the issue exists, while the log above it is
+          what people actually come here to check. */}
       <div>
         <button
           type="button"
@@ -2087,11 +2103,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </PropRow>
         </div>}
       </div>
-
-      {/* Execution log — active runs + collapsed past runs. Self-contained;
-          owns its own collapse state and WS subscriptions. Hides itself
-          when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
@@ -2617,13 +2628,47 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <h2 className="text-title-sm font-semibold">{t(($) => $.detail.activity_section)}</h2>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleSubscribe}
-                  className="text-caption text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {isSubscribed ? t(($) => $.detail.unsubscribe) : t(($) => $.detail.subscribe)}
-                </button>
+                {/* A delegated subscription is one the user never opted into
+                    by hand — their agent created this issue for them. Saying
+                    so is what keeps it from reading as the product quietly
+                    adding them to things (MUL-5483). */}
+                {isSubscribed && subscriptionReason === "delegated" && (
+                  <Tooltip>
+                    {/* Quiet surface, not plain body text: this is metadata
+                        explaining a state, and must not read as a second
+                        action sitting next to Unsubscribe. Uses the shared
+                        caption role rather than an ad-hoc size (MUL-5451). */}
+                    <TooltipTrigger className="cursor-default rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground">
+                      {t(($) => $.detail.delegated_subscription_badge)}
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-64">
+                      {t(($) => $.detail.delegated_subscription_hint)}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                {isSubscribed ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="text-caption text-muted-foreground hover:text-foreground transition-colors">
+                      {t(($) => $.detail.unsubscribe)}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={handleToggleSubscribe}>
+                        {t(($) => $.detail.unsubscribe_this)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={handleUnsubscribeSubtree}>
+                        {t(($) => $.detail.unsubscribe_subtree)}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleToggleSubscribe}
+                    className="text-caption text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {t(($) => $.detail.subscribe)}
+                  </button>
+                )}
                 <Popover>
                   <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
                     {subscribers.length > 0 ? (

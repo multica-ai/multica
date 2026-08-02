@@ -329,7 +329,7 @@ func main() {
 	// Order matters: subscriber listeners must register BEFORE notification listeners.
 	// The notification listener queries the subscriber table to determine recipients,
 	// so subscribers must be written first within the same synchronous event dispatch.
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 

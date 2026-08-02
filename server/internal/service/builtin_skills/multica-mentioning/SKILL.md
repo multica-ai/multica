@@ -32,6 +32,15 @@ So the link target is a real entity UUID (or `all`), never a display name. The
 label between the brackets is free text — that is where the human-readable name
 goes.
 
+One `mention://` form deliberately sits OUTSIDE this parser:
+`[Label](mention://project/<uuid>)`. `project` is absent from the type group
+above, so the backend never parses it and it can enqueue nothing — it is a
+render-only link every client makes navigable (a chip on web and desktop, an
+ordinary link that opens the project on tap on mobile). That is the whole point:
+a project reference should never be able to start a run. Use it freely to point
+at a project (see the multica-projects-and-resources skill); everything else in
+this document is about the four types (plus `all`) the parser does recognize.
+
 ## Step 1 — look up the UUID with `--output json`
 
 A name is not a UUID. Look the UUID up first, from the matching list command:

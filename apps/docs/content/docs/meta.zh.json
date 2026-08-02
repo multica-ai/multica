@@ -43,6 +43,7 @@
     "desktop-app",
     "mobile-app",
     "---自托管---",
+    "security-model",
     "environment-variables",
     "auth-setup",
     "troubleshooting",

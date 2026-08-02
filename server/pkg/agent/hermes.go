@@ -675,26 +675,45 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 // may deliver the final agent_message_chunk after the response; closing stdin
 // or cancelling immediately at that boundary loses the user-visible answer.
 func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(hermesNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(hermesReaderDrainGrace)
-	defer hard.Stop()
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, hermesNotificationQuietTime, hermesReaderDrainGrace)
+}
+
+// acpNotificationQuietTime is the default lull the shared drain waits out
+// before concluding an ACP agent has stopped emitting notifications. It is a
+// protocol-level heuristic rather than a per-backend trait, so backends that
+// have no reason to differ share it; the hard bound stays per-backend.
+const acpNotificationQuietTime = 250 * time.Millisecond
+
+// waitForACPNotificationQuiescence gives the shared ACP stdout reader a
+// bounded chance to consume notifications a backend may emit just after its
+// session/prompt response returns. Closing stdin and cancelling the context at
+// the response boundary otherwise races the reader and silently truncates the
+// final text or usage update.
+//
+// It returns as soon as any of these happens, so an agent that holds stdout
+// open forever cannot stall the turn: no notification arrived for quiet, the
+// reader finished, hard elapsed, or ctx was cancelled.
+func waitForACPNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}, quiet, hard time.Duration) {
+	quietTimer := time.NewTimer(quiet)
+	defer quietTimer.Stop()
+	hardTimer := time.NewTimer(hard)
+	defer hardTimer.Stop()
 
 	for {
 		select {
 		case <-activity:
-			if !quiet.Stop() {
+			if !quietTimer.Stop() {
 				select {
-				case <-quiet.C:
+				case <-quietTimer.C:
 				default:
 				}
 			}
-			quiet.Reset(hermesNotificationQuietTime)
-		case <-quiet.C:
+			quietTimer.Reset(quiet)
+		case <-quietTimer.C:
 			return
 		case <-readerDone:
 			return
-		case <-hard.C:
+		case <-hardTimer.C:
 			return
 		case <-ctx.Done():
 			return

@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func createDaemonTestRepo(t *testing.T) string {
@@ -321,6 +322,65 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("error = %v, want missing CODEX_HOME", err)
 		}
 	})
+}
+
+// TestCodexTaskShellEnvInheritsRealHome pins the MUL-5578 contract at the layer
+// where the daemon assembles the environment a Codex task actually launches
+// with: HOME and the XDG base dirs reach the task's shell tools from the
+// *inherited* daemon process environment, so `gh`, `aws`, `kubectl`, and npm
+// resolve the daemon user's real config inside a task.
+//
+// This guards the pass-through, not runTask's decision not to inject a HOME of
+// its own — that decision lives inline in runTask and has no unit seam.
+func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
+	t.Parallel()
+
+	codexHome := t.TempDir()
+	inherited := []string{
+		"HOME=/home/daemon-user",
+		"XDG_CONFIG_HOME=/home/daemon-user/.config",
+		"XDG_CACHE_HOME=/home/daemon-user/.cache",
+		"XDG_DATA_HOME=/home/daemon-user/.local/share",
+		"XDG_STATE_HOME=/home/daemon-user/.local/state",
+		"PATH=/usr/local/bin:/usr/bin",
+	}
+	// What runTask layers on top for a Codex task: task identity plus the
+	// task-scoped CODEX_HOME, and — since MUL-5578 — no HOME/XDG entry.
+	explicit := map[string]string{
+		"CODEX_HOME":         codexHome,
+		"MULTICA_TOKEN":      "mat_task",
+		"MULTICA_SERVER_URL": "https://task.example",
+	}
+
+	if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, explicit, nil, slog.Default()); err != nil {
+		t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	var parsed struct {
+		ShellEnvironmentPolicy struct {
+			IncludeOnly []string `toml:"include_only"`
+		} `toml:"shell_environment_policy"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse config.toml: %v\n%s", err, data)
+	}
+	include := parsed.ShellEnvironmentPolicy.IncludeOnly
+
+	// The daemon user's real home must survive into the task's shell tools, or
+	// gh / aws / kubectl / npm stop resolving their config there.
+	for _, want := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		if !slices.Contains(include, want) {
+			t.Errorf("include_only missing %q, got %v", want, include)
+		}
+	}
+	// CODEX_HOME is the one home-shaped variable the daemon does own.
+	if !slices.Contains(include, "CODEX_HOME") {
+		t.Errorf("include_only missing CODEX_HOME, got %v", include)
+	}
 }
 
 func TestCodexShellAuthorizedCustomEnvNamesUsesDaemonBlocklist(t *testing.T) {
@@ -2372,7 +2432,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "traecli", "pi", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "qoderclicn", "traecli", "pi", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()

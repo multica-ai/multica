@@ -565,31 +565,7 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 // session/prompt response. Without this window, cancelling the process at the
 // response boundary can truncate the final text or usage update.
 func waitForGrokNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(grokNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(grokReaderDrainGrace)
-	defer hard.Stop()
-
-	for {
-		select {
-		case <-activity:
-			if !quiet.Stop() {
-				select {
-				case <-quiet.C:
-				default:
-				}
-			}
-			quiet.Reset(grokNotificationQuietTime)
-		case <-quiet.C:
-			return
-		case <-readerDone:
-			return
-		case <-hard.C:
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, grokNotificationQuietTime, grokReaderDrainGrace)
 }
 
 // envHasNonEmpty reports whether an `os/exec`-style env slice

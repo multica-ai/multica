@@ -146,10 +146,7 @@
   "chat": {
     "floating_title": "悬浮窗",
     "floating_label": "悬浮聊天窗",
-    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。",
-    "quick_actions_title": "推荐操作",
-    "quick_actions_label": "生成推荐操作",
-    "quick_actions_hint": "智能体每次回复后自动生成最多三个后续操作建议。关闭后，本设备发送的消息不再触发生成；已有的建议仍会显示。"
+    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
   },
   "issue": {
     "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
@@ -257,10 +254,9 @@
   },
   "labels": {
     "title": "标签",
-    "description": "分别管理工作区中用于整理 issue、智能体和 skill 的标签。三类标签相互独立。",
+    "description": "分别管理工作区中用于整理 issue 和 skill 的标签。两类标签相互独立。",
     "scopes": {
       "issue": "Issue",
-      "agent": "智能体",
       "skill": "Skill"
     },
     "search_placeholder": "按名称或描述筛选...",

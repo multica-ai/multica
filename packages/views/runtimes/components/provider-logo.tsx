@@ -328,6 +328,7 @@ export function ProviderLogo({
     case "kiro":
       return <KiroLogo className={className} />;
     case "qoder":
+    case "qoderclicn":
       return <QoderLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;

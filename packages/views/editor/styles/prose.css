@@ -377,13 +377,18 @@
   text-decoration-color: var(--brand);
 }
 
-/* Issue mention cards — inline cards that sit within text flow */
-.rich-text-editor a.issue-mention {
+/* Mention chips — inline cards that sit within text flow. The chip already
+   carries its own affordance (border, icon, hover background), so the generic
+   link color and underline above would be a second, competing one drawn
+   through the card. Every chip-shaped mention belongs here. */
+.rich-text-editor a.issue-mention,
+.rich-text-editor a.project-mention {
   color: inherit;
   text-decoration: none;
 }
 
-.rich-text-editor a.issue-mention:hover {
+.rich-text-editor a.issue-mention:hover,
+.rich-text-editor a.project-mention:hover {
   text-decoration: none;
 }
 

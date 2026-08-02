@@ -259,7 +259,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    quick_actions_disabled, regenerate_quick_actions_for, fire_at
+    fire_at
 )
 VALUES (
     $1, $2, NULL,
@@ -273,30 +273,26 @@ VALUES (
     $12,
     $13,
     $14,
-    COALESCE($15::boolean, FALSE),
-    $16,
     $6::timestamptz
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
 `
 
 type CreateChatTaskParams struct {
-	AgentID                   pgtype.UUID        `json:"agent_id"`
-	RuntimeID                 pgtype.UUID        `json:"runtime_id"`
-	Priority                  int32              `json:"priority"`
-	ChatSessionID             pgtype.UUID        `json:"chat_session_id"`
-	InitiatorUserID           pgtype.UUID        `json:"initiator_user_id"`
-	FireAt                    pgtype.Timestamptz `json:"fire_at"`
-	OriginatorUserID          pgtype.UUID        `json:"originator_user_id"`
-	AccountableUserID         pgtype.UUID        `json:"accountable_user_id"`
-	ForceFreshSession         pgtype.Bool        `json:"force_fresh_session"`
-	RuntimeMcpOverlay         []byte             `json:"runtime_mcp_overlay"`
-	RuntimeConnectedApps      []byte             `json:"runtime_connected_apps"`
-	OriginatorSource          pgtype.Text        `json:"originator_source"`
-	TriggerEvidenceKind       pgtype.Text        `json:"trigger_evidence_kind"`
-	TriggerEvidenceRefID      pgtype.UUID        `json:"trigger_evidence_ref_id"`
-	QuickActionsDisabled      pgtype.Bool        `json:"quick_actions_disabled"`
-	RegenerateQuickActionsFor pgtype.UUID        `json:"regenerate_quick_actions_for"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	RuntimeID            pgtype.UUID        `json:"runtime_id"`
+	Priority             int32              `json:"priority"`
+	ChatSessionID        pgtype.UUID        `json:"chat_session_id"`
+	InitiatorUserID      pgtype.UUID        `json:"initiator_user_id"`
+	FireAt               pgtype.Timestamptz `json:"fire_at"`
+	OriginatorUserID     pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID    pgtype.UUID        `json:"accountable_user_id"`
+	ForceFreshSession    pgtype.Bool        `json:"force_fresh_session"`
+	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte             `json:"runtime_connected_apps"`
+	OriginatorSource     pgtype.Text        `json:"originator_source"`
+	TriggerEvidenceKind  pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID pgtype.UUID        `json:"trigger_evidence_ref_id"`
 }
 
 // The chat sender (initiator) is a direct_human originator and accountable;
@@ -318,8 +314,6 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		arg.OriginatorSource,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
-		arg.QuickActionsDisabled,
-		arg.RegenerateQuickActionsFor,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(

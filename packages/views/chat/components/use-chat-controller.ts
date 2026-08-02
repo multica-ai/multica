@@ -539,9 +539,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       // the draft for retry (ChatInput never cleared it).
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
-          quickActionsEnabled: useChatStore.getState().quickActionsEnabled,
-        });
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
         // Invoke permission can be revoked mid-session; the send is refused with

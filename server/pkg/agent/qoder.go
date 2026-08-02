@@ -24,16 +24,24 @@ var qoderBlockedArgs = map[string]blockedArgMode{
 	"--yolo": blockedStandalone,
 }
 
-// qoderBackend implements Backend by spawning `qodercli --yolo --acp` and
-// communicating via the ACP (Agent Communication Protocol) JSON-RPC 2.0
-// transport over stdin/stdout.
+// qoderBackend implements Backend for both Qoder CLI binaries by spawning
+// `<binary> --yolo --acp` and communicating via the ACP (Agent Communication
+// Protocol) JSON-RPC 2.0 transport over stdin/stdout.
 //
 // Qoder CLI uses global flags (`--yolo`, `--acp`), not an `acp` subcommand. We
 // reuse hermesClient like Hermes/Kimi/Kiro and mirror their streaming gate so
 // history replay flushed during session/setup does not corrupt the streamed
 // output or leave the UI stuck on a stale assistant chunk.
 type qoderBackend struct {
-	cfg Config
+	cfg               Config
+	defaultExecutable string
+}
+
+func qoderDefaultBinary(providerType string) string {
+	if providerType == "qoderclicn" {
+		return "qoderclicn"
+	}
+	return "qodercli"
 }
 
 var qoderReaderDrainGrace = 2 * time.Second
@@ -70,10 +78,10 @@ func (s *qoderMessageStream) close() {
 func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "qodercli"
+		execPath = b.defaultExecutable
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("qoder executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.defaultExecutable, execPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects) into
@@ -148,6 +156,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -156,6 +165,12 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -371,6 +386,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, qoderReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)

@@ -124,12 +124,6 @@ type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
 	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
-	// QuickActionsPending declares that this daemon will follow up with a
-	// quick-actions supplement for this chat turn (the suggestion pass runs
-	// in the background after this callback). Per-turn capability signal:
-	// absent on non-chat tasks, skipped turns, and older daemons — so a
-	// false/missing flag means clients must not wait for suggestions.
-	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
 }
 
 // ChatQuickActionsPayload supplements one completed chat turn with the

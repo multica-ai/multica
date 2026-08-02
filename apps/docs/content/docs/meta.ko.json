@@ -43,6 +43,7 @@
     "desktop-app",
     "mobile-app",
     "---자체 호스팅---",
+    "security-model",
     "environment-variables",
     "auth-setup",
     "troubleshooting",

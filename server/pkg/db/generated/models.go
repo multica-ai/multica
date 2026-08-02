@@ -696,11 +696,13 @@ type IssueReaction struct {
 }
 
 type IssueSubscriber struct {
-	IssueID   pgtype.UUID        `json:"issue_id"`
-	UserType  string             `json:"user_type"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Reason    string             `json:"reason"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	UserType       string             `json:"user_type"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	Reason         string             `json:"reason"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UnsubscribedAt pgtype.Timestamptz `json:"unsubscribed_at"`
+	OptOutScope    pgtype.Text        `json:"opt_out_scope"`
 }
 
 type IssueToLabel struct {

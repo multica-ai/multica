@@ -130,7 +130,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
-// Qoder:       skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see docs.qoder.com/cli/Skills.md)
+// Qoder/Qoder CN: skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see the provider docs)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
@@ -385,9 +385,10 @@ func skillsDirPath(workDir, provider string) string {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		return filepath.Join(workDir, ".kiro", "skills")
-	case "qoder":
-		// Qoder CLI discovers project-level skills under .qoder/skills/.
-		// See https://docs.qoder.com/cli/Skills.md
+	case "qoder", "qoderclicn":
+		// Both Qoder CLI editions discover project-level skills under
+		// .qoder/skills/. Their user-level roots differ, which is handled by
+		// listRuntimeLocalSkills.
 		return filepath.Join(workDir, ".qoder", "skills")
 	case "qwen":
 		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.

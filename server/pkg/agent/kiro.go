@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+// kiroReaderDrainGrace bounds how long the turn waits for trailing ACP
+// notifications after the session/prompt response. A var, not a const, so
+// tests can shorten it. Mirrors qoderReaderDrainGrace / traecliReaderDrainGrace.
+var kiroReaderDrainGrace = 2 * time.Second
+
 // kiroBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol subcommand,
 // and --trust-all-tools covers Kiro's CLI-level tool gate while
@@ -134,6 +139,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var lastFinishingResultStatus string // "", "completed", or "failed"
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -142,6 +148,12 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -430,6 +442,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kiroReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)

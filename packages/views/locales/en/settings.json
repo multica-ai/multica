@@ -146,10 +146,7 @@
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab.",
-    "quick_actions_title": "Suggested follow-ups",
-    "quick_actions_label": "Generate suggested follow-ups",
-    "quick_actions_hint": "Generate up to three follow-up suggestions after each agent reply. When off, messages sent from this device no longer trigger generation; existing suggestions stay visible."
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
   },
   "issue": {
     "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
@@ -258,10 +255,9 @@
   },
   "labels": {
     "title": "Labels",
-    "description": "Manage the separate label catalogs used to organize issues, agents, and skills in this workspace.",
+    "description": "Manage the separate label catalogs used to organize issues and skills in this workspace.",
     "scopes": {
       "issue": "Issues",
-      "agent": "Agents",
       "skill": "Skills"
     },
     "search_placeholder": "Filter by name or description...",

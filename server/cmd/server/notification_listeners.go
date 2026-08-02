@@ -19,7 +19,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -75,22 +74,77 @@ var parentBubbleNotifTypes = map[string]bool{
 	"status_changed": true,
 }
 
+// delegatedAlwaysNotifTypes are the events a DELEGATED subscriber (reason=
+// 'delegated' — an agent created this issue on their behalf, MUL-5483) receives
+// unconditionally: they are either addressed at the human directly, or they are
+// exceptions that stall the work until a human looks.
+var delegatedAlwaysNotifTypes = map[string]bool{
+	"mentioned":     true,
+	"task_failed":   true,
+	"agent_blocked": true,
+}
+
+// delegatedStatusNotify are the statuses whose ARRIVAL is worth an inbox item
+// for a delegated subscriber — someone whose agent filed this issue on their
+// behalf.
+//
+// in_review is the important one: in Multica's agent flow an agent parks
+// completed work in in_review, so that is the dominant "this needs you now"
+// transition, not done.
+//
+// Everything absent from this set is churn for someone who never asked for this
+// specific issue: routine forward progress (todo, in_progress), deliberate
+// parking (backlog), comment traffic, and field edits.
+var delegatedStatusNotify = map[string]bool{
+	"in_review": true,
+	"done":      true,
+	"cancelled": true,
+	"blocked":   true,
+}
+
+// deliverToSubscriber reports whether a subscriber row should receive this
+// notification type. Direct subscriptions (creator / assignee / commenter /
+// mentioned / manual / autopilot) are unchanged — they opted in to this issue,
+// explicitly or by acting on it. Only the delegated tier is narrowed, and only
+// to drop churn.
+//
+// A child finishing is NOT churn: "sub-issue X is ready for review" is exactly
+// the signal a delegated watcher needs, and there is one per piece of real work.
+// An earlier cut suppressed those and synthesized a single "the whole batch
+// finished" roll-up from sibling state instead. That was both the wrong shape
+// (see the MUL-5483 thread) and redundant: the human is subscribed to the PARENT
+// as well, so when the agent moves the parent to in_review/done that transition
+// delivers here — which is the natural "the tree is done" signal. Deriving it
+// from children was reinventing a notification the platform already sends.
+func deliverToSubscriber(reason, notifType, issueStatus string) bool {
+	if reason != "delegated" {
+		return true
+	}
+	if delegatedAlwaysNotifTypes[notifType] {
+		return true
+	}
+	if notifType != "status_changed" {
+		return false
+	}
+	return delegatedStatusNotify[issueStatus]
+}
+
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -230,7 +284,7 @@ func notifySubscribers(
 	body string,
 	details []byte,
 ) {
-	notified := notifyIssueSubscribers(ctx, queries, bus,
+	notified, tierSuppressed := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, details)
 
@@ -251,11 +305,21 @@ func notifySubscribers(
 	}
 
 	// Merge already-notified IDs into exclude set for parent subscribers.
-	parentExclude := make(map[string]bool, len(exclude)+len(notified))
+	parentExclude := make(map[string]bool, len(exclude)+len(notified)+len(tierSuppressed))
 	for id := range exclude {
 		parentExclude[id] = true
 	}
 	for id := range notified {
+		parentExclude[id] = true
+	}
+	// Recipients the delegated tier just filtered out for THIS child must not
+	// get the same event smuggled back in through the parent's subscriber list.
+	// The common shape is exactly that: the human directly created the parent
+	// (reason='creator', full delivery) while their agent filed the children
+	// (reason='delegated', reduced). Without this the tier suppresses nothing
+	// in the one case it exists for — an agent-built tree under a parent the
+	// human is watching (MUL-5483).
+	for id := range tierSuppressed {
 		parentExclude[id] = true
 	}
 
@@ -271,7 +335,11 @@ func notifySubscribers(
 // subscriberIssueID, but creates inbox items pointing to targetIssueID.
 // This allows querying subscribers from a parent issue while the notification
 // links to the sub-issue where the change actually occurred.
-// Returns the set of member IDs that were notified.
+//
+// Returns two sets of member IDs: those that were notified, and those the
+// delegated delivery tier deliberately filtered out. The caller propagates the
+// second set into the parent bubble so a suppressed event cannot be
+// re-delivered through an ancestor subscription (see notifySubscribers).
 func notifyIssueSubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -287,14 +355,15 @@ func notifyIssueSubscribers(
 	title string,
 	body string,
 	details []byte,
-) map[string]bool {
+) (map[string]bool, map[string]bool) {
 	notified := map[string]bool{}
+	tierSuppressed := map[string]bool{}
 
 	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(subscriberIssueID))
 	if err != nil {
 		slog.Error("failed to list subscribers for notification",
 			"issue_id", subscriberIssueID, "error", err)
-		return notified
+		return notified, tierSuppressed
 	}
 
 	// Batch-load notification preferences for all member subscribers.
@@ -329,6 +398,13 @@ func notifyIssueSubscribers(
 			continue
 		}
 
+		// Delegated subscriptions deliver a narrower event set than direct
+		// ones — see deliverToSubscriber.
+		if !deliverToSubscriber(sub.Reason, notifType, issueStatus) {
+			tierSuppressed[subID] = true
+			continue
+		}
+
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(workspaceID),
 			RecipientType: "member",
@@ -360,7 +436,7 @@ func notifyIssueSubscribers(
 		})
 	}
 
-	return notified
+	return notified, tierSuppressed
 }
 
 // notifyDirect creates an inbox item for a specific recipient. Skips if the
@@ -597,8 +673,16 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		prevDescription, _ := payload["prev_description"].(*string)
 
 		if assigneeChanged {
-			// Build structured details for assignee change
-			detailsMap := map[string]any{}
+			// Build structured details for assignee change.
+			//
+			// map[string]string, not map[string]any: every client parses inbox
+			// `details` as a string->string map, and because the inbox endpoint
+			// returns an ARRAY, one non-string value fails the whole parse and
+			// blanks the entire list rather than one row. `any` let that be a
+			// convention a reviewer had to notice; the concrete type makes it a
+			// compile error. This is the only details map in this file that was
+			// not already string-typed.
+			detailsMap := map[string]string{}
 			if prevAssigneeType != nil {
 				detailsMap["prev_assignee_type"] = *prevAssigneeType
 			}

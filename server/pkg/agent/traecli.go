@@ -165,6 +165,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -173,6 +174,12 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -379,6 +386,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, traecliReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)

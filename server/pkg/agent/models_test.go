@@ -408,6 +408,21 @@ func TestListModelsQoderWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsQoderCNWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "qoderclicn")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "qoderclicn", missingAgentExecutable(t, "qoderclicn"))
+	if err != nil {
+		t.Fatalf("ListModels(qoderclicn) error: %v", err)
+	}
+	if got.Models == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")

@@ -495,9 +495,7 @@ export function ChatWindow() {
       // the draft for retry (ChatInput never cleared it).
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
-          quickActionsEnabled: useChatStore.getState().quickActionsEnabled,
-        });
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
         toast.error(t(($) => $.input.send_failed_toast));

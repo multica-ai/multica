@@ -118,6 +118,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "kiro",
   "antigravity",
   "qoder",
+  "qoderclicn",
   "traecli",
   "grok",
   "qwen",

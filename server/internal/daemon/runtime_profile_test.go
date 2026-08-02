@@ -177,6 +177,30 @@ func TestRegisterRuntimes_IncludesBuiltInQwen(t *testing.T) {
 	}
 }
 
+func TestRegisterRuntimes_IncludesBuiltInQoderCN(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"qoderclicn": {Path: "/usr/bin/true", Command: "qoderclicn"},
+	}
+
+	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 {
+		t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	sent := fx.sentRuntimes[0]
+	if sent["type"] != "qoderclicn" || sent["name"] != "Qoder CN" || sent["version"] != "9.9.9" || sent["status"] != "online" {
+		t.Fatalf("registered Qoder CN runtime = %+v", sent)
+	}
+	if len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != "qoderclicn" {
+		t.Fatalf("register response = %+v", resp)
+	}
+}
+
 func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})

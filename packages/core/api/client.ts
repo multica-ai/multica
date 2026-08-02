@@ -410,6 +410,20 @@ export class PreviewUnsupportedError extends Error {
  */
 export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
 
+/**
+ * Body shared by both unsubscribe endpoints: an omitted target means "the
+ * caller", which the server resolves from the request actor.
+ */
+function subscriberTarget(
+  userId?: string,
+  userType?: string,
+): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (userId) body.user_id = userId;
+  if (userType) body.user_type = userType;
+  return body;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -1060,13 +1074,37 @@ export class ApiClient {
     });
   }
 
-  async unsubscribeFromIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
-    const body: Record<string, string> = {};
-    if (userId) body.user_id = userId;
-    if (userType) body.user_type = userType;
+  async unsubscribeFromIssue(
+    issueId: string,
+    userId?: string,
+    userType?: string,
+  ): Promise<void> {
     await this.fetch(`/api/issues/${issueId}/unsubscribe`, {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify(subscriberTarget(userId, userType)),
+    });
+  }
+
+  /**
+   * Leaves this issue and every descendant, and keeps future children of the
+   * tree from re-subscribing the user — the escape hatch for an agent-built
+   * tree that keeps growing (MUL-5483).
+   *
+   * Deliberately its own endpoint rather than a `subtree` flag on
+   * `unsubscribeFromIssue`. Web/desktop staging ships on merge while the
+   * backend is deployed by hand, so this client regularly runs against an
+   * older server; one that predates the feature would ignore an unknown body
+   * field, unsubscribe only the root, and still answer 200. A distinct path
+   * 404s there, which surfaces as a failed mutation instead of a silent lie.
+   */
+  async unsubscribeFromIssueSubtree(
+    issueId: string,
+    userId?: string,
+    userType?: string,
+  ): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unsubscribe/subtree`, {
+      method: "POST",
+      body: JSON.stringify(subscriberTarget(userId, userType)),
     });
   }
 
@@ -2317,20 +2355,13 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
-    options?: { quickActionsEnabled?: boolean },
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
       attachment_ids?: string[];
-      quick_actions_enabled?: boolean;
     } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
-    }
-    // Only an explicit false is sent: absent means enabled server-side, so
-    // older payload shapes keep generating suggestions unchanged.
-    if (options?.quickActionsEnabled === false) {
-      body.quick_actions_enabled = false;
     }
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
