@@ -130,10 +130,75 @@ func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgty
 		taskID, workspaceID, agentID, tool, serverWildcard,
 	).Scan(&expiresAt, &contains)
 	if errors.Is(err, pgx.ErrNoRows) {
+		var storedWorkspaceID, storedAgentID pgtype.UUID
+		identityErr := s.db.QueryRow(ctx, `
+			SELECT workspace_id, agent_id
+			FROM cerebro_task_mandate
+			WHERE task_id=$1`, taskID,
+		).Scan(&storedWorkspaceID, &storedAgentID)
+		if errors.Is(identityErr, pgx.ErrNoRows) {
+			return ErrMissing
+		}
+		if identityErr != nil {
+			return identityErr
+		}
+		if storedWorkspaceID != workspaceID || storedAgentID != agentID {
+			return ErrIdentityMismatch
+		}
 		return ErrMissing
 	}
 	if err != nil {
 		return err
+	}
+	if !expiresAt.After(s.now()) {
+		return ErrExpired
+	}
+	if !contains {
+		return ErrToolDeny
+	}
+	return nil
+}
+
+// AuthorizeClaimGeneration applies the same fresh-read authorization check as
+// Authorize while requiring the caller's immutable claim generation. Legacy
+// rows remain readable through Authorize, but cannot be confused with a
+// finalized generation by a generation-aware caller.
+func (s *Store) AuthorizeClaimGeneration(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, generation int64, tool string) error {
+	if IsSelfCapabilityLookup(tool) {
+		return nil
+	}
+	if s == nil || s.db == nil || !taskID.Valid || generation <= 0 {
+		return ErrMissing
+	}
+	var (
+		storedWorkspaceID, storedAgentID pgtype.UUID
+		storedGeneration                 int64
+		lifecycle                        ClaimLifecycleState
+		expiresAt                        time.Time
+		contains                         bool
+		identityMatches                  bool
+		generationMatches                bool
+	)
+	serverWildcard := MCPServerWildcard(tool)
+	err := s.db.QueryRow(ctx, `
+		SELECT workspace_id, agent_id, claim_generation, lifecycle_state,
+		       expires_at, allowed_tools ? $5 OR ($6 <> '' AND allowed_tools ? $6),
+		       workspace_id = $2 AND agent_id = $3, claim_generation = $4
+		FROM cerebro_task_mandate
+		WHERE task_id=$1`,
+		taskID, workspaceID, agentID, generation, tool, serverWildcard,
+	).Scan(&storedWorkspaceID, &storedAgentID, &storedGeneration, &lifecycle, &expiresAt, &contains, &identityMatches, &generationMatches)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrMissing
+	}
+	if err != nil {
+		return err
+	}
+	if !identityMatches || storedWorkspaceID != workspaceID || storedAgentID != agentID {
+		return ErrIdentityMismatch
+	}
+	if !generationMatches || storedGeneration != generation || lifecycle != ClaimLifecycleFinalized {
+		return ErrStaleClaimGeneration
 	}
 	if !expiresAt.After(s.now()) {
 		return ErrExpired

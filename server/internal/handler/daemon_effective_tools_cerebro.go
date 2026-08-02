@@ -119,6 +119,15 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 	if err != nil {
 		return nil, nil, fmt.Errorf("cerebro effective tools: parse agent id %q: %w", agent.ID, err)
 	}
+	// A failed runtime inventory must be visible at claim time. If the daemon
+	// could not measure a provider and no curated fallback exists, issuing an
+	// empty finalized mandate would turn a discovery outage into a silent total
+	// lockout. The claim retries instead, while the runtime capability snapshot
+	// remains explicitly marked not_measured for operators.
+	caps := normalizedRuntimeCapabilities(runtime.Provider, runtime.Capabilities, runtime.ToolsConfig)
+	if method, _ := caps["discovery_method"].(string); method == "not_measured" && len(anyStringSlice(caps["tools"])) == 0 {
+		return nil, nil, fmt.Errorf("cerebro effective tools: provider inventory not measured for %q", runtime.Provider)
+	}
 
 	// Actor layers (FIR-2441). The agent owner and the delegated member (the task
 	// initiator, on_behalf_of) are two DISTINCT policy layers — matching the claim-

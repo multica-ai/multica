@@ -21,6 +21,7 @@ import (
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
@@ -115,6 +116,10 @@ type FirtalGatewayExecutor struct {
 type taskMandateStore interface {
 	Issue(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time) error
 	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
+}
+
+type taskMandateFinalizer interface {
+	FinalizeTaskClaim(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time, string) (taskmandate.ClaimGeneration, error)
 }
 
 // SetPlatformActionGate wires the always-on server floor for Multica platform mutations.
@@ -963,7 +968,12 @@ func (e *FirtalGatewayExecutor) finalizeTaskMandate(ctx context.Context, meta Ga
 	for _, tool := range tools {
 		toolNames = append(toolNames, tool.Name())
 	}
-	return e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, time.Now().Add(2*time.Hour)) == nil
+	expiresAt := time.Now().Add(2 * time.Hour)
+	if finalizer, ok := e.taskMandates.(taskMandateFinalizer); ok {
+		_, err := finalizer.FinalizeTaskClaim(ctx, taskID, workspaceID, agentID, toolNames, expiresAt, "firtal-gateway:v1")
+		return err == nil
+	}
+	return e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, expiresAt) == nil
 }
 
 // filterConnectionDenied drops tools whose workspace-connection verdict is Deny,
@@ -1161,7 +1171,11 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			useRegistry = true
 		}
 	}
-	if !e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, enabledTools) {
+	// Registry transports may discover a provider-compatible core fallback only
+	// after the first tool request is accepted. Their finalization happens inside
+	// runGatewayCompatRegistryToolLoop after that exact list is known. Other
+	// transports have no such retry surface and finalize here.
+	if !useRegistry && !e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, enabledTools) {
 		anthropicTools = nil
 		enabledTools = nil
 		activeRegistry = nil
@@ -1568,6 +1582,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	}
 
 	retriedCoreTools := false
+	mandateFinalized := false
 	for round := 0; round < maxRounds; round++ {
 		completion, err := e.completeGatewayWithTools(ctx, cfg, agent.Model.String, history, toolDefs, meta)
 		if err != nil {
@@ -1591,6 +1606,12 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				}
 			}
 			return GatewayCompletion{}, err
+		}
+		if !mandateFinalized {
+			if !e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, tools) {
+				return GatewayCompletion{}, errors.New("firtal gateway task mandate finalization failed")
+			}
+			mandateFinalized = true
 		}
 		accumulate(completion)
 		// FIR-2639: compound the prune saving — this call's prompt omitted every

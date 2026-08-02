@@ -3,6 +3,7 @@ package taskmandate
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -39,6 +40,41 @@ func TestContractInputCarriesTaskAndSourceIdentity(t *testing.T) {
 	}
 	if got := input.SourceVersion(); got != "inventory:v7/discovery:v3" {
 		t.Fatalf("SourceVersion = %q, want exact source version", got)
+	}
+	if got := input.DiscoveryVersion(); got != "discovery:v3" {
+		t.Fatalf("DiscoveryVersion = %q, want parsed discovery version", got)
+	}
+}
+
+func TestNewClaimInputCarriesMCPDiscoveryVersion(t *testing.T) {
+	t.Parallel()
+	input, err := NewClaimInput(
+		contractInputUUID(1),
+		contractInputUUID(2),
+		contractInputUUID(3),
+		[]string{"mcp__atlas__search", "tools:Read"},
+		nil,
+		"daemon-claim:v1",
+	)
+	if err != nil {
+		t.Fatalf("NewClaimInput: %v", err)
+	}
+	if got := input.DiscoveryVersion(); got == "" || !strings.HasPrefix(got, "mcp:sha256:") {
+		t.Fatalf("DiscoveryVersion = %q, want stable MCP content version", got)
+	}
+	withoutMCP, err := NewClaimInput(
+		contractInputUUID(1),
+		contractInputUUID(2),
+		contractInputUUID(3),
+		[]string{"tools:Read"},
+		nil,
+		"daemon-claim:v1",
+	)
+	if err != nil {
+		t.Fatalf("NewClaimInput without MCP: %v", err)
+	}
+	if got := withoutMCP.DiscoveryVersion(); got != "" {
+		t.Fatalf("non-MCP DiscoveryVersion = %q, want empty", got)
 	}
 }
 

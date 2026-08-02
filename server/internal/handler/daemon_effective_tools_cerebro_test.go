@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -129,6 +130,24 @@ func TestCerebroEffectiveToolsForClaimLocksInitialPolicyAndSessionIntersection(t
 	}
 	if containsString(mandate, "Bash") {
 		t.Fatalf("issued task mandate expanded after policy change: %v", mandate)
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimFailsWhenProviderInventoryWasNotMeasured(t *testing.T) {
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{},
+	}
+	runtime := db.AgentRuntime{
+		Provider:     "hermes",
+		Capabilities: []byte(`{"tools":[],"discovery_method":"not_measured"}`),
+	}
+	_, _, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(), runtime,
+		&TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"},
+		"agent", "",
+	)
+	if err == nil || !strings.Contains(err.Error(), "provider inventory not measured") {
+		t.Fatalf("provider discovery failure = %v, want visible finalization error", err)
 	}
 }
 

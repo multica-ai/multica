@@ -40,6 +40,7 @@ var (
 	ErrIdentityMismatch        = errors.New("task mandate identity mismatch")
 	ErrFinalizedGrantsChanged  = errors.New("task mandate finalized grants changed")
 	ErrStaleFinalizationWriter = errors.New("task mandate stale finalization writer")
+	ErrStaleClaimGeneration    = errors.New("task mandate stale claim generation")
 )
 
 // FinalizeClaim creates the task's single immutable generation. An identical
@@ -83,12 +84,12 @@ func (s *Store) FinalizeClaim(
 			claim_generation, producer, finalizer, lifecycle_state,
 			inventory_version, discovery_version, finalized_grant_digest
 		)
-		VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 'finalized', $8, NULL, $9)
+		VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 'finalized', $8, NULLIF($9, ''), $10)
 		ON CONFLICT (task_id) DO NOTHING
 		RETURNING claim_generation, producer, finalizer, lifecycle_state,
 		          inventory_version, discovery_version, finalized_grant_digest`,
 		taskID, workspaceID, agentID, rawTools, expiresAt,
-		producer, finalizer, sourceVersion, digest,
+		producer, finalizer, sourceVersion, input.DiscoveryVersion(), digest,
 	).Scan(
 		&generation.Generation,
 		&generation.Producer,
@@ -106,6 +107,65 @@ func (s *Store) FinalizeClaim(
 	}
 
 	return s.matchFinalizedClaim(ctx, input, producer, finalizer, digest, expiresAt)
+}
+
+// RenewClaim extends one finalized claim without changing its immutable
+// identity, generation, discovery/inventory versions, or grant digest.
+func (s *Store) RenewClaim(ctx context.Context, input ContractInput, generation int64, expiresAt time.Time) (ClaimGeneration, error) {
+	taskID, workspaceID, agentID := input.TaskIdentity()
+	if s == nil || s.db == nil || !taskID.Valid || !workspaceID.Valid || !agentID.Valid || generation <= 0 {
+		return ClaimGeneration{}, fmt.Errorf("task mandate: invalid renewal input")
+	}
+	expiresAt = expiresAt.UTC().Truncate(time.Microsecond)
+	if !expiresAt.After(s.now()) {
+		return ClaimGeneration{}, ErrExpired
+	}
+	digest, err := contractGrantDigest(input)
+	if err != nil {
+		return ClaimGeneration{}, err
+	}
+
+	var renewed ClaimGeneration
+	err = s.db.QueryRow(ctx, `
+		UPDATE cerebro_task_mandate
+		SET expires_at = $5
+		WHERE task_id = $1 AND workspace_id = $2 AND agent_id = $3
+		  AND claim_generation = $4
+		  AND lifecycle_state = 'finalized'
+		  AND inventory_version = $6
+		  AND (discovery_version = NULLIF($7, '') OR (discovery_version IS NULL AND $7 = ''))
+		  AND finalized_grant_digest = $8
+		RETURNING claim_generation, producer, finalizer, lifecycle_state,
+		          inventory_version, discovery_version, finalized_grant_digest`,
+		taskID, workspaceID, agentID, generation, expiresAt,
+		input.SourceVersion(), input.DiscoveryVersion(), digest,
+	).Scan(
+		&renewed.Generation,
+		&renewed.Producer,
+		&renewed.Finalizer,
+		&renewed.LifecycleState,
+		&renewed.InventoryVersion,
+		&renewed.DiscoveryVersion,
+		&renewed.FinalizedGrantDigest,
+	)
+	if err == nil {
+		return renewed, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return ClaimGeneration{}, err
+	}
+	return s.matchRenewalClaim(ctx, input, generation, digest)
+}
+
+// FinalizeTaskClaim is the narrow raw-tool compatibility seam used by claim
+// producers outside this package. It compiles exact callables into the same
+// immutable generation contract as direct FinalizeClaim callers.
+func (s *Store) FinalizeTaskClaim(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tools []string, expiresAt time.Time, sourceVersion string) (ClaimGeneration, error) {
+	input, err := NewClaimInput(taskID, workspaceID, agentID, tools, nil, sourceVersion)
+	if err != nil {
+		return ClaimGeneration{}, err
+	}
+	return s.FinalizeClaim(ctx, input, "task-claim", "task-claim", expiresAt)
 }
 
 func (s *Store) matchFinalizedClaim(
@@ -154,13 +214,61 @@ func (s *Store) matchFinalizedClaim(
 		generation.Producer == nil || *generation.Producer != producer ||
 		generation.Finalizer == nil || *generation.Finalizer != finalizer ||
 		generation.InventoryVersion == nil || *generation.InventoryVersion != input.SourceVersion() ||
-		generation.DiscoveryVersion != nil {
+		!sameOptionalString(generation.DiscoveryVersion, input.DiscoveryVersion()) {
 		return ClaimGeneration{}, ErrStaleFinalizationWriter
 	}
 	if generation.FinalizedGrantDigest == nil || *generation.FinalizedGrantDigest != digest {
 		return ClaimGeneration{}, ErrFinalizedGrantsChanged
 	}
 	return generation, nil
+}
+
+func (s *Store) matchRenewalClaim(ctx context.Context, input ContractInput, generation int64, digest string) (ClaimGeneration, error) {
+	taskID, workspaceID, agentID := input.TaskIdentity()
+	var stored ClaimGeneration
+	var storedWorkspaceID, storedAgentID pgtype.UUID
+	err := s.db.QueryRow(ctx, `
+		SELECT workspace_id, agent_id, claim_generation, producer, finalizer,
+		       lifecycle_state, inventory_version, discovery_version,
+		       finalized_grant_digest
+		FROM cerebro_task_mandate
+		WHERE task_id = $1`, taskID,
+	).Scan(
+		&storedWorkspaceID,
+		&storedAgentID,
+		&stored.Generation,
+		&stored.Producer,
+		&stored.Finalizer,
+		&stored.LifecycleState,
+		&stored.InventoryVersion,
+		&stored.DiscoveryVersion,
+		&stored.FinalizedGrantDigest,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ClaimGeneration{}, ErrMissing
+	}
+	if err != nil {
+		return ClaimGeneration{}, err
+	}
+	if storedWorkspaceID != workspaceID || storedAgentID != agentID {
+		return ClaimGeneration{}, ErrIdentityMismatch
+	}
+	if stored.Generation != generation || stored.LifecycleState != ClaimLifecycleFinalized ||
+		stored.InventoryVersion == nil || *stored.InventoryVersion != input.SourceVersion() ||
+		!sameOptionalString(stored.DiscoveryVersion, input.DiscoveryVersion()) {
+		return ClaimGeneration{}, ErrStaleClaimGeneration
+	}
+	if stored.FinalizedGrantDigest == nil || *stored.FinalizedGrantDigest != digest {
+		return ClaimGeneration{}, ErrFinalizedGrantsChanged
+	}
+	return ClaimGeneration{}, ErrStaleClaimGeneration
+}
+
+func sameOptionalString(stored *string, expected string) bool {
+	if expected == "" {
+		return stored == nil
+	}
+	return stored != nil && *stored == expected
 }
 
 func contractGrantDigest(input ContractInput) (string, error) {

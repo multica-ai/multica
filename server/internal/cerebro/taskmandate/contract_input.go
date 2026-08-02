@@ -1,6 +1,8 @@
 package taskmandate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"sort"
@@ -21,6 +23,7 @@ type ContractInput struct {
 	platformOperationIdentities []PlatformOperationIdentity
 	connectionScopeIdentities   []string
 	sourceVersion               string
+	discoveryVersion            string
 }
 
 // PlatformOperationIdentity retains both the exact callable binding and the
@@ -50,11 +53,26 @@ func newContractInput(
 	connectionScopeIdentities []string,
 	sourceVersion string,
 ) (ContractInput, error) {
+	return newContractInputWithDiscoveryVersion(
+		taskID, workspaceID, agentID, callableIdentities,
+		connectionScopeIdentities, sourceVersion, discoveryVersionFromSource(sourceVersion),
+	)
+}
+
+func newContractInputWithDiscoveryVersion(
+	taskID, workspaceID, agentID pgtype.UUID,
+	callableIdentities []string,
+	connectionScopeIdentities []string,
+	sourceVersion, discoveryVersion string,
+) (ContractInput, error) {
 	if !taskID.Valid || !workspaceID.Valid || !agentID.Valid {
 		return ContractInput{}, fmt.Errorf("task mandate contract input: invalid task identity")
 	}
 	if sourceVersion == "" || strings.TrimSpace(sourceVersion) != sourceVersion {
 		return ContractInput{}, fmt.Errorf("task mandate contract input: invalid source version")
+	}
+	if strings.TrimSpace(discoveryVersion) != discoveryVersion {
+		return ContractInput{}, fmt.Errorf("task mandate contract input: invalid discovery version")
 	}
 
 	callables, err := normalizeContractIdentities("callable", callableIdentities, nil)
@@ -90,7 +108,25 @@ func newContractInput(
 		platformOperationIdentities: platformOperations,
 		connectionScopeIdentities:   connectionScopes,
 		sourceVersion:               sourceVersion,
+		discoveryVersion:            discoveryVersion,
 	}, nil
+}
+
+// NewClaimInput builds the server-owned input used by a new local-runtime or
+// Gateway claim. The MCP discovery version is derived from the exact callable
+// identities, so a later tools/list surface cannot be mistaken for the one
+// that was finalized for this task.
+func NewClaimInput(
+	taskID, workspaceID, agentID pgtype.UUID,
+	callableIdentities []string,
+	connectionScopeIdentities []string,
+	sourceVersion string,
+) (ContractInput, error) {
+	return newContractInputWithDiscoveryVersion(
+		taskID, workspaceID, agentID, callableIdentities,
+		connectionScopeIdentities, sourceVersion,
+		MCPDiscoveryVersion(callableIdentities),
+	)
 }
 
 // UnmarshalJSON rejects external request/model assembly. ContractInput is built
@@ -136,3 +172,36 @@ func (in ContractInput) ConnectionScopeIdentities() []string {
 // SourceVersion returns the exact inventory/discovery source version used to
 // assemble this input.
 func (in ContractInput) SourceVersion() string { return in.sourceVersion }
+
+// DiscoveryVersion returns the exact MCP discovery version carried by this
+// input. It is empty when the claim has no MCP callable identities.
+func (in ContractInput) DiscoveryVersion() string { return in.discoveryVersion }
+
+// MCPDiscoveryVersion returns a stable content version for the MCP callable
+// surface. The version is intentionally based on exact provider spellings,
+// including an explicit raw-server wildcard when one was granted.
+func MCPDiscoveryVersion(callableIdentities []string) string {
+	names := make([]string, 0, len(callableIdentities))
+	for _, identity := range callableIdentities {
+		identity = strings.TrimSpace(identity)
+		if strings.HasPrefix(identity, "mcp__") {
+			names = append(names, identity)
+		}
+	}
+	sort.Strings(names)
+	names = slices.Compact(names)
+	if len(names) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.Join(names, "\x00")))
+	return "mcp:sha256:" + hex.EncodeToString(sum[:])
+}
+
+func discoveryVersionFromSource(sourceVersion string) string {
+	for _, part := range strings.Split(sourceVersion, "/") {
+		if strings.HasPrefix(part, "discovery:") && strings.TrimPrefix(part, "discovery:") != "" {
+			return part
+		}
+	}
+	return ""
+}

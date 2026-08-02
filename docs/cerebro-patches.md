@@ -2297,3 +2297,8 @@ The brief-rendering block moved out of `execenv/context.go` into a sibling
 
 - **Why:** FIR-4220 needs Task Mandate issuance and observation to continue while call-time enforcement remains safely reversible. `cerebro_task_mandate_enforcement` is therefore a workspace flag that defaults off; an operator can restore the policy-only behavior immediately without a deploy or mandate rewrite.
 - **Where:** The shared resolver lives in `server/internal/cerebro/taskmandate/enforcement.go`. Cerebro-owned Gateway and access-decision paths consume it directly. The local handler seam is `server/internal/handler/task_mandate_enforcement_cerebro.go`; the marked checks in `platform_action_guard_cerebro.go` and `daemon_tool_policy_cerebro.go` only call `Authorize` while the flag is on. `server/cmd/server/main.go` has one marked wiring block so the duplicate Gateway decision check uses the same flag.
+
+# `task-mandate-claim-lifecycle`
+
+- **Why:** FIR-4291 couples immutable Task Mandate finalization to task-token activation, keeps renewal limited to the same identity/generation/grant digest, records the exact MCP discovery content version, and makes an unmeasured provider without a curated fallback visible as a claim failure. Gateway fallback finalizes only the provider-compatible tool list that was actually accepted.
+- **Where:** The lifecycle contract lives in `server/internal/cerebro/taskmandate/`; claim activation is marked in `server/internal/handler/daemon.go`, and Gateway fallback finalization is implemented in `server/internal/cerebro/runtime/firtal_gateway_executor.go`.

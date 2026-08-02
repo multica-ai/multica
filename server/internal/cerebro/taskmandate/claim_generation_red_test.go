@@ -187,7 +187,7 @@ func TestFinalizeClaimCreatesOneImmutableGeneration(t *testing.T) {
 	if generation != 1 || rowCount != 1 || ClaimLifecycleState(lifecycle) != ClaimLifecycleFinalized {
 		t.Fatalf("finalized generation = (%d, %d rows, %q), want (1, 1 row, %q)", generation, rowCount, lifecycle, ClaimLifecycleFinalized)
 	}
-	if producer != "local-runtime" || finalizer != "task-claim" || inventoryVersion != input.SourceVersion() || discoveryVersion != nil {
+	if producer != "local-runtime" || finalizer != "task-claim" || inventoryVersion != input.SourceVersion() || discoveryVersion == nil || *discoveryVersion != "discovery:v3" {
 		t.Fatalf(
 			"finalized metadata = producer:%q finalizer:%q inventory:%q discovery:%v",
 			producer, finalizer, inventoryVersion, discoveryVersion,
@@ -461,6 +461,33 @@ func TestFinalizeClaimRejectsChangedExpiryBeforeRenewal(t *testing.T) {
 		t.Fatalf("changed expiry FinalizeClaim = %v, want %q", err, staleWriterReason)
 	}
 	requireFinalizedClaimUnchanged(t, fixture, before)
+}
+
+func TestRenewClaimRequiresExactGenerationAndFinalizedGrantDigest(t *testing.T) {
+	fixture, store, input, _ := newFinalizedClaimFixture(t)
+	ctx := context.Background()
+	newExpiry := time.Now().Add(3 * time.Hour)
+	renewed, err := store.RenewClaim(ctx, input, 1, newExpiry)
+	if err != nil {
+		t.Fatalf("RenewClaim: %v", err)
+	}
+	if renewed.Generation != 1 || renewed.FinalizedGrantDigest == nil {
+		t.Fatalf("renewed claim = %#v, want finalized generation 1 with digest", renewed)
+	}
+
+	changed, err := newContractInput(
+		fixture.taskID, fixture.workspaceID, fixture.agentID,
+		[]string{"tools:Write"}, nil, "inventory:v7",
+	)
+	if err != nil {
+		t.Fatalf("changed input: %v", err)
+	}
+	if _, err := store.RenewClaim(ctx, changed, 1, time.Now().Add(4*time.Hour)); err == nil || err.Error() != changedGrantReason {
+		t.Fatalf("changed-grant renewal = %v, want %q", err, changedGrantReason)
+	}
+	if _, err := store.RenewClaim(ctx, input, 2, time.Now().Add(4*time.Hour)); err == nil || err.Error() != staleClaimGenerationReason {
+		t.Fatalf("stale-generation renewal = %v, want %q", err, staleClaimGenerationReason)
+	}
 }
 
 func TestAuthorizeMissingClaimGenerationHasDistinctReason(t *testing.T) {
