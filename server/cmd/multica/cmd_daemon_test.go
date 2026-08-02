@@ -69,6 +69,49 @@ func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	}
 }
 
+func TestRequestDaemonAdmissionUsesLocalPostAndDecodesState(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"admission_paused":true,"claims_in_flight":0,"active_task_count":2}`))
+	}))
+	defer srv.Close()
+
+	state, err := requestDaemonAdmission(srv.Client(), srv.URL, true)
+	if err != nil {
+		t.Fatalf("requestDaemonAdmission: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/admission/pause" {
+		t.Fatalf("request = %s %s, want POST /admission/pause", gotMethod, gotPath)
+	}
+	if !state.AdmissionPaused || state.ClaimsInFlight != 0 || state.ActiveTaskCount != 2 {
+		t.Fatalf("state = %+v, want paused with two active tasks and no draining claims", state)
+	}
+}
+
+func TestRequestDaemonAdmissionAcceptsDrainPending(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"admission_paused":true,"claims_in_flight":1,"active_task_count":2}`))
+	}))
+	defer srv.Close()
+
+	state, err := requestDaemonAdmission(srv.Client(), srv.URL, true)
+	if err != nil {
+		t.Fatalf("requestDaemonAdmission: %v", err)
+	}
+	if !state.AdmissionPaused || state.ClaimsInFlight != 1 {
+		t.Fatalf("state = %+v, want paused with one draining claim", state)
+	}
+}
+
 func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().Duration("codex-handshake-timeout", 0, "")

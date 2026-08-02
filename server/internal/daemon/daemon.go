@@ -376,9 +376,10 @@ type Daemon struct {
 	// or any task is in handleTask. Together that closes the fetch-then-claim
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool // when true, the batch poller skips claiming
-	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	claimMu         sync.Mutex
+	pauseClaims     bool // auto-update barrier; successful upgrades keep it set until process restart
+	admissionPaused bool // operator-controlled barrier; pauses new claims without cancelling active tasks
+	claimsInFlight  int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -3352,7 +3353,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || d.admissionPaused {
 		return false
 	}
 	d.claimsInFlight++

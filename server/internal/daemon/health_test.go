@@ -53,6 +53,9 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if got, want := raw["active_task_count"], float64(3); got != want {
 		t.Errorf("active_task_count key: got %v, want %v", got, want)
 	}
+	if got, want := raw["admission_paused"], false; got != want {
+		t.Errorf("admission_paused key: got %v, want %v", got, want)
+	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
@@ -74,6 +77,101 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 	if resp.ActiveTaskCount != 3 {
 		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	}
+	if resp.AdmissionPaused {
+		t.Error("AdmissionPaused: got true, want false")
+	}
+}
+
+func TestAdmissionHandlerPausesAndResumesNewClaims(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+
+	pauseRec := httptest.NewRecorder()
+	d.admissionHandler(true).ServeHTTP(
+		pauseRec,
+		httptest.NewRequest(http.MethodPost, "/admission/pause", nil),
+	)
+	if pauseRec.Code != http.StatusOK {
+		t.Fatalf("pause status: got %d, want 200: %s", pauseRec.Code, pauseRec.Body.String())
+	}
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("claim entered while admission was paused")
+	}
+
+	resumeRec := httptest.NewRecorder()
+	d.admissionHandler(false).ServeHTTP(
+		resumeRec,
+		httptest.NewRequest(http.MethodPost, "/admission/resume", nil),
+	)
+	if resumeRec.Code != http.StatusOK {
+		t.Fatalf("resume status: got %d, want 200: %s", resumeRec.Code, resumeRec.Body.String())
+	}
+	if !d.tryEnterClaim() {
+		t.Fatal("claim remained blocked after admission resumed")
+	}
+	d.exitClaim()
+}
+
+func TestAdmissionResumeDoesNotClearAutoUpdateBarrier(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{pauseClaims: true, admissionPaused: true}
+	rec := httptest.NewRecorder()
+	d.admissionHandler(false).ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodPost, "/admission/resume", nil),
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resume status: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("manual resume cleared the independent auto-update claim barrier")
+	}
+}
+
+func TestAdmissionPauseReportsClaimDrainPending(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{claimsInFlight: 1}
+	rec := httptest.NewRecorder()
+	d.admissionHandler(true).ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodPost, "/admission/pause", nil),
+	)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("pause status: got %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := body["claims_in_flight"], float64(1); got != want {
+		t.Fatalf("claims_in_flight: got %v, want %v", got, want)
+	}
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("new claim entered while a pre-pause claim was draining")
+	}
+}
+
+func TestAdmissionHandlerRejectsNonPost(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+	rec := httptest.NewRecorder()
+	d.admissionHandler(true).ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodGet, "/admission/pause", nil),
+	)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status: got %d, want 405", rec.Code)
+	}
+	if d.admissionPaused {
+		t.Fatal("GET request changed admission state")
 	}
 }
 

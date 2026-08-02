@@ -32,6 +32,7 @@ type HealthResponse struct {
 	ServerURL       string   `json:"server_url"`
 	CLIVersion      string   `json:"cli_version"`
 	ActiveTaskCount int64    `json:"active_task_count"`
+	AdmissionPaused bool     `json:"admission_paused"`
 	Agents          []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
 	// reason the last registration round dropped it (version undetectable,
@@ -112,6 +113,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ServerURL:       d.cfg.ServerBaseURL,
 			CLIVersion:      d.cfg.CLIVersion,
 			ActiveTaskCount: d.activeTasks.Load(),
+			AdmissionPaused: d.isAdmissionPaused(),
 			Agents:          agents,
 			SkippedAgents:   d.skippedAgentsSnapshot(),
 			Workspaces:      wsList,
@@ -119,6 +121,41 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func (d *Daemon) isAdmissionPaused() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return d.admissionPaused
+}
+
+// admissionHandler changes only the operator-controlled claim barrier. Pausing
+// does not cancel active tasks. A 202 response means a claim that began before
+// the pause is still draining; the barrier already blocks every later claim.
+func (d *Daemon) admissionHandler(paused bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		d.claimMu.Lock()
+		d.admissionPaused = paused
+		claimsInFlight := d.claimsInFlight
+		d.claimMu.Unlock()
+
+		statusCode := http.StatusOK
+		if paused && claimsInFlight > 0 {
+			statusCode = http.StatusAccepted
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"admission_paused":  paused,
+			"claims_in_flight":  claimsInFlight,
+			"active_task_count": d.activeTasks.Load(),
+		})
 	}
 }
 
@@ -150,6 +187,8 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/admission/pause", d.admissionHandler(true))
+	mux.HandleFunc("/admission/resume", d.admissionHandler(false))
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}
