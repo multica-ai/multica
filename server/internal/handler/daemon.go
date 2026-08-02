@@ -1097,6 +1097,24 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		m.UpdateMs = time.Since(updateStart).Milliseconds()
 		return nil, m, err
 	}
+	// Recovery is deliberately checked on every online heartbeat. The query is
+	// idempotent and bounded, so this both drains backlogs larger than one batch
+	// and retries a transient database failure without requiring another
+	// offline -> online transition.
+	if h.TaskService != nil {
+		recovered, err := h.TaskService.RecoverQueuedExpiredCreateIssueTasksForRuntime(ctx, rt.ID)
+		if err != nil {
+			slog.Warn("runtime reconnect: queued-expired recovery failed",
+				"runtime_id", runtimeID,
+				"error", err,
+			)
+		} else if recovered > 0 {
+			slog.Info("runtime reconnect: queued-expired create_issue tasks recovered",
+				"runtime_id", runtimeID,
+				"count", recovered,
+			)
+		}
+	}
 	m.UpdateMs = time.Since(updateStart).Milliseconds()
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)

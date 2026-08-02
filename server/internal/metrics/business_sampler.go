@@ -110,14 +110,16 @@ type BusinessSamplerCollector struct {
 	// the values are computed once per scrape from a fresh DB read; we
 	// never want stale series sticking around because a label has stopped
 	// appearing in the result set.
-	descActiveUsers      *prometheus.Desc
-	descActiveWorkspaces *prometheus.Desc
-	descTaskQueued       *prometheus.Desc
-	descTaskRunning      *prometheus.Desc
-	descTaskStuck        *prometheus.Desc
-	descRuntimeOnline    *prometheus.Desc
-	descHeartbeatAgeHist *prometheus.Desc
-	descWorkspaceTotal   *prometheus.Desc
+	descActiveUsers                       *prometheus.Desc
+	descActiveWorkspaces                  *prometheus.Desc
+	descTaskQueued                        *prometheus.Desc
+	descTaskRunning                       *prometheus.Desc
+	descTaskStuck                         *prometheus.Desc
+	descQueuedExpiredCreateIssueCount     *prometheus.Desc
+	descQueuedExpiredCreateIssueOldestAge *prometheus.Desc
+	descRuntimeOnline                     *prometheus.Desc
+	descHeartbeatAgeHist                  *prometheus.Desc
+	descWorkspaceTotal                    *prometheus.Desc
 
 	mu       sync.Mutex
 	snapshot *samplerSnapshot
@@ -179,6 +181,14 @@ func NewBusinessSamplerCollector(opts *BusinessSamplerOptions) *BusinessSamplerC
 			"multica_agent_task_stuck_total",
 			"Current `running` agent_task_queue rows whose started_at is older than the stuck threshold. Sampled from the database.",
 			[]string{"source"}, nil),
+		descQueuedExpiredCreateIssueCount: prometheus.NewDesc(
+			"multica_create_issue_queued_expired",
+			"Current autopilot-created issues whose sole direct task expired in queue and has not been recovered.",
+			nil, nil),
+		descQueuedExpiredCreateIssueOldestAge: prometheus.NewDesc(
+			"multica_create_issue_queued_expired_oldest_age_seconds",
+			"Age of the oldest unrecovered autopilot create_issue queued expiry. Zero when none are affected.",
+			nil, nil),
 		descRuntimeOnline: prometheus.NewDesc(
 			"multica_runtime_online",
 			"Count of agent_runtime rows with last_seen_at within the online heartbeat window. Sampled from the database.",
@@ -217,6 +227,8 @@ func (c *BusinessSamplerCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.descTaskQueued,
 		c.descTaskRunning,
 		c.descTaskStuck,
+		c.descQueuedExpiredCreateIssueCount,
+		c.descQueuedExpiredCreateIssueOldestAge,
 		c.descRuntimeOnline,
 		c.descHeartbeatAgeHist,
 		c.descWorkspaceTotal,
@@ -283,6 +295,10 @@ func (c *BusinessSamplerCollector) emit(ch chan<- prometheus.Metric, snap *sampl
 		ch <- prometheus.MustNewConstMetric(
 			c.descTaskStuck, prometheus.GaugeValue, snap.taskStuck[source], source)
 	}
+	ch <- prometheus.MustNewConstMetric(
+		c.descQueuedExpiredCreateIssueCount, prometheus.GaugeValue, snap.queuedExpiredCreateIssueCount)
+	ch <- prometheus.MustNewConstMetric(
+		c.descQueuedExpiredCreateIssueOldestAge, prometheus.GaugeValue, snap.queuedExpiredCreateIssueOldestAgeSeconds)
 	for _, source := range knownSourceLabels() {
 		for _, mode := range knownRuntimeModeLabels() {
 			key := taskRunningKey{source: source, runtimeMode: mode}
@@ -361,6 +377,9 @@ type samplerSnapshot struct {
 	taskRunning map[taskRunningKey]float64
 	taskStuck   map[string]float64
 
+	queuedExpiredCreateIssueCount            float64
+	queuedExpiredCreateIssueOldestAgeSeconds float64
+
 	runtimeOnline map[runtimeOnlineKey]float64
 	heartbeatAge  map[string]samplerHistogram
 
@@ -412,6 +431,9 @@ func (c *BusinessSamplerCollector) refreshFromDB(ctx context.Context, now time.T
 	})
 	c.runQuery(ctx, conn, "task_stuck", func(ctx context.Context, tx pgx.Tx) error {
 		return c.queryTaskStuck(ctx, tx, snap)
+	})
+	c.runQuery(ctx, conn, "queued_expired_create_issue", func(ctx context.Context, tx pgx.Tx) error {
+		return c.queryQueuedExpiredCreateIssue(ctx, tx, snap)
 	})
 	c.runQuery(ctx, conn, "runtime_online", func(ctx context.Context, tx pgx.Tx) error {
 		return c.queryRuntimeOnline(ctx, tx, snap)

@@ -121,6 +121,40 @@ UPDATE issue SET
 WHERE id = $1 AND workspace_id = $3
 RETURNING *;
 
+-- name: MarkQueuedExpiredIssueManualRerun :exec
+-- Claims the recovery decision before a manual rerun starts cancelling tasks.
+-- A concurrent reconnect locks the same issue row; whichever transition wins
+-- makes the other path observe a non-queued_expired pipeline state.
+UPDATE issue
+SET status = 'todo',
+    metadata = jsonb_set(
+        jsonb_set(metadata, '{pipeline_status}', '"manual_rerun"'::jsonb, true),
+        '{waiting_on}', '"runtime_execution"'::jsonb, true
+    ),
+    updated_at = now()
+WHERE id = $1
+  AND metadata ->> 'pipeline_status' = 'queued_expired';
+
+-- name: LockIssueForTaskEnqueue :one
+-- All issue-linked enqueue decisions take this row lock. Recovery takes the
+-- same lock in LockRecoverableQueuedExpiredCreateIssueTasks, eliminating the
+-- NOT EXISTS snapshot race with ordinary/manual/mention task creation.
+SELECT id FROM issue WHERE id = $1 FOR UPDATE;
+
+-- name: SupersedeQueuedExpiredIssueWithNewWork :exec
+-- Ordinary/mention work queued after durable expiry supersedes reconnect
+-- recovery. This runs under LockIssueForTaskEnqueue and shares the task insert
+-- transaction, so insert failure rolls the issue state back too.
+UPDATE issue
+SET status = 'todo',
+    metadata = jsonb_set(
+        jsonb_set(metadata, '{pipeline_status}', '"new_work_queued"'::jsonb, true),
+        '{waiting_on}', '"runtime_execution"'::jsonb, true
+    ),
+    updated_at = now()
+WHERE id = $1
+  AND metadata ->> 'pipeline_status' = 'queued_expired';
+
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
