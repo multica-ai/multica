@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -85,41 +84,6 @@ func TestRunToolLoopFinalizesTaskMandateAfterAddingOpenLoopStep(t *testing.T) {
 	executor.SetTaskMandates(mandates)
 
 	ctx := context.Background()
-	workspaceFlags, err := executor.cerebro.ListCerebroWorkspaceFeatureFlags(ctx, runtimeAccountTestWSID)
-	if err != nil {
-		t.Fatalf("list workspace flags: %v", err)
-	}
-	var previousMemoryFlag *cerebrodb.ListCerebroWorkspaceFeatureFlagsRow
-	for i := range workspaceFlags {
-		if workspaceFlags[i].FlagKey == cerebroMemoryFlagKey {
-			previous := workspaceFlags[i]
-			previousMemoryFlag = &previous
-			break
-		}
-	}
-	if err := executor.cerebro.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
-		WorkspaceID: runtimeAccountTestWSID,
-		FlagKey:     cerebroMemoryFlagKey,
-		Enabled:     true,
-		Locked:      false,
-	}); err != nil {
-		t.Fatalf("enable memory tools: %v", err)
-	}
-	t.Cleanup(func() {
-		if previousMemoryFlag != nil {
-			_ = executor.cerebro.UpsertCerebroWorkspaceFeatureFlag(context.Background(), cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
-				WorkspaceID: runtimeAccountTestWSID,
-				FlagKey:     cerebroMemoryFlagKey,
-				Enabled:     previousMemoryFlag.Enabled,
-				Locked:      previousMemoryFlag.Locked,
-			})
-			return
-		}
-		_ = executor.cerebro.DeleteCerebroWorkspaceFeatureFlag(context.Background(), cerebrodb.DeleteCerebroWorkspaceFeatureFlagParams{
-			WorkspaceID: runtimeAccountTestWSID,
-			FlagKey:     cerebroMemoryFlagKey,
-		})
-	})
 
 	var issueID pgtype.UUID
 	if err := runtimeAccountTestPool.QueryRow(ctx, `
