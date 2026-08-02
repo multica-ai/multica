@@ -120,7 +120,12 @@ def _select_samples(paths: List[str], limit: int) -> List[str]:
     return [paths[index] for index in sorted(indexes)]
 
 
-def tree_manifest(root: Path, *, sample_limit: int = 16) -> Dict[str, Any]:
+def tree_manifest(
+    root: Path,
+    *,
+    sample_limit: int = 16,
+    excluded_relative_paths: Iterable[str] = (),
+) -> Dict[str, Any]:
     """Describe a tree without following symlinks.
 
     The entry list freezes every file's size and mtime while hashes provide a
@@ -129,6 +134,7 @@ def tree_manifest(root: Path, *, sample_limit: int = 16) -> Dict[str, Any]:
 
     if not root.is_dir() or root.is_symlink():
         raise ArchiveError("archive source must be a real directory: %s" % root)
+    excluded = set(excluded_relative_paths)
     directories: List[str] = []
     files: List[Dict[str, Any]] = []
     symlinks: List[Dict[str, str]] = []
@@ -139,6 +145,8 @@ def tree_manifest(root: Path, *, sample_limit: int = 16) -> Dict[str, Any]:
         for name in sorted(dirnames):
             path = current_path / name
             relative = path.relative_to(root).as_posix()
+            if relative in excluded:
+                continue
             if path.is_symlink():
                 symlinks.append({"path": relative, "target": os.readlink(str(path))})
             else:
@@ -148,6 +156,8 @@ def tree_manifest(root: Path, *, sample_limit: int = 16) -> Dict[str, Any]:
         for name in sorted(filenames):
             path = current_path / name
             relative = path.relative_to(root).as_posix()
+            if relative in excluded:
+                continue
             if path.is_symlink():
                 symlinks.append({"path": relative, "target": os.readlink(str(path))})
                 continue
@@ -359,7 +369,11 @@ class ArchiveManager:
         *,
         delete_source: bool = False,
         delete_gate: Optional[Callable[[], bool]] = None,
+        approval_token: Optional[str] = None,
+        post_commit_hook: Optional[Callable[[Path], None]] = None,
     ) -> Dict[str, Any]:
+        if delete_source:
+            raise ArchiveError("source deletion requires a producer lease and is disabled")
         source = source.absolute()
         if not source.is_dir() or source.is_symlink():
             raise ArchiveError("refusing unsafe source: %s" % source)
@@ -405,44 +419,28 @@ class ArchiveManager:
                 "archive_path": str(final),
                 "source_manifest": frozen,
                 "archive_manifest": copied,
-                "verified_before_source_delete": True,
+                "approval_token": approval_token,
+                "source_delete_enabled": False,
             }
             atomic_write_json(final / "COMPLETE.json", marker)
             fsync_directory(final)
             self._fail("after_complete")
 
+            if post_commit_hook is not None:
+                post_commit_hook(final)
+            committed = tree_manifest(final, excluded_relative_paths={"COMPLETE.json"})
+            if committed != frozen:
+                raise ArchiveError("committed archive changed after COMPLETE marker")
+
             source_before_delete = tree_manifest(source)
             persisted = json.loads((final / "COMPLETE.json").read_text(encoding="utf-8"))
             if source_before_delete != frozen or persisted != marker:
                 raise ArchiveError("source or COMPLETE marker changed before delete gate")
-            if delete_source:
-                if delete_gate is not None and not delete_gate():
-                    raise ArchiveError("fresh control-plane delete gate rejected candidate")
-                if self.preflight is not None:
-                    self.preflight(0)
-                # Atomically isolate the approved task path. Writers using the
-                # old path can only create a new directory, which is never
-                # removed by this transaction. Re-hash the isolated tree before
-                # deleting it so writes racing with the gate fail closed.
-                quarantine = source.parent / (".%s.archived-%s" % (source.name, suffix))
-                os.replace(str(source), str(quarantine))
-                fsync_directory(source.parent)
-                try:
-                    if tree_manifest(quarantine) != frozen:
-                        raise ArchiveError("source changed during atomic delete isolation")
-                    self._fail("after_isolation")
-                except Exception:
-                    if quarantine.exists() and not source.exists():
-                        os.replace(str(quarantine), str(source))
-                        fsync_directory(source.parent)
-                    raise
-                shutil.rmtree(str(quarantine))
-                fsync_directory(source.parent)
             return {
                 "status": "complete",
                 "source_path": str(source),
                 "archive_path": str(final),
-                "source_deleted": delete_source,
+                "source_deleted": False,
                 "manifest": frozen,
             }
         except ArchiveError:
@@ -534,6 +532,8 @@ def _latest_mtime_size_and_unsafe_symlinks(root: Path) -> Tuple[float, int, List
             path = current_path / name
             stat = path.lstat()
             latest = max(latest, stat.st_mtime)
+            if not path.is_symlink():
+                total_bytes += stat.st_size
             if path.is_symlink():
                 try:
                     path.resolve(strict=False).relative_to(resolved_root)
@@ -707,35 +707,72 @@ def discover_candidates(roots: Iterable[Path]) -> List[Path]:
     return candidates
 
 
+def consumed_approval_tokens(archive_root: Path) -> set[str]:
+    tokens: set[str] = set()
+    if not archive_root.is_dir():
+        return tokens
+    for marker_path in archive_root.glob("*/COMPLETE.json"):
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        token = marker.get("approval_token")
+        if token:
+            tokens.add(str(token))
+    return tokens
+
+
+def has_message_id(value: Any) -> bool:
+    if isinstance(value, dict):
+        return bool(value.get("message_id")) or any(has_message_id(child) for child in value.values())
+    if isinstance(value, list):
+        return any(has_message_id(child) for child in value)
+    return False
+
+
 def send_alert(config: Dict[str, Any], message: str) -> None:
     alert_path = Path(str(config["alert_log_path"]))
-    append_jsonl(alert_path, {"recorded_at": utc_now().isoformat(), "message": message})
+    try:
+        append_jsonl(alert_path, {"recorded_at": utc_now().isoformat(), "message": message})
+    except OSError:
+        pass
     open_id = str(config.get("lark_open_id") or "")
     if not open_id:
         return
-    process = subprocess.run(
-        [
-            "lark-cli",
-            "im",
-            "+messages-send",
-            "--as",
-            "bot",
-            "--user-id",
-            open_id,
-            "--text",
-            message,
-            "--format",
-            "json",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if process.returncode != 0:
-        append_jsonl(
-            alert_path,
-            {"recorded_at": utc_now().isoformat(), "message": "lark alert delivery failed", "exit_code": process.returncode},
+    try:
+        process = subprocess.run(
+            [
+                "lark-cli",
+                "im",
+                "+messages-send",
+                "--as",
+                "bot",
+                "--user-id",
+                open_id,
+                "--text",
+                message,
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
         )
+        response = json.loads(process.stdout) if process.stdout else {}
+        delivered = process.returncode == 0 and has_message_id(response)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        delivered = False
+        process = None
+    if not delivered:
+        exit_code = process.returncode if process is not None else None
+        try:
+            append_jsonl(
+                alert_path,
+                {"recorded_at": utc_now().isoformat(), "message": "lark alert delivery failed", "exit_code": exit_code},
+            )
+        except OSError:
+            pass
 
 
 def process_ancestry(start_pid: Optional[int] = None, limit: int = 8) -> List[Dict[str, Any]]:
@@ -795,11 +832,14 @@ def verify_cron_bridge(config: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dic
     return trigger, lineage
 
 
-def write_cron_bridge_receipt(config: Dict[str, Any], *, status: str, error: Optional[str] = None) -> None:
-    try:
-        trigger = json.loads(Path(str(config["cron_bridge_trigger_path"])).read_text(encoding="utf-8"))
-        token = str(trigger["token"])
-    except (FileNotFoundError, OSError, KeyError, json.JSONDecodeError):
+def write_cron_bridge_receipt(
+    config: Dict[str, Any],
+    *,
+    token: Optional[str],
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    if not token:
         return
     atomic_write_json(
         Path(str(config["cron_bridge_receipt_path"])),
@@ -837,6 +877,10 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
     cron_lineage: List[Dict[str, Any]] = []
     if config.get("require_cron_lineage", True):
         trigger, cron_lineage = verify_cron_bridge(config)
+        config["_verified_cron_token"] = str(trigger["token"])
+        write_cron_bridge_receipt(config, token=str(trigger["token"]), status="running")
+    if config.get("delete_source", False):
+        raise ArchiveError("source deletion requires a producer lease and remains disabled")
     external_path = Path(str(config["external_path"]))
     archive_root = Path(str(config["archive_root"]))
     archive_root.mkdir(parents=True, exist_ok=True)
@@ -847,8 +891,17 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         min_free_bytes=int(float(config.get("external_min_free_gib", 100)) * GIB),
     )
     volume_guard.check()
+    canary_root = Path(str(config.get("canary_root") or external_path))
+    canary_root.mkdir(parents=True, exist_ok=True)
+    canary_guard = ExternalVolumeGuard(
+        external_path,
+        canary_root,
+        expected_uuid=str(config["external_volume_uuid"]),
+        min_free_bytes=int(float(config.get("external_min_free_gib", 100)) * GIB),
+    )
+    canary_guard.check()
     canary = Canary(
-        Path(str(config.get("canary_root") or external_path)),
+        canary_root,
         expected_uuid=str(config["external_volume_uuid"]),
         min_free_bytes=int(float(config.get("external_min_free_gib", 100)) * GIB),
         volume_path=external_path,
@@ -882,9 +935,11 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
     if config.get("archive_enabled", False):
         manager = ArchiveManager(archive_root, preflight=volume_guard.check)
         approved = {str(value) for value in config.get("approved_candidates", [])}
+        consumed = consumed_approval_tokens(archive_root)
         for candidate in candidates:
             candidate_path = Path(str(candidate["path"]))
-            if not candidate["eligible"] or candidate.get("approval_token") not in approved:
+            token = str(candidate.get("approval_token") or "")
+            if not candidate["eligible"] or token not in approved or token in consumed:
                 continue
             fresh = evaluator.evaluate(candidate_path)
             if not fresh["eligible"] or fresh.get("approval_token") != candidate.get("approval_token"):
@@ -893,13 +948,14 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
                 manager.archive(
                     candidate_path,
                     candidate_path.name,
-                    delete_source=bool(config.get("delete_source", False)),
-                    delete_gate=lambda path=candidate_path: evaluator.evaluate(path)["eligible"],
+                    delete_source=False,
+                    approval_token=token,
                 )
             )
+            consumed.add(token)
     atomic_write_json(Path(str(config["report_path"])), report)
     if trigger:
-        write_cron_bridge_receipt(config, status="green")
+        write_cron_bridge_receipt(config, token=str(trigger["token"]), status="green")
     return report
 
 
@@ -913,20 +969,38 @@ def main() -> int:
             report = run_worker(config)
     except BlockingIOError:
         message = "storage retention worker skipped: another owner holds the single-instance lock"
-        try:
-            send_alert(config, message)
-        except Exception:
-            pass
+        for action in (
+            lambda: atomic_write_failure_report(config, message),
+            lambda: write_cron_bridge_receipt(
+                config,
+                token=str(config.get("_verified_cron_token") or "") or None,
+                status="red",
+                error=message,
+            ),
+            lambda: send_alert(config, message),
+        ):
+            try:
+                action()
+            except Exception:
+                pass
         print(json.dumps({"status": "locked", "error": message}), file=sys.stderr)
         return 75
     except Exception as error:
         message = "storage retention worker failed closed: %s" % error
-        try:
-            atomic_write_failure_report(config, message)
-            write_cron_bridge_receipt(config, status="red", error=message)
-            send_alert(config, message)
-        except Exception:
-            pass
+        for action in (
+            lambda: atomic_write_failure_report(config, message),
+            lambda: write_cron_bridge_receipt(
+                config,
+                token=str(config.get("_verified_cron_token") or "") or None,
+                status="red",
+                error=message,
+            ),
+            lambda: send_alert(config, message),
+        ):
+            try:
+                action()
+            except Exception:
+                pass
         print(json.dumps({"status": "red", "error": message}, ensure_ascii=False), file=sys.stderr)
         return 1
     print(

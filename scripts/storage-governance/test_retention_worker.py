@@ -18,8 +18,12 @@ from retention_worker import (  # noqa: E402
     ExternalVolumeGuard,
     GCEvaluator,
     SingleInstanceLock,
+    _latest_mtime_size_and_unsafe_symlinks,
+    consumed_approval_tokens,
+    send_alert,
     tree_manifest,
     verify_cron_bridge,
+    write_cron_bridge_receipt,
 )
 
 
@@ -108,7 +112,7 @@ class ArchiveTransactionTest(unittest.TestCase):
             self.assertEqual(before["files"], after["files"])
             self.assertNotEqual(before["content_hashes"], after["content_hashes"])
 
-    def test_complete_marker_precedes_opt_in_source_delete(self) -> None:
+    def test_source_delete_is_refused_without_a_shared_producer_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source"
@@ -116,14 +120,9 @@ class ArchiveTransactionTest(unittest.TestCase):
             source.mkdir()
             make_tree(source)
 
-            result = ArchiveManager(destination).archive(source, "candidate", delete_source=True)
-
-            final = Path(result["archive_path"])
-            self.assertFalse(source.exists())
-            marker = json.loads((final / "COMPLETE.json").read_text(encoding="utf-8"))
-            self.assertEqual(marker["schema"], "multica.transactional-archive.v1")
-            self.assertEqual(marker["source_manifest"], marker["archive_manifest"])
-            self.assertTrue(marker["verified_before_source_delete"])
+            with self.assertRaisesRegex(ArchiveError, "producer lease"):
+                ArchiveManager(destination).archive(source, "candidate", delete_source=True)
+            self.assertTrue(source.exists())
 
     def test_every_injected_failure_preserves_source(self) -> None:
         for phase in ("after_copy", "after_verify", "after_rename", "after_complete"):
@@ -134,56 +133,29 @@ class ArchiveTransactionTest(unittest.TestCase):
                 make_tree(source)
                 with self.assertRaises(ArchiveError):
                     ArchiveManager(root / "archive", fail_at=phase).archive(
-                        source, "candidate", delete_source=True
+                        source, "candidate", delete_source=False
                     )
                 self.assertTrue(source.exists())
                 self.assertEqual(tree_manifest(source)["file_count"], 3)
 
-    def test_fresh_delete_gate_failure_preserves_source_after_complete_marker(self) -> None:
+    def test_committed_archive_is_rehashed_after_complete_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source"
             source.mkdir()
             make_tree(source)
-            with self.assertRaises(ArchiveError):
+
+            def corrupt_committed(final: Path) -> None:
+                (final / "root.txt").write_text("corrupt\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ArchiveError, "committed archive changed"):
                 ArchiveManager(root / "archive").archive(
                     source,
                     "candidate",
-                    delete_source=True,
-                    delete_gate=lambda: False,
+                    delete_source=False,
+                    post_commit_hook=corrupt_committed,
                 )
             self.assertTrue(source.exists())
-            self.assertEqual(len(list((root / "archive").glob("*/COMPLETE.json"))), 1)
-
-    def test_write_racing_in_delete_gate_is_not_deleted(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "source"
-            source.mkdir()
-            make_tree(source)
-
-            def late_writer() -> bool:
-                (source / "late.txt").write_text("not archived", encoding="utf-8")
-                return True
-
-            with self.assertRaises(ArchiveError):
-                ArchiveManager(root / "archive").archive(
-                    source, "candidate", delete_source=True, delete_gate=late_writer
-                )
-            self.assertEqual((source / "late.txt").read_text(encoding="utf-8"), "not archived")
-
-    def test_failure_after_atomic_isolation_rolls_source_path_back(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "source"
-            source.mkdir()
-            make_tree(source)
-            with self.assertRaises(ArchiveError):
-                ArchiveManager(root / "archive", fail_at="after_isolation").archive(
-                    source, "candidate", delete_source=True
-                )
-            self.assertTrue(source.is_dir())
-            self.assertEqual(tree_manifest(source)["file_count"], 3)
 
     def test_single_instance_lock_is_nonblocking(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -344,6 +316,24 @@ class ExternalVolumeGuardTest(unittest.TestCase):
                     free_bytes_reader=lambda _: 100,
                 ).check()
 
+    def test_size_scan_counts_regular_file_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "payload.bin").write_bytes(b"x" * 4096)
+            _, total_bytes, _ = _latest_mtime_size_and_unsafe_symlinks(root)
+            self.assertGreaterEqual(total_bytes, 4096)
+
+    def test_consumed_approval_tokens_are_read_from_complete_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp)
+            completed = archive / "candidate-1"
+            completed.mkdir()
+            (completed / "COMPLETE.json").write_text(
+                json.dumps({"approval_token": "one-time-token"}),
+                encoding="utf-8",
+            )
+            self.assertEqual(consumed_approval_tokens(archive), {"one-time-token"})
+
 
 class CronBridgeVerificationTest(unittest.TestCase):
     def make_config(self, root: Path, token: str = "fresh-token") -> dict:
@@ -408,6 +398,29 @@ class CronBridgeVerificationTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ArchiveError, "already consumed"):
                 verify_cron_bridge(config)
+
+    def test_receipt_is_bound_to_verified_token_not_reread_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self.make_config(root, token="newer-trigger")
+            write_cron_bridge_receipt(config, token="verified-token", status="green")
+            receipt = json.loads(Path(config["cron_bridge_receipt_path"]).read_text())
+            self.assertEqual(receipt["token"], "verified-token")
+
+
+class AlertDeliveryTest(unittest.TestCase):
+    @mock.patch("retention_worker.subprocess.run")
+    def test_success_exit_without_message_id_is_recorded_as_delivery_failure(self, run: mock.Mock) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
+            config = {
+                "lark_open_id": "ou_test",
+                "alert_log_path": str(root / "alerts.jsonl"),
+            }
+            send_alert(config, "disk full")
+            alert = json.loads((root / "alerts.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(alert["message"], "lark alert delivery failed")
 
 
 if __name__ == "__main__":

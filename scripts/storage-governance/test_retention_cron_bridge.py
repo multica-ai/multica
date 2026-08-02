@@ -8,7 +8,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from retention_cron_bridge import SingleInstanceLock, launchctl_kickstart_command  # noqa: E402
+from retention_cron_bridge import (  # noqa: E402
+    SingleInstanceLock,
+    launchctl_kickstart_command,
+    receipt_exit_code,
+    record_lock_collision,
+)
 
 
 class CronBridgeTest(unittest.TestCase):
@@ -30,6 +35,17 @@ class CronBridgeTest(unittest.TestCase):
                         fcntl.flock(descriptor.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 finally:
                     descriptor.close()
+
+    def test_running_receipt_keeps_bridge_waiting(self) -> None:
+        self.assertIsNone(receipt_exit_code({"token": "t", "status": "running"}, "t"))
+        self.assertEqual(receipt_exit_code({"token": "t", "status": "green"}, "t"), 0)
+        self.assertEqual(receipt_exit_code({"token": "t", "status": "red"}, "t"), 1)
+
+    def test_lock_collision_writes_machine_readable_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "alerts.jsonl"
+            record_lock_collision(path)
+            self.assertIn("previous bridge is still running", path.read_text())
 
 
 if __name__ == "__main__":

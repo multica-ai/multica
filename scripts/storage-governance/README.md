@@ -23,11 +23,16 @@ out-of-tree symlinks reject the candidate.
 
 After an operator approves a dry-run list, its one-time `approval_token` values
 must be put in `approved_candidates` before `archive_enabled` is enabled; keep
-`delete_source` false. A transaction freezes the source manifest,
+`delete_source` false. A completed archive marker consumes the token so a later
+cron run cannot archive the same snapshot again. A transaction freezes the source manifest,
 copies to `.partial`, fsyncs and verifies it, atomically renames the archive,
-and writes `COMPLETE.json`. Source deletion is a separate, final opt-in with a
-fresh control-plane eligibility check immediately before removal. Any exception
-before that last gate leaves the source in place.
+and writes `COMPLETE.json`, then re-hashes the committed payload. Automated
+source deletion is deliberately rejected until Multica exposes a producer-shared
+lease; filesystem isolation alone cannot close the open-file-descriptor race.
+
+The guard's minute path samples free space, swap, and daemon state before any
+recursive work. Directory/category scans run from a 15-minute cache after the
+breaker decision, so capacity attribution cannot delay low-water enforcement.
 
 ## Formal cron lineage
 
@@ -41,7 +46,7 @@ LaunchAgent, and waits for a token-matched receipt. The worker refuses a green
 result unless that bridge process and its cron parent are still alive:
 
 ```cron
-*/15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json
+*/15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json --alert-log /Users/example/.local/state/storage-governance/retention-alerts.jsonl --config /Users/example/.local/libexec/storage-governance/retention-config.json
 ```
 
 Keep the lock and report on the internal volume, and the archive root on the

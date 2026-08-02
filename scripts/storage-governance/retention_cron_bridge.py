@@ -13,6 +13,9 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
+
+from retention_worker import atomic_write_failure_report, send_alert
 
 
 class SingleInstanceLock:
@@ -34,6 +37,51 @@ class SingleInstanceLock:
 
 def launchctl_kickstart_command(label: str, *, uid: int) -> list[str]:
     return ["/bin/launchctl", "kickstart", "gui/%d/%s" % (uid, label)]
+
+
+def receipt_exit_code(value: dict, token: str) -> Optional[int]:
+    if value.get("token") != token:
+        return None
+    if value.get("status") == "green":
+        return 0
+    if value.get("status") == "red":
+        return 1
+    return None
+
+
+def record_lock_collision(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "locked",
+                    "message": "previous bridge is still running; skipped overlapping retention launch",
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def report_bridge_failure(config_path: Optional[str], message: str) -> None:
+    if not config_path:
+        return
+    try:
+        config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    for action in (
+        lambda: atomic_write_failure_report(config, message),
+        lambda: send_alert(config, message),
+    ):
+        try:
+            action()
+        except Exception:
+            pass
 
 
 def atomic_write(path: Path, value: dict) -> None:
@@ -105,8 +153,9 @@ def run_bridge(args: argparse.Namespace) -> int:
         except (FileNotFoundError, OSError, json.JSONDecodeError):
             time.sleep(2)
             continue
-        if value.get("token") == token:
-            return 0 if value.get("status") == "green" else 1
+        result = receipt_exit_code(value, token)
+        if result is not None:
+            return result
         time.sleep(2)
     raise SystemExit("retention worker receipt timeout")
 
@@ -118,12 +167,21 @@ def main() -> int:
     parser.add_argument("--label", default="com.multica.storage-retention")
     parser.add_argument("--timeout", type=int, default=7200)
     parser.add_argument("--lock")
+    parser.add_argument("--alert-log")
+    parser.add_argument("--config")
     args = parser.parse_args()
     lock_path = Path(args.lock) if args.lock else Path(args.trigger).with_name("retention-cron-bridge.lock")
     try:
         with SingleInstanceLock(lock_path):
-            return run_bridge(args)
+            try:
+                return run_bridge(args)
+            except SystemExit as error:
+                report_bridge_failure(args.config, "storage retention cron bridge failed: %s" % error)
+                raise
     except BlockingIOError:
+        alert_path = Path(args.alert_log) if args.alert_log else Path(args.trigger).with_name("retention-alerts.jsonl")
+        record_lock_collision(alert_path)
+        report_bridge_failure(args.config, "storage retention cron bridge skipped: previous bridge is still running")
         return 75
 
 

@@ -16,7 +16,7 @@ import re
 import signal
 import subprocess
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -34,18 +34,25 @@ class Sample:
     active_task_count: int
     daemon_pid: Optional[int]
     daemon_status: str
+    admission_pause_owners: Optional[Tuple[str, ...]] = None
     shadow_runs_bytes: Optional[int] = None
     workspace_total_bytes: Optional[int] = None
     workspace_inflight_bytes: Optional[int] = None
     workspace_gc_eligible_bytes: Optional[int] = None
     workspace_gc_backlog_bytes: Optional[int] = None
+    workspace_unclassified_bytes: Optional[int] = None
     cursor_bytes: Optional[int] = None
     logs_bytes: Optional[int] = None
 
 
 class CommandRunner:
     def run(self, argv: List[str], *, tolerate_failure: bool = False) -> Tuple[int, str, str]:
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=10)
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=10)
+        except subprocess.TimeoutExpired as error:
+            if tolerate_failure:
+                return 124, "", "command timed out after 10 seconds"
+            raise RuntimeError("command timed out: %s" % argv[0]) from error
         if proc.returncode != 0 and not tolerate_failure:
             detail = (proc.stderr or proc.stdout).strip()
             raise RuntimeError("command failed (%d): %s: %s" % (proc.returncode, argv[0], detail))
@@ -90,6 +97,8 @@ class SystemCollector:
 
     @staticmethod
     def directory_size(path: Path) -> Optional[int]:
+        if not path.is_dir() or path.is_symlink():
+            return None
         total = 0
         try:
             for current, dirnames, filenames in os.walk(str(path), topdown=True, followlinks=False):
@@ -115,32 +124,40 @@ class SystemCollector:
             else None
         )
 
-        eligible = backlog = None
+        eligible = inflight = backlog = None
         report_path = self.config.get("retention_report_path")
         if report_path:
             try:
                 report = json.loads(Path(str(report_path)).read_text(encoding="utf-8"))
-                if report.get("status") == "green":
-                    eligible_value = 0
-                    backlog_value = 0
+                recorded_at = parse_timestamp(str(report["recorded_at"]))
+                maximum_age = float(self.config.get("retention_report_max_age_seconds", 1800))
+                if report.get("status") == "green" and (datetime.now(timezone.utc) - recorded_at).total_seconds() <= maximum_age:
+                    eligible_value = inflight_value = backlog_value = 0
                     for candidate in report.get("gc_candidates") or []:
                         size = int((candidate.get("details") or {}).get("size_bytes") or 0)
+                        reasons = " ".join(str(value) for value in candidate.get("reasons") or [])
                         if candidate.get("eligible"):
                             eligible_value += size
+                        elif any(
+                            marker in reasons
+                            for marker in ("not terminal", "nonterminal child", "active run", "open file", "recent write")
+                        ):
+                            inflight_value += size
                         elif float((candidate.get("details") or {}).get("age_seconds") or 0) >= float(self.config.get("retention_days", 7)) * 86400:
                             backlog_value += size
-                    eligible, backlog = eligible_value, backlog_value
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    eligible, inflight, backlog = eligible_value, inflight_value, backlog_value
+            except (KeyError, OSError, ValueError, TypeError, json.JSONDecodeError):
                 pass
-        inflight = None
-        if workspace_total is not None and eligible is not None and backlog is not None:
-            inflight = max(0, workspace_total - eligible - backlog)
+        unclassified = None
+        if workspace_total is not None and eligible is not None and inflight is not None and backlog is not None:
+            unclassified = max(0, workspace_total - eligible - inflight - backlog)
         return {
             "shadow_runs_bytes": shadow,
             "workspace_total_bytes": workspace_total,
             "workspace_inflight_bytes": inflight,
             "workspace_gc_eligible_bytes": eligible,
             "workspace_gc_backlog_bytes": backlog,
+            "workspace_unclassified_bytes": unclassified,
             "cursor_bytes": cursor,
             "logs_bytes": logs,
         }
@@ -153,7 +170,8 @@ class SystemCollector:
         except OSError:
             external_free = None
         pid = daemon.get("pid")
-        growth = self.growth_metrics()
+        owners_value = daemon.get("admission_pause_owners")
+        owners = tuple(str(value) for value in owners_value) if isinstance(owners_value, list) else None
         return Sample(
             recorded_at=datetime.now(timezone.utc).isoformat(),
             internal_free_bytes=self.free_bytes(str(self.config["internal_path"])),
@@ -162,8 +180,34 @@ class SystemCollector:
             active_task_count=int(daemon.get("active_task_count") or 0),
             daemon_pid=int(pid) if pid else None,
             daemon_status=str(daemon.get("status") or "unknown"),
-            **growth,
+            admission_pause_owners=owners,
         )
+
+    def enrich(self, sample: Sample) -> Sample:
+        cache_path = Path(
+            str(
+                self.config.get("growth_cache_path")
+                or Path(str(self.config["state_path"])).with_name("growth-metrics-cache.json")
+            )
+        )
+        interval = float(self.config.get("growth_scan_interval_seconds", 900))
+        now = datetime.now(timezone.utc)
+        cached = load_json(cache_path, {})
+        try:
+            cached_age = (now - parse_timestamp(str(cached["recorded_at"]))).total_seconds()
+            cached_values = cached["values"]
+        except (KeyError, TypeError, ValueError):
+            cached_age = float("inf")
+            cached_values = {}
+        if cached_age < interval:
+            return replace(sample, **cached_values)
+        values = self.growth_metrics()
+        if any(value is not None for value in values.values()):
+            atomic_write_json(cache_path, {"recorded_at": now.isoformat(), "values": values})
+            return replace(sample, **values)
+        if cached_age < interval * 2:
+            return replace(sample, **cached_values)
+        return replace(sample, **values)
 
 
 def classify_level(
@@ -225,6 +269,7 @@ def build_capacity_report(
     maximum_window_hours: float = 72,
     minimum_coverage: float = 0.8,
     required_growth_fields: Iterable[str] = (),
+    required_field_max_gap_seconds: float = 1800,
     discarded_sample_count: int = 0,
     external_safety_floor_bytes: int = 100 * GIB,
 ) -> Dict[str, Any]:
@@ -245,6 +290,8 @@ def build_capacity_report(
         "p95_growth_bytes_per_hour": None,
         "peak_growth_bytes_per_hour": None,
         "category_p95_growth_bytes_per_hour": {},
+        "field_coverage_ratio": {},
+        "field_maximum_gap_seconds": {},
         "safety_floor_bytes": safety_floor_bytes,
         "burst_reserve_bytes": burst_reserve_bytes,
         "days_remaining": None,
@@ -267,14 +314,30 @@ def build_capacity_report(
     report["maximum_gap_seconds"] = maximum_gap
     minimum_samples = math.ceil(minimum_hours * 3600 / expected_interval_seconds * minimum_coverage) + 1
     required_fields = list(required_growth_fields)
-    fields_complete = all(all(item.get(field) is not None for field in required_fields) for item in ordered)
+    fields_ready = True
+    for field in required_fields:
+        available = [item for item in ordered if item.get(field) is not None]
+        coverage_value = len(available) / len(ordered)
+        report["field_coverage_ratio"][field] = coverage_value
+        field_times = [parse_timestamp(str(item["recorded_at"])) for item in available]
+        field_gaps = [(current - previous).total_seconds() for previous, current in zip(field_times, field_times[1:])]
+        field_maximum_gap = max(field_gaps) if field_gaps else None
+        report["field_maximum_gap_seconds"][field] = field_maximum_gap
+        latest_age = (end - field_times[-1]).total_seconds() if field_times else float("inf")
+        if (
+            coverage_value < minimum_coverage
+            or field_maximum_gap is None
+            or field_maximum_gap > required_field_max_gap_seconds
+            or latest_age > required_field_max_gap_seconds
+        ):
+            fields_ready = False
     if (
         observation_hours < minimum_hours
         or len(ordered) < minimum_samples
         or coverage < minimum_coverage
         or maximum_gap is None
         or maximum_gap > expected_interval_seconds * 3
-        or not fields_complete
+        or not fields_ready
     ):
         return report
 
@@ -290,6 +353,8 @@ def build_capacity_report(
         delta = int(previous["internal_free_bytes"]) - int(current["internal_free_bytes"])
         hourly_growth[bucket] = hourly_growth.get(bucket, 0.0) + delta
         for field in required_fields:
+            if previous.get(field) is None or current.get(field) is None:
+                continue
             if field.endswith("_free_bytes"):
                 category_delta = int(previous[field]) - int(current[field])
             else:
@@ -399,11 +464,17 @@ class Guard:
     def stop_launchagent(self, label: str, actions: List[str]) -> bool:
         target = "gui/%d/%s" % (self.uid, label)
         disable_code, _, disable_error = self.runner.run(["launchctl", "disable", target], tolerate_failure=True)
-        self.runner.run(["launchctl", "bootout", target], tolerate_failure=True)
-        if disable_code == 0:
-            actions.append("launchagent_disabled:" + label)
+        bootout_code, _, bootout_error = self.runner.run(["launchctl", "bootout", target], tolerate_failure=True)
+        print_code, _, print_error = self.runner.run(["launchctl", "print", target], tolerate_failure=True)
+        print_not_found = print_code != 0 and any(
+            marker in (print_error or "").lower()
+            for marker in ("not found", "could not find service", "no such process")
+        )
+        if disable_code == 0 and print_not_found:
+            actions.append("launchagent_stopped:" + label)
             return True
-        actions.append("launchagent_disable_failed:%s:%s" % (label, disable_error.strip()[:120]))
+        detail = (print_error or bootout_error or disable_error).strip()[:120]
+        actions.append("launchagent_stop_failed:%s:%s" % (label, detail))
         return False
 
     def pause_admission(self, sample: Sample, state: Dict[str, Any], actions: List[str]) -> bool:
@@ -422,43 +493,9 @@ class Guard:
             state["admission_pause_owned"] = True
             actions.append("daemon_admission_paused")
             return True
-        if not bool(self.config.get("legacy_sigstop_fallback", False)):
-            actions.append("daemon_admission_pause_failed:" + stderr.strip()[:200])
-            return False
-        if sample.active_task_count > 0:
-            actions.append("legacy_sigstop_refused:active_tasks=%d" % sample.active_task_count)
-            return False
-        pid = sample.daemon_pid
-        if not pid:
-            code, stdout, _ = self.runner.run(
-                ["multica", "daemon", "status", "--output", "json"],
-                tolerate_failure=True,
-            )
-            if code == 0:
-                try:
-                    pid = int(json.loads(stdout).get("pid") or 0)
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    pid = None
-        if pid:
-            ps_code, command, _ = self.runner.run(
-                ["/bin/ps", "-p", str(pid), "-o", "command="], tolerate_failure=True
-            )
-            if ps_code != 0 or "multica" not in command or "daemon" not in command:
-                actions.append("legacy_sigstop_refused:pid_identity_mismatch")
-                return False
-            state["legacy_daemon_sigstop_intent"] = True
-            state["legacy_daemon_pid"] = pid
-            state["legacy_daemon_command"] = command.strip()
-            atomic_write_json(Path(str(self.config["state_path"])), state)
-            self.runner.signal(pid, signal.SIGSTOP)
-            state["legacy_daemon_sigstopped"] = True
-            state["legacy_daemon_sigstop_intent"] = False
-            atomic_write_json(Path(str(self.config["state_path"])), state)
-            actions.append("legacy_daemon_sigstopped")
-            return True
-        else:
-            actions.append("daemon_admission_pause_failed:no_pid")
-            return False
+        actions.append("daemon_admission_pause_failed:" + stderr.strip()[:200])
+        actions.append("legacy_sigstop_disabled:unsafe_without_shared_claim_barrier")
+        return False
 
     def resume_admission(self, state: Dict[str, Any], actions: List[str]) -> bool:
         released_legacy_fallback = False
@@ -575,6 +612,8 @@ class Guard:
                 "resume_pending": False,
             },
         )
+        if sample.admission_pause_owners is not None:
+            state["admission_pause_owned"] = "storage-guard" in sample.admission_pause_owners
         previous = int(state.get("level") or 0)
         level = classify_level(
             sample.internal_free_bytes,
@@ -600,7 +639,7 @@ class Guard:
                     "一级低水位执行失败，任务入场可能仍开放",
                     alert_key="level1-enforcement-failed",
                 )
-        elif previous >= 1 or state.get("legacy_daemon_sigstopped") or state.get("resume_pending") or state.get("admission_pause_owned"):
+        elif previous >= 1 or state.get("legacy_daemon_sigstopped") or state.get("legacy_daemon_sigstop_intent") or state.get("resume_pending") or state.get("admission_pause_owned"):
             enforcement_ok = self.resume_admission(state, actions)
             if not enforcement_ok:
                 level = max(previous, 1)
@@ -614,14 +653,20 @@ class Guard:
                 )
 
         if level >= 2:
+            level2_enforcement_ok = True
             for label in self.config.get("nonproduction_launchagents", []):
-                self.stop_launchagent(str(label), actions)
+                level2_enforcement_ok = self.stop_launchagent(str(label), actions) and level2_enforcement_ok
+            enforcement_ok = level2_enforcement_ok and enforcement_ok
             self.alert(
                 sample,
                 level,
                 state,
                 actions,
-                "内置盘进入二级低水位，已暂停显式列出的非生产任务",
+                (
+                    "内置盘进入二级低水位，已暂停显式列出的非生产任务"
+                    if level2_enforcement_ok
+                    else "内置盘进入二级低水位，但非生产任务暂停未完全生效"
+                ),
                 alert_key="level2-internal-low-water",
             )
 
@@ -645,6 +690,8 @@ class Guard:
                 alert_key="external-low-water",
             )
 
+        if hasattr(self.collector, "enrich"):
+            sample = self.collector.enrich(sample)
         state.update(
             {
                 "level": level,
@@ -665,6 +712,7 @@ class Guard:
             maximum_window_hours=float(self.config.get("maximum_observation_hours", 72)),
             minimum_coverage=float(self.config.get("minimum_sample_coverage", 0.8)),
             required_growth_fields=self.config.get("required_growth_fields", []),
+            required_field_max_gap_seconds=float(self.config.get("required_field_max_gap_seconds", 1800)),
             discarded_sample_count=discarded,
             external_safety_floor_bytes=int(float(self.config.get("external_min_free_gib", 100)) * GIB),
         )

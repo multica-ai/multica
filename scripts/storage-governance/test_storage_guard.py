@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -15,6 +16,7 @@ from storage_guard import (  # noqa: E402
     Sample,
     build_capacity_report,
     classify_level,
+    SystemCollector,
 )
 
 
@@ -53,9 +55,16 @@ class FakeCollector:
 
 
 class FakeRunner:
-    def __init__(self, *, admission_supported: bool = True, resume_supported: bool = True):
+    def __init__(
+        self,
+        *,
+        admission_supported: bool = True,
+        resume_supported: bool = True,
+        launchagent_stops: bool = True,
+    ):
         self.admission_supported = admission_supported
         self.resume_supported = resume_supported
+        self.launchagent_stops = launchagent_stops
         self.calls: list[tuple[str, ...]] = []
         self.signals: list[tuple[int, int]] = []
 
@@ -73,6 +82,8 @@ class FakeRunner:
             return 0, json.dumps({"pid": 4321, "status": "running", "active_task_count": 2}), ""
         if argv[:3] == ["/bin/ps", "-p", "4321"]:
             return 0, "/opt/homebrew/bin/multica daemon start --foreground\n", ""
+        if argv[:2] == ["launchctl", "print"]:
+            return (1, "", "not found") if self.launchagent_stops else (0, "running", "")
         if argv and argv[0] == "lark-cli":
             return 0, json.dumps({"data": {"message_id": "om_test"}}), ""
         return 0, "{}", ""
@@ -93,7 +104,13 @@ class LevelClassificationTest(unittest.TestCase):
 
 
 class GuardActionTest(unittest.TestCase):
-    def make_sample(self, free_gib: int, timestamp: datetime, active_tasks: int = 2) -> Sample:
+    def make_sample(
+        self,
+        free_gib: int,
+        timestamp: datetime,
+        active_tasks: int = 2,
+        admission_pause_owners: tuple[str, ...] = (),
+    ) -> Sample:
         return Sample(
             recorded_at=timestamp.isoformat(),
             internal_free_bytes=free_gib * GIB,
@@ -102,6 +119,7 @@ class GuardActionTest(unittest.TestCase):
             active_task_count=active_tasks,
             daemon_pid=4321,
             daemon_status="running",
+            admission_pause_owners=admission_pause_owners,
         )
 
     def test_level1_stops_observer_and_pauses_admission_without_killing_tasks(self) -> None:
@@ -128,21 +146,84 @@ class GuardActionTest(unittest.TestCase):
             runner = FakeRunner(admission_supported=False)
             Guard(cfg, runner, FakeCollector(self.make_sample(24, now))).run_once()
             self.assertEqual(runner.signals, [])
-            self.assertTrue(any("legacy_sigstop_refused:active_tasks" in action for action in json.loads(Path(cfg["state_path"]).read_text())["last_actions"]))
+            self.assertTrue(
+                any(
+                    "legacy_sigstop_disabled:unsafe" in action
+                    for action in json.loads(Path(cfg["state_path"]).read_text())["last_actions"]
+                )
+            )
 
-    def test_idle_old_daemon_persists_intent_before_sigstop_and_recovers(self) -> None:
+    def test_old_daemon_never_uses_sigstop_even_when_idle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg = base_config(root)
             now = datetime(2026, 8, 3, tzinfo=timezone.utc)
             runner = FakeRunner(admission_supported=False)
-            Guard(cfg, runner, FakeCollector(self.make_sample(24, now, active_tasks=0))).run_once()
-            self.assertEqual(runner.signals, [(4321, signal.SIGSTOP)])
+            result = Guard(cfg, runner, FakeCollector(self.make_sample(24, now, active_tasks=0))).run_once()
+            self.assertEqual(runner.signals, [])
+            self.assertEqual(result["level"], 1)
+            self.assertEqual(json.loads(Path(cfg["state_path"]).read_text())["enforcement_status"], "failed")
 
-            result = Guard(cfg, runner, FakeCollector(self.make_sample(30, now + timedelta(minutes=1)))).run_once()
+    def test_persisted_sigstop_intent_is_reconciled_after_space_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = base_config(root)
+            Path(cfg["state_path"]).write_text(
+                json.dumps(
+                    {
+                        "level": 0,
+                        "legacy_daemon_sigstop_intent": True,
+                        "legacy_daemon_sigstopped": False,
+                        "legacy_daemon_pid": 4321,
+                        "legacy_daemon_command": "/opt/homebrew/bin/multica daemon start --foreground",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runner = FakeRunner(admission_supported=False)
+            result = Guard(
+                cfg,
+                runner,
+                FakeCollector(self.make_sample(30, datetime(2026, 8, 3, tzinfo=timezone.utc))),
+            ).run_once()
             self.assertIn((4321, signal.SIGCONT), runner.signals)
-            self.assertNotIn(("multica", "daemon", "resume", "--owner", "storage-guard", "--output", "json"), runner.calls)
             self.assertEqual(result["level"], 0)
+
+    def test_daemon_owner_reconciles_when_local_pause_state_was_not_committed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = base_config(root)
+            runner = FakeRunner()
+            result = Guard(
+                cfg,
+                runner,
+                FakeCollector(
+                    self.make_sample(
+                        30,
+                        datetime(2026, 8, 3, tzinfo=timezone.utc),
+                        admission_pause_owners=("storage-guard",),
+                    )
+                ),
+            ).run_once()
+            self.assertIn(
+                ("multica", "daemon", "resume", "--owner", "storage-guard", "--output", "json"),
+                runner.calls,
+            )
+            self.assertEqual(result["level"], 0)
+
+    def test_level2_launchagent_failure_is_not_reported_as_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = base_config(root)
+            runner = FakeRunner(launchagent_stops=False)
+            Guard(
+                cfg,
+                runner,
+                FakeCollector(self.make_sample(17, datetime(2026, 8, 3, tzinfo=timezone.utc))),
+            ).run_once()
+            state = json.loads(Path(cfg["state_path"]).read_text())
+            self.assertEqual(state["enforcement_status"], "failed")
+            self.assertTrue(any("launchagent_stop_failed" in action for action in state["last_actions"]))
 
     def test_resume_failure_remains_pending_and_retries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,6 +300,68 @@ class CapacityReportTest(unittest.TestCase):
         self.assertAlmostEqual(report["p95_growth_bytes_per_hour"], float(GIB))
         self.assertAlmostEqual(report["peak_growth_bytes_per_hour"], float(GIB))
         self.assertEqual(report["days_remaining"], 0.0)
+
+    def test_one_missing_category_sample_uses_field_coverage_instead_of_poisoning_window(self) -> None:
+        start = datetime(2026, 8, 3, tzinfo=timezone.utc)
+        samples = []
+        for hour in range(50):
+            samples.append(
+                {
+                    "recorded_at": (start + timedelta(hours=hour)).isoformat(),
+                    "internal_free_bytes": (80 - hour) * GIB,
+                    "cursor_bytes": None if hour == 25 else hour * GIB,
+                }
+            )
+        report = build_capacity_report(
+            samples,
+            safety_floor_bytes=25 * GIB,
+            burst_reserve_bytes=10 * GIB,
+            minimum_hours=48,
+            expected_interval_seconds=3600,
+            required_growth_fields=["cursor_bytes"],
+            required_field_max_gap_seconds=3 * 3600,
+        )
+        self.assertEqual(report["status"], "READY")
+        self.assertGreater(report["field_coverage_ratio"]["cursor_bytes"], 0.9)
+
+
+class SystemCollectorTest(unittest.TestCase):
+    def test_fast_collect_does_not_scan_growth_directories(self) -> None:
+        runner = mock.Mock()
+        runner.run.side_effect = [
+            (0, json.dumps({"status": "running", "pid": 1, "active_task_count": 0}), ""),
+            (0, "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M", ""),
+        ]
+        collector = SystemCollector({"internal_path": "/", "external_path": "/"}, runner)
+        with mock.patch.object(collector, "growth_metrics", side_effect=AssertionError("slow scan on fast path")):
+            sample = collector.collect()
+        self.assertEqual(sample.active_task_count, 0)
+
+    def test_stale_green_retention_report_is_not_capacity_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "status": "green",
+                        "recorded_at": "2000-01-01T00:00:00+00:00",
+                        "gc_candidates": [{"eligible": True, "details": {"size_bytes": 123}}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            collector = SystemCollector(
+                {
+                    "retention_report_path": str(report),
+                    "retention_report_max_age_seconds": 1800,
+                    "workspace_roots": [],
+                    "logs_paths": [],
+                },
+                mock.Mock(),
+            )
+            metrics = collector.growth_metrics()
+            self.assertIsNone(metrics["workspace_gc_eligible_bytes"])
 
 
 if __name__ == "__main__":
