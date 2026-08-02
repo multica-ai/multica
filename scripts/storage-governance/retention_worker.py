@@ -9,6 +9,7 @@ only prove the external-volume path and emit a GC dry-run report.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import fcntl
 import hashlib
 import json
@@ -27,7 +28,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 GIB = 1024**3
 TERMINAL_ISSUE_STATUSES = {"done", "cancelled"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
-ACTIVE_RUN_STATUSES = {"queued", "claimed", "preparing", "running", "in_progress"}
 
 
 class ArchiveError(RuntimeError):
@@ -160,6 +160,7 @@ def tree_manifest(root: Path, *, sample_limit: int = 16) -> Dict[str, Any]:
     directories.sort()
     symlinks.sort(key=lambda item: item["path"])
     samples = _select_samples(sorted(regular_paths), sample_limit)
+    content_hashes = {relative: hash_file(root / relative) for relative in sorted(regular_paths)}
     return {
         "file_count": len(files),
         "directory_count": len(directories),
@@ -168,7 +169,8 @@ def tree_manifest(root: Path, *, sample_limit: int = 16) -> Dict[str, Any]:
         "directories": directories,
         "files": files,
         "symlinks": symlinks,
-        "sample_hashes": {relative: hash_file(root / relative) for relative in samples},
+        "content_hashes": content_hashes,
+        "sample_hashes": {relative: content_hashes[relative] for relative in samples},
     }
 
 
@@ -202,23 +204,25 @@ class Canary:
         *,
         expected_uuid: str,
         min_free_bytes: int,
+        volume_path: Optional[Path] = None,
         uuid_reader: Callable[[Path], str] = read_volume_uuid,
         free_bytes_reader: Callable[[Path], int] = available_bytes,
     ):
         self.destination = destination
         self.expected_uuid = expected_uuid.upper()
         self.min_free_bytes = min_free_bytes
+        self.volume_path = volume_path or destination
         self.uuid_reader = uuid_reader
         self.free_bytes_reader = free_bytes_reader
 
     def run(self) -> Dict[str, Any]:
-        actual_uuid = self.uuid_reader(self.destination).upper()
+        actual_uuid = self.uuid_reader(self.volume_path).upper()
         if actual_uuid != self.expected_uuid:
             raise ArchiveError(
                 "external volume UUID mismatch: expected %s, got %s"
                 % (self.expected_uuid, actual_uuid)
             )
-        free_bytes = self.free_bytes_reader(self.destination)
+        free_bytes = self.free_bytes_reader(self.volume_path)
         if free_bytes < self.min_free_bytes:
             raise ArchiveError(
                 "external volume below low-water mark: %d < %d bytes"
@@ -252,7 +256,57 @@ class Canary:
             "manifest": actual,
         }
         atomic_write_json(final / "CANARY.json", result)
+        completed = sorted(
+            (path for path in canary_root.iterdir() if path.is_dir() and not path.name.endswith(".partial")),
+            key=lambda path: path.name,
+            reverse=True,
+        )
+        for stale in completed[96:]:
+            shutil.rmtree(str(stale))
         return result
+
+
+class ExternalVolumeGuard:
+    """Bind archive writes to one physical external volume at every phase."""
+
+    def __init__(
+        self,
+        external_root: Path,
+        archive_root: Path,
+        *,
+        expected_uuid: str,
+        min_free_bytes: int,
+        uuid_reader: Callable[[Path], str] = read_volume_uuid,
+        free_bytes_reader: Callable[[Path], int] = available_bytes,
+    ):
+        self.external_root = external_root
+        self.archive_root = archive_root
+        self.expected_uuid = expected_uuid.upper()
+        self.min_free_bytes = min_free_bytes
+        self.uuid_reader = uuid_reader
+        self.free_bytes_reader = free_bytes_reader
+
+    def check(self, required_bytes: int = 0) -> Dict[str, Any]:
+        if self.external_root.is_symlink() or self.archive_root.is_symlink():
+            raise ArchiveError("external or archive root must not be a symlink")
+        external = self.external_root.resolve(strict=True)
+        archive = self.archive_root.resolve(strict=True)
+        try:
+            archive.relative_to(external)
+        except ValueError as error:
+            raise ArchiveError("archive root is outside the verified external root") from error
+        if external.stat().st_dev != archive.stat().st_dev:
+            raise ArchiveError("archive root is not on the verified external device")
+        actual_uuid = self.uuid_reader(external).upper()
+        if actual_uuid != self.expected_uuid:
+            raise ArchiveError("archive volume UUID changed before commit")
+        free_bytes = self.free_bytes_reader(archive)
+        reserve = self.min_free_bytes + int(required_bytes * 1.10)
+        if free_bytes < reserve:
+            raise ArchiveError(
+                "archive volume lacks candidate budget: %d < %d bytes" % (free_bytes, reserve)
+            )
+        return {"volume_uuid": actual_uuid, "free_bytes": free_bytes, "required_reserve_bytes": reserve}
 
 
 class SingleInstanceLock:
@@ -283,9 +337,16 @@ class SingleInstanceLock:
 
 
 class ArchiveManager:
-    def __init__(self, destination: Path, *, fail_at: Optional[str] = None):
+    def __init__(
+        self,
+        destination: Path,
+        *,
+        fail_at: Optional[str] = None,
+        preflight: Optional[Callable[[int], Any]] = None,
+    ):
         self.destination = destination
         self.fail_at = fail_at
+        self.preflight = preflight
 
     def _fail(self, phase: str) -> None:
         if self.fail_at == phase:
@@ -308,6 +369,8 @@ class ArchiveManager:
         self.destination.mkdir(parents=True, exist_ok=True)
 
         frozen = tree_manifest(source)
+        if self.preflight is not None:
+            self.preflight(int(frozen["total_bytes"]))
         suffix = utc_now().strftime("%Y%m%dT%H%M%S.%fZ")
         final = self.destination / (candidate_id + "-" + suffix)
         partial = self.destination / (final.name + ".partial")
@@ -328,6 +391,8 @@ class ArchiveManager:
                 raise ArchiveError("archive count/bytes/entry/sample verification failed")
             self._fail("after_verify")
 
+            if self.preflight is not None:
+                self.preflight(0)
             os.replace(str(partial), str(final))
             fsync_directory(self.destination)
             self._fail("after_rename")
@@ -353,7 +418,25 @@ class ArchiveManager:
             if delete_source:
                 if delete_gate is not None and not delete_gate():
                     raise ArchiveError("fresh control-plane delete gate rejected candidate")
-                shutil.rmtree(str(source))
+                if self.preflight is not None:
+                    self.preflight(0)
+                # Atomically isolate the approved task path. Writers using the
+                # old path can only create a new directory, which is never
+                # removed by this transaction. Re-hash the isolated tree before
+                # deleting it so writes racing with the gate fail closed.
+                quarantine = source.parent / (".%s.archived-%s" % (source.name, suffix))
+                os.replace(str(source), str(quarantine))
+                fsync_directory(source.parent)
+                try:
+                    if tree_manifest(quarantine) != frozen:
+                        raise ArchiveError("source changed during atomic delete isolation")
+                    self._fail("after_isolation")
+                except Exception:
+                    if quarantine.exists() and not source.exists():
+                        os.replace(str(quarantine), str(source))
+                        fsync_directory(source.parent)
+                    raise
+                shutil.rmtree(str(quarantine))
                 fsync_directory(source.parent)
             return {
                 "status": "complete",
@@ -370,7 +453,10 @@ class ArchiveManager:
 
 class MulticaIssueClient:
     def _json(self, argv: List[str]) -> Any:
-        process = subprocess.run(argv, capture_output=True, text=True, check=False)
+        try:
+            process = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=15)
+        except subprocess.TimeoutExpired as error:
+            raise ArchiveError("multica query timed out") from error
         if process.returncode != 0:
             detail = (process.stderr or process.stdout).strip()
             raise ArchiveError("multica query failed: %s" % detail)
@@ -391,8 +477,8 @@ class MulticaIssueClient:
 
     def get_children(self, issue_id: str) -> List[Dict[str, Any]]:
         value = self._json(["multica", "issue", "children", issue_id, "--output", "json"])
-        if not isinstance(value, dict):
-            return []
+        if not isinstance(value, dict) or "stages" not in value or "unstaged" not in value or "total" not in value:
+            raise ArchiveError("children response schema is unknown")
         children: List[Dict[str, Any]] = []
         for item in value.get("unstaged") or []:
             if isinstance(item, dict):
@@ -403,6 +489,8 @@ class MulticaIssueClient:
             for item in stage.get("issues") or stage.get("children") or []:
                 if isinstance(item, dict):
                     children.append(item)
+        if int(value["total"]) != len(children):
+            raise ArchiveError("children response count does not match parsed entries")
         return children
 
 
@@ -412,6 +500,7 @@ def default_open_file_checker(path: Path) -> bool:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     if process.returncode not in (0, 1):
         raise ArchiveError("lsof failed while checking %s" % path)
@@ -419,8 +508,9 @@ def default_open_file_checker(path: Path) -> bool:
     return len(lines) > 1
 
 
-def _latest_mtime_and_unsafe_symlinks(root: Path) -> Tuple[float, List[str]]:
+def _latest_mtime_size_and_unsafe_symlinks(root: Path) -> Tuple[float, int, List[str]]:
     latest = root.lstat().st_mtime
+    total_bytes = 0
     unsafe: List[str] = []
     resolved_root = root.resolve()
     for current, dirnames, filenames in os.walk(str(root), topdown=True, followlinks=False):
@@ -430,6 +520,8 @@ def _latest_mtime_and_unsafe_symlinks(root: Path) -> Tuple[float, List[str]]:
             path = current_path / name
             stat = path.lstat()
             latest = max(latest, stat.st_mtime)
+            if not path.is_symlink():
+                total_bytes += stat.st_size
             if path.is_symlink():
                 try:
                     path.resolve(strict=False).relative_to(resolved_root)
@@ -447,7 +539,7 @@ def _latest_mtime_and_unsafe_symlinks(root: Path) -> Tuple[float, List[str]]:
                     path.resolve(strict=False).relative_to(resolved_root)
                 except ValueError:
                     unsafe.append(path.relative_to(root).as_posix())
-    return latest, sorted(unsafe)
+    return latest, total_bytes, sorted(unsafe)
 
 
 class GCEvaluator:
@@ -523,7 +615,7 @@ class GCEvaluator:
             reasons.append("candidate has a retention pin")
         if any(child.get("status") not in TERMINAL_ISSUE_STATUSES for child in children):
             reasons.append("nonterminal child or supplement verification exists")
-        if any(run.get("status") in ACTIVE_RUN_STATUSES for run in runs):
+        if any(run.get("status") not in TERMINAL_RUN_STATUSES for run in runs):
             reasons.append("active run or lease exists")
 
         matching_runs: List[Dict[str, Any]] = []
@@ -556,8 +648,9 @@ class GCEvaluator:
         except Exception as error:
             reasons.append("open file check failed closed: %s" % error)
         try:
-            latest_mtime, unsafe_symlinks = _latest_mtime_and_unsafe_symlinks(candidate)
+            latest_mtime, total_bytes, unsafe_symlinks = _latest_mtime_size_and_unsafe_symlinks(candidate)
             details["latest_mtime"] = datetime.fromtimestamp(latest_mtime, timezone.utc).isoformat()
+            details["size_bytes"] = total_bytes
             if self.now().timestamp() - latest_mtime < self.recent_write_seconds:
                 reasons.append("recent write exists under candidate")
             if unsafe_symlinks:
@@ -565,7 +658,7 @@ class GCEvaluator:
         except OSError as error:
             reasons.append("filesystem scan failed closed: %s" % error)
 
-        return {
+        result = {
             "path": str(candidate),
             "issue_id": issue_id,
             "workspace_id": workspace_id,
@@ -573,6 +666,31 @@ class GCEvaluator:
             "reasons": reasons,
             "details": details,
         }
+        if not reasons:
+            try:
+                manifest = tree_manifest(candidate)
+                digest = hashlib.sha256(
+                    json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                matching = matching_runs[0]
+                approval_identity = {
+                    "source_path": str(candidate.resolve()),
+                    "workspace_id": workspace_id,
+                    "issue_id": issue_id,
+                    "run_id": str(matching.get("id")),
+                    "completed_at": str(meta.get("completed_at")),
+                    "manifest_sha256": digest,
+                }
+                result["run_id"] = approval_identity["run_id"]
+                result["manifest_sha256"] = digest
+                result["approval_token"] = hashlib.sha256(
+                    json.dumps(approval_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                result["details"]["size_bytes"] = int(manifest["total_bytes"])
+            except Exception as error:
+                reasons.append("approval manifest failed closed: %s" % error)
+                result["eligible"] = False
+        return result
 
 
 def discover_candidates(roots: Iterable[Path]) -> List[Path]:
@@ -595,7 +713,7 @@ def send_alert(config: Dict[str, Any], message: str) -> None:
     open_id = str(config.get("lark_open_id") or "")
     if not open_id:
         return
-    subprocess.run(
+    process = subprocess.run(
         [
             "lark-cli",
             "im",
@@ -613,32 +731,146 @@ def send_alert(config: Dict[str, Any], message: str) -> None:
         text=True,
         check=False,
     )
+    if process.returncode != 0:
+        append_jsonl(
+            alert_path,
+            {"recorded_at": utc_now().isoformat(), "message": "lark alert delivery failed", "exit_code": process.returncode},
+        )
+
+
+def process_ancestry(start_pid: Optional[int] = None, limit: int = 8) -> List[Dict[str, Any]]:
+    pid = os.getpid() if start_pid is None else start_pid
+    values: List[Dict[str, Any]] = []
+    for _ in range(limit):
+        process = subprocess.run(
+            ["/bin/ps", "-p", str(pid), "-o", "ppid=", "-o", "comm="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        fields = process.stdout.strip().split(None, 1)
+        if process.returncode != 0 or len(fields) != 2:
+            break
+        parent = int(fields[0])
+        command = fields[1]
+        values.append({"pid": pid, "parent_pid": parent, "command": command})
+        if parent <= 1 or parent == pid:
+            break
+        pid = parent
+    return values
+
+
+def verify_cron_bridge(config: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    if os.environ.get("MULTICA_STORAGE_CRON_BRIDGE") != "1":
+        raise ArchiveError("formal cron bridge marker is missing")
+    trigger_path = Path(str(config["cron_bridge_trigger_path"]))
+    try:
+        trigger = json.loads(trigger_path.read_text(encoding="utf-8"))
+        bridge_pid = int(trigger["bridge_pid"])
+        created_at = parse_timestamp(str(trigger["created_at"]))
+    except (FileNotFoundError, OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        raise ArchiveError("formal cron bridge trigger is invalid") from error
+    if trigger.get("schema") != "multica.storage-cron-trigger.v1" or not trigger.get("token"):
+        raise ArchiveError("formal cron bridge trigger schema is invalid")
+    try:
+        receipt = json.loads(Path(str(config["cron_bridge_receipt_path"])).read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        receipt = {}
+    if receipt.get("token") == trigger["token"]:
+        raise ArchiveError("formal cron bridge token was already consumed")
+    age = (utc_now() - created_at).total_seconds()
+    if age < 0 or age > 120:
+        raise ArchiveError("formal cron bridge trigger is stale")
+    command = subprocess.run(
+        ["/bin/ps", "-p", str(bridge_pid), "-o", "command="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if command.returncode != 0 or "retention_cron_bridge.py" not in command.stdout:
+        raise ArchiveError("formal cron bridge process is not alive")
+    lineage = process_ancestry(bridge_pid)
+    if not any(Path(str(item["command"])).name == "cron" for item in lineage):
+        raise ArchiveError("formal cron bridge has no live cron ancestor")
+    return trigger, lineage
+
+
+def write_cron_bridge_receipt(config: Dict[str, Any], *, status: str, error: Optional[str] = None) -> None:
+    try:
+        trigger = json.loads(Path(str(config["cron_bridge_trigger_path"])).read_text(encoding="utf-8"))
+        token = str(trigger["token"])
+    except (FileNotFoundError, OSError, KeyError, json.JSONDecodeError):
+        return
+    atomic_write_json(
+        Path(str(config["cron_bridge_receipt_path"])),
+        {"token": token, "status": status, "recorded_at": utc_now().isoformat(), "error": error},
+    )
+
+
+def atomic_write_failure_report(config: Dict[str, Any], message: str) -> None:
+    path = Path(str(config["report_path"]))
+    last_success_at: Optional[str] = None
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(previous, dict):
+            if previous.get("status") == "green":
+                last_success_at = str(previous.get("recorded_at") or "") or None
+            else:
+                last_success_at = previous.get("last_success_at")
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        pass
+    atomic_write_json(
+        path,
+        {
+            "schema": "multica.storage-retention-run.v1",
+            "status": "red",
+            "failed_at": utc_now().isoformat(),
+            "last_success_at": last_success_at,
+            "error": message,
+        },
+    )
 
 
 def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
-    if config.get("require_cron_lineage", True) and os.environ.get("MULTICA_STORAGE_CRON") != "1":
-        raise ArchiveError("formal cron lineage marker is missing")
+    ancestry = process_ancestry()
+    trigger: Optional[Dict[str, Any]] = None
+    cron_lineage: List[Dict[str, Any]] = []
+    if config.get("require_cron_lineage", True):
+        trigger, cron_lineage = verify_cron_bridge(config)
     external_path = Path(str(config["external_path"]))
-    canary = Canary(
+    archive_root = Path(str(config["archive_root"]))
+    archive_root.mkdir(parents=True, exist_ok=True)
+    volume_guard = ExternalVolumeGuard(
         external_path,
+        archive_root,
         expected_uuid=str(config["external_volume_uuid"]),
         min_free_bytes=int(float(config.get("external_min_free_gib", 100)) * GIB),
+    )
+    volume_guard.check()
+    canary = Canary(
+        Path(str(config.get("canary_root") or external_path)),
+        expected_uuid=str(config["external_volume_uuid"]),
+        min_free_bytes=int(float(config.get("external_min_free_gib", 100)) * GIB),
+        volume_path=external_path,
     ).run()
     evaluator = GCEvaluator(
         MulticaIssueClient(),
         retention_seconds=int(float(config.get("retention_days", 7)) * 86400),
         recent_write_seconds=int(config.get("recent_write_seconds", 86400)),
     )
-    candidates = [
-        evaluator.evaluate(path)
-        for path in discover_candidates(Path(str(item)) for item in config.get("workspace_roots", []))
-    ]
+    candidate_paths = discover_candidates(Path(str(item)) for item in config.get("workspace_roots", []))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        candidates = list(executor.map(evaluator.evaluate, candidate_paths))
     report: Dict[str, Any] = {
         "schema": "multica.storage-retention-run.v1",
+        "status": "green",
         "recorded_at": utc_now().isoformat(),
         "pid": os.getpid(),
         "parent_pid": os.getppid(),
-        "invocation_source": "formal-cron" if os.environ.get("MULTICA_STORAGE_CRON") == "1" else "manual",
+        "invocation_source": "verified-cron-launchd-bridge" if trigger else "manual",
+        "process_ancestry": ancestry,
+        "cron_bridge_ancestry": cron_lineage,
+        "cron_trigger_token": trigger.get("token") if trigger else None,
         "canary": canary,
         "gc_mode": "dry-run",
         "gc_candidates": candidates,
@@ -648,14 +880,14 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         "archives": [],
     }
     if config.get("archive_enabled", False):
-        manager = ArchiveManager(Path(str(config["archive_root"])))
-        approved = {str(value) for value in config.get("approved_candidate_ids", [])}
+        manager = ArchiveManager(archive_root, preflight=volume_guard.check)
+        approved = {str(value) for value in config.get("approved_candidates", [])}
         for candidate in candidates:
             candidate_path = Path(str(candidate["path"]))
-            if not candidate["eligible"] or candidate_path.name not in approved:
+            if not candidate["eligible"] or candidate.get("approval_token") not in approved:
                 continue
             fresh = evaluator.evaluate(candidate_path)
-            if not fresh["eligible"]:
+            if not fresh["eligible"] or fresh.get("approval_token") != candidate.get("approval_token"):
                 continue
             report["archives"].append(
                 manager.archive(
@@ -666,6 +898,8 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
                 )
             )
     atomic_write_json(Path(str(config["report_path"])), report)
+    if trigger:
+        write_cron_bridge_receipt(config, status="green")
     return report
 
 
@@ -688,12 +922,26 @@ def main() -> int:
     except Exception as error:
         message = "storage retention worker failed closed: %s" % error
         try:
+            atomic_write_failure_report(config, message)
+            write_cron_bridge_receipt(config, status="red", error=message)
             send_alert(config, message)
         except Exception:
             pass
         print(json.dumps({"status": "red", "error": message}, ensure_ascii=False), file=sys.stderr)
         return 1
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "recorded_at": report["recorded_at"],
+                "eligible_count": report["eligible_count"],
+                "archive_count": len(report["archives"]),
+                "report_path": str(config["report_path"]),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

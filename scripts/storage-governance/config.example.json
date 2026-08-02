@@ -9,6 +9,31 @@
   "safety_floor_gib": 25,
   "burst_reserve_gib": 10,
   "minimum_observation_hours": 48,
+  "maximum_observation_hours": 72,
+  "expected_interval_seconds": 60,
+  "minimum_sample_coverage": 0.8,
+  "shadow_runs_path": "/Users/example/path/to/m0-shadow-observer/data/runs",
+  "workspace_roots": [
+    "/Users/example/multica_workspaces",
+    "/Users/example/multica_workspaces_desktop-api.multica.ai"
+  ],
+  "retention_report_path": "/Users/example/.local/state/storage-governance/gc-dry-run.json",
+  "retention_days": 7,
+  "cursor_path": "/Users/example/Library/Application Support/Cursor",
+  "logs_paths": [
+    "/Users/example/.multica"
+  ],
+  "required_growth_fields": [
+    "shadow_runs_bytes",
+    "workspace_total_bytes",
+    "workspace_inflight_bytes",
+    "workspace_gc_eligible_bytes",
+    "workspace_gc_backlog_bytes",
+    "cursor_bytes",
+    "logs_bytes",
+    "swap_used_bytes",
+    "external_free_bytes"
+  ],
   "observer_labels": [
     "ai.multica.ws2512.m0-shadow-observer"
   ],

@@ -25,15 +25,16 @@ type HealthResponse struct {
 	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
 	// so a foreign-OS daemon can't be started/stopped by the app even though
 	// /health is reachable. See #3916.
-	OS              string   `json:"os"`
-	Uptime          string   `json:"uptime"`
-	DaemonID        string   `json:"daemon_id"`
-	DeviceName      string   `json:"device_name"`
-	ServerURL       string   `json:"server_url"`
-	CLIVersion      string   `json:"cli_version"`
-	ActiveTaskCount int64    `json:"active_task_count"`
-	AdmissionPaused bool     `json:"admission_paused"`
-	Agents          []string `json:"agents"`
+	OS                   string   `json:"os"`
+	Uptime               string   `json:"uptime"`
+	DaemonID             string   `json:"daemon_id"`
+	DeviceName           string   `json:"device_name"`
+	ServerURL            string   `json:"server_url"`
+	CLIVersion           string   `json:"cli_version"`
+	ActiveTaskCount      int64    `json:"active_task_count"`
+	AdmissionPaused      bool     `json:"admission_paused"`
+	AdmissionPauseOwners []string `json:"admission_pause_owners"`
+	Agents               []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
 	// reason the last registration round dropped it (version undetectable,
 	// below the minimum supported version). Purely diagnostic, and omitted when
@@ -104,19 +105,20 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		}
 
 		resp := HealthResponse{
-			Status:          status,
-			PID:             os.Getpid(),
-			OS:              runtime.GOOS,
-			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
-			DaemonID:        d.cfg.DaemonID,
-			DeviceName:      d.cfg.DeviceName,
-			ServerURL:       d.cfg.ServerBaseURL,
-			CLIVersion:      d.cfg.CLIVersion,
-			ActiveTaskCount: d.activeTasks.Load(),
-			AdmissionPaused: d.isAdmissionPaused(),
-			Agents:          agents,
-			SkippedAgents:   d.skippedAgentsSnapshot(),
-			Workspaces:      wsList,
+			Status:               status,
+			PID:                  os.Getpid(),
+			OS:                   runtime.GOOS,
+			Uptime:               time.Since(startedAt).Truncate(time.Second).String(),
+			DaemonID:             d.cfg.DaemonID,
+			DeviceName:           d.cfg.DeviceName,
+			ServerURL:            d.cfg.ServerBaseURL,
+			CLIVersion:           d.cfg.CLIVersion,
+			ActiveTaskCount:      d.activeTasks.Load(),
+			AdmissionPaused:      d.isAdmissionPaused(),
+			AdmissionPauseOwners: d.admissionPauseOwnersSnapshot(),
+			Agents:               agents,
+			SkippedAgents:        d.skippedAgentsSnapshot(),
+			Workspaces:           wsList,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -127,7 +129,13 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 func (d *Daemon) isAdmissionPaused() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	return d.admissionPaused
+	return len(d.admissionPauseOwners) > 0
+}
+
+func (d *Daemon) admissionPauseOwnersSnapshot() []string {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return sortedAdmissionOwners(d.admissionPauseOwners)
 }
 
 // admissionHandler changes only the operator-controlled claim barrier. Pausing
@@ -139,10 +147,28 @@ func (d *Daemon) admissionHandler(paused bool) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		owner, err := normalizeAdmissionOwner(r.URL.Query().Get("owner"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		d.claimMu.Lock()
-		d.admissionPaused = paused
+		next := cloneAdmissionOwners(d.admissionPauseOwners)
+		if paused {
+			next[owner] = struct{}{}
+		} else {
+			delete(next, owner)
+		}
+		if err := d.persistAdmissionOwnersLocked(next); err != nil {
+			d.claimMu.Unlock()
+			http.Error(w, "persist admission barrier: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		d.admissionPauseOwners = next
 		claimsInFlight := d.claimsInFlight
+		owners := sortedAdmissionOwners(next)
+		_, ownerPaused := next[owner]
 		d.claimMu.Unlock()
 
 		statusCode := http.StatusOK
@@ -152,9 +178,12 @@ func (d *Daemon) admissionHandler(paused bool) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"admission_paused":  paused,
-			"claims_in_flight":  claimsInFlight,
-			"active_task_count": d.activeTasks.Load(),
+			"admission_paused":       len(owners) > 0,
+			"admission_pause_owners": owners,
+			"owner":                  owner,
+			"owner_paused":           ownerPaused,
+			"claims_in_flight":       claimsInFlight,
+			"active_task_count":      d.activeTasks.Load(),
 		})
 	}
 }

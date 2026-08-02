@@ -53,17 +53,26 @@ class FakeCollector:
 
 
 class FakeRunner:
-    def __init__(self, *, admission_supported: bool = True):
+    def __init__(self, *, admission_supported: bool = True, resume_supported: bool = True):
         self.admission_supported = admission_supported
+        self.resume_supported = resume_supported
         self.calls: list[tuple[str, ...]] = []
         self.signals: list[tuple[int, int]] = []
 
     def run(self, argv: list[str], *, tolerate_failure: bool = False) -> tuple[int, str, str]:
         self.calls.append(tuple(argv))
-        if argv[:3] == ["multica", "daemon", "pause"] and not self.admission_supported:
-            return 1, "", "endpoint returned 404"
+        if argv[:3] == ["multica", "daemon", "pause"]:
+            if not self.admission_supported:
+                return 1, "", "endpoint returned 404"
+            return 0, json.dumps({"owner_paused": True, "admission_paused": True}), ""
+        if argv[:3] == ["multica", "daemon", "resume"]:
+            if not self.resume_supported:
+                return 1, "", "endpoint unavailable"
+            return 0, json.dumps({"owner_paused": False, "admission_paused": False}), ""
         if argv[:3] == ["multica", "daemon", "status"]:
             return 0, json.dumps({"pid": 4321, "status": "running", "active_task_count": 2}), ""
+        if argv[:3] == ["/bin/ps", "-p", "4321"]:
+            return 0, "/opt/homebrew/bin/multica daemon start --foreground\n", ""
         if argv and argv[0] == "lark-cli":
             return 0, json.dumps({"data": {"message_id": "om_test"}}), ""
         return 0, "{}", ""
@@ -84,13 +93,13 @@ class LevelClassificationTest(unittest.TestCase):
 
 
 class GuardActionTest(unittest.TestCase):
-    def make_sample(self, free_gib: int, timestamp: datetime) -> Sample:
+    def make_sample(self, free_gib: int, timestamp: datetime, active_tasks: int = 2) -> Sample:
         return Sample(
             recorded_at=timestamp.isoformat(),
             internal_free_bytes=free_gib * GIB,
             external_free_bytes=1500 * GIB,
             swap_used_bytes=9 * GIB,
-            active_task_count=2,
+            active_task_count=active_tasks,
             daemon_pid=4321,
             daemon_status="running",
         )
@@ -105,25 +114,50 @@ class GuardActionTest(unittest.TestCase):
             self.assertEqual(result["level"], 1)
             self.assertIn(("launchctl", "disable", "gui/501/ai.multica.ws2512.m0-shadow-observer"), runner.calls)
             self.assertIn(("launchctl", "bootout", "gui/501/ai.multica.ws2512.m0-shadow-observer"), runner.calls)
-            self.assertIn(("multica", "daemon", "pause", "--output", "json"), runner.calls)
+            self.assertIn(("multica", "daemon", "pause", "--owner", "storage-guard", "--output", "json"), runner.calls)
             self.assertEqual(runner.signals, [])
             state = json.loads(Path(base_config(root)["state_path"]).read_text())
             self.assertEqual(state["level"], 1)
             self.assertFalse(state["legacy_daemon_sigstopped"])
 
-    def test_old_daemon_falls_back_to_sigstop_and_recovery_continues_it(self) -> None:
+    def test_old_daemon_refuses_sigstop_with_active_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg = base_config(root)
             now = datetime(2026, 8, 3, tzinfo=timezone.utc)
             runner = FakeRunner(admission_supported=False)
             Guard(cfg, runner, FakeCollector(self.make_sample(24, now))).run_once()
+            self.assertEqual(runner.signals, [])
+            self.assertTrue(any("legacy_sigstop_refused:active_tasks" in action for action in json.loads(Path(cfg["state_path"]).read_text())["last_actions"]))
+
+    def test_idle_old_daemon_persists_intent_before_sigstop_and_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = base_config(root)
+            now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+            runner = FakeRunner(admission_supported=False)
+            Guard(cfg, runner, FakeCollector(self.make_sample(24, now, active_tasks=0))).run_once()
             self.assertEqual(runner.signals, [(4321, signal.SIGSTOP)])
 
-            runner.admission_supported = True
-            Guard(cfg, runner, FakeCollector(self.make_sample(30, now + timedelta(minutes=1)))).run_once()
+            result = Guard(cfg, runner, FakeCollector(self.make_sample(30, now + timedelta(minutes=1)))).run_once()
             self.assertIn((4321, signal.SIGCONT), runner.signals)
-            self.assertIn(("multica", "daemon", "resume", "--output", "json"), runner.calls)
+            self.assertNotIn(("multica", "daemon", "resume", "--owner", "storage-guard", "--output", "json"), runner.calls)
+            self.assertEqual(result["level"], 0)
+
+    def test_resume_failure_remains_pending_and_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = base_config(root)
+            now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+            first = FakeRunner()
+            Guard(cfg, first, FakeCollector(self.make_sample(24, now))).run_once()
+
+            failing = FakeRunner(resume_supported=False)
+            result = Guard(cfg, failing, FakeCollector(self.make_sample(30, now + timedelta(minutes=1)))).run_once()
+            self.assertEqual(result["level"], 1)
+            state = json.loads(Path(cfg["state_path"]).read_text())
+            self.assertTrue(state["resume_pending"])
+            self.assertEqual(state["enforcement_status"], "failed")
 
     def test_level2_pauses_explicit_nonproduction_jobs_and_sends_lark_alert(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -158,6 +192,21 @@ class CapacityReportTest(unittest.TestCase):
         self.assertEqual(report["status"], "INCONCLUSIVE")
         self.assertIsNone(report["days_remaining"])
 
+    def test_two_samples_across_48_hours_do_not_fake_ready_coverage(self) -> None:
+        start = datetime(2026, 8, 3, tzinfo=timezone.utc)
+        report = build_capacity_report(
+            [
+                {"recorded_at": start.isoformat(), "internal_free_bytes": 40 * GIB},
+                {"recorded_at": (start + timedelta(hours=48)).isoformat(), "internal_free_bytes": 39 * GIB},
+            ],
+            safety_floor_bytes=25 * GIB,
+            burst_reserve_bytes=10 * GIB,
+            minimum_hours=48,
+            expected_interval_seconds=3600,
+        )
+        self.assertEqual(report["status"], "INCONCLUSIVE")
+        self.assertLess(report["coverage_ratio"], 0.1)
+
     def test_report_uses_p95_observed_hourly_growth_and_reserves(self) -> None:
         start = datetime(2026, 8, 3, tzinfo=timezone.utc)
         samples = []
@@ -168,6 +217,7 @@ class CapacityReportTest(unittest.TestCase):
         report = build_capacity_report(samples, safety_floor_bytes=25 * GIB, burst_reserve_bytes=10 * GIB, minimum_hours=48)
         self.assertEqual(report["status"], "READY")
         self.assertAlmostEqual(report["p95_growth_bytes_per_hour"], float(GIB))
+        self.assertAlmostEqual(report["peak_growth_bytes_per_hour"], float(GIB))
         self.assertEqual(report["days_remaining"], 0.0)
 
 

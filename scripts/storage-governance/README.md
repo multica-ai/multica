@@ -21,8 +21,8 @@ active, no pin or open file exists, no recent write exists, and local identity
 agrees with the control plane. Filesystem traversal never follows symlinks;
 out-of-tree symlinks reject the candidate.
 
-After an operator approves a dry-run list, its task directory names must be put
-in `approved_candidate_ids` before `archive_enabled` is enabled; keep
+After an operator approves a dry-run list, its one-time `approval_token` values
+must be put in `approved_candidates` before `archive_enabled` is enabled; keep
 `delete_source` false. A transaction freezes the source manifest,
 copies to `.partial`, fsyncs and verifies it, atomically renames the archive,
 and writes `COMPLETE.json`. Source deletion is a separate, final opt-in with a
@@ -34,8 +34,14 @@ before that last gate leaves the source in place.
 Use the same command for canary, GC audit, and archive. The environment marker
 prevents a normal manual invocation from being mistaken for a cron result:
 
+On macOS, `/usr/sbin/cron` normally lacks Full Disk Access to external media.
+The formal entry therefore runs a synchronous bridge. The bridge proves its
+own live `cron` ancestry, writes a fresh one-time token, starts the FDA-capable
+LaunchAgent, and waits for a token-matched receipt. The worker refuses a green
+result unless that bridge process and its cron parent are still alive:
+
 ```cron
-*/15 * * * * MULTICA_STORAGE_CRON=1 HOME=/Users/example PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_worker.py --config /Users/example/.local/libexec/storage-governance/retention-config.json >> /Users/example/Library/Logs/multica-storage-retention.log 2>&1
+*/15 * * * * /usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_cron_bridge.py --trigger /Users/example/.local/state/storage-governance/cron-trigger.json --receipt /Users/example/.local/state/storage-governance/cron-receipt.json
 ```
 
 Keep the lock and report on the internal volume, and the archive root on the

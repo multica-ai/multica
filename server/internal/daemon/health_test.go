@@ -118,7 +118,7 @@ func TestAdmissionHandlerPausesAndResumesNewClaims(t *testing.T) {
 func TestAdmissionResumeDoesNotClearAutoUpdateBarrier(t *testing.T) {
 	t.Parallel()
 
-	d := &Daemon{pauseClaims: true, admissionPaused: true}
+	d := &Daemon{pauseClaims: true, admissionPauseOwners: map[string]struct{}{"manual": {}}}
 	rec := httptest.NewRecorder()
 	d.admissionHandler(false).ServeHTTP(
 		rec,
@@ -170,8 +170,44 @@ func TestAdmissionHandlerRejectsNonPost(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status: got %d, want 405", rec.Code)
 	}
-	if d.admissionPaused {
+	if d.isAdmissionPaused() {
 		t.Fatal("GET request changed admission state")
+	}
+}
+
+func TestAdmissionOwnersAreIndependentAndPersistAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	d := &Daemon{cfg: Config{WorkspacesRoot: root}, admissionPauseOwners: make(map[string]struct{})}
+	request := func(path string) map[string]any {
+		rec := httptest.NewRecorder()
+		d.admissionHandler(strings.Contains(path, "/pause")).ServeHTTP(
+			rec,
+			httptest.NewRequest(http.MethodPost, path, nil),
+		)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status: %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	request("/admission/pause?owner=manual")
+	request("/admission/pause?owner=storage-guard")
+	body := request("/admission/resume?owner=storage-guard")
+	if body["admission_paused"] != true || body["owner_paused"] != false {
+		t.Fatalf("storage resume cleared manual owner: %v", body)
+	}
+
+	restarted := &Daemon{cfg: Config{WorkspacesRoot: root}, admissionPauseOwners: make(map[string]struct{})}
+	if err := restarted.loadAdmissionOwners(); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.admissionPauseOwnersSnapshot(); len(got) != 1 || got[0] != "manual" {
+		t.Fatalf("persisted owners = %v, want [manual]", got)
 	}
 }
 

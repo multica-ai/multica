@@ -1,0 +1,4 @@
+set commandText to "/usr/bin/env -i HOME=__HOME__ PATH=__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin MULTICA_STORAGE_CRON_BRIDGE=1 OPENAI_API_KEY='' OPENAI_BASE_URL='' /usr/bin/python3 __INSTALL_ROOT__/retention_worker.py --config __INSTALL_ROOT__/retention-config.json >> __HOME__/Library/Logs/multica-storage-retention.log 2>&1"
+with timeout of 7200 seconds
+  do shell script commandText
+end timeout

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,6 +125,8 @@ func init() {
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
 	daemonPauseCmd.Flags().String("output", "table", "Output format: table or json")
 	daemonResumeCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonPauseCmd.Flags().String("owner", "manual", "Independent pause owner (for example: manual or storage-guard)")
+	daemonResumeCmd.Flags().String("owner", "manual", "Release only this pause owner")
 
 	// restart shares all the same flags as start
 	rf := daemonRestartCmd.Flags()
@@ -1078,17 +1081,21 @@ func requestDaemonShutdown(healthPort int) error {
 }
 
 type daemonAdmissionState struct {
-	AdmissionPaused bool  `json:"admission_paused"`
-	ClaimsInFlight  int   `json:"claims_in_flight"`
-	ActiveTaskCount int64 `json:"active_task_count"`
+	AdmissionPaused      bool     `json:"admission_paused"`
+	AdmissionPauseOwners []string `json:"admission_pause_owners"`
+	Owner                string   `json:"owner"`
+	OwnerPaused          bool     `json:"owner_paused"`
+	ClaimsInFlight       int      `json:"claims_in_flight"`
+	ActiveTaskCount      int64    `json:"active_task_count"`
 }
 
-func requestDaemonAdmission(client *http.Client, baseURL string, paused bool) (daemonAdmissionState, error) {
+func requestDaemonAdmission(client *http.Client, baseURL string, paused bool, owner string) (daemonAdmissionState, error) {
 	action := "resume"
 	if paused {
 		action = "pause"
 	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/admission/"+action, nil)
+	endpoint := strings.TrimRight(baseURL, "/") + "/admission/" + action + "?" + url.Values{"owner": {owner}}.Encode()
+	req, err := http.NewRequest(http.MethodPost, endpoint, nil)
 	if err != nil {
 		return daemonAdmissionState{}, err
 	}
@@ -1117,7 +1124,8 @@ func runDaemonAdmission(cmd *cobra.Command, paused bool) error {
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	state, err := requestDaemonAdmission(client, fmt.Sprintf("http://127.0.0.1:%d", port), paused)
+	owner, _ := cmd.Flags().GetString("owner")
+	state, err := requestDaemonAdmission(client, fmt.Sprintf("http://127.0.0.1:%d", port), paused, owner)
 	if err != nil {
 		return err
 	}

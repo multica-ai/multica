@@ -72,21 +72,25 @@ func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 func TestRequestDaemonAdmissionUsesLocalPostAndDecodesState(t *testing.T) {
 	t.Parallel()
 
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotOwner string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
+		gotOwner = r.URL.Query().Get("owner")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"admission_paused":true,"claims_in_flight":0,"active_task_count":2}`))
+		_, _ = w.Write([]byte(`{"admission_paused":true,"admission_pause_owners":["storage-guard"],"owner":"storage-guard","owner_paused":true,"claims_in_flight":0,"active_task_count":2}`))
 	}))
 	defer srv.Close()
 
-	state, err := requestDaemonAdmission(srv.Client(), srv.URL, true)
+	state, err := requestDaemonAdmission(srv.Client(), srv.URL, true, "storage-guard")
 	if err != nil {
 		t.Fatalf("requestDaemonAdmission: %v", err)
 	}
 	if gotMethod != http.MethodPost || gotPath != "/admission/pause" {
 		t.Fatalf("request = %s %s, want POST /admission/pause", gotMethod, gotPath)
+	}
+	if gotOwner != "storage-guard" || !state.OwnerPaused {
+		t.Fatalf("owner = %q, state = %+v", gotOwner, state)
 	}
 	if !state.AdmissionPaused || state.ClaimsInFlight != 0 || state.ActiveTaskCount != 2 {
 		t.Fatalf("state = %+v, want paused with two active tasks and no draining claims", state)
@@ -99,11 +103,11 @@ func TestRequestDaemonAdmissionAcceptsDrainPending(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"admission_paused":true,"claims_in_flight":1,"active_task_count":2}`))
+		_, _ = w.Write([]byte(`{"admission_paused":true,"owner":"manual","owner_paused":true,"claims_in_flight":1,"active_task_count":2}`))
 	}))
 	defer srv.Close()
 
-	state, err := requestDaemonAdmission(srv.Client(), srv.URL, true)
+	state, err := requestDaemonAdmission(srv.Client(), srv.URL, true, "manual")
 	if err != nil {
 		t.Fatalf("requestDaemonAdmission: %v", err)
 	}
