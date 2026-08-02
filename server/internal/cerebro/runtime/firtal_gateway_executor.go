@@ -925,10 +925,10 @@ func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Re
 	sort.Strings(names)
 
 	allowed := make([]Tool, 0, len(names))
-	issuanceMeta := meta
-	issuanceMeta.TaskID = ""
+	decisionMeta := meta
+	decisionMeta.TaskID = ""
 	for _, name := range names {
-		entry := e.decideAccess(ctx, agentID, workspaceID, name, reg, issuanceMeta, gatewayPolicyRequestContext(name, nil))
+		entry := e.decideAccess(ctx, agentID, workspaceID, name, reg, decisionMeta, gatewayPolicyRequestContext(name, nil))
 		if entry.PolicyDecision != accessdecision.PolicyAllow &&
 			entry.PolicyDecision != accessdecision.PolicyAsk {
 			continue
@@ -945,20 +945,25 @@ func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Re
 		return nil
 	}
 	allowed = e.filterConnectionDenied(ctx, allowed, workspaceID, agent.RuntimeID, agentID, agent.OwnerID)
-	if meta.TaskID != "" {
-		taskID := optionalGatewayUUID(meta.TaskID)
-		if e.taskMandates == nil || !taskID.Valid {
-			return nil
-		}
-		toolNames := make([]string, 0, len(allowed))
-		for _, tool := range allowed {
-			toolNames = append(toolNames, tool.Name())
-		}
-		if err := e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, time.Now().Add(2*time.Hour)); err != nil {
-			return nil
-		}
-	}
 	return allowed
+}
+
+// finalizeTaskMandate snapshots the exact Gateway tool list only after every
+// task-scoped and dynamic source has been added and the provider limit has been
+// applied. A task with an invalid or unavailable mandate store fails closed.
+func (e *FirtalGatewayExecutor) finalizeTaskMandate(ctx context.Context, meta GatewayRequestMeta, workspaceID, agentID pgtype.UUID, tools []Tool) bool {
+	if meta.TaskID == "" {
+		return true
+	}
+	taskID := optionalGatewayUUID(meta.TaskID)
+	if e.taskMandates == nil || !taskID.Valid {
+		return false
+	}
+	toolNames := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		toolNames = append(toolNames, tool.Name())
+	}
+	return e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, time.Now().Add(2*time.Hour)) == nil
 }
 
 // filterConnectionDenied drops tools whose workspace-connection verdict is Deny,
@@ -1073,21 +1078,6 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		// The Policy Decision Service is the single source for Gateway exposure.
 		// An empty or failing decision set is authoritative and stays empty.
 		enabledTools = e.policyDecisionTools(ctx, taskRegistry, agentID, workspaceID, meta)
-		if tctx.LoopStep != nil {
-			if tool, ok := taskRegistry.Get("open_loop_step"); ok {
-				enabledTools = append([]Tool{tool}, enabledTools...)
-			}
-		}
-		enabledTools = limitFirtalGatewayTools(enabledTools)
-		if len(enabledTools) > 0 {
-			// Also register the MCP-backed tools (get_issue, list_comments,
-			// add_comment) that the Registry wraps via its Call method.
-			// For backward compat, create an MCP server and also expose its
-			// tools — the registry dispatch handles the extended tools.
-			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-			activeRegistry = taskRegistry
-			useRegistry = true
-		}
 		// FIR-2166 C PR2 / FIR-2388: expose every enabled API-type connection's
 		// allowed endpoints as server-side-dispatched tools when the workspace flag
 		// cerebro_api_connection_tools is on (default off). Additive — the tools are
@@ -1140,10 +1130,6 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 					taskRegistry.Register(t)
 				}
 				enabledTools = e.policyDecisionTools(ctx, taskRegistry, agentID, workspaceID, meta)
-				enabledTools = limitFirtalGatewayTools(enabledTools)
-				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-				activeRegistry = taskRegistry
-				useRegistry = true
 			}
 		}
 		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — additive, like the
@@ -1158,12 +1144,28 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 					taskRegistry.Register(t)
 				}
 				enabledTools = e.policyDecisionTools(ctx, taskRegistry, agentID, workspaceID, meta)
-				enabledTools = limitFirtalGatewayTools(enabledTools)
-				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-				activeRegistry = taskRegistry
-				useRegistry = true
 			}
 		}
+		// Task-scoped tools are derived from the trusted task context, not the
+		// authored policy cascade. Add them only after every dynamic source has
+		// rebuilt the policy list, then apply the provider limit exactly once.
+		if tctx.LoopStep != nil {
+			if tool, ok := taskRegistry.Get("open_loop_step"); ok && !toolsContainName(enabledTools, tool.Name()) {
+				enabledTools = append([]Tool{tool}, enabledTools...)
+			}
+		}
+		enabledTools = limitFirtalGatewayTools(enabledTools)
+		if len(enabledTools) > 0 {
+			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+			activeRegistry = taskRegistry
+			useRegistry = true
+		}
+	}
+	if !e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, enabledTools) {
+		anthropicTools = nil
+		enabledTools = nil
+		activeRegistry = nil
+		useRegistry = false
 	}
 	// The compat tool-loop transports serialize GatewayMessage over the OpenAI
 	// wire, where ContentBlocks (image/document) are dropped (`json:"-"`). Fold
@@ -1200,6 +1202,15 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		return e.runToolLoopWithServer(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 	return completion, err
+}
+
+func toolsContainName(tools []Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 // foldGatewayCompatAttachmentBlocks rewrites messages for the OpenAI-compat
