@@ -158,14 +158,18 @@ func (s *Store) RenewClaim(ctx context.Context, input ContractInput, generation 
 }
 
 // FinalizeTaskClaim is the narrow raw-tool compatibility seam used by claim
-// producers outside this package. It compiles exact callables into the same
-// immutable generation contract as direct FinalizeClaim callers.
+// producers outside this package. It creates generation 1 on the first claim
+// and renews that same immutable generation on an identical reclaim.
 func (s *Store) FinalizeTaskClaim(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tools []string, expiresAt time.Time, sourceVersion string) (ClaimGeneration, error) {
 	input, err := NewClaimInput(taskID, workspaceID, agentID, tools, nil, sourceVersion)
 	if err != nil {
 		return ClaimGeneration{}, err
 	}
-	return s.FinalizeClaim(ctx, input, "task-claim", "task-claim", expiresAt)
+	generation, err := s.FinalizeClaim(ctx, input, "task-claim", "task-claim", expiresAt)
+	if !errors.Is(err, ErrStaleFinalizationWriter) {
+		return generation, err
+	}
+	return s.RenewClaim(ctx, input, 1, expiresAt)
 }
 
 func (s *Store) matchFinalizedClaim(

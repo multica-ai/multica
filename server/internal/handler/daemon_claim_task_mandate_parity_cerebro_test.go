@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
@@ -22,7 +23,7 @@ func (f claimParitySessionModeProfiles) Active(context.Context, pgtype.UUID, ses
 	return f.config, nil
 }
 
-func TestClaimTaskByRuntimeStoresFinalOfferedCallableIdentities(t *testing.T) {
+func TestClaimTaskByRuntimeStoresFinalOfferedCallableIdentitiesAndRenewsOnReclaim(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -133,6 +134,7 @@ func TestClaimTaskByRuntimeStoresFinalOfferedCallableIdentities(t *testing.T) {
 	var claimed struct {
 		Task *struct {
 			ID             string               `json:"id"`
+			AuthToken      string               `json:"auth_token"`
 			EffectiveTools []AgentTaskToolEntry `json:"effective_tools"`
 		} `json:"task"`
 	}
@@ -159,5 +161,114 @@ func TestClaimTaskByRuntimeStoresFinalOfferedCallableIdentities(t *testing.T) {
 	}
 	if !slices.Equal(snapshot.AllowedTools, offered) {
 		t.Fatalf("stored Task Mandate = %v, final offered callables = %v", snapshot.AllowedTools, offered)
+	}
+
+	var (
+		firstGeneration       int64
+		firstInventoryVersion string
+		firstDiscoveryVersion string
+		firstGrantDigest      string
+		firstExpiry           time.Time
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT claim_generation, inventory_version, discovery_version,
+		       finalized_grant_digest, expires_at
+		FROM cerebro_task_mandate
+		WHERE task_id = $1
+	`, taskID).Scan(
+		&firstGeneration,
+		&firstInventoryVersion,
+		&firstDiscoveryVersion,
+		&firstGrantDigest,
+		&firstExpiry,
+	); err != nil {
+		t.Fatalf("read first finalized generation: %v", err)
+	}
+	if firstGeneration != 1 {
+		t.Fatalf("first claim generation = %d, want immutable generation 1", firstGeneration)
+	}
+	if claimed.Task.AuthToken == "" {
+		t.Fatal("first claim returned an empty task token")
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET dispatched_at = now() - interval '120 seconds', started_at = NULL
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("make task reclaimable: %v", err)
+	}
+
+	reclaimRecorder := httptest.NewRecorder()
+	reclaimRequest := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "task-mandate-reclaim")
+	reclaimRequest = withURLParam(reclaimRequest, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(reclaimRecorder, reclaimRequest)
+	if reclaimRecorder.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime reclaim: status=%d body=%s", reclaimRecorder.Code, reclaimRecorder.Body.String())
+	}
+
+	var reclaimed struct {
+		Task *struct {
+			ID        string `json:"id"`
+			AuthToken string `json:"auth_token"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(reclaimRecorder.Body.Bytes(), &reclaimed); err != nil {
+		t.Fatalf("decode reclaim response: %v", err)
+	}
+	if reclaimed.Task == nil || reclaimed.Task.ID != taskID {
+		t.Fatalf("reclaimed task = %+v, want %s", reclaimed.Task, taskID)
+	}
+	if reclaimed.Task.AuthToken == "" || reclaimed.Task.AuthToken == claimed.Task.AuthToken {
+		t.Fatal("reclaim must activate one fresh task token")
+	}
+
+	var (
+		renewedGeneration       int64
+		renewedInventoryVersion string
+		renewedDiscoveryVersion string
+		renewedGrantDigest      string
+		renewedExpiry           time.Time
+		tokenCount              int
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT claim_generation, inventory_version, discovery_version,
+		       finalized_grant_digest, expires_at
+		FROM cerebro_task_mandate
+		WHERE task_id = $1
+	`, taskID).Scan(
+		&renewedGeneration,
+		&renewedInventoryVersion,
+		&renewedDiscoveryVersion,
+		&renewedGrantDigest,
+		&renewedExpiry,
+	); err != nil {
+		t.Fatalf("read renewed finalized generation: %v", err)
+	}
+	if renewedGeneration != firstGeneration ||
+		renewedInventoryVersion != firstInventoryVersion ||
+		renewedDiscoveryVersion != firstDiscoveryVersion ||
+		renewedGrantDigest != firstGrantDigest {
+		t.Fatalf(
+			"reclaim changed finalized generation metadata: before=(%d %q %q %q) after=(%d %q %q %q)",
+			firstGeneration, firstInventoryVersion, firstDiscoveryVersion, firstGrantDigest,
+			renewedGeneration, renewedInventoryVersion, renewedDiscoveryVersion, renewedGrantDigest,
+		)
+	}
+	if !renewedExpiry.After(firstExpiry) {
+		t.Fatalf("reclaim expiry = %s, want after first expiry %s", renewedExpiry, firstExpiry)
+	}
+	renewedSnapshot, err := taskmandate.NewStore(testPool).Get(ctx, taskUUID, workspaceUUID, agentUUID)
+	if err != nil {
+		t.Fatalf("read renewed Task Mandate: %v", err)
+	}
+	if !slices.Equal(renewedSnapshot.AllowedTools, offered) {
+		t.Fatalf("reclaim changed Task Mandate tools = %v, want %v", renewedSnapshot.AllowedTools, offered)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM task_token WHERE task_id = $1`, taskID).Scan(&tokenCount); err != nil {
+		t.Fatalf("count active task tokens after reclaim: %v", err)
+	}
+	if tokenCount != 1 {
+		t.Fatalf("task token count after reclaim = %d, want exactly 1", tokenCount)
 	}
 }
