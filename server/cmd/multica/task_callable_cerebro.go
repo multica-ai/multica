@@ -8,8 +8,16 @@ import (
 
 var taskCallableByCommand = map[string]string{
 	"issue list": "list_issues", "issue get": "get_issue", "issue search": "search_issues",
+	"issue pull-requests": "get_issue", "issue runs": "get_issue", "issue run-messages": "get_issue",
 	"issue create": "create_issue", "issue update": "update_issue", "issue status": "update_issue", "issue assign": "update_issue",
 	"issue ask": "add_comment", "issue context": "get_issue",
+	"issue block": "update_issue", "issue unblock": "update_issue", "issue blocks": "get_issue", "issue related": "update_issue",
+	"issue label list": "get_issue", "issue label add": "update_issue", "issue label remove": "update_issue",
+	"issue metadata list": "get_issue", "issue metadata get": "get_issue",
+	"issue metadata set": "update_issue", "issue metadata delete": "update_issue",
+	"issue property list": "get_issue", "issue property set": "update_issue", "issue property unset": "update_issue",
+	"issue subscriber list": "get_issue", "issue subscriber add": "subscribe_issue", "issue subscriber remove": "subscribe_issue",
+	"issue rerun": "rerun_issue", "issue cancel-task": "rerun_issue",
 	"issue comment add": "add_comment", "issue comment list": "list_comments",
 	"issue comment delete": "delete_comment", "issue comment move": "move_comments_to_thread",
 	"issue comment resolve": "resolve_comment", "issue comment unresolve": "unresolve_comment",

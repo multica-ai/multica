@@ -2120,6 +2120,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to prepare task token activation")
 		return
 	}
+	// CEREBRO-PATCH(task-mandate-generation-response): FIR-4292 return the exact finalized claim generation to the runtime.
 	claimGeneration, err := taskmandate.NewStoreDB(h.DB).FinalizeTaskClaim(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour), "daemon-claim:v1")
 	if err != nil {
 		outcome = "error_task_mandate"
@@ -2560,7 +2561,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
 			)
 		}
-		h.projectAnalyticsRun(r.Context(), taskID) // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
+		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
 	}
 	if len(normalizedEvents) > 0 {
 		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)

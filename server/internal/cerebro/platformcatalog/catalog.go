@@ -243,6 +243,7 @@ var catalog = []Capability{
 			"POST /api/issues/{id}/tasks/{taskId}/cancel",
 			"POST /api/tasks/{taskId}/cancel",
 		},
+		ToolBindings: []string{"rerun_issue"},
 	},
 	{
 		Key:           "subscribe_issue",
@@ -256,6 +257,7 @@ var catalog = []Capability{
 			"POST /api/issues/{id}/reactions",
 			"DELETE /api/issues/{id}/reactions",
 		},
+		ToolBindings: []string{"subscribe_issue"},
 	},
 	{
 		Key:           "manage_labels",

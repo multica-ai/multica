@@ -1640,8 +1640,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
-					r.Post("/subscribe", h.SubscribeToIssue)
-					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
+					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/subscribe", h.SubscribeToIssue)     // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
+					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/unsubscribe", h.UnsubscribeFromIssue) // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.With(h.RequirePlatformCapability("rerun_issue")).Post("/tasks/{taskId}/cancel", h.CancelTask) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 rerun_issue policy gate.
 					r.With(h.RequirePlatformCapability("rerun_issue")).Post("/rerun", h.RerunIssue)                 // CEREBRO-PATCH(platform-capability-gates): FIR-4220 rerun_issue policy gate.
@@ -1650,8 +1650,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/usage", h.GetIssueUsage)
 					// CEREBRO-PATCH(comment-cost-route): FIR-39 per-comment cost badge.
 					r.Get("/comment-costs", h.GetIssueCommentCosts)
-					r.Post("/reactions", h.AddIssueReaction)
-					r.Delete("/reactions", h.RemoveIssueReaction)
+					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/reactions", h.AddIssueReaction)     // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
+					r.With(h.RequirePlatformCapability("subscribe_issue")).Delete("/reactions", h.RemoveIssueReaction) // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
 					r.Get("/attachments", h.ListAttachments)
 					// CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 artifact listing moved outside this read_issues route.
 					r.Get("/children", h.ListChildIssues)

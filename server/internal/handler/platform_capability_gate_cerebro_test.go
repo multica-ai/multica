@@ -72,6 +72,7 @@ func TestRequirePlatformCapability_PolicyIsTheGateForAgents(t *testing.T) {
 	}
 	for _, capability := range []string{
 		rerunIssuePlatformAction,
+		"subscribe_issue",
 		triggerAutopilotPlatformAction,
 		autopilotScopePlatformAction,
 		scheduleAgentWakeupPlatformAction,

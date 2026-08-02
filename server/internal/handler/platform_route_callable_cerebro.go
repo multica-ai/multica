@@ -18,7 +18,7 @@ func platformRouteCallables(r *http.Request, capability string) []string {
 	method := r.Method
 
 	switch capability {
-	case createIssuePlatformAction, updateIssuePlatformAction, addCommentPlatformAction:
+	case createIssuePlatformAction, updateIssuePlatformAction, addCommentPlatformAction, rerunIssuePlatformAction, "subscribe_issue":
 		return []string{capability}
 	case "read_issues":
 		return readIssueRouteCallables(method, parts)

@@ -131,6 +131,7 @@ func TestTaskMandateOperationBindingsAreExactAndComplete(t *testing.T) {
 		// Issue and Comment operations.
 		"list_issues": "read_issues", "get_issue": "read_issues", "search_issues": "read_issues",
 		"create_issue": "create_issue", "update_issue": "update_issue",
+		"rerun_issue": "rerun_issue", "subscribe_issue": "subscribe_issue",
 		"add_comment": "add_comment", "list_comments": "read_issues",
 		"update_comment": "update_comment", "delete_comment": "update_comment",
 		"resolve_comment": "update_comment", "unresolve_comment": "update_comment",
