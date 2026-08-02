@@ -104,10 +104,10 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 	if snapshot.AllowedTools == nil {
 		snapshot.AllowedTools = []string{}
 	}
-	snapshot.AuthorizedCount = len(snapshot.AllowedTools)
 	for _, identity := range snapshot.AllowedTools {
 		if !IsAuthorizationScope(identity) {
 			snapshot.OfferedCount++
+			snapshot.AuthorizedCount++
 		}
 	}
 	return snapshot, nil

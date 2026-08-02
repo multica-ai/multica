@@ -80,6 +80,62 @@ func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetTaskMandateByUserReportsExpiredSnapshotAsAllowedWhenEnforcementOff(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "task-access-expired-observation", []byte(`{}`))
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position)
+		VALUES ($1, 'expired task access observation', 'todo', 'none', 'member', $2, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1`, issueID)
+	})
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("clear seeded task mandate: %v", err)
+	}
+	issuedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Microsecond)
+	expiresAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, issued_at, expires_at)
+		VALUES ($1,$2,$3,'["tools:Read"]'::jsonb,$4,$5)
+	`, taskID, testWorkspaceID, agentID, issuedAt, expiresAt); err != nil {
+		t.Fatalf("insert expired task mandate: %v", err)
+	}
+
+	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID: util.MustParseUUID(testUserID), WorkspaceID: util.MustParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	req := newRequest(http.MethodGet, "/api/tasks/"+taskID+"/access", nil)
+	req = withURLParam(req, "taskId", taskID)
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, member))
+	w := httptest.NewRecorder()
+
+	testHandler.GetTaskMandateByUser(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var response taskMandateResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "expired" || response.EnforcementEnabled {
+		t.Fatalf("snapshot state = status %q enforcement %v, want expired observation with enforcement off", response.Status, response.EnforcementEnabled)
+	}
+	if !response.Verdict.Allowed || response.Verdict.Code != "allowed" || response.Verdict.RecoveryAction != "none" {
+		t.Fatalf("diagnostic verdict = %+v, want allowed/none to match call-time behavior while enforcement is off", response.Verdict)
+	}
+}
+
 func TestGetTaskMandateByUserRejectsInvalidTaskID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/not-a-task/access", nil)

@@ -269,11 +269,34 @@ func TestGetReturnsFinalizedGenerationDiagnostics(t *testing.T) {
 	if snapshot.ClaimGeneration != 4 || snapshot.LifecycleState != ClaimLifecycleFinalized || snapshot.Producer == nil || *snapshot.Producer != producer || snapshot.Finalizer == nil || *snapshot.Finalizer != finalizer {
 		t.Fatalf("generation diagnostics = %+v", snapshot)
 	}
-	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 3 {
-		t.Fatalf("source counts = offered %d authorized %d, want 2/3", snapshot.OfferedCount, snapshot.AuthorizedCount)
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 2 {
+		t.Fatalf("source counts = offered %d authorized %d, want 2/2", snapshot.OfferedCount, snapshot.AuthorizedCount)
 	}
 	if snapshot.InventoryVersion == nil || *snapshot.InventoryVersion != inventory || snapshot.DiscoveryVersion == nil || *snapshot.DiscoveryVersion != discovery || snapshot.FinalizedGrantDigest == nil || *snapshot.FinalizedGrantDigest != digest {
 		t.Fatalf("source metadata = inventory %v discovery %v digest %v", snapshot.InventoryVersion, snapshot.DiscoveryVersion, snapshot.FinalizedGrantDigest)
+	}
+}
+
+func TestGetCountsCallableParityWithoutAuthorizationScopes(t *testing.T) {
+	now := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+	id := validUUID()
+	store := NewStoreDB(mandateDB{row: snapshotRow{
+		taskID: id, workspaceID: id, agentID: id,
+		allowedTools: []byte(`[
+			"tools:Read",
+			"mcp__company-brain__search",
+			"connection:company-brain",
+			"mcp__company-brain__*"
+		]`),
+		issuedAt: now, expiresAt: now.Add(time.Hour), lifecycle: ClaimLifecycleFinalized,
+	}})
+
+	snapshot, err := store.Get(context.Background(), id, id, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 2 {
+		t.Fatalf("callable parity counts = offered %d authorized %d, want 2/2 with authorization scopes excluded from both", snapshot.OfferedCount, snapshot.AuthorizedCount)
 	}
 }
 

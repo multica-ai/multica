@@ -74,12 +74,15 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 	}
 	status := "active"
 	verdict := taskmandate.AllowedVerdict()
+	enforcementEnabled := h.taskMandateEnforcementEnabled(r.Context(), workspaceUUID)
 	if !snapshot.ExpiresAt.After(time.Now()) {
 		status = "expired"
-		verdict = taskmandate.VerdictForError(taskmandate.ErrExpired)
+		if enforcementEnabled {
+			verdict = taskmandate.VerdictForError(taskmandate.ErrExpired)
+		}
 	}
 	writeJSON(w, http.StatusOK, taskMandateResponse{
-		EnforcementEnabled:   h.taskMandateEnforcementEnabled(r.Context(), workspaceUUID),
+		EnforcementEnabled:   enforcementEnabled,
 		TaskID:               uuidToString(snapshot.TaskID),
 		AgentID:              uuidToString(snapshot.AgentID),
 		AllowedTools:         snapshot.AllowedTools,
