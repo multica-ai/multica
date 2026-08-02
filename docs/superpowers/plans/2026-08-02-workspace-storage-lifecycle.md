@@ -378,7 +378,7 @@ git add CLI_AND_DAEMON.md docs/superpowers/plans/2026-08-02-workspace-storage-li
 git commit -m "docs: explain bounded workspace storage lifecycle"
 ```
 
-- [ ] **Step 5: Push and open the linked pull request**
+- [x] **Step 5: Push and open the linked pull request**
 
 ```bash
 git push -u origin agent/cto-codex/3962c1ca-1785685966
