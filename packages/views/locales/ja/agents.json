@@ -147,7 +147,7 @@
     "section_execution": "実行設定",
     "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時タスク数を設定します。",
     "section_access": "アクセス",
-    "section_access_hint": "この Multica エージェントを実行できる相手（および Composio など Multica 接続アプリの共有）を管理します。外部ホストの資格情報は扱いません — たとえば AKH トークンスコープは Hub の Settings → Agents で変更します。",
+    "section_access_hint": "この Multica エージェントを実行できる相手と、Multica 接続アプリの共有を管理します。外部ホストの資格情報と権限は、ここではなく各外部サービスで管理します。",
     "section_properties": "プロパティ",
     "section_details": "詳細",
     "section_details_hint": "所有者とライフサイクルに関する読み取り専用情報です。",

@@ -155,7 +155,7 @@
     "section_execution": "실행 설정",
     "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 작업 한도를 설정합니다.",
     "section_access": "접근 권한",
-    "section_access_hint": "이 Multica 에이전트를 실행할 수 있는 대상(및 Composio 등 Multica 연결 앱 공유)을 관리합니다. 외부 호스트 자격 증명은 다루지 않습니다 — 예를 들어 AKH 토큰 스코프는 Hub의 Settings → Agents에서 변경합니다.",
+    "section_access_hint": "이 Multica 에이전트를 실행할 수 있는 대상과 Multica 연결 앱 공유를 관리합니다. 외부 호스트 자격 증명과 권한은 여기서가 아니라 해당 외부 서비스에서 관리합니다.",
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_details_hint": "소유권과 수명 주기에 대한 읽기 전용 정보입니다.",
