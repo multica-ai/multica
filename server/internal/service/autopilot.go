@@ -691,7 +691,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		ActorType:   "agent",
 		ActorID:     util.UUIDToString(leader.ID),
 		Payload: map[string]any{
-			"issue": issueToMap(issue, prefix),
+			"issue": IssueToMap(issue, prefix),
 		},
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)

@@ -12,6 +12,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Router is the channel-agnostic inbound pipeline — the generalization of the
@@ -369,15 +371,18 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	// 7. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
 	if appendRes.IssueCommand != nil {
-		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand)
+		// One lookup feeds both the broadcast payload's identifier and the
+		// chat reply's.
+		prefix := r.issuePrefix(ctx, inst.WorkspaceID)
+		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand, prefix)
 		if err != nil {
 			return Result{}, postAppendFinalize, fmt.Errorf("create issue from command: %w", err)
 		}
 		res.IssueID = issueRes.Issue.ID
 		res.IssueNumber = issueRes.Issue.Number
 		res.IssueTitle = issueRes.Issue.Title
-		if ws, werr := r.reader.GetWorkspace(ctx, inst.WorkspaceID); werr == nil && ws.IssuePrefix != "" {
-			res.IssueIdentifier = fmt.Sprintf("%s-%d", ws.IssuePrefix, issueRes.Issue.Number)
+		if prefix != "" {
+			res.IssueIdentifier = fmt.Sprintf("%s-%d", prefix, issueRes.Issue.Number)
 		} else {
 			res.IssueIdentifier = fmt.Sprintf("#%d", issueRes.Issue.Number)
 		}
@@ -655,7 +660,7 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: instID}
 }
 
-func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand) (service.IssueCreateResult, error) {
+func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string) (service.IssueCreateResult, error) {
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}
@@ -672,7 +677,31 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 		OriginType:   pgtype.Text{String: originType, Valid: originType != ""},
 		OriginID:     sessionID,
 	}
-	return r.issues.Create(ctx, params, service.IssueCreateOpts{})
+	// Without a BroadcastPayload the service emits its minimal
+	// {"issue_id": ...} stub, and every issue:created consumer that reads the
+	// "issue" key drops the event — most visibly the subscriber listener, which
+	// needs id + creator_id and so never subscribed the person who typed
+	// /issue to their own issue. Reuse the same builder the HTTP and autopilot
+	// paths broadcast so all three describe a new issue identically.
+	opts := service.IssueCreateOpts{
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			return map[string]any{"issue": service.IssueToMap(issue, issuePrefix)}
+		},
+	}
+	return r.issues.Create(ctx, params, opts)
+}
+
+// issuePrefix reads the workspace's issue key (the "MUL" in MUL-42). A read
+// failure is not worth failing issue creation over, so it degrades to empty
+// and only the rendered identifier suffers.
+func (r *Router) issuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+	ws, err := r.reader.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		r.logger.Warn("channel engine: workspace lookup for issue prefix failed",
+			"workspace_id", util.UUIDToString(workspaceID), "error", err)
+		return ""
+	}
+	return ws.IssuePrefix
 }
 
 // ErrEmptyIssueTitle is returned by createIssue when /issue has no title and

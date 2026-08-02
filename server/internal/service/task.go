@@ -4494,7 +4494,7 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // issue's status before the write so the client can gate that reconcile on
 // status_changed.
 //
-// The `issue` payload is a map (issueToMap), which the workspace WS fanout
+// The `issue` payload is a map (IssueToMap), which the workspace WS fanout
 // (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
 // drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
 // side effects: the activity-log and inbox listeners type-assert `issue` to a
@@ -4510,7 +4510,7 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"issue":          issueToMap(issue, prefix),
+			"issue":          IssueToMap(issue, prefix),
 			"status_changed": prevStatus != issue.Status,
 			"prev_status":    prevStatus,
 		},
@@ -4623,7 +4623,14 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 	})
 }
 
-func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
+// IssueToMap renders an issue row as the map shape the issue:created /
+// issue:updated broadcast payloads carry under their "issue" key. It is the
+// single source of truth for that shape: the workspace WS fanout marshals it
+// as-is for the UI, and cmd/server's extractIssueFields reads id / creator_id
+// / workspace_id off it to decide who to auto-subscribe. Exported so callers
+// outside this package (the channel engine's /issue command) broadcast the
+// same fields instead of a partial payload those consumers silently drop.
+func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 	return map[string]any{
 		"id":              util.UUIDToString(issue.ID),
 		"workspace_id":    util.UUIDToString(issue.WorkspaceID),

@@ -236,13 +236,15 @@ func (f *fakeMedia) calls() int {
 type fakeIssues struct {
 	called bool
 	params service.IssueCreateParams
+	opts   service.IssueCreateOpts
 	result service.IssueCreateResult
 	err    error
 }
 
-func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, _ service.IssueCreateOpts) (service.IssueCreateResult, error) {
+func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o service.IssueCreateOpts) (service.IssueCreateResult, error) {
 	f.called = true
 	f.params = p
+	f.opts = o
 	return f.result, f.err
 }
 
