@@ -272,6 +272,112 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 }
 
+func TestRunTask_ReclaimsCodexArtifactsBeforeReturn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script Codex fixture is POSIX-only")
+	}
+
+	fakeBin := filepath.Join(t.TempDir(), "codex")
+	script := `#!/bin/sh
+mkdir -p "$CODEX_HOME/.tmp/plugin" "$CODEX_HOME/.sandbox-bin" "$CODEX_HOME/sessions/2026/08/03"
+printf cache > "$CODEX_HOME/.tmp/plugin/cache.bin"
+printf sandbox > "$CODEX_HOME/.sandbox-bin/codex"
+printf session > "$CODEX_HOME/sessions/keep.jsonl"
+printf rollout > "$CODEX_HOME/sessions/2026/08/03/rollout-2026-08-03T00-00-00-thr-cleanup.jsonl"
+printf log > "$CODEX_HOME/../logs/keep.log"
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+IFS= read -r _
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-cleanup"}}}'
+IFS= read -r _
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cleanup","turn":{"id":"turn-cleanup"}}}'
+case "$FIXTURE_STATUS" in
+  completed)
+    printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-cleanup","item":{"type":"agentMessage","id":"msg-cleanup","text":"done"}}}'
+    printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-cleanup","turn":{"id":"turn-cleanup","status":"completed"}}}'
+    ;;
+  cancelled)
+    printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-cleanup","turn":{"id":"turn-cleanup","status":"cancelled"}}}'
+    ;;
+  failed)
+    printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-cleanup","turn":{"id":"turn-cleanup","status":"failed","error":{"message":"fixture failure"}}}}'
+    ;;
+esac
+sleep 2
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Codex: %v", err)
+	}
+	if err := os.Chmod(fakeBin, 0o755); err != nil {
+		t.Fatalf("chmod fake Codex: %v", err)
+	}
+
+	for _, status := range []string{"completed", "cancelled", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			workspacesRoot := t.TempDir()
+			workspaceID := "ws-codex-cleanup-" + status
+			taskID := "task-codex-cleanup-" + status
+			envRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(srv.Close)
+
+			d := &Daemon{
+				client:         NewClient(srv.URL),
+				logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+				workspaces:     make(map[string]*workspaceState),
+				runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "codex"}},
+				activeEnvRoots: make(map[string]int),
+				cfg: Config{
+					WorkspacesRoot: workspacesRoot,
+					AgentTimeout:   30 * time.Second,
+					ServerBaseURL:  srv.URL,
+					Agents: map[string]AgentEntry{
+						"codex": {Path: fakeBin},
+					},
+				},
+			}
+			task := Task{
+				ID:                taskID,
+				WorkspaceID:       workspaceID,
+				RuntimeID:         "rt-1",
+				QuickCreatePrompt: "exercise task-exit cleanup",
+				AuthToken:         "mat_codex_cleanup",
+				Agent: &AgentData{
+					Name:      "cleanup-agent",
+					CustomEnv: map[string]string{"FIXTURE_STATUS": status},
+				},
+			}
+
+			result, err := d.runTask(context.Background(), task, "codex", 0, d.logger)
+			if err != nil {
+				t.Fatalf("runTask: %v", err)
+			}
+			if status == "completed" && result.Status != "completed" {
+				t.Fatalf("result status=%q comment=%q failure_reason=%q, want completed", result.Status, result.Comment, result.FailureReason)
+			}
+			if status != "completed" && result.Status != status && result.Status != "blocked" {
+				t.Fatalf("result status=%q, want %s or blocked", result.Status, status)
+			}
+
+			for _, rel := range []string{"codex-home/.tmp", "codex-home/.sandbox-bin"} {
+				if _, err := os.Stat(filepath.Join(envRoot, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+					t.Fatalf("managed artifact %s still exists when runTask returned: %v", rel, err)
+				}
+			}
+			for _, rel := range []string{"codex-home/sessions/keep.jsonl", "logs/keep.log"} {
+				if _, err := os.Stat(filepath.Join(envRoot, filepath.FromSlash(rel))); err != nil {
+					t.Fatalf("durable task file %s was removed: %v", rel, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	oldRefresh := taskPrepareLeaseRefresh
 	oldTimeout := taskPrepareLeaseTimeout

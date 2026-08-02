@@ -5033,6 +5033,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
+	// Codex marketplace/plugin caches must stay task-local while executable
+	// code is running, then become disposable as soon as the process exits.
+	// Register this after every active-root release defer so cleanup runs first:
+	// the root stays reserved until managed artifacts are gone. This applies to
+	// success, failure, timeout, and cancellation before handleTask can report a
+	// terminal result and dispatch a same-issue successor into this environment.
+	defer d.reclaimTaskExitArtifacts(provider, env.RootDir, taskLog)
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)

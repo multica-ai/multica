@@ -958,6 +958,32 @@ func TestCleanTaskArtifacts_ManagedPathDoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
+func TestReclaimTaskExitArtifacts_OnlyCodex(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		provider string
+		wantGone bool
+	}{
+		{provider: "codex", wantGone: true},
+		{provider: "claude", wantGone: false},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			taskDir := t.TempDir()
+			writeFile(t, filepath.Join(taskDir, "codex-home/.tmp/cache.bin"), 10)
+
+			d := newGCTestDaemon(t, http.NewServeMux())
+			d.reclaimTaskExitArtifacts(tc.provider, taskDir, slog.Default())
+
+			_, err := os.Stat(filepath.Join(taskDir, "codex-home/.tmp"))
+			if gotGone := os.IsNotExist(err); gotGone != tc.wantGone {
+				t.Fatalf("cache gone=%v (stat err=%v), want %v", gotGone, err, tc.wantGone)
+			}
+		})
+	}
+}
+
 func TestActiveEnvRootRefcount(t *testing.T) {
 	t.Parallel()
 

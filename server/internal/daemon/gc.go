@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -638,6 +639,19 @@ func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed 
 
 func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes int64, perPattern map[string]int) {
 	return d.cleanTaskArtifactsMatching(taskDir, newArtifactMatcher(nil, execenv.ManagedReclaimableArtifactSubpaths()))
+}
+
+// reclaimTaskExitArtifacts removes only exact daemon-owned Codex artifacts
+// after the provider process has exited. Other providers are left untouched,
+// even if their task root happens to contain a matching path.
+func (d *Daemon) reclaimTaskExitArtifacts(provider, taskDir string, logger *slog.Logger) {
+	if provider != "codex" || taskDir == "" {
+		return
+	}
+	removed, bytes, _ := d.cleanManagedTaskArtifacts(taskDir)
+	if removed > 0 && logger != nil {
+		logger.Info("reclaimed managed task-exit artifacts", "directories", removed, "bytes", bytes)
+	}
 }
 
 func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatcher) (removed int, bytes int64, perPattern map[string]int) {
