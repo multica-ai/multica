@@ -6,8 +6,10 @@
 > Decision Service input used by direct policy rows; expired or archived
 > bindings are filtered with the database clock on every resolve, and the
 > effective explanation records the deciding Role name and version.
-> A per-run Task Mandate then freezes the allowed-tool envelope and is checked
-> again on every managed or local-runtime call. Migration 9147 deletes the two
+> A per-run Task Mandate then freezes the allowed-tool envelope. The immutable
+> snapshot is always captured and remains observable, but it is enforced again
+> on managed and local-runtime calls only while
+> `cerebro_task_mandate_enforcement` is on. Migration 9147 deletes the two
 > superseded direct stores; automated contract coverage prevents either route
 > or SQL access path from returning.
 
@@ -90,9 +92,12 @@ Workspace/runtime/agent/group/user choices are authored only in
   Direct Agent rules remain a tighten-only ceiling over a Role, and the
   explanation carries Role name + version provenance.
 - **Task Mandate is a run snapshot, not a second policy store.** It freezes the
-  exact allowed-tool envelope when a task is claimed and is checked again before
-  every managed or local-runtime call. The task transcript and
+  exact allowed-tool envelope when a task is claimed. The task transcript and
   `multica permissions task <id>` expose that historical snapshot.
+  `cerebro_task_mandate_enforcement` controls whether managed and local runtimes
+  apply it as a call-time ceiling; turning that flag off does not change the
+  snapshot or bypass tool policy, credential, sandbox, repository, ownership,
+  approval, or other independent safety floors.
 - **Resolver:** `toolpolicy.ResolveWithMode` contains the two pure folds. Public
   DB callers use `Store.ResolveDeclared` or `Store.ResolvePermission`, so the
   key registry — not the caller — selects hard-floor versus openable semantics.
@@ -258,7 +263,7 @@ advisory row cannot appear silently.
 
 Workflow Hook capabilities are independent of `manage_workflows`. `platformcatalog` binds each concrete hook tool to one permission key; `platformaccess` owns that key's contract, and `toolpolicy.ResolvePermission` projects it into the capability card, claim-time tool list, and call-time authorizer. Agents receive `hooks:read`, while `hooks:write` needs an explicit grant, `hooks:enforce` rejects agent actors, and `hooks:manage_managed` accepts only the workspace owner. Tool registration therefore means only `available`; it never implies `allowed` or `callable`. The complete eight-key special-contract list lives in `permission-system.md`; this architecture document does not duplicate it.
 
-Workflow, Command, and Eval mutations under `/api/cerebro/workflows*`, `/api/cerebro/commands*`, and `/api/cerebro/evals*` share one agent enforcement boundary: `handler.RequireManageWorkflows` checks Task Mandate and `PlatformActionGate` against `manage_workflows` before the route handler can mutate state. Reads and member behavior remain unchanged, and the independent `/api/cerebro/workflow-hooks*` family keeps its `hooks:*` contracts. Settings → Permissions is therefore the only authoring surface for `manage_workflows`; CLI/MCP wrappers inherit the HTTP decision.
+Workflow, Command, and Eval mutations under `/api/cerebro/workflows*`, `/api/cerebro/commands*`, and `/api/cerebro/evals*` share one agent enforcement boundary: `handler.RequireManageWorkflows` always checks `PlatformActionGate` against `manage_workflows` and also checks Task Mandate while `cerebro_task_mandate_enforcement` is on before the route handler can mutate state. Reads and member behavior remain unchanged, and the independent `/api/cerebro/workflow-hooks*` family keeps its `hooks:*` contracts. Settings → Permissions is therefore the only authoring surface for `manage_workflows`; CLI/MCP wrappers inherit the HTTP decision.
 
 The three intake rows render `Governed by: <external_security_owner> · Workspace off-switch` in both permission catalog presentations, with the decision control enabled on the workspace page only (`isRowSettable` in `packages/cerebro-tool-policy/core/tool-policy.ts`, mirroring the server's `externallyManagedWriteError`). An older response without an owner renders `Security owner not specified`, so the management location never depends on hover or disappears silently.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
