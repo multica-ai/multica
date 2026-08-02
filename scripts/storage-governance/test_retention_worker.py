@@ -94,6 +94,24 @@ class CanaryTest(unittest.TestCase):
             self.assertGreaterEqual(len(result["manifest"]["sample_hashes"]), 2)
             self.assertTrue(Path(result["path"], "nested", "deeper", "empty").is_file())
 
+    def test_postflight_volume_rebind_failure_prevents_green_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp)
+
+            def rebound() -> dict:
+                raise ArchiveError("archive volume UUID changed before commit")
+
+            with self.assertRaisesRegex(ArchiveError, "UUID changed"):
+                Canary(
+                    destination,
+                    expected_uuid="volume-uuid",
+                    min_free_bytes=1,
+                    uuid_reader=lambda _: "volume-uuid",
+                    free_bytes_reader=lambda _: 10_000,
+                    postflight=rebound,
+                ).run()
+            self.assertEqual(list(destination.glob("**/CANARY.json")), [])
+
 
 class ArchiveTransactionTest(unittest.TestCase):
     def test_manifest_hashes_every_file_not_only_samples(self) -> None:
@@ -156,6 +174,8 @@ class ArchiveTransactionTest(unittest.TestCase):
                     post_commit_hook=corrupt_committed,
                 )
             self.assertTrue(source.exists())
+            self.assertEqual(list((root / "archive").glob("*/COMPLETE.json")), [])
+            self.assertEqual(consumed_approval_tokens(root / "archive"), set())
 
     def test_single_instance_lock_is_nonblocking(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

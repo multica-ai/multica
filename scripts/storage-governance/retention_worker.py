@@ -217,6 +217,7 @@ class Canary:
         volume_path: Optional[Path] = None,
         uuid_reader: Callable[[Path], str] = read_volume_uuid,
         free_bytes_reader: Callable[[Path], int] = available_bytes,
+        postflight: Optional[Callable[[], Dict[str, Any]]] = None,
     ):
         self.destination = destination
         self.expected_uuid = expected_uuid.upper()
@@ -224,6 +225,7 @@ class Canary:
         self.volume_path = volume_path or destination
         self.uuid_reader = uuid_reader
         self.free_bytes_reader = free_bytes_reader
+        self.postflight = postflight
 
     def run(self) -> Dict[str, Any]:
         actual_uuid = self.uuid_reader(self.volume_path).upper()
@@ -255,6 +257,10 @@ class Canary:
         actual = tree_manifest(final)
         if expected != actual:
             raise ArchiveError("canary verification failed after atomic rename")
+        if self.postflight is not None:
+            verified_volume = self.postflight()
+            actual_uuid = str(verified_volume["volume_uuid"])
+            free_bytes = int(verified_volume["free_bytes"])
         result = {
             "schema": "multica.external-volume-canary.v1",
             "status": "green",
@@ -411,6 +417,12 @@ class ArchiveManager:
             fsync_directory(self.destination)
             self._fail("after_rename")
 
+            if post_commit_hook is not None:
+                post_commit_hook(final)
+            committed = tree_manifest(final)
+            if committed != frozen:
+                raise ArchiveError("committed archive changed before COMPLETE marker")
+
             marker = {
                 "schema": "multica.transactional-archive.v1",
                 "completed_at": utc_now().isoformat(),
@@ -418,19 +430,13 @@ class ArchiveManager:
                 "source_path": str(source),
                 "archive_path": str(final),
                 "source_manifest": frozen,
-                "archive_manifest": copied,
+                "archive_manifest": committed,
                 "approval_token": approval_token,
                 "source_delete_enabled": False,
             }
             atomic_write_json(final / "COMPLETE.json", marker)
             fsync_directory(final)
             self._fail("after_complete")
-
-            if post_commit_hook is not None:
-                post_commit_hook(final)
-            committed = tree_manifest(final, excluded_relative_paths={"COMPLETE.json"})
-            if committed != frozen:
-                raise ArchiveError("committed archive changed after COMPLETE marker")
 
             source_before_delete = tree_manifest(source)
             persisted = json.loads((final / "COMPLETE.json").read_text(encoding="utf-8"))
@@ -518,8 +524,6 @@ def _latest_mtime_size_and_unsafe_symlinks(root: Path) -> Tuple[float, int, List
             path = current_path / name
             stat = path.lstat()
             latest = max(latest, stat.st_mtime)
-            if not path.is_symlink():
-                total_bytes += stat.st_size
             if path.is_symlink():
                 try:
                     path.resolve(strict=False).relative_to(resolved_root)
@@ -905,6 +909,7 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         expected_uuid=str(config["external_volume_uuid"]),
         min_free_bytes=int(float(config.get("external_min_free_gib", 100)) * GIB),
         volume_path=external_path,
+        postflight=canary_guard.check,
     ).run()
     evaluator = GCEvaluator(
         MulticaIssueClient(),

@@ -131,7 +131,8 @@ class SystemCollector:
                 report = json.loads(Path(str(report_path)).read_text(encoding="utf-8"))
                 recorded_at = parse_timestamp(str(report["recorded_at"]))
                 maximum_age = float(self.config.get("retention_report_max_age_seconds", 1800))
-                if report.get("status") == "green" and (datetime.now(timezone.utc) - recorded_at).total_seconds() <= maximum_age:
+                report_age = (datetime.now(timezone.utc) - recorded_at).total_seconds()
+                if report.get("status") == "green" and 0 <= report_age <= maximum_age:
                     eligible_value = inflight_value = backlog_value = 0
                     for candidate in report.get("gc_candidates") or []:
                         size = int((candidate.get("details") or {}).get("size_bytes") or 0)
@@ -150,7 +151,11 @@ class SystemCollector:
                 pass
         unclassified = None
         if workspace_total is not None and eligible is not None and inflight is not None and backlog is not None:
-            unclassified = max(0, workspace_total - eligible - inflight - backlog)
+            categorized = eligible + inflight + backlog
+            if categorized <= workspace_total:
+                unclassified = workspace_total - categorized
+            else:
+                eligible = inflight = backlog = None
         return {
             "shadow_runs_bytes": shadow,
             "workspace_total_bytes": workspace_total,

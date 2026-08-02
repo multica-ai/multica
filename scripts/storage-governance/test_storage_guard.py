@@ -363,6 +363,70 @@ class SystemCollectorTest(unittest.TestCase):
             metrics = collector.growth_metrics()
             self.assertIsNone(metrics["workspace_gc_eligible_bytes"])
 
+    def test_future_green_retention_report_is_not_capacity_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "status": "green",
+                        "recorded_at": "2099-01-01T00:00:00+00:00",
+                        "gc_candidates": [{"eligible": True, "details": {"size_bytes": 123}}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            collector = SystemCollector(
+                {
+                    "retention_report_path": str(report),
+                    "retention_report_max_age_seconds": 1800,
+                    "workspace_roots": [],
+                    "logs_paths": [],
+                },
+                mock.Mock(),
+            )
+            self.assertIsNone(collector.growth_metrics()["workspace_gc_eligible_bytes"])
+
+    def test_workspace_categories_conserve_file_payload_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspaces"
+            workspace.mkdir()
+            (workspace / "payload.bin").write_bytes(b"x" * 100)
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "status": "green",
+                        "recorded_at": datetime.now(timezone.utc).isoformat(),
+                        "gc_candidates": [{"eligible": True, "details": {"size_bytes": 40}}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            collector = SystemCollector(
+                {
+                    "retention_report_path": str(report),
+                    "retention_report_max_age_seconds": 1800,
+                    "workspace_roots": [str(workspace)],
+                    "logs_paths": [],
+                },
+                mock.Mock(),
+            )
+            metrics = collector.growth_metrics()
+            total = metrics["workspace_total_bytes"]
+            categories = sum(
+                int(metrics[key] or 0)
+                for key in (
+                    "workspace_gc_eligible_bytes",
+                    "workspace_inflight_bytes",
+                    "workspace_gc_backlog_bytes",
+                    "workspace_unclassified_bytes",
+                )
+            )
+            self.assertEqual(categories, total)
+
 
 if __name__ == "__main__":
     unittest.main()
