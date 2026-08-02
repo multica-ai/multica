@@ -17,6 +17,10 @@
     <string>__HOME__</string>
     <key>PATH</key>
     <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OPENAI_API_KEY</key>
+    <string></string>
+    <key>OPENAI_BASE_URL</key>
+    <string></string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
