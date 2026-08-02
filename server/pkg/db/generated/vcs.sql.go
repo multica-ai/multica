@@ -477,10 +477,14 @@ func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnecti
 }
 
 const upsertVCSPullRequest = `-- name: UpsertVCSPullRequest :one
+
 WITH existing AS (
     SELECT id, state
     FROM vcs_pull_request
-    WHERE connection_id = $2 AND repo_owner = $4 AND repo_name = $5 AND pr_number = $6
+    WHERE vcs_pull_request.connection_id = $2
+      AND vcs_pull_request.repo_owner = $4
+      AND vcs_pull_request.repo_name = $5
+      AND vcs_pull_request.pr_number = $6
     FOR UPDATE
 ),
 upserted AS (
@@ -542,21 +546,43 @@ type UpsertVCSPullRequestParams struct {
 	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
 }
 
+type UpsertVCSPullRequestRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ConnectionID    pgtype.UUID        `json:"connection_id"`
+	Provider        string             `json:"provider"`
+	RepoOwner       string             `json:"repo_owner"`
+	RepoName        string             `json:"repo_name"`
+	PrNumber        int32              `json:"pr_number"`
+	Title           string             `json:"title"`
+	State           string             `json:"state"`
+	HtmlUrl         string             `json:"html_url"`
+	Branch          pgtype.Text        `json:"branch"`
+	HeadSha         string             `json:"head_sha"`
+	AuthorLogin     pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
+	PrCreatedAt     pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
+	Additions       int32              `json:"additions"`
+	Deletions       int32              `json:"deletions"`
+	ChangedFiles    int32              `json:"changed_files"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	PreviousState   pgtype.Text        `json:"previous_state"`
+}
+
 // =====================
 // VCS Pull Request
 // =====================
 // pr_updated_at guards against an out-of-order webhook redelivery regressing
 // the PR state, mirroring the updated_at guard on UpsertVCSCommitStatus. Each
-// mutable column is applied only when the incoming event is newer than the
-// stored row, or when it has the same timestamp without trying to clear an
-// already-terminal state. The row is still touched (and thus RETURNED) either
-// way, so callers always get the current PR and the previous state needed to
-// freeze close intent only after the first terminal transition.
-type UpsertVCSPullRequestRow struct {
-	VcsPullRequest
-	PreviousState pgtype.Text `json:"previous_state"`
-}
-
+// mutable column is applied only when the incoming event is not older than the
+// stored row and is not trying to clear an already-terminal state. The row is
+// still touched (and thus RETURNED) either way, so callers
+// always get the current PR and the previous state needed to freeze close
+// intent only after the first terminal transition.
 func (q *Queries) UpsertVCSPullRequest(ctx context.Context, arg UpsertVCSPullRequestParams) (UpsertVCSPullRequestRow, error) {
 	row := q.db.QueryRow(ctx, upsertVCSPullRequest,
 		arg.WorkspaceID,

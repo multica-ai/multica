@@ -62,6 +62,34 @@ func vcsPullRequestAcceptedEvent(pr db.UpsertVCSPullRequestRow, ev vcs.PullReque
 		pr.State == ev.State
 }
 
+func vcsPullRequestFromUpsertRow(pr db.UpsertVCSPullRequestRow) db.VcsPullRequest {
+	return db.VcsPullRequest{
+		ID:              pr.ID,
+		WorkspaceID:     pr.WorkspaceID,
+		ConnectionID:    pr.ConnectionID,
+		Provider:        pr.Provider,
+		RepoOwner:       pr.RepoOwner,
+		RepoName:        pr.RepoName,
+		PrNumber:        pr.PrNumber,
+		Title:           pr.Title,
+		State:           pr.State,
+		HtmlUrl:         pr.HtmlUrl,
+		Branch:          pr.Branch,
+		HeadSha:         pr.HeadSha,
+		AuthorLogin:     pr.AuthorLogin,
+		AuthorAvatarUrl: pr.AuthorAvatarUrl,
+		MergedAt:        pr.MergedAt,
+		ClosedAt:        pr.ClosedAt,
+		PrCreatedAt:     pr.PrCreatedAt,
+		PrUpdatedAt:     pr.PrUpdatedAt,
+		Additions:       pr.Additions,
+		Deletions:       pr.Deletions,
+		ChangedFiles:    pr.ChangedFiles,
+		CreatedAt:       pr.CreatedAt,
+		UpdatedAt:       pr.UpdatedAt,
+	}
+}
+
 // vcsPullRequestRowToResponse maps an issue's PR-list row, which carries the
 // aggregated commit-status counts, onto the shared response shape.
 func vcsPullRequestRowToResponse(p db.ListVCSPullRequestsByIssueRow) GitHubPullRequestResponse {
@@ -227,7 +255,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	}
 
 	workspaceID := uuidToString(conn.WorkspaceID)
-	resp := vcsPullRequestToResponse(pr.VcsPullRequest)
+	resp := vcsPullRequestToResponse(vcsPullRequestFromUpsertRow(pr))
 
 	// Auto-link to issues by identifiers in title/body/branch. Connecting a
 	// a provider is the opt-in, so there is no separate per-workspace flag. The
