@@ -1170,9 +1170,10 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.
 // Returns (reason, true) when dispatching now would only enqueue a doomed
-// task — i.e. the assignee (or, for squad autopilots, the squad leader) is
-// gone, archived, has no runtime bound, or its runtime is not currently
-// online. Returns ("", false) on the happy path.
+// task - i.e. the autopilot is at its max_concurrent_runs cap (WS-750), or the
+// assignee (or, for squad autopilots, the squad leader) is gone, archived, has
+// no runtime bound, or its runtime is not currently online. Returns ("", false)
+// on the happy path.
 //
 // Errors are split into two classes:
 //   - pgx.ErrNoRows / errSquadArchived (the row truly doesn't exist or is
@@ -1186,6 +1187,29 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, actorUserID pgtype.UUID) (string, dispatch.ReasonCode, bool) {
 	if !ap.AssigneeID.Valid {
 		return "autopilot has no assignee", dispatch.ReasonTargetUnavailable, true
+	}
+	// Per-autopilot concurrency cap (WS-750). When max_concurrent_runs is set,
+	// count in-flight runs (issue_created/running) and skip a new dispatch that
+	// would exceed the cap. NULL means unlimited (preserves prior behaviour).
+	// The skip reuses the m079 `skipped` status via recordSkippedRun, so -
+	// unlike the concurrency_policy feature dropped in 043 (skip orphan bug) -
+	// no orphaned run is left behind. Checked before leader resolution so a
+	// capped dispatch short-circuits cheaply. A transient count error fails
+	// open: a DB hiccup must never silently swallow a scheduled run.
+	if ap.MaxConcurrentRuns.Valid {
+		active, err := s.Queries.CountActiveAutopilotRuns(ctx, ap.ID)
+		if err != nil {
+			slog.Warn("autopilot admission: failed to count active runs",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"error", err,
+			)
+			return "", "", false
+		}
+		if active >= int64(ap.MaxConcurrentRuns.Int32) {
+			return fmt.Sprintf("concurrency cap reached: %d of %d in-flight runs active",
+					active, ap.MaxConcurrentRuns.Int32),
+				dispatch.ReasonConcurrencyCap, true
+		}
 	}
 	agent, squadResolved, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {

@@ -48,10 +48,12 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
+    max_concurrent_runs,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
     $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
+    sqlc.narg('max_concurrent_runs'),
     $7, $8
 ) RETURNING *;
 
@@ -65,6 +67,7 @@ UPDATE autopilot SET
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
+    max_concurrent_runs = sqlc.narg('max_concurrent_runs'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -437,6 +440,17 @@ LIMIT 1;
 UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
 WHERE issue_id = $1
+  AND status IN ('issue_created', 'running');
+
+-- name: CountActiveAutopilotRuns :one
+-- In-flight run count for the per-autopilot concurrency cap (WS-750). Counts
+-- runs that are still working: issue_created (issue created, downstream agent
+-- task not yet terminal) and running (run_only task queued/active). Terminal
+-- statuses (completed/failed/skipped) are excluded so the cap reflects actual
+-- outstanding work, not history. Matches the idx_autopilot_run_status partial
+-- index so the count is index-only.
+SELECT count(*)::bigint FROM autopilot_run
+WHERE autopilot_id = $1
   AND status IN ('issue_created', 'running');
 
 -- =====================
