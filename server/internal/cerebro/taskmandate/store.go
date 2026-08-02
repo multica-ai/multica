@@ -36,12 +36,21 @@ type DB interface {
 // It is also the read model shown to operators, so the human and the running
 // agent can inspect the same exact allowlist that call-time enforcement uses.
 type Snapshot struct {
-	TaskID       pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	AgentID      pgtype.UUID
-	AllowedTools []string
-	IssuedAt     time.Time
-	ExpiresAt    time.Time
+	TaskID               pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	AgentID              pgtype.UUID
+	AllowedTools         []string
+	IssuedAt             time.Time
+	ExpiresAt            time.Time
+	ClaimGeneration      int64
+	Producer             *string
+	Finalizer            *string
+	LifecycleState       ClaimLifecycleState
+	InventoryVersion     *string
+	DiscoveryVersion     *string
+	FinalizedGrantDigest *string
+	OfferedCount         int
+	AuthorizedCount      int
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -61,7 +70,10 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 		raw      []byte
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT task_id, workspace_id, agent_id, allowed_tools, issued_at, expires_at
+		SELECT task_id, workspace_id, agent_id, allowed_tools, issued_at, expires_at,
+		       COALESCE(claim_generation, 0), producer, finalizer,
+		       COALESCE(NULLIF(lifecycle_state, ''), 'legacy'),
+		       inventory_version, discovery_version, finalized_grant_digest
 		FROM cerebro_task_mandate
 		WHERE task_id=$1 AND workspace_id=$2 AND agent_id=$3`,
 		taskID, workspaceID, agentID,
@@ -72,6 +84,13 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 		&raw,
 		&snapshot.IssuedAt,
 		&snapshot.ExpiresAt,
+		&snapshot.ClaimGeneration,
+		&snapshot.Producer,
+		&snapshot.Finalizer,
+		&snapshot.LifecycleState,
+		&snapshot.InventoryVersion,
+		&snapshot.DiscoveryVersion,
+		&snapshot.FinalizedGrantDigest,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Snapshot{}, ErrMissing
@@ -85,7 +104,17 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 	if snapshot.AllowedTools == nil {
 		snapshot.AllowedTools = []string{}
 	}
+	snapshot.AuthorizedCount = len(snapshot.AllowedTools)
+	for _, identity := range snapshot.AllowedTools {
+		if !IsAuthorizationScope(identity) {
+			snapshot.OfferedCount++
+		}
+	}
 	return snapshot, nil
+}
+
+func IsAuthorizationScope(identity string) bool {
+	return strings.HasPrefix(identity, "connection:") || strings.HasSuffix(identity, "__*")
 }
 
 // Issue snapshots the exact tools a task may call through the immutable claim
@@ -167,8 +196,11 @@ func (s *Store) AuthorizeClaimGeneration(ctx context.Context, taskID, workspaceI
 	if IsSelfCapabilityLookup(tool) {
 		return nil
 	}
-	if s == nil || s.db == nil || !taskID.Valid || generation <= 0 {
+	if s == nil || s.db == nil || !taskID.Valid {
 		return ErrMissing
+	}
+	if generation <= 0 {
+		return ErrStaleClaimGeneration
 	}
 	var (
 		storedWorkspaceID, storedAgentID pgtype.UUID

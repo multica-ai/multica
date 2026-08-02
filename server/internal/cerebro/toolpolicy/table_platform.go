@@ -68,6 +68,7 @@ func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs 
 			ManagedExternally:     c.ManagedExternally,
 			ExternalSecurityOwner: c.ExternalSecurityOwner,
 			WorkspaceIntakeSwitch: c.WorkspaceIntakeSwitch,
+			CallableIdentities:    append([]string(nil), c.ToolBindings...),
 			Layers:                map[Layer]Setting{},
 			Conditions:            map[Layer]*Condition{},
 		}

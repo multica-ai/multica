@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,6 +12,44 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
+
+func TestNoteArtifactAliasesEnforceExactTaskCallable(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	setTaskMandateEnforcement(t, true)
+	setPlatformActionWorkspacePolicy(t, "manage_artifacts", toolpolicy.SettingAllow)
+	agentID := createHandlerTestAgent(t, "note-artifact-alias-"+uuid.NewString(), []byte(`{}`))
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+	generation := issuePlatformActionMandate(t, taskID, agentID, "search_artifacts")
+
+	nextCalls := 0
+	guarded := testHandler.RequirePlatformCapability("manage_artifacts")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := func(path, callable string) *http.Request {
+		req := newRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Actor-Source", "task_token")
+		req.Header.Set("X-Agent-ID", agentID)
+		req.Header.Set("X-Task-ID", taskID)
+		req.Header.Set("X-Task-Mandate-Generation", strconv.FormatInt(generation, 10))
+		req.Header.Set("X-Multica-Callable", callable)
+		return req
+	}
+
+	denied := httptest.NewRecorder()
+	guarded.ServeHTTP(denied, request("/api/notes/note-1", "get_artifact"))
+	if denied.Code != http.StatusForbidden || nextCalls != 0 || !strings.Contains(denied.Body.String(), "task_mandate_denied") {
+		t.Fatalf("ungranted note read = status %d calls %d body %s", denied.Code, nextCalls, denied.Body.String())
+	}
+
+	allowed := httptest.NewRecorder()
+	guarded.ServeHTTP(allowed, request("/api/notes/search", "search_artifacts"))
+	if allowed.Code != http.StatusNoContent || nextCalls != 1 {
+		t.Fatalf("granted note search = status %d calls %d body %s", allowed.Code, nextCalls, allowed.Body.String())
+	}
+}
 
 // agentPlatformCapabilityRequest builds an agent-actor request WITHOUT issuing
 // a task mandate for the capability. These catalog-only keys are not runtime

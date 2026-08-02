@@ -15,6 +15,17 @@
 import { z } from "zod";
 import { api, parseWithFallback } from "@multica/core/api";
 
+const TaskMandateVerdictSchema = z
+  .object({
+    allowed: z.boolean().catch(false),
+    code: z.string().catch("task_mandate_internal_error"),
+    recovery_action: z.string().catch("retry"),
+    message: z.string().catch("The Task Mandate decision could not be completed."),
+  })
+  .loose()
+  .optional()
+  .catch(undefined);
+
 const AgentCapabilitySkillSchema = z
   .object({
     id: z.string().default(""),
@@ -51,6 +62,9 @@ const AgentCapabilityToolSchema = z
     verified: z.boolean().optional().catch(undefined),
     blocked_reason: z.string().catch("").default(""),
     how_to_fix: z.string().catch("").default(""),
+    verdict: TaskMandateVerdictSchema,
+    callable_identities: z.array(z.string()).catch([]).default([]),
+    authorized_callables: z.array(z.string()).catch([]).default([]),
     availability: z
       .object({
         level: z.enum(["declared", "discovered", "verified"]).catch("declared"),
@@ -112,6 +126,7 @@ const AgentCapabilityConnEndpointSchema = z
     verified: z.boolean().optional().catch(undefined),
     blocked_reason: z.string().catch("").default(""),
     how_to_fix: z.string().catch("").default(""),
+    verdict: TaskMandateVerdictSchema,
   })
   .loose();
 
@@ -127,6 +142,7 @@ const AgentCapabilityConnToolSchema = z
     verified: z.boolean().optional().catch(undefined),
     blocked_reason: z.string().catch("").default(""),
     how_to_fix: z.string().catch("").default(""),
+    verdict: TaskMandateVerdictSchema,
   })
   .loose();
 

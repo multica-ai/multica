@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
 const minShortIDPrefixLen = 4
@@ -147,7 +148,9 @@ func resolveIssueRef(ctx context.Context, client *cli.APIClient, input string) (
 
 func fetchIssueRef(ctx context.Context, client *cli.APIClient, ref string) (resolvedID, error) {
 	var issue map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(ref), &issue); err != nil {
+	// CEREBRO-PATCH(task-mandate-callable-identity): FIR-4292 use exact read identity for helper requests.
+	requestCtx := mcp.WithCallableIdentity(ctx, "get_issue")
+	if err := client.GetJSON(requestCtx, "/api/issues/"+url.PathEscape(ref), &issue); err != nil {
 		return resolvedID{}, err
 	}
 	c := issueCandidate(issue)
@@ -198,7 +201,9 @@ func fetchIssueCandidates(ctx context.Context, client *cli.APIClient) ([]idCandi
 			params.Set("offset", strconv.Itoa(offset))
 		}
 		var result map[string]any
-		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &result); err != nil {
+		// CEREBRO-PATCH(task-mandate-callable-identity): FIR-4292 keep list resolution under list_issues.
+		requestCtx := mcp.WithCallableIdentity(ctx, "list_issues")
+		if err := client.GetJSON(requestCtx, "/api/issues?"+params.Encode(), &result); err != nil {
 			return nil, err
 		}
 		issuesRaw, _ := result["issues"].([]any)

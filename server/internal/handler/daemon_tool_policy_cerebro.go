@@ -46,6 +46,7 @@ import (
 type daemonToolPolicyResolveRequest struct {
 	AgentID         string         `json:"agent_id"`
 	TaskID          string         `json:"task_id"`
+	ClaimGeneration int64          `json:"claim_generation"`
 	ToolName        string         `json:"tool_name"`
 	ResourcePattern string         `json:"resource_pattern"`
 	Args            map[string]any `json:"args"`
@@ -107,12 +108,21 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	toolKey, resourcePattern := localtoolpolicy.ProviderToolCallForAgent(r.Context(), h.DB, wsUUID, agentID, req.ToolName, req.ResourcePattern, req.Args) // CEREBRO-PATCH(cursor-tool-policy-key): FIR-3729 normalize Cursor hook names/resources to its runtime inventory.
 	req.ResourcePattern = resourcePattern
 	if h.taskMandateEnforcementEnabled(r.Context(), wsUUID) {
-		if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, localtoolpolicy.ProviderMandateToolKey(toolKey)); err != nil { // CEREBRO-PATCH(connection-task-mandate-key): FIR-3828 match local workspace Connection hooks to the shared dispatch identity.
-			h.recordDaemonTaskMandateDenial(r.Context(), wsUUID, agentID, taskID, req.ToolName, toolKey)
+		if err := taskmandate.NewStoreDB(h.DB).AuthorizeClaimGeneration(r.Context(), taskID, wsUUID, agentID, req.ClaimGeneration, localtoolpolicy.ProviderMandateToolKey(toolKey)); err != nil { // CEREBRO-PATCH(connection-task-mandate-key): FIR-3828 match local workspace Connection hooks to the shared dispatch identity.
+			verdict := taskmandate.VerdictForError(err)
+			h.recordDaemonTaskMandateDenial(r.Context(), wsUUID, agentID, taskID, req.ToolName, toolKey, verdict)
+			slog.Warn("local tool-policy: Task Mandate denied call",
+				"workspace_id", workspaceID,
+				"agent_id", req.AgentID,
+				"task_id", req.TaskID,
+				"tool", req.ToolName,
+				"verdict_code", string(verdict.Code),
+				"recovery_action", string(verdict.RecoveryAction),
+			)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"allowed": false, "decision": string(localtoolpolicy.KindDeny),
 				"mode": mode, "enforced": true, "would_block": true,
-				"reason": "task mandate denied the call",
+				"reason": verdict.Message, "verdict": verdict,
 			})
 			return
 		}
@@ -309,7 +319,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 // into the same append-only ledger the Gateway uses. Capabilities and the drift
 // watcher read this observation so a tool that Permissions allows but the
 // immutable Task Mandate rejects is visible as real access drift.
-func (h *Handler) recordDaemonTaskMandateDenial(ctx context.Context, workspaceID, agentID, taskID pgtype.UUID, observedToolName, capabilityID string) {
+func (h *Handler) recordDaemonTaskMandateDenial(ctx context.Context, workspaceID, agentID, taskID pgtype.UUID, observedToolName, capabilityID string, verdict taskmandate.Verdict) {
 	if h == nil || h.Queries == nil || h.CerebroQueries == nil || !agentID.Valid {
 		return
 	}

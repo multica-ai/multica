@@ -115,16 +115,18 @@ func TestListAgentToolsMarksPolicyAllowedBuiltinEnabledForCloudRuntime(t *testin
 		testPool.Exec(ctx, `DELETE FROM cerebro_capability WHERE workspace_id=$1 AND capability_key IN ('web_fetch','schedule_wakeup')`, wsUUID)
 	})
 
-	// Deny schedule_wakeup at the runtime layer; web_fetch stays allow (base).
+	// Deny the canonical schedule_agent_wakeup platform family at the runtime layer;
+	// its exact schedule_wakeup binding must inherit that verdict while web_fetch
+	// stays allow (base).
 	policyStore := toolpolicy.NewStore(testPool)
 	if _, err := policyStore.Set(ctx, toolpolicy.SetParams{
-		WorkspaceID: wsUUID, ToolKey: "schedule_wakeup", Layer: toolpolicy.LayerRuntime,
+		WorkspaceID: wsUUID, ToolKey: "schedule_agent_wakeup", Layer: toolpolicy.LayerRuntime,
 		SubjectID: rtUUID, Setting: toolpolicy.SettingDeny,
 	}); err != nil {
 		t.Fatalf("set deny policy: %v", err)
 	}
 	t.Cleanup(func() {
-		policyStore.Clear(ctx, wsUUID, "schedule_wakeup", toolpolicy.LayerRuntime, rtUUID, "", actorUUID)
+		policyStore.Clear(ctx, wsUUID, "schedule_agent_wakeup", toolpolicy.LayerRuntime, rtUUID, "", actorUUID)
 	})
 
 	// Wire the real access service into the shared test handler for this test.

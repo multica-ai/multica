@@ -36,12 +36,13 @@ import (
 // model-facing one-liner; Verdict is "allow" or "ask".
 type AgentTaskToolEntry struct {
 	// CEREBRO-PATCH(connection-instructions-claim): FIR-2760 attaches guidance only after tool-policy filtering.
-	Family       string `json:"family"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	Verdict      string `json:"verdict,omitempty"`
-	Connection   string `json:"connection,omitempty"`
-	Instructions string `json:"instructions,omitempty"`
+	Family         string `json:"family"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	Verdict        string `json:"verdict,omitempty"`
+	Connection     string `json:"connection,omitempty"`
+	PolicyIdentity string `json:"policy_identity,omitempty"`
+	Instructions   string `json:"instructions,omitempty"`
 }
 
 type CerebroConnectionInstructionsBriefResolver interface {
@@ -227,12 +228,17 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 		case v.Descriptor.Source == "mcp":
 			family = "MCP tools"
 		}
+		policyIdentity := strings.TrimSpace(v.Descriptor.ToolKey)
+		if strings.EqualFold(v.Descriptor.Source, "platform") {
+			policyIdentity = ""
+		}
 		out = append(out, AgentTaskToolEntry{
-			Family:      family,
-			Name:        name,
-			Description: strings.TrimSpace(v.Descriptor.Description),
-			Verdict:     strings.TrimSpace(v.Policy.Effective),
-			Connection:  server,
+			Family:         family,
+			Name:           name,
+			Description:    strings.TrimSpace(v.Descriptor.Description),
+			Verdict:        strings.TrimSpace(v.Policy.Effective),
+			Connection:     server,
+			PolicyIdentity: policyIdentity,
 		})
 	}
 
@@ -315,40 +321,39 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 	return out, mandateTools, nil
 }
 
-func filterClaimToolsForSessionMode(tools []AgentTaskToolEntry, mandateTools, allowedTools []string) ([]AgentTaskToolEntry, []string) {
-	if len(allowedTools) == 0 {
-		return tools, mandateTools
+func filterClaimToolsForSessionMode(tools []AgentTaskToolEntry, mandateTools, allowedTools []string) ([]AgentTaskToolEntry, []string, error) {
+	supplemental := make(map[string]struct{})
+	for _, identity := range mandateTools[min(len(tools), len(mandateTools)):] {
+		supplemental[identity] = struct{}{}
 	}
-	allowed := make(map[string]struct{}, len(allowedTools))
-	for _, name := range allowedTools {
-		allowed[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
-	}
-	filteredTools := tools[:0]
-	filteredMandate := mandateTools[:0]
+	candidates := make([]taskmandate.AdmissionCandidate, 0, len(tools))
 	for i, tool := range tools {
-		_, displayAllowed := allowed[strings.ToLower(strings.TrimSpace(tool.Name))]
-		callableName := ""
-		callableAllowed := false
-		if i < len(mandateTools) {
-			callableName = mandateTools[i]
-			_, callableAllowed = allowed[strings.ToLower(strings.TrimSpace(callableName))]
-			if !callableAllowed {
-				if wildcard := taskmandate.MCPServerWildcard(callableName); wildcard != "" {
-					_, callableAllowed = allowed[strings.ToLower(wildcard)]
-				}
+		if i >= len(mandateTools) {
+			return nil, nil, fmt.Errorf("task mandate admission: callable identity missing for offered tool %q", tool.Name)
+		}
+		callable := mandateTools[i]
+		scopes := make([]string, 0, 2)
+		if connection := strings.TrimSpace(tool.Connection); connection != "" {
+			scopes = append(scopes, "connection:"+connection)
+		}
+		if wildcard := taskmandate.MCPServerWildcard(callable); wildcard != "" {
+			if _, issued := supplemental[wildcard]; issued {
+				scopes = append(scopes, wildcard)
 			}
 		}
-		if displayAllowed || callableAllowed {
-			filteredTools = append(filteredTools, tool)
-			if callableName != "" {
-				filteredMandate = append(filteredMandate, callableName)
-			}
-		}
+		candidates = append(candidates, taskmandate.AdmissionCandidate{
+			CallableIdentity:          callable,
+			Aliases:                   taskmandate.CompatibilityAdmissionAliases(callable),
+			ConnectionScopeIdentities: scopes,
+		})
 	}
-	for _, supplemental := range mandateTools[min(len(tools), len(mandateTools)):] {
-		if _, ok := allowed[strings.ToLower(strings.TrimSpace(supplemental))]; ok {
-			filteredMandate = append(filteredMandate, supplemental)
-		}
+	compiled, err := taskmandate.CompileAdmissionSurface(candidates, allowedTools)
+	if err != nil {
+		return nil, nil, err
 	}
-	return filteredTools, filteredMandate
+	filteredTools := make([]AgentTaskToolEntry, 0, len(compiled.SourceIndexes()))
+	for _, index := range compiled.SourceIndexes() {
+		filteredTools = append(filteredTools, tools[index])
+	}
+	return filteredTools, compiled.AuthorizationIdentities(), nil
 }

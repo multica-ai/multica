@@ -171,18 +171,19 @@ type GatewayCompletion struct {
 // non-ASCII (Danish æøå, emoji) survives the latin-1 HTTP header transport; the
 // registry decodes them with decodeURIComponent.
 type GatewayRequestMeta struct {
-	TaskID          string
-	AgentID         string
-	AgentName       string
-	WorkspaceID     string
-	IssueID         string
-	IssueTitle      string
-	ProjectID       string
-	ProjectName     string
-	TriggerUserID   string
-	TriggerUserName string
-	Surface         string // chat | issue | autopilot
-	AutopilotID     string
+	TaskID                string
+	TaskMandateGeneration int64
+	AgentID               string
+	AgentName             string
+	WorkspaceID           string
+	IssueID               string
+	IssueTitle            string
+	ProjectID             string
+	ProjectName           string
+	TriggerUserID         string
+	TriggerUserName       string
+	Surface               string // chat | issue | autopilot
+	AutopilotID           string
 	// CaptureContent asks the registry to persist the full prompt/response/tool
 	// content for this call (not just token counts + a hash).
 	CaptureContent bool

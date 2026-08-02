@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModeConfigEditor, validateModeConfig } from "./mode-settings-tab";
+import { ModeConfigEditor, modeToolChoices, validateModeConfig } from "./mode-settings-tab";
 import type { ModeConfig } from "./mode-config";
 
 const config: ModeConfig = {
@@ -136,5 +136,22 @@ describe("ModeConfigEditor", () => {
     expect(screen.getByText("Graphify")).toBeInTheDocument();
     expect(screen.getAllByText("Company Brain").length).toBeGreaterThan(0);
     expect(screen.queryByPlaceholderText("One tool key per line")).not.toBeInTheDocument();
+  });
+});
+
+describe("modeToolChoices", () => {
+  it("publishes exact platform callables and typed Connection scopes", () => {
+    const choices = modeToolChoices([
+      { tool_key: "manage_workflows", title: "Manage workflows", description: "", source: "platform", callable_identities: ["create_workflow", "update_workflow"] },
+      { tool_key: "connection:registry", title: "Registry", description: "", source: "connection", callable_identities: [] },
+      { tool_key: "platform_without_callable", title: "Machine intake", description: "", source: "platform", callable_identities: [] },
+    ]);
+
+    expect(choices.map((choice) => choice.id).sort()).toEqual([
+      "connection:registry",
+      "create_workflow",
+      "update_workflow",
+    ]);
+    expect(choices.some((choice) => choice.id === "manage_workflows")).toBe(false);
   });
 });

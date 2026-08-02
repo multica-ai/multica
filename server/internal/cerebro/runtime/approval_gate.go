@@ -236,10 +236,20 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	if e.taskMandates != nil && e.taskMandateEnforcementEnabled(ctx, workspaceID) {
 		taskID := optionalGatewayUUID(meta.TaskID)
 		if !taskID.Valid {
-			return false, "task mandate missing"
+			return e.denyTaskMandateCall(meta, toolName, taskmandate.ErrMissing)
 		}
-		if err := e.taskMandates.Authorize(ctx, taskID, workspaceID, agentID, toolName); err != nil {
-			return false, fmt.Sprintf("task mandate denied the call: %v", err)
+		var err error
+		if authorizer, ok := e.taskMandates.(taskMandateGenerationAuthorizer); ok {
+			if meta.TaskMandateGeneration <= 0 {
+				err = taskmandate.ErrStaleClaimGeneration
+			} else {
+				err = authorizer.AuthorizeClaimGeneration(ctx, taskID, workspaceID, agentID, meta.TaskMandateGeneration, toolName)
+			}
+		} else {
+			err = e.taskMandates.Authorize(ctx, taskID, workspaceID, agentID, toolName)
+		}
+		if err != nil {
+			return e.denyTaskMandateCall(meta, toolName, err)
 		}
 	}
 	var decision, connNameLog string
@@ -338,6 +348,28 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
 	}
 	return true, ""
+}
+
+func (e *FirtalGatewayExecutor) denyTaskMandateCall(meta GatewayRequestMeta, toolName string, err error) (bool, string) {
+	verdict := taskmandate.VerdictForError(err)
+	reason := taskmandate.VerdictJSON(err)
+	if e != nil && e.logger != nil {
+		e.logger.Warn("runtime tool decision (FIR-2243 B1)",
+			"event", "tool_call_decision",
+			"tool", toolName,
+			"decision", "task_mandate",
+			"allowed", false,
+			"verdict_code", string(verdict.Code),
+			"recovery_action", string(verdict.RecoveryAction),
+			"agent_id", meta.AgentID,
+			"agent_name", meta.AgentName,
+			"task_id", meta.TaskID,
+			"issue_id", meta.IssueID,
+			"surface", meta.Surface,
+			"reason", reason,
+		)
+	}
+	return false, reason
 }
 
 func (e *FirtalGatewayExecutor) taskMandateEnforcementEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {

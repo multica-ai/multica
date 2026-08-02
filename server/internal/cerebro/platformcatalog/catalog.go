@@ -188,6 +188,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/issues/check-similar",
 			"POST /api/cerebro/issues/check-similar/event",
 		},
+		ToolBindings: []string{"create_issue"},
 	},
 	{
 		Key:           "update_issue",
@@ -217,6 +218,7 @@ var catalog = []Capability{
 			"DELETE /api/cerebro/issues/{issueId}/custom-status/",
 			"PUT /api/cerebro/issues/{issueID}/date-times/",
 		},
+		ToolBindings: []string{"update_issue"},
 	},
 	{
 		Key:           "delete_issue",
@@ -301,6 +303,7 @@ var catalog = []Capability{
 		Ops: []string{
 			"POST /api/issues/{id}/comments",
 		},
+		ToolBindings: []string{"add_comment"},
 	},
 	{
 		Key:           "manage_scheduled_messages",
@@ -331,6 +334,10 @@ var catalog = []Capability{
 			"POST /api/comments/move-to-thread",
 			"POST /api/comments/{commentId}/move-to-subissue",
 		},
+		ToolBindings: []string{
+			"update_comment", "delete_comment", "resolve_comment", "unresolve_comment",
+			"add_comment_reaction", "remove_comment_reaction", "move_comments_to_thread", "move_comment_to_subissue",
+		},
 	},
 	{
 		Key:           "manage_sessions",
@@ -342,6 +349,7 @@ var catalog = []Capability{
 			"PATCH /api/cerebro/issues/{issueId}/sessions/{sessionId}",
 			"POST /api/cerebro/issues/{issueId}/sessions/start-fresh",
 		},
+		ToolBindings: []string{"rename_session", "handoff_session"},
 	},
 
 	// --- Autopilots -----------------------------------------------------------
@@ -425,6 +433,14 @@ var catalog = []Capability{
 			"POST /api/artifact-uploads",
 			"POST /api/upload-file",
 			"DELETE /api/attachments/{id}",
+		},
+		ToolBindings: []string{
+			"create_artifact", "update_artifact", "list_artifacts", "search_artifacts", "add_attachment",
+			"move_artifact", "get_artifact", "delete_artifact", "set_artifact_folder",
+			"suggest_artifact_folder", "get_artifact_folder_suggestion", "list_artifact_folder_suggestions",
+			"accept_artifact_folder_suggestion", "reject_artifact_folder_suggestion",
+			"list_artifact_folders", "create_artifact_folder", "update_artifact_folder",
+			"delete_artifact_folder", "set_artifact_folder_visibility", "delete_attachment",
 		},
 	},
 	{
@@ -569,6 +585,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/wakeups/",
 			"POST /api/cerebro/wakeups/{id}/cancel",
 		},
+		ToolBindings: []string{"schedule_wakeup", "list_wakeups", "cancel_wakeup"},
 	},
 	{
 		Key:           "manage_work_sessions",
@@ -1127,6 +1144,16 @@ var catalog = []Capability{
 			"POST /api/cerebro/evals/bindings",
 			"DELETE /api/cerebro/evals/bindings/{bindingId}",
 		},
+		ToolBindings: []string{
+			"list_workflows", "get_workflow", "create_workflow", "update_workflow",
+			"delete_workflow", "toggle_workflow", "activate_workflow", "get_active_workflow",
+			"regenerate_workflow_token", "regenerate_workflow_signing_secret", "regenerate_workflow_outbound_secret",
+			"approve_workflow_human_check", "sweep_workflow_cron",
+			"list_commands", "get_command", "create_command", "update_command", "delete_command",
+			"list_evals", "get_eval", "create_eval", "update_eval", "delete_eval", "list_eval_runs",
+			"run_eval", "record_eval_run", "get_eval_schedule", "set_eval_schedule",
+			"delete_eval_schedule", "list_eval_bindings", "bind_eval", "unbind_eval",
+		},
 	},
 	{
 		Key:           "hooks:read",
@@ -1214,6 +1241,7 @@ var catalog = []Capability{
 			"server/internal/middleware/workspace.go (RequireWorkspaceMember)",
 			"server/internal/handler/access.go (canAccessProject)",
 		},
+		ToolBindings: []string{"list_issues", "get_issue", "search_issues", "list_comments", "list_sessions"},
 	},
 	{
 		Key:           "read_projects",

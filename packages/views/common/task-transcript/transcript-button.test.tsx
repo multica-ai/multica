@@ -99,12 +99,27 @@ describe("TranscriptButton", () => {
     mockApi.getAgent.mockResolvedValue({ id: "agent-1", name: "Charlene" });
     mockApi.listRuntimes.mockResolvedValue([]);
     mockApi.getTaskAccess.mockResolvedValue({
+	  enforcement_enabled: true,
       task_id: "task-1",
       agent_id: "agent-1",
       allowed_tools: ["tools:Read", "firtal_registry"],
       issued_at: "2026-06-05T19:02:00Z",
       expires_at: "2026-06-05T20:02:00Z",
       status: "expired",
+      claim_generation: 3,
+      lifecycle_state: "finalized",
+      producer: "daemon-claim:v1",
+      finalizer: "task-claim",
+      inventory_version: "daemon-claim:v1",
+      discovery_version: "runtime-scan:42",
+      offered_count: 4,
+      authorized_count: 2,
+      verdict: {
+        allowed: false,
+        code: "task_mandate_expired",
+        recovery_action: "start_new_task",
+        message: "The Task Mandate run window has ended.",
+      },
     });
   });
 
@@ -137,10 +152,36 @@ describe("TranscriptButton", () => {
     expect(await screen.findByRole("dialog", { name: "Agent Execution Transcript" })).toBeInTheDocument();
     expect(screen.getByText("Starter run")).toBeInTheDocument();
     expect(screen.getByText("Command failed with exit code 1")).toBeInTheDocument();
-    expect(await screen.findByText("Task access · 2 allowed")).toBeInTheDocument();
+    expect(await screen.findByText("Task access · 2 authorized")).toBeInTheDocument();
     expect(stopPropagation).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("Task access · 2 allowed"));
+    fireEvent.click(screen.getByText("Task access · 2 authorized"));
     expect(await screen.findByText("tools:Read")).toBeInTheDocument();
+    expect(screen.getByText("Generation 3")).toBeInTheDocument();
+    expect(screen.getByText("4 offered")).toBeInTheDocument();
+    expect(screen.getByText(/Recovery: start_new_task/)).toBeInTheDocument();
     expect(screen.getByText(/Every tool call is checked against this exact list/)).toBeInTheDocument();
   });
+
+	it("labels a stored snapshot as diagnostic when enforcement is off", async () => {
+	  mockApi.getTaskAccess.mockResolvedValue({
+		enforcement_enabled: false,
+		task_id: "task-1",
+		agent_id: "agent-1",
+		allowed_tools: ["tools:Read"],
+		issued_at: "2026-06-05T19:02:00Z",
+		expires_at: "2026-06-05T20:02:00Z",
+		status: "active",
+		authorized_count: 1,
+	  });
+
+	  renderWithI18n(<TranscriptButton task={makeTask()} agentName="Charlene" title="Vis run-detaljer" />);
+	  fireEvent.click(screen.getByRole("button", { name: "Vis run-detaljer" }));
+	  const observation = await screen.findByText("Observation only", {}, { timeout: 10_000 });
+	  const trigger = observation.closest("button");
+	  expect(trigger).not.toBeNull();
+	  fireEvent.click(trigger!);
+
+	  expect(screen.getByText(/Enforcement is off, so this snapshot is diagnostic only/)).toBeInTheDocument();
+	  expect(screen.queryByText(/Every tool call is checked against this exact list/)).not.toBeInTheDocument();
+	});
 });

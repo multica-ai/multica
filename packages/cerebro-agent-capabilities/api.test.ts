@@ -166,6 +166,14 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
           verified: false,
           blocked_reason: "An explicit agent grant is required",
           how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+          callable_identities: ["create_workflow", "update_workflow"],
+          authorized_callables: ["create_workflow"],
+          verdict: {
+            allowed: true,
+            code: "allowed",
+            recovery_action: "none",
+            message: "The callable is inside the active Task Mandate.",
+          },
         },
       ],
     });
@@ -178,6 +186,12 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
       verified: false,
       blocked_reason: "An explicit agent grant is required",
       how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+      callable_identities: ["create_workflow", "update_workflow"],
+      authorized_callables: ["create_workflow"],
+      verdict: {
+        code: "allowed",
+        recovery_action: "none",
+      },
     });
   });
 

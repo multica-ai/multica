@@ -73,6 +73,10 @@ type Handler struct {
 	// nil makes POST /{id}/comments/{commentId}/create-issue return 503 (e.g. in
 	// unit tests that do not exercise issue creation).
 	Issues IssueCreator
+	// ArtifactReadGate applies the shared manage_artifacts policy and Task
+	// Mandate contract to note read/search aliases. Nil preserves standalone
+	// handler fixtures; production always wires the platform gate.
+	ArtifactReadGate func(http.Handler) http.Handler
 }
 
 // New constructs the handler. The router wires both query packages, the event
@@ -201,11 +205,11 @@ func (h *Handler) Routes(r chi.Router) {
 	// FIR-2022 — full-text search over documents (all artifact kinds) + their
 	// comments. Static path, registered before /{id} so chi never treats
 	// "search" as a note id. See search.go.
-	r.Get("/search", h.SearchNotes)
+	r.With(h.artifactReadMiddleware).Get("/search", h.SearchNotes)
 	// FIR-1621 — reverse note↔object coupling: list notes that reference a given
 	// object (e.g. an issue), so the issue page shows its coupled notes.
 	r.Get("/by-reference", h.ListNotesForReference)
-	r.Get("/{id}", h.GetNote)
+	r.With(h.artifactReadMiddleware).Get("/{id}", h.GetNote)
 	r.Put("/{id}", h.UpdateNote)
 	r.Delete("/{id}", h.DeleteNote)
 	r.Put("/{id}/visibility", h.SetVisibility)
@@ -247,6 +251,13 @@ func (h *Handler) Routes(r chi.Router) {
 
 	// FIR-1317 Plan A — AI-assisted conflict merge. See merge.go.
 	r.Post("/{id}/merge", h.MergeNote)
+}
+
+func (h *Handler) artifactReadMiddleware(next http.Handler) http.Handler {
+	if h == nil || h.ArtifactReadGate == nil {
+		return next
+	}
+	return h.ArtifactReadGate(next)
 }
 
 // --- request / response shapes ---
@@ -314,7 +325,7 @@ type NoteResponse struct {
 	IssueID   *string `json:"issue_id"`
 	ProjectID *string `json:"project_id"`
 	// FIR-2145: populated on list reads; 0 on single-note detail reads.
-	CommentCount int64  `json:"comment_count"`
+	CommentCount int64 `json:"comment_count"`
 	// FIR-2595: whether THIS caller may edit and save the note. Driven by folder
 	// access (owner, or an 'editor'/'full_access' grant on the note's folder).
 	// Populated on the single-note reads (create/get/update) that feed the

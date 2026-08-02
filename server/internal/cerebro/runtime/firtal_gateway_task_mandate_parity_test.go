@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -50,6 +51,64 @@ func TestRunToolLoopFinalizesTaskMandateAfterAddingMCPTools(t *testing.T) {
 	assertOfferedAndMandatedTool(t, probe, "mcp__task-mandate-mcp__get_secret")
 }
 
+func TestRunToolLoopAppliesSessionModeExactToolCeiling(t *testing.T) {
+	probe := newGatewayMandateProbe(t, false)
+	probe.allowedTools = []string{"get_issue"}
+
+	probe.run(t)
+
+	if got, want := probe.offered[0], []string{"get_issue"}; !equalStrings(got, want) {
+		t.Fatalf("offered tools = %v, want exact SessionModeConfig.AllowedTools %v", got, want)
+	}
+	if !equalStrings(probe.mandates.issued, probe.offered[0]) {
+		t.Fatalf("Task Mandate = %v, want exact offered tools %v", probe.mandates.issued, probe.offered[0])
+	}
+}
+
+func TestRunToolLoopAppliesSharedLegacyToolIdentity(t *testing.T) {
+	probe := newGatewayMandateProbe(t, false)
+	probe.allowedTools = []string{"tools:get_issue"}
+
+	probe.run(t)
+
+	if got, want := probe.offered[0], []string{"get_issue"}; !equalStrings(got, want) {
+		t.Fatalf("offered tools = %v, want shared legacy alias %v", got, want)
+	}
+}
+
+func TestRunToolLoopAppliesSessionModeConnectionIdentity(t *testing.T) {
+	probe := newGatewayMandateProbe(t, false)
+	setGatewayWorkspaceFlag(t, probe.executor, flagAPIConnectionTools, true)
+	seedGatewayAPIConnection(t, "task-mandate-mode-api", 1)
+	probe.wireConnections()
+	probe.allowedTools = []string{"connection:task-mandate-mode-api"}
+
+	probe.run(t)
+
+	assertOfferedAndMandatedTool(t, probe, "task_mandate_mode_api__get_items_000")
+	if !containsString(probe.mandates.issued, "connection:task-mandate-mode-api") {
+		t.Fatalf("Task Mandate = %v, want typed Connection identity", probe.mandates.issued)
+	}
+}
+
+func TestRunToolLoopAppliesSessionModeMCPWildcard(t *testing.T) {
+	fake := httptest.NewServer((&fakeMCPServer{sessionID: "task-mandate-mode-mcp"}).handler())
+	t.Cleanup(fake.Close)
+
+	probe := newGatewayMandateProbe(t, false)
+	setGatewayWorkspaceFlag(t, probe.executor, flagAPIConnectionTools, true)
+	seedGatewayMCPConnection(t, "task-mandate-mode-mcp", fake.URL)
+	probe.wireConnections()
+	probe.allowedTools = []string{"mcp__task-mandate-mode-mcp__*"}
+
+	probe.run(t)
+
+	assertOfferedAndMandatedTool(t, probe, "mcp__task-mandate-mode-mcp__get_secret")
+	if !containsString(probe.mandates.issued, "mcp__task-mandate-mode-mcp__*") {
+		t.Fatalf("Task Mandate = %v, want exact MCP Connection wildcard", probe.mandates.issued)
+	}
+}
+
 func TestRunToolLoopFinalizesTaskMandateAfterMalformedRequestFallback(t *testing.T) {
 	probe := newGatewayMandateProbe(t, true)
 
@@ -61,7 +120,7 @@ func TestRunToolLoopFinalizesTaskMandateAfterMalformedRequestFallback(t *testing
 	if len(probe.offered[0]) <= len(probe.offered[1]) {
 		t.Fatalf("gateway tool counts = %d then %d, want a smaller successful fallback", len(probe.offered[0]), len(probe.offered[1]))
 	}
-	if !equalStrings(probe.mandates.issued, probe.offered[1]) {
+	if !equalStrings(mandatedCallables(probe.mandates.issued), probe.offered[1]) {
 		t.Fatalf("Task Mandate = %v, want successful fallback tools %v", probe.mandates.issued, probe.offered[1])
 	}
 }
@@ -80,16 +139,17 @@ func TestRunToolLoopFinalizesTaskMandateFromLimitFirtalGatewayToolsResult(t *tes
 	if len(probe.offered[0]) != firtalGatewayMaxToolDefs {
 		t.Fatalf("offered tools = %d, want provider-limited result of %d", len(probe.offered[0]), firtalGatewayMaxToolDefs)
 	}
-	if !equalStrings(probe.mandates.issued, probe.offered[0]) {
+	if !equalStrings(mandatedCallables(probe.mandates.issued), probe.offered[0]) {
 		t.Fatalf("Task Mandate = %v, want provider-limited tools %v", probe.mandates.issued, probe.offered[0])
 	}
 }
 
 type gatewayMandateProbe struct {
-	executor *FirtalGatewayExecutor
-	agentID  pgtype.UUID
-	mandates *captureTaskMandates
-	offered  [][]string
+	executor     *FirtalGatewayExecutor
+	agentID      pgtype.UUID
+	mandates     *captureTaskMandates
+	offered      [][]string
+	allowedTools []string
 }
 
 func newGatewayMandateProbe(t *testing.T, malformedFirst bool) *gatewayMandateProbe {
@@ -141,8 +201,9 @@ func (p *gatewayMandateProbe) run(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
+	ctx := withGatewayAllowedTools(context.Background(), p.allowedTools)
 	if _, err := p.executor.runToolLoop(
-		context.Background(),
+		ctx,
 		FirtalGatewayRuntimeConfig{Model: "claude-sonnet-4-6", MaxTokens: 4096},
 		agent,
 		[]GatewayMessage{{Role: "user", Content: "continue"}},
@@ -167,9 +228,20 @@ func assertOfferedAndMandatedTool(t *testing.T, probe *gatewayMandateProbe, name
 	if !containsString(probe.mandates.issued, name) {
 		t.Fatalf("Task Mandate = %v, want offered %s", probe.mandates.issued, name)
 	}
-	if !equalStrings(probe.mandates.issued, probe.offered[0]) {
+	if !equalStrings(mandatedCallables(probe.mandates.issued), probe.offered[0]) {
 		t.Fatalf("Task Mandate = %v, want exact offered tools %v", probe.mandates.issued, probe.offered[0])
 	}
+}
+
+func mandatedCallables(identities []string) []string {
+	out := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		if strings.HasPrefix(identity, "connection:") || strings.HasSuffix(identity, "__*") {
+			continue
+		}
+		out = append(out, identity)
+	}
+	return out
 }
 
 func setGatewayWorkspaceFlag(t *testing.T, executor *FirtalGatewayExecutor, key string, enabled bool) {

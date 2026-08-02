@@ -101,6 +101,7 @@ type FirtalGatewayExecutor struct {
 	// for every Gateway list and call decision. nil fails closed.
 	accessDecisions *accessdecision.Service
 	taskMandates    taskMandateStore
+	sessionModes    sessionModeAllowedToolsResolver
 	// taskMandateEnforcement is a test seam for the workspace circuit breaker.
 	// Production resolves the shared default-off flag from e.cerebro.
 	taskMandateEnforcement func(context.Context, pgtype.UUID) bool
@@ -120,6 +121,14 @@ type taskMandateStore interface {
 
 type taskMandateFinalizer interface {
 	FinalizeTaskClaim(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time, string) (taskmandate.ClaimGeneration, error)
+}
+
+type taskMandateGenerationAuthorizer interface {
+	AuthorizeClaimGeneration(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, int64, string) error
+}
+
+type sessionModeAllowedToolsResolver interface {
+	SessionModeAllowedToolsForTask(context.Context, *db.AgentTaskQueue, pgtype.UUID) ([]string, error)
 }
 
 // SetPlatformActionGate wires the always-on server floor for Multica platform mutations.
@@ -191,6 +200,13 @@ func (e *FirtalGatewayExecutor) SetAccessDecisionService(service *accessdecision
 func (e *FirtalGatewayExecutor) SetTaskMandates(store taskMandateStore) *FirtalGatewayExecutor {
 	if e != nil {
 		e.taskMandates = store
+	}
+	return e
+}
+
+func (e *FirtalGatewayExecutor) SetSessionModeAllowedToolsResolver(resolver sessionModeAllowedToolsResolver) *FirtalGatewayExecutor {
+	if e != nil {
+		e.sessionModes = resolver
 	}
 	return e
 }
@@ -499,6 +515,14 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(parent, cfg.TaskTimeout)
 		defer cancel()
+	}
+	if e.sessionModes != nil {
+		allowedTools, resolveErr := e.sessionModes.SessionModeAllowedToolsForTask(runCtx, &task, plan.workspaceID)
+		if resolveErr != nil {
+			e.failTask(parent, task, "failed to resolve SessionModeConfig.AllowedTools: "+resolveErr.Error(), "agent_error")
+			return
+		}
+		runCtx = withGatewayAllowedTools(runCtx, allowedTools)
 	}
 	meta := GatewayRequestMeta{
 		TaskID:         taskID,
@@ -956,24 +980,30 @@ func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Re
 // finalizeTaskMandate snapshots the exact Gateway tool list only after every
 // task-scoped and dynamic source has been added and the provider limit has been
 // applied. A task with an invalid or unavailable mandate store fails closed.
-func (e *FirtalGatewayExecutor) finalizeTaskMandate(ctx context.Context, meta GatewayRequestMeta, workspaceID, agentID pgtype.UUID, tools []Tool) bool {
+func (e *FirtalGatewayExecutor) finalizeTaskMandate(ctx context.Context, meta GatewayRequestMeta, workspaceID, agentID pgtype.UUID, tools []Tool) (taskmandate.ClaimGeneration, bool) {
 	if meta.TaskID == "" {
-		return true
+		return taskmandate.ClaimGeneration{}, true
 	}
 	taskID := optionalGatewayUUID(meta.TaskID)
 	if e.taskMandates == nil || !taskID.Valid {
-		return false
+		return taskmandate.ClaimGeneration{}, false
 	}
-	toolNames := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		toolNames = append(toolNames, tool.Name())
+	_, toolNames, err := compileGatewayAdmissionSurface(tools, gatewayAllowedTools(ctx))
+	if err != nil {
+		if e.logger != nil {
+			e.logger.Error("task mandate admission compilation failed", "task_id", meta.TaskID, "error", err)
+		}
+		return taskmandate.ClaimGeneration{}, false
 	}
 	expiresAt := time.Now().Add(2 * time.Hour)
 	if finalizer, ok := e.taskMandates.(taskMandateFinalizer); ok {
-		_, err := finalizer.FinalizeTaskClaim(ctx, taskID, workspaceID, agentID, toolNames, expiresAt, "firtal-gateway:v1")
-		return err == nil
+		generation, err := finalizer.FinalizeTaskClaim(ctx, taskID, workspaceID, agentID, toolNames, expiresAt, "firtal-gateway:v1")
+		return generation, err == nil
 	}
-	return e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, expiresAt) == nil
+	if err := e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, expiresAt); err != nil {
+		return taskmandate.ClaimGeneration{}, false
+	}
+	return taskmandate.ClaimGeneration{Generation: 1}, true
 }
 
 // filterConnectionDenied drops tools whose workspace-connection verdict is Deny,
@@ -1033,7 +1063,8 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// FIR-2668: carry the calling agent to API-connection dispatch so
 	// on_behalf_of-enabled connections stamp the agent's delegated identity.
 	ctx = WithConnectionAgent(ctx, meta.AgentID)
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398: thread the self-lookup card provider and task mandate.
+	var taskMandateGeneration int64
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled(ctx, workspaceID), TaskMandateGeneration: &taskMandateGeneration} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398: thread the self-lookup card provider and task mandate.
 	if taskID, err := util.ParseUUID(meta.TaskID); err == nil {
 		tctx.TaskID = taskID
 		if e.queries != nil {
@@ -1165,6 +1196,11 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			}
 		}
 		enabledTools = limitFirtalGatewayTools(enabledTools)
+		compiledTools, _, compileErr := compileGatewayAdmissionSurface(enabledTools, gatewayAllowedTools(ctx))
+		if compileErr != nil {
+			return GatewayCompletion{}, fmt.Errorf("compile SessionModeConfig.AllowedTools: %w", compileErr)
+		}
+		enabledTools = compiledTools
 		if len(enabledTools) > 0 {
 			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
 			activeRegistry = taskRegistry
@@ -1175,11 +1211,17 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// after the first tool request is accepted. Their finalization happens inside
 	// runGatewayCompatRegistryToolLoop after that exact list is known. Other
 	// transports have no such retry surface and finalize here.
-	if !useRegistry && !e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, enabledTools) {
-		anthropicTools = nil
-		enabledTools = nil
-		activeRegistry = nil
-		useRegistry = false
+	if !useRegistry {
+		generation, finalized := e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, enabledTools)
+		if !finalized {
+			anthropicTools = nil
+			enabledTools = nil
+			activeRegistry = nil
+			useRegistry = false
+		} else {
+			meta.TaskMandateGeneration = generation.Generation
+			taskMandateGeneration = generation.Generation
+		}
 	}
 	// The compat tool-loop transports serialize GatewayMessage over the OpenAI
 	// wire, where ContentBlocks (image/document) are dropped (`json:"-"`). Fold
@@ -1190,7 +1232,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 
 	if useRegistry && activeRegistry != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use the provider-compatible tool loop as the primary path for enabled registry tools; prod Anthropic-native failures did not reliably lift Kristian into fallback.
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, &taskMandateGeneration, pruneOn)
 	}
 	if toolSrv != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
@@ -1210,7 +1252,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		"error", err,
 	)
 	if useRegistry && activeRegistry != nil {
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, &taskMandateGeneration, pruneOn)
 	}
 	if toolSrv != nil {
 		return e.runToolLoopWithServer(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
@@ -1553,6 +1595,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	agentID, workspaceID pgtype.UUID,
 	registry *Registry,
 	tools []Tool,
+	claimGeneration *int64,
 	pruneOn bool,
 ) (GatewayCompletion, error) {
 	history := withRegistryToolUsageHint(ctx, initialMessages, tools)
@@ -1608,8 +1651,13 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 			return GatewayCompletion{}, err
 		}
 		if !mandateFinalized {
-			if !e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, tools) {
+			generation, finalized := e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, tools)
+			if !finalized {
 				return GatewayCompletion{}, errors.New("firtal gateway task mandate finalization failed")
+			}
+			meta.TaskMandateGeneration = generation.Generation
+			if claimGeneration != nil {
+				*claimGeneration = generation.Generation
 			}
 			mandateFinalized = true
 		}

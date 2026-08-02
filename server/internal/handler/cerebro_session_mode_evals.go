@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -16,6 +18,39 @@ import (
 // use, so a Mode's evaluations execute through exactly one runner.
 type SessionModeEvalRunner interface {
 	RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (string, string, error)
+}
+
+// SessionModeAllowedToolsForTask exposes the published Mode ceiling through a
+// narrow runtime seam so the Firtal Gateway and local claim path consume the
+// same SessionModeConfig.AllowedTools contract.
+func (h *Handler) SessionModeAllowedToolsForTask(ctx context.Context, task *db.AgentTaskQueue, workspaceID pgtype.UUID) ([]string, error) {
+	if h == nil || task == nil || h.SessionModeProfiles == nil {
+		return nil, nil
+	}
+	var (
+		mode sessionmode.Mode
+		ok   bool
+	)
+	if task.ChatSessionID.Valid {
+		chat, err := h.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("load chat session Mode: %w", err)
+		}
+		if chat.WorkspaceID != workspaceID {
+			return nil, fmt.Errorf("chat session workspace does not match task workspace")
+		}
+		mode, ok = sessionmode.Normalize(chat.Mode)
+	} else if task.IssueID.Valid && task.TriggerCommentID.Valid {
+		mode, ok = h.sessionModeForTask(ctx, task)
+	}
+	if !ok {
+		return nil, nil
+	}
+	config, err := h.SessionModeProfiles.Active(ctx, workspaceID, mode)
+	if err != nil {
+		return nil, fmt.Errorf("load published %s Mode: %w", mode, err)
+	}
+	return append([]string(nil), config.AllowedTools...), nil
 }
 
 // runSessionModeEvals executes the evaluations configured on the Mode of the

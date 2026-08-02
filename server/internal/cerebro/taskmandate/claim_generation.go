@@ -63,7 +63,7 @@ func (s *Store) FinalizeClaim(
 		return ClaimGeneration{}, ErrExpired
 	}
 
-	tools := input.CallableIdentities()
+	tools := append(input.CallableIdentities(), input.ConnectionScopeIdentities()...)
 	if tools == nil {
 		tools = []string{}
 	}
@@ -161,7 +161,16 @@ func (s *Store) RenewClaim(ctx context.Context, input ContractInput, generation 
 // producers outside this package. It creates generation 1 on the first claim
 // and renews that same immutable generation on an identical reclaim.
 func (s *Store) FinalizeTaskClaim(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tools []string, expiresAt time.Time, sourceVersion string) (ClaimGeneration, error) {
-	input, err := NewClaimInput(taskID, workspaceID, agentID, tools, nil, sourceVersion)
+	callables := make([]string, 0, len(tools))
+	connectionScopes := make([]string, 0)
+	for _, identity := range tools {
+		if strings.HasPrefix(identity, "connection:") {
+			connectionScopes = append(connectionScopes, identity)
+			continue
+		}
+		callables = append(callables, identity)
+	}
+	input, err := NewClaimInput(taskID, workspaceID, agentID, callables, connectionScopes, sourceVersion)
 	if err != nil {
 		return ClaimGeneration{}, err
 	}

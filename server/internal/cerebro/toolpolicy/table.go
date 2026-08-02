@@ -75,6 +75,10 @@ type TableRow struct {
 	// off-switch (FIR-4220): the UI renders a workspace-layer-only decision
 	// control instead of a fully read-only row.
 	WorkspaceIntakeSwitch bool
+	// CallableIdentities lists the exact runtime/CLI/MCP callables represented by
+	// a platform permission family. Empty means the row is not a platform
+	// callable family; consumers must never infer ToolKey as a broad grant.
+	CallableIdentities []string
 	// Layers holds the explicit setting at each layer for this context. A layer
 	// absent from the map carries no explicit choice (Inherit). LayerGroup, when
 	// present, is the combined value across the context's groups (most permissive

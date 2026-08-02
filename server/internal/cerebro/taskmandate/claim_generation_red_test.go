@@ -193,7 +193,7 @@ func TestFinalizeClaimCreatesOneImmutableGeneration(t *testing.T) {
 			producer, finalizer, inventoryVersion, discoveryVersion,
 		)
 	}
-	if grantDigest != *first.FinalizedGrantDigest || !reflect.DeepEqual(tools, []string{"tools:Read", "tools:Write"}) {
+	if grantDigest != *first.FinalizedGrantDigest || !reflect.DeepEqual(tools, []string{"tools:Read", "tools:Write", "connection:registry"}) {
 		t.Fatalf("finalized grants = digest:%q tools:%v, want stable digest and normalized exact tools", grantDigest, tools)
 	}
 }

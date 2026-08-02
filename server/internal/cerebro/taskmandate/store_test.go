@@ -39,6 +39,10 @@ type snapshotRow struct {
 	taskID, workspaceID, agentID pgtype.UUID
 	allowedTools                 []byte
 	issuedAt, expiresAt          time.Time
+	claimGeneration              int64
+	producer, finalizer          *string
+	lifecycle                    ClaimLifecycleState
+	inventory, discovery, digest *string
 	err                          error
 }
 
@@ -52,6 +56,13 @@ func (r snapshotRow) Scan(dest ...any) error {
 	*(dest[3].(*[]byte)) = r.allowedTools
 	*(dest[4].(*time.Time)) = r.issuedAt
 	*(dest[5].(*time.Time)) = r.expiresAt
+	*(dest[6].(*int64)) = r.claimGeneration
+	*(dest[7].(**string)) = r.producer
+	*(dest[8].(**string)) = r.finalizer
+	*(dest[9].(*ClaimLifecycleState)) = r.lifecycle
+	*(dest[10].(**string)) = r.inventory
+	*(dest[11].(**string)) = r.discovery
+	*(dest[12].(**string)) = r.digest
 	return nil
 }
 
@@ -216,7 +227,7 @@ func TestGetReturnsTheExactHistoricalSnapshotAfterExpiry(t *testing.T) {
 	store := NewStoreDB(mandateDB{row: snapshotRow{
 		taskID: id, workspaceID: id, agentID: id,
 		allowedTools: []byte(`["tools:Read","firtal_registry"]`),
-		issuedAt:     now.Add(-2 * time.Hour), expiresAt: now.Add(-time.Hour),
+		issuedAt:     now.Add(-2 * time.Hour), expiresAt: now.Add(-time.Hour), lifecycle: ClaimLifecycleLegacy,
 	}})
 	snapshot, err := store.Get(context.Background(), id, id, id)
 	if err != nil {
@@ -227,6 +238,42 @@ func TestGetReturnsTheExactHistoricalSnapshotAfterExpiry(t *testing.T) {
 	}
 	if snapshot.ExpiresAt.After(now) {
 		t.Fatalf("snapshot expiry = %v, expected historical expired contract", snapshot.ExpiresAt)
+	}
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 2 || snapshot.LifecycleState != ClaimLifecycleLegacy {
+		t.Fatalf("snapshot diagnostics = offered %d authorized %d lifecycle %q", snapshot.OfferedCount, snapshot.AuthorizedCount, snapshot.LifecycleState)
+	}
+}
+
+func TestGetReturnsFinalizedGenerationDiagnostics(t *testing.T) {
+	now := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+	id := validUUID()
+	producer, finalizer := "local-runtime", "task-claim"
+	inventory, discovery, digest := "runtime:v7", "scan:v12", "sha256:abc"
+	store := NewStoreDB(mandateDB{row: snapshotRow{
+		taskID: id, workspaceID: id, agentID: id,
+		allowedTools:    []byte(`["tools:Read","mcp__company-brain__search","connection:company-brain"]`),
+		issuedAt:        now,
+		expiresAt:       now.Add(time.Hour),
+		claimGeneration: 4,
+		producer:        &producer,
+		finalizer:       &finalizer,
+		lifecycle:       ClaimLifecycleFinalized,
+		inventory:       &inventory,
+		discovery:       &discovery,
+		digest:          &digest,
+	}})
+	snapshot, err := store.Get(context.Background(), id, id, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if snapshot.ClaimGeneration != 4 || snapshot.LifecycleState != ClaimLifecycleFinalized || snapshot.Producer == nil || *snapshot.Producer != producer || snapshot.Finalizer == nil || *snapshot.Finalizer != finalizer {
+		t.Fatalf("generation diagnostics = %+v", snapshot)
+	}
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 3 {
+		t.Fatalf("source counts = offered %d authorized %d, want 2/3", snapshot.OfferedCount, snapshot.AuthorizedCount)
+	}
+	if snapshot.InventoryVersion == nil || *snapshot.InventoryVersion != inventory || snapshot.DiscoveryVersion == nil || *snapshot.DiscoveryVersion != discovery || snapshot.FinalizedGrantDigest == nil || *snapshot.FinalizedGrantDigest != digest {
+		t.Fatalf("source metadata = inventory %v discovery %v digest %v", snapshot.InventoryVersion, snapshot.DiscoveryVersion, snapshot.FinalizedGrantDigest)
 	}
 }
 

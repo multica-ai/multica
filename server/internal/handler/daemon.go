@@ -2099,8 +2099,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to resolve agent tool mandate")
 		return
 	}
-	if resp.SessionModeConfig != nil && len(resp.SessionModeConfig.AllowedTools) > 0 {
-		resp.EffectiveTools, mandateTools = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, resp.SessionModeConfig.AllowedTools)
+	var sessionModeAllowedTools []string
+	// CEREBRO-PATCH(task-mandate-session-mode-parity): FIR-4292 compile the same exact AllowedTools ceiling as Gateway.
+	if resp.SessionModeConfig != nil {
+		sessionModeAllowedTools = resp.SessionModeConfig.AllowedTools
+	}
+	resp.EffectiveTools, mandateTools, toolResolveErr = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, sessionModeAllowedTools)
+	if toolResolveErr != nil {
+		outcome = "error_session_mode_tools"
+		slog.Error("task claim: invalid SessionModeConfig.AllowedTools contract", "task_id", uuidToString(task.ID), "error", toolResolveErr)
+		writeError(w, http.StatusInternalServerError, "failed to compile SessionModeConfig.AllowedTools")
+		return
 	}
 	// CEREBRO-PATCH(task-token-finalization-compensation): FIR-4291 — reclaim
 	// cannot retain a token from an earlier attempt while this generation is
@@ -2111,12 +2120,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to prepare task token activation")
 		return
 	}
-	if _, err := taskmandate.NewStoreDB(h.DB).FinalizeTaskClaim(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour), "daemon-claim:v1"); err != nil {
+	claimGeneration, err := taskmandate.NewStoreDB(h.DB).FinalizeTaskClaim(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour), "daemon-claim:v1")
+	if err != nil {
 		outcome = "error_task_mandate"
 		slog.Error("task claim: failed to finalize task mandate; token activation withheld", "task_id", uuidToString(task.ID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to finalize task mandate")
 		return
 	}
+	resp.TaskMandateGeneration = claimGeneration.Generation
 
 	// CEREBRO-PATCH(task-token-after-mandate): FIR-4291 — activate the
 	// task-scoped token only after the immutable Task Mandate has finalized.
@@ -2549,7 +2560,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
 			)
 		}
-		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
+		h.projectAnalyticsRun(r.Context(), taskID) // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
 	}
 	if len(normalizedEvents) > 0 {
 		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)

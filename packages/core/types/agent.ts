@@ -213,13 +213,33 @@ export interface AgentTask {
 // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot.
 // Immutable tool allowlist issued when a task starts. This is the same
 // snapshot enforced at every tool call, exposed for the transcript and CLI.
+// CEREBRO-PATCH(task-mandate-read-model): FIR-4292 additive generation, source, count, digest, and verdict diagnostics.
+export interface TaskMandateVerdict {
+  allowed: boolean;
+  code: string;
+  recovery_action: string;
+  message: string;
+}
+
 export interface TaskAccessSnapshot {
+	/** False means the snapshot is diagnostic only; call-time enforcement is disabled. */
+	enforcement_enabled: boolean;
   task_id: string;
   agent_id: string;
   allowed_tools: string[];
   issued_at: string;
   expires_at: string;
   status: "active" | "expired";
+  claim_generation?: number;
+  lifecycle_state?: "legacy" | "draft" | "finalized";
+  producer?: string;
+  finalizer?: string;
+  inventory_version?: string;
+  discovery_version?: string;
+  offered_count?: number;
+  authorized_count?: number;
+  grant_digest?: string;
+  verdict?: TaskMandateVerdict;
 }
 
 export interface WorkSession {

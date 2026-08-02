@@ -63,9 +63,10 @@ func TestGetAgentCapabilitiesKeepsPlatformPermissionsAndAppliesConnectionTaskMan
 			},
 		}}},
 		tctx: ToolContext{
-			AgentID:     id,
-			WorkspaceID: id,
-			TaskID:      id,
+			AgentID:                id,
+			WorkspaceID:            id,
+			TaskID:                 id,
+			TaskMandateEnforcement: true,
 			TaskMandates: rejectingTaskMandates{rejected: map[string]bool{
 				"rejected_tool":                true,
 				"mcp__company-brain__whoami":   true,
@@ -119,7 +120,7 @@ func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
 				Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true,
 			}},
 		}}}},
-		tctx: ToolContext{AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates},
+		tctx: ToolContext{AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates, TaskMandateEnforcement: true},
 	}
 
 	raw, err := lookup.Call(context.Background(), nil)
@@ -143,5 +144,34 @@ func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
 	allowed, reason := executor.guardToolCall(context.Background(), id, id, endpoint, nil, reg, GatewayRequestMeta{TaskID: util.UUIDToString(id)})
 	if allowed || !strings.Contains(reason, "outside the issued task mandate") {
 		t.Fatalf("gateway call = (%v, %q), want the same mandate denial", allowed, reason)
+	}
+}
+
+func TestGetAgentCapabilitiesDoesNotPresentSnapshotAsCeilingWhenEnforcementIsOff(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	lookup := FirtalGetAgentCapabilitiesTool{
+		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Connections: []handler.AgentCapabilityConnection{{
+			Name: "company-brain",
+			Tools: []handler.AgentCapabilityConnTool{{
+				Name: "whoami", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true,
+			}},
+		}}}},
+		tctx: ToolContext{
+			AgentID: id, WorkspaceID: id, TaskID: id,
+			TaskMandates: rejectingTaskMandates{rejected: map[string]bool{"mcp__company-brain__whoami": true}},
+		},
+	}
+
+	raw, err := lookup.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	var card handler.AgentCapabilities
+	if err := json.Unmarshal([]byte(raw), &card); err != nil {
+		t.Fatalf("unmarshal card: %v", err)
+	}
+	tool := card.Connections[0].Tools[0]
+	if tool.Permission != "allow" || !tool.Allowed || !tool.Callable || tool.BlockedReason != "" {
+		t.Fatalf("default-off snapshot changed the live capabilities verdict: %+v", tool)
 	}
 }

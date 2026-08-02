@@ -1182,17 +1182,40 @@ function TaskAccessDisclosure({ taskId, enabled }: { taskId: string; enabled: bo
     <Collapsible>
       <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-left text-xs hover:bg-muted/50">
         <LockKeyhole className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-medium">Task access · {snapshot.allowed_tools.length} allowed</span>
+        {/* CEREBRO-PATCH(task-mandate-read-model): FIR-4292 show the exact finalized generation and recovery contract. */}
+        <span className="font-medium">
+          Task access · {snapshot.authorized_count ?? snapshot.allowed_tools.length} authorized
+        </span>
         <span className="ml-auto text-muted-foreground">
-          {snapshot.status === "active" ? "Active run window" : "Run window ended"}
+          {!snapshot.enforcement_enabled
+            ? "Observation only"
+            : snapshot.status === "active" ? "Active run window" : "Run window ended"}
         </span>
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="rounded-b-md border border-t-0 px-3 py-3 text-xs">
           <p className="text-muted-foreground">
-            Locked when this run started. Every tool call is checked against this exact list.
+            {snapshot.enforcement_enabled
+              ? "Locked when this run started. Every tool call is checked against this exact list."
+              : "Captured when this run started. Enforcement is off, so this snapshot is diagnostic only."}
           </p>
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+            <span className="rounded border bg-muted/30 px-1.5 py-0.5">
+              Generation {snapshot.claim_generation ?? 0}
+            </span>
+            <span className="rounded border bg-muted/30 px-1.5 py-0.5">
+              {snapshot.lifecycle_state ?? "legacy"}
+            </span>
+            <span className="rounded border bg-muted/30 px-1.5 py-0.5">
+              {snapshot.offered_count ?? snapshot.allowed_tools.length} offered
+            </span>
+          </div>
+          {snapshot.verdict && (
+            <p className="mt-2 text-muted-foreground">
+              {snapshot.verdict.message} Recovery: {snapshot.verdict.recovery_action}.
+            </p>
+          )}
           <div className="mt-2 flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
             {snapshot.allowed_tools.length === 0 ? (
               <span className="text-muted-foreground">No tools were allowed.</span>
@@ -1206,6 +1229,11 @@ function TaskAccessDisclosure({ taskId, enabled }: { taskId: string; enabled: bo
             Issued {new Date(snapshot.issued_at).toLocaleString()} ·
             expires {new Date(snapshot.expires_at).toLocaleString()}
           </p>
+          {(snapshot.producer || snapshot.finalizer || snapshot.inventory_version || snapshot.discovery_version) && (
+            <p className="mt-1 break-all text-[10px] text-muted-foreground">
+              Producer {snapshot.producer ?? "—"} · finalizer {snapshot.finalizer ?? "—"} · inventory {snapshot.inventory_version ?? "—"} · discovery {snapshot.discovery_version ?? "—"}
+            </p>
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>

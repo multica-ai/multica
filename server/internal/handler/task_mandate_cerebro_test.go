@@ -69,6 +69,15 @@ func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 	if response.Status != "active" {
 		t.Fatalf("status = %q, want active", response.Status)
 	}
+	if response.LifecycleState != "legacy" || response.ClaimGeneration != 1 {
+		t.Fatalf("legacy diagnostics = lifecycle %q generation %d", response.LifecycleState, response.ClaimGeneration)
+	}
+	if response.OfferedCount != 2 || response.AuthorizedCount != 2 || response.Verdict.Code != "allowed" {
+		t.Fatalf("read model = offered %d authorized %d verdict %+v", response.OfferedCount, response.AuthorizedCount, response.Verdict)
+	}
+	if response.EnforcementEnabled {
+		t.Fatal("default-off workspace reported Task Mandate enforcement as enabled")
+	}
 }
 
 func TestGetTaskMandateByUserRejectsInvalidTaskID(t *testing.T) {

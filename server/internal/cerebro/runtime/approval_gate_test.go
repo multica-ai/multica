@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -20,6 +22,17 @@ import (
 type gateFakeTaskMandates struct {
 	authorizeErr error
 	calls        []string
+}
+
+type gateGenerationTaskMandates struct {
+	gateFakeTaskMandates
+	generation int64
+}
+
+func (f *gateGenerationTaskMandates) AuthorizeClaimGeneration(_ context.Context, _, _, _ pgtype.UUID, generation int64, tool string) error {
+	f.calls = append(f.calls, tool)
+	f.generation = generation
+	return f.authorizeErr
 }
 
 func (f *gateFakeTaskMandates) Issue(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time) error {
@@ -239,6 +252,52 @@ func TestGuardToolCallMissingTaskMandateFailsClosed(t *testing.T) {
 				t.Fatalf("guardToolCall() = (%v, %q), want missing-mandate denial", allowed, reason)
 			}
 		})
+	}
+}
+
+func TestGuardToolCallReturnsStructuredTaskMandateRecovery(t *testing.T) {
+	taskID := gateTestUUID(7)
+	executor := (&FirtalGatewayExecutor{
+		logger:                 slog.Default(),
+		taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
+	}).SetTaskMandates(&gateFakeTaskMandates{authorizeErr: taskmandate.ErrExpired})
+
+	allowed, reason := executor.guardToolCall(
+		context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(taskID)},
+	)
+	var payload struct {
+		Verdict taskmandate.Verdict `json:"verdict"`
+	}
+	if err := json.Unmarshal([]byte(reason), &payload); err != nil {
+		t.Fatalf("Gateway Task Mandate denial is not structured JSON: %q (%v)", reason, err)
+	}
+	if allowed || payload.Verdict.Code != taskmandate.VerdictMandateExpired || payload.Verdict.RecoveryAction != taskmandate.RecoveryStartNewTask {
+		t.Fatalf("Gateway Task Mandate verdict = %+v allowed=%v, want expired/start_new_task denial", payload.Verdict, allowed)
+	}
+}
+
+func TestGuardToolCallRequiresCurrentClaimGeneration(t *testing.T) {
+	taskID := gateTestUUID(7)
+	mandates := &gateGenerationTaskMandates{}
+	executor := (&FirtalGatewayExecutor{
+		logger:                 slog.Default(),
+		taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
+	}).SetTaskMandates(mandates)
+
+	allowed, reason := executor.guardToolCall(
+		context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(taskID)},
+	)
+	if allowed || !strings.Contains(reason, string(taskmandate.VerdictStaleGeneration)) {
+		t.Fatalf("missing generation = (%v, %q), want task_generation_stale", allowed, reason)
+	}
+	allowed, _ = executor.guardToolCall(
+		context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(taskID), TaskMandateGeneration: 11},
+	)
+	if mandates.generation != 11 {
+		t.Fatalf("AuthorizeClaimGeneration generation = %d, want 11", mandates.generation)
 	}
 }
 

@@ -126,6 +126,68 @@ func TestWorkflowHookCapabilityContracts(t *testing.T) {
 	}
 }
 
+func TestTaskMandateOperationBindingsAreExactAndComplete(t *testing.T) {
+	want := map[string]string{
+		// Issue and Comment operations.
+		"list_issues": "read_issues", "get_issue": "read_issues", "search_issues": "read_issues",
+		"create_issue": "create_issue", "update_issue": "update_issue",
+		"add_comment": "add_comment", "list_comments": "read_issues",
+		"update_comment": "update_comment", "delete_comment": "update_comment",
+		"resolve_comment": "update_comment", "unresolve_comment": "update_comment",
+		"add_comment_reaction": "update_comment", "remove_comment_reaction": "update_comment",
+		"move_comments_to_thread": "update_comment", "move_comment_to_subissue": "update_comment",
+
+		// Artifact operations.
+		"create_artifact": "manage_artifacts", "update_artifact": "manage_artifacts",
+		"list_artifacts": "manage_artifacts", "search_artifacts": "manage_artifacts",
+		"add_attachment": "manage_artifacts",
+		"move_artifact":  "manage_artifacts", "get_artifact": "manage_artifacts",
+		"delete_artifact": "manage_artifacts", "set_artifact_folder": "manage_artifacts",
+		"suggest_artifact_folder": "manage_artifacts", "list_artifact_folders": "manage_artifacts",
+		"create_artifact_folder": "manage_artifacts", "update_artifact_folder": "manage_artifacts",
+		"delete_artifact_folder": "manage_artifacts", "get_artifact_folder_suggestion": "manage_artifacts",
+		"list_artifact_folder_suggestions": "manage_artifacts", "accept_artifact_folder_suggestion": "manage_artifacts",
+		"reject_artifact_folder_suggestion": "manage_artifacts", "set_artifact_folder_visibility": "manage_artifacts",
+		"delete_attachment": "manage_artifacts",
+
+		// Wakeup and Handoff operations.
+		"schedule_wakeup": "schedule_agent_wakeup", "list_wakeups": "schedule_agent_wakeup",
+		"cancel_wakeup": "schedule_agent_wakeup", "list_sessions": "read_issues",
+		"rename_session": "manage_sessions", "handoff_session": "manage_sessions",
+
+		// Workflow, Command, and Eval operations. The callable remains the
+		// Task Mandate identity; manage_workflows is only its policy family.
+		"list_workflows": "manage_workflows", "get_workflow": "manage_workflows",
+		"create_workflow": "manage_workflows", "update_workflow": "manage_workflows",
+		"delete_workflow": "manage_workflows", "toggle_workflow": "manage_workflows",
+		"activate_workflow": "manage_workflows", "get_active_workflow": "manage_workflows",
+		"regenerate_workflow_token": "manage_workflows", "regenerate_workflow_signing_secret": "manage_workflows",
+		"regenerate_workflow_outbound_secret": "manage_workflows", "approve_workflow_human_check": "manage_workflows",
+		"sweep_workflow_cron": "manage_workflows",
+		"list_commands":       "manage_workflows", "get_command": "manage_workflows",
+		"create_command": "manage_workflows", "update_command": "manage_workflows",
+		"delete_command": "manage_workflows",
+		"list_evals":     "manage_workflows", "get_eval": "manage_workflows",
+		"create_eval": "manage_workflows", "update_eval": "manage_workflows",
+		"delete_eval": "manage_workflows", "list_eval_runs": "manage_workflows",
+		"run_eval": "manage_workflows", "record_eval_run": "manage_workflows",
+		"get_eval_schedule": "manage_workflows", "set_eval_schedule": "manage_workflows",
+		"delete_eval_schedule": "manage_workflows", "list_eval_bindings": "manage_workflows",
+		"bind_eval": "manage_workflows", "unbind_eval": "manage_workflows",
+	}
+
+	for tool, capabilityKey := range want {
+		capability, ok := ByToolBinding(tool)
+		if !ok {
+			t.Errorf("registered callable %q has no platform ToolBindings owner", tool)
+			continue
+		}
+		if capability.Key != capabilityKey {
+			t.Errorf("ByToolBinding(%q).Key = %q, want %q", tool, capability.Key, capabilityKey)
+		}
+	}
+}
+
 // inventory mirrors the permguard inventory.json shape (only the http surface
 // and the id field matter here).
 type inventory struct {

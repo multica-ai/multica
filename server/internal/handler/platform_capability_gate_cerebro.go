@@ -20,6 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -113,11 +114,15 @@ func (h *Handler) allowPlatformCapability(w http.ResponseWriter, r *http.Request
 		return true
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	requireMandate := false
+	if registered, ok := platformcatalog.ByKey(capability); ok {
+		requireMandate = len(registered.ToolBindings) > 0
+	}
 	answer := h.authorizePlatformActionWithMandate(
 		r.Context(), r, workspaceUUID, actorType, actorID, capability, "rest_api",
 		map[string]any{"method": r.Method, "path": r.URL.Path},
 		map[string]string{"method": r.Method, "path": r.URL.Path},
-		false, false,
+		false, requireMandate,
 	)
 	if !answer.Allowed {
 		writePlatformAction(w, capability, answer)

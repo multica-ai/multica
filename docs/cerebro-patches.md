@@ -3,6 +3,30 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4292 — Exact Task Mandate admission and diagnostics
+
+- `task-mandate-callable-propagation` carries the exact CLI or MCP operation
+  through `server/cmd/multica/cmd_agent.go`, `server/internal/cli/client.go`, and
+  `server/internal/mcp/server.go`; REST gates never infer a broad permission
+  family such as `manage_workflows` as a callable.
+- `task-mandate-exact-platform-routes` applies those exact identities to the
+  Artifact, Comment, Wakeup, and Handoff routes in
+  `server/cmd/server/router.go` while preserving member behavior.
+- `task-mandate-session-mode-parity` applies one `SessionModeConfig.AllowedTools`
+  compiler to local claims and Firtal Gateway claims through
+  `server/internal/handler/daemon.go` and `server/cmd/server/main.go`.
+- `task-mandate-read-model` extends `packages/core/types/agent.ts` and
+  `packages/views/common/task-transcript/agent-transcript-dialog.tsx` with the
+  additive generation, lifecycle, producer/finalizer, source-version, count,
+  digest, verdict, and recovery fields.
+- `task-mandate-generation-claim` carries the finalized `claim_generation`
+  from daemon claim through local hooks, CLI/REST, Capabilities, and Gateway;
+  every enabled call-time gate uses `AuthorizeClaimGeneration`, so a reclaimed
+  task cannot reuse an older attempt's authority.
+- **Why:** policy families describe what admins author; exact callables describe
+  what one run can invoke. Conflating them allowed broad-family inference and
+  made local/Gateway admission and operator diagnostics disagree.
+
 ## FIR-4217 — Check recipient runtime before agent handoff
 
 - `server/internal/daemon/execenv/runtime_config.go:803-804` adds a silent,

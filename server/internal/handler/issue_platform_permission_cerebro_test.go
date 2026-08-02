@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func setTaskMandateEnforcement(t *testing.T, enabled bool) {
 	})
 }
 
-func issuePlatformActionMandate(t *testing.T, taskID, agentID string, actions ...string) {
+func issuePlatformActionMandate(t *testing.T, taskID, agentID string, actions ...string) int64 {
 	t.Helper()
 	taskUUID, err := util.ParseUUID(taskID)
 	if err != nil {
@@ -84,16 +85,22 @@ func issuePlatformActionMandate(t *testing.T, taskID, agentID string, actions ..
 	if err != nil {
 		t.Fatalf("parse agent id: %v", err)
 	}
-	if err := taskmandate.NewStore(testPool).Issue(
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskUUID); err != nil {
+		t.Fatalf("clear seeded task mandate: %v", err)
+	}
+	generation, err := taskmandate.NewStore(testPool).FinalizeTaskClaim(
 		context.Background(),
 		taskUUID,
 		workspaceUUID,
 		agentUUID,
 		actions,
 		time.Now().Add(time.Hour),
-	); err != nil {
+		"handler-test:v1",
+	)
+	if err != nil {
 		t.Fatalf("issue task mandate: %v", err)
 	}
+	return generation.Generation
 }
 
 func issueCountByTitle(t *testing.T, title string) int {
@@ -116,7 +123,7 @@ func agentCreateIssueRequest(t *testing.T, title string, parentID string) *http.
 	t.Helper()
 	agentID := createHandlerTestAgent(t, "create-issue-permission-"+uuid.NewString(), []byte(`{}`))
 	taskID := createHandlerTestTaskForAgent(t, agentID)
-	issuePlatformActionMandate(t, taskID, agentID, createIssuePermissionToolKey)
+	generation := issuePlatformActionMandate(t, taskID, agentID, createIssuePermissionToolKey)
 	body := map[string]any{"title": title, "allow_duplicate": true}
 	if parentID != "" {
 		body["parent_issue_id"] = parentID
@@ -125,6 +132,8 @@ func agentCreateIssueRequest(t *testing.T, title string, parentID string) *http.
 	req.Header.Set("X-Actor-Source", "task_token")
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
+	req.Header.Set("X-Task-Mandate-Generation", strconv.FormatInt(generation, 10))
+	req.Header.Set("X-Multica-Callable", createIssuePermissionToolKey)
 	return req
 }
 
@@ -132,11 +141,17 @@ func agentIssueActionRequest(t *testing.T, method, issueID string, body map[stri
 	t.Helper()
 	agentID := createHandlerTestAgent(t, "issue-action-permission-"+uuid.NewString(), []byte(`{}`))
 	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
-	issuePlatformActionMandate(t, taskID, agentID, actions...)
+	generation := issuePlatformActionMandate(t, taskID, agentID, actions...)
 	req := withURLParam(newRequest(method, "/api/issues/"+issueID, body), "id", issueID)
 	req.Header.Set("X-Actor-Source", "task_token")
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
+	req.Header.Set("X-Task-Mandate-Generation", strconv.FormatInt(generation, 10))
+	if method == http.MethodPost {
+		req.Header.Set("X-Multica-Callable", addCommentPermissionToolKey)
+	} else {
+		req.Header.Set("X-Multica-Callable", updateIssuePermissionToolKey)
+	}
 	return req
 }
 
@@ -183,13 +198,15 @@ func TestCreateIssuePermission_RESTTaskMandateDenyBlocksBeforeMutation(t *testin
 
 	agentID := createHandlerTestAgent(t, "create-issue-mandate-"+uuid.NewString(), []byte(`{}`))
 	taskID := createHandlerTestTaskForAgent(t, agentID)
-	issuePlatformActionMandate(t, taskID, agentID)
+	generation := issuePlatformActionMandate(t, taskID, agentID)
 	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": title, "allow_duplicate": true,
 	})
 	req.Header.Set("X-Actor-Source", "task_token")
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
+	req.Header.Set("X-Task-Mandate-Generation", strconv.FormatInt(generation, 10))
+	req.Header.Set("X-Multica-Callable", createIssuePermissionToolKey)
 
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, req)
@@ -197,8 +214,32 @@ func TestCreateIssuePermission_RESTTaskMandateDenyBlocksBeforeMutation(t *testin
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "task_mandate_denied") {
 		t.Fatalf("REST agent create outside Task Mandate: status=%d body=%s, want 403 task_mandate_denied", w.Code, w.Body.String())
 	}
+	var denial struct {
+		Verdict taskmandate.Verdict `json:"verdict"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &denial); err != nil || denial.Verdict.Code != taskmandate.VerdictToolNotAuthorized || denial.Verdict.RecoveryAction != taskmandate.RecoveryStartNewTask {
+		t.Fatalf("REST Task Mandate verdict = %+v (decode %v), want task_tool_not_authorized/start_new_task", denial.Verdict, err)
+	}
 	if got := issueCountByTitle(t, title); got != 0 {
 		t.Fatalf("REST agent create outside Task Mandate mutated %d issue rows, want 0", got)
+	}
+}
+
+func TestCreateIssuePermission_RESTStaleClaimGenerationBlocksBeforeMutation(t *testing.T) {
+	setTaskMandateEnforcement(t, true)
+	setCreateIssueWorkspacePolicy(t, toolpolicy.SettingAllow)
+	title := "REST stale generation issue " + uuid.NewString()
+	cleanupIssuesByTitle(t, title)
+	req := agentCreateIssueRequest(t, title, "")
+	req.Header.Set("X-Task-Mandate-Generation", "999999")
+
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), string(taskmandate.VerdictStaleGeneration)) {
+		t.Fatalf("stale REST generation: status=%d body=%s, want task_generation_stale", w.Code, w.Body.String())
+	}
+	if got := issueCountByTitle(t, title); got != 0 {
+		t.Fatalf("stale REST generation mutated %d issue rows, want 0", got)
 	}
 }
 
