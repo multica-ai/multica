@@ -180,3 +180,48 @@ func TestAuthorizeStaleClaimGenerationHasDistinctReason(t *testing.T) {
 	)
 	requireClaimGenerationDenialReason(t, err, staleClaimGenerationReason)
 }
+
+func TestClaimGenerationStorageShapeIsAdditive(t *testing.T) {
+	fixture := newClaimGenerationFixture(t)
+	ctx := context.Background()
+	store := NewStore(fixture.pool)
+	if err := store.Issue(
+		ctx, fixture.taskID, fixture.workspaceID, fixture.agentID, []string{"tools:Read"}, time.Now().Add(time.Hour),
+	); err != nil {
+		t.Fatalf("issue legacy claim generation: %v", err)
+	}
+
+	var (
+		generation                         int64
+		producer, finalizer                *string
+		inventoryVersion, discoveryVersion *string
+		finalizedGrantDigest               *string
+		lifecycleState                     string
+	)
+	err := fixture.pool.QueryRow(ctx, `
+		SELECT claim_generation, producer, finalizer, lifecycle_state,
+		       inventory_version, discovery_version, finalized_grant_digest
+		FROM cerebro_task_mandate
+		WHERE task_id = $1`, fixture.taskID,
+	).Scan(
+		&generation,
+		&producer,
+		&finalizer,
+		&lifecycleState,
+		&inventoryVersion,
+		&discoveryVersion,
+		&finalizedGrantDigest,
+	)
+	if err != nil {
+		t.Fatalf("read additive claim generation storage: %v", err)
+	}
+	if generation != 1 || ClaimLifecycleState(lifecycleState) != ClaimLifecycleLegacy {
+		t.Fatalf("legacy claim generation = (%d, %q), want (1, %q)", generation, lifecycleState, ClaimLifecycleLegacy)
+	}
+	if producer != nil || finalizer != nil || inventoryVersion != nil || discoveryVersion != nil || finalizedGrantDigest != nil {
+		t.Fatalf(
+			"legacy metadata = producer:%v finalizer:%v inventory:%v discovery:%v digest:%v, want nil",
+			producer, finalizer, inventoryVersion, discoveryVersion, finalizedGrantDigest,
+		)
+	}
+}
