@@ -1,0 +1,2 @@
+ALTER TABLE autopilot_run
+    ADD COLUMN IF NOT EXISTS recovered_at TIMESTAMPTZ;

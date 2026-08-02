@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -151,6 +152,7 @@ type AutopilotRunResponse struct {
 	TaskID        *string `json:"task_id"`
 	TriggeredAt   string  `json:"triggered_at"`
 	CompletedAt   *string `json:"completed_at"`
+	RecoveredAt   *string `json:"recovered_at"`
 	FailureReason *string `json:"failure_reason"`
 	// ReasonCode is a stable, localizable, enumeration-safe classification of a
 	// non-success run (skipped/failed), derived from FailureReason. The "run now"
@@ -284,6 +286,7 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		TaskID:        uuidToPtr(r.TaskID),
 		TriggeredAt:   timestampToString(r.TriggeredAt),
 		CompletedAt:   timestampToPtr(r.CompletedAt),
+		RecoveredAt:   timestampToPtr(r.RecoveredAt),
 		FailureReason: textToPtr(r.FailureReason),
 		// ReasonCode is left unset here: it is a decision-time value the manual
 		// "run now" handler injects from the typed dispatch outcome (MUL-4525).
@@ -1934,6 +1937,10 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if _, err := h.Queries.ReconcileRecoveredIssueRuns(r.Context(), autopilot.ID); err != nil {
+		slog.Warn("failed to reconcile recovered autopilot runs", "autopilot_id", autopilotID, "error", err)
+	}
+
 	runs, err := h.Queries.ListAutopilotRuns(r.Context(), db.ListAutopilotRunsParams{
 		AutopilotID: autopilot.ID,
 		Limit:       limit,
@@ -1967,6 +1974,9 @@ func (h *Handler) GetAutopilotRun(w http.ResponseWriter, r *http.Request) {
 	autopilot, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
 		return
+	}
+	if _, err := h.Queries.ReconcileRecoveredIssueRuns(r.Context(), autopilot.ID); err != nil {
+		slog.Warn("failed to reconcile recovered autopilot runs", "autopilot_id", autopilotID, "error", err)
 	}
 
 	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run id")

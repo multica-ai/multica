@@ -62,6 +62,12 @@ For "why didn't it run":
 5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
 6. For `create_issue`, inspect the created issue if the run records one.
 
+A `create_issue` run that failed only because its linked issue was temporarily
+`blocked` is reconciled to `completed` when that same issue later reaches
+`done` or `in_review`. `recovered_at` marks recovery; `failure_reason` retains
+the historical `issue blocked` gate. Dispatch/task failures and cancelled
+issues remain failures.
+
 ## Side effects
 
 These mutate durable state or start work: `create`, `update`, `delete`, trigger add/update/delete/rotate, `trigger`, and webhook calls to `/api/webhooks/autopilots/{token}`.

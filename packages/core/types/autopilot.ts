@@ -121,6 +121,9 @@ export interface AutopilotRun {
   task_id: string | null;
   triggered_at: string;
   completed_at: string | null;
+  // Set when a create_issue run recovered from a temporary linked-issue
+  // `blocked` gate. `failure_reason` remains populated as audit history.
+  recovered_at?: string | null;
   failure_reason: string | null;
   // Stable, localizable, enumeration-safe classification of a non-success run
   // (skipped/failed), derived server-side from failure_reason (MUL-4525). The
