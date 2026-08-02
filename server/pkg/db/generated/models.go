@@ -242,6 +242,14 @@ type AutopilotSubscriber struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AutopilotSuccessor struct {
+	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
+	SuccessorAutopilotID pgtype.UUID        `json:"successor_autopilot_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	OnStatus             string             `json:"on_status"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
 type AutopilotTrigger struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`

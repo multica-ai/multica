@@ -542,3 +542,50 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
+
+-- =====================
+-- Autopilot Successors (chain triggering, WS-768 / Stage 4)
+-- =====================
+
+-- name: ListAutopilotSuccessors :many
+-- Returns all successor edges where the given autopilot is the predecessor.
+SELECT * FROM autopilot_successor
+WHERE autopilot_id = $1
+ORDER BY created_at ASC;
+
+-- name: ListAutopilotPredecessors :many
+-- Reverse lookup: returns all successor edges where the given autopilot is the
+-- successor (i.e. which autopilots chain INTO this one).
+SELECT * FROM autopilot_successor
+WHERE successor_autopilot_id = $1
+ORDER BY created_at ASC;
+
+-- name: AddAutopilotSuccessor :one
+-- Add a chain edge from autopilot_id → successor_autopilot_id. The workspace
+-- existence / same-workspace checks happen at the API layer.
+INSERT INTO autopilot_successor (autopilot_id, successor_autopilot_id, workspace_id, on_status)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (autopilot_id, successor_autopilot_id)
+    DO UPDATE SET on_status = EXCLUDED.on_status
+RETURNING *;
+
+-- name: DeleteAutopilotSuccessor :exec
+DELETE FROM autopilot_successor
+WHERE autopilot_id = $1 AND successor_autopilot_id = $2;
+
+-- name: DeleteAutopilotSuccessorsForAutopilot :exec
+-- Cleanup when the predecessor autopilot is deleted (the ON DELETE CASCADE on
+-- autopilot_id already handles this, but the delete handler also runs an
+-- explicit sweep for symmetry with collaborators/subscribers).
+DELETE FROM autopilot_successor
+WHERE autopilot_id = $1;
+
+-- name: ListSuccessorEdgesInWorkspace :many
+-- Returns every successor edge in the workspace — used by the cycle detector
+-- to build the DAG before checking reachability.
+SELECT autopilot_id, successor_autopilot_id FROM autopilot_successor
+WHERE workspace_id = $1;
+
+-- name: CountAutopilotSuccessors :one
+SELECT COUNT(*) FROM autopilot_successor WHERE autopilot_id = $1;
+

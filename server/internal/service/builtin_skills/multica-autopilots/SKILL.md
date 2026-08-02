@@ -45,7 +45,14 @@ multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" 
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
 multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
+multica autopilot successor-add <autopilot-id> <successor-id> --on-status completed|failed|both --output json
+multica autopilot successor-delete <autopilot-id> <successor-id>
+multica autopilot successors <autopilot-id> --output json
 ```
+
+Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
+
+Successors (`successor-add` / `successors`) wire cross-autopilot chain triggering: when autopilot A's run reaches a terminal state matching `--on-status` (default `completed`), autopilot B fires via the same dispatch path with `source="chained"`. Cycle creation is rejected (409). Skipped runs do NOT chain (skip is a dispatch decision, not a domain outcome). Chain dispatches respect the successor's own `max_concurrent_runs` cap and webhook idempotency like any other dispatch.
 
 Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
 
@@ -64,6 +71,6 @@ For "why didn't it run":
 
 ## Side effects
 
-These mutate durable state or start work: `create`, `update`, `delete`, trigger add/update/delete/rotate, `trigger`, and webhook calls to `/api/webhooks/autopilots/{token}`.
+These mutate durable state or start work: `create`, `update`, `delete`, trigger add/update/delete/rotate, `trigger`, `successor-add`/`successor-delete`, and webhook calls to `/api/webhooks/autopilots/{token}`.
 
 More source-backed details: `references/autopilots-source-map.md`.

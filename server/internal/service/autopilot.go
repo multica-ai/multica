@@ -983,6 +983,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
+		s.triggerSuccessors(ctx, autopilot, updatedRun, "completed")
 	case "cancelled", "blocked":
 		reason := "issue " + issue.Status
 		updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
@@ -995,6 +996,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
+		s.triggerSuccessors(ctx, autopilot, updatedRun, "failed")
 	}
 }
 
@@ -1027,6 +1029,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
+		s.triggerSuccessors(ctx, autopilot, updatedRun, "completed")
 	case "failed", "cancelled":
 		reason := "task " + task.Status
 		if task.Error.Valid {
@@ -1042,6 +1045,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
+		s.triggerSuccessors(ctx, autopilot, updatedRun, "failed")
 	}
 }
 
@@ -1853,4 +1857,201 @@ func (s *AutopilotService) canCreatorInvokeAgent(ctx context.Context, ap db.Auto
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Cross-autopilot chain triggering (WS-768 / Stage 4)
+// ---------------------------------------------------------------------------
+
+// DetectCycle returns true if adding an edge from predecessorID → successorID
+// would create a cycle in the workspace's successor DAG. It also returns the
+// reachability chain (successor path) when a cycle is detected so callers can
+// surface a useful error.
+//
+// The check is: starting from successorID, follow successor edges; if we can
+// reach predecessorID, adding the edge would close a loop.
+func (s *AutopilotService) DetectCycle(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	predecessorID pgtype.UUID,
+	successorID pgtype.UUID,
+) (wouldCycle bool, cyclePath []pgtype.UUID, err error) {
+	edges, err := s.Queries.ListSuccessorEdgesInWorkspace(ctx, workspaceID)
+	if err != nil {
+		return false, nil, fmt.Errorf("list successor edges: %w", err)
+	}
+
+	// Build adjacency list: from → []to.
+	adj := make(map[string][]pgtype.UUID)
+	for _, e := range edges {
+		key := util.UUIDToString(e.AutopilotID)
+		adj[key] = append(adj[key], e.SuccessorAutopilotID)
+	}
+
+	// BFS from successorID; if we reach predecessorID, adding the edge would
+	// close a cycle.
+	startKey := util.UUIDToString(successorID)
+	targetKey := util.UUIDToString(predecessorID)
+
+	visited := map[string]bool{startKey: true}
+	queue := []pgtype.UUID{successorID}
+	parent := map[string]string{}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		curKey := util.UUIDToString(cur)
+
+		if curKey == targetKey {
+			chain := []pgtype.UUID{cur}
+			nodeKey := parent[curKey]
+			for nodeKey != "" && nodeKey != startKey {
+				id := pgtype.UUID{}
+				_ = id.Scan(nodeKey)
+				chain = append(chain, id)
+				nodeKey = parent[nodeKey]
+			}
+			// Prepend the start node (successorID) - it has no parent entry.
+			chain = append(chain, successorID)
+			// Reverse so the chain reads start -> ... -> cur.
+			for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+				chain[i], chain[j] = chain[j], chain[i]
+			}
+			path := []pgtype.UUID{predecessorID}
+			path = append(path, chain...)
+			path = append(path, predecessorID)
+			return true, path, nil
+		}
+
+		for _, next := range adj[curKey] {
+			nextKey := util.UUIDToString(next)
+			if !visited[nextKey] {
+				visited[nextKey] = true
+				parent[nextKey] = curKey
+				queue = append(queue, next)
+			}
+		}
+	}
+
+	return false, nil, nil
+}
+
+// triggerSuccessors fires chain dispatches for all successors of the given
+// autopilot whose on_status matches the terminal run status. Called after a
+// run reaches a terminal state (completed / failed / skipped).
+//
+// Errors are logged but never propagated: a failing successor dispatch must
+// not roll back the upstream run's terminal state transition.
+func (s *AutopilotService) triggerSuccessors(
+	ctx context.Context,
+	ap db.Autopilot,
+	run db.AutopilotRun,
+	terminalStatus string,
+) {
+	successors, err := s.Queries.ListAutopilotSuccessors(ctx, ap.ID)
+	if err != nil {
+		slog.Warn("failed to list autopilot successors for chain dispatch",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"error", err)
+		return
+	}
+	if len(successors) == 0 {
+		return
+	}
+
+	for _, succ := range successors {
+		if !successorMatchesStatus(succ.OnStatus, terminalStatus) {
+			continue
+		}
+
+		// Resolve the successor autopilot; skip if it no longer exists or is
+		// in a different workspace (defence in depth — the API layer already
+		// enforces same-workspace).
+		successorAP, err := s.Queries.GetAutopilot(ctx, succ.SuccessorAutopilotID)
+		if err != nil {
+			slog.Warn("successor autopilot not found for chain dispatch",
+				"predecessor_id", util.UUIDToString(ap.ID),
+				"successor_id", util.UUIDToString(succ.SuccessorAutopilotID),
+				"error", err)
+			continue
+		}
+		if util.UUIDToString(successorAP.WorkspaceID) != util.UUIDToString(ap.WorkspaceID) {
+			slog.Warn("successor autopilot workspace mismatch",
+				"predecessor_id", util.UUIDToString(ap.ID),
+				"successor_id", util.UUIDToString(succ.SuccessorAutopilotID))
+			continue
+		}
+
+		// Skip archived successors — they are not dispatchable.
+		if successorAP.Status == "archived" {
+			continue
+		}
+
+		// Build a payload that references the upstream run so the successor
+		// can inspect its result.
+		payload := map[string]any{
+			"chain": map[string]any{
+				"predecessor_autopilot_id": util.UUIDToString(ap.ID),
+				"predecessor_run_id":       util.UUIDToString(run.ID),
+				"predecessor_status":       terminalStatus,
+			},
+		}
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			slog.Warn("failed to marshal chain payload",
+				"predecessor_id", util.UUIDToString(ap.ID),
+				"successor_id", util.UUIDToString(succ.SuccessorAutopilotID),
+				"error", err)
+			continue
+		}
+
+		// Capture loop variables for the goroutine.
+		sAP := successorAP
+		pBytes := payloadBytes
+		predecessorID := ap.ID
+		sAPID := sAP.ID
+
+		// Fire-and-forget: DispatchAutopilot handles its own error recording
+		// (skipped / failed run). We log but never propagate.
+		go func() {
+			// Detach from the caller's context so a cancellation at the
+			// listener layer doesn't kill the chain dispatch.
+			detachedCtx := context.Background()
+			_, _, dispatchErr := s.dispatchAutopilot(
+				detachedCtx,
+				sAP,
+				pgtype.UUID{}, // no trigger_id — chain dispatches have no trigger row
+				"chained",
+				pBytes,
+				pgtype.Timestamptz{},
+				pgtype.UUID{},
+				pgtype.UUID{},
+			)
+			if dispatchErr != nil {
+				slog.Warn("chain dispatch failed",
+					"predecessor_id", util.UUIDToString(predecessorID),
+					"successor_id", util.UUIDToString(sAPID),
+					"error", dispatchErr)
+			}
+		}()
+	}
+}
+
+// successorMatchesStatus reports whether a successor edge's on_status filter
+// matches the terminal run status. 'both' matches completed or failed; the
+// specific values match the corresponding terminal state only. Skipped runs
+// do not trigger successors (skip is a dispatch-layer decision, not a
+// domain outcome).
+func successorMatchesStatus(onStatus, terminalStatus string) bool {
+	switch onStatus {
+	case "both":
+		return terminalStatus == "completed" || terminalStatus == "failed"
+	case "completed":
+		return terminalStatus == "completed"
+	case "failed":
+		return terminalStatus == "failed"
+	default:
+		return false
+	}
 }
