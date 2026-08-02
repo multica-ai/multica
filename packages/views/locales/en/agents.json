@@ -163,7 +163,7 @@
     "section_execution": "Execution",
     "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel task limit.",
     "section_access": "Access",
-    "section_access_hint": "Control who can run this agent and use its connected capabilities.",
+    "section_access_hint": "Controls who may run this Multica agent (and share its Multica-connected apps such as Composio). It does not manage external host credentials — for example AKH token scopes live in the Hub under Settings → Agents.",
     "section_properties": "Properties",
     "section_details": "Details",
     "section_details_hint": "Read-only ownership and lifecycle information.",

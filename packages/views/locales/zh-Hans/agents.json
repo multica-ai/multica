@@ -155,7 +155,7 @@
     "section_execution": "执行配置",
     "section_execution_hint": "选择运行时、模型、思考强度、速度和并行任务上限。",
     "section_access": "访问权限",
-    "section_access_hint": "控制谁可以运行该智能体并使用它已连接的能力。",
+    "section_access_hint": "控制谁可以运行该 Multica 智能体（并共享其 Multica 已连接能力，例如 Composio）。它不管理外部主机凭证——例如 AKH token scopes 需在 Hub 的 Settings → Agents 中修改。",
     "section_properties": "属性",
     "section_details": "详情",
     "section_details_hint": "只读的所有权和生命周期信息。",
