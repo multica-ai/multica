@@ -359,10 +359,13 @@ var issueSearchCmd = &cobra.Command{
 		"so a conclusion that only ever landed in a comment thread is still findable\n" +
 		"here.\n\n" +
 		"A bare number matches the issue with that number, and so does anything\n" +
-		"shaped like an identifier: \"AGE-412\" is equivalent to \"412\". The prefix is\n" +
-		"not validated, so \"MUL-412\" and \"ZZZ-412\" match local issue 412 just the\n" +
-		"same. Number matches rank first, so pasting an identifier from another\n" +
-		"tracker can put an unrelated local issue at the top of the results.\n\n" +
+		"shaped like an identifier: \"AGE-412\" and \"412\" both match issue 412. The\n" +
+		"number match is the same either way, but the text search still uses the\n" +
+		"query as written, so \"412\" also matches text containing \"1412\" while\n" +
+		"\"AGE-412\" does not. The prefix is not validated, so \"MUL-412\" and\n" +
+		"\"ZZZ-412\" match local issue 412 just the same. Number matches rank\n" +
+		"first, so pasting an identifier from another tracker can put an\n" +
+		"unrelated local issue at the top of the results.\n\n" +
 		"Each result carries a match_source of \"title\", \"description\" or \"comment\",\n" +
 		"shown in the MATCH column and returned by --output json. It reports the\n" +
 		"strongest field that matched, and \"comment\" is also the fallback for a\n" +
