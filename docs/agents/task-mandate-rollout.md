@@ -45,6 +45,41 @@ views before changing `cerebro_task_mandate_enforcement`:
    the offered and authorized counts are understood, and every observed denial
    names the affected callable, source policy, and recovery action.
 
+## Post-deploy live Runtime tool gate
+
+Run the live gate after every staging and production deployment, after the
+services report healthy and before the deployment is accepted:
+
+```bash
+MULTICA_POST_DEPLOY_CLI=/path/to/deployed/multica \
+MULTICA_POST_DEPLOY_PROFILE=<live-profile> \
+scripts/cerebro/check-live-runtime-tools-post-deploy.sh
+```
+
+The profile must authenticate to the deployed live workspace. The check reads
+every online Runtime through one `multica runtime list` snapshot and fails
+closed when no online Runtime can be verified or any online Runtime has an
+empty `capabilities` report. This is the measurable zero-state that previously
+left an agent with none of its callable surface; an intentionally empty
+provider-native `tools` array is not equivalent when the Runtime still reports
+its protocol and discovery capabilities.
+
+`.github/workflows/cerebro-post-deploy-live-runtime-tools.yml` runs this gate on
+every push to the Sliplane deploy branches, `main` and `production`. Configure
+the `staging` and `production` GitHub environments with `MULTICA_TOKEN`,
+`MULTICA_SERVER_URL`, `MULTICA_WORKSPACE_ID`, and `MULTICA_APP_URL`; add
+`CEREBRO_CF_ACCESS_CLIENT_ID` and `CEREBRO_CF_ACCESS_CLIENT_SECRET` when the API
+is behind Cloudflare Access. The workflow waits until `MULTICA_APP_URL/version`
+reports the pushed commit before reading the workspace, so an old healthy
+deployment cannot satisfy the new deployment's gate. Both Cloudflare Access
+headers are applied to `/version` when configured, and a half-configured pair
+fails closed. After the web commit appears, the workflow holds a two-minute
+settle window for the independently deployed backend and Runtime reports before
+reading them. `.deploy/deploy.sh`
+invokes the same commit-bound check on the separate canonical local path. A
+failed check is a failed deployment acceptance; it does not justify enabling
+`cerebro_task_mandate_enforcement`.
+
 ## Release gates
 
 Keep enforcement off until the observation cohort proves all of these paths:
@@ -75,6 +110,37 @@ unavailable discovery result treated as current.
    transcript and `cerebro_access_decision_ledger`.
 4. Expand the cohort only after the release owner records a clean window and
    confirms the rollback owner is available.
+
+## `legacy` retirement gate
+
+Do not delete the parallel `legacy` read path merely because enforcement has
+been enabled. Retirement is allowed only when one release record proves every
+criterion below for the same approved cohort:
+
+1. The release owner approves and records the cohort before observation starts:
+   workspace IDs, Runtime IDs, agent IDs, release owner, rollback owner, start
+   timestamp, and the exact deployed commit. Any cohort or permission-surface
+   change starts a new observation window.
+2. The complete cohort runs with `cerebro_task_mandate_enforcement` enabled for
+   seven consecutive 24-hour periods. A flag-off interval, unavailable
+   diagnostic source, provider/discovery version mismatch, or cohort change
+   resets the seven-day clock.
+3. The cohort records zero parity denials. A parity denial is any production
+   call with a Task Mandate denial `reason_code` where the same identity and
+   callable resolves to Allow or Ask through live Settings → Permissions.
+   Deliberate negative canaries are excluded only when their task IDs and
+   expected `reason_code` were recorded before the window began. Record the
+   ledger query interval, total calls, total mandate denials, and parity-denial
+   count; the accepted parity-denial count is exactly `0`.
+4. After the seven-day evidence is accepted, keep the `legacy` path available
+   and keep the rollback owner on call for a further 72-hour rollback window.
+   Continue the same ledger and diagnostic checks throughout that window. Any
+   parity denial, missing source, version mismatch, or rollback resets both the
+   acceptance and the 72-hour clock.
+5. Only after the 72-hour rollback window closes with the count still at zero
+   may a separate reviewed change remove the `legacy` path. That change must
+   link the cohort record and preserve the feature-flag rollback until its own
+   deployment is verified.
 
 ## Rollback
 
