@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 protects CLI parity with the REST contract.
 func TestRunRuntimeDiagnosticsJSONUsesSharedRESTContract(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/runtimes/runtime-1/access-diagnostics" {

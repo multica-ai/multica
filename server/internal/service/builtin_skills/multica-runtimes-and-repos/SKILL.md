@@ -35,6 +35,7 @@ The chain is:
 
 ## CLI
 
+<!-- CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 documents the read-only operator path. -->
 ```bash
 multica runtime list --output json
 multica runtime diagnostics <runtime-id> --output json

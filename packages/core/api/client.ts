@@ -2636,6 +2636,7 @@ export class ApiClient {
 
   // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 expose the task-scoped permission snapshot.
   async getTaskAccess(taskId: string): Promise<TaskAccessSnapshot> {
+    // CEREBRO-PATCH(task-access-diagnostics): FIR-4293 fail closed with an explainable shared state.
     const path = `/api/tasks/${taskId}/access`;
     const raw = await this.fetch(path);
     return parseWithFallback(raw, TaskAccessSnapshotSchema, {

@@ -7,7 +7,9 @@ documents one named patch + its rationale + the file location(s).
 
 - `runtime-access-diagnostics` adds the shared read-only Runtime contract to
   `packages/core/api/client.ts`, `packages/core/api/schemas.ts`, and
-  `server/cmd/server/router.go`; `runtime-access-diagnostics-matrix` records the
+  `server/cmd/server/router.go`, exposes it through `server/cmd/multica/cmd_runtime.go`,
+  and documents it in the built-in `multica-runtimes-and-repos` skill;
+  `runtime-access-diagnostics-matrix` records the
   CLI-runtime MCP tool in `server/internal/cerebro/runtime/tools_registry.go`
   without turning diagnostics into an implicit Gateway grant. The Runtime UI,
   CLI, and MCP consume the same provider-probe and MCP `tools/list` evidence

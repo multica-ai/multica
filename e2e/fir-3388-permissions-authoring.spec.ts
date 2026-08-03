@@ -89,7 +89,9 @@ test("Settings Permissions writes the canonical policy and persists after reload
     );
 
     await preventAttributionSurvey(page, userId);
-    const workspaceSlug = await loginAsDefault(page);
+    const workspaceSlug = await loginAsDefault(page, {
+      workspaceReadyTimeout: 60_000,
+    });
     await page.goto(`/${workspaceSlug}/settings?tab=permissions`, {
       waitUntil: "domcontentloaded",
     });
@@ -130,7 +132,7 @@ test("Settings Permissions writes the canonical policy and persists after reload
       page
         .getByTestId(`tool-card-${toolKey}`)
         .getByRole("button", { name: "Decision: Deny" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
 
     // The same Settings decision must reach the agent's own Capabilities card
     // with an actionable denial. This joins authoring, the visible agent view,

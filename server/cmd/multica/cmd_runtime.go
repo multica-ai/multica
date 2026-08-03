@@ -43,6 +43,7 @@ var runtimeUpdateCmd = &cobra.Command{
 	RunE:  runRuntimeUpdate,
 }
 
+// CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 exposes the shared read-only report in CLI.
 var runtimeDiagnosticsCmd = &cobra.Command{
 	Use:   "diagnostics <runtime-id>",
 	Short: "Show provider probe and MCP discovery diagnostics",

@@ -1,5 +1,6 @@
 # Runtimes and repos source map
 
+<!-- CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 maps CLI and MCP to one REST contract. -->
 - `server/cmd/multica/cmd_runtime.go` registers `runtime list`, `diagnostics`, `usage`, `activity`, and `update`.
 - `runtime list` reads `/api/runtimes` and prints `id`, `name`, `runtime_mode`, `provider`, `status`, and `last_seen_at`.
 - `runtime diagnostics` and MCP `get_runtime_access_diagnostics` read the same owner/admin-gated `/api/runtimes/{runtime-id}/access-diagnostics` contract; the report separates provider probing from MCP `tools/list` and never changes policy.

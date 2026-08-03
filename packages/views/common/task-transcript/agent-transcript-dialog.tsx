@@ -19,6 +19,7 @@ import {
   ArrowUpNarrowWide,
   ListCollapse,
   Info,
+  // CEREBRO-PATCH(task-access-diagnostics): FIR-4293 shared disclosure owns its diagnostic icon.
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -50,6 +51,7 @@ import {
   type TranscriptFilterKey,
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
+// CEREBRO-PATCH(task-access-diagnostics): FIR-4293 shared disclosure owns snapshot types.
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 // CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — surface the run's full initial prompt in the transcript modal.
 import { RunPromptDisclosure } from "@multica/cerebro-sessions";
@@ -778,6 +780,7 @@ export function AgentTranscriptDialog({
         {/* CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — full initial prompt, openable. */}
         <RunPromptDisclosure task={task} />
         {/* CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot. */}
+        {/* CEREBRO-PATCH(task-access-diagnostics): FIR-4293 shared disclosure loads its read model. */}
         <TaskAccessDisclosure taskId={task.id} />
 
         {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and density. */}
