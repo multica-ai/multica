@@ -136,6 +136,33 @@ func parseBoolEnv(raw string) (bool, error) {
 	}
 }
 
+// usesAWSEndpoint reports whether uploads go to real AWS S3 — either the
+// default endpoint or an explicitly configured AWS one, since VPC, dualstack
+// and FIPS hostnames all live under amazonaws.com.
+func (s *S3Storage) usesAWSEndpoint() bool {
+	return s.endpointURL == "" || strings.Contains(s.endpointURL, "amazonaws.com")
+}
+
+// uploadChecksumOptions returns the per-request options for the buffered
+// upload path. The SDK defaults RequestChecksumCalculation to WhenSupported,
+// which sends the body as aws-chunked with a CRC32 trailer; Aliyun OSS and
+// Tencent COS do not implement that encoding and reject the request outright.
+//
+// Downgrading to WhenRequired drops the trailer, but it also drops the
+// client-side checksum entirely, so it is applied only to non-AWS endpoints.
+// Real AWS S3 accepts the trailer today, and buckets carrying a default Object
+// Lock retention actually require a checksum, so those requests are left
+// exactly as the SDK built them — including any AWS_REQUEST_CHECKSUM_CALCULATION
+// the operator configured.
+func (s *S3Storage) uploadChecksumOptions() []func(*s3.Options) {
+	if s.usesAWSEndpoint() {
+		return nil
+	}
+	return []func(*s3.Options){func(opts *s3.Options) {
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	}}
+}
+
 // storageClass returns the appropriate S3 storage class.
 // Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
 func (s *S3Storage) storageClass() types.StorageClass {
@@ -281,14 +308,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
-	}, func(opts *s3.Options) {
-		// Avoid the optional trailing-checksum path for the same reason
-		// UploadStream does: it uses aws-chunked framing that S3-compatible
-		// backends handle unevenly (Aliyun OSS and Tencent COS reject it
-		// outright). The seekable body here is still covered by the real
-		// SigV4 payload hash, so integrity is unaffected.
-		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
-	})
+	}, s.uploadChecksumOptions()...)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}

@@ -76,65 +76,73 @@ func TestS3StorageUploadStreamRejectsUnknownLength(t *testing.T) {
 	}
 }
 
-func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
-	type observedRequest struct {
-		contentSHA256 string
-		trailer       string
-		checksumCRC32 string
-		encoding      string
-		body          string
-	}
+type observedChecksumRequest struct {
+	contentSHA256 string
+	trailer       string
+	checksumCRC32 string
+	encoding      string
+	body          string
+}
 
-	// TLS matters: the SDK only switches to a trailing checksum when the
-	// request is HTTPS (see the IsHTTPS gate in the checksum middleware), and
-	// production talks to OSS/S3 over HTTPS. A plain HTTP server would take the
-	// header-checksum branch instead and never reproduce the trailer.
-	newRecordingServer := func(t *testing.T, observed chan<- observedRequest) *httptest.Server {
-		t.Helper()
-		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Errorf("read request body: %v", err)
-			}
-			observed <- observedRequest{
-				contentSHA256: r.Header.Get("X-Amz-Content-Sha256"),
-				trailer:       r.Header.Get("X-Amz-Trailer"),
-				checksumCRC32: r.Header.Get("X-Amz-Checksum-Crc32"),
-				encoding:      r.Header.Get("Content-Encoding"),
-				body:          string(body),
-			}
-			w.WriteHeader(http.StatusOK)
-		}))
-		t.Cleanup(server.Close)
-		return server
-	}
-
-	newStore := func(server *httptest.Server) *S3Storage {
-		return &S3Storage{
-			client: s3.New(s3.Options{
-				Region:       "us-east-1",
-				Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
-				BaseEndpoint: aws.String(server.URL),
-				UsePathStyle: true,
-				HTTPClient:   server.Client(),
-				// NewS3StorageFromEnv builds its client through
-				// config.LoadDefaultConfig, which resolves this to
-				// WhenSupported. s3.New leaves it unset, and an unset value
-				// emits no checksum at all — so without pinning the production
-				// default here the test passes even with the fix removed.
-				RequestChecksumCalculation: aws.RequestChecksumCalculationWhenSupported,
-			}),
-			bucket:       "test-bucket",
-			region:       "us-east-1",
-			endpointURL:  server.URL,
-			usePathStyle: true,
+// newChecksumRecordingServer records the checksum-relevant wire details of a
+// single upload. TLS matters: the SDK only switches to a trailing checksum when
+// the request is HTTPS (see the IsHTTPS gate in the checksum middleware), and
+// production talks to OSS/S3 over HTTPS. A plain HTTP server would take the
+// header-checksum branch instead and never reproduce the trailer.
+func newChecksumRecordingServer(t *testing.T, observed chan<- observedChecksumRequest) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
 		}
+		observed <- observedChecksumRequest{
+			contentSHA256: r.Header.Get("X-Amz-Content-Sha256"),
+			trailer:       r.Header.Get("X-Amz-Trailer"),
+			checksumCRC32: r.Header.Get("X-Amz-Checksum-Crc32"),
+			encoding:      r.Header.Get("Content-Encoding"),
+			body:          string(body),
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// newChecksumTestStore points a store at the recording server. endpointURL is
+// the field Upload branches on, so pass "" to exercise the default AWS shape
+// and server.URL to exercise an S3-compatible backend.
+func newChecksumTestStore(server *httptest.Server, endpointURL string) *S3Storage {
+	return &S3Storage{
+		client: s3.New(s3.Options{
+			Region:       "us-east-1",
+			Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+			BaseEndpoint: aws.String(server.URL),
+			UsePathStyle: true,
+			HTTPClient:   server.Client(),
+			// NewS3StorageFromEnv builds its client through
+			// config.LoadDefaultConfig, which resolves this to
+			// WhenSupported. s3.New leaves it unset, and an unset value
+			// emits no checksum at all — so without pinning the production
+			// default here the test passes even with the fix removed.
+			RequestChecksumCalculation: aws.RequestChecksumCalculationWhenSupported,
+		}),
+		bucket:       "test-bucket",
+		region:       "us-east-1",
+		endpointURL:  endpointURL,
+		usePathStyle: true,
+	}
+}
+
+func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
+	newStore := func(server *httptest.Server) *S3Storage {
+		return newChecksumTestStore(server, server.URL)
 	}
 
 	// S3-compatible backends such as Aliyun OSS and Tencent COS reject
 	// aws-chunked framing outright, so neither upload path may emit a
 	// trailing checksum.
-	assertNoTrailer := func(t *testing.T, got observedRequest, payload string) {
+	assertNoTrailer := func(t *testing.T, got observedChecksumRequest, payload string) {
 		t.Helper()
 		if got.contentSHA256 == "STREAMING-UNSIGNED-PAYLOAD-TRAILER" {
 			t.Fatalf("x-amz-content-sha256 = %q, want a non-chunked value", got.contentSHA256)
@@ -154,8 +162,8 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 	}
 
 	t.Run("buffered upload", func(t *testing.T) {
-		observed := make(chan observedRequest, 1)
-		server := newRecordingServer(t, observed)
+		observed := make(chan observedChecksumRequest, 1)
+		server := newChecksumRecordingServer(t, observed)
 		payload := "buffered payload"
 
 		if _, err := newStore(server).Upload(
@@ -168,8 +176,8 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 	})
 
 	t.Run("streaming upload", func(t *testing.T) {
-		observed := make(chan observedRequest, 1)
-		server := newRecordingServer(t, observed)
+		observed := make(chan observedChecksumRequest, 1)
+		server := newChecksumRecordingServer(t, observed)
 		payload := "streamed payload"
 		nonSeekable := io.LimitReader(strings.NewReader(payload), int64(len(payload)))
 
@@ -181,6 +189,40 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 		}
 		assertNoTrailer(t, <-observed, payload)
 	})
+}
+
+// The OSS/COS workaround costs the request its client-side checksum, so it
+// must not reach AWS: real AWS S3 accepts the aws-chunked trailer, and buckets
+// carrying a default Object Lock retention require a checksum to be present.
+// The store below is shaped the way NewS3StorageFromEnv leaves it when
+// AWS_ENDPOINT_URL is unset; the client is pointed at a local TLS server only
+// so the request can be observed.
+func TestS3StorageAWSUploadKeepsChecksumTrailer(t *testing.T) {
+	for _, endpointURL := range []string{
+		"",
+		"https://s3.us-east-1.amazonaws.com",
+	} {
+		t.Run("endpoint="+endpointURL, func(t *testing.T) {
+			observed := make(chan observedChecksumRequest, 1)
+			server := newChecksumRecordingServer(t, observed)
+			payload := "buffered payload"
+
+			if _, err := newChecksumTestStore(server, endpointURL).Upload(
+				context.Background(), "uploads/media.bin", []byte(payload),
+				"application/octet-stream", "media.bin",
+			); err != nil {
+				t.Fatalf("Upload: %v", err)
+			}
+
+			got := <-observed
+			if got.contentSHA256 != "STREAMING-UNSIGNED-PAYLOAD-TRAILER" {
+				t.Fatalf("x-amz-content-sha256 = %q, want the SDK default trailer flow", got.contentSHA256)
+			}
+			if !strings.HasPrefix(got.trailer, "x-amz-checksum-") {
+				t.Fatalf("x-amz-trailer = %q, want a checksum trailer", got.trailer)
+			}
+		})
+	}
 }
 
 func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
