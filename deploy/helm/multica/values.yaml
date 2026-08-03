@@ -124,6 +124,12 @@ backend:
     # every caller. Bootstrap the workspace with this false, then flip to
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
+    # Optional: hide long-closed issues from the issue surface once they have
+    # sat in their terminal status this many hours. Empty keeps every closed
+    # issue visible; each status is independent. Presentation-only — searches,
+    # the CLI and direct links still reach hidden issues.
+    boardHideCancelledHours: ""
+    boardHideDoneHours: ""
     # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
     # chart enables the product surface by default; operators must also provide
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.

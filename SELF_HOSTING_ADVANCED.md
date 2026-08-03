@@ -84,6 +84,24 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 > Note: setting `ALLOW_SIGNUP=false` blocks **all** new account creation, including users who already have a pending invitation. If you need invited users to be able to sign up but not create their own workspaces, keep `ALLOW_SIGNUP=true` (optionally combined with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS`) and only flip `DISABLE_WORKSPACE_CREATION=true`.
 
+### Aging Out Closed Issues (Optional)
+
+| Variable | Description |
+|----------|-------------|
+| `MULTICA_BOARD_HIDE_CANCELLED_HOURS` | Hide `cancelled` issues from the issue surface once they have been cancelled for this many hours |
+| `MULTICA_BOARD_HIDE_DONE_HOURS` | Hide `done` issues from the issue surface once they have been done for this many hours |
+
+Both are unset by default, which keeps every closed issue visible. Each is independent: set one, the other, or neither. Unset, empty, non-numeric, or non-positive values disable that cutoff.
+
+On a long-running instance the `done` and `cancelled` columns grow without bound, which is mostly noise for a team that only cares about recent history. These cutoffs drop aged-out closed issues from the list, board, and their column counts.
+
+Hiding is presentation-only, and it deliberately does not apply everywhere:
+
+- The clock starts when the issue **entered** its current terminal status, not when it was last touched, so a later comment or edit does not resurrect it.
+- **Searches are exempt.** A hidden issue is still findable by name, still reachable by direct link, and still returned by `GET /api/issues`, the CLI, and quick search. Nothing is deleted or archived.
+
+Changes take effect after restarting the backend / compose stack.
+
 ### File Storage (Optional)
 
 For file uploads and attachments, configure S3 and (optionally) CloudFront:
