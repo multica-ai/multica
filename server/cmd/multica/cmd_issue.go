@@ -355,9 +355,14 @@ var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search issues by title, description, or comments",
 	Long: "Search issues in the current workspace. The query is matched against issue\n" +
-		"titles, descriptions and comment bodies; a numeric query also matches an\n" +
-		"issue by its number. Comment bodies are searched too, so a conclusion that\n" +
-		"only ever landed in a comment thread is still findable here.\n\n" +
+		"titles, descriptions and comment bodies. Comment bodies are searched too,\n" +
+		"so a conclusion that only ever landed in a comment thread is still findable\n" +
+		"here.\n\n" +
+		"A bare number matches the issue with that number, and so does anything\n" +
+		"shaped like an identifier: \"AGE-412\" is equivalent to \"412\". The prefix is\n" +
+		"not validated, so \"MUL-412\" and \"ZZZ-412\" match local issue 412 just the\n" +
+		"same. Number matches rank first, so pasting an identifier from another\n" +
+		"tracker can put an unrelated local issue at the top of the results.\n\n" +
 		"Each result carries a match_source of \"title\", \"description\" or \"comment\",\n" +
 		"shown in the MATCH column and returned by --output json. It reports the\n" +
 		"strongest field that matched, and \"comment\" is also the fallback for a\n" +
