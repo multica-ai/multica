@@ -27,32 +27,76 @@ func TestChannelNewCommandE2EStartsFreshProviderSession(t *testing.T) {
 
 	tests := []struct {
 		name             string
+		channelType      channel.Type
 		text             string
+		commandText      string
+		forceFresh       bool
+		wantStoredText   string
 		wantForceFresh   bool
 		wantPriorSession string
 		wantPriorWorkDir string
 	}{
 		{
 			name:             "normal message resumes existing provider context",
+			channelType:      channel.Type("slack"),
 			text:             "what model are you?",
+			commandText:      "what model are you?",
+			wantStoredText:   "what model are you?",
 			wantPriorSession: "old-provider-session",
 			wantPriorWorkDir: "/tmp/old-provider-workdir",
 		},
 		{
-			name:           "/new message starts without provider context",
+			name:           "Slack /new message starts without provider context",
+			channelType:    channel.Type("slack"),
 			text:           "/new   what model are you?",
+			commandText:    "/new   what model are you?",
+			wantStoredText: "what model are you?",
+			wantForceFresh: true,
+		},
+		{
+			name:           "Slack same-line /issue remains fresh-only",
+			channelType:    channel.Type("slack"),
+			text:           "/new /issue investigate deploy",
+			commandText:    "/new /issue investigate deploy",
+			wantStoredText: "/issue investigate deploy",
+			wantForceFresh: true,
+		},
+		{
+			name:           "Slack next-line /issue remains fresh-only",
+			channelType:    channel.Type("slack"),
+			text:           "/new\n/issue investigate deploy",
+			commandText:    "/new\n/issue investigate deploy",
+			wantStoredText: "/issue investigate deploy",
+			wantForceFresh: true,
+		},
+		{
+			name:           "Feishu same-line /issue remains fresh-only",
+			channelType:    channel.TypeFeishu,
+			text:           "/issue investigate deploy",
+			commandText:    "/new /issue investigate deploy",
+			forceFresh:     true,
+			wantStoredText: "/issue investigate deploy",
+			wantForceFresh: true,
+		},
+		{
+			name:           "Feishu next-line /issue remains fresh-only",
+			channelType:    channel.TypeFeishu,
+			text:           "/issue investigate deploy",
+			commandText:    "/new\n/issue investigate deploy",
+			forceFresh:     true,
+			wantStoredText: "/issue investigate deploy",
 			wantForceFresh: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runChannelNewCommandE2E(t, tt.text, tt.wantForceFresh, tt.wantPriorSession, tt.wantPriorWorkDir)
+			runChannelNewCommandE2E(t, tt.channelType, tt.text, tt.commandText, tt.forceFresh, tt.wantStoredText, tt.wantForceFresh, tt.wantPriorSession, tt.wantPriorWorkDir)
 		})
 	}
 }
 
-func runChannelNewCommandE2E(t *testing.T, text string, wantForceFresh bool, wantPriorSession, wantPriorWorkDir string) {
+func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, commandText string, adapterForceFresh bool, wantStoredText string, wantForceFresh bool, wantPriorSession, wantPriorWorkDir string) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -64,9 +108,9 @@ func runChannelNewCommandE2E(t *testing.T, text string, wantForceFresh bool, wan
 		INSERT INTO channel_installation (
 			workspace_id, agent_id, channel_type, config, status, installer_user_id
 		)
-		VALUES ($1, $2, 'test_e2e', '{}'::jsonb, 'active', $3)
+		VALUES ($1, $2, $3, '{}'::jsonb, 'active', $4)
 		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&installationID); err != nil {
+	`, testWorkspaceID, agentID, string(channelType), testUserID).Scan(&installationID); err != nil {
 		t.Fatalf("create channel installation: %v", err)
 	}
 	t.Cleanup(func() {
@@ -75,7 +119,6 @@ func runChannelNewCommandE2E(t *testing.T, text string, wantForceFresh bool, wan
 		testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
 	})
 
-	channelType := channel.Type("test_e2e")
 	installation := engine.ResolvedInstallation{
 		ID:              util.MustParseUUID(installationID),
 		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
@@ -105,6 +148,9 @@ func runChannelNewCommandE2E(t *testing.T, text string, wantForceFresh bool, wan
 	if err != nil {
 		t.Fatalf("seed channel chat session: %v", err)
 	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE origin_type = 'test_e2e_chat' AND origin_id = $1`, sessionID)
+	})
 	if _, err := testPool.Exec(ctx, `
 		UPDATE chat_session
 		SET session_id = 'old-provider-session',
@@ -126,10 +172,12 @@ func runChannelNewCommandE2E(t *testing.T, text string, wantForceFresh bool, wan
 	})
 
 	if err := router.Handle(ctx, channel.InboundMessage{
-		EventID:   "event-" + t.Name(),
-		MessageID: "message-" + t.Name(),
-		Type:      channel.MsgTypeText,
-		Text:      text,
+		EventID:     "event-" + t.Name(),
+		MessageID:   "message-" + t.Name(),
+		Type:        channel.MsgTypeText,
+		Text:        text,
+		CommandText: commandText,
+		ForceFresh:  adapterForceFresh,
 		Source: channel.Source{
 			ChannelType: channelType,
 			ChatID:      t.Name(),
@@ -155,17 +203,31 @@ func runChannelNewCommandE2E(t *testing.T, text string, wantForceFresh bool, wan
 		t.Fatalf("queued task %s: force_fresh_session = %t, want %t", taskID, forceFresh, wantForceFresh)
 	}
 
+	var issueCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM issue
+		WHERE workspace_id = $1
+		  AND origin_type = 'test_e2e_chat'
+		  AND origin_id = $2
+	`, testWorkspaceID, sessionID).Scan(&issueCount); err != nil {
+		t.Fatalf("count command-created issues: %v", err)
+	}
+	if issueCount != 0 {
+		t.Fatalf("created issues = %d, want 0; /new must be mutually exclusive with /issue", issueCount)
+	}
+
 	messages, err := queries.ListChatMessages(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("list persisted chat messages: %v", err)
 	}
-	if len(messages) != 1 || messages[0].Content != "what model are you?" {
-		t.Fatalf("persisted messages = %#v, want one command-stripped user message", messages)
+	if len(messages) != 1 || messages[0].Content != wantStoredText {
+		t.Fatalf("persisted messages = %#v, want one user message %q", messages, wantStoredText)
 	}
 
 	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if claimed.ChatMessage != "what model are you?" {
-		t.Fatalf("claimed chat_message = %q, want command-stripped prompt", claimed.ChatMessage)
+	if claimed.ChatMessage != wantStoredText {
+		t.Fatalf("claimed chat_message = %q, want %q", claimed.ChatMessage, wantStoredText)
 	}
 	if claimed.PriorSessionID != wantPriorSession {
 		t.Fatalf("claimed prior_session_id = %q, want %q", claimed.PriorSessionID, wantPriorSession)
@@ -245,7 +307,7 @@ func (b *channelNewE2ESessionBinder) AppendMessage(ctx context.Context, p engine
 		Sender:              p.Sender,
 		InstallationID:      p.InstallationID,
 		Body:                p.Message.Text,
-		CommandText:         p.Message.Text,
+		CommandText:         p.Message.CommandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            p.Message.Source.ThreadID,
 		ClaimToken:          p.ClaimToken,

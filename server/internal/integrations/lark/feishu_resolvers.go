@@ -17,10 +17,10 @@ import (
 // the channel-agnostic engine.Router runs the inbound pipeline through. Each
 // resolver translates between the engine's normalized channel.InboundMessage /
 // engine types and the Feishu store / services. Platform-specific fields the
-// normalized envelope does not carry (app_id, event_type, the un-enriched
-// command body, create time) are read from the original InboundMessage the
-// feishuChannel stashes in channel.InboundMessage.Raw — the documented adapter
-// boundary (the core never reads Raw).
+// normalized envelope does not carry (app_id, event_type, create time) are read
+// from the original InboundMessage that feishuChannel stashes in
+// channel.InboundMessage.Raw — the documented adapter boundary (the core never
+// reads Raw).
 
 // originFeishuChat is the issue.origin_type label written for issues created
 // via the Feishu /issue command. Kept as "lark_chat" (unchanged from the
@@ -203,19 +203,16 @@ func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.Ensure
 }
 
 func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
-	// CommandText is the user's OWN typed text: the Feishu enricher inlines
-	// quoted/forwarded context into Body, so /issue parsing must use the
-	// un-enriched command body stashed in Raw, not Body.
-	lm, err := larkMsgFromRaw(p.Message)
-	if err != nil {
-		return engine.AppendResult{}, err
+	commandText := p.Message.CommandText
+	if commandText == "" {
+		commandText = p.Message.Text
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:           p.SessionID,
 		Sender:              p.Sender,
 		InstallationID:      p.InstallationID,
 		Body:                p.Message.Text,
-		CommandText:         lm.CommandBody,
+		CommandText:         commandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            p.Message.Source.ThreadID,
 		ClaimToken:          p.ClaimToken,

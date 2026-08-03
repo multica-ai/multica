@@ -128,10 +128,16 @@ type InboundMessage struct {
 	// Type is the normalized message kind.
 	Type MsgType
 
-	// Text is the human-readable content, flattened by the adapter. For
-	// non-text messages it may be empty or a short placeholder; the media
+	// Text is the agent-readable content, flattened by the adapter. Router or
+	// an adapter may strip a command directive or enrich it with quoted context.
+	// For non-text messages it may be empty or a short placeholder; the media
 	// itself is in MediaRefs.
 	Text string
+
+	// CommandText is the user's normalized text before command stripping or
+	// contextual enrichment. Shared command classifiers read this field so a
+	// rewritten Text is never interpreted as a second command. Empty means Text.
+	CommandText string
 
 	// MediaRefs is the OUTPUT channel of engine.MediaResolver.ResolveMedia:
 	// the objects it downloaded and uploaded for this message, each covered
