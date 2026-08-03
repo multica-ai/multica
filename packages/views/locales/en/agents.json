@@ -281,11 +281,10 @@
     "back": "Go back",
     "eyebrow": "Agent creation",
     "choose_title": "How would you like to start?",
-    "choose_description": "Start with full control, adapt a proven template, or describe what you need and build it through conversation.",
+    "choose_description": "Start with full control, or describe what you need and build it through conversation.",
     "recommended": "Recommended",
     "continue": "Continue",
     "step_choose": "Choose a starting point",
-    "step_template": "Choose a template",
     "step_configure": "Review and configure",
     "step_ai": "Build through conversation",
     "modes": {
@@ -301,15 +300,6 @@
         "title": "Build with AI",
         "description": "Describe the outcome you want. An Agent Builder will ask focused questions and prepare a live draft."
       }
-    },
-    "templates": {
-      "search": "Search templates…",
-      "search_label": "Search agent templates",
-      "empty": "No templates match your search.",
-      "select_hint": "Select a template to preview its instructions and skills.",
-      "skills": "Included skills",
-      "instructions": "Instructions",
-      "use": "Use this template"
     },
     "sections": {
       "identity": "Identity",
@@ -371,7 +361,17 @@
     "creating": "Creating agent…",
     "create_failed": "Could not create the agent.",
     "name_conflict": "An agent with this name already exists.",
-    "created": "{{name}} was created"
+    "created": "{{name}} was created",
+    "drafts": {
+      "title": "Drafts",
+      "untitled": "Untitled draft",
+      "discard": "Discard",
+      "discard_confirm": "The conversation and its configuration are deleted permanently.",
+      "discard_title": "Discard this draft?",
+      "discard_cancel": "Keep editing",
+      "banner": "You have {{count}} unfinished draft(s)",
+      "pick_hint": "Pick one to continue."
+    }
   },
   "create_dialog": {
     "title_create": "Create Agent",

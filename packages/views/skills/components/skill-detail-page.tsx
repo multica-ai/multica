@@ -528,6 +528,7 @@ function FilesTab({
   mode,
   canEdit,
   addingFile,
+  focusEditor,
   onSelectPath,
   onModeChange,
   onStartAddFile,
@@ -535,7 +536,9 @@ function FilesTab({
   onCancelAddFile,
   onDeleteFile,
   onRenameFile,
+  onEditFile,
   onContentChange,
+  onFocusHandled,
 }: {
   filePaths: string[];
   selectedPath: string;
@@ -543,6 +546,7 @@ function FilesTab({
   mode: FileMode;
   canEdit: boolean;
   addingFile: boolean;
+  focusEditor: boolean;
   onSelectPath: (path: string) => void;
   onModeChange: (mode: FileMode) => void;
   onStartAddFile: () => void;
@@ -550,16 +554,20 @@ function FilesTab({
   onCancelAddFile: () => void;
   onDeleteFile: (path?: string) => void;
   onRenameFile: (from: string, to: string) => void;
+  onEditFile: (path: string) => void;
   onContentChange: (content: string) => void;
+  onFocusHandled: () => void;
 }) {
   const { t } = useT("skills");
   const validatePath = useValidateNewFilePath();
   const supportingPaths = filePaths.filter((p) => p !== SKILL_MD);
   const isMd = isMarkdownPath(selectedPath);
   // Absent for read-only viewers so the tree never offers an action it would
-  // then refuse. SKILL.md is excluded inside the tree by reservedPath.
+  // then refuse. Both rails get the same object: SKILL.md keeps Edit and loses
+  // rename/delete, which the tree derives from reservedPath.
   const treeActions = canEdit
     ? {
+        onEdit: onEditFile,
         validatePath,
         onRename: onRenameFile,
         onDelete: onDeleteFile,
@@ -582,6 +590,7 @@ function FilesTab({
           {t(($) => $.detail.files.main)}
         </p>
         <FileTree
+          actions={treeActions}
           filePaths={[SKILL_MD]}
           selectedPath={selectedPath}
           onSelect={onSelectPath}
@@ -633,6 +642,11 @@ function FilesTab({
           </span>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {isMd && (
+              // The second segment is named for what it does for THIS viewer:
+              // "Edit" when the pane it opens accepts typing, "Plain text"
+              // when the same pane is read-only. Same mode either way — only
+              // the promise differs, and offering an edit the page would
+              // refuse is the thing this rail is careful not to do.
               <div
                 role="group"
                 aria-label={t(($) => $.detail.files.mode_aria)}
@@ -653,7 +667,9 @@ function FilesTab({
                   >
                     {value === "preview"
                       ? t(($) => $.detail.files.mode_preview)
-                      : t(($) => $.detail.files.mode_raw)}
+                      : canEdit
+                        ? t(($) => $.detail.files.mode_edit)
+                        : t(($) => $.detail.files.mode_raw)}
                   </button>
                 ))}
               </div>
@@ -687,7 +703,9 @@ function FilesTab({
             content={selectedContent}
             mode={mode}
             readOnly={!canEdit}
+            autoFocus={focusEditor}
             onChange={onContentChange}
+            onFocusHandled={onFocusHandled}
           />
         </div>
       </section>
@@ -756,6 +774,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   // and survives switching files. It used to live inside FileViewer, which the
   // per-file `key` remounted — every file switch silently snapped back.
   const [fileMode, setFileMode] = useState<FileMode>("preview");
+  // Which file's editor is waiting for the caret. A path rather than a boolean
+  // so a request raised for one row cannot land in another row's editor if the
+  // selection moves before the effect runs.
+  const [focusPath, setFocusPath] = useState<string | null>(null);
 
   const urlView = navigation.searchParams.get("view");
   const [activeView, setActiveView] = useState<DetailView>(() =>
@@ -988,6 +1010,22 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     setFiles((prev) => prev.filter((f) => f.path !== path));
     if (path === selectedPath) setSelectedPath(SKILL_MD);
   };
+
+  // "Edit" from a row menu is one gesture that owes three things: the file is
+  // open, the pane is the editor rather than the preview, and the caret is in
+  // it. Doing fewer would leave the user another click away from typing, which
+  // is the whole reason the entry exists.
+  const handleEditFile = useCallback(
+    (path: string) => {
+      if (!canEdit) return;
+      setSelectedPath(path);
+      setFileMode("raw");
+      setFocusPath(path);
+    },
+    [canEdit],
+  );
+
+  const handleFocusHandled = useCallback(() => setFocusPath(null), []);
 
   const handleRenameFile = (from: string, to: string) => {
     if (from === SKILL_MD) return;
@@ -1229,6 +1267,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             mode={fileMode}
             canEdit={canEdit}
             addingFile={addingFile}
+            focusEditor={focusPath === selectedPath}
             onSelectPath={setSelectedPath}
             onModeChange={setFileMode}
             onStartAddFile={() => setAddingFile(true)}
@@ -1236,7 +1275,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             onCancelAddFile={() => setAddingFile(false)}
             onDeleteFile={handleDeleteFile}
             onRenameFile={handleRenameFile}
+            onEditFile={handleEditFile}
             onContentChange={handleFileContentChange}
+            onFocusHandled={handleFocusHandled}
           />
         )}
       </div>

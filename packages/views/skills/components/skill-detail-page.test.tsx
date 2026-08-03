@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Skill } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -193,7 +194,7 @@ describe("SkillDetailPage file mode", () => {
   it("keeps plain-text mode when switching files", async () => {
     renderPage(new URLSearchParams("view=files"));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Plain text" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     expect(screen.getByRole("textbox", { name: /SKILL\.md/ })).toBeTruthy();
 
     // Mode used to live inside FileViewer, which the per-path `key`
@@ -208,6 +209,69 @@ describe("SkillDetailPage file mode", () => {
     const preview = await screen.findByTestId("preview");
     expect(preview.textContent).toContain("# Interface Animations");
     expect(preview.textContent).not.toContain("name: aiforui-animations");
+  });
+});
+
+describe("SkillDetailPage edit action (MUL-5654)", () => {
+  /** Opens a file row's action menu the way the rail exposes it. */
+  async function openRowMenu(path: string | RegExp) {
+    // The file-name button carries role="tab", so a "button" match on the row
+    // is the trailing "..." trigger.
+    await userEvent.click(await screen.findByRole("button", { name: path }));
+  }
+
+  it("opens a supporting file in a focused editor", async () => {
+    renderPage(new URLSearchParams("view=files"));
+
+    await openRowMenu(/patterns\.md/);
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Edit" }),
+    );
+
+    // One gesture owes all three: the file is open, the pane is the editor
+    // rather than the preview, and the caret is already in it.
+    const editor = screen.getByRole("textbox", { name: /patterns\.md/ });
+    expect(screen.queryByTestId("preview")).toBeNull();
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it("focuses the editor for the file that is already open", async () => {
+    renderPage(new URLSearchParams("view=files"));
+
+    // SKILL.md opens selected, so this path mounts nothing new. A mount-only
+    // autoFocus would silently do nothing here.
+    await openRowMenu(/SKILL\.md/);
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Edit" }),
+    );
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: /SKILL\.md/ }),
+    );
+  });
+
+  it("leaves the caret at the top rather than the end of the file", async () => {
+    renderPage(new URLSearchParams("view=files"));
+
+    await openRowMenu(/patterns\.md/);
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Edit" }),
+    );
+
+    const editor = screen.getByRole("textbox", {
+      name: /patterns\.md/,
+    }) as HTMLTextAreaElement;
+    expect([editor.selectionStart, editor.selectionEnd]).toEqual([0, 0]);
+  });
+
+  it("offers read-only viewers a plain-text view, not an edit they cannot make", async () => {
+    canEditRef.current = false;
+    renderPage(new URLSearchParams("view=files"));
+
+    expect(await screen.findByRole("button", { name: "Plain text" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    // No row menus either — the tree offers no action the page would refuse.
+    expect(screen.queryByRole("button", { name: /Actions for/ })).toBeNull();
   });
 });
 
@@ -240,7 +304,7 @@ describe("SkillDetailPage save pill", () => {
   it("counts a supporting-file edit as one changed file", async () => {
     renderPage(new URLSearchParams("view=files"));
     fireEvent.click(await screen.findByRole("tab", { name: "patterns.md" }));
-    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: /patterns\.md/ }), {
       target: { value: "edited content" },
     });

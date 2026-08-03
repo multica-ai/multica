@@ -31,10 +31,8 @@ vi.mock("@multica/core/api", () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-import {
-  AgentExecutionOverrides,
-  type AgentDraft,
-} from "./agent-creation-studio";
+import type { AgentDraft } from "@multica/core/agents";
+import { AgentExecutionOverrides } from "./agent-configuration-panel";
 
 const FAST_MODEL: RuntimeModel = {
   id: "gpt-5.6-sol",

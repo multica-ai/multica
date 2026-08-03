@@ -148,6 +148,12 @@ deleted_draft_restores AS (
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
        OR task_id IN (SELECT id FROM ws_tasks)
 ),
+-- Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
+-- than the session set because that column exists precisely so this statement
+-- does not have to join through chat_session, which it deletes in this same CTE.
+deleted_agent_builder_drafts AS (
+    DELETE FROM agent_builder_draft WHERE workspace_id = $1
+),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
 ),

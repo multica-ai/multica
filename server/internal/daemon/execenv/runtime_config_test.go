@@ -329,10 +329,15 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		"## Instruction Precedence",
 		"Agent Identity instructions have priority over the issue workflow below.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement",
+		// One enumeration, in Instruction Precedence, covering every action
+		// type Agent Identity can forbid. This and workflow step 4 each used to
+		// carry their own list and the two disagreed (MUL-5442).
+		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
 		"Before step 4, run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip it.",
-		"Complete the task within your Agent Identity boundaries.",
-		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
+		"Complete the task within your Agent Identity boundaries",
+		// Step 4 keeps only what the enumeration cannot express: a
+		// delegation-only role stops once the delegation is delivered.
+		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
 		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip it.",
 		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
 	} {

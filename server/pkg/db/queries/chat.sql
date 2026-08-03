@@ -75,6 +75,66 @@ LEFT JOIN LATERAL (
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
+-- name: ListAgentBuilderSessionsByCreator :many
+-- The caller's unfinished agent-creation conversations.
+--
+-- These never appear in ListChatSessionsByCreator: that list is filtered
+-- against ListAllAgents, which is `kind = 'user'` only, so a builder session —
+-- whose agent is the hidden `kind = 'system'` carrier — is invisible to every
+-- chat surface by construction. This statement is the only way back to one,
+-- which is why the studio may stop deleting them on navigation.
+--
+-- `a.runtime_id` is the whole point of the join. The carrier is what
+-- SendDirectChatMessage reads to stamp a chat task's runtime, so it is the only
+-- truthful answer to "where does this conversation run". Deliberately NOT
+-- cs.runtime_id: that is the daemon's resume pointer, left stale on purpose
+-- after a runtime switch (see RebindAgentBuilderRuntime), so resuming from it
+-- would put the picker on a runtime that no longer executes anything — the
+-- exact split MUL-5163 removed.
+--
+-- A conversation qualifies once it holds something the user would miss: a
+-- message, or a saved configuration. Requiring a message alone was wrong — the
+-- form on the right is editable from the moment the session exists and
+-- autosaves, so someone can open the builder, type a name, and leave before the
+-- first turn. That session has real work in it and was unreachable. Requiring
+-- neither is also wrong: a session opened and abandoned untouched is not a
+-- draft, and would put an empty row in front of the user on every accidental
+-- entry into the flow.
+--
+-- The stored draft rides along instead of needing its own fetch: the studio
+-- renders this list beside the conversation it is switching between, so the
+-- configuration for the row the user picks has to be in hand at click time.
+-- LEFT JOIN because a conversation that has only ever been driven by the AI has
+-- no saved draft — the client replays the last <agent_draft> block in that case.
+SELECT cs.id,
+       cs.title,
+       cs.created_at,
+       cs.updated_at,
+       a.runtime_id,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       d.draft AS stored_draft
+FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id
+LEFT JOIN agent_builder_draft d ON d.chat_session_id = cs.id
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = $1
+  AND cs.creator_id = $2
+  AND cs.status = 'active'
+  AND a.kind = 'system'
+  AND a.system_key LIKE 'agent_builder:%'
+  AND (lm.created_at IS NOT NULL OR d.chat_session_id IS NOT NULL)
+-- A draft-only session has no message to sort by; fall back to when its
+-- configuration was last written so it still lands in activity order.
+ORDER BY COALESCE(lm.created_at, d.updated_at, cs.updated_at) DESC;
+
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1

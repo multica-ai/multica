@@ -841,9 +841,14 @@ func TestBuildCommentPromptCoalescedCrossThread(t *testing.T) {
 
 // TestBuildCommentPromptCoalescedIDsOnlyFallback pins the old-server fallback:
 // when only coalesced ids are shipped (no embedded detail), the prompt must
-// still NOT assume a shared thread and must point at an issue-wide fetch.
+// still NOT assume a shared thread, and must reach the ids through a BOUNDED
+// read rather than an issue-wide bulk pull (MUL-5442).
+//
+// The bulk pull is the regression this guards: `--recent N` caps threads, not
+// comments, so on a small issue it returns the whole history — and the brief's
+// own catch-up step forbids exactly that shape.
 func TestBuildCommentPromptCoalescedIDsOnlyFallback(t *testing.T) {
-	task := Task{
+	base := Task{
 		IssueID:               "issue-fallback-1",
 		TriggerCommentID:      "trigger-newest",
 		TriggerThreadID:       "thread-root-A",
@@ -851,13 +856,74 @@ func TestBuildCommentPromptCoalescedIDsOnlyFallback(t *testing.T) {
 		TriggerAuthorType:     "member",
 		CoalescedCommentIDs:   []string{"c-old-1", "c-old-2"},
 	}
-	out := BuildPrompt(task, "claude")
 
+	t.Run("with since anchor", func(t *testing.T) {
+		task := base
+		task.NewCommentsSince = "2026-08-03T06:00:00Z"
+		out := BuildPrompt(task, "claude")
+
+		want := "multica issue comment list issue-fallback-1 --since 2026-08-03T06:00:00Z --output json"
+		if !strings.Contains(out, want) {
+			t.Errorf("id-only fallback should prefetch the window with %q, got:\n%s", want, out)
+		}
+		// The window is a prefetch, never the guarantee: a retry inherits the
+		// prior attempt's coalesced ids verbatim while the anchor is recomputed
+		// from the last started task, so an inherited id can predate the window.
+		// The prompt must say so and must not promise an exact fetch.
+		for _, want := range []string{"candidate window, not a guarantee", "can carry ids older than the window"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("anchored fallback must not present --since as complete, missing %q, got:\n%s", want, out)
+			}
+		}
+		for _, banned := range []string{"returns exactly the comments", "precisely"} {
+			if strings.Contains(out, banned) {
+				t.Errorf("anchored fallback must not overpromise the window (%q), got:\n%s", banned, out)
+			}
+		}
+		assertBoundedIDOnlyFallback(t, out)
+	})
+
+	t.Run("without since anchor", func(t *testing.T) {
+		// No prior run on this issue, so the server sent no anchor. The per-id
+		// lookup below is the whole contract here.
+		out := BuildPrompt(base, "claude")
+
+		if strings.Contains(out, "--since") {
+			t.Errorf("anchorless fallback must not emit a --since read, got:\n%s", out)
+		}
+		// No heuristics: the agent must not be asked to guess which threads look
+		// recent enough to hold the ids (MUL-5442 review).
+		if strings.Contains(out, "last_activity_at") {
+			t.Errorf("anchorless fallback must not rely on a recency heuristic, got:\n%s", out)
+		}
+		assertBoundedIDOnlyFallback(t, out)
+	})
+}
+
+// assertBoundedIDOnlyFallback holds the completeness contract both fallback
+// shapes must satisfy: every listed id is reachable deterministically, through
+// bounded reads, without a bulk pull.
+func assertBoundedIDOnlyFallback(t *testing.T, out string) {
+	t.Helper()
 	if strings.Contains(out, "they are in the triggering thread") {
 		t.Errorf("id-only fallback must not assume a shared thread, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--recent 30") {
-		t.Errorf("id-only fallback must point at an issue-wide fetch (--recent 30), got:\n%s", out)
+	if strings.Contains(out, "--recent") {
+		t.Errorf("id-only fallback must not send the agent at an issue-wide --recent pull (MUL-5442), got:\n%s", out)
+	}
+	// The deterministic per-id lookup. `--thread` resolves ANY comment id, so an
+	// id is reachable without knowing its thread; paging keeps it reachable even
+	// when it is older than the tail window.
+	for _, want := range []string{
+		"multica issue comment list issue-fallback-1 --thread <comment-id> --tail 30 --output json",
+		"accepts a reply id",
+		"Next reply cursor",
+		"--before-id",
+		"Do not finish this turn until every id above is accounted for",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("id-only fallback missing per-id completeness guarantee %q, got:\n%s", want, out)
+		}
 	}
 	for _, id := range []string{"c-old-1", "c-old-2"} {
 		if !strings.Contains(out, id) {

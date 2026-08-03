@@ -1339,8 +1339,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
 			r.Route("/api/agent-builder/sessions", func(r chi.Router) {
+				// The creation studio's unfinished drafts. Builder sessions are
+				// invisible to every chat list (their carrier is kind='system'),
+				// so this is the only route back to one.
+				r.Get("/", h.ListAgentBuilderSessions)
 				r.Post("/", h.CreateAgentBuilderSession)
 				r.Patch("/{sessionId}/runtime", h.SwitchAgentBuilderRuntime)
+				// Autosaved configuration, including edits the user has typed
+				// but not sent. Read back through the list above.
+				r.Put("/{sessionId}/draft", h.SaveAgentBuilderDraft)
 			})
 
 			// Skills

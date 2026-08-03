@@ -27,6 +27,8 @@ import type {
   CreateAgentFromTemplateResponse,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
+  AgentBuilderSessionSummary,
+  StoredAgentDraft,
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
@@ -198,6 +200,8 @@ import {
   CreateAgentFromTemplateResponseSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
+  AgentBuilderSessionListSchema,
+  EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -1141,6 +1145,46 @@ export class ApiClient {
       EMPTY_AGENT_BUILDER_SESSION,
       { endpoint: "POST /api/agent-builder/sessions" },
     );
+  }
+
+  /**
+   * The caller's unfinished agent-creation conversations.
+   *
+   * Builder sessions are hidden from every chat list (their carrier agent is
+   * `kind = 'system'`), so this is the only route back to one. A 404 means the
+   * backend predates the endpoint: degrade to "no drafts" instead of erroring
+   * the Agents page, exactly as listChatDraftRestores does.
+   */
+  async listAgentBuilderSessions(): Promise<AgentBuilderSessionSummary[]> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>("/api/agent-builder/sessions");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return [];
+      throw err;
+    }
+    return parseWithFallback(
+      raw,
+      AgentBuilderSessionListSchema,
+      EMPTY_AGENT_BUILDER_SESSION_LIST,
+      { endpoint: "GET /api/agent-builder/sessions" },
+    ).sessions;
+  }
+
+  /**
+   * Stores the configuration a creation conversation has arrived at, including
+   * edits the user typed but has not sent. Whole-object last-write-wins: one
+   * conversation has one editor, so a field-level merge could only reconstruct
+   * a state nobody saw. Read back through `listAgentBuilderSessions`.
+   */
+  async saveAgentBuilderDraft(
+    sessionId: string,
+    draft: StoredAgentDraft,
+  ): Promise<void> {
+    await this.fetch(`/api/agent-builder/sessions/${sessionId}/draft`, {
+      method: "PUT",
+      body: JSON.stringify({ draft }),
+    });
   }
 
   /** Rebinds a live builder conversation to another runtime. Callers must not
