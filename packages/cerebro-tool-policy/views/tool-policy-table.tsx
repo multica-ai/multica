@@ -668,9 +668,9 @@ export function ToolPolicyTable({
               {VIEW_SCOPE_LABEL[view]} override.
             </span>{" "}
             This is the same permission engine as Settings → Permissions and
-            assigned Roles. The Effective result shows whether this choice wins,
-            is superseded by a more specific rule, or is capped by a protected
-            safety floor.
+            assigned Permission profiles. The Effective result shows whether
+            this choice wins, is superseded by a more specific rule, or is
+            capped by a protected safety floor.
           </p>
         </div>
       ) : null}
