@@ -106,8 +106,8 @@ export function AuthInitializer({
       // selection here.
       Promise.all([api.getMe(), api.listWorkspaces()])
         .then(([user, wsList]) => {
-          onAuthSuccess(user);
           qc.setQueryData(workspaceKeys.list(), wsList);
+          onAuthSuccess(user);
         })
         .catch((err) => {
           logger.error("cookie auth init failed", err);
@@ -128,10 +128,10 @@ export function AuthInitializer({
 
     Promise.all([api.getMe(), api.listWorkspaces()])
       .then(([user, wsList]) => {
-        onAuthSuccess(user);
         // Seed React Query cache so the URL-driven layout can resolve the
         // slug without a second fetch.
         qc.setQueryData(workspaceKeys.list(), wsList);
+        onAuthSuccess(user);
       })
       .catch((err) => {
         logger.error("auth init failed", err);
