@@ -680,6 +680,15 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 		t.Fatalf("archived config = %v, want complete legacy payload", archived)
 	}
 
+	collisionName := "Migration replay all-sources agent"
+	collisionFallback := collisionName + " (" + util.UUIDToString(agentAll) + ")"
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cerebro_role (workspace_id, name)
+		VALUES ($1, $2), ($1, $3)
+	`, tpTestWorkspaceID, collisionName, collisionFallback); err != nil {
+		t.Fatalf("seed permission profile name collisions: %v", err)
+	}
+
 	replayMigration(t, ctx, tx, "9167_cerebro_permission_profile_names.up.sql")
 	var profileName, profileDescription string
 	if err := tx.QueryRow(ctx, `
@@ -693,5 +702,19 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	}
 	if profileName != "Migration replay agent" || profileDescription != "Keeps the permissions that were previously configured directly for Migration replay agent." {
 		t.Fatalf("permission profile = %q / %q, want the assigned agent's readable name and description", profileName, profileDescription)
+	}
+
+	if err := tx.QueryRow(ctx, `
+		SELECT name, description FROM cerebro_role
+		WHERE workspace_id = $1 AND id IN (
+			SELECT role_id FROM cerebro_role_assignment
+			WHERE subject_type = 'agent' AND subject_id = $2
+		)
+	`, tpTestWorkspaceID, agentAll).Scan(&profileName, &profileDescription); err != nil {
+		t.Fatalf("read collision-safe permission profile: %v", err)
+	}
+	wantCollisionName := "Migrated agent " + util.UUIDToString(agentAll)
+	if profileName != wantCollisionName || profileDescription != "Automatically migrated from direct agent policy rows" {
+		t.Fatalf("collision-safe permission profile = %q / %q, want the unchanged migration profile", profileName, profileDescription)
 	}
 }
