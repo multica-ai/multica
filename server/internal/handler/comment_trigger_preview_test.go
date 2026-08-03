@@ -414,6 +414,68 @@ func TestPreviewCommentTriggers_ExplicitMentionSuppressesAssigneeFallback(t *tes
 	}
 }
 
+func TestCreateComment_AllAndExplicitAgentRegressionScenarios(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	cases := []struct {
+		name       string
+		content    func(agentID string) string
+		wantAgents int
+		wantTasks  int
+	}{
+		{
+			name:       "pure all suppresses assignee fallback",
+			content:    func(string) string { return "[@all](mention://all/all) heads up" },
+			wantAgents: 0,
+			wantTasks:  0,
+		},
+		{
+			name: "pure explicit agent triggers once",
+			content: func(agentID string) string {
+				return fmt.Sprintf("[@Agent](mention://agent/%s) please take this", agentID)
+			},
+			wantAgents: 1,
+			wantTasks:  1,
+		},
+		{
+			name: "all plus same explicit agent triggers once",
+			content: func(agentID string) string {
+				return fmt.Sprintf("[@all](mention://all/all) FYI [@Agent](mention://agent/%s) please take this", agentID)
+			},
+			wantAgents: 1,
+			wantTasks:  1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agentID := createHandlerTestAgent(t, "All Explicit Regression "+tc.name, nil)
+			issueID := createCommentTriggerPreviewIssue(t, tc.name, "agent", agentID)
+			content := tc.content(agentID)
+
+			preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content})
+			if got := len(preview.Agents); got != tc.wantAgents {
+				t.Fatalf("preview agents = %d, want %d: %+v", got, tc.wantAgents, preview.Agents)
+			}
+			if tc.wantAgents == 1 {
+				if preview.Agents[0].ID != agentID {
+					t.Fatalf("preview agent id = %s, want %s", preview.Agents[0].ID, agentID)
+				}
+				if preview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+					t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionAgent)
+				}
+			}
+
+			postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content})
+			if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != tc.wantTasks {
+				t.Fatalf("queued tasks = %d, want %d", got, tc.wantTasks)
+			}
+		})
+	}
+}
+
 func TestCreateComment_ExplicitMentionKeepsPendingRouteWithoutDuplicateTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
