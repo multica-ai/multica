@@ -136,14 +136,22 @@ func TestExecOpenclawCLIReapsForkedHelper(t *testing.T) {
 func TestExecOpenclawCLIWaitsForThePathAfterDoctorBanner(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
-	body := `#!/bin/sh
-echo '┌───────────────────────────────┐'
-echo '│ warning: run openclaw doctor  │'
-echo '└───────────────────────────────┘'
-sleep 1
-printf '%s\n' '/root/.openclaw/openclaw.json'
-sleep 300
-`
+	// A real, statable path rather than the literal path the host printed:
+	// openclawParseActiveConfigPath stats what it parses and tolerates only
+	// os.ErrNotExist, so a hard-coded /root/... path reads as ENOENT on a
+	// developer machine but as EACCES on a Linux CI runner — failing the test for
+	// a reason that has nothing to do with the boundary under test.
+	cfgPath := filepath.Join(dir, "openclaw.json")
+	if err := os.WriteFile(cfgPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write fake config: %v", err)
+	}
+	body := "#!/bin/sh\n" +
+		"echo '┌───────────────────────────────┐'\n" +
+		"echo '│ warning: run openclaw doctor  │'\n" +
+		"echo '└───────────────────────────────┘'\n" +
+		"sleep 1\n" +
+		"printf '%s\\n' '" + cfgPath + "'\n" +
+		"sleep 300\n"
 	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
 		t.Fatalf("write fake openclaw: %v", err)
 	}
@@ -156,7 +164,7 @@ sleep 300
 		t.Fatalf("execOpenclawCLI: %v", err)
 	}
 	got := strings.TrimSpace(out)
-	if !strings.HasSuffix(got, "/root/.openclaw/openclaw.json") {
+	if !strings.HasSuffix(got, cfgPath) {
 		t.Fatalf("output = %q — returned before the path arrived, so the Doctor "+
 			"banner would be parsed as the config path", got)
 	}
@@ -165,7 +173,7 @@ sleep 300
 	if perr != nil {
 		t.Fatalf("openclawParseActiveConfigPath: %v", perr)
 	}
-	if path != "/root/.openclaw/openclaw.json" {
+	if path != cfgPath {
 		t.Errorf("parsed path = %q, want the real config path", path)
 	}
 }
@@ -251,10 +259,16 @@ func TestOpenclawOutputCompleteRules(t *testing.T) {
 func TestExecOpenclawCLIToleratesNonExitingCLI(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
-	body := `#!/bin/sh
-printf '%s\n' '/root/.openclaw/openclaw.json'
-sleep 300
-`
+	// Statable for the same reason as above, even though this test only inspects
+	// the raw stdout: a hard-coded /root/... path here would be a trap for
+	// whoever next adds a parse to this test.
+	cfgPath := filepath.Join(dir, "openclaw.json")
+	if err := os.WriteFile(cfgPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write fake config: %v", err)
+	}
+	body := "#!/bin/sh\n" +
+		"printf '%s\\n' '" + cfgPath + "'\n" +
+		"sleep 300\n"
 	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
 		t.Fatalf("write fake openclaw: %v", err)
 	}
@@ -269,7 +283,7 @@ sleep 300
 	if err != nil {
 		t.Fatalf("execOpenclawCLI: %v", err)
 	}
-	if strings.TrimSpace(out) != "/root/.openclaw/openclaw.json" {
+	if strings.TrimSpace(out) != cfgPath {
 		t.Errorf("stdout = %q, want the printed path", out)
 	}
 	// Loose on purpose: only has to sit far below the 60s ctx and the stub's 300s
