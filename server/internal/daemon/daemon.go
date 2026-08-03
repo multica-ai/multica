@@ -3909,15 +3909,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
+	// CEREBRO-PATCH(task-mandate-claim-generation): FIR-4292 expose server-owned task generation to CLI requests.
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"MULTICA_TOKEN":                   agentToken,
+		"MULTICA_SERVER_URL":              d.cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT":             fmt.Sprintf("%d", d.cfg.HealthPort),
+		"MULTICA_WORKSPACE_ID":            task.WorkspaceID,
+		"MULTICA_AGENT_NAME":              agentName,
+		"MULTICA_AGENT_ID":                task.AgentID,
+		"MULTICA_TASK_ID":                 task.ID,
+		"MULTICA_TASK_MANDATE_GENERATION": strconv.FormatInt(task.TaskMandateGeneration, 10),
+		"MULTICA_TASK_SLOT":               strconv.Itoa(slot),
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID

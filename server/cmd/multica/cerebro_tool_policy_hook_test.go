@@ -61,6 +61,27 @@ func TestHook_ReadToolUsesServer(t *testing.T) {
 	}
 }
 
+func TestHook_ForwardsTaskMandateGeneration(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode hook request: %v", err)
+		}
+		if generation := body["claim_generation"]; generation != float64(13) {
+			t.Errorf("claim_generation = %v, want 13", generation)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"allowed": true})
+	}))
+	defer srv.Close()
+	exit, _ := runHookForTest(t, `{"tool_name":"Read","tool_input":{"file_path":"/x"}}`, map[string]string{
+		"MULTICA_DAEMON_PORT":             portOf(t, srv),
+		"MULTICA_TASK_MANDATE_GENERATION": "13",
+	})
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+}
+
 func TestHook_GatedAllow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"allowed": true})

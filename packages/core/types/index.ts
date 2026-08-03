@@ -97,6 +97,11 @@ export type {
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
   WorkSession,
+  // CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 shared operator diagnostic contract.
+  AccessDiagnostic,
+  AccessDiagnosticState,
+  RuntimeAccessDiagnostics,
+  TaskMandateVerdict,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, MemberUsage, Invitation } from "./workspace";
 export type {

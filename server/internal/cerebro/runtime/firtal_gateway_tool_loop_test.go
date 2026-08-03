@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/mcp"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -234,15 +235,17 @@ func TestGatewayCompatRegistryToolLoopForcedFinalKeepsToolsAndForcesText(t *test
 	reg := NewRegistry(nil)
 	reg.Register(fallbackTestTool{})
 	e := &FirtalGatewayExecutor{gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()), logger: testLogger()}
+	e.SetTaskMandates(&captureTaskMandates{})
 	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
-		GatewayRequestMeta{TaskID: "t1"},
+		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(92))},
 		pgtype.UUID{},
 		pgtype.UUID{},
 		reg,
 		[]Tool{fallbackTestTool{}},
+		nil,
 		false,
 	)
 	if err != nil {
@@ -512,15 +515,17 @@ func TestGatewayCompatRegistryToolLoopFallsBackToCoreToolsOnMalformedFullList(t 
 		}, srv.Client()),
 		logger: testLogger(),
 	}
+	e.SetTaskMandates(&captureTaskMandates{})
 	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
 		db.Agent{},
 		[]GatewayMessage{{Role: "user", Content: "hello"}},
-		GatewayRequestMeta{TaskID: "t1"},
+		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(93))},
 		pgtype.UUID{},
 		pgtype.UUID{},
 		reg,
 		tools,
+		nil,
 		false,
 	)
 	if err != nil {
@@ -584,15 +589,17 @@ func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO
 	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
 	e.gateway = NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client())
 	e.logger = testLogger()
+	e.SetTaskMandates(&captureTaskMandates{})
 	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
-		GatewayRequestMeta{TaskID: "t1"},
+		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(94))},
 		agentID,
 		runtimeAccountTestWSID,
 		reg,
 		[]Tool{fallbackTestTool{}},
+		nil,
 		false,
 	)
 	if err != nil {

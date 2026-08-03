@@ -17,11 +17,25 @@ const (
 // both fail closed when no approval flow is available.
 type PolicyDecision string
 
+// ReasonCode is the machine-readable authority/recovery classification stored
+// with each decision. Reason remains display-only copy.
+type ReasonCode string
+
 const (
 	PolicyAllow PolicyDecision = "allow"
 	PolicyAsk   PolicyDecision = "ask"
 	PolicyDeny  PolicyDecision = "deny"
 	PolicyError PolicyDecision = "error"
+)
+
+const (
+	ReasonLegacyUnknown                 ReasonCode = "legacy_unknown"
+	ReasonAllowed                       ReasonCode = "policy_allowed"
+	ReasonCanonicalCapabilityUnresolved ReasonCode = "canonical_capability_unresolved"
+	ReasonRuntimeCapabilityUnavailable  ReasonCode = "runtime_capability_unavailable"
+	ReasonPolicyApprovalRequired        ReasonCode = "policy_approval_required"
+	ReasonPolicyDenied                  ReasonCode = "policy_denied"
+	ReasonPolicyUnavailable             ReasonCode = "policy_unavailable"
 )
 
 // EvaluationInput is everything the pure decision needs.
@@ -33,22 +47,31 @@ type EvaluationInput struct {
 
 // EvaluationResult is the enforced outcome and its audit-safe explanation.
 type EvaluationResult struct {
-	Decision Decision
-	Reason   string
+	Decision   Decision
+	ReasonCode ReasonCode
+	Reason     string
 }
 
 // Evaluate applies the canonical fail-closed rules.
 func Evaluate(in EvaluationInput) EvaluationResult {
 	if in.CanonicalCapabilityID == "" {
-		return EvaluationResult{Decision: DecisionDeny, Reason: "tool did not resolve to a canonical capability"}
+		return EvaluationResult{Decision: DecisionDeny, ReasonCode: ReasonCanonicalCapabilityUnresolved, Reason: "tool did not resolve to a canonical capability"}
 	}
 	if in.EvidenceLevel == availabilityevidence.LevelDeclared || in.EvidenceLevel == "" {
-		return EvaluationResult{Decision: DecisionDeny, Reason: "canonical capability is absent from the live runtime surface"}
+		return EvaluationResult{Decision: DecisionDeny, ReasonCode: ReasonRuntimeCapabilityUnavailable, Reason: "canonical capability is absent from the live runtime surface"}
 	}
-	if in.PolicyDecision != PolicyAllow {
-		return EvaluationResult{Decision: DecisionDeny, Reason: "canonical policy did not allow the capability"}
+	switch in.PolicyDecision {
+	case PolicyAsk:
+		return EvaluationResult{Decision: DecisionDeny, ReasonCode: ReasonPolicyApprovalRequired, Reason: "canonical policy requires approval for the capability"}
+	case PolicyDeny:
+		return EvaluationResult{Decision: DecisionDeny, ReasonCode: ReasonPolicyDenied, Reason: "canonical policy did not allow the capability"}
+	case PolicyError:
+		return EvaluationResult{Decision: DecisionDeny, ReasonCode: ReasonPolicyUnavailable, Reason: "canonical policy decision was unavailable"}
+	case PolicyAllow:
+		return EvaluationResult{Decision: DecisionAllow, ReasonCode: ReasonAllowed, Reason: "canonical policy allowed a capability present on the live runtime surface"}
+	default:
+		return EvaluationResult{Decision: DecisionDeny, ReasonCode: ReasonPolicyUnavailable, Reason: "canonical policy decision was unavailable"}
 	}
-	return EvaluationResult{Decision: DecisionAllow, Reason: "canonical policy allowed a capability present on the live runtime surface"}
 }
 
 // Observation is one live Gateway call plus the canonical inputs.
@@ -78,6 +101,7 @@ type Entry struct {
 	Decision              Decision
 	PolicyDecision        PolicyDecision
 	EvidenceLevel         availabilityevidence.Level
+	ReasonCode            ReasonCode
 	Reason                string
 }
 
@@ -100,6 +124,7 @@ func NewEntry(o Observation) Entry {
 		Decision:              result.Decision,
 		PolicyDecision:        o.PolicyDecision,
 		EvidenceLevel:         o.EvidenceLevel,
+		ReasonCode:            result.ReasonCode,
 		Reason:                result.Reason,
 	}
 }

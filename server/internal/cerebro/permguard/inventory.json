@@ -2303,6 +2303,10 @@
       "exempt": "read-only — wraps GET /api/cerebro/evals/{id}/schedule"
     },
     {
+      "id": "get_runtime_access_diagnostics",
+      "exempt": "read-only diagnostic — wraps owner/admin-gated GET /api/runtimes/{runtimeId}/access-diagnostics"
+    },
+    {
       "id": "get_active_workflow",
       "exempt": "read-only — wraps GET /api/cerebro/workflows/for-issue/{issueId}"
     },
@@ -3495,6 +3499,10 @@
     {
       "id": "runtime delete",
       "gate": "via:DELETE /api/runtimes/{runtimeId}"
+    },
+    {
+      "id": "runtime diagnostics",
+      "exempt": "read-only diagnostic — wraps owner/admin-gated GET /api/runtimes/{runtimeId}/access-diagnostics"
     },
     {
       "id": "runtime list",

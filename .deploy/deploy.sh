@@ -385,6 +385,21 @@ if ! smoke_test; then
   exit 1
 fi
 
+# CEREBRO-PATCH(post-deploy-runtime-tool-gate): FIR-4220 verifies the live
+# workspace after every canonical deploy. An online Runtime with an empty
+# capability report is a release failure even when the app itself returns 200.
+echo "Post-deploy check: verifying live Runtime tool offers…"
+if ! MULTICA_POST_DEPLOY_CLI="$REPO/server/bin/multica" \
+    MULTICA_POST_DEPLOY_VERSION_URL="${SMOKE_URL%/}/version" \
+    MULTICA_POST_DEPLOY_EXPECTED_COMMIT="$NEW_SHA" \
+    scripts/cerebro/check-live-runtime-tools-post-deploy.sh; then
+  # The backend and possibly the daemon already run the new commit. Rolling
+  # back only .next here would create a mixed-version deployment, so leave the
+  # matched build in place, retain .next.old, and fail for operator recovery.
+  echo "=== DEPLOY FAILED (live Runtime tool gate): matched build retained for recovery ===" >&2
+  exit 1
+fi
+
 # Smoke test passed. Now safe to remove the previous build asynchronously.
 rm -rf "$NEXT_OLD" &
 

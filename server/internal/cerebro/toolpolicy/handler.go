@@ -138,20 +138,21 @@ type groupAttributionResponse struct {
 }
 
 type toolPolicyRow struct {
-	ToolKey               string          `json:"tool_key"`
-	ResourcePattern       string          `json:"resource_pattern"`
-	Title                 string          `json:"title"`
-	Category              string          `json:"category"`
-	Description           string          `json:"description"`
-	DescriptionZh         string          `json:"description_zh"`
-	Source                string          `json:"source"`
-	ManagedExternally     bool            `json:"managed_externally"`
-	ExternalSecurityOwner string          `json:"external_security_owner"`
+	ToolKey               string `json:"tool_key"`
+	ResourcePattern       string `json:"resource_pattern"`
+	Title                 string `json:"title"`
+	Category              string `json:"category"`
+	Description           string `json:"description"`
+	DescriptionZh         string `json:"description_zh"`
+	Source                string `json:"source"`
+	ManagedExternally     bool   `json:"managed_externally"`
+	ExternalSecurityOwner string `json:"external_security_owner"`
 	// WorkspaceIntakeSwitch marks a managed-external machine-intake boundary
 	// whose workspace-layer row is a live off-switch (FIR-4220): the UI renders
 	// a workspace-layer-only decision control for it instead of a read-only row.
-	WorkspaceIntakeSwitch bool          `json:"workspace_intake_switch"`
-	Layers                layerSettings `json:"layers"`
+	WorkspaceIntakeSwitch bool            `json:"workspace_intake_switch"`
+	CallableIdentities    []string        `json:"callable_identities"`
+	Layers                layerSettings   `json:"layers"`
 	Conditions            layerConditions `json:"conditions"`
 	// EnforcedConditions names the WHEN condition kinds (action/host/cel) that
 	// actually bite for this capability, so the editor renders only those
@@ -762,6 +763,7 @@ func toRowResponse(row TableRow) toolPolicyRow {
 		ManagedExternally:     row.ManagedExternally,
 		ExternalSecurityOwner: row.ExternalSecurityOwner,
 		WorkspaceIntakeSwitch: row.WorkspaceIntakeSwitch,
+		CallableIdentities:    append([]string{}, row.CallableIdentities...),
 		EnforcedConditions:    enforcedStrs,
 		Layers: layerSettings{
 			Workspace: settingPtr(row.Layers, LayerWorkspace),

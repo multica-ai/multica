@@ -173,6 +173,8 @@ export interface ToolPolicyRow {
    * (see isRowSettable). Optional for older server responses (defaults false).
    */
   workspace_intake_switch?: boolean;
+  /** Exact runtime/CLI/MCP identities represented by a platform family. */
+  callable_identities?: string[];
   /**
    * Which WHEN condition kinds actually bite for this capability (FIR-1708 C),
    * computed server-side from the gate facts so the editor renders only the
@@ -425,6 +427,7 @@ const toolPolicyRowSchema = z.object({
   // so an older backend renders the row fully read-only (the safer, pre-fix
   // behaviour) rather than offering a write the server would reject.
   workspace_intake_switch: z.boolean().default(false),
+  callable_identities: z.array(z.string()).catch([]).default([]),
   // FIR-1708 C: the WHEN kinds the gate actually evaluates for this capability.
   // Left optional (not defaulted to []) so the editor can tell "older backend
   // omitted it" (undefined → heuristic fallback) from "no kind bites" ([]).

@@ -17,7 +17,7 @@ import { api } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
 import { memberListOptions } from "@multica/core/workspace/queries";
-import { toolPolicyTableOptions } from "@multica/cerebro-tool-policy/core";
+import { toolPolicyTableOptions, type ToolPolicyRow } from "@multica/cerebro-tool-policy/core";
 import { useDataSourceScopeConfig, useScopeOptions } from "@multica/cerebro-tool-policy/data-source-scope";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -101,6 +101,26 @@ export function validateModeConfig(config: ModeConfig): ModeValidation {
     errors.max_turns = "Use 0 or a positive whole number.";
   }
   return errors;
+}
+
+export function modeToolChoices(rows: Array<Pick<ToolPolicyRow, "tool_key" | "title" | "description" | "source" | "callable_identities">>): Choice[] {
+  const byId = new Map<string, Choice>();
+  for (const row of rows) {
+    const identities = row.callable_identities?.length
+      ? row.callable_identities
+      : row.source === "platform"
+        ? []
+        : [row.tool_key];
+    for (const identity of identities) {
+      const exactSuffix = identities.length > 1 ? ` · ${identity}` : "";
+      byId.set(identity, {
+        id: identity,
+        name: `${row.title || identity}${exactSuffix}`,
+        description: row.description,
+      });
+    }
+  }
+  return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function numberInputValue(value: number): number | "" {
@@ -428,7 +448,7 @@ export function ModeConfigEditor({
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <SearchableMultiChoice label="Allowed tools" values={config.allowed_tools} choices={toolChoices} emptyLabel="All tools allowed" helper="Leave empty to allow every tool permitted by workspace policy." onChange={(values) => patch("allowed_tools", values)} disabled={disabled} />
+          <SearchableMultiChoice label="Allowed tools" values={config.allowed_tools} choices={toolChoices} emptyLabel="All tools allowed" helper="Choose exact callable or Connection scope identities. Leave empty to allow every tool permitted by workspace policy." onChange={(values) => patch("allowed_tools", values)} disabled={disabled} />
           <SearchableMultiChoice label="Data sources" values={config.data_sources} choices={dataSourceChoices} emptyLabel="All data sources allowed" helper="Leave empty to allow every connected source permitted by workspace policy." onChange={(values) => patch("data_sources", values)} disabled={disabled} />
         </div>
 
@@ -585,9 +605,7 @@ export function ModeSettingsTab() {
     return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
   }, [modelQueries]);
   const toolChoices = useMemo(() => {
-    const byId = new Map<string, Choice>();
-    for (const row of toolPolicyQuery.data ?? []) byId.set(row.tool_key, { id: row.tool_key, name: row.title || row.tool_key, description: row.description });
-    return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return modeToolChoices(toolPolicyQuery.data ?? []);
   }, [toolPolicyQuery.data]);
   const dataSourceChoices = useMemo(() => dataScopeQuery.options.map((option) => ({ id: option.id, name: option.name, description: option.folder })), [dataScopeQuery.options]);
   const memberNames = useMemo(() => {

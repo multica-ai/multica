@@ -81,7 +81,11 @@ func (t *FirtalGetAgentCapabilitiesTool) Call(ctx context.Context, args map[stri
 		return "", fmt.Errorf("get_agent_capabilities: %w", err)
 	}
 	enforcementEnabled := t.tctx.TaskMandateEnforcement != nil && t.tctx.TaskMandateEnforcement(ctx, t.tctx.WorkspaceID)
-	handler.ApplyTaskMandate(ctx, enforcementEnabled, t.tctx.TaskMandates, t.tctx.TaskID, t.tctx.WorkspaceID, t.tctx.AgentID, &card)
+	if t.tctx.TaskMandateGeneration != nil {
+		handler.ApplyTaskMandate(ctx, enforcementEnabled, t.tctx.TaskMandates, t.tctx.TaskID, t.tctx.WorkspaceID, t.tctx.AgentID, &card, *t.tctx.TaskMandateGeneration)
+	} else {
+		handler.ApplyTaskMandate(ctx, enforcementEnabled, t.tctx.TaskMandates, t.tctx.TaskID, t.tctx.WorkspaceID, t.tctx.AgentID, &card)
+	}
 	out, err := json.Marshal(card)
 	if err != nil {
 		return "", fmt.Errorf("get_agent_capabilities: marshal result: %w", err)

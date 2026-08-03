@@ -3,12 +3,14 @@ package taskmandate
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type mandateDB struct{ row pgx.Row }
@@ -37,6 +39,10 @@ type snapshotRow struct {
 	taskID, workspaceID, agentID pgtype.UUID
 	allowedTools                 []byte
 	issuedAt, expiresAt          time.Time
+	claimGeneration              int64
+	producer, finalizer          *string
+	lifecycle                    ClaimLifecycleState
+	inventory, discovery, digest *string
 	err                          error
 }
 
@@ -50,11 +56,115 @@ func (r snapshotRow) Scan(dest ...any) error {
 	*(dest[3].(*[]byte)) = r.allowedTools
 	*(dest[4].(*time.Time)) = r.issuedAt
 	*(dest[5].(*time.Time)) = r.expiresAt
+	*(dest[6].(*int64)) = r.claimGeneration
+	*(dest[7].(**string)) = r.producer
+	*(dest[8].(**string)) = r.finalizer
+	*(dest[9].(*ClaimLifecycleState)) = r.lifecycle
+	*(dest[10].(**string)) = r.inventory
+	*(dest[11].(**string)) = r.discovery
+	*(dest[12].(**string)) = r.digest
 	return nil
 }
 
 func validUUID() pgtype.UUID {
 	return pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+}
+
+func openMandateTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		t.Skipf("task mandate database unavailable: %v", err)
+	}
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
+		t.Skipf("task mandate database unreachable: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+func TestIssueRejectsSecondProducerChangingTaskIdentity(t *testing.T) {
+	pool := openMandateTestPool(t)
+	ctx := context.Background()
+	var originalWorkspaceID, changedWorkspaceID, runtimeID, originalAgentID, changedAgentID, issueID, taskID pgtype.UUID
+
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug)
+		VALUES ('Task Mandate Original', 'task-mandate-original-' || gen_random_uuid())
+		RETURNING id`).Scan(&originalWorkspaceID); err != nil {
+		t.Fatalf("create original workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, originalWorkspaceID)
+	})
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug)
+		VALUES ('Task Mandate Changed', 'task-mandate-changed-' || gen_random_uuid())
+		RETURNING id`).Scan(&changedWorkspaceID); err != nil {
+		t.Fatalf("create changed workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, changedWorkspaceID)
+	})
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
+		VALUES ($1, 'Task Mandate Runtime', 'local', 'codex')
+		RETURNING id`, originalWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+		VALUES ($1, 'Original Producer', 'local', $2)
+		RETURNING id`, originalWorkspaceID, runtimeID).Scan(&originalAgentID); err != nil {
+		t.Fatalf("create original agent: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode)
+		VALUES ($1, 'Changed Producer', 'local')
+		RETURNING id`, changedWorkspaceID).Scan(&changedAgentID); err != nil {
+		t.Fatalf("create changed agent: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
+		VALUES ($1, 'Task Mandate Identity', 'agent', $2)
+		RETURNING id`, originalWorkspaceID, originalAgentID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id)
+		VALUES ($1, $2, $3)
+		RETURNING id`, originalAgentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	store := NewStore(pool)
+	if err := store.Issue(ctx, taskID, originalWorkspaceID, originalAgentID, []string{"tools:Read"}, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("issue original mandate: %v", err)
+	}
+	secondErr := store.Issue(ctx, taskID, changedWorkspaceID, changedAgentID, []string{"tools:Write"}, time.Now().Add(2*time.Hour))
+	if secondErr == nil {
+		overwritten, err := store.Get(ctx, taskID, changedWorkspaceID, changedAgentID)
+		if err != nil {
+			t.Fatalf("second producer returned nil without a readable overwrite: %v", err)
+		}
+		t.Fatalf(
+			"second producer overwrote task mandate: workspace_id=%v agent_id=%v allowed_tools=%v; want changed identity rejected",
+			overwritten.WorkspaceID, overwritten.AgentID, overwritten.AllowedTools,
+		)
+	}
+
+	original, err := store.Get(ctx, taskID, originalWorkspaceID, originalAgentID)
+	if err != nil {
+		t.Fatalf("read original mandate after rejected overwrite: %v", err)
+	}
+	if len(original.AllowedTools) != 1 || original.AllowedTools[0] != "tools:Read" {
+		t.Fatalf("original mandate changed after rejected overwrite: %v", original.AllowedTools)
+	}
 }
 
 func TestErrorsRemainFailClosedAndDistinct(t *testing.T) {
@@ -117,7 +227,7 @@ func TestGetReturnsTheExactHistoricalSnapshotAfterExpiry(t *testing.T) {
 	store := NewStoreDB(mandateDB{row: snapshotRow{
 		taskID: id, workspaceID: id, agentID: id,
 		allowedTools: []byte(`["tools:Read","firtal_registry"]`),
-		issuedAt:     now.Add(-2 * time.Hour), expiresAt: now.Add(-time.Hour),
+		issuedAt:     now.Add(-2 * time.Hour), expiresAt: now.Add(-time.Hour), lifecycle: ClaimLifecycleLegacy,
 	}})
 	snapshot, err := store.Get(context.Background(), id, id, id)
 	if err != nil {
@@ -128,6 +238,65 @@ func TestGetReturnsTheExactHistoricalSnapshotAfterExpiry(t *testing.T) {
 	}
 	if snapshot.ExpiresAt.After(now) {
 		t.Fatalf("snapshot expiry = %v, expected historical expired contract", snapshot.ExpiresAt)
+	}
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 2 || snapshot.LifecycleState != ClaimLifecycleLegacy {
+		t.Fatalf("snapshot diagnostics = offered %d authorized %d lifecycle %q", snapshot.OfferedCount, snapshot.AuthorizedCount, snapshot.LifecycleState)
+	}
+}
+
+func TestGetReturnsFinalizedGenerationDiagnostics(t *testing.T) {
+	now := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+	id := validUUID()
+	producer, finalizer := "local-runtime", "task-claim"
+	inventory, discovery, digest := "runtime:v7", "scan:v12", "sha256:abc"
+	store := NewStoreDB(mandateDB{row: snapshotRow{
+		taskID: id, workspaceID: id, agentID: id,
+		allowedTools:    []byte(`["tools:Read","mcp__company-brain__search","connection:company-brain"]`),
+		issuedAt:        now,
+		expiresAt:       now.Add(time.Hour),
+		claimGeneration: 4,
+		producer:        &producer,
+		finalizer:       &finalizer,
+		lifecycle:       ClaimLifecycleFinalized,
+		inventory:       &inventory,
+		discovery:       &discovery,
+		digest:          &digest,
+	}})
+	snapshot, err := store.Get(context.Background(), id, id, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if snapshot.ClaimGeneration != 4 || snapshot.LifecycleState != ClaimLifecycleFinalized || snapshot.Producer == nil || *snapshot.Producer != producer || snapshot.Finalizer == nil || *snapshot.Finalizer != finalizer {
+		t.Fatalf("generation diagnostics = %+v", snapshot)
+	}
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 2 {
+		t.Fatalf("source counts = offered %d authorized %d, want 2/2", snapshot.OfferedCount, snapshot.AuthorizedCount)
+	}
+	if snapshot.InventoryVersion == nil || *snapshot.InventoryVersion != inventory || snapshot.DiscoveryVersion == nil || *snapshot.DiscoveryVersion != discovery || snapshot.FinalizedGrantDigest == nil || *snapshot.FinalizedGrantDigest != digest {
+		t.Fatalf("source metadata = inventory %v discovery %v digest %v", snapshot.InventoryVersion, snapshot.DiscoveryVersion, snapshot.FinalizedGrantDigest)
+	}
+}
+
+func TestGetCountsCallableParityWithoutAuthorizationScopes(t *testing.T) {
+	now := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+	id := validUUID()
+	store := NewStoreDB(mandateDB{row: snapshotRow{
+		taskID: id, workspaceID: id, agentID: id,
+		allowedTools: []byte(`[
+			"tools:Read",
+			"mcp__company-brain__search",
+			"connection:company-brain",
+			"mcp__company-brain__*"
+		]`),
+		issuedAt: now, expiresAt: now.Add(time.Hour), lifecycle: ClaimLifecycleFinalized,
+	}})
+
+	snapshot, err := store.Get(context.Background(), id, id, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if snapshot.OfferedCount != 2 || snapshot.AuthorizedCount != 2 {
+		t.Fatalf("callable parity counts = offered %d authorized %d, want 2/2 with authorization scopes excluded from both", snapshot.OfferedCount, snapshot.AuthorizedCount)
 	}
 }
 

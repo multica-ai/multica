@@ -2083,17 +2083,56 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
-	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
-	// process instead of its own credential, so any API call the agent
-	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
-	// recognized server-side as actor=agent, closing the lateral-movement
-	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
-	// owner is required because task tokens are still bound to an owning user;
-	// without one, fail the claim explicitly instead of letting the daemon
-	// fall back to a member/owner credential. MUL-3292.
-	// Token expires after the queue/runtime upper bound (24h) so it survives
-	// long-running tasks but cannot outlive a forgotten one.
+	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
+	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
+		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
+			skillPayloadBytes = len(skillPayload)
+		}
+	}
+	var mandateTools []string
+	var toolResolveErr error
+	resp.EffectiveTools, mandateTools, toolResolveErr = h.cerebroEffectiveToolsForClaim(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission tools once for both the brief and immutable mandate
+	if toolResolveErr != nil {
+		// CEREBRO-PATCH(agent-task-tool-resolve-failclaim): FIR-3403 TRIN 1b — never issue an empty (total-lockout) mandate on a resolution error; fail the claim so the task retries.
+		outcome = "error_tool_resolve"
+		slog.Error("task claim: failed to resolve agent tool mandate", "task_id", uuidToString(task.ID), "error", toolResolveErr)
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent tool mandate")
+		return
+	}
+	var sessionModeAllowedTools []string
+	// CEREBRO-PATCH(task-mandate-session-mode-parity): FIR-4292 compile the same exact AllowedTools ceiling as Gateway.
+	if resp.SessionModeConfig != nil {
+		sessionModeAllowedTools = resp.SessionModeConfig.AllowedTools
+	}
+	resp.EffectiveTools, mandateTools, toolResolveErr = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, sessionModeAllowedTools)
+	if toolResolveErr != nil {
+		outcome = "error_session_mode_tools"
+		slog.Error("task claim: invalid SessionModeConfig.AllowedTools contract", "task_id", uuidToString(task.ID), "error", toolResolveErr)
+		writeError(w, http.StatusInternalServerError, "failed to compile SessionModeConfig.AllowedTools")
+		return
+	}
+	// CEREBRO-PATCH(task-token-finalization-compensation): FIR-4291 — reclaim
+	// cannot retain a token from an earlier attempt while this generation is
+	// being revalidated. Any deletion failure stops before finalization.
+	if err := h.Queries.DeleteTaskTokensByTask(r.Context(), task.ID); err != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to clear previous task tokens before mandate finalization", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to prepare task token activation")
+		return
+	}
+	// CEREBRO-PATCH(task-mandate-generation-response): FIR-4292 return the exact finalized claim generation to the runtime.
+	claimGeneration, err := taskmandate.NewStoreDB(h.DB).FinalizeTaskClaim(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour), "daemon-claim:v1")
+	if err != nil {
+		outcome = "error_task_mandate"
+		slog.Error("task claim: failed to finalize task mandate; token activation withheld", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to finalize task mandate")
+		return
+	}
+	resp.TaskMandateGeneration = claimGeneration.Generation
+
+	// CEREBRO-PATCH(task-token-after-mandate): FIR-4291 — activate the
+	// task-scoped token only after the immutable Task Mandate has finalized.
+	// A failed finalization therefore leaves no newly usable token behind.
 	tokenUserID := runtime.OwnerID
 	if !tokenUserID.Valid && resp.Agent != nil && resp.Agent.OwnerID != "" {
 		tokenUserID = parseUUID(resp.Agent.OwnerID)
@@ -2153,32 +2192,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.AuthToken = tokenStr
-
-	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
-	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
-		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
-			skillPayloadBytes = len(skillPayload)
-		}
-	}
-	var mandateTools []string
-	var toolResolveErr error
-	resp.EffectiveTools, mandateTools, toolResolveErr = h.cerebroEffectiveToolsForClaim(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission tools once for both the brief and immutable mandate
-	if toolResolveErr != nil {
-		// CEREBRO-PATCH(agent-task-tool-resolve-failclaim): FIR-3403 TRIN 1b — never issue an empty (total-lockout) mandate on a resolution error; fail the claim so the task retries.
-		outcome = "error_tool_resolve"
-		slog.Error("task claim: failed to resolve agent tool mandate", "task_id", uuidToString(task.ID), "error", toolResolveErr)
-		writeError(w, http.StatusInternalServerError, "failed to resolve agent tool mandate")
-		return
-	}
-	if resp.SessionModeConfig != nil && len(resp.SessionModeConfig.AllowedTools) > 0 {
-		resp.EffectiveTools, mandateTools = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, resp.SessionModeConfig.AllowedTools)
-	}
-	if err := taskmandate.NewStoreDB(h.DB).Issue(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour)); err != nil {
-		outcome = "error_task_mandate"
-		slog.Error("task claim: failed to issue task mandate", "task_id", uuidToString(task.ID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to issue task mandate")
-		return
-	}
 	h.applyMemoryAutoRecall(r.Context(), &resp, *task) // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
 
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})

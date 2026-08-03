@@ -94,6 +94,16 @@ release merge commit. The server exposes `/version` (commit SHA) for
 programmatic checks. The full production proof is
 `multica agent-browser internal-verify --app multica` — see VERIFY.md, §3.
 
+Every push to the Sliplane deploy branches also starts
+`.github/workflows/cerebro-post-deploy-live-runtime-tools.yml`. It waits until
+the environment's `/version` reports the pushed commit, then fails if the live
+workspace has no verifiable online Runtime or any online Runtime has an empty
+`capabilities` report. The `staging` and `production` GitHub environments must
+provide the authenticated URLs and token documented in
+`docs/agents/task-mandate-rollout.md`. A failed live Runtime tool gate means the
+deployment is not accepted; inspect the workflow and Sliplane logs, keep the
+affected feature flag off, and follow the rollback order below.
+
 ## Rollback
 
 Use this order when a change fails after deploy:

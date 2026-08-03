@@ -3,6 +3,57 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4293 — Shared access diagnostics and frozen Task Mandate explanation
+
+- `runtime-access-diagnostics` adds the shared read-only Runtime contract to
+  `packages/core/api/client.ts`, `packages/core/api/schemas.ts`,
+  `packages/core/types/agent.ts`, and
+  `server/cmd/server/router.go`, exposes it through `server/cmd/multica/cmd_runtime.go`,
+  and documents it in the built-in `multica-runtimes-and-repos` skill;
+  `runtime-access-diagnostics-matrix` records the
+  CLI-runtime MCP tool in `server/internal/cerebro/runtime/tools_registry.go`
+  without turning diagnostics into an implicit Gateway grant. The Runtime UI,
+  CLI, and MCP consume the same provider-probe and MCP `tools/list` evidence
+  with independent versions.
+- `task-access-disclosure` replaces the inline task transcript presentation in
+  `packages/views/common/task-transcript/agent-transcript-dialog.tsx` with the
+  shared TanStack Query-backed `@multica/cerebro-ui` component. Settings →
+  Permissions is identified as live authoring while the claimed Task Mandate is
+  visibly frozen.
+- `task-access-diagnostics-gate` keeps Runtime capability diagnostics,
+  Connection discovery diagnostics, and transcript Task access behind the one
+  default-off `cerebro_access_diagnostics` operator gate. It is intentionally
+  separate from `cerebro_task_mandate_enforcement`, so observation can be
+  reviewed before call-time denial is enabled.
+- **Why:** discovery evidence, current policy, and a per-run Task Mandate answer
+  different operator questions. One diagnostic shape makes absence, denial,
+  partial, stale, and error states explainable without introducing another
+  authoring or authorization path.
+
+## FIR-4292 — Exact Task Mandate admission and diagnostics
+
+- `task-mandate-callable-propagation` carries the exact CLI or MCP operation
+  through `server/cmd/multica/cmd_agent.go`, `server/internal/cli/client.go`, and
+  `server/internal/mcp/server.go`; REST gates never infer a broad permission
+  family such as `manage_workflows` as a callable.
+- `task-mandate-exact-platform-routes` applies those exact identities to the
+  Artifact, Comment, Wakeup, and Handoff routes in
+  `server/cmd/server/router.go` while preserving member behavior.
+- `task-mandate-session-mode-parity` applies one `SessionModeConfig.AllowedTools`
+  compiler to local claims and Firtal Gateway claims through
+  `server/internal/handler/daemon.go` and `server/cmd/server/main.go`.
+- `task-mandate-read-model` extends `packages/core/types/agent.ts` and
+  `packages/views/common/task-transcript/agent-transcript-dialog.tsx` with the
+  additive generation, lifecycle, producer/finalizer, source-version, count,
+  digest, verdict, and recovery fields.
+- `task-mandate-generation-claim` carries the finalized `claim_generation`
+  from daemon claim through local hooks, CLI/REST, Capabilities, and Gateway;
+  every enabled call-time gate uses `AuthorizeClaimGeneration`, so a reclaimed
+  task cannot reuse an older attempt's authority.
+- **Why:** policy families describe what admins author; exact callables describe
+  what one run can invoke. Conflating them allowed broad-family inference and
+  made local/Gateway admission and operator diagnostics disagree.
+
 ## FIR-4217 — Check recipient runtime before agent handoff
 
 - `server/internal/daemon/execenv/runtime_config.go:803-804` adds a silent,
@@ -2321,6 +2372,10 @@ The brief-rendering block moved out of `execenv/context.go` into a sibling
 - **Why:** FIR-4220 needs Task Mandate issuance and observation to continue while call-time enforcement remains safely reversible. `cerebro_task_mandate_enforcement` is therefore a workspace flag that defaults off; an operator can restore the policy-only behavior immediately without a deploy or mandate rewrite.
 - **Where:** The shared resolver lives in `server/internal/cerebro/taskmandate/enforcement.go`. Cerebro-owned Gateway and access-decision paths consume it directly. The local handler seam is `server/internal/handler/task_mandate_enforcement_cerebro.go`; the marked checks in `platform_action_guard_cerebro.go` and `daemon_tool_policy_cerebro.go` only call `Authorize` while the flag is on. `server/cmd/server/main.go` has one marked wiring block so the duplicate Gateway decision check uses the same flag.
 
+# `task-mandate-claim-lifecycle`
+
+- **Why:** FIR-4291 couples immutable Task Mandate finalization to task-token activation, keeps renewal limited to the same identity/generation/grant digest, records the exact MCP discovery content version, and makes an unmeasured provider without a curated fallback visible as a claim failure. Gateway fallback finalizes only the provider-compatible tool list that was actually accepted.
+- **Where:** The lifecycle contract lives in `server/internal/cerebro/taskmandate/`; claim activation is marked in `server/internal/handler/daemon.go`, and Gateway fallback finalization is implemented in `server/internal/cerebro/runtime/firtal_gateway_executor.go`.
 # `task-mandate-capabilities-circuit-breaker`
 
 - **Why:** FIR-4289 requires `get_agent_capabilities` and the HTTP Capabilities card to match call-time behavior. With `cerebro_task_mandate_enforcement` off, Task Mandate cannot turn an otherwise allowed capability into Deny; Tool Policy, credentials, sandbox, repository, and approval ceilings remain unchanged.

@@ -16,6 +16,7 @@
     "@multica/cerebro-groups": "workspace:*",
     "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-types": "workspace:*",
+    "@multica/cerebro-ui": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",

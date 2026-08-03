@@ -30,6 +30,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { PageHeader } from "@multica/views/layout/page-header";
+import { ConnectionAccessDiagnostics } from "./connection-access-diagnostics";
 
 import type { Connection, ConnectionType, CreateConnectionInput, DefaultAccess, EndpointPermission, ScopableArg, UpdateConnectionInput } from "../types";
 import {
@@ -439,17 +440,13 @@ function ConnectionFormBody({
           {/* Test result */}
           {testResult && (
             <div
-              className={`rounded-md border p-4 ${
-                testResult.reachable
-                  ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
-                  : "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
-              }`}
+              className="rounded-md border bg-muted/20 p-4"
             >
               <div className="flex items-center gap-2 mb-2">
                 {testResult.reachable ? (
-                  <CheckCircle2 className="size-4 text-green-600 dark:text-green-400 shrink-0" />
+                  <CheckCircle2 className="size-4 shrink-0 text-primary" />
                 ) : (
-                  <XCircle className="size-4 text-red-600 dark:text-red-400 shrink-0" />
+                  <XCircle className="size-4 shrink-0 text-destructive" />
                 )}
                 <span className="text-sm font-medium">
                   {testResult.reachable ? "Connection successful" : "Connection failed"}
@@ -460,6 +457,8 @@ function ConnectionFormBody({
               {testResult.error && (
                 <p className="text-xs text-muted-foreground mb-2">{testResult.error}</p>
               )}
+
+              <ConnectionAccessDiagnostics diagnostics={testResult.diagnostics} />
 
               {testResult.tools && testResult.tools.length > 0 && (
                 <div className="space-y-1">

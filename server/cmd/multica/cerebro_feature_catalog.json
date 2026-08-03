@@ -484,9 +484,23 @@
       "default": true
     },
     {
+      "key": "cerebro_task_mandate_diagnostics",
+      "label": "Task Mandate diagnostics",
+      "description": "Show read-only provider/MCP diagnostics on Runtime pages and historical Task access diagnostics in the Task transcript. This does not enable call-time enforcement. FIR-4293.",
+      "group": "permissions",
+      "default": true
+    },
+    {
       "key": "cerebro_task_mandate_enforcement",
       "label": "Task Mandate enforcement",
       "description": "Enforce the immutable Task Mandate on every local and Firtal Gateway call. Keep this off while validating that every callable offered to an agent is present in the same mandate generation. FIR-4220.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_access_diagnostics",
+      "label": "Access diagnostics",
+      "description": "Show the shared provider, discovery and Task access diagnostics on Runtime, Connection and transcript surfaces. This is observation-only and does not enable Task Mandate enforcement. FIR-4293.",
       "group": "permissions",
       "default": false
     },

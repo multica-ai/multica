@@ -274,12 +274,12 @@ func TestEveryRegisteredGatewayPermissionUsesThePolicyDecisionService(t *testing
 	mandates := &captureTaskMandates{}
 	executor.SetTaskMandates(mandates)
 	executor.SetAccessDecisionService(accessdecision.NewService(executor.toolPolicy, nil, &shadowLedgerWriter{}).WithMandates(mandates))
-	issuedTools := executor.policyDecisionTools(
+	executor.policyDecisionTools(
 		context.Background(), registry, allowAgent, runtimeAccountTestWSID,
 		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))},
 	)
-	if got := sortedToolNames(issuedTools); !equalStrings(got, mandates.issued) {
-		t.Fatalf("task mandate = %v, want exact final allowed list %v", mandates.issued, got)
+	if mandates.issued != nil {
+		t.Fatalf("policy decision finalized Task Mandate before task-scoped tools were assembled: %v", mandates.issued)
 	}
 	if denied := executor.policyDecisionTools(
 		context.Background(), registry, denyAgent, runtimeAccountTestWSID, GatewayRequestMeta{},

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
@@ -118,6 +119,9 @@ func TestTable_PlatformRowsGatedByIncludeFlag(t *testing.T) {
 		}
 		if row.ExternalSecurityOwner != c.ExternalSecurityOwner {
 			t.Errorf("%q external security owner = %q, want %q", c.Key, row.ExternalSecurityOwner, c.ExternalSecurityOwner)
+		}
+		if !slices.Equal(row.CallableIdentities, c.ToolBindings) {
+			t.Errorf("%q callable identities = %v, want exact ToolBindings %v", c.Key, row.CallableIdentities, c.ToolBindings)
 		}
 		// Ordinary policy capabilities inherit the Base. Capabilities with a
 		// code-owned actor contract fail closed when this workspace-only query

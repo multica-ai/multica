@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,13 +123,16 @@ type AgentCapabilityTool struct {
 	CappedByGroups        []string `json:"capped_by_groups,omitempty"`
 	// The effective truth model keeps the distinct questions separate: policy,
 	// runtime presence, live enforcement, callability, and observed proof.
-	Allowed       bool   `json:"allowed"`
-	Available     bool   `json:"available"`
-	Enforced      bool   `json:"enforced"`
-	Callable      bool   `json:"callable"`
-	Verified      bool   `json:"verified"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	HowToFix      string `json:"how_to_fix,omitempty"`
+	Allowed             bool                 `json:"allowed"`
+	Available           bool                 `json:"available"`
+	Enforced            bool                 `json:"enforced"`
+	Callable            bool                 `json:"callable"`
+	Verified            bool                 `json:"verified"`
+	BlockedReason       string               `json:"blocked_reason,omitempty"`
+	HowToFix            string               `json:"how_to_fix,omitempty"`
+	Verdict             *taskmandate.Verdict `json:"verdict,omitempty"`
+	CallableIdentities  []string             `json:"callable_identities,omitempty"`
+	AuthorizedCallables []string             `json:"authorized_callables,omitempty"`
 	// CEREBRO-PATCH(agent-capabilities-tool-availability): FIR-3398 — what has
 	// been PROVED about this tool on the agent's runtime. Permission above is
 	// what policy allows; this is whether the capability is really there.
@@ -149,30 +153,32 @@ type AgentCapabilityConnEndpoint struct {
 	// Summary is the endpoint's one-line label captured from the API's OpenAPI
 	// spec at discovery time (e.g. "Execute data source: Orders"); empty when
 	// the spec declared none.
-	Summary       string `json:"summary,omitempty"`
-	Permission    string `json:"permission"`
-	Allowed       bool   `json:"allowed"`
-	Available     bool   `json:"available"`
-	Enforced      bool   `json:"enforced"`
-	Callable      bool   `json:"callable"`
-	Verified      bool   `json:"verified"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	HowToFix      string `json:"how_to_fix,omitempty"`
+	Summary       string               `json:"summary,omitempty"`
+	Permission    string               `json:"permission"`
+	Allowed       bool                 `json:"allowed"`
+	Available     bool                 `json:"available"`
+	Enforced      bool                 `json:"enforced"`
+	Callable      bool                 `json:"callable"`
+	Verified      bool                 `json:"verified"`
+	BlockedReason string               `json:"blocked_reason,omitempty"`
+	HowToFix      string               `json:"how_to_fix,omitempty"`
+	Verdict       *taskmandate.Verdict `json:"verdict,omitempty"`
 }
 
 // AgentCapabilityConnTool is one MCP tool a connection exposes, with this agent's
 // effective permission on it (empty when the tool-policy table has no row).
 type AgentCapabilityConnTool struct {
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Permission    string `json:"permission"`
-	Allowed       bool   `json:"allowed"`
-	Available     bool   `json:"available"`
-	Enforced      bool   `json:"enforced"`
-	Callable      bool   `json:"callable"`
-	Verified      bool   `json:"verified"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	HowToFix      string `json:"how_to_fix,omitempty"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description,omitempty"`
+	Permission    string               `json:"permission"`
+	Allowed       bool                 `json:"allowed"`
+	Available     bool                 `json:"available"`
+	Enforced      bool                 `json:"enforced"`
+	Callable      bool                 `json:"callable"`
+	Verified      bool                 `json:"verified"`
+	BlockedReason string               `json:"blocked_reason,omitempty"`
+	HowToFix      string               `json:"how_to_fix,omitempty"`
+	Verdict       *taskmandate.Verdict `json:"verdict,omitempty"`
 }
 
 // AgentCapabilityConnection is one external system the agent reaches, with the
@@ -378,7 +384,8 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid task scope", http.StatusForbidden)
 			return
 		}
-		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
+		generation, _ := strconv.ParseInt(strings.TrimSpace(r.Header.Get("X-Task-Mandate-Generation")), 10, 64)
+		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card, generation) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
 	}
 	writeJSON(w, http.StatusOK, card)
 }
@@ -389,28 +396,87 @@ type AgentCapabilityTaskMandate interface {
 	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
 }
 
-// ApplyTaskMandate overlays the immutable task ceiling on connection calls.
-// Platform actions intentionally keep their canonical permission result: the
-// FIR-4076 rollback removed Task Mandate enforcement from those HTTP actions,
-// and their capability keys are not issued in the connection/tool mandate.
-func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
+type agentCapabilityTaskMandateGeneration interface {
+	AuthorizeClaimGeneration(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, int64, string) error
+}
+
+// ApplyTaskMandate overlays the immutable task ceiling on every callable the
+// capabilities card reports. Platform families resolve through their exact
+// ToolBindings; a broad permission key is never inferred as a callable grant.
+func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities, claimGeneration ...int64) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
 	if !enforcementEnabled || mandates == nil || card == nil || !taskID.Valid {
 		return
+	}
+	for i := range card.Tools {
+		tool := &card.Tools[i]
+		capability, ok := platformcatalog.ByKey(tool.Key)
+		if !ok || len(capability.ToolBindings) == 0 {
+			continue
+		}
+		tool.CallableIdentities = append([]string(nil), capability.ToolBindings...)
+		var firstErr error
+		for _, callable := range capability.ToolBindings {
+			if err := authorizeCapabilityTaskMandate(ctx, mandates, taskID, workspaceID, agentID, callable, claimGeneration); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			tool.AuthorizedCallables = append(tool.AuthorizedCallables, callable)
+		}
+		if len(tool.AuthorizedCallables) > 0 {
+			verdict := taskmandate.AllowedVerdict()
+			tool.Verdict = &verdict
+			continue
+		}
+		verdict := taskmandate.VerdictForError(firstErr)
+		tool.Permission = "deny"
+		tool.Allowed = false
+		tool.Callable = false
+		tool.BlockedReason = verdict.Message
+		tool.HowToFix = taskMandateRecoveryCopy(verdict.RecoveryAction)
+		tool.Verdict = &verdict
 	}
 	for i := range card.Connections {
 		for j := range card.Connections[i].Tools {
 			tool := &card.Connections[i].Tools[j]
 			callableName := cerebrotoolpolicy.MCPToolToken(card.Connections[i].Name, tool.Name)
-			if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, callableName); err != nil {
+			if err := authorizeCapabilityTaskMandate(ctx, mandates, taskID, workspaceID, agentID, callableName, claimGeneration); err != nil {
+				verdict := taskmandate.VerdictForError(err)
 				tool.Permission = "deny"
 				tool.Allowed = false
 				tool.Callable = false
-				tool.BlockedReason = fmt.Sprintf("task mandate denied the capability: %v", err)
-				tool.HowToFix = "Start a new task whose issued mandate includes this capability."
+				tool.BlockedReason = verdict.Message
+				tool.HowToFix = taskMandateRecoveryCopy(verdict.RecoveryAction)
+				tool.Verdict = &verdict
 			}
 		}
 	}
-	applyCerebroTaskMandateEndpointLimits(ctx, mandates, taskID, workspaceID, agentID, card) // CEREBRO-PATCH(task-mandate-api-capability-parity): keep API endpoint capabilities aligned with call-time Task Mandate enforcement.
+	applyCerebroTaskMandateEndpointLimits(ctx, mandates, taskID, workspaceID, agentID, card, claimGeneration) // CEREBRO-PATCH(task-mandate-api-capability-parity): keep API endpoint capabilities aligned with call-time Task Mandate enforcement.
+}
+
+func authorizeCapabilityTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, callable string, claimGeneration []int64) error {
+	if len(claimGeneration) > 0 {
+		if authorizer, ok := mandates.(agentCapabilityTaskMandateGeneration); ok {
+			return authorizer.AuthorizeClaimGeneration(ctx, taskID, workspaceID, agentID, claimGeneration[0], callable)
+		}
+	}
+	return mandates.Authorize(ctx, taskID, workspaceID, agentID, callable)
+}
+
+func taskMandateRecoveryCopy(action taskmandate.RecoveryAction) string {
+	switch action {
+	case taskmandate.RecoveryRetryClaim:
+		return "Retry the claim before calling this capability."
+	case taskmandate.RecoveryRefreshTaskContext:
+		return "Refresh the task context before calling this capability."
+	case taskmandate.RecoveryFixInventory:
+		return "Fix the callable inventory and issue a new claim."
+	case taskmandate.RecoveryRetry:
+		return "Retry the Task Mandate decision."
+	default:
+		return "Start a new task whose issued mandate includes this capability."
+	}
 }
 
 // BuildAgentCapabilitiesCard assembles the same card as the HTTP route for an

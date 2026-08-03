@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -625,7 +626,8 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	}
 
 	var issue map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID, &issue); err != nil {
+	// CEREBRO-PATCH(task-mandate-callable-identity): FIR-4292 keep helper reads under get_issue.
+	if err := client.GetJSON(mcp.WithCallableIdentity(ctx, "get_issue"), "/api/issues/"+issueRef.ID, &issue); err != nil {
 		return fmt.Errorf("get issue: %w", err)
 	}
 
@@ -1126,7 +1128,8 @@ func runIssueAsk(cmd *cobra.Command, args []string) error {
 	}
 
 	var issue map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID, &issue); err != nil {
+	// CEREBRO-PATCH(task-mandate-callable-identity): FIR-4292 keep helper reads under get_issue.
+	if err := client.GetJSON(mcp.WithCallableIdentity(ctx, "get_issue"), "/api/issues/"+issueRef.ID, &issue); err != nil {
 		return fmt.Errorf("get issue: %w", err)
 	}
 

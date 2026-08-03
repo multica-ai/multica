@@ -193,7 +193,18 @@ test("Codex uses one permission identity in inventory, Capabilities, observed ac
         AND flag_key = 'cerebro_agent_page_redesign'`,
     [workspace.id],
   );
+  const previousAccessDiagnosticsFlag = await database.query<{
+    enabled: boolean;
+  }>(
+    `SELECT enabled
+       FROM cerebro_feature_flags
+      WHERE workspace_id = $1
+        AND user_id = '00000000-0000-0000-0000-000000000000'
+        AND flag_key = 'cerebro_access_diagnostics'`,
+    [workspace.id],
+  );
   await api.setWorkspaceFeatureFlag("cerebro_agent_page_redesign", true);
+  await api.setWorkspaceFeatureFlag("cerebro_access_diagnostics", true);
   const userId = (
     await database.query(`SELECT id FROM "user" WHERE email = $1 LIMIT 1`, [
       "e2e@multica.ai",
@@ -389,19 +400,22 @@ test("Codex uses one permission identity in inventory, Capabilities, observed ac
     });
     await expect(transcriptButton).toHaveCount(1);
     await transcriptButton.click();
-    const taskAccess = page.getByText("Task access · 1 allowed", {
+    const taskAccess = page.getByText("Task access", {
       exact: true,
     });
     await expect(taskAccess).toBeVisible();
-    await expect(page.getByText("Run window ended", { exact: true })).toBeVisible();
-    await taskAccess.click();
-    await expect(page.getByText("tools:bash", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("1 capabilities · ended", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Observation only", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Task access expired", { exact: true })).toBeVisible();
     await expect(
       page.getByText(
-        "Locked when this run started. Every tool call is checked against this exact list.",
+        "Settings → Permissions is live: a later Deny or safety ceiling can still tighten this run, but a later Allow cannot widen its frozen Task Mandate. Start a new task to capture newly allowed access.",
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(page.getByText("tools:bash", { exact: true })).toBeVisible();
     const taskAccessPath = test.info().outputPath("codex-task-access.png");
     const taskAccessScreenshot = await page
       .getByRole("dialog")
@@ -454,6 +468,24 @@ test("Codex uses one permission identity in inventory, Capabilities, observed ac
             AND user_id = '00000000-0000-0000-0000-000000000000'
             AND flag_key = 'cerebro_agent_page_redesign'`,
         [workspace.id, previousFeatureFlag.rows[0]!.enabled],
+      );
+    }
+    if (previousAccessDiagnosticsFlag.rowCount === 0) {
+      await database.query(
+        `DELETE FROM cerebro_feature_flags
+          WHERE workspace_id = $1
+            AND user_id = '00000000-0000-0000-0000-000000000000'
+            AND flag_key = 'cerebro_access_diagnostics'`,
+        [workspace.id],
+      );
+    } else {
+      await database.query(
+        `UPDATE cerebro_feature_flags
+            SET enabled = $2, updated_at = NOW()
+          WHERE workspace_id = $1
+            AND user_id = '00000000-0000-0000-0000-000000000000'
+            AND flag_key = 'cerebro_access_diagnostics'`,
+        [workspace.id, previousAccessDiagnosticsFlag.rows[0]!.enabled],
       );
     }
     await database.end();

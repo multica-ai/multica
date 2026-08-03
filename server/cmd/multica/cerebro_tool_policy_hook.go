@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -75,10 +77,12 @@ func runToolPolicyHook(cmd *cobra.Command) {
 		return
 	}
 
+	claimGeneration, _ := strconv.ParseInt(strings.TrimSpace(os.Getenv("MULTICA_TASK_MANDATE_GENERATION")), 10, 64)
 	body, _ := json.Marshal(map[string]any{
 		"workspace_id":     os.Getenv("MULTICA_WORKSPACE_ID"),
 		"agent_id":         os.Getenv("MULTICA_AGENT_ID"),
 		"task_id":          os.Getenv("MULTICA_TASK_ID"),
+		"claim_generation": claimGeneration,
 		"tool_name":        tool,
 		"resource_pattern": claudehook.ResourcePattern(tool, in.InputArgs()),
 		"args":             in.InputArgs(),

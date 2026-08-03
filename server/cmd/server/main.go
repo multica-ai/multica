@@ -473,6 +473,7 @@ func main() {
 		h.CapabilityEvidence = cerebroruntime.NewGatewayAvailabilityLedger(gatewayRuntimeCtx, h, queries)
 		mandates := cerebrotaskmandate.NewStore(pool)
 		gatewayExecutor.SetTaskMandates(mandates)
+		gatewayExecutor.SetSessionModeAllowedToolsResolver(h) // CEREBRO-PATCH(task-mandate-session-mode-parity): FIR-4292 apply the published Mode ceiling before Gateway exposure and finalization.
 		mandateFlags := cerebrodb.New(pool)
 		gatewayExecutor.SetAccessDecisionService(cerebroaccessdecision.NewService(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates).WithMandateEnforcement(func(ctx context.Context, workspaceID pgtype.UUID) bool { // CEREBRO-PATCH(task-mandate-enforcement-circuit-breaker): FIR-4220 keep duplicate Gateway decision enforcement on the same default-off workspace flag.
 			return cerebrotaskmandate.EnforcementEnabled(ctx, mandateFlags, workspaceID)

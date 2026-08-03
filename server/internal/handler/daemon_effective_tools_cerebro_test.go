@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -111,7 +112,10 @@ func TestCerebroEffectiveToolsForClaimLocksInitialPolicyAndSessionIntersection(t
 	if err != nil {
 		t.Fatalf("cerebroEffectiveToolsForClaim: unexpected error %v", err)
 	}
-	tools, mandate = filterClaimToolsForSessionMode(tools, mandate, []string{"Read", "Bash"})
+	tools, mandate, err = filterClaimToolsForSessionMode(tools, mandate, []string{"Read", "Bash"})
+	if err != nil {
+		t.Fatalf("filterClaimToolsForSessionMode: %v", err)
+	}
 	if len(mandate) != 1 || mandate[0] != "Read" {
 		t.Fatalf("initial task mandate = %v, want exact policy/runtime/session intersection [Read]", mandate)
 	}
@@ -129,6 +133,42 @@ func TestCerebroEffectiveToolsForClaimLocksInitialPolicyAndSessionIntersection(t
 	}
 	if containsString(mandate, "Bash") {
 		t.Fatalf("issued task mandate expanded after policy change: %v", mandate)
+	}
+}
+
+func TestFilterClaimToolsAcceptsSharedLegacyIdentityWithoutBroadPlatformInference(t *testing.T) {
+	tools := []AgentTaskToolEntry{
+		{Name: "Read", PolicyIdentity: "tools:Read"},
+		{Name: "Manage workflows", PolicyIdentity: ""},
+	}
+	filtered, mandate, err := filterClaimToolsForSessionMode(
+		tools,
+		[]string{"Read", "create_workflow"},
+		[]string{"tools:Read", "manage_workflows"},
+	)
+	if err != nil {
+		t.Fatalf("filterClaimToolsForSessionMode: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Name != "Read" || !slices.Equal(mandate, []string{"Read"}) {
+		t.Fatalf("filtered = %+v mandate = %v, want only exact runtime-policy alias", filtered, mandate)
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimFailsWhenProviderInventoryWasNotMeasured(t *testing.T) {
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{},
+	}
+	runtime := db.AgentRuntime{
+		Provider:     "hermes",
+		Capabilities: []byte(`{"tools":[],"discovery_method":"not_measured"}`),
+	}
+	_, _, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(), runtime,
+		&TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"},
+		"agent", "",
+	)
+	if err == nil || !strings.Contains(err.Error(), "provider inventory not measured") {
+		t.Fatalf("provider discovery failure = %v, want visible finalization error", err)
 	}
 }
 

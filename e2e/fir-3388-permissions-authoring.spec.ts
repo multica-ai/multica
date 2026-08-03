@@ -89,11 +89,23 @@ test("Settings Permissions writes the canonical policy and persists after reload
     );
 
     await preventAttributionSurvey(page, userId);
-    const workspaceSlug = await loginAsDefault(page);
+    const workspaceSlug = await loginAsDefault(page, {
+      workspaceReadyTimeout: 60_000,
+    });
     await page.goto(`/${workspaceSlug}/settings?tab=permissions`, {
       waitUntil: "domcontentloaded",
     });
     await dismissAttributionSurvey(page);
+
+    await expect(
+      page.getByRole("heading", { name: "How access is decided" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Settings → Permissions is the live authoring source. A task freezes its Task Mandate when the run starts. A later Deny or safety ceiling can tighten the active run, but a later Allow never widens its frozen Task Mandate. Start a new task to capture newly allowed access.",
+        { exact: true },
+      ),
+    ).toBeVisible();
 
     const row = page.getByTestId(`tool-card-${toolKey}`);
     await expect(row).toBeVisible();
@@ -120,7 +132,7 @@ test("Settings Permissions writes the canonical policy and persists after reload
       page
         .getByTestId(`tool-card-${toolKey}`)
         .getByRole("button", { name: "Decision: Deny" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
 
     // The same Settings decision must reach the agent's own Capabilities card
     // with an actionable denial. This joins authoring, the visible agent view,

@@ -50,6 +50,7 @@ type toolPolicyResolveRequest struct {
 	WorkspaceID     string         `json:"workspace_id"`
 	AgentID         string         `json:"agent_id"`
 	TaskID          string         `json:"task_id"`
+	ClaimGeneration int64          `json:"claim_generation"`
 	ToolName        string         `json:"tool_name"`
 	ResourcePattern string         `json:"resource_pattern"`
 	Args            map[string]any `json:"args"`
@@ -92,7 +93,7 @@ func (d *Daemon) handleToolPolicyResolve(w http.ResponseWriter, r *http.Request)
 // resolveToolPolicy performs the server round-trip + approval long-poll and
 // returns the final (allowed, reason). Transport/server errors fail closed.
 func (d *Daemon) resolveToolPolicy(ctx context.Context, req toolPolicyResolveRequest) (bool, string) {
-	res, err := d.client.ResolveToolPolicy(ctx, req.WorkspaceID, req.AgentID, req.TaskID, req.ToolName, req.ResourcePattern, req.Args)
+	res, err := d.client.ResolveToolPolicy(ctx, req.WorkspaceID, req.AgentID, req.TaskID, req.ClaimGeneration, req.ToolName, req.ResourcePattern, req.Args)
 	if err != nil {
 		return toolPolicyFailDirection(req.ToolName, err)
 	}

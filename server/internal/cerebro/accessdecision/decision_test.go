@@ -8,9 +8,10 @@ import (
 
 func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 	tests := []struct {
-		name string
-		in   EvaluationInput
-		want Decision
+		name     string
+		in       EvaluationInput
+		want     Decision
+		wantCode ReasonCode
 	}{
 		{
 			name: "canonical allow with verified evidence",
@@ -19,7 +20,8 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 				PolicyDecision:        PolicyAllow,
 				EvidenceLevel:         availabilityevidence.LevelVerified,
 			},
-			want: DecisionAllow,
+			want:     DecisionAllow,
+			wantCode: ReasonAllowed,
 		},
 		{
 			name: "unknown capability",
@@ -27,7 +29,8 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 				PolicyDecision: PolicyAllow,
 				EvidenceLevel:  availabilityevidence.LevelVerified,
 			},
-			want: DecisionDeny,
+			want:     DecisionDeny,
+			wantCode: ReasonCanonicalCapabilityUnresolved,
 		},
 		{
 			name: "live surface discovery is callable",
@@ -36,7 +39,8 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 				PolicyDecision:        PolicyAllow,
 				EvidenceLevel:         availabilityevidence.LevelDiscovered,
 			},
-			want: DecisionAllow,
+			want:     DecisionAllow,
+			wantCode: ReasonAllowed,
 		},
 		{
 			name: "declared but absent availability",
@@ -45,7 +49,8 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 				PolicyDecision:        PolicyAllow,
 				EvidenceLevel:         availabilityevidence.LevelDeclared,
 			},
-			want: DecisionDeny,
+			want:     DecisionDeny,
+			wantCode: ReasonRuntimeCapabilityUnavailable,
 		},
 		{
 			name: "approval required",
@@ -54,7 +59,8 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 				PolicyDecision:        PolicyAsk,
 				EvidenceLevel:         availabilityevidence.LevelVerified,
 			},
-			want: DecisionDeny,
+			want:     DecisionDeny,
+			wantCode: ReasonPolicyApprovalRequired,
 		},
 		{
 			name: "policy lookup failed",
@@ -63,7 +69,8 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 				PolicyDecision:        PolicyError,
 				EvidenceLevel:         availabilityevidence.LevelVerified,
 			},
-			want: DecisionDeny,
+			want:     DecisionDeny,
+			wantCode: ReasonPolicyUnavailable,
 		},
 	}
 
@@ -75,6 +82,12 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 			}
 			if got.Reason == "" {
 				t.Fatal("Evaluate() returned an empty reason")
+			}
+			if got.ReasonCode == "" {
+				t.Fatal("Evaluate() returned an empty reason code")
+			}
+			if got.ReasonCode != tt.wantCode {
+				t.Fatalf("Evaluate() reason code = %q, want %q", got.ReasonCode, tt.wantCode)
 			}
 		})
 	}
@@ -102,5 +115,8 @@ func TestNewEntryRecordsIdentityAndOneCanonicalDecision(t *testing.T) {
 	}
 	if entry.Decision != DecisionDeny {
 		t.Fatalf("canonical decision = %q, want deny", entry.Decision)
+	}
+	if entry.ReasonCode != ReasonPolicyDenied {
+		t.Fatalf("reason code = %q, want %q", entry.ReasonCode, ReasonPolicyDenied)
 	}
 }

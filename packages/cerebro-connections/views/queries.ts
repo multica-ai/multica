@@ -129,6 +129,21 @@ const DiscoveredEndpointSchema = z
   })
   .loose();
 
+const AccessDiagnosticSchema = z.object({
+  code: z.string(),
+  state: z
+    .enum(["success", "info", "partial", "stale", "empty", "denied", "unavailable", "error"])
+    .catch("info"),
+  title: z.string(),
+  message: z.string(),
+  affected_capability: z.string().optional(),
+  source_policy: z.string().default("Unknown source"),
+  recovery_action: z.string().default("Refresh the diagnostic and investigate the source."),
+  version: z.string().optional(),
+  count: z.number().optional(),
+  observed_at: z.string().optional(),
+}).loose();
+
 export const TestResultSchema = z
   .object({
     reachable: z.boolean(),
@@ -137,6 +152,7 @@ export const TestResultSchema = z
     scope_suggestions: z.array(ScopableArgSchema).optional(),
     endpoints: z.array(DiscoveredEndpointSchema).optional(),
     error: z.string().optional(),
+    diagnostics: z.array(AccessDiagnosticSchema).default([]),
   })
   .loose();
 
