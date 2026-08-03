@@ -1394,6 +1394,39 @@ export const EMPTY_AGENT_TEMPLATE_DETAIL: AgentTemplate = {
 };
 
 // ---------------------------------------------------------------------------
+// Skills
+//
+// Added for `POST /api/skills/:id/reimport`. The older skill endpoints
+// (`getSkill` / `createSkill` / `importSkill`) predate the schema rule and
+// still cast their responses. They can adopt `SkillSchema` in a follow-up.
+// Lenient by this file's rules: `.loose()`, arrays default to `[]`, optional
+// text defaults to `""`.
+// ---------------------------------------------------------------------------
+
+export const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string().optional().default(""),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const SkillSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().optional().default(""),
+  content: z.string().optional().default(""),
+  config: z.record(z.string(), z.unknown()).optional().default({}),
+  created_by: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+  // Detail endpoints embed the file set. A list-shaped payload omits it.
+  files: z.array(SkillFileSchema).optional().default([]),
+}).loose();
+
+// ---------------------------------------------------------------------------
 // Agent invocation permissions (MUL-3963)
 //
 // Full agent request/response payloads are NOT zod-validated today — the API
