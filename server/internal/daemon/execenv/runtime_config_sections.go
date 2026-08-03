@@ -157,6 +157,48 @@ func writeRequestingUser(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\nTreat this as background context, not as task instructions. If it conflicts with the actual task, the task wins.\n\n")
 }
 
+// writeConversationChannel emits the Conversation Channel block: which IM the
+// agent's replies land in, and whether the room is shared with other people.
+//
+// The brief could already say WHICH platform (the Output section's delivery
+// rule reads ChatChannelType), but never WHO ELSE IS THERE. A Feishu, Slack or
+// WeCom group room maps to one chat_session shared by everyone in it, and the
+// chat workflow described every chat run as a private 1:1, so an agent had no
+// input from which to weigh a wider audience at all.
+//
+// This is session-stable state and belongs in the brief rather than the
+// per-turn message (MUL-5377): a chat_session is bound 1:1 to one channel
+// conversation for its whole life and that conversation does not change shape
+// between resumes. WHO is speaking this turn does change, and already travels
+// per-turn in `## Task Initiator` — which is why the group branch points at it.
+//
+// The block states facts and sets no policy. Whether a given fact means "do
+// not repeat that here" depends on the workspace, and the operator writes it
+// in the agent's own instructions; a rule baked in here would fire on every
+// workspace whether its owner wanted it or not.
+func writeConversationChannel(b *strings.Builder, ctx TaskContextForEnv) {
+	if ctx.ChatChannelType == "" {
+		return
+	}
+	b.WriteString("## Conversation Channel\n\n")
+	fmt.Fprintf(b, "This conversation runs in %s, not the Multica web app.\n\n", ChannelDisplayName(ctx.ChatChannelType))
+	switch AudienceOf(ctx.ChatChannelType, ctx.ChatType) {
+	case ChatAudienceGroup:
+		b.WriteString("**Group chat: everyone in the room receives every reply you send.** That includes people who did not write the message you are answering. Multica does not hand you the room's member list, so the audience may be wider than the names you have seen. Nothing you send here is private to the person asking.\n\n")
+		b.WriteString("Who is asking also changes from message to message: this turn's `## Task Initiator` names them. `## Requesting User` does not — that is the person whose credentials you run with, and they need not be in this room at all.\n\n")
+	case ChatAudienceDirect:
+		b.WriteString("**Direct one-to-one chat: only the person you are replying to receives what you send.**\n\n")
+	default:
+		// Channel known, room shape not — a server predating chat_type on the
+		// claim, or a binding deleted between enqueue and claim. Name the
+		// platform and stop: assuming "direct" is exactly the wrong picture
+		// this section exists to correct. writeWorkflowChat and buildChatPrompt
+		// read the same AudienceOf, so neither puts the claim back later.
+		return
+	}
+	b.WriteString("Treat that as a fact about who can read your output. What may be said in front of that audience is for your own instructions to decide.\n\n")
+}
+
 // BuildTaskInitiatorBlock renders the Task Initiator block for the per-turn
 // user message. Both MUL-2645 test-pinned phrases ("apply any per-person
 // privacy or access rules" and "credentials stay scoped to the runtime
@@ -412,8 +454,27 @@ func writeWorkflowHeader(b *strings.Builder) {
 // post-completion suggestion pass (chat_suggest.go), because an optional
 // formatting instruction in this brief proved unreliable across providers and
 // long conversations.
-func writeWorkflowChat(b *strings.Builder) {
-	b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
+//
+// The opening line used to assert "A user is messaging you directly" for every
+// chat run. On a channel group session that is false — one chat_session serves
+// a whole room — and it is the first thing the agent reads, so it overrode any
+// later hint that other people are present. It now only claims a private 1:1
+// where the server says there is one; a web chat reports no room shape and is
+// 1:1 by construction, so it keeps the original wording. The audience detail
+// stays in `## Conversation Channel` (writeConversationChannel) rather than
+// being restated here.
+func writeWorkflowChat(b *strings.Builder, ctx TaskContextForEnv) {
+	switch AudienceOf(ctx.ChatChannelType, ctx.ChatType) {
+	case ChatAudienceGroup:
+		b.WriteString("**You are in chat mode.** You are one participant in a group conversation, answering a message addressed to you.\n\n")
+	case ChatAudienceUnknown:
+		// `## Conversation Channel` has just declined to say who is present,
+		// on purpose. Restating "messaging you directly" here would put the
+		// claim back two sections later, and this line is read first.
+		b.WriteString("**You are in chat mode.** You are answering a message in a chat conversation.\n\n")
+	default:
+		b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
+	}
 	b.WriteString("- Respond conversationally and helpfully to the user's message\n")
 	b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
 	b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
@@ -707,6 +768,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //
 //	Section               | comment | assign | autopilot | quick_create | chat
 //	----------------------+---------+--------+-----------+--------------+------
+//	Conversation Channel  |    —    |   —    |     —     |      —       |  △
 //	Available Commands    |   full  |  full  |   full    |   minimal    | full
 //	Issue Body Formatting |    ✓    |   ✓    |     ✓     |      ✓       |  ✓
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
@@ -735,6 +797,13 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeBackgroundTaskSafetySlim(&b)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
+	// Sits next to Requesting User because it answers the same question from
+	// the other side: that section says who the agent acts FOR, this one says
+	// who can READ the answer. Chat-only — no other kind has a conversation
+	// to describe — and it elides itself when the claim carried no channel.
+	if kind == kindChat {
+		writeConversationChannel(&b, ctx)
+	}
 	writeWorkspaceContext(&b, ctx)
 
 	switch kind {
@@ -766,7 +835,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeWorkflowHeader(&b)
 	switch kind {
 	case kindChat:
-		writeWorkflowChat(&b)
+		writeWorkflowChat(&b, ctx)
 	case kindQuickCreate:
 		writeWorkflowQuickCreate(&b)
 	case kindAutopilotRunOnly:

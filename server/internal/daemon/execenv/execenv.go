@@ -126,13 +126,23 @@ type TaskContextForEnv struct {
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
-	// "feishu"); empty for a web/mobile chat. The brief reads it for DELIVERY
-	// policy only: any non-empty value means the reply leaves Multica for an
+	// "feishu", "wecom"); empty for a web/mobile chat. Two brief sections read
+	// it. DELIVERY: any non-empty value means the reply leaves Multica for an
 	// external channel, so `multica attachment upload` cannot deliver a file and
-	// the Output section says text-only instead (MUL-4899). The orthogonal
-	// history-command policy is Slack-only and lives in the per-turn chat prompt
-	// (daemon/prompt.go) — the server has no Feishu history reader.
-	ChatChannelType         string
+	// the Output section says text-only instead (MUL-4899). CHANNEL CONTEXT:
+	// `## Conversation Channel` names the platform, and pairs it with ChatType
+	// below. The orthogonal history-command policy is Slack-only and lives in
+	// the per-turn chat prompt (daemon/prompt.go) — the server has no history
+	// reader for any other channel.
+	ChatChannelType string
+	// ChatType is the room shape behind a channel chat session — "group" when
+	// the chat_session is shared by a whole room, "p2p" for a 1:1 with the bot.
+	// Read from channel_chat_session_binding.chat_type, which every adapter
+	// writes, so this is channel-agnostic. Empty for a web chat (no binding
+	// row) or an older server. The brief's `## Conversation Channel` section
+	// reads it to tell the agent who else can read its replies; without it the
+	// brief described every chat run as a private 1:1.
+	ChatType                string
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string

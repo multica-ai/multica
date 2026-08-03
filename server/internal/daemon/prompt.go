@@ -422,7 +422,23 @@ func buildChatPrompt(task Task) string {
 
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
-	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	// "directly" is only true of a 1:1. A channel group room maps to ONE
+	// chat_session shared by everyone in it, so on a group turn this line used
+	// to assert a private conversation that does not exist — and it is the
+	// second thing the agent reads. The room's shape and who else can read the
+	// reply are stated once, in the brief's `## Conversation Channel`; this
+	// line only has to stop contradicting it. A web chat reports no shape and
+	// is 1:1 by construction, so it keeps the original wording; a channel whose
+	// shape did not arrive is not the same case and claims no audience at all
+	// (AudienceOf).
+	switch execenv.AudienceOf(task.ChatChannelType, task.ChatType) {
+	case execenv.ChatAudienceGroup:
+		b.WriteString("You are in a group conversation and someone has addressed you. Respond to their message.\n\n")
+	case execenv.ChatAudienceUnknown:
+		b.WriteString("Someone has addressed you in a chat conversation. Respond to their message.\n\n")
+	default:
+		b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	}
 	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
 	// the agent must KNOW it is operating inside that channel — otherwise an ask
 	// like "what did you just talk about" sends it to read Multica instead of the

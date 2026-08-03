@@ -2137,8 +2137,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
 			// is no history reader on any other channel, so the flag has nothing
 			// to select between there and must not imply one exists.
+			//
+			// chat_type rides along on the same row. It is what lets the
+			// runtime brief tell the agent whether this chat_session is a room
+			// shared by many people or a 1:1 with the bot; the brief used to
+			// describe every chat run as a private 1:1 whatever the room. The
+			// shared session service writes the column for every channel
+			// (channel/engine/session.go), so no channel needs naming here
+			// either.
 			if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
 				resp.ChatChannelType = binding.ChannelType
+				resp.ChatType = binding.ChatType
 				if binding.ChannelType == string(slack.TypeSlack) {
 					// The latest trigger was a thread reply iff its reply-target
 					// thread (last_thread_id) differs from its own message id (a
