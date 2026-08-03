@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   View,
@@ -57,6 +58,11 @@ import {
   pendingChatTaskOptions,
   taskMessagesOptions,
 } from "@/data/queries/chat";
+import {
+  ACTIVE_CHAT_POLL_INTERVAL_MS,
+  refetchActiveChat,
+  shouldPollActiveChat,
+} from "@/data/queries/chat-polling";
 import {
   useCreateChatSession,
   useDeleteChatSession,
@@ -92,6 +98,19 @@ export default function ChatTab() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [isAppActive, setIsAppActive] = useState(
+    () => AppState.currentState === "active",
+  );
+
+  // React Navigation tracks tab focus, not whether iOS has backgrounded the
+  // app. Keep the pull fallback strictly foreground-only so it never turns
+  // into background polling when timers happen to survive a transition.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      setIsAppActive(nextState === "active");
+    });
+    return () => sub.remove();
+  }, []);
 
   // Bridge to the chat-sessions formSheet route. Mirror local
   // activeSessionId into the store so the picker can render the current
@@ -194,6 +213,43 @@ export default function ChatTab() {
     setActiveSessionId(null);
   });
 
+  const isFocused = useIsFocused();
+
+  // A chat that becomes visible must not depend on a reconnect or a fresh WS
+  // event to catch up. This also recovers a session after a tab/app switch.
+  useFocusEffect(
+    useCallback(() => {
+      if (isAppActive && activeSessionId) {
+        void refetchActiveChat(qc, activeSessionId);
+      }
+    }, [activeSessionId, isAppActive, qc]),
+  );
+
+  // WebSocket is the fast path, not the sole source of truth. While an active
+  // task is visible, pull its messages, task pointer, and persisted progress
+  // every four seconds. Stop immediately if the tab loses focus or the task
+  // completes, so idle/background chats consume no polling traffic.
+  useEffect(() => {
+    if (
+      !activeSessionId ||
+      !shouldPollActiveChat(
+        isFocused,
+        isAppActive,
+        activeSessionId,
+        pendingTask?.task_id,
+      )
+    ) {
+      return;
+    }
+    const sessionId = activeSessionId;
+    const refresh = () => {
+      void refetchActiveChat(qc, sessionId, pendingTask?.task_id);
+    };
+    refresh();
+    const timer = setInterval(refresh, ACTIVE_CHAT_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [activeSessionId, isAppActive, isFocused, pendingTask?.task_id, qc]);
+
   // Exit text-selection mode whenever the chat tab loses focus. Expo
   // Router bottom tabs stay mounted across tab switches, so a plain
   // useEffect cleanup wouldn't fire — useFocusEffect is the navigation-
@@ -203,7 +259,6 @@ export default function ChatTab() {
   );
 
   // ── Auto markRead while viewing a session with unread state ──────────
-  const isFocused = useIsFocused();
   const markRead = useMarkChatSessionRead();
   useEffect(() => {
     if (!isFocused) return;
