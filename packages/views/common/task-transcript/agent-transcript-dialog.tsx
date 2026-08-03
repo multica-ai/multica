@@ -504,6 +504,7 @@ export function AgentTranscriptDialog({
     : null;
   const failureCardEnabled = useFlagValue("cerebro_run_failure_card"); // CEREBRO-PATCH(run-failure-card): FIR-3782 — gate the failure summary card.
   const failedRunActionsEnabled = useFlagValue("cerebro_failed_run_bar"); // CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — same flag as the failed-run alert.
+  const taskAccessDiagnosticsEnabled = useFlagValue("cerebro_task_mandate_diagnostics"); // CEREBRO-PATCH(task-access-diagnostics): FIR-4293 — keep evidence independently switchable from enforcement.
   const hasRunDetails =
     !!runtimeInfo ||
     !!task.relative_work_dir ||
@@ -781,7 +782,7 @@ export function AgentTranscriptDialog({
         <RunPromptDisclosure task={task} />
         {/* CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot. */}
         {/* CEREBRO-PATCH(task-access-diagnostics): FIR-4293 shared disclosure loads its read model. */}
-        <TaskAccessDisclosure taskId={task.id} />
+        {taskAccessDiagnosticsEnabled ? <TaskAccessDisclosure taskId={task.id} /> : null}
 
         {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and density. */}
         {failureCardEnabled && task.status === "failed" && (

@@ -38,6 +38,7 @@ const (
 	CodeTaskDraft           Code = "task_not_finalized"
 	CodeTaskMissing         Code = "task_mandate_missing"
 	CodeObservedDenial      Code = "observed_denial"
+	CodeDecisionLedgerError Code = "decision_ledger_unavailable"
 )
 
 // Diagnostic is the additive wire shape shared by REST, CLI, MCP and the app.
@@ -132,6 +133,10 @@ func BuildRuntimeDiagnostics(in RuntimeInput) RuntimeReport {
 	}
 
 	configuredServers := cleanNames(stringSlice(in.Capabilities["mcp_servers"]))
+	configuredServerSet := make(map[string]struct{}, len(configuredServers))
+	for _, serverName := range configuredServers {
+		configuredServerSet[serverName] = struct{}{}
+	}
 	mcpNames := make([]string, 0, len(in.Tools))
 	type serverEvidence struct {
 		count            int
@@ -144,6 +149,9 @@ func BuildRuntimeDiagnostics(in RuntimeInput) RuntimeReport {
 			continue
 		}
 		serverName := strings.TrimSpace(tool.MCPServerName)
+		if _, configured := configuredServerSet[serverName]; !configured {
+			continue
+		}
 		mcpNames = append(mcpNames, serverName+":"+strings.TrimSpace(tool.Name))
 		evidence := serverEvidenceByName[serverName]
 		evidence.count++
@@ -296,6 +304,7 @@ type TaskInput struct {
 	VerdictMessage     string
 	RecoveryAction     string
 	Ledger             []DecisionEvidence
+	LedgerError        string
 }
 
 func BuildTaskDiagnostics(in TaskInput) []Diagnostic {
@@ -306,6 +315,14 @@ func BuildTaskDiagnostics(in TaskInput) []Diagnostic {
 			Message:            "Task Mandate enforcement is off. The snapshot is recorded for comparison but cannot reject calls.",
 			AffectedCapability: "task:*", SourcePolicy: "Task Mandate",
 			RecoveryAction: "Keep the rollout off until observation shows clean provider, discovery and policy parity.",
+		})
+	}
+	if strings.TrimSpace(in.LedgerError) != "" {
+		out = append(out, Diagnostic{
+			Code: CodeDecisionLedgerError, State: StateError, Title: "Decision telemetry unavailable",
+			Message:            "The task access decision ledger could not be read, so denial history may be incomplete.",
+			AffectedCapability: "task:*", SourcePolicy: "Decision Ledger",
+			RecoveryAction: "Retry the diagnostic read and investigate Decision Ledger storage before enabling enforcement.",
 		})
 	}
 	if in.Status == "expired" {

@@ -384,10 +384,8 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid task scope", http.StatusForbidden)
 			return
 		}
-		if h.taskMandateEnforcementEnabled(r.Context(), workspaceID) {
-			generation, _ := strconv.ParseInt(strings.TrimSpace(r.Header.Get("X-Task-Mandate-Generation")), 10, 64)
-			ApplyTaskMandate(r.Context(), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card, generation)
-		}
+		generation, _ := strconv.ParseInt(strings.TrimSpace(r.Header.Get("X-Task-Mandate-Generation")), 10, 64)
+		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card, generation) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
 	}
 	writeJSON(w, http.StatusOK, card)
 }
@@ -405,8 +403,8 @@ type agentCapabilityTaskMandateGeneration interface {
 // ApplyTaskMandate overlays the immutable task ceiling on every callable the
 // capabilities card reports. Platform families resolve through their exact
 // ToolBindings; a broad permission key is never inferred as a callable grant.
-func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities, claimGeneration ...int64) {
-	if mandates == nil || card == nil || !taskID.Valid {
+func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities, claimGeneration ...int64) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
+	if !enforcementEnabled || mandates == nil || card == nil || !taskID.Valid {
 		return
 	}
 	for i := range card.Tools {

@@ -305,7 +305,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "get_eval", Description: "Get one versioned eval contract. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
 	{Name: "get_eval_schedule", Description: "Get one eval's recurring schedule. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}/schedule.", Status: ToolStatusExcluded},
 	// CEREBRO-PATCH(runtime-access-diagnostics-matrix): FIR-4293 keep the shared read-only diagnostic in the complete CLI-runtime MCP inventory without treating it as an always-callable Gateway grant.
-	{Name: "get_runtime_access_diagnostics", Description: "Read one Runtime's provider capability probe and MCP tools/list diagnostics through the shared REST contract. CLI-runtime MCP tool over GET /api/runtimes/{runtimeId}/access-diagnostics.", Status: ToolStatusExcluded},
+	{Name: "get_runtime_access_diagnostics", Description: "Read one Runtime's provider capability probe and MCP tools/list diagnostics through the shared REST contract. Bridged into both local MCP and the Firtal Gateway over GET /api/runtimes/{runtimeId}/access-diagnostics.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_group", Description: "Fetch one workspace group.", Status: ToolStatusExcluded},
 	{Name: "get_issue", Description: "Get full details of a Multica issue: title, description, status, priority, and comments.", Status: ToolStatusImplemented},
 	{Name: "get_me", Description: "Return the calling agent's ID, name, and workspace context.", Status: ToolStatusImplemented},

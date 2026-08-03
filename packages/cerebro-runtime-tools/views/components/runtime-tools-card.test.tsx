@@ -7,6 +7,7 @@ import type { AgentRuntime } from "@multica/core/types/agent";
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockGetRuntimeAccessDiagnostics = vi.hoisted(() => vi.fn());
+const diagnosticsFlag = vi.hoisted(() => ({ enabled: false }));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -24,7 +25,7 @@ vi.mock("@multica/core/api", async () => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => false }));
+vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => diagnosticsFlag.enabled }));
 
 import { RuntimeToolsCard } from "./runtime-tools-card";
 
@@ -55,6 +56,7 @@ function renderWithClient(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  diagnosticsFlag.enabled = false;
   mockListRuntimeTools.mockReset();
   mockCerebroRequest.mockReset();
   mockGetRuntimeAccessDiagnostics.mockReset();
@@ -97,6 +99,18 @@ describe("RuntimeToolsCard", () => {
 
     expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
     expect(screen.queryByText(/none specific/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Capability discovery")).not.toBeInTheDocument();
+    expect(mockGetRuntimeAccessDiagnostics).not.toHaveBeenCalled();
+  });
+
+  it("loads capability diagnostics when the diagnostics feature flag is on", async () => {
+    diagnosticsFlag.enabled = true;
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    expect(await screen.findByText("Capability discovery")).toBeInTheDocument();
+    await waitFor(() => expect(mockGetRuntimeAccessDiagnostics).toHaveBeenCalledTimes(1));
   });
 
   it("keeps the live scan-now inventory action", async () => {
@@ -114,6 +128,7 @@ describe("RuntimeToolsCard", () => {
   });
 
   it("shows provider probe and MCP discovery as separate diagnostics", async () => {
+    diagnosticsFlag.enabled = true;
     renderWithClient(
       <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
     );

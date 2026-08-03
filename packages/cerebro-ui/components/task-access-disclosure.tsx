@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, LockKeyhole, RefreshCw } from "lucide-react";
 import { api } from "@multica/core/api";
 import type { AccessDiagnostic, TaskAccessSnapshot } from "@multica/core/types";
@@ -24,28 +24,16 @@ export function TaskAccessDisclosure({
   taskId: string;
   load?: TaskAccessLoader;
 }) {
-  const [snapshot, setSnapshot] = useState<TaskAccessSnapshot | null>(null);
-  const [errorDiagnostics, setErrorDiagnostics] = useState<AccessDiagnostic[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const snapshotQuery = useQuery({
+    queryKey: ["cerebro", "task-access", taskId],
+    queryFn: () => load(taskId),
+  });
+  const snapshot = snapshotQuery.data ?? null;
+  const errorDiagnostics = snapshotQuery.isError
+    ? diagnosticsFromError(snapshotQuery.error, taskId)
+    : null;
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setErrorDiagnostics(null);
-    try {
-      setSnapshot(await load(taskId));
-    } catch (cause) {
-      setSnapshot(null);
-      setErrorDiagnostics(diagnosticsFromError(cause, taskId));
-    } finally {
-      setLoading(false);
-    }
-  }, [load, taskId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  if (loading && !snapshot) {
+  if (snapshotQuery.isPending && !snapshot) {
     return (
       <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground" role="status">
         Loading Task access…
@@ -67,7 +55,7 @@ export function TaskAccessDisclosure({
       <div className="rounded-md border border-destructive/40 bg-card p-3">
         <div className="space-y-3">
           <AccessDiagnostics diagnostics={diagnostics} />
-          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => void refresh()}>
+          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => void snapshotQuery.refetch()}>
             <RefreshCw className="size-3" /> Retry
           </Button>
         </div>

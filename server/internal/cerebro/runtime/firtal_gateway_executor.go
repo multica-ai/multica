@@ -1064,7 +1064,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// on_behalf_of-enabled connections stamp the agent's delegated identity.
 	ctx = WithConnectionAgent(ctx, meta.AgentID)
 	var taskMandateGeneration int64
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled(ctx, workspaceID), TaskMandateGeneration: &taskMandateGeneration} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398: thread the self-lookup card provider and task mandate.
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled, TaskMandateGeneration: &taskMandateGeneration} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398/FIR-4289: thread the self-lookup card provider, mandate generation, and circuit breaker.
 	if taskID, err := util.ParseUUID(meta.TaskID); err == nil {
 		tctx.TaskID = taskID
 		if e.queries != nil {

@@ -54,7 +54,7 @@ func TestApplyTaskMandateDeniesAPIConnectionEndpointOnCapabilitiesCard(t *testin
 		Name:      "infisical-admin",
 		Endpoints: []AgentCapabilityConnEndpoint{{Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true}},
 	}}}
-	ApplyTaskMandate(context.Background(), rejectingCapabilityMandate{denied: map[string]bool{"infisical_admin__get_secrets": true}}, id, id, id, &card)
+	ApplyTaskMandate(context.Background(), true, rejectingCapabilityMandate{denied: map[string]bool{"infisical_admin__get_secrets": true}}, id, id, id, &card)
 	got := card.Connections[0].Endpoints[0]
 	if got.Permission != "deny" || got.Allowed || got.Callable || got.BlockedReason == "" || got.HowToFix == "" || got.Verdict == nil || got.Verdict.Code != taskmandate.VerdictToolNotAuthorized {
 		t.Fatalf("API endpoint mandate denial must be visible on the capabilities card: %+v", got)
@@ -67,7 +67,7 @@ func TestApplyTaskMandateUsesExactPlatformToolBindings(t *testing.T) {
 		Key: "read_issues", Permission: "allow", Allowed: true, Callable: true,
 	}}}
 
-	ApplyTaskMandate(context.Background(), rejectingCapabilityMandate{
+	ApplyTaskMandate(context.Background(), true, rejectingCapabilityMandate{
 		denied: map[string]bool{
 			"list_issues": true, "get_issue": true, "search_issues": true,
 			"list_comments": true, "list_sessions": true,
@@ -89,9 +89,35 @@ func TestApplyTaskMandateUsesClaimGenerationWhenProvided(t *testing.T) {
 	card := AgentCapabilities{Tools: []AgentCapabilityTool{{
 		Key: "create_issue", Permission: "allow", Allowed: true, Callable: true,
 	}}}
-	ApplyTaskMandate(context.Background(), mandate, id, id, id, &card, 22)
+	ApplyTaskMandate(context.Background(), true, mandate, id, id, id, &card, 22)
 	if mandate.generation != 22 || card.Tools[0].Verdict == nil || card.Tools[0].Verdict.Code != taskmandate.VerdictStaleGeneration {
 		t.Fatalf("generation overlay = %d/%+v, want 22/task_generation_stale", mandate.generation, card.Tools[0])
+	}
+}
+
+func TestApplyTaskMandateDisabledPreservesResolvedPermissions(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Connections: []AgentCapabilityConnection{{
+		Name: "infisical-admin",
+		Endpoints: []AgentCapabilityConnEndpoint{
+			{Path: "/allowed", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true},
+			{Path: "/denied", Methods: []string{"GET"}, Permission: "deny", Allowed: false, Callable: false, BlockedReason: "Tool Policy denied the capability"},
+		},
+	}}}
+	mandates := rejectingCapabilityMandate{denied: map[string]bool{
+		"infisical_admin__get_allowed": true,
+		"infisical_admin__get_denied":  true,
+	}}
+
+	ApplyTaskMandate(context.Background(), false, mandates, id, id, id, &card)
+
+	allowed := card.Connections[0].Endpoints[0]
+	if allowed.Permission != "allow" || !allowed.Allowed || !allowed.Callable || allowed.BlockedReason != "" {
+		t.Fatalf("disabled Task Mandate changed Tool Policy Allow: %+v", allowed)
+	}
+	denied := card.Connections[0].Endpoints[1]
+	if denied.Permission != "deny" || denied.Allowed || denied.Callable || denied.BlockedReason != "Tool Policy denied the capability" {
+		t.Fatalf("disabled Task Mandate changed Tool Policy Deny: %+v", denied)
 	}
 }
 

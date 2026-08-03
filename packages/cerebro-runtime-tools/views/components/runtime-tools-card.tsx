@@ -10,6 +10,7 @@ import { api } from "@multica/core/api";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { AccessDiagnostics } from "@multica/cerebro-ui";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { ToolPolicyTabs } from "@multica/cerebro-tool-policy/views";
 import { toolPolicyKeys } from "@multica/cerebro-tool-policy/core";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,6 +36,7 @@ export function RuntimeToolsCard({
 }: RuntimeToolsCardProps) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId() || workspaceId;
+  const diagnosticsEnabled = useFeatureFlag("cerebro_task_mandate_diagnostics");
   const [scanning, setScanning] = useState(false);
   const toolsQuery = useQuery({
     queryKey: runtimeToolsKey(runtime.id),
@@ -43,6 +45,7 @@ export function RuntimeToolsCard({
   const diagnosticsQuery = useQuery({
     queryKey: runtimeAccessDiagnosticsKey(runtime.id),
     queryFn: () => api.getRuntimeAccessDiagnostics(runtime.id),
+    enabled: diagnosticsEnabled,
   });
   const lastScannedAt = useMemo(() => {
     let newest: string | null = null;
@@ -89,7 +92,7 @@ export function RuntimeToolsCard({
   return (
     <div className="space-y-4">
       <SandboxProfileCard runtime={runtime} wsId={wsId} canEdit={canEdit} />
-      <section className="rounded-md border bg-card" aria-labelledby="runtime-capability-discovery">
+      {diagnosticsEnabled ? <section className="rounded-md border bg-card" aria-labelledby="runtime-capability-discovery">
         <div className="border-b p-4">
           <h3 id="runtime-capability-discovery" className="text-sm font-medium">
             Capability discovery
@@ -120,7 +123,7 @@ export function RuntimeToolsCard({
             />
           )}
         </div>
-      </section>
+      </section> : null}
       <div className="rounded-md border bg-card">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
           <div>

@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
+import type React from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiClient, setApiInstance } from "@multica/core/api";
 import type { TaskAccessSnapshot } from "@multica/core/types";
 
 import { TaskAccessDisclosure } from "./task-access-disclosure";
+
+function renderDisclosure(node: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+}
 
 const snapshot = {
   enforcement_enabled: false,
@@ -40,7 +47,7 @@ describe("TaskAccessDisclosure", () => {
   it("shows loading and then the observation-only frozen ceiling", async () => {
     let resolve!: (value: typeof snapshot) => void;
     const load = vi.fn(() => new Promise<typeof snapshot>((done) => { resolve = done; }));
-    render(<TaskAccessDisclosure taskId="task-1" load={load} />);
+    renderDisclosure(<TaskAccessDisclosure taskId="task-1" load={load} />);
 
     expect(screen.getByText("Loading Task access…")).toBeInTheDocument();
     resolve(snapshot);
@@ -56,14 +63,14 @@ describe("TaskAccessDisclosure", () => {
     const load = vi.spyOn(client, "getTaskAccess").mockResolvedValue(snapshot);
     setApiInstance(client);
 
-    render(<TaskAccessDisclosure taskId="task-1" />);
+    renderDisclosure(<TaskAccessDisclosure taskId="task-1" />);
 
     expect(await screen.findByText("Observation only")).toBeInTheDocument();
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
   });
 
   it("shows a recoverable error instead of hiding Task access", async () => {
-    render(
+    renderDisclosure(
       <TaskAccessDisclosure
         taskId="task-1"
         load={vi.fn().mockRejectedValue(new Error("network unavailable"))}
@@ -90,7 +97,7 @@ describe("TaskAccessDisclosure", () => {
         }],
       },
     });
-    render(<TaskAccessDisclosure taskId="task-1" load={vi.fn().mockRejectedValue(error)} />);
+    renderDisclosure(<TaskAccessDisclosure taskId="task-1" load={vi.fn().mockRejectedValue(error)} />);
 
     expect(await screen.findByText("Task access snapshot missing")).toBeInTheDocument();
     expect(screen.getByText("Task Mandate")).toBeInTheDocument();
@@ -98,7 +105,7 @@ describe("TaskAccessDisclosure", () => {
   });
 
   it("shows the empty capability state explicitly", async () => {
-    render(
+    renderDisclosure(
       <TaskAccessDisclosure
         taskId="task-1"
         load={vi.fn().mockResolvedValue({

@@ -1,5 +1,52 @@
 # VERIFY — firtal-cerebro
 
+**This file is the single source of truth for how work in this repository is
+verified.** CLAUDE.md points here and does not restate the commands, so the two
+cannot drift.
+
+Never mark work complete, open a PR, or claim a fix works without green checks.
+Evidence before assertions.
+
+## 0. Which check command to run
+
+`check`, `check-main` and `check-worktree` all run the same `scripts/check.sh`
+(typecheck, TS unit tests, Go tests, E2E). They differ only in which env file
+they load, and loading the wrong one runs the pipeline against another
+checkout's database and ports.
+
+| Where you are | Command | Env file |
+|---|---|---|
+| A git worktree | `make check-worktree` | `.env.worktree` |
+| The main checkout | `make check` | `.env` |
+| Forcing the main checkout from inside a worktree | `make check-main` | `.env` |
+
+`.env.worktree` exists in a worktree and not in a main checkout — that is how
+you tell which you are in. `multica repo checkout` and `git worktree add` both
+produce worktrees.
+
+Workflow: write code, run the command for your checkout, read any failure
+output, fix, re-run until green. Only then is the task complete.
+
+**Quick iteration.** While iterating, run only the layer you touched, then
+finish with the full command above before claiming done:
+
+```sh
+pnpm typecheck              # TypeScript type errors only
+pnpm test                   # TS unit tests only (Vitest, all packages)
+make test                   # Go tests only
+pnpm exec playwright test   # E2E only (requires backend + frontend running)
+```
+
+Single tests:
+
+```sh
+pnpm --filter @multica/views exec vitest run auth/login-page.test.tsx
+cd server && go test ./internal/handler/ -run TestName
+pnpm exec playwright test e2e/tests/specific-test.spec.ts
+```
+
+## Functional proof (browser contracts)
+
 The functional proof runs against `localhost` with an isolated worktree
 database. Do not use staging, production, Cloudflare Access, or shared
 credentials for this contract.
@@ -42,11 +89,8 @@ git diff --exit-code -- server/cmd/multica/cerebro_feature_catalog.json
 pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts e2e/fir-3388-capabilities.spec.ts e2e/fir-3755-service-tokens.spec.ts --project=chromium
 ```
 
-Run the complete repository contract before delivery:
-
-```sh
-make check-worktree
-```
+Then run the complete repository contract for your checkout — see the table in
+section 0.
 
 Required CI checks:
 
@@ -74,3 +118,17 @@ make stop-worktree
 Do not run `make db-down` from a worktree because PostgreSQL is shared with
 other checkouts. The browser specs remove their own test records, including
 revoked service-token rows and audit rows.
+
+## 5. Agent-context changes
+
+Changes to the runtime brief, to always-on skill propagation, or to the
+agent-context API are covered by:
+
+```sh
+cd server && go test ./internal/daemon/execenv/ -run "AlwaysOn|Brief"
+cd server && go test ./internal/handler/ -run AlwaysOn
+```
+
+After changing anything an agent reads, also run
+`multica agent context lint <agent-id>` and confirm every remaining finding is
+documented and justified.

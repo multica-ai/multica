@@ -61,9 +61,10 @@ type ToolContext struct {
 	// self-lookup applies it to the returned card so the answer matches the same
 	// call-time guard every tool execution passes through.
 	TaskMandates taskMandateStore
-	// TaskMandateEnforcement is the workspace circuit-breaker verdict captured
-	// for this run. A stored snapshot remains diagnostic when this is false.
-	TaskMandateEnforcement bool
+	// TaskMandateEnforcement is the shared workspace circuit breaker used by
+	// the capability self-lookup. A stored snapshot remains diagnostic when it
+	// returns false.
+	TaskMandateEnforcement func(context.Context, pgtype.UUID) bool
 	// TaskMandateGeneration points at the generation finalized after the exact
 	// provider tool list is known. Tools read it only after the call-time guard.
 	TaskMandateGeneration *int64

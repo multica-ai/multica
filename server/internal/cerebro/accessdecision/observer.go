@@ -3,6 +3,7 @@ package accessdecision
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
@@ -135,7 +136,9 @@ func (s *Service) Decide(ctx context.Context, call Call) Entry {
 		entry.Reason = "task mandate denied the call"
 	}
 	if s != nil && s.writer != nil {
-		_ = s.writer.Append(ctx, entry)
+		if err := s.writer.Append(ctx, entry); err != nil {
+			slog.ErrorContext(ctx, "append access decision ledger entry", "error", err, "task_id", entry.TaskID, "tool", entry.ObservedToolName)
+		}
 	}
 	return entry
 }
@@ -163,7 +166,9 @@ func (s *Service) RecordTaskMandateDenial(ctx context.Context, call Call, verdic
 	entry.Decision = DecisionDeny
 	entry.Reason = fmt.Sprintf("task mandate %s: %s", verdictCode, message)
 	if s != nil && s.writer != nil {
-		_ = s.writer.Append(ctx, entry)
+		if err := s.writer.Append(ctx, entry); err != nil {
+			slog.ErrorContext(ctx, "append task mandate denial ledger entry", "error", err, "task_id", entry.TaskID, "tool", entry.ObservedToolName)
+		}
 	}
 	return entry
 }

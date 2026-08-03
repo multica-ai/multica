@@ -14,6 +14,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -279,6 +280,7 @@ func (h *Handler) GetRuntimeAccessDiagnostics(w http.ResponseWriter, r *http.Req
 		return
 	}
 	evidence := make([]accessdiagnostics.RuntimeToolEvidence, 0, len(tools))
+	var providerObservedAt time.Time
 	for _, tool := range tools {
 		row := accessdiagnostics.RuntimeToolEvidence{
 			Name:          tool.Name,
@@ -288,6 +290,9 @@ func (h *Handler) GetRuntimeAccessDiagnostics(w http.ResponseWriter, r *http.Req
 		if tool.LastScannedAt != nil {
 			row.LastScannedAt, _ = time.Parse(time.RFC3339Nano, *tool.LastScannedAt)
 		}
+		if row.MCPServerName == "" && !strings.EqualFold(row.Source, "mcp") && row.LastScannedAt.After(providerObservedAt) {
+			providerObservedAt = row.LastScannedAt
+		}
 		evidence = append(evidence, row)
 	}
 	writeJSON(w, http.StatusOK, accessdiagnostics.BuildRuntimeDiagnostics(accessdiagnostics.RuntimeInput{
@@ -295,7 +300,7 @@ func (h *Handler) GetRuntimeAccessDiagnostics(w http.ResponseWriter, r *http.Req
 		Provider:           rt.Provider,
 		Status:             rt.Status,
 		Capabilities:       normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig),
-		ProviderObservedAt: rt.UpdatedAt.Time,
+		ProviderObservedAt: providerObservedAt,
 		Tools:              evidence,
 		Now:                time.Now(),
 		StaleAfter:         30 * time.Minute,

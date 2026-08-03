@@ -134,6 +134,28 @@ func TestBuildRuntimeDiagnosticsChecksEveryConfiguredMCPServer(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeDiagnosticsExcludesLegacyMCPRowsFromCurrentInventory(t *testing.T) {
+	now := time.Date(2026, 8, 3, 1, 0, 0, 0, time.UTC)
+	report := BuildRuntimeDiagnostics(RuntimeInput{
+		RuntimeID: "runtime-1", Provider: "claude", Status: "online",
+		Capabilities: map[string]any{
+			"discovery_method": "probed",
+			"tools":            []string{"Read"},
+			"mcp_servers":      []string{"current"},
+		},
+		ProviderObservedAt: now.Add(-5 * time.Minute),
+		Tools: []RuntimeToolEvidence{
+			{Name: "search", Source: "mcp", MCPServerName: "current", LastScannedAt: now.Add(-5 * time.Minute)},
+			{Name: "legacy", Source: "mcp", MCPServerName: "removed", LastScannedAt: now.Add(-5 * time.Minute)},
+		},
+		Now: now, StaleAfter: 30 * time.Minute,
+	})
+	got := report.Diagnostics[1]
+	if got.State != StateSuccess || got.Count != 1 || got.Version != Version([]string{"current:search"}) {
+		t.Fatalf("MCP diagnostic included deconfigured evidence: %#v", got)
+	}
+}
+
 func TestBuildConnectionDiagnosticsPinsStableDiscoveryVersion(t *testing.T) {
 	now := time.Date(2026, 8, 2, 20, 0, 0, 0, time.UTC)
 	a := BuildConnectionDiagnostics(ConnectionInput{
@@ -193,6 +215,23 @@ func TestBuildTaskDiagnosticsExplainsFrozenCeilingAndObservedDenial(t *testing.T
 	if denied.AffectedCapability != "connection:company-brain/search" || denied.SourcePolicy != "Settings → Permissions" || denied.RecoveryAction == "" {
 		t.Fatalf("denial diagnostic = %#v", denied)
 	}
+}
+
+func TestBuildTaskDiagnosticsReportsDecisionLedgerReadFailure(t *testing.T) {
+	diagnostics := BuildTaskDiagnostics(TaskInput{
+		EnforcementEnabled: false,
+		Status:             "active",
+		LifecycleState:     "finalized",
+		OfferedCount:       1,
+		AuthorizedCount:    1,
+		LedgerError:        "database unavailable",
+	})
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == CodeDecisionLedgerError && diagnostic.State == StateError {
+			return
+		}
+	}
+	t.Fatalf("decision ledger error diagnostic missing: %#v", diagnostics)
 }
 
 func TestBuildTaskDiagnosticsUsesEnforcedDenialAndExactSource(t *testing.T) {

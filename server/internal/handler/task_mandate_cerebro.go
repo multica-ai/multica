@@ -90,6 +90,7 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	decisionEvidence := make([]accessdiagnostics.DecisionEvidence, 0)
+	var decisionLedgerError string
 	if h.CerebroQueries != nil {
 		rows, listErr := h.CerebroQueries.ListTaskAccessDecisionDiagnostics(r.Context(), taskUUID)
 		if listErr == nil {
@@ -108,6 +109,8 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 				}
 				decisionEvidence = append(decisionEvidence, evidence)
 			}
+		} else {
+			decisionLedgerError = listErr.Error()
 		}
 	}
 	diagnostics := accessdiagnostics.BuildTaskDiagnostics(accessdiagnostics.TaskInput{
@@ -121,6 +124,7 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 		VerdictMessage:     verdict.Message,
 		RecoveryAction:     string(verdict.RecoveryAction),
 		Ledger:             decisionEvidence,
+		LedgerError:        decisionLedgerError,
 	})
 	writeJSON(w, http.StatusOK, taskMandateResponse{
 		EnforcementEnabled:   enforcementEnabled,
