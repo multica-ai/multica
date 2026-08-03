@@ -1597,15 +1597,16 @@ const (
 )
 
 // probeBuiltinRuntime resolves and version-detects one built-in provider,
-// retrying a fast failure up to runtimeVersionProbeAttempts times. It returns
-// false when the provider must be dropped from this round's registration
-// payload: its version could not be detected, or it is below the minimum
-// supported version.
+// retrying a fast failure up to runtimeVersionProbeAttempts times. The verdict
+// tells the caller how to treat a drop: builtinProbeUnavailable means the
+// version could not be read (or not understood) — transient, leave whatever is
+// registered alone — while builtinProbeBelowMinimum is a confirmed too-old
+// verdict the caller may demote on. See builtinProbeVerdict.
 //
-// The second return value is a short human-readable reason when ok is false.
-// It is surfaced on /health as skipped_agents so a user can tell "CLI not
-// installed" apart from "CLI installed but dropped at registration", which was
-// previously only visible in the daemon log (MUL-5439).
+// The second return value is a short human-readable reason when the verdict is
+// not OK. It is surfaced on /health as skipped_agents so a user can tell "CLI
+// not installed" apart from "CLI installed but dropped at registration", which
+// was previously only visible in the daemon log (MUL-5439).
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
 	var (
 		lastErr  error
