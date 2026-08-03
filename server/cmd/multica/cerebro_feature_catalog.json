@@ -491,6 +491,13 @@
       "default": false
     },
     {
+      "key": "cerebro_task_scope_enforcement",
+      "label": "Task scope enforcement",
+      "description": "Require task tokens to match their bound issue, agent, and workspace on routes guarded by AllowTaskScopeForIssue, AllowTaskScopeForAgent, or AllowTaskScopeForWorkspace. Off bypasses only those three route matchers; Permissions, approvals, credentials, Connections, sandbox, repository, and every other security boundary remain active. Default ON. FIR-4076.",
+      "group": "permissions",
+      "default": true
+    },
+    {
       "key": "cerebro_approvals",
       "label": "Approval inbox",
       "description": "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. The inbox remains visible whenever Tool approval enforcement is on, so an Ask can never wait without a human decision path. FIR-2131, FIR-3388.",

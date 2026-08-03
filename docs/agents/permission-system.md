@@ -139,6 +139,14 @@ inline query and realtime subscriptions use that same combined condition. This
 prevents an active Ask gate from hiding the human decision path. Neither flag
 disables the server permission floor.
 
+`cerebro_task_scope_enforcement` is a default-on workspace circuit breaker for
+only the resource matching performed by `AllowTaskScopeForIssue`,
+`AllowTaskScopeForAgent`, and `AllowTaskScopeForWorkspace`. Turning it off lets
+task tokens cross those three route-match boundaries, but does not bypass the
+Task Mandate, Permissions, approval, credential, Connection, sandbox,
+repository, membership, actor, or handler-specific gates that remain composed
+on the request. User-token behavior is unchanged.
+
 > **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
 > gate IS deciding a call (question 1), a workspace uses the
 > *member-override* model — a member's own Allow/Ask/Deny overrides an inherited
