@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -101,12 +102,31 @@ var (
 	errSkillOverwriteNotFound     = errors.New("target skill not found")
 	errSkillOverwriteForbidden    = errors.New("not permitted to overwrite target skill")
 	errSkillOverwriteNameMismatch = errors.New("target skill name does not match the imported skill")
+	errSkillOverwriteStale        = errors.New("target skill changed since it was read")
+)
+
+// skillOverwriteAuthz names the permission rule overwriteSkillWithFiles
+// applies. It evaluates the rule inside the write transaction. Callers pass a
+// rule, not a verdict: the reimport path fetches the upstream bundle for up to
+// importFetchTimeout after its request-time check, and the caller can lose
+// access in that window.
+type skillOverwriteAuthz int
+
+const (
+	// overwriteAuthzCreatorOnly is the default. Only the creator may overwrite
+	// the skill (see canOverwriteSkillByLocalImport). Used by the local-import
+	// and import-conflict paths.
+	overwriteAuthzCreatorOnly skillOverwriteAuthz = iota
+	// overwriteAuthzCreatorOrManager matches canManageSkill. The caller must
+	// still be a workspace member, and be an owner/admin or the creator. Used
+	// by the reimport path.
+	overwriteAuthzCreatorOrManager
 )
 
 type skillOverwriteInput struct {
 	WorkspaceID   pgtype.UUID
 	TargetSkillID pgtype.UUID
-	UserID        string // re-checked against the skill creator inside the tx
+	UserID        string // re-checked against Authz inside the tx
 	// ExpectedName, when non-empty, must equal the target's current name. Guards
 	// against a client sending the wrong target_skill_id and overwriting a
 	// different skill than the one the conflict dialog showed the user. The
@@ -116,20 +136,62 @@ type skillOverwriteInput struct {
 	Content      string
 	Config       any
 	Files        []CreateSkillFileRequest
-	// AllowWorkspaceManager lets a workspace owner/admin who is not the skill's
-	// creator overwrite it. The reimport path sets this because ReimportSkill
-	// already authorized the caller via canManageSkill (owner/admin/creator);
-	// the import-conflict overwrite path leaves it false to keep its stricter
-	// creator-only rule (see canOverwriteSkillByLocalImport).
-	AllowWorkspaceManager bool
+	// Authz selects the permission rule re-evaluated inside the tx. The zero
+	// value is creator-only.
+	Authz skillOverwriteAuthz
+	// ExpectedUpdatedAt, when valid, must equal the target's current
+	// updated_at. Otherwise the overwrite fails with errSkillOverwriteStale.
+	// A caller that reads the skill, does slow work, then writes passes the
+	// value it read. An edit made in that window is then reported, not
+	// discarded. Leave it zero to skip the check.
+	ExpectedUpdatedAt pgtype.Timestamptz
 }
 
-// overwriteSkillWithFiles re-imports a bundle onto an existing skill in a single
-// transaction. It re-verifies, inside that tx, that the target still exists in
-// the workspace and that UserID may overwrite it (creator-only — see
-// canOverwriteSkillByLocalImport). A target deleted or a creator change between
-// the user's confirm and this write fails cleanly via errSkillOverwriteNotFound
-// / errSkillOverwriteForbidden rather than falling back to create.
+// authorizeSkillOverwrite applies input.Authz to state read through qtx. It
+// therefore sees the membership and skill row as of the write transaction, not
+// as of the request's opening checks.
+func authorizeSkillOverwrite(ctx context.Context, qtx *db.Queries, input skillOverwriteInput, existing db.Skill) error {
+	isCreator := canOverwriteSkillByLocalImport(input.UserID, existing)
+	if input.Authz == overwriteAuthzCreatorOnly {
+		if !isCreator {
+			return errSkillOverwriteForbidden
+		}
+		return nil
+	}
+
+	userUUID, err := util.ParseUUID(input.UserID)
+	if err != nil {
+		return errSkillOverwriteForbidden
+	}
+	member, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userUUID,
+		WorkspaceID: input.WorkspaceID,
+	})
+	if err != nil {
+		// No membership row: the caller left or was removed since the
+		// request-time check.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errSkillOverwriteForbidden
+		}
+		return err
+	}
+	if !roleAllowed(member.Role, "owner", "admin", "member") {
+		return errSkillOverwriteForbidden
+	}
+	if !roleAllowed(member.Role, "owner", "admin") && !isCreator {
+		return errSkillOverwriteForbidden
+	}
+	return nil
+}
+
+// overwriteSkillWithFiles re-imports a bundle onto an existing skill in one
+// transaction. It locks the target row and re-checks three things in that tx:
+// the target still exists in the workspace, UserID may overwrite it under
+// input.Authz (see authorizeSkillOverwrite), and it has not changed since
+// input.ExpectedUpdatedAt. A deleted target, a creator change, a role change,
+// or a concurrent edit fails with errSkillOverwriteNotFound,
+// errSkillOverwriteForbidden or errSkillOverwriteStale. Callers must not fall
+// back to create.
 //
 // Preserved: id, created_by, created_at, name, and agent_skill bindings (the
 // row identity and the binding table are never touched). Replaced: description,
@@ -153,7 +215,10 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 
 	qtx := h.Queries.WithTx(tx)
 
-	existing, err := qtx.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+	// FOR UPDATE locks the row for the rest of the tx. The checks below
+	// (permission, name, updated_at) therefore still hold at the UPDATE. Under
+	// READ COMMITTED a plain read would let a concurrent edit commit in between.
+	existing, err := qtx.GetSkillInWorkspaceForUpdate(ctx, db.GetSkillInWorkspaceForUpdateParams{
 		ID:          input.TargetSkillID,
 		WorkspaceID: input.WorkspaceID,
 	})
@@ -163,8 +228,16 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		}
 		return SkillWithFilesResponse{}, err
 	}
-	if !input.AllowWorkspaceManager && !canOverwriteSkillByLocalImport(input.UserID, existing) {
-		return SkillWithFilesResponse{}, errSkillOverwriteForbidden
+	if err := authorizeSkillOverwrite(ctx, qtx, input, existing); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	// Compare-and-set against the row the caller read before its slow work.
+	// UpdateSkill replaces description, content and config outright. Without
+	// this check an edit made in that window disappears with no signal. That
+	// includes a change to the source URL in config.origin.
+	if input.ExpectedUpdatedAt.Valid &&
+		!existing.UpdatedAt.Time.Equal(input.ExpectedUpdatedAt.Time) {
+		return SkillWithFilesResponse{}, errSkillOverwriteStale
 	}
 	// The overwrite is keyed on target_skill_id, but the conflict the user
 	// confirmed was a same-name collision; reject if the target's name no longer

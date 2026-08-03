@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 // insertReimportSkill seeds a skill owned by testUserID with a clawhub origin
@@ -107,6 +109,50 @@ func withMockClawHubReimport(t *testing.T, slug, displayName, body string) {
 	})
 }
 
+// withGatedMockClawHubReimport is withMockClawHubReimport with the file
+// download held open. It returns a channel that closes once the handler enters
+// the download, plus a release channel the test closes to let it finish. A test
+// can then change DB state while the upstream fetch is in flight.
+func withGatedMockClawHubReimport(t *testing.T, slug, displayName, body string) (fetching <-chan struct{}, release chan<- struct{}) {
+	t.Helper()
+	reached := make(chan struct{})
+	gate := make(chan struct{})
+	var once sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/skills/" + slug:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"skill": map[string]any{
+					"slug":        slug,
+					"displayName": displayName,
+					"summary":     "fresh summary",
+					"tags":        map[string]string{"latest": "2.0.0"},
+				},
+			})
+		case "/api/v1/skills/" + slug + "/versions/2.0.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version": map[string]any{
+					"version": "2.0.0",
+					"files":   []map[string]any{{"path": "SKILL.md", "size": len(body)}},
+				},
+			})
+		case "/api/v1/skills/" + slug + "/file":
+			once.Do(func() { close(reached) })
+			<-gate
+			_, _ = w.Write([]byte(body))
+		default:
+			t.Errorf("unexpected ClawHub path: %s", r.URL.String())
+		}
+	}))
+	prev := clawHubAPIBase
+	clawHubAPIBase = srv.URL + "/api/v1"
+	t.Cleanup(func() {
+		clawHubAPIBase = prev
+		srv.Close()
+	})
+	return reached, gate
+}
+
 func callReimport(t *testing.T, userID, skillID string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -189,6 +235,105 @@ func TestReimportSkill_NonAdminMemberForbidden(t *testing.T) {
 	w := callReimport(t, memberID, id)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+	}
+}
+
+// The upstream fetch runs for up to importFetchTimeout between the
+// request-time permission check and the write. A caller who loses access in
+// that window must not land the overwrite. The write tx re-reads membership,
+// so revoking it mid-fetch returns 403 and leaves the skill untouched.
+func TestReimportSkill_RoleRevokedDuringFetchForbidden(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test DB not configured")
+	}
+	slug := "review-helper"
+	// The workspace owner created the skill. The caller is a separate admin, so
+	// only their role authorizes them.
+	id := insertReimportSkillCreatedBy(t, slug, "# Old body\n", testUserID)
+	adminID := addWorkspaceMember(t, "admin")
+	var name string
+	if err := testPool.QueryRow(context.Background(), `SELECT name FROM skill WHERE id = $1`, id).Scan(&name); err != nil {
+		t.Fatalf("read name: %v", err)
+	}
+	fetching, release := withGatedMockClawHubReimport(t, slug, name, "# Fresh body\n")
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- callReimport(t, adminID, id) }()
+
+	select {
+	case <-fetching:
+	case <-time.After(10 * time.Second):
+		t.Fatal("upstream fetch never started")
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, adminID); err != nil {
+		t.Fatalf("revoke membership: %v", err)
+	}
+	close(release)
+
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reimport never returned")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 after membership revoked mid-fetch: %s", w.Code, w.Body.String())
+	}
+	var content string
+	if err := testPool.QueryRow(context.Background(), `SELECT content FROM skill WHERE id = $1`, id).Scan(&content); err != nil {
+		t.Fatalf("read content: %v", err)
+	}
+	if content != "# Old body\n" {
+		t.Fatalf("content = %q, want the original body left unchanged", content)
+	}
+}
+
+// An edit that lands while the upstream fetch is in flight must survive. The
+// write tx compares updated_at against the row the request read, so the
+// overwrite fails with 409 and the edit stays.
+func TestReimportSkill_ConcurrentEditConflicts(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test DB not configured")
+	}
+	slug := "review-helper"
+	id := insertReimportSkill(t, slug, "# Old body\n")
+	var name string
+	if err := testPool.QueryRow(context.Background(), `SELECT name FROM skill WHERE id = $1`, id).Scan(&name); err != nil {
+		t.Fatalf("read name: %v", err)
+	}
+	fetching, release := withGatedMockClawHubReimport(t, slug, name, "# Fresh body\n")
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- callReimport(t, testUserID, id) }()
+
+	select {
+	case <-fetching:
+	case <-time.After(10 * time.Second):
+		t.Fatal("upstream fetch never started")
+	}
+	// Another member edits the body without renaming the skill.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE skill SET content = $2, updated_at = now() WHERE id = $1`, id, "# Someone else's edit\n"); err != nil {
+		t.Fatalf("concurrent edit: %v", err)
+	}
+	close(release)
+
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reimport never returned")
+	}
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 after a concurrent edit: %s", w.Code, w.Body.String())
+	}
+	var content string
+	if err := testPool.QueryRow(context.Background(), `SELECT content FROM skill WHERE id = $1`, id).Scan(&content); err != nil {
+		t.Fatalf("read content: %v", err)
+	}
+	if content != "# Someone else's edit\n" {
+		t.Fatalf("content = %q, want the concurrent edit preserved", content)
 	}
 }
 

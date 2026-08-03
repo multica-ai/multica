@@ -2118,6 +2118,8 @@ func skillImportOverwriteFailure(err error) (int, string) {
 		return http.StatusForbidden, "only the skill creator can overwrite this skill"
 	case errors.Is(err, errSkillOverwriteNameMismatch):
 		return http.StatusConflict, "target skill name no longer matches the imported skill"
+	case errors.Is(err, errSkillOverwriteStale):
+		return http.StatusConflict, "this skill was edited while the update was running; review the changes and try again"
 	default:
 		return http.StatusInternalServerError, "failed to overwrite skill: " + err.Error()
 	}
@@ -2338,9 +2340,13 @@ func (h *Handler) ReimportSkill(w http.ResponseWriter, r *http.Request) {
 		Content:       imported.content,
 		Config:        config,
 		Files:         files,
-		// Authorized above via canManageSkill (owner/admin/creator), so exempt
-		// this write from the shared overwrite's stricter creator-only re-check.
-		AllowWorkspaceManager: true,
+		// canManageSkill above is only the early reject. The write tx applies the
+		// same owner/admin/creator rule to membership it reads itself, because
+		// the fetch in between can run for importFetchTimeout.
+		Authz: overwriteAuthzCreatorOrManager,
+		// Same window, second hazard: an edit made while the fetch runs would be
+		// replaced without warning. Return 409 instead, so the user re-confirms.
+		ExpectedUpdatedAt: skill.UpdatedAt,
 	})
 	if err != nil {
 		status, reason := skillImportOverwriteFailure(err)
