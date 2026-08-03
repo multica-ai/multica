@@ -1056,7 +1056,7 @@ func TestTargetForResolvesRoleAwareDataCatalogChecks(t *testing.T) {
 		{
 			name: "data-catalog", host: "atlas.firtal.com", path: "/",
 			access: true, idKey: "ADMIN_CF_ACCESS_CLIENT_ID", secretKey: "ADMIN_CF_ACCESS_CLIENT_SECRET",
-			navigatePath: "/permissions", wantMarkers: []string{"Permissions", "Roles", "Assignments"},
+			navigatePath: "/permissions", wantMarkers: []string{"Permissions", "People & agents", "Role model"},
 		},
 		{
 			name: "data-catalog-reader", host: "atlas.firtal.com", path: "/",

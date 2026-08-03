@@ -181,7 +181,7 @@ var targets = map[string]Target{
 		// the run opens /permissions directly — the same route the reader token
 		// must be denied on, which keeps the admin/reader contrast exact.
 		NavigatePath: "/permissions", ExpectedPathSuffix: "/permissions",
-		ExpectedText: []string{"Permissions", "Roles", "Assignments"},
+		ExpectedText: []string{"Permissions", "People & agents", "Role model"},
 	},
 	"data-catalog-reader": {
 		Name: "data-catalog-reader", URL: "https://atlas.firtal.com/",
