@@ -4,6 +4,7 @@ package execenv
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -119,6 +120,122 @@ func TestExecOpenclawCLIReapsForkedHelper(t *testing.T) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Fatalf("forked helper (pid %d) survived execOpenclawCLI — the "+
 			"orphan leak is back", pid)
+	}
+}
+
+// TestExecOpenclawCLIWaitsForThePathAfterDoctorBanner is the regression for the
+// review finding on #6275: "output arrived and went quiet" is not the same as
+// "the answer arrived".
+//
+// `openclaw config file` can print Doctor warning UI before the path (MUL-3136,
+// which is why openclawParseActiveConfigPath takes the last non-empty line). If
+// the early return fired on idle output alone, a pause between the banner and the
+// path would hand the banner back as the config path — and expandOpenclawPath
+// would dutifully turn it into an absolute path, so nothing downstream would
+// catch it.
+func TestExecOpenclawCLIWaitsForThePathAfterDoctorBanner(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openclaw")
+	body := `#!/bin/sh
+echo '┌───────────────────────────────┐'
+echo '│ warning: run openclaw doctor  │'
+echo '└───────────────────────────────┘'
+sleep 1
+printf '%s\n' '/root/.openclaw/openclaw.json'
+sleep 300
+`
+	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake openclaw: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	out, err := execOpenclawCLI(ctx, bin, "config", "file")
+	if err != nil {
+		t.Fatalf("execOpenclawCLI: %v", err)
+	}
+	got := strings.TrimSpace(out)
+	if !strings.HasSuffix(got, "/root/.openclaw/openclaw.json") {
+		t.Fatalf("output = %q — returned before the path arrived, so the Doctor "+
+			"banner would be parsed as the config path", got)
+	}
+	// And the parse the daemon actually performs must land on the path.
+	path, _, perr := openclawParseActiveConfigPath(out)
+	if perr != nil {
+		t.Fatalf("openclawParseActiveConfigPath: %v", perr)
+	}
+	if path != "/root/.openclaw/openclaw.json" {
+		t.Errorf("parsed path = %q, want the real config path", path)
+	}
+}
+
+// TestExecOpenclawCLIDoesNotSalvagePartialJSON pins that a `--json` subcommand
+// still streaming when the deadline arrives is an error, not a truncated success.
+func TestExecOpenclawCLIDoesNotSalvagePartialJSON(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openclaw")
+	body := "#!/bin/sh\nprintf '{\"agents\":['\n" +
+		"while :; do printf '{\"id\":\"a\"},'; sleep 0.12; done\n"
+	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake openclaw: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	out, err := execOpenclawCLI(ctx, bin, "config", "get", "--json")
+	if err == nil {
+		t.Fatalf("partial JSON reported as success: %q", out)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("errors.Is(err, context.DeadlineExceeded) must hold\ngot: %v", err)
+	}
+}
+
+// TestOpenclawOutputCompleteRules pins which rule each subcommand shape gets, and
+// that an unknown shape gets none — which makes RunCollectQuiet wait for exit
+// rather than guess.
+func TestOpenclawOutputCompleteRules(t *testing.T) {
+	banner := []byte("┌────┐\n│ hi │\n└────┘\n")
+	pathOut := []byte(string(banner) + "/root/.openclaw/openclaw.json\n")
+	partialJSON := []byte(`{"agents":[{"id":"a"},`)
+	fullJSON := []byte("{\"agents\":[]}\n")
+
+	// `config file` prints the path with the $HOME prefix collapsed, so the shape
+	// depends on the environment rather than on where the file is: the same file was
+	// reported as `~/.openclaw/openclaw.json` under one HOME and as
+	// `/root/.openclaw/openclaw.json` under another (openclaw 2026.5.27). The daemon
+	// normally shares openclaw's HOME, so the tilde form is the common one.
+	cases := []struct {
+		name string
+		args []string
+		out  []byte
+		want bool
+	}{
+		{"config file, banner only", []string{"config", "file"}, banner, false},
+		{"config file, path arrived", []string{"config", "file"}, pathOut, true},
+		{"config file, tilde path", []string{"config", "file"}, []byte("~/.openclaw/openclaw.json\n"), true},
+		{"config file, empty", []string{"config", "file"}, nil, false},
+		{"json, partial", []string{"config", "get", "--json"}, partialJSON, false},
+		{"json, complete", []string{"config", "get", "--json"}, fullJSON, true},
+		{"json, null is a real answer", []string{"config", "get", "agents.list", "--json"}, []byte("null\n"), true},
+		{"json, empty", []string{"agents", "list", "--json"}, nil, false},
+	}
+	for _, tc := range cases {
+		rule := openclawOutputComplete(tc.args)
+		if rule == nil {
+			t.Errorf("%s: no completeness rule for %v", tc.name, tc.args)
+			continue
+		}
+		if got := rule(tc.out); got != tc.want {
+			t.Errorf("%s: rule(%q) = %v, want %v", tc.name, tc.out, got, tc.want)
+		}
+	}
+
+	if rule := openclawOutputComplete([]string{"doctor"}); rule != nil {
+		t.Error("an unrecognised subcommand must have no rule, so the runner " +
+			"waits for exit instead of judging output it does not understand")
 	}
 }
 

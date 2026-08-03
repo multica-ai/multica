@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -188,4 +189,153 @@ func TestDetectCLIVersionReapsForkedHelper(t *testing.T) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Fatalf("detectCLIVersion left helper pid %d running", pid)
 	}
+}
+
+// assertNoGoroutineGrowth pins the contract that finish() joins everything
+// startCollector spawned. Polls because goroutine teardown is observed
+// asynchronously, but a correct implementation satisfies it on the first look.
+func assertNoGoroutineGrowth(t *testing.T, before int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := runtime.NumGoroutine()
+		if got <= before {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("goroutines: %d before, %d after — the collector must join "+
+				"its reader and wait goroutines before returning, on every exit "+
+				"path", before, got)
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestRunCollectLeavesNoGoroutines pins review item 3: the call must not park a
+// goroutine on a CLI whose descendant holds the pipe. Previously the wait
+// goroutine could sit in cmd.Wait indefinitely, which on Windows (no process
+// group to signal) had nothing to release it.
+func TestRunCollectLeavesNoGoroutines(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "helper.pid")
+	cli := writeForkingCLI(t, pidFile)
+
+	// Warm up so lazily-created runtime goroutines exist before the baseline.
+	if _, _, err := RunCollect(context.Background(), nil, cli); err != nil {
+		t.Fatalf("warmup: %v", err)
+	}
+	before := runtime.NumGoroutine()
+
+	for i := 0; i < 2; i++ {
+		if _, _, err := RunCollect(context.Background(), nil, cli); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	assertNoGoroutineGrowth(t, before)
+}
+
+// TestRunCollectQuietLeavesNoGoroutines pins the same contract on the path that
+// returns while the CLI is still alive — the one that has to kill the child
+// itself rather than waiting for it.
+func TestRunCollectQuietLeavesNoGoroutines(t *testing.T) {
+	cli := writePrintThenHangCLI(t, quietTestJSON, "")
+
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli); err != nil {
+		t.Fatalf("warmup: %v", err)
+	}
+	before := runtime.NumGoroutine()
+
+	for i := 0; i < 2; i++ {
+		if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	assertNoGoroutineGrowth(t, before)
+}
+
+// TestOutputBufferAbsorbStopsWhenReadEndClosed pins the mechanism finish() relies
+// on when a descendant will not release the pipe: closing the read end has to
+// terminate the in-flight Read, otherwise the join would hang and the previous
+// revision's alternative — returning while io.Copy was still appending — is a
+// data race on the buffer the caller is about to read.
+func TestOutputBufferAbsorbStopsWhenReadEndClosed(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer w.Close()
+
+	var buf outputBuffer
+	done := make(chan struct{})
+	go func() { defer close(done); _ = buf.absorb(r) }()
+
+	if _, err := w.WriteString("partial"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// Let the reader pick it up, then pull the rug out while it is blocked in
+	// Read with the write end still open (i.e. no EOF is coming).
+	time.Sleep(50 * time.Millisecond)
+	r.Close()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("absorb did not return after the read end was closed — finish() " +
+			"would block forever waiting to join it")
+	}
+	if got := string(buf.snapshot()); got != "partial" {
+		t.Errorf("snapshot = %q, want the bytes that arrived before the close", got)
+	}
+}
+
+// TestOutputBufferPublishesBytesAndTimestampTogether pins review item 2. The
+// buffer and the last-write timestamp are updated in one critical section, so a
+// reader can never see new bytes carrying a stale timestamp and conclude the
+// stream has gone quiet while it is in fact producing.
+//
+// Run under -race this also covers the concurrent access itself.
+func TestOutputBufferPublishesBytesAndTimestampTogether(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+
+	var buf outputBuffer
+	absorbed := make(chan struct{})
+	go func() { defer close(absorbed); _ = buf.absorb(r) }()
+
+	writing := make(chan struct{})
+	go func() {
+		defer close(writing)
+		for i := 0; i < 60; i++ {
+			_, _ = w.WriteString("x")
+			time.Sleep(3 * time.Millisecond)
+		}
+		w.Close()
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-writing:
+			// Writer finished; idleness is legitimate from here on.
+			<-absorbed
+			return
+		default:
+		}
+		n := len(buf.snapshot())
+		idle, produced := buf.idleFor()
+		// While the writer is active at 1ms intervals, any observed byte must
+		// come with a recent timestamp. A generous bound keeps this from being a
+		// scheduling flake while still failing if the timestamp lagged the bytes
+		// by a whole grace period.
+		if produced && n > 0 && idle > 300*time.Millisecond {
+			t.Fatalf("saw %d bytes with idle=%v while the writer was still "+
+				"producing — a stale timestamp lets RunCollectQuiet truncate an "+
+				"answer mid-write", n, idle)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	<-writing
+	<-absorbed
 }

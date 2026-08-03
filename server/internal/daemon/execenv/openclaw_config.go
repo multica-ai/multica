@@ -495,15 +495,7 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 func openclawParseActiveConfigPath(out string) (string, bool, error) {
 	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
 	// the actual path. The path is always the last non-empty line.
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	path := ""
-	for i := len(lines) - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed != "" {
-			path = trimmed
-			break
-		}
-	}
+	path := openclawLastNonEmptyLine(out)
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
@@ -513,6 +505,59 @@ func openclawParseActiveConfigPath(out string) (string, bool, error) {
 		return "", false, err
 	}
 	return openclawStatConfigPath(path)
+}
+
+// openclawLastNonEmptyLine returns the last non-empty, trimmed line of out.
+// Shared by the parser and by openclawConfigPathComplete so the two cannot
+// disagree about which line carries the answer.
+func openclawLastNonEmptyLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if trimmed := strings.TrimSpace(lines[i]); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// openclawOutputComplete returns the rule that decides whether the bytes
+// captured so far are a finished answer for this openclaw subcommand, for
+// agent.RunCollectQuiet's early return.
+//
+// A nil result means "no rule for this shape", which makes RunCollectQuiet wait
+// for the process to exit — the conservative behaviour. Adding a subcommand
+// without a rule therefore loses the hang tolerance rather than risking a
+// truncated answer.
+func openclawOutputComplete(args []string) agent.OutputComplete {
+	for _, a := range args {
+		if a == "--json" {
+			return agent.JSONOutputComplete
+		}
+	}
+	if len(args) >= 2 && args[0] == "config" && args[1] == "file" {
+		return openclawConfigPathComplete
+	}
+	return nil
+}
+
+// openclawConfigPathComplete reports whether out already carries a usable
+// `openclaw config file` answer, i.e. its last non-empty line looks like a path.
+//
+// Deliberately stricter than openclawParseActiveConfigPath, which resolves a
+// relative line through filepath.Abs and would therefore accept a Doctor warning
+// border as an answer. That leniency is fine once the command has finished, but
+// as a completeness rule it would let the early return fire on the banner
+// OpenClaw prints *before* the path (see MUL-3136) and return the banner as the
+// config path.
+func openclawConfigPathComplete(out []byte) bool {
+	line := openclawLastNonEmptyLine(string(out))
+	if line == "" {
+		return false
+	}
+	if line == "~" || strings.HasPrefix(line, "~/") {
+		return true
+	}
+	return filepath.IsAbs(line)
 }
 
 func openclawFallbackActiveConfigPath() (string, bool, error) {
@@ -798,12 +843,16 @@ var openclawExec = execOpenclawCLI
 // diagnosis, just not as the wrapped cause.
 //
 // The invocation goes through agent.RunCollectQuiet rather than cmd.Output(),
-// which closes the gap openclawCLITimeout documents (MUL-5467) and tolerates
-// an openclaw that prints its answer and then declines to exit. Both are
-// openclaw-side misbehaviour we cannot fix from here, and neither should stop
-// a chat task from starting. See server/pkg/agent/run_collect.go.
+// which closes the gap openclawCLITimeout documents (MUL-5467) and tolerates an
+// openclaw that prints its answer and then declines to exit. Both are
+// openclaw-side misbehaviour we cannot fix from here, and neither should stop a
+// chat task from starting. See server/pkg/agent/run_collect.go.
+//
+// The completeness rule is per-subcommand (openclawOutputComplete): the runner
+// must never treat "some output arrived" as "the answer arrived", or a response
+// still streaming when the deadline hits would be reported as success.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
-	raw, stderr, _, err := agent.RunCollectQuiet(ctx, os.Environ(), 0, bin, args...)
+	raw, stderr, _, err := agent.RunCollectQuiet(ctx, os.Environ(), 0, openclawOutputComplete(args), bin, args...)
 	if err != nil {
 		stderrMsg := strings.TrimSpace(stderr)
 		if ctxErr := ctx.Err(); ctxErr != nil {

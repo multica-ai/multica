@@ -3,166 +3,147 @@ package agent
 import (
 	"bytes"
 	"context"
-	"os/exec"
-	"sync"
-	"sync/atomic"
+	"encoding/json"
 	"time"
 )
 
-// DefaultQuietIdleGrace is how long stdout must stay silent before
-// RunCollectQuiet treats a one-shot command's output as complete.
+// DefaultQuietIdleGrace is how long stdout must stay silent, on top of already
+// carrying a complete answer, before RunCollectQuiet stops waiting for a CLI to
+// exit.
 //
-// Sized for "the CLI already flushed its answer": these commands print a path
-// or a short JSON blob, and the writes of one logical response land
+// Sized for "the CLI already flushed its answer": these commands print a path or
+// a short JSON document, and the writes of one logical response land
 // back-to-back. 400ms is orders of magnitude longer than the gap between those
-// writes, and short enough that the three calls task setup makes cost ~1.2s in
-// the misbehaving case instead of one full openclawCLITimeout each.
+// writes, and short enough that the calls task setup makes cost about a second
+// in the misbehaving case instead of a full openclawCLITimeout each.
+//
+// It is also the window in which a *late* failure can still be observed: a CLI
+// that prints a complete answer and then exits non-zero is reported as the
+// failure it is, as long as it does so within the grace. Beyond that it is
+// indistinguishable from one that prints an answer and hangs forever, which is
+// the case this whole helper exists to survive.
 const DefaultQuietIdleGrace = 400 * time.Millisecond
 
-// quietWriter buffers output and records when the last write landed, so
-// RunCollectQuiet can tell "still producing" from "flushed and now idle".
-type quietWriter struct {
-	mu       sync.Mutex
-	buf      bytes.Buffer
-	lastByte atomic.Int64 // unix nanos of the last write; 0 = nothing yet
+// quietPoll is how often RunCollectQuiet re-evaluates its exit conditions.
+const quietPoll = 50 * time.Millisecond
+
+// OutputComplete reports whether the bytes captured so far are a *finished*
+// answer for the command that produced them.
+//
+// This is the caller's judgement, not something the runner can infer: only the
+// caller knows whether `{"agents":[{"id":"a"},` is a truncated document or a
+// legitimate one. Without it, "we have some output" gets mistaken for "we have
+// the output" and a response interrupted mid-flight is reported as success.
+type OutputComplete func(stdout []byte) bool
+
+// JSONOutputComplete is the rule for commands whose entire answer is one JSON
+// document. Empty output is never complete; a lone `null` is, since that is how
+// the CLI reports an unset key.
+//
+// Note this requires the whole buffer to parse, so a CLI that prints banner text
+// before its JSON never satisfies it. That matches how the callers parse the
+// result anyway (a whole-buffer json.Unmarshal), so such output was never usable
+// — it now fails on the deadline instead of on the parse.
+func JSONOutputComplete(stdout []byte) bool {
+	trimmed := bytes.TrimSpace(stdout)
+	return len(trimmed) > 0 && json.Valid(trimmed)
 }
 
-func (w *quietWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	n, err := w.buf.Write(p)
-	w.mu.Unlock()
-	if n > 0 {
-		w.lastByte.Store(time.Now().UnixNano())
-	}
-	return n, err
-}
-
-func (w *quietWriter) snapshot() []byte {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return append([]byte(nil), w.buf.Bytes()...)
-}
-
-// idleFor reports how long since the last write, and whether anything has been
-// written at all.
-func (w *quietWriter) idleFor() (time.Duration, bool) {
-	last := w.lastByte.Load()
-	if last == 0 {
-		return 0, false
-	}
-	return time.Since(time.Unix(0, last)), true
-}
-
-// RunCollectQuiet runs a one-shot CLI command and returns as soon as either the
-// process exits *or* it has produced output that then stayed idle for
-// idleGrace. The process group is reaped before returning on every path.
+// RunCollectQuiet runs a one-shot CLI command and returns when the process
+// exits, or — for a CLI that will not exit — as soon as it has produced output
+// that `complete` accepts and that has then stayed idle for idleGrace.
 //
 // # Why "output is enough" beats "wait for exit"
 //
-// Measured on an OpenClaw host (openclaw 2026.5.27):
+// Measured on a host running openclaw 2026.5.27:
 //
 //	openclaw --version    258ms  exits cleanly
 //	openclaw config file    60s  correct path printed, then never exits
 //	openclaw agents list    60s  correct list printed, then never exits
 //
-// Waiting for exit turns two working commands into a task-fatal error, because
-// they sit on the task's critical path (Prepare → prepareOpenclawConfig):
+// Waiting for exit turns two working commands into a task-fatal error, and they
+// sit on the task's critical path (Prepare -> prepareOpenclawConfig). The
+// contract of those commands is "print a value"; once the value has arrived,
+// whether the process tidies itself up is not the caller's business.
 //
-//	prepare execution environment: execenv: prepare openclaw config:
-//	locate openclaw active config: openclaw config file:
-//	context deadline exceeded (process: signal: killed)
+// # Why `complete` is required rather than "any output"
 //
-// The answer was on stdout the whole time. The contract of these commands is
-// "print a value"; once the value has arrived and nothing more is coming,
-// whether the process tidies itself up is not the caller's business, and it
-// certainly should not fail a chat task.
+// An earlier revision returned success from the deadline branch whenever stdout
+// was non-empty. That salvaged partial answers: a CLI still streaming when the
+// deadline arrived had its truncated output reported as success (measured 9 runs
+// in 10 against a 250ms deadline). Two conditions now gate the early return, and
+// neither is sufficient alone:
 //
-// quiet reports that the return came from the idle path rather than a clean
-// exit, so callers can log the CLI's misbehaviour without failing on it.
+//   - `complete` accepts the buffer. Idle alone is not enough, because the CLI
+//     may be pausing between a banner and the real answer — `openclaw config
+//     file` prints Doctor warning UI first (see MUL-3136), and cutting off there
+//     yields the banner instead of the path.
+//   - The buffer has then been idle for idleGrace. Complete alone is not enough,
+//     because more output may still follow and change the answer.
+//
+// Reaching the context deadline is never success. Whatever was captured is
+// returned alongside the error so a caller with a different rule can inspect it,
+// but this helper does not decide on the caller's behalf.
+//
+// A nil `complete` disables the early return entirely: the call then waits for
+// exit, bounded only by ctx. That is the right default for a command whose
+// output shape has no completeness rule.
+//
+// quiet reports that the return did not come from a clean exit, so callers can
+// log the CLI's misbehaviour without failing on it.
 //
 // Use this only for commands whose entire output is a short one-shot response.
 // Anything that streams incrementally (agent execution) must keep its own
 // lifecycle handling, where a pause in output carries meaning.
-func RunCollectQuiet(ctx context.Context, env []string, idleGrace time.Duration, execPath string, args ...string) (stdout []byte, stderr string, quiet bool, err error) {
+func RunCollectQuiet(ctx context.Context, env []string, idleGrace time.Duration, complete OutputComplete, execPath string, args ...string) (stdout []byte, stderr string, quiet bool, err error) {
 	if idleGrace <= 0 {
 		idleGrace = DefaultQuietIdleGrace
 	}
 
-	cmd := exec.CommandContext(ctx, execPath, args...)
-	if env != nil {
-		cmd.Env = env
-	}
-	hideAgentWindow(cmd)
-	configureProcessGroup(cmd)
-
-	outW := &quietWriter{}
-	errW := &quietWriter{}
-	cmd.Stdout = outW
-	cmd.Stderr = errW
-
-	if startErr := cmd.Start(); startErr != nil {
+	c, startErr := startCollector(ctx, env, execPath, args...)
+	if startErr != nil {
 		return nil, "", false, startErr
 	}
 
-	// os/exec owns the draining here — we handed it io.Writers, not the
-	// *os.File that RunCollect uses — so Wait can be held open by a
-	// pipe-holding descendant. That is precisely why Wait does not get to
-	// decide when we are done: the loop below decides, and reapProcessTree
-	// releases whatever is held. The channel is buffered so this goroutine can
-	// always finish even when nobody is left to receive.
-	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
-
-	// finish reaps the tree and gives Wait a bounded moment to observe the
-	// kill, so the child is collected instead of left as a zombie.
-	finish := func() error {
-		reapProcessTree(cmd)
-		select {
-		case waitErr := <-waited:
-			return waitErr
-		case <-time.After(collectDrainGrace):
-			return nil
-		}
-	}
-
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(quietPoll)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case waitErr := <-waited:
-			// Clean exit (or a real non-zero one): the normal path, and it
-			// costs no idle wait at all.
-			reapProcessTree(cmd)
-			return outW.snapshot(), string(errW.snapshot()), false, waitErr
+		case <-c.waitDone:
+			// Clean exit, or a real non-zero one: the normal path, and it pays
+			// no idle wait at all.
+			c.finish()
+			return c.stdout.snapshot(), string(c.stderr.snapshot()), false, c.waitErr
 
 		case <-ctx.Done():
-			waitErr := finish()
-			out := outW.snapshot()
-			// Salvage: a command that printed its answer and then hung has
-			// done its job as far as the caller is concerned.
-			if len(bytes.TrimSpace(out)) > 0 {
-				return out, string(errW.snapshot()), true, nil
+			c.finish()
+			out := c.stdout.snapshot()
+			// Deliberately no salvage. Reaching the deadline means we never saw
+			// output that `complete` accepted, so by the caller's own rule the
+			// buffer is unfinished. Prefer the process error when we have one:
+			// callers attribute ctx themselves and a "signal: killed" detail is
+			// worth keeping in the message.
+			if werr, reaped := c.exitErr(); reaped && werr != nil {
+				return out, string(c.stderr.snapshot()), true, werr
 			}
-			// Nothing to salvage, so the deadline stands. Prefer the process
-			// error when we have one — callers attribute ctx themselves and a
-			// "signal: killed" detail is worth keeping in the message.
-			if waitErr != nil {
-				return out, string(errW.snapshot()), true, waitErr
-			}
-			return out, string(errW.snapshot()), true, ctx.Err()
+			return out, string(c.stderr.snapshot()), true, ctx.Err()
 
 		case <-ticker.C:
-			idle, produced := outW.idleFor()
+			if complete == nil {
+				continue
+			}
+			idle, produced := c.stdout.idleFor()
 			if !produced || idle < idleGrace {
 				continue
 			}
-			if len(bytes.TrimSpace(outW.snapshot())) == 0 {
+			out := c.stdout.snapshot()
+			if !complete(out) {
 				continue
 			}
-			// Output flushed and gone quiet: take it and reap the tree.
-			_ = finish()
-			return outW.snapshot(), string(errW.snapshot()), true, nil
+			// A finished answer that has gone quiet: take it and reap the tree.
+			c.finish()
+			return out, string(c.stderr.snapshot()), true, nil
 		}
 	}
 }

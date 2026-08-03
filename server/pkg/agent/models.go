@@ -1573,12 +1573,16 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// `openclaw agents list` prints the correct list in ~250ms and then does
 	// not exit at all, so waiting for exit spent the whole 30s budget to
 	// arrive at output we already had. See run_collect.go / MUL-5467.
+	//
+	// JSONOutputComplete is what makes the early return safe: a list still being
+	// written does not parse, so a truncated catalog can never be mistaken for
+	// the real one.
 	for _, jsonArgs := range [][]string{
 		{"agents", "list", "--json"},
 		{"agents", "list", "--output", "json"},
 		{"agents", "list", "-o", "json"},
 	} {
-		out, _, _, err := RunCollectQuiet(runCtx, nil, 0, executablePath, jsonArgs...)
+		out, _, _, err := RunCollectQuiet(runCtx, nil, 0, JSONOutputComplete, executablePath, jsonArgs...)
 		if err != nil && len(out) == 0 {
 			continue
 		}
@@ -1590,7 +1594,12 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// Text fallback. Be strict — the default output is a decorated
 	// banner with box-drawing and section headers, and picking up
 	// the wrong tokens produces nonsense entries like "Identity:".
-	out, _, _, err := RunCollectQuiet(runCtx, nil, 0, executablePath, "agents", "list")
+	//
+	// RunCollect (wait for exit) rather than RunCollectQuiet: decorated text has
+	// no completeness rule, so an early return could yield a partial agent list,
+	// and a silently short catalog is worse than a slow one. This path still
+	// gains the orphan reaping and the bounded return.
+	out, _, err := RunCollect(runCtx, nil, executablePath, "agents", "list")
 	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}
