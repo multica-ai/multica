@@ -4626,10 +4626,11 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 // IssueToMap renders an issue row as the map shape the issue:created /
 // issue:updated broadcast payloads carry under their "issue" key. It is the
 // single source of truth for that shape wherever the event is published from
-// outside the HTTP handler (autopilot, quick-create, the channel engine's
-// /issue command): the workspace WS fanout marshals it as-is for the UI, and
-// cmd/server's extractIssueFields reads id / creator_id / workspace_id off it
-// to decide who to auto-subscribe.
+// outside the HTTP handler — autopilot and the channel engine's /issue command
+// on issue:created, the background stuck-issue status reset on issue:updated.
+// The workspace WS fanout marshals it as-is for the UI, and cmd/server's
+// extractIssueFields reads id / creator_id / workspace_id off it to decide who
+// to auto-subscribe.
 //
 // The map must stay key-compatible with handler.IssueResponse, the other
 // rendering of the same event. Clients type both as a complete Issue and
