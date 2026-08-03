@@ -85,9 +85,13 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 		body          string
 	}
 
+	// TLS matters: the SDK only switches to a trailing checksum when the
+	// request is HTTPS (see the IsHTTPS gate in the checksum middleware), and
+	// production talks to OSS/S3 over HTTPS. A plain HTTP server would take the
+	// header-checksum branch instead and never reproduce the trailer.
 	newRecordingServer := func(t *testing.T, observed chan<- observedRequest) *httptest.Server {
 		t.Helper()
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("read request body: %v", err)
@@ -105,17 +109,24 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 		return server
 	}
 
-	newStore := func(endpoint string) *S3Storage {
+	newStore := func(server *httptest.Server) *S3Storage {
 		return &S3Storage{
 			client: s3.New(s3.Options{
 				Region:       "us-east-1",
 				Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
-				BaseEndpoint: aws.String(endpoint),
+				BaseEndpoint: aws.String(server.URL),
 				UsePathStyle: true,
+				HTTPClient:   server.Client(),
+				// NewS3StorageFromEnv builds its client through
+				// config.LoadDefaultConfig, which resolves this to
+				// WhenSupported. s3.New leaves it unset, and an unset value
+				// emits no checksum at all — so without pinning the production
+				// default here the test passes even with the fix removed.
+				RequestChecksumCalculation: aws.RequestChecksumCalculationWhenSupported,
 			}),
 			bucket:       "test-bucket",
 			region:       "us-east-1",
-			endpointURL:  endpoint,
+			endpointURL:  server.URL,
 			usePathStyle: true,
 		}
 	}
@@ -147,7 +158,7 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 		server := newRecordingServer(t, observed)
 		payload := "buffered payload"
 
-		if _, err := newStore(server.URL).Upload(
+		if _, err := newStore(server).Upload(
 			context.Background(), "uploads/media.bin", []byte(payload),
 			"application/octet-stream", "media.bin",
 		); err != nil {
@@ -162,7 +173,7 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 		payload := "streamed payload"
 		nonSeekable := io.LimitReader(strings.NewReader(payload), int64(len(payload)))
 
-		if _, err := newStore(server.URL).UploadStream(
+		if _, err := newStore(server).UploadStream(
 			context.Background(), "uploads/media.bin", nonSeekable, int64(len(payload)),
 			"application/octet-stream", "media.bin",
 		); err != nil {

@@ -282,8 +282,13 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
 	}, func(opts *s3.Options) {
-        opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
-    })
+		// Avoid the optional trailing-checksum path for the same reason
+		// UploadStream does: it uses aws-chunked framing that S3-compatible
+		// backends handle unevenly (Aliyun OSS and Tencent COS reject it
+		// outright). The seekable body here is still covered by the real
+		// SigV4 payload hash, so integrity is unaffected.
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	})
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
