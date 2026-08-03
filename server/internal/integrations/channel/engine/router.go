@@ -381,11 +381,9 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		res.IssueID = issueRes.Issue.ID
 		res.IssueNumber = issueRes.Issue.Number
 		res.IssueTitle = issueRes.Issue.Title
-		if prefix != "" {
-			res.IssueIdentifier = fmt.Sprintf("%s-%d", prefix, issueRes.Issue.Number)
-		} else {
-			res.IssueIdentifier = fmt.Sprintf("#%d", issueRes.Issue.Number)
-		}
+		// Same renderer the broadcast payload uses, so a degraded prefix can't
+		// show the chat "#42" while the realtime list shows "-42".
+		res.IssueIdentifier = service.IssueIdentifier(prefix, issueRes.Issue.Number)
 	}
 
 	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
@@ -681,8 +679,10 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	// {"issue_id": ...} stub, and every issue:created consumer that reads the
 	// "issue" key drops the event — most visibly the subscriber listener, which
 	// needs id + creator_id and so never subscribed the person who typed
-	// /issue to their own issue. Reuse the same builder the HTTP and autopilot
-	// paths broadcast so all three describe a new issue identically.
+	// /issue to their own issue. IssueToMap is the shared renderer for events
+	// published outside the HTTP handler; it stays key-compatible with the
+	// IssueResponse that handler path broadcasts, so clients see one issue
+	// shape regardless of which entry point created the issue.
 	opts := service.IssueCreateOpts{
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
 			return map[string]any{"issue": service.IssueToMap(issue, issuePrefix)}
