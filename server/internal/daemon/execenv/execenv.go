@@ -270,6 +270,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
 		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
 	}
+	if err := EnsureSpotlightExclusion(params.WorkspacesRoot); err != nil && logger != nil {
+		logger.Warn("execenv: Spotlight exclusion marker not written", "error", err)
+	}
 
 	// Remove existing env if present (defensive — task IDs are unique).
 	if _, err := os.Stat(envRoot); err == nil {
@@ -475,6 +478,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.WorkspacesRoot != "" {
 		if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
 			logger.Warn("execenv: workspaces root marker not written on reuse; fail-closed guard limited to the task workdir", "error", err)
+		}
+		if err := EnsureSpotlightExclusion(params.WorkspacesRoot); err != nil && logger != nil {
+			logger.Warn("execenv: Spotlight exclusion marker not written on reuse", "error", err)
 		}
 	}
 
