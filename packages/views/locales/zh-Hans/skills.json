@@ -96,6 +96,7 @@
     "updating": "更新中...",
     "updated_toast": "已从来源更新 {{name}}",
     "update_failed_toast": "更新 skill 失败",
+    "update_partial_toast": "已从来源更新 {{total}} 个 skill 中的 {{succeeded}} 个，{{failed}} 个失败",
     "update_no_permission": "所选内容包含无法从来源更新的 skill",
     "update_dialog_title_multi_other": "从来源更新这 {{count}} 个 skill？",
     "update_dialog_desc_multi_other": "这会用来源的最新版本替换所选的 {{count}} 个 skill。本地修改将会丢失。",

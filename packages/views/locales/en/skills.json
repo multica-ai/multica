@@ -100,6 +100,7 @@
     "updating": "Updating...",
     "updated_toast": "Updated {{name}} from source",
     "update_failed_toast": "Failed to update skill",
+    "update_partial_toast": "Updated {{succeeded}} of {{total}} skills from source; {{failed}} failed",
     "update_no_permission": "Selection includes skills that can't be updated from a source",
     "update_dialog_title_multi_one": "Update {{count}} skill from source?",
     "update_dialog_title_multi_other": "Update {{count}} skills from source?",

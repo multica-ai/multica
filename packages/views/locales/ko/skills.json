@@ -96,6 +96,7 @@
     "updating": "업데이트 중...",
     "updated_toast": "{{name}}을(를) 소스에서 업데이트했습니다",
     "update_failed_toast": "스킬 업데이트에 실패했습니다",
+    "update_partial_toast": "스킬 {{total}}개 중 {{succeeded}}개를 소스에서 업데이트했습니다({{failed}}개 실패)",
     "update_no_permission": "소스에서 업데이트할 수 없는 스킬이 선택에 포함되어 있습니다",
     "update_dialog_title_multi_other": "스킬 {{count}}개를 소스에서 업데이트할까요?",
     "update_dialog_desc_multi_other": "선택한 스킬 {{count}}개를 소스의 최신 버전으로 교체합니다. 로컬 변경 사항은 사라집니다.",

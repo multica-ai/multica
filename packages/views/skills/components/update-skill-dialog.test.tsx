@@ -13,6 +13,13 @@ vi.mock("@multica/core/api", () => ({
   api: { reimportSkill: (...a: unknown[]) => mockReimportSkill(...a) },
 }));
 
+const mockToast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+}));
+vi.mock("sonner", () => ({ toast: mockToast }));
+
 import { UpdateSkillDialog } from "./skill-list-actions";
 
 const TEST_RESOURCES = { en: { common: enCommon, skills: enSkills } };
@@ -97,5 +104,63 @@ describe("UpdateSkillDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Update" }));
     await waitFor(() => expect(mockReimportSkill).toHaveBeenCalled());
+  });
+
+  // When the second skill fails, the server has already overwritten the first.
+  // The batch must keep going, refresh the caches, and report what landed.
+  it("reports a partial result when one skill in a batch fails", async () => {
+    mockReimportSkill.mockClear();
+    mockToast.warning.mockClear();
+    mockReimportSkill.mockImplementation((id: string) =>
+      id === "s2" ? Promise.reject(new Error("boom")) : Promise.resolve({}),
+    );
+    const qc = new QueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const onOpenChange = vi.fn();
+    const onUpdated = vi.fn();
+    render(
+      <UpdateSkillDialog
+        rows={[row("s1"), row("s2")]}
+        ctx={ctx}
+        open
+        onOpenChange={onOpenChange}
+        onUpdated={onUpdated}
+      />,
+      { wrapper: wrap(qc) },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(mockToast.warning).toHaveBeenCalled());
+    expect(mockReimportSkill).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["workspaces", "ws1", "skills"],
+    });
+    expect(mockToast.warning).toHaveBeenCalledWith(
+      "Updated 1 of 2 skills from source; 1 failed",
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    // Selection survives a partial failure so the user can retry.
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("does not invalidate when every skill in a batch fails", async () => {
+    mockReimportSkill.mockClear();
+    mockToast.error.mockClear();
+    mockReimportSkill.mockRejectedValue(new Error("boom"));
+    const qc = new QueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    render(
+      <UpdateSkillDialog
+        rows={[row("s1"), row("s2")]}
+        ctx={ctx}
+        open
+        onOpenChange={() => {}}
+      />,
+      { wrapper: wrap(qc) },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("boom"));
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
