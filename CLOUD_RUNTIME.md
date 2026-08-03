@@ -18,6 +18,10 @@ Multica backend, so it needs no inbound port, DNS, domain, or tunnel.
 - the **Claude Code CLI**, pinned **Cursor Agent CLI**, pinned **Pi Coding
   Agent**, and pinned **Hermes Agent** that the daemon shells out to,
 - `git` (per-task repo checkouts), `ripgrep`, `curl`, `jq`,
+- `chromium` + the pinned **`agent-browser` CLI**, so an agent can drive a real
+  browser. `AGENT_BROWSER_EXECUTABLE_PATH` and `AGENT_BROWSER_ARGS`
+  (`--no-sandbox,--disable-dev-shm-usage`, the container has no user
+  namespaces) are already set in the image — do not re-set them per service,
 - a non-root `multica` user.
 
 Entrypoint: `docker/runtime-entrypoint.sh` — provisions config, wires git auth,
