@@ -109,6 +109,14 @@ func TestValidateForProviderRejectsCrossProviderModel(t *testing.T) {
 	}
 }
 
+func TestValidateForProviderRejectsUnsupportedCodexAccountModel(t *testing.T) {
+	t.Parallel()
+	err := ValidateForProvider("codex", "gpt-5.5-mini")
+	if !errors.Is(err, ErrModelNotOnProvider) {
+		t.Fatalf("ValidateForProvider(codex, gpt-5.5-mini) = %v, want ErrModelNotOnProvider", err)
+	}
+}
+
 func TestValidateForProviderAcceptsOwnProviderModel(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ provider, model string }{
