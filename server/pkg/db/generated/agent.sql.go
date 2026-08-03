@@ -3343,7 +3343,7 @@ ORDER BY name ASC
 // Returns every non-archived agent bound to a runtime. Backs the cascade
 // delete dialog: when DELETE /api/runtimes/:id refuses with
 // runtime_has_active_agents, the response carries this list so the front-end
-// can render exactly the agents that will be archived if the user confirms,
+// can render exactly the agents that will be unbound if the user confirms,
 // and so the cascade endpoint's expected_active_agent_ids check has a stable
 // snapshot to compare against. Ordered by name for a deterministic display.
 func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
@@ -3408,8 +3408,7 @@ FOR UPDATE
 // LockAgentRuntime, which holds the runtime row exclusively to also
 // block FK-validated INSERTs / runtime_id updates that would otherwise
 // add a new agent to the runtime mid-cascade. Together they guarantee
-// that the set we compared against expected_active_agent_ids is exactly
-// the set ArchiveAgentsByIDs will operate on — no race window.
+// that the set we compared against expected_active_agent_ids is stable.
 func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listActiveAgentsByRuntimeForUpdate, runtimeID)
 	if err != nil {
@@ -4213,6 +4212,67 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 	return items, nil
 }
 
+const listUserAgentsByRuntimeForUpdate = `-- name: ListUserAgentsByRuntimeForUpdate :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
+WHERE runtime_id = $1 AND kind = 'user'
+ORDER BY id
+FOR UPDATE
+`
+
+// Locks active AND archived user agents before a runtime teardown. Locking only
+// the active snapshot leaves a restore race: an archived row can become active
+// after confirmation and then be silently unbound. Runtime/profile delete
+// locks the parent runtime first (blocking new FK references), then calls this
+// in stable ID order (blocking restore/archive/move on existing rows).
+func (q *Queries) ListUserAgentsByRuntimeForUpdate(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listUserAgentsByRuntimeForUpdate, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceAgentTaskSnapshot = `-- name: ListWorkspaceAgentTaskSnapshot :many
 SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
@@ -4504,6 +4564,62 @@ func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorksp
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAgentForAutopilotAssignment = `-- name: LockAgentForAutopilotAssignment :one
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
+WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
+FOR SHARE
+`
+
+type LockAgentForAutopilotAssignmentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serializes creating, retargeting, or resuming an active Autopilot with
+// Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it
+// clears runtime_id and pauses matching Autopilots. FOR SHARE also stabilizes
+// runtime_id and archived_at against concurrent ordinary Agent updates. The
+// shared lock makes the
+// two outcomes exhaustive:
+//   - assignment commits first, then teardown sees and pauses it; or
+//   - teardown commits first, then assignment re-reads runtime_id=NULL and
+//     rejects the active Autopilot.
+func (q *Queries) LockAgentForAutopilotAssignment(ctx context.Context, arg LockAgentForAutopilotAssignmentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, lockAgentForAutopilotAssignment, arg.ID, arg.WorkspaceID)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+	)
+	return i, err
 }
 
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one

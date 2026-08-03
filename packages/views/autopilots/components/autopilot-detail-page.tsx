@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
-  Webhook, RotateCw,
+  Webhook, RotateCw, Server,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -824,6 +824,23 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           ) : null
         }
       />
+
+      {autopilot.pause_reason === "agent_runtime_required" && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-caption text-amber-900 dark:text-amber-100">
+          <Server className="size-3.5 shrink-0" />
+          <span className="flex-1">
+            {t(($) => $.detail.paused_runtime_required)}
+          </span>
+          {autopilot.assignee_type === "agent" && (
+            <AppLink
+              href={`${wsPaths.agentDetail(autopilot.assignee_id)}?view=general`}
+              className="font-medium underline underline-offset-2"
+            >
+              {t(($) => $.detail.bind_runtime)}
+            </AppLink>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-8">

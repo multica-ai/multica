@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
@@ -1257,6 +1258,48 @@ RETURNING id
 	}
 	if otherStatus != "online" {
 		t.Fatalf("expected other-member runtime to stay online, got %q", otherStatus)
+	}
+}
+
+// TestDeleteMember_CancelsDeferredTasks covers the second caller of
+// CancelAgentTasksByRuntimeOrAgent. Member revocation must cancel a scheduled
+// fallback just like queued/running work; otherwise it could become claimable
+// after its owner and runtime access have been removed.
+func TestDeleteMember_CancelsDeferredTasks(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-deferred", "daemon-revoke-deferred")
+	ctx := context.Background()
+
+	var deferredTaskID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, fire_at)
+VALUES ($1, $2, 'deferred', 0, now() + interval '1 hour')
+RETURNING id
+`, fx.AgentID, fx.RuntimeID).Scan(&deferredTaskID); err != nil {
+		t.Fatalf("insert deferred task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testHandler.DeleteMember(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertRevoked(t, fx)
+
+	var status string
+	var completedAt *time.Time
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, completed_at FROM agent_task_queue WHERE id = $1`,
+		deferredTaskID,
+	).Scan(&status, &completedAt); err != nil {
+		t.Fatalf("query deferred task: %v", err)
+	}
+	if status != "cancelled" || completedAt == nil {
+		t.Fatalf("deferred task = (%q, %v), want cancelled with completed_at", status, completedAt)
 	}
 }
 

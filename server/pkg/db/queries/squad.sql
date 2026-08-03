@@ -9,6 +9,23 @@ SELECT * FROM squad WHERE id = $1;
 -- name: GetSquadInWorkspace :one
 SELECT * FROM squad WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockSquadForAutopilotAssignment :one
+-- Stabilizes the squad-to-leader resolution while an active Autopilot is
+-- created, retargeted, or resumed. FOR SHARE conflicts with an ordinary
+-- leader_id update, so the caller subsequently locks the same leader Agent
+-- whose row Runtime teardown serializes against.
+SELECT * FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR SHARE;
+
+-- name: LockSquadForUpdate :one
+-- Squad leader changes take the exclusive side of the same lock used by
+-- Autopilot assignment. The handler then locks the proposed leader Agent and
+-- pauses active squad Autopilots when that Agent is unbound.
+SELECT * FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: ListSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC;
 

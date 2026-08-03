@@ -3,10 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
-import {
-  useDuplicateDraftSeed,
-  type AgentDraft,
-} from "./agent-creation-studio";
+import type { AgentDraft } from "@multica/core/agents";
+import { useDuplicateDraftSeed } from "./use-duplicate-draft-seed";
 
 const SOURCE_RUNTIME = {
   id: "runtime-1",

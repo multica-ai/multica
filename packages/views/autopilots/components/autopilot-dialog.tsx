@@ -13,6 +13,7 @@ import {
   Maximize2,
   Minimize2,
   Play,
+  Plus,
   Rocket,
   Users,
   Webhook,
@@ -163,19 +164,34 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     initial.subscriber_user_ids ?? [],
   );
 
+  // The schedule panel speaks for the autopilot's SCHEDULE trigger, not for
+  // `triggers[0]` — on a webhook- or api-triggered autopilot that row is one no
+  // cron may be written into.
+  const existingSchedule = isCreate
+    ? null
+    : props.triggers.find((trig) => trig.kind === "schedule") ?? null;
+
   const initialCfg: ScheduleConfig = (() => {
     if (isCreate) {
       const tpl = props.initialSchedule;
       const fallback = getDefaultScheduleConfig(browserTimezone());
       return tpl ? { ...fallback, ...tpl } : fallback;
     }
-    const first = props.triggers[0];
-    if (first?.cron_expression) {
-      return parseCron(first.cron_expression, first.timezone ?? "UTC");
+    if (existingSchedule?.cron_expression) {
+      return parseCron(existingSchedule.cron_expression, existingSchedule.timezone ?? "UTC");
     }
     return getDefaultScheduleConfig(browserTimezone());
   })();
   const [schedule, setSchedule] = useState<ScheduleConfig>(initialCfg);
+
+  // Editing an autopilot that has no schedule: the panel has nothing to
+  // reflect, so anything it showed would be a proposal dressed as the
+  // autopilot's state — and `scheduleDirty` below, comparing that proposal
+  // against itself, then dropped the save on the floor under a success toast
+  // (MUL-5649). The schedule is asked for explicitly instead: until the user
+  // adds one, the panel says the autopilot is manual, and once they do, Save
+  // writes what it shows whether or not they touched the default.
+  const [scheduleAdded, setScheduleAdded] = useState(false);
 
   // Trigger kind selector. Only meaningful in create mode — edit mode does
   // not support converting between kinds inline (PLAN.md calls that
@@ -207,9 +223,18 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const firstTriggerIdRef = useRef(
     !isCreate && props.triggers[0] ? props.triggers[0].id : null,
   );
+  // The row the schedule write targets, snapshotted at mount like the one
+  // above. Null means there is none to patch, so the write creates one.
+  const scheduleTriggerIdRef = useRef(existingSchedule?.id ?? null);
 
   const triggerCount = isCreate ? 0 : props.triggers.length;
   const schedulePillDisabled = !isCreate && triggerCount >= 2;
+
+  // The manual-autopilot empty state, and the only path to a first schedule
+  // from this dialog. Skipped when the panel is locked (2+ triggers), which
+  // keeps that case rendering exactly the disabled editor it always has.
+  const showScheduleEmptyState =
+    !isCreate && existingSchedule === null && !scheduleAdded && !schedulePillDisabled;
 
   const selectedAssignee = useMemo(() => {
     if (!assigneeId) return null;
@@ -245,12 +270,15 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const scheduleGate = useScheduleSubmitGate(wsId);
 
   // The schedule only gates submit when this save would actually write it. A
-  // locked schedule (2+ triggers) or one the user never touched is not sent, so
-  // a preview 400 on the stored expression — an expression the server accepted
-  // once and may now reject, e.g. a timezone its tzdata dropped — must not veto
-  // edits to the title, prompt or assignee.
+  // locked schedule (2+ triggers) or a stored one the user never touched is not
+  // sent, so a preview 400 on the stored expression — an expression the server
+  // accepted once and may now reject, e.g. a timezone its tzdata dropped — must
+  // not veto edits to the title, prompt or assignee. A schedule the user just
+  // added has no stored counterpart to differ from: adding it IS the change.
   const scheduleWillBeWritten =
-    triggerKind === "schedule" && !schedulePillDisabled && (isCreate || scheduleDirty);
+    triggerKind === "schedule" &&
+    !schedulePillDisabled &&
+    (isCreate || (existingSchedule !== null ? scheduleDirty : scheduleAdded));
 
   // The FIRST empty required field in reading order — the user fills one, the
   // next surfaces. Only these two are answered here: a rejected schedule is
@@ -355,7 +383,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         // webhook — there's no cron to update there, and the schedule
         // panel isn't even rendered for webhook autopilots.
         if (scheduleWillBeWritten) {
-          const snapshottedTriggerId = firstTriggerIdRef.current;
+          const snapshottedTriggerId = scheduleTriggerIdRef.current;
           try {
             if (snapshottedTriggerId) {
               await updateTrigger.mutateAsync({
@@ -615,27 +643,31 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             {triggerKind === "schedule" ? (
               <div>
                 <SectionLabel>{t(($) => $.dialog.section_schedule)}</SectionLabel>
-                {/* No `onValidityChange` / `clearRejection` here, unlike the
-                    detail page's add-trigger dialog: nothing in this footer is
-                    gated on the schedule's validity any more, so the gate's
-                    `scheduleValid` would have no reader. The editor still shows
-                    its own inline rejection, and `ensureAccepted` re-asks the
-                    server on submit and toasts what it says. */}
-                <ScheduleEditor
-                  value={schedule}
-                  onChange={setSchedule}
-                  wsId={wsId}
-                  // Locked while the save is in flight: the submit path validates
-                  // over the network and then writes the schedule it read before
-                  // that round trip, so an edit made in between would be dropped
-                  // on the floor with a success toast over it.
-                  disabled={schedulePillDisabled || submitting}
-                  disabledReason={
-                    schedulePillDisabled
-                      ? t(($) => $.dialog.schedule_disabled_reason)
-                      : undefined
-                  }
-                />
+                {showScheduleEmptyState ? (
+                  <ScheduleEmptyState onAdd={() => setScheduleAdded(true)} />
+                ) : (
+                  /* No `onValidityChange` / `clearRejection` here, unlike the
+                     detail page's add-trigger dialog: nothing in this footer is
+                     gated on the schedule's validity any more, so the gate's
+                     `scheduleValid` would have no reader. The editor still shows
+                     its own inline rejection, and `ensureAccepted` re-asks the
+                     server on submit and toasts what it says. */
+                  <ScheduleEditor
+                    value={schedule}
+                    onChange={setSchedule}
+                    wsId={wsId}
+                    // Locked while the save is in flight: the submit path validates
+                    // over the network and then writes the schedule it read before
+                    // that round trip, so an edit made in between would be dropped
+                    // on the floor with a success toast over it.
+                    disabled={schedulePillDisabled || submitting}
+                    disabledReason={
+                      schedulePillDisabled
+                        ? t(($) => $.dialog.schedule_disabled_reason)
+                        : undefined
+                    }
+                  />
+                )}
               </div>
             ) : (
               <WebhookSection
@@ -649,9 +681,18 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t shrink-0 bg-background">
+          {/* The hint drops out while the schedule section states the autopilot
+              is manual — a footer promising automatic runs directly under that
+              is the same false promise the empty state exists to retire. The
+              slot itself stays, or `justify-between` would walk the buttons
+              over to the left edge. */}
           <div className="flex items-center gap-1.5 text-caption text-muted-foreground min-w-0">
-            <Zap className="size-3.5 text-amber-500 shrink-0" />
-            <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
+            {!showScheduleEmptyState && (
+              <>
+                <Zap className="size-3.5 text-amber-500 shrink-0" />
+                <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
@@ -913,6 +954,26 @@ function SubscribersSection({
   );
 }
 
+
+// The schedule section of an autopilot that has none. Mirrors the detail
+// page's trigger empty state — a dashed card that states the autopilot is
+// manual — so the two surfaces agree on what "no schedule" looks like instead
+// of one of them showing a filled-in editor and a next-run preview for a
+// schedule that does not exist.
+function ScheduleEmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useT("autopilots");
+  return (
+    <div className="rounded-md border border-dashed p-3 text-center">
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.dialog.schedule_empty)}
+      </p>
+      <Button size="sm" variant="outline" className="mt-2.5" onClick={onAdd}>
+        <Plus className="size-3.5 mr-1" />
+        {t(($) => $.dialog.schedule_add)}
+      </Button>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Trigger kind segmented control + webhook help section

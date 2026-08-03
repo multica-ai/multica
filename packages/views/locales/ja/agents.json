@@ -68,6 +68,7 @@
   "row": {
     "you": "あなた",
     "archived": "アーカイブ済み",
+    "needs_runtime": "ランタイム未設定",
     "no_description": "説明なし",
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
@@ -123,6 +124,8 @@
     "no_access_hint": "この非公開エージェントは、エージェントのオーナーまたはワークスペースの admin のみが閲覧できます。",
     "try_again": "再試行",
     "archived_banner": "このエージェントはアーカイブされています。割り当てやメンションはできません。",
+    "runtime_required_banner": "このエージェントの設定と履歴は保持されていますが、実行するにはランタイムを設定する必要があります。",
+    "bind_runtime": "ランタイムを設定",
     "restore": "復元",
     "archive_dialog_title": "エージェントをアーカイブしますか？",
     "archive_dialog_description": "\"{{name}}\" がアーカイブされます。割り当てやメンションはできなくなりますが、履歴はすべて保持されます。後で復元できます。",
@@ -137,6 +140,7 @@
     "restore_failed_toast": "エージェントを復元できませんでした",
     "dm": "DM",
     "dm_no_permission_toast": "このエージェントとチャットする権限がありません。",
+    "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
     "updated": "{{when}}に更新"
@@ -736,11 +740,10 @@
     "back": "戻る",
     "eyebrow": "エージェント作成",
     "choose_title": "どの方法で始めますか？",
-    "choose_description": "すべて自分で設定するか、実績のあるテンプレートを調整するか、必要なものを説明して会話から作成できます。",
+    "choose_description": "すべて自分で設定するか、必要なものを説明して会話から作成できます。",
     "recommended": "おすすめ",
     "continue": "続ける",
     "step_choose": "開始方法を選択",
-    "step_template": "テンプレートを選択",
     "step_configure": "確認して設定",
     "step_ai": "会話で作成",
     "modes": {
@@ -756,15 +759,6 @@
         "title": "AI で作成",
         "description": "期待する成果を説明すると、Agent Builder が重要な質問を行い、下書きをリアルタイムで作成します。"
       }
-    },
-    "templates": {
-      "search": "テンプレートを検索…",
-      "search_label": "エージェントテンプレートを検索",
-      "empty": "検索に一致するテンプレートはありません。",
-      "select_hint": "テンプレートを選択して、指示とスキルをプレビューします。",
-      "skills": "含まれるスキル",
-      "instructions": "指示",
-      "use": "このテンプレートを使用"
     },
     "sections": {
       "identity": "基本情報",
@@ -826,7 +820,17 @@
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
     "name_conflict": "同じ名前のエージェントがすでに存在します。",
-    "created": "{{name}} を作成しました"
+    "created": "{{name}} を作成しました",
+    "drafts": {
+      "title": "下書き",
+      "untitled": "無題の下書き",
+      "discard": "作成を破棄",
+      "discard_confirm": "会話と右側の設定は完全に削除されます。",
+      "discard_title": "この作成を破棄しますか？",
+      "discard_cancel": "編集を続ける",
+      "banner": "未完了の下書きが {{count}} 件あります",
+      "pick_hint": "続きを選んでください。"
+    }
   },
   "actions": {
     "selected_other": "{{count}} 件選択中",

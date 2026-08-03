@@ -382,10 +382,12 @@
     "trigger_blocked_invocation_not_allowed": "この対象が見つからないか、使用する権限がありません",
     "trigger_blocked_target_unavailable": "この対象は利用できません",
     "trigger_blocked_runtime_offline": "この対象のランタイムがオフラインです",
+    "trigger_blocked_agent_runtime_required": "この対象にはランタイムがありません — 実行するにはバインドしてください",
     "trigger_blocked_generic": "この対象はトリガーされません",
     "trigger_blocked_short_invocation_not_allowed": "未検出または権限なし",
     "trigger_blocked_short_target_unavailable": "利用不可",
     "trigger_blocked_short_runtime_offline": "ランタイム オフライン",
+    "trigger_blocked_short_agent_runtime_required": "ランタイム未設定",
     "trigger_blocked_short_generic": "トリガーされません",
     "send_reply_failed": "返信を送信できませんでした",
     "delete_failed": "コメントを削除できませんでした",
@@ -573,7 +575,9 @@
       "search_placeholder": "担当者を割り当て...",
       "members_group": "メンバー",
       "agents_group": "エージェント",
-      "squads_group": "スクワッド"
+      "squads_group": "スクワッド",
+      "agent_runtime_required": "作業を割り当てる前に、このエージェントにランタイムをバインドしてください",
+      "squad_runtime_required": "作業を割り当てる前に、このスクワッドのリーダーにランタイムをバインドしてください"
     },
     "start_date": {
       "trigger_label": "開始日",

@@ -1804,8 +1804,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 					if task.TriggerCommentID.Valid {
 						if !taskCoversReplyParent(task, parentID) {
 							// Keep this error actionable for agents (MUL-4417 / GH #5266).
-							writeError(w, http.StatusConflict,
-								"comment-triggered tasks cannot create top-level comments; set parent_id (--parent) to "+uuidToString(task.TriggerCommentID)+" or a coalesced comment id")
+							// The two rejections need different copy. A resumed
+							// session carrying a previous turn's --parent forward
+							// (GH #6264) did NOT ask for a top-level comment, and
+							// telling it that it did sends it looking for a
+							// new-thread opt-in instead of simply correcting the
+							// parent it already passed.
+							fix := "set parent_id (--parent) to " + uuidToString(task.TriggerCommentID) + " or a coalesced comment id"
+							msg := "comment-triggered tasks cannot create top-level comments; " + fix
+							if parentID.Valid {
+								msg = "parent_id " + uuidToString(parentID) + " is not a comment this task may reply under; " + fix
+							}
+							writeError(w, http.StatusConflict, msg)
 							return
 						}
 					}
@@ -3039,7 +3049,9 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			if !agent.RuntimeID.Valid {
-				blockTarget("squad", m.ID, ReasonRuntimeOffline)
+				// Unbound, not offline: the leader survived its runtime's
+				// deletion and needs a new one (MUL-5559).
+				blockTarget("squad", m.ID, ReasonAgentRuntimeRequired)
 				continue
 			}
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
@@ -3092,7 +3104,9 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		if !agent.RuntimeID.Valid {
-			blockTarget("agent", m.ID, ReasonRuntimeOffline)
+			// Unbound, not offline: there is no machine to bring back, so the
+			// user needs "bind a runtime", not "reconnect it" (MUL-5559).
+			blockTarget("agent", m.ID, ReasonAgentRuntimeRequired)
 			continue
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)

@@ -586,6 +586,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  runtime_bound: z.boolean().optional(),
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),

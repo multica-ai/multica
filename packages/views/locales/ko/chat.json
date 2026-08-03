@@ -13,12 +13,14 @@
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
     "placeholder_archived_agent": "보관된 에이전트입니다",
+    "placeholder_runtime_required": "런타임을 연결한 후 계속하세요",
     "placeholder_named": "{{name}}에게 메시지 보내기…",
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지",
     "send_failed_toast": "메시지를 보내지 못했습니다",
     "send_blocked_toast": "메시지가 전송되지 않았습니다 — 이 에이전트를 사용할 권한이 없습니다",
+    "runtime_required_toast": "메시지가 전송되지 않았습니다 — 먼저 이 에이전트에 런타임을 연결하세요",
     "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "add_tooltip": "추가",
     "upload_file": "이미지 또는 파일",
@@ -112,7 +114,9 @@
     "others": "기타",
     "no_agents": "에이전트 없음",
     "history_group": "채팅 기록",
-    "agent_filter_placeholder": "에이전트 검색..."
+    "agent_filter_placeholder": "에이전트 검색...",
+    "agent_needs_runtime": "런타임 필요",
+    "agent_needs_runtime_hint": "이 에이전트와 채팅하기 전에 런타임을 연결하세요"
   },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",
@@ -132,6 +136,11 @@
   },
   "no_agent_banner": "채팅을 시작하려면 에이전트가 필요합니다.",
   "archived_agent_banner": "{{name}}은(는) 보관되었습니다. 이 대화는 읽기 전용입니다.",
+  "runtime_required_banner": {
+    "fallback_name": "이 에이전트",
+    "message": "{{name}} 에이전트가 응답하려면 런타임을 연결해야 합니다.",
+    "action": "런타임 연결"
+  },
   "offline_banner": {
     "fallback_name": "에이전트",
     "unstable": "{{name}}의 연결이 불안정합니다. 답변이 지연될 수 있습니다.",

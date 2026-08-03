@@ -95,6 +95,8 @@ vi.mock("@multica/core/api", () => ({
   dispatchReasonCode: () => undefined,
 }));
 vi.mock("@multica/core/agents", () => ({
+  isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
+    agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useAgentPresenceDetail: () => ({ availability: "online" }),
   useWorkspaceAgentAvailability: () => "available",
 }));
@@ -139,6 +141,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("members")) {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
+      if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
       if (key.includes("draft-restores")) return { data: h.draftRestores };
@@ -181,8 +184,18 @@ function makeSession(
   };
 }
 
-const agentA = { id: "agent-a", name: "Alpha" } as unknown as Agent;
-const agentB = { id: "agent-b", name: "Beta" } as unknown as Agent;
+const agentA = {
+  id: "agent-a",
+  name: "Alpha",
+  runtime_id: "runtime-a",
+  runtime_bound: true,
+} as unknown as Agent;
+const agentB = {
+  id: "agent-b",
+  name: "Beta",
+  runtime_id: "runtime-b",
+  runtime_bound: true,
+} as unknown as Agent;
 
 // Descending updated_at → sortChatSessions renders them sA, sB, sC.
 const sA = makeSession({ id: "sA", agent_id: "agent-a", updated_at: "2026-07-08T03:00:00Z" });
@@ -713,6 +726,7 @@ describe("useChatController.handleSend — compose target tracking", () => {
     h.store.setActiveSession.mockClear();
     h.createSessionMutate.mockClear();
     h.createSessionMutate.mockResolvedValue({ id: "new-session" });
+    vi.mocked(api.sendChatMessage).mockClear();
     vi.mocked(api.sendChatMessage).mockResolvedValue({
       message_id: "msg-1",
       task_id: "task-1",
@@ -749,6 +763,25 @@ describe("useChatController.handleSend — compose target tracking", () => {
       expect.objectContaining({ clearEditor: true, extraDraftKeys: ["new-session"] }),
     );
     expect(h.store.setActiveSession).toHaveBeenCalledWith("new-session");
+  });
+
+  it("does not create or send a chat for an unbound agent", async () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = "agent-a";
+    h.sessions = [];
+    h.agents = [{ ...agentA, runtime_id: "", runtime_bound: false }];
+    const { result } = renderHook(() => useChatController());
+    const commitInput = vi.fn();
+
+    let sent = true;
+    await act(async () => {
+      sent = await result.current.handleSend("hello", undefined, commitInput);
+    });
+
+    expect(sent).toBe(false);
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(commitInput).not.toHaveBeenCalled();
   });
 
   it("scrubs the composer even if the agent picker moved mid-send", async () => {

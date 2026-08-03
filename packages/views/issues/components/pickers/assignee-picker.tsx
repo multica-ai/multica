@@ -5,6 +5,7 @@ import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -136,6 +137,11 @@ function AssigneePickerImpl({
   const filteredSquads = squads
     .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
+  const runnableAgentIds = new Set(
+    agents
+      .filter((agent) => !agent.archived_at && isAgentRuntimeBound(agent))
+      .map((agent) => agent.id),
+  );
 
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
@@ -218,13 +224,20 @@ function AssigneePickerImpl({
                   ? memberRole
                   : null,
             });
-            const allowed = decision.allowed;
+            const runtimeBound = isAgentRuntimeBound(a);
+            const allowed = decision.allowed && runtimeBound;
             return (
               <PickerItem
                 key={a.id}
                 selected={isSelected("agent", a.id)}
                 disabled={!allowed}
-                tooltip={!allowed ? decision.message : undefined}
+                tooltip={
+                  !decision.allowed
+                    ? decision.message
+                    : !runtimeBound
+                      ? t(($) => $.pickers.assignee.agent_runtime_required)
+                      : undefined
+                }
                 onClick={() => {
                   if (!allowed) return;
                   onUpdate({
@@ -249,22 +262,32 @@ function AssigneePickerImpl({
           its leader agent on the backend. */}
       {filteredSquads.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.squads_group)}>
-          {filteredSquads.map((s) => (
-            <PickerItem
-              key={s.id}
-              selected={isSelected("squad", s.id)}
-              onClick={() => {
-                onUpdate({
-                  assignee_type: "squad",
-                  assignee_id: s.id,
-                });
-                setOpen(false);
-              }}
-            >
-              <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
-              <span className="truncate">{s.name}</span>
-            </PickerItem>
-          ))}
+          {filteredSquads.map((s) => {
+            const runtimeBound = runnableAgentIds.has(s.leader_id);
+            return (
+              <PickerItem
+                key={s.id}
+                selected={isSelected("squad", s.id)}
+                disabled={!runtimeBound}
+                tooltip={
+                  runtimeBound
+                    ? undefined
+                    : t(($) => $.pickers.assignee.squad_runtime_required)
+                }
+                onClick={() => {
+                  if (!runtimeBound) return;
+                  onUpdate({
+                    assignee_type: "squad",
+                    assignee_id: s.id,
+                  });
+                  setOpen(false);
+                }}
+              >
+                <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
+                <span className="truncate">{s.name}</span>
+              </PickerItem>
+            );
+          })}
         </PickerSection>
       )}
 

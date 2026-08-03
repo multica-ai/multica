@@ -142,6 +142,156 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// AgentBuilderSessionSummary is one unfinished agent-creation conversation.
+type AgentBuilderSessionSummary struct {
+	SessionID string `json:"session_id"`
+	Title     string `json:"title"`
+	// RuntimeID is the carrier's runtime — where this conversation actually
+	// executes. The client seeds its runtime picker from it so the picker can
+	// never disagree with what answers the next message (MUL-5163).
+	RuntimeID string `json:"runtime_id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	// LastMessageContent is the raw stored message, still in the builder's wire
+	// format (the user side is a JSON envelope, the assistant side carries an
+	// <agent_draft> block). Decoding is the client's job: the protocol is
+	// defined by the studio and its prompt, and duplicating it here would give
+	// it a second, silently divergent implementation.
+	LastMessageContent string `json:"last_message_content"`
+	LastMessageRole    string `json:"last_message_role"`
+	LastMessageAt      string `json:"last_message_at"`
+	// Draft is the stored configuration, opaque to the server (see migration
+	// 252). It ships with the list rather than behind its own fetch because the
+	// studio renders this list beside the conversation it switches between, so
+	// the picked row's configuration must be in hand at click time. Null when
+	// the conversation has only ever been driven by the AI — the client then
+	// replays the last <agent_draft> block instead.
+	Draft json.RawMessage `json:"draft,omitempty"`
+}
+
+type ListAgentBuilderSessionsResponse struct {
+	Sessions []AgentBuilderSessionSummary `json:"sessions"`
+}
+
+// ListAgentBuilderSessions returns the caller's unfinished agent-creation
+// conversations, newest activity first.
+//
+// This is the only way back to a builder session: they are hidden from every
+// chat surface by the `kind = 'user'` agent filter, so before this endpoint the
+// studio had to delete one on navigation or leak it forever. Creator-scoped
+// like every other chat read — a workspace admin cannot list someone else's
+// drafts, matching loadChatSessionForUser's rule.
+func (h *Handler) ListAgentBuilderSessions(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListAgentBuilderSessionsByCreator(r.Context(), db.ListAgentBuilderSessionsByCreatorParams{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent builder sessions")
+		return
+	}
+
+	sessions := make([]AgentBuilderSessionSummary, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, AgentBuilderSessionSummary{
+			SessionID:          uuidToString(row.ID),
+			Title:              row.Title,
+			RuntimeID:          uuidToString(row.RuntimeID),
+			CreatedAt:          timestampToString(row.CreatedAt),
+			UpdatedAt:          timestampToString(row.UpdatedAt),
+			LastMessageContent: row.LastMessageContent,
+			LastMessageRole:    row.LastMessageRole,
+			LastMessageAt:      timestampToString(row.LastMessageAt),
+			Draft:              json.RawMessage(row.StoredDraft),
+		})
+	}
+	writeJSON(w, http.StatusOK, ListAgentBuilderSessionsResponse{Sessions: sessions})
+}
+
+// maxAgentBuilderDraftBytes bounds one stored configuration. The largest honest
+// field is the instruction markdown, which the create API itself caps well
+// below this; the limit exists so a client bug cannot grow an unbounded row.
+const maxAgentBuilderDraftBytes = 256 * 1024
+
+type SaveAgentBuilderDraftRequest struct {
+	Draft json.RawMessage `json:"draft"`
+}
+
+// SaveAgentBuilderDraft stores the configuration a creation conversation has
+// arrived at, including the edits the user typed but has not sent.
+//
+// The payload is opaque (see migration 252): its shape is the studio's
+// AgentDraft, validated client-side, and nothing server-side reads a field.
+// Whole-object last-write-wins is correct here because a conversation has one
+// editor on one screen — a field-level merge could only reconstruct a state the
+// user never saw.
+func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req SaveAgentBuilderDraftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Draft) == 0 {
+		writeError(w, http.StatusBadRequest, "draft is required")
+		return
+	}
+	if len(req.Draft) > maxAgentBuilderDraftBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "draft is too large")
+		return
+	}
+	if !json.Valid(req.Draft) {
+		writeError(w, http.StatusBadRequest, "draft must be valid JSON")
+		return
+	}
+
+	// Creator-only, and only for a builder carrier — the same two gates the
+	// runtime switch applies. Without the carrier check this would be a way to
+	// hang arbitrary JSON off any chat session the caller owns.
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
+		return
+	}
+	if !isAgentBuilderCarrier(agent) {
+		writeError(w, http.StatusNotFound, "agent builder session not found")
+		return
+	}
+
+	if _, err := h.Queries.UpsertAgentBuilderDraft(r.Context(), db.UpsertAgentBuilderDraftParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+		Draft:         req.Draft,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save agent builder draft")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // resolveBuilderRuntime loads a runtime the caller is allowed to execute a
 // builder conversation on. Shared by session create and runtime switch so both
 // enforce the same three gates in the same order: it exists in this workspace,

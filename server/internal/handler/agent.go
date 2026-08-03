@@ -35,9 +35,18 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RuntimeID     string          `json:"runtime_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	// RuntimeID is the empty string when the agent is unbound — it kept its
+	// configuration and history when its runtime was deleted, and needs a new
+	// runtime before it can run again (MUL-5559). The wire type stays a string
+	// so installed clients keep parsing; RuntimeBound is the explicit signal.
+	RuntimeID string `json:"runtime_id"`
+	// RuntimeBound is false exactly when the agent has no runtime. UI should
+	// branch on this rather than on RuntimeID being falsy, and must not confuse
+	// it with a bound-but-offline runtime (a different user story: reconnect the
+	// machine vs. pick a new one).
+	RuntimeBound  bool            `json:"runtime_bound"`
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
 	Instructions  string          `json:"instructions"`
@@ -159,6 +168,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
 		RuntimeID:                uuidToString(a.RuntimeID),
+		RuntimeBound:             a.RuntimeID.Valid,
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,

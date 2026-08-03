@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -307,6 +308,49 @@ func (h *Handler) inheritMachineCustomName(ctx context.Context, rt db.AgentRunti
 	return updated
 }
 
+var errRuntimeProfileDisabled = errors.New("runtime profile is disabled")
+
+// upsertRuntimeWithProfile serializes custom-runtime registration with profile
+// deletion. The profile row remains KEY SHARE locked until the runtime upsert
+// commits; DeleteRuntimeProfile takes a conflicting UPDATE lock before it
+// enumerates runtime rows. This closes the stale-read window where deletion
+// could miss an instance inserted by a concurrently registering daemon.
+func (h *Handler) upsertRuntimeWithProfile(
+	ctx context.Context,
+	workspaceID, profileID pgtype.UUID,
+	build func(db.RuntimeProfile) db.UpsertAgentRuntimeWithProfileParams,
+) (db.UpsertAgentRuntimeWithProfileRow, db.RuntimeProfile, error) {
+	var row db.UpsertAgentRuntimeWithProfileRow
+	var profile db.RuntimeProfile
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return row, profile, fmt.Errorf("begin profile runtime registration: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	profile, err = qtx.LockRuntimeProfileForRegistration(ctx, db.LockRuntimeProfileForRegistrationParams{
+		ID:          profileID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return row, profile, fmt.Errorf("lock runtime profile: %w", err)
+	}
+	if !profile.Enabled {
+		return row, profile, errRuntimeProfileDisabled
+	}
+
+	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, build(profile))
+	if err != nil {
+		return row, profile, fmt.Errorf("upsert profile runtime: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return row, profile, fmt.Errorf("commit profile runtime registration: %w", err)
+	}
+	return row, profile, nil
+}
+
 // sharedDaemonCustomName returns the machine-level name shared by all of a
 // daemon's runtimes — the same rule the frontend's sharedCustomName applies:
 // every runtime must carry the identical non-empty custom_name. Returns
@@ -429,32 +473,33 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			// The profile must exist in this workspace and be enabled. Trust
 			// the profile's stored protocol_family over the daemon-sent type so
 			// the provider used for task routing cannot drift from the profile.
-			profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
-				ID:          profileUUID,
-				WorkspaceID: wsUUID,
-			})
-			if perr != nil {
+			prow, profile, err := h.upsertRuntimeWithProfile(
+				r.Context(),
+				wsUUID,
+				profileUUID,
+				func(profile db.RuntimeProfile) db.UpsertAgentRuntimeWithProfileParams {
+					return db.UpsertAgentRuntimeWithProfileParams{
+						WorkspaceID: wsUUID,
+						DaemonID:    strToText(req.DaemonID),
+						Name:        name,
+						RuntimeMode: "local",
+						Provider:    profile.ProtocolFamily,
+						Status:      status,
+						DeviceInfo:  deviceInfo,
+						Metadata:    metadata,
+						OwnerID:     ownerID,
+						ProfileID:   profileUUID,
+					}
+				},
+			)
+			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusBadRequest, "unknown runtime profile: "+runtime.ProfileID)
 				return
 			}
-			if !profile.Enabled {
+			if errors.Is(err, errRuntimeProfileDisabled) {
 				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
 				return
 			}
-			provider = profile.ProtocolFamily
-
-			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
-				WorkspaceID: wsUUID,
-				DaemonID:    strToText(req.DaemonID),
-				Name:        name,
-				RuntimeMode: "local",
-				Provider:    provider,
-				Status:      status,
-				DeviceInfo:  deviceInfo,
-				Metadata:    metadata,
-				OwnerID:     ownerID,
-				ProfileID:   profileUUID,
-			})
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
 					uuidToString(ownerID),
@@ -468,6 +513,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
 				return
 			}
+			provider = profile.ProtocolFamily
 			inserted = prow.Inserted
 			registered = db.AgentRuntime{
 				ID:             prow.ID,
@@ -590,46 +636,46 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if !pok {
 			return
 		}
-		profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
-			ID:          profileUUID,
-			WorkspaceID: wsUUID,
-		})
-		if perr != nil || !profile.Enabled {
-			continue
-		}
-		name := profile.DisplayName
-		if req.DeviceName != "" {
-			name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
-		}
-		deviceInfo := strings.TrimSpace(req.DeviceName)
 		reason := strings.TrimSpace(failed.Reason)
 		if reason == "" {
 			reason = "custom runtime command could not be resolved"
 		}
 		commandName := strings.TrimSpace(failed.CommandName)
-		if commandName == "" {
-			commandName = profile.CommandName
-		}
-		metadata, _ := json.Marshal(map[string]any{
-			"version":                            "",
-			"cli_version":                        req.CLIVersion,
-			"launched_by":                        req.LaunchedBy,
-			"runtime_profile_registration_error": true,
-			"runtime_profile_failure_reason":     reason,
-			"command_name":                       commandName,
-		})
-		prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
-			WorkspaceID: wsUUID,
-			DaemonID:    strToText(req.DaemonID),
-			Name:        name,
-			RuntimeMode: "local",
-			Provider:    profile.ProtocolFamily,
-			Status:      "offline",
-			DeviceInfo:  deviceInfo,
-			Metadata:    metadata,
-			OwnerID:     ownerID,
-			ProfileID:   profileUUID,
-		})
+		prow, _, err := h.upsertRuntimeWithProfile(
+			r.Context(),
+			wsUUID,
+			profileUUID,
+			func(profile db.RuntimeProfile) db.UpsertAgentRuntimeWithProfileParams {
+				name := profile.DisplayName
+				if req.DeviceName != "" {
+					name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
+				}
+				resolvedCommandName := commandName
+				if resolvedCommandName == "" {
+					resolvedCommandName = profile.CommandName
+				}
+				metadata, _ := json.Marshal(map[string]any{
+					"version":                            "",
+					"cli_version":                        req.CLIVersion,
+					"launched_by":                        req.LaunchedBy,
+					"runtime_profile_registration_error": true,
+					"runtime_profile_failure_reason":     reason,
+					"command_name":                       resolvedCommandName,
+				})
+				return db.UpsertAgentRuntimeWithProfileParams{
+					WorkspaceID: wsUUID,
+					DaemonID:    strToText(req.DaemonID),
+					Name:        name,
+					RuntimeMode: "local",
+					Provider:    profile.ProtocolFamily,
+					Status:      "offline",
+					DeviceInfo:  strings.TrimSpace(req.DeviceName),
+					Metadata:    metadata,
+					OwnerID:     ownerID,
+					ProfileID:   profileUUID,
+				}
+			},
+		)
 		if err != nil {
 			slog.Warn("failed to record runtime profile registration failure",
 				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID,

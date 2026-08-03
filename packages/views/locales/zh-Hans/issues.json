@@ -382,10 +382,12 @@
     "trigger_blocked_invocation_not_allowed": "找不到该目标，或你没有它的使用权限",
     "trigger_blocked_target_unavailable": "该目标不可用",
     "trigger_blocked_runtime_offline": "该目标的运行时已离线",
+    "trigger_blocked_agent_runtime_required": "该目标未绑定运行时——绑定后才能运行",
     "trigger_blocked_generic": "该目标不会被触发",
     "trigger_blocked_short_invocation_not_allowed": "找不到或无权限",
     "trigger_blocked_short_target_unavailable": "不可用",
     "trigger_blocked_short_runtime_offline": "运行时离线",
+    "trigger_blocked_short_agent_runtime_required": "需绑定运行时",
     "trigger_blocked_short_generic": "不会触发",
     "send_reply_failed": "发送回复失败",
     "delete_failed": "删除评论失败",
@@ -573,7 +575,9 @@
       "search_placeholder": "分配给...",
       "members_group": "成员",
       "agents_group": "智能体",
-      "squads_group": "小队"
+      "squads_group": "小队",
+      "agent_runtime_required": "请先为该智能体绑定运行时，再分配工作",
+      "squad_runtime_required": "请先为该小队的负责人绑定运行时，再分配工作"
     },
     "start_date": {
       "trigger_label": "开始日期",

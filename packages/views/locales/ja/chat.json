@@ -13,12 +13,14 @@
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
     "placeholder_archived_agent": "このエージェントはアーカイブされています",
+    "placeholder_runtime_required": "ランタイムを設定して続ける",
     "placeholder_named": "{{name}} にメッセージ…",
     "placeholder_default": "メッセージを入力…",
     "send_tooltip": "送信",
     "stop_tooltip": "停止",
     "send_failed_toast": "メッセージを送信できませんでした",
     "send_blocked_toast": "メッセージは送信されませんでした — このエージェントを使用する権限がありません",
+    "runtime_required_toast": "メッセージは送信されませんでした — 先にこのエージェントのランタイムを設定してください",
     "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
     "add_tooltip": "追加",
     "upload_file": "画像・ファイル",
@@ -112,7 +114,9 @@
     "others": "その他",
     "no_agents": "エージェントなし",
     "history_group": "チャット履歴",
-    "agent_filter_placeholder": "エージェントを検索..."
+    "agent_filter_placeholder": "エージェントを検索...",
+    "agent_needs_runtime": "ランタイム未設定",
+    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください"
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",
@@ -132,6 +136,11 @@
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
   "archived_agent_banner": "{{name}} はアーカイブされました。この会話は読み取り専用です。",
+  "runtime_required_banner": {
+    "fallback_name": "このエージェント",
+    "message": "{{name}} が返信するにはランタイムの設定が必要です。",
+    "action": "ランタイムを設定"
+  },
   "offline_banner": {
     "fallback_name": "エージェント",
     "unstable": "{{name}} の接続が不安定です。返信が遅れる場合があります。",

@@ -12,6 +12,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Router is the channel-agnostic inbound pipeline — the generalization of the
@@ -177,6 +179,24 @@ var ErrNoResolverSet = errors.New("channel router: no resolver set for channel t
 // infrastructure failures (the adapter reconnects). Product outcomes (dropped,
 // needs-binding, …) are not errors.
 func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
+	// Preserve the user's original normalized text before any shared command
+	// rewrites. Session binders pass this source to command classifiers while
+	// Text remains the agent-readable body.
+	if msg.CommandText == "" {
+		msg.CommandText = msg.Text
+	}
+
+	// /new is a channel-wide product command, not an adapter capability. Parse
+	// it here so every adapter that delivers it as message text gets the same
+	// fresh-session behavior. Feishu already strips /new before its context
+	// enricher runs and sets ForceFresh; the guard preserves that enriched body.
+	if !msg.ForceFresh {
+		if body, ok := ParseFreshSessionCommand(msg.CommandText); ok {
+			msg.ForceFresh = true
+			msg.Text = body
+		}
+	}
+
 	r.mu.RLock()
 	set, ok := r.sets[msg.Source.ChannelType]
 	r.mu.RUnlock()
@@ -369,18 +389,19 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	// 7. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
 	if appendRes.IssueCommand != nil {
-		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand)
+		// One lookup feeds both the broadcast payload's identifier and the
+		// chat reply's.
+		prefix := r.issuePrefix(ctx, inst.WorkspaceID)
+		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand, prefix)
 		if err != nil {
 			return Result{}, postAppendFinalize, fmt.Errorf("create issue from command: %w", err)
 		}
 		res.IssueID = issueRes.Issue.ID
 		res.IssueNumber = issueRes.Issue.Number
 		res.IssueTitle = issueRes.Issue.Title
-		if ws, werr := r.reader.GetWorkspace(ctx, inst.WorkspaceID); werr == nil && ws.IssuePrefix != "" {
-			res.IssueIdentifier = fmt.Sprintf("%s-%d", ws.IssuePrefix, issueRes.Issue.Number)
-		} else {
-			res.IssueIdentifier = fmt.Sprintf("#%d", issueRes.Issue.Number)
-		}
+		// Same renderer the broadcast payload uses, so a degraded prefix can't
+		// show the chat "#42" while the realtime list shows "-42".
+		res.IssueIdentifier = service.IssueIdentifier(prefix, issueRes.Issue.Number)
 	}
 
 	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
@@ -655,7 +676,7 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: instID}
 }
 
-func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand) (service.IssueCreateResult, error) {
+func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string) (service.IssueCreateResult, error) {
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}
@@ -672,7 +693,33 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 		OriginType:   pgtype.Text{String: originType, Valid: originType != ""},
 		OriginID:     sessionID,
 	}
-	return r.issues.Create(ctx, params, service.IssueCreateOpts{})
+	// Without a BroadcastPayload the service emits its minimal
+	// {"issue_id": ...} stub, and every issue:created consumer that reads the
+	// "issue" key drops the event — most visibly the subscriber listener, which
+	// needs id + creator_id and so never subscribed the person who typed
+	// /issue to their own issue. IssueToMap is the shared renderer for events
+	// published outside the HTTP handler; it stays key-compatible with the
+	// IssueResponse that handler path broadcasts, so clients see one issue
+	// shape regardless of which entry point created the issue.
+	opts := service.IssueCreateOpts{
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			return map[string]any{"issue": service.IssueToMap(issue, issuePrefix)}
+		},
+	}
+	return r.issues.Create(ctx, params, opts)
+}
+
+// issuePrefix reads the workspace's issue key (the "MUL" in MUL-42). A read
+// failure is not worth failing issue creation over, so it degrades to empty
+// and only the rendered identifier suffers.
+func (r *Router) issuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+	ws, err := r.reader.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		r.logger.Warn("channel engine: workspace lookup for issue prefix failed",
+			"workspace_id", util.UUIDToString(workspaceID), "error", err)
+		return ""
+	}
+	return ws.IssuePrefix
 }
 
 // ErrEmptyIssueTitle is returned by createIssue when /issue has no title and

@@ -373,7 +373,16 @@ export interface AgentTask {
 export interface Agent {
   id: string;
   workspace_id: string;
+  /**
+   * Empty string when the agent is unbound: it kept its configuration, chats and
+   * task history when its runtime was deleted, and needs a new runtime before it
+   * can run again (MUL-5559). Use `isAgentRuntimeBound` so additive and legacy
+   * signals stay compatible, and do not confuse it with a bound-but-offline
+   * runtime — that one just needs the machine back.
+   */
   runtime_id: string;
+  /** False exactly when the agent has no runtime. Older backends omit it. */
+  runtime_bound?: boolean;
   name: string;
   description: string;
   instructions: string;
@@ -551,6 +560,54 @@ export interface AgentBuilderSession {
   session_id: string;
   builder_agent_id: string;
   runtime_id: string;
+}
+
+/** Who may invoke the agent being created, as the creation form models it. */
+export type AgentPermissionScope = "private" | "workspace" | "members";
+
+/**
+ * The wire form of an in-progress agent configuration.
+ *
+ * Differs from the editable draft in two deliberate ways: `Set` becomes an
+ * array (JSON has no sets), and there is no runtime — which runtime a
+ * conversation executes on is owned by its carrier agent server-side, and a
+ * copy here could only go stale. `applied_message_id` travels along because it
+ * is what stops a restore from re-applying the last reply's `<agent_draft>`
+ * over edits the user made after it.
+ */
+export interface StoredAgentDraft {
+  name: string;
+  description: string;
+  instructions: string;
+  avatar_url: string | null;
+  model: string;
+  thinking_level: string;
+  service_tier: string;
+  skill_ids: string[];
+  permission_scope: AgentPermissionScope;
+  member_ids: string[];
+  team_ids: string[];
+  applied_message_id: string | null;
+}
+
+/** One unfinished agent-creation conversation, as listed by the studio. */
+export interface AgentBuilderSessionSummary {
+  session_id: string;
+  title: string;
+  /** The carrier's runtime — where this conversation actually executes. The
+   *  picker seeds from it so it can never disagree with what answers the next
+   *  message (MUL-5163). */
+  runtime_id: string;
+  created_at: string;
+  updated_at: string;
+  /** Still in the builder wire format; decode with the builder protocol helpers
+   *  before showing it to a human. */
+  last_message_content: string;
+  last_message_role: string;
+  last_message_at: string;
+  /** The stored configuration, or null when the conversation has never been
+   *  hand-edited — the client then replays the last `<agent_draft>` block. */
+  draft?: StoredAgentDraft | null;
 }
 
 /** Result of rebinding a live builder conversation to another runtime.

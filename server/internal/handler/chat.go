@@ -626,6 +626,13 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same no-FK chore, for the agent configuration a builder conversation was
+	// editing. A no-op for ordinary chats, which never have one.
+	if err := qtx.DeleteAgentBuilderDraft(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
+		return
+	}
+
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -750,7 +757,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !agent.RuntimeID.Valid {
-		writeError(w, http.StatusConflict, "chat agent has no runtime")
+		h.writeDispatchBlocked(w, http.StatusConflict, ReasonAgentRuntimeRequired)
 		return
 	}
 
@@ -1241,17 +1248,16 @@ func (h *Handler) ConsumeChatDraftRestore(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pruneRuntimeAgentChatDraftRestores drops the pending draft restores of every
-// chat_session a runtime teardown is about to remove through the agent cascade
-// (chat_session.agent_id is ON DELETE CASCADE, migration 033). chat_draft_restore
-// has no FK (MUL-3515) and no reaper, so a restore left behind keeps the user's
-// prompt text forever, unreachable and undeletable.
+// pruneRuntimeSystemAgentChatDraftRestores drops the pending draft restores of
+// every chat_session a runtime teardown is about to remove through the agent
+// cascade (chat_session.agent_id is ON DELETE CASCADE, migration 033).
+// chat_draft_restore has no FK (MUL-3515) and no reaper, so a restore left
+// behind keeps the user's prompt text forever, unreachable and undeletable.
 //
 // Every runtime/agent teardown path must call this in its own transaction and
-// BEFORE deleting the agent rows — the queries join through them. includeSystemAgents
-// mirrors whether the caller also runs DeleteSystemAgentsByRuntime: the
-// runtime-profile teardown deletes only archived agents, and pruning system-agent
-// sessions there would destroy restores whose session survives.
+// BEFORE deleting the agent rows — the queries join through them. Only system
+// agents are in scope: since MUL-5559 a runtime delete unbinds its user agents
+// instead of deleting them, so their sessions and restores must survive.
 //
 // The sessions are locked before the sweep: that is the deleter half of the
 // mutual-exclusion protocol with FinalizeDeferredCancelledChat, which would
@@ -1261,20 +1267,16 @@ func (h *Handler) ConsumeChatDraftRestore(w http.ResponseWriter, r *http.Request
 // The workspace teardown has its own copy of this shape (locks, then sweeps
 // inside the DeleteWorkspace CTE) because that statement's prune must stay in
 // the same statement as the workspace row it commits with.
-func pruneRuntimeAgentChatDraftRestores(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID, includeSystemAgents bool) error {
-	if _, err := q.LockChatSessionsByArchivedRuntimeAgents(ctx, runtimeID); err != nil {
-		return err
-	}
-	if err := q.DeleteChatDraftRestoresByArchivedRuntimeAgents(ctx, runtimeID); err != nil {
-		return err
-	}
-	if !includeSystemAgents {
-		return nil
-	}
+func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID) error {
 	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}
-	return q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID)
+	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	// Builder drafts only ever hang off a system carrier, so they are pruned
+	// here and nowhere else — the archived-agent sweep above has none to find.
+	return q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID)
 }
 
 // PendingChatTasksResponse is the aggregate view consumed by the FAB.

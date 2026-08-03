@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをアーカイブし、アクティブなタスクもキャンセルします。
+アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブなタスクをキャンセルします。
 
 仕組みとカスタムプロファイルについては[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
@@ -279,7 +279,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `stop` / `status` / `restart` | 停止、状態の確認、再起動（`restart` は `start` と同じフラグ） | |
 | | `logs` | デーモンのログを表示 | `--follow`、`--lines` |
 | | `disk-usage` | ローカルのディスク使用量を表示 | `--by-workspace`、`--by-task`、`--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントをアーカイブし、そのタスクもキャンセル） |
+| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、そのタスクをキャンセル） |
 | | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | |
 | | `profile set-path/unset-path <profile-id>` | ローカルの実行ファイルパスを固定（ローカルのみ有効。サーバーには送信されません） | |
 

@@ -294,6 +294,37 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.17",
+        date: "2026-08-03",
+        title: "Delete a runtime without losing your agents",
+        changes: [],
+        features: [
+          "Deleting a runtime now keeps your agents — point them at another machine and carry on.",
+          "Arrow keys move the selection in your inbox, so you can read through it without the mouse.",
+          "A new hands-on tutorial takes you from an empty workspace to a team that runs itself.",
+          "Repo caches no task has touched for a month now clear themselves out.",
+        ],
+        improvements: [
+          "Disk usage now matches what your file manager shows, down to the last folder.",
+          "The command line now tells you how to fix a conflict instead of asking you to retry.",
+          "Creating an autopilot now points at the required field that is still missing.",
+          "The Issue sidebar puts the execution log first and Details underneath.",
+          "The license now says plainly that free public hosting still needs a commercial license.",
+        ],
+        fixes: [
+          "Kimi replies no longer repeat the previous answer when a conversation picks back up.",
+          "Agents with their own Codex instructions file now start their tasks correctly.",
+          "Picking a schedule for an autopilot that had no triggers now saves it.",
+          "Opening a Skill an agent imported no longer shows edits you never made.",
+          "/new starts a fresh conversation in both Slack and Feishu now.",
+          "Issues you file with /issue in chat now notify you about what happens next.",
+          "Attachment uploads no longer fail on Aliyun OSS and Tencent COS.",
+          "Machines that can only reach the internet through a proxy now pick up tasks right away.",
+          "The mobile app reconnects on its own instead of sitting on a dead connection.",
+          "Downloaded Skills stay cached instead of being fetched again every few days.",
+        ],
+      },
+      {
         version: "0.4.16",
         date: "2026-07-31",
         title: "One-click next steps, link cards, and steadier agents",

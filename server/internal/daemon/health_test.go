@@ -350,6 +350,10 @@ func newBlockingLookupRepoCache(path string) *blockingLookupRepoCache {
 	}
 }
 
+func (c *blockingLookupRepoCache) BarePath(_, _ string) string {
+	return ""
+}
+
 func (c *blockingLookupRepoCache) Lookup(_, _ string) string {
 	select {
 	case <-c.lookupSeen:
@@ -379,6 +383,10 @@ type recordingRepoCache struct {
 }
 
 func (c *recordingRepoCache) Lookup(_, _ string) string {
+	return c.lookupPath
+}
+
+func (c *recordingRepoCache) BarePath(_, _ string) string {
 	return c.lookupPath
 }
 

@@ -29,7 +29,7 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 			return
 		}
 		// Issues created via handler use IssueResponse; autopilot-created issues
-		// use map[string]any (see service/autopilot.go → issueToMap).
+		// use map[string]any (see service/autopilot.go → IssueToMap).
 		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return

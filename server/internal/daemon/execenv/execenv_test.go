@@ -3,6 +3,7 @@ package execenv
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -1001,9 +1002,16 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// an explicit, verified handoff with a cleanup handle.
 				"persistent service handoff",
 				"running service itself is the requested deliverable",
-				"stdio redirected to durable logs",
-				"PID/profile",
-				"verify readiness before replying",
+				// MUL-5442: pin the handoff concepts, not the operational
+				// phrasing — but the cleanup handle must stay general (a
+				// supervisor/profile-managed service has no single stable PID)
+				// and the user-facing reply must keep the full URL/logs/stop
+				// triple (durable logs alone are unobservable if the user is
+				// never told where they are).
+				"durable logs",
+				"cleanup handle such as PID/profile",
+				"verify readiness",
+				"URL, logs, and stop instructions",
 				"survival as best-effort, not guaranteed",
 				"does not cover tests, builds, CI polling",
 				"are not agent-owned background tasks",
@@ -1077,10 +1085,31 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
 		"multica issue comment add --help",
-		"multica squad member set-role <squad-id>",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
+		}
+	}
+
+	// Squad maintenance is squad-leader surface and is gated on that (MUL-5442):
+	// an agent leading no squad has no squad whose roles it could change.
+	if strings.Contains(s, "### Squad maintenance") {
+		t.Errorf("non-leader brief must not carry the squad maintenance block\n---\n%s", s)
+	}
+	leaderDir := t.TempDir()
+	if _, err := InjectRuntimeConfig(leaderDir, "codex", TaskContextForEnv{IssueID: "issue-1", IsSquadLeader: true}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	leader, err := os.ReadFile(filepath.Join(leaderDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read leader AGENTS.md: %v", err)
+	}
+	for _, want := range []string{
+		"### Squad maintenance",
+		"multica squad member set-role <squad-id>",
+	} {
+		if !strings.Contains(string(leader), want) {
+			t.Errorf("squad-leader AGENTS.md missing %q\n---\n%s", want, leader)
 		}
 	}
 
@@ -2438,6 +2467,453 @@ func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err, want)
 		}
+	}
+}
+
+// Regression test for MUL-5623 / #6271 — a user-level
+// `model_instructions_file = "./gpt-unrestricted.md"` survived the copy into the
+// per-task CODEX_HOME while the file it names did not, so Codex failed loading
+// its configuration before the task prompt was delivered.
+func TestPrepareCodexHomeCopiesRelativeModelInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "./gpt-unrestricted.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "gpt-unrestricted.md"), []byte("Be direct."), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "gpt-unrestricted.md"))
+	if err != nil {
+		t.Fatalf("read per-task instructions: %v", err)
+	}
+	if string(data) != "Be direct." {
+		t.Errorf("per-task instructions = %q", data)
+	}
+
+	// The copy must be isolated: a task editing its instructions cannot reach
+	// back into the user's real Codex home.
+	if err := os.WriteFile(filepath.Join(codexHome, "gpt-unrestricted.md"), []byte("tampered"), 0o644); err != nil {
+		t.Fatalf("rewrite per-task instructions: %v", err)
+	}
+	shared, err := os.ReadFile(filepath.Join(sharedHome, "gpt-unrestricted.md"))
+	if err != nil {
+		t.Fatalf("read shared instructions: %v", err)
+	}
+	if string(shared) != "Be direct." {
+		t.Errorf("shared instructions mutated by task: %q", shared)
+	}
+}
+
+// A nested reference must land at the same relative location inside the task
+// home. The path is built with filepath.Join so Windows exercises its own
+// separator, and the TOML literal string keeps that backslash verbatim.
+func TestPrepareCodexHomeCopiesNestedDeprecatedInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	rel := filepath.Join("prompts", "unrestricted.md")
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(fmt.Sprintf("experimental_instructions_file = '%s'", rel)), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedHome, "prompts"), 0o755); err != nil {
+		t.Fatalf("create shared prompts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, rel), []byte("Nested."), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, rel))
+	if err != nil {
+		t.Fatalf("read per-task instructions: %v", err)
+	}
+	if string(data) != "Nested." {
+		t.Errorf("per-task instructions = %q", data)
+	}
+}
+
+// A missing source must fail while preparing the environment, with a diagnostic
+// naming the key and both paths — not as an opaque `os error 2` from Codex's own
+// configuration loading, after the task has already been launched.
+func TestPrepareCodexHomeReportsMissingModelInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "missing-instructions.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to fail for missing model instructions file")
+	}
+	for _, want := range []string{"model_instructions_file", "missing-instructions.md", filepath.Join(sharedHome, "missing-instructions.md")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
+}
+
+// A relative reference that escapes the task home is rejected rather than
+// copied: honoring it would let any user config name an arbitrary host file and
+// have the daemon materialise it inside the task environment.
+func TestPrepareCodexHomeRejectsEscapingModelInstructionsFile(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	root := t.TempDir()
+	sharedHome := filepath.Join(root, "shared")
+	if err := os.MkdirAll(sharedHome, 0o755); err != nil {
+		t.Fatalf("create shared home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "../secrets.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secrets.md"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write escaping source: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to reject an escaping model instructions path")
+	}
+	if !strings.Contains(err.Error(), "model_instructions_file") {
+		t.Fatalf("error %q does not name the offending key", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(codexHome), "secrets.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("escaping source was materialised outside the task home: %v", statErr)
+	}
+}
+
+// A reused task home must reflect the user's current instructions instead of
+// serving the snapshot an earlier run copied.
+func TestPrepareCodexHomeRefreshesModelInstructionsFileOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "instructions-override.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	source := filepath.Join(sharedHome, "instructions-override.md")
+	if err := os.WriteFile(source, []byte("first"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("second"), 0o644); err != nil {
+		t.Fatalf("update shared instructions: %v", err)
+	}
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "instructions-override.md"))
+	if err != nil {
+		t.Fatalf("read per-task instructions: %v", err)
+	}
+	if string(data) != "second" {
+		t.Errorf("per-task instructions = %q, want the refreshed source", data)
+	}
+}
+
+// A reused task home is writable by the task that ran in it, so an intermediate
+// directory of the copy destination can be a symlink by the time the next
+// prepare runs. Root-scoped writes must refuse to follow it out of the task
+// home instead of deleting and overwriting the link target.
+func TestPrepareCodexHomeRefusesSymlinkedInstructionsParentOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	rel := filepath.Join("prompts", "unrestricted.md")
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(fmt.Sprintf("model_instructions_file = '%s'", rel)), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedHome, "prompts"), 0o755); err != nil {
+		t.Fatalf("create shared prompts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, rel), []byte("from shared home"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+
+	// Stand in for what a task can do to its own home between prepares.
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "unrestricted.md")
+	if err := os.WriteFile(sentinel, []byte("outside the task home"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	taskParent := filepath.Join(codexHome, "prompts")
+	if err := os.RemoveAll(taskParent); err != nil {
+		t.Fatalf("remove task prompts dir: %v", err)
+	}
+	if err := os.Symlink(outside, taskParent); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to refuse writing through a symlinked parent")
+	}
+	if !strings.Contains(err.Error(), "model_instructions_file") {
+		t.Fatalf("error %q does not name the offending key", err)
+	}
+
+	data, readErr := os.ReadFile(sentinel)
+	if readErr != nil {
+		t.Fatalf("sentinel outside the task home was removed: %v", readErr)
+	}
+	if string(data) != "outside the task home" {
+		t.Errorf("sentinel outside the task home was overwritten: %q", data)
+	}
+}
+
+// The destination file itself can also be a symlink on reuse. Removing it must
+// unlink the symlink, never write through it into the link target.
+func TestPrepareCodexHomeReplacesSymlinkedInstructionsCopyOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "gpt-unrestricted.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "gpt-unrestricted.md"), []byte("from shared home"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "sentinel.md")
+	if err := os.WriteFile(sentinel, []byte("outside the task home"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	taskCopy := filepath.Join(codexHome, "gpt-unrestricted.md")
+	if err := os.Remove(taskCopy); err != nil {
+		t.Fatalf("remove task copy: %v", err)
+	}
+	if err := os.Symlink(sentinel, taskCopy); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("sentinel outside the task home was removed: %v", err)
+	}
+	if string(data) != "outside the task home" {
+		t.Errorf("sentinel outside the task home was overwritten: %q", data)
+	}
+	info, err := os.Lstat(taskCopy)
+	if err != nil {
+		t.Fatalf("lstat task copy: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("task copy is still a symlink")
+	}
+	copied, err := os.ReadFile(taskCopy)
+	if err != nil {
+		t.Fatalf("read task copy: %v", err)
+	}
+	if string(copied) != "from shared home" {
+		t.Errorf("task copy = %q", copied)
+	}
+}
+
+// Repointing the key provisions the new target; the previous copy stays behind
+// unreferenced. Codex never reads it because the copied config no longer names
+// it — this test pins that documented contract so a future change to it is
+// deliberate.
+func TestPrepareCodexHomeLeavesRepointedInstructionsCopyBehind(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedConfig := filepath.Join(sharedHome, "config.toml")
+	if err := os.WriteFile(sharedConfig, []byte(`model_instructions_file = "old.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "old.md"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write old instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome failed: %v", err)
+	}
+
+	if err := os.WriteFile(sharedConfig, []byte(`model_instructions_file = "new.md"`), 0o644); err != nil {
+		t.Fatalf("repoint shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "new.md"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write new instructions: %v", err)
+	}
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "new.md"))
+	if err != nil {
+		t.Fatalf("read repointed instructions: %v", err)
+	}
+	if string(data) != "new" {
+		t.Errorf("repointed instructions = %q", data)
+	}
+	config, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml: %v", err)
+	}
+	if !strings.Contains(string(config), `model_instructions_file = "new.md"`) {
+		t.Errorf("per-task config.toml still points at the old target: %s", config)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "old.md")); err != nil {
+		t.Errorf("unreferenced old copy unexpectedly cleaned up: %v", err)
+	}
+}
+
+// The root of the copy — the task home itself — must be identity-checked too. A
+// path-based check followed by a path-based open leaves a window where the
+// directory is swapped for a link and every "confined" write lands in the wrong
+// tree. These two tests drive the check directly so the swap is deterministic
+// rather than raced.
+func TestVerifyCodexHomeRootRejectsSwappedDirectory(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	codexHome := filepath.Join(base, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("create codex home: %v", err)
+	}
+	root, err := os.OpenRoot(codexHome)
+	if err != nil {
+		t.Fatalf("open codex home root: %v", err)
+	}
+	defer root.Close()
+
+	// Same path, different directory — what a swap looks like after the open.
+	if err := os.Rename(codexHome, filepath.Join(base, "moved-aside")); err != nil {
+		t.Fatalf("move original codex home: %v", err)
+	}
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("recreate codex home: %v", err)
+	}
+
+	err = verifyCodexHomeRoot(root, codexHome, "model_instructions_file")
+	if err == nil {
+		t.Fatal("expected verifyCodexHomeRoot to reject a swapped codex home")
+	}
+	if !strings.Contains(err.Error(), "replaced") {
+		t.Fatalf("error %q does not report the replacement", err)
+	}
+}
+
+func TestVerifyCodexHomeRootRejectsSymlinkedHome(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	codexHome := filepath.Join(base, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("create codex home: %v", err)
+	}
+	root, err := os.OpenRoot(codexHome)
+	if err != nil {
+		t.Fatalf("open codex home root: %v", err)
+	}
+	defer root.Close()
+
+	outside := t.TempDir()
+	if err := os.Rename(codexHome, filepath.Join(base, "moved-aside")); err != nil {
+		t.Fatalf("move original codex home: %v", err)
+	}
+	if err := os.Symlink(outside, codexHome); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	err = verifyCodexHomeRoot(root, codexHome, "model_instructions_file")
+	if err == nil {
+		t.Fatal("expected verifyCodexHomeRoot to reject a symlinked codex home")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error %q does not report the symlink", err)
+	}
+}
+
+// End to end, scoped to the write this change owns: when the task home is
+// already a link to an outside directory, the referenced-file copy must fail
+// instead of provisioning through the link.
+//
+// Deliberately not asserted: that nothing at all lands in the link target.
+// Earlier steps in prepareCodexHomeWithOpts (config.toml, sessions/, plugin
+// cache) still address codexHome by path and run before this check, so making
+// the whole prepare root-handle safe is a separate, larger change (MUL-5647).
+func TestPrepareCodexHomeRefusesReferencedFileWriteThroughSymlinkedCodexHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_instructions_file = "gpt-unrestricted.md"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "gpt-unrestricted.md"), []byte("from shared home"), 0o644); err != nil {
+		t.Fatalf("write shared instructions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "gpt-unrestricted.md")
+	if err := os.WriteFile(sentinel, []byte("outside the task home"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := os.Symlink(outside, codexHome); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to refuse a symlinked codex home")
+	}
+	if !strings.Contains(err.Error(), "model_instructions_file") {
+		t.Fatalf("error %q does not name the offending key", err)
+	}
+
+	data, readErr := os.ReadFile(sentinel)
+	if readErr != nil {
+		t.Fatalf("sentinel outside the task home was removed: %v", readErr)
+	}
+	if string(data) != "outside the task home" {
+		t.Errorf("sentinel outside the task home was overwritten: %q", data)
 	}
 }
 
@@ -4505,9 +4981,12 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, commentTriggerCtx)
-		// The anti-loop signal for CLAUDE.md lives in the numbered workflow
-		// steps (4 + 5), not in a dedicated preamble. Lock in the key phrases
-		// so the signal can't decay back into pure prose again.
+		// The anti-loop signal must reach the brief; lock in the key phrases so
+		// it can't decay back into pure prose again. The reply-warranted rules
+		// live in the Reply mode block, while the no-sign-off-mention rule is
+		// mention policy and lives in `## Mentions` (MUL-5442) — these
+		// assertions are file-wide on purpose, so the signal is pinned without
+		// pinning which section carries it.
 		for _, want := range []string{
 			"Decide whether a reply is warranted",
 			"Silence is a valid and preferred way",
@@ -5160,7 +5639,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			"high-signal scratchpad",
 			"**Read on entry.**",
 			"**Write on exit.**",
-			"See the `## Issue Metadata` section above",
+			"the bar in `## Issue Metadata`",
 		},
 	}
 
@@ -5189,7 +5668,11 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-1 --output json",
-				"See the `## Issue Metadata` section above",
+				// Both steps point at the section instead of restating its
+				// rules (MUL-5442); the entry step names what to look for,
+				// the exit step names the write bar.
+				"What to look for: `## Issue Metadata`",
+				"the bar in `## Issue Metadata`",
 				// Exit step must show both write and delete, not just
 				// "set" — stale-key cleanup is the half that keeps
 				// metadata from rotting.
@@ -5206,7 +5689,8 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-2 --output json",
-				"See the `## Issue Metadata` section above",
+				"What to look for: `## Issue Metadata`",
+				"the bar in `## Issue Metadata`",
 				"multica issue metadata set",
 				"multica issue metadata delete",
 				"Before exiting",

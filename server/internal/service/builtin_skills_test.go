@@ -236,6 +236,13 @@ func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
 		"--status backlog",
 		"pr_url",
 		"references/working-on-issues-source-map.md",
+		// MUL-5442: the brief's Sub-issue Creation section is now a one-line
+		// map pointing here. These anchors are the demoted playbook — if they
+		// leave the skill, the brief pointer dangles.
+		"`todo` starts work now, `backlog` parks it",
+		"`--stage <N>`",
+		"when a whole stage finishes",
+		"multica issue status <child-id> todo",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {

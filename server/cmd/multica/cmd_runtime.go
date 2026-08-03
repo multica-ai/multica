@@ -62,7 +62,8 @@ var runtimeDeleteCmd = &cobra.Command{
 	Short: "Delete a runtime from the workspace",
 	Long: "Delete a runtime registration from the workspace.\n\n" +
 		"By default this refuses when active agents are still bound to the runtime. " +
-		"Pass --cascade to archive those agents, cancel their queued/running tasks, and delete the runtime.",
+		"Pass --cascade to unbind those agents, cancel their queued/running tasks, and delete the runtime. " +
+		"Unbound agents keep their configuration, chats and task history; bind them to another runtime to run them again.",
 	Args: exactArgs(1),
 	RunE: runRuntimeDelete,
 }
@@ -95,7 +96,7 @@ func init() {
 	runtimeRenameCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime delete
-	runtimeDeleteCmd.Flags().Bool("cascade", false, "Archive active agents bound to the runtime, cancel their tasks, then delete the runtime")
+	runtimeDeleteCmd.Flags().Bool("cascade", false, "Unbind active agents from the runtime, cancel their tasks, then delete the runtime")
 	runtimeDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -237,7 +238,7 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 	cascade, _ := cmd.Flags().GetBool("cascade")
 	if !cascade {
 		return fmt.Errorf(
-			"delete runtime: runtime has active agents bound to it (%s); archive or reassign them first, or rerun with --cascade to archive them and delete the runtime",
+			"delete runtime: runtime has active agents bound to it (%s); rebind them to another runtime first, or rerun with --cascade to unbind them and delete the runtime (the agents and their history are kept)",
 			strings.Join(conflict.AgentDisplays(), ", "),
 		)
 	}
@@ -246,7 +247,7 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 		"expected_active_agent_ids": conflict.AgentIDs(),
 	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/archive-agents-and-delete", body, &result); err != nil {
+	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete", body, &result); err != nil {
 		return fmt.Errorf("cascade delete runtime: %w", err)
 	}
 	result["id"] = runtimeID
@@ -404,8 +405,18 @@ func printRuntimeDeleteResult(cmd *cobra.Command, result map[string]any) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 
+	if agentsUnbound, ok := result["agents_unbound"]; ok {
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; unbound %v agent(s)", strVal(result, "id"), agentsUnbound)
+		if paused, ok := result["autopilots_paused"]; ok {
+			fmt.Fprintf(os.Stderr, " and paused %v autopilot(s)", paused)
+		}
+		fmt.Fprintln(os.Stderr, ".")
+		return nil
+	}
+	// Compatibility fallback for an older server that only returns the
+	// pre-MUL-5559 mirror.
 	if agentsArchived, ok := result["agents_archived"]; ok {
-		fmt.Fprintf(os.Stderr, "Runtime %s deleted; archived %v agent(s).\n", strVal(result, "id"), agentsArchived)
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; processed %v agent(s).\n", strVal(result, "id"), agentsArchived)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Runtime %s deleted.\n", strVal(result, "id"))

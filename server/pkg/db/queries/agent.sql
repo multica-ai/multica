@@ -38,6 +38,20 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: LockAgentForAutopilotAssignment :one
+-- Serializes creating, retargeting, or resuming an active Autopilot with
+-- Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it
+-- clears runtime_id and pauses matching Autopilots. FOR SHARE also stabilizes
+-- runtime_id and archived_at against concurrent ordinary Agent updates. The
+-- shared lock makes the
+-- two outcomes exhaustive:
+--   * assignment commits first, then teardown sees and pauses it; or
+--   * teardown commits first, then assignment re-reads runtime_id=NULL and
+--     rejects the active Autopilot.
+SELECT * FROM agent
+WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
+FOR SHARE;
+
 -- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
@@ -214,7 +228,7 @@ RETURNING *;
 -- Returns every non-archived agent bound to a runtime. Backs the cascade
 -- delete dialog: when DELETE /api/runtimes/:id refuses with
 -- runtime_has_active_agents, the response carries this list so the front-end
--- can render exactly the agents that will be archived if the user confirms,
+-- can render exactly the agents that will be unbound if the user confirms,
 -- and so the cascade endpoint's expected_active_agent_ids check has a stable
 -- snapshot to compare against. Ordered by name for a deterministic display.
 SELECT * FROM agent
@@ -228,11 +242,21 @@ ORDER BY name ASC;
 -- LockAgentRuntime, which holds the runtime row exclusively to also
 -- block FK-validated INSERTs / runtime_id updates that would otherwise
 -- add a new agent to the runtime mid-cascade. Together they guarantee
--- that the set we compared against expected_active_agent_ids is exactly
--- the set ArchiveAgentsByIDs will operate on — no race window.
+-- that the set we compared against expected_active_agent_ids is stable.
 SELECT * FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC
+FOR UPDATE;
+
+-- name: ListUserAgentsByRuntimeForUpdate :many
+-- Locks active AND archived user agents before a runtime teardown. Locking only
+-- the active snapshot leaves a restore race: an archived row can become active
+-- after confirmation and then be silently unbound. Runtime/profile delete
+-- locks the parent runtime first (blocking new FK references), then calls this
+-- in stable ID order (blocking restore/archive/move on existing rows).
+SELECT * FROM agent
+WHERE runtime_id = $1 AND kind = 'user'
+ORDER BY id
 FOR UPDATE;
 
 -- name: RestoreAgent :one

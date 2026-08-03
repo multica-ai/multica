@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // larkMsgTypeMergeForward is the msg_type of a "merged & forwarded"
@@ -150,9 +152,9 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	if freshSource == "" {
 		freshSource = msg.Body
 	}
-	if cmd, ok := parseFreshSessionCommand(freshSource); ok {
+	if body, ok := engine.ParseFreshSessionCommand(freshSource); ok {
 		msg.ForceFreshSession = true
-		msg.Body = cmd.Body
+		msg.Body = body
 	}
 
 	isForward := msg.MessageType == larkMsgTypeMergeForward

@@ -382,10 +382,12 @@
     "trigger_blocked_invocation_not_allowed": "이 대상을 찾을 수 없거나 사용할 권한이 없습니다",
     "trigger_blocked_target_unavailable": "이 대상을 사용할 수 없습니다",
     "trigger_blocked_runtime_offline": "이 대상의 런타임이 오프라인입니다",
+    "trigger_blocked_agent_runtime_required": "이 대상에 런타임이 없습니다 — 실행하려면 런타임을 연결하세요",
     "trigger_blocked_generic": "이 대상은 트리거되지 않습니다",
     "trigger_blocked_short_invocation_not_allowed": "찾을 수 없음 또는 권한 없음",
     "trigger_blocked_short_target_unavailable": "사용 불가",
     "trigger_blocked_short_runtime_offline": "런타임 오프라인",
+    "trigger_blocked_short_agent_runtime_required": "런타임 필요",
     "trigger_blocked_short_generic": "트리거 안 됨",
     "send_reply_failed": "답글을 보내지 못했습니다",
     "delete_failed": "댓글을 삭제하지 못했습니다",
@@ -573,7 +575,9 @@
       "search_placeholder": "담당자 지정...",
       "members_group": "멤버",
       "agents_group": "에이전트",
-      "squads_group": "스쿼드"
+      "squads_group": "스쿼드",
+      "agent_runtime_required": "작업을 할당하기 전에 이 에이전트에 런타임을 연결하세요",
+      "squad_runtime_required": "작업을 할당하기 전에 이 스쿼드의 리더에 런타임을 연결하세요"
     },
     "start_date": {
       "trigger_label": "시작일",

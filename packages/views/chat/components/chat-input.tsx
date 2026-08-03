@@ -96,6 +96,7 @@ interface ChatInputProps {
    *  as opposed to the session itself being archived — swaps the placeholder
    *  copy so the read-only reason reads accurately. */
   agentArchived?: boolean;
+  agentRuntimeRequired?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
@@ -136,6 +137,7 @@ export function ChatInput({
   disabled,
   noAgent,
   agentArchived,
+  agentRuntimeRequired,
   agentName,
   leftAdornment,
   contextItems,
@@ -527,6 +529,8 @@ export function ChatInput({
     : disabled
       ? agentArchived
         ? t(($) => $.input.placeholder_archived_agent)
+        : agentRuntimeRequired
+          ? t(($) => $.input.placeholder_runtime_required)
         : t(($) => $.input.placeholder_archived)
       : agentName
         ? t(($) => $.input.placeholder_named, { name: agentName })

@@ -4494,7 +4494,7 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // issue's status before the write so the client can gate that reconcile on
 // status_changed.
 //
-// The `issue` payload is a map (issueToMap), which the workspace WS fanout
+// The `issue` payload is a map (IssueToMap), which the workspace WS fanout
 // (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
 // drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
 // side effects: the activity-log and inbox listeners type-assert `issue` to a
@@ -4510,7 +4510,7 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"issue":          issueToMap(issue, prefix),
+			"issue":          IssueToMap(issue, prefix),
 			"status_changed": prevStatus != issue.Status,
 			"prev_status":    prevStatus,
 		},
@@ -4623,12 +4623,27 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 	})
 }
 
-func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
+// IssueToMap renders an issue row as the map shape the issue:created /
+// issue:updated broadcast payloads carry under their "issue" key. It is the
+// single source of truth for that shape wherever the event is published from
+// outside the HTTP handler — autopilot and the channel engine's /issue command
+// on issue:created, the background stuck-issue status reset on issue:updated.
+// The workspace WS fanout marshals it as-is for the UI, and cmd/server's
+// extractIssueFields reads id / creator_id / workspace_id off it to decide who
+// to auto-subscribe.
+//
+// The map must stay key-compatible with handler.IssueResponse, the other
+// rendering of the same event. Clients type both as a complete Issue and
+// insert it straight into the list cache without runtime validation, so a
+// field missing here is a field that reads back undefined until the next
+// refetch — see TestIssueToMap_KeysMatchIssueResponse, which fails if the two
+// renderings drift apart.
+func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 	return map[string]any{
 		"id":              util.UUIDToString(issue.ID),
 		"workspace_id":    util.UUIDToString(issue.WorkspaceID),
 		"number":          issue.Number,
-		"identifier":      issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
+		"identifier":      IssueIdentifier(issuePrefix, issue.Number),
 		"title":           issue.Title,
 		"description":     util.TextToPtr(issue.Description),
 		"status":          issue.Status,
@@ -4638,12 +4653,28 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"creator_type":    issue.CreatorType,
 		"creator_id":      util.UUIDToString(issue.CreatorID),
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
+		"project_id":      util.UUIDToPtr(issue.ProjectID),
 		"position":        issue.Position,
+		"stage":           util.Int4ToPtr(issue.Stage),
 		"start_date":      util.DateToPtr(issue.StartDate),
 		"due_date":        util.DateToPtr(issue.DueDate),
 		"created_at":      util.TimestampToString(issue.CreatedAt),
 		"updated_at":      util.TimestampToString(issue.UpdatedAt),
+		"metadata":        util.JSONObjectOrEmpty(issue.Metadata),
+		"properties":      util.JSONObjectOrEmpty(issue.Properties),
 	}
+}
+
+// IssueIdentifier renders the human-facing issue key ("MUL-42"). Callers that
+// resolve the workspace prefix defensively may pass "": a failed workspace
+// lookup should not surface as a stray "-42", so the number stands alone as
+// "#42". The HTTP layer never passes "" — handler.getIssuePrefix derives a
+// prefix from the workspace name before rendering anything.
+func IssueIdentifier(issuePrefix string, number int32) string {
+	if issuePrefix == "" {
+		return "#" + strconv.Itoa(int(number))
+	}
+	return issuePrefix + "-" + strconv.Itoa(int(number))
 }
 
 // parseQuickCreateContext returns the quick-create payload if the task's

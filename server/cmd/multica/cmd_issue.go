@@ -353,9 +353,20 @@ var issueCancelTaskCmd = &cobra.Command{
 
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
-	Short: "Search issues by title or description",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runIssueSearch,
+	Short: "Search issues by title, description, or comments",
+	Long: "Search issues in the current workspace. The query matches issue titles,\n" +
+		"descriptions, and comment bodies, so a conclusion that only lives in a\n" +
+		"comment thread is still findable.\n\n" +
+		"A bare number or an identifier-shaped query (\"412\", \"AGE-412\") matches\n" +
+		"the issue with that number. The prefix is not validated, and number\n" +
+		"matches rank first, so pasting an identifier from another tracker can\n" +
+		"put an unrelated local issue at the top of the results.\n\n" +
+		"The MATCH column (match_source in --output json) reports the strongest\n" +
+		"field that matched — title, description, or comment — and falls back to\n" +
+		"\"comment\" for a number-only hit. Treat it as a display hint, not a\n" +
+		"filter.",
+	Args: cobra.ExactArgs(1),
+	RunE: runIssueSearch,
 }
 
 var validIssueStatuses = []string{

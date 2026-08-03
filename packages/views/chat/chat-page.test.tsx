@@ -133,6 +133,7 @@ vi.mock("./components/use-chat-controller", async () => {
       currentSession: null,
       isSessionArchived: false,
       isAgentArchived: false,
+      isAgentRuntimeBound: true,
       activeAgent: availableAgentsRef.current[0] ?? null,
       noAgent: false,
       availability: "online",

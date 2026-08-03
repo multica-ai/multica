@@ -208,11 +208,64 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 // Lookup returns the local bare clone path for a repo URL within a workspace.
 // Returns "" if not cached.
 func (c *Cache) Lookup(workspaceID, url string) string {
-	barePath := filepath.Join(c.root, workspaceID, bareDirName(url))
+	barePath := c.BarePath(workspaceID, url)
 	if isBareRepo(barePath) {
 		return barePath
 	}
 	return ""
+}
+
+// BarePath returns where a repo's bare cache lives, whether or not it exists
+// yet. Lookup is the "is it cached?" question; this is the "where would it be?"
+// question, which the GC needs to map a set of live repo URLs onto the
+// directories it is about to consider evicting.
+func (c *Cache) BarePath(workspaceID, url string) string {
+	return filepath.Join(c.root, workspaceID, bareDirName(url))
+}
+
+// lastUsedFile records the last time a task asked for a worktree from this
+// bare repo. It lives inside the bare repo so it is removed with it.
+//
+// Directory mtime cannot answer this question. Every daemon restart re-syncs
+// each registered workspace's full repo list, and that path fetches every
+// cached repo (see Sync), refreshing the mtime of repos no task has checked
+// out in months. atime is worse: noatime is common on Linux and Windows
+// disables it by default. So the signal has to be written explicitly, at the
+// one place that means a repo was really used — CreateWorktree.
+const lastUsedFile = ".multica_last_used"
+
+// MarkUsed records that this bare repo was just used for a checkout. Callers
+// must already hold the repo lock. Best-effort: a failed stamp only risks the
+// repo looking idle later, and the GC's own missing-stamp grace period
+// (see LastUsed) absorbs that.
+func MarkUsed(barePath string, logger *slog.Logger) {
+	if barePath == "" {
+		return
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(filepath.Join(barePath, lastUsedFile), []byte(stamp), 0o644); err != nil && logger != nil {
+		logger.Warn("repo cache: write last-used stamp failed", "repo", barePath, "error", err)
+	}
+}
+
+// LastUsed reports when this bare repo was last used for a checkout, and
+// whether a stamp existed at all.
+//
+// ok=false means "unknown", never "ancient". Every cache created before this
+// stamp existed reports unknown, so treating it as infinitely old would make
+// the first GC cycle after an upgrade wipe every repo cache on the machine and
+// force a full re-clone of each. Callers must stamp an unknown repo and let it
+// age from now.
+func LastUsed(barePath string) (time.Time, bool) {
+	data, err := os.ReadFile(filepath.Join(barePath, lastUsedFile))
+	if err != nil {
+		return time.Time{}, false
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return stamp, true
 }
 
 // WithRepoLock serializes caller-supplied mutations on a bare repo against all
@@ -462,6 +515,12 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	repoLock := c.lockForRepo(barePath)
 	repoLock.Lock()
 	defer repoLock.Unlock()
+
+	// Stamp before doing the work, not after: a task asking for a worktree is
+	// what "this cache is still wanted" means, whether or not the checkout
+	// ultimately succeeds. Stamping only on success would let a repo whose
+	// checkouts keep failing age out from under the tasks still trying to use it.
+	MarkUsed(barePath, c.logger)
 
 	// Fetch latest from origin. This also migrates the bare cache's refspec
 	// to the modern remote-tracking layout on first run, so subsequent fetches

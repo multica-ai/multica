@@ -563,6 +563,75 @@ func (q *Queries) ListSquadsByMember(ctx context.Context, arg ListSquadsByMember
 	return items, nil
 }
 
+const lockSquadForAutopilotAssignment = `-- name: LockSquadForAutopilotAssignment :one
+SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR SHARE
+`
+
+type LockSquadForAutopilotAssignmentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Stabilizes the squad-to-leader resolution while an active Autopilot is
+// created, retargeted, or resumed. FOR SHARE conflicts with an ordinary
+// leader_id update, so the caller subsequently locks the same leader Agent
+// whose row Runtime teardown serializes against.
+func (q *Queries) LockSquadForAutopilotAssignment(ctx context.Context, arg LockSquadForAutopilotAssignmentParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, lockSquadForAutopilotAssignment, arg.ID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
+	)
+	return i, err
+}
+
+const lockSquadForUpdate = `-- name: LockSquadForUpdate :one
+SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockSquadForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Squad leader changes take the exclusive side of the same lock used by
+// Autopilot assignment. The handler then locks the proposed leader Agent and
+// pauses active squad Autopilots when that Agent is unbound.
+func (q *Queries) LockSquadForUpdate(ctx context.Context, arg LockSquadForUpdateParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, lockSquadForUpdate, arg.ID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
+	)
+	return i, err
+}
+
 const removeSquadMember = `-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3

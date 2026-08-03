@@ -28,7 +28,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     updateRuntime: (...args: unknown[]) => mockUpdateRuntime(...args),
     deleteRuntime: vi.fn(),
-    archiveAgentsAndDeleteRuntime: vi.fn(),
+    unbindAgentsAndDeleteRuntime: vi.fn(),
     deleteRuntimeProfile: (...args: unknown[]) =>
       mockDeleteRuntimeProfile(...args),
   },
@@ -111,7 +111,7 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     isPending: false,
   }),
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
-  useArchiveAgentsAndDeleteRuntime: () => ({
+  useUnbindAgentsAndDeleteRuntime: () => ({
     mutate: vi.fn(),
     isPending: false,
     mutateAsync: vi.fn(),

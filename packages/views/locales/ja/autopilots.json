@@ -27,6 +27,7 @@
   "status": {
     "active": "アクティブ",
     "paused": "一時停止中",
+    "paused_runtime_required": "一時停止中 — 担当エージェントのランタイムが必要です",
     "archived": "アーカイブ済み"
   },
   "execution_mode": {
@@ -69,6 +70,8 @@
     "not_found": "オートパイロットが見つかりません",
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
+    "paused_runtime_required": "担当エージェントのランタイムが失われたため一時停止しました。ランタイムを設定してから再度有効にしてください。",
+    "bind_runtime": "ランタイムを設定",
     "edit": "編集",
     "run_now": "今すぐ実行",
     "running": "実行中...",
@@ -76,6 +79,7 @@
     "toast_trigger_failed": "オートパイロットを実行できませんでした",
     "run_blocked_invocation_not_allowed": "実行されませんでした — このオートパイロットのエージェントを使用する権限がありません",
     "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
+    "run_blocked_agent_runtime_required": "実行されませんでした — エージェントにランタイムがありません。実行するにはバインドしてください",
     "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
     "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
     "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
@@ -306,6 +310,8 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
     "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
+    "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
+    "schedule_add": "スケジュールを追加",
     "error_title_required": "オートパイロット名を入力してください。",
     "error_assignee_required": "実行するエージェントまたはスクワッドを選択してください。",
     "output_modes": {
@@ -410,7 +416,9 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "agents_group": "エージェント",
-    "squads_group": "スクワッド"
+    "squads_group": "スクワッド",
+    "agent_runtime_required": "このエージェントを選択する前にランタイムをバインドしてください",
+    "squad_runtime_required": "選択する前に、このスクワッドのリーダーにランタイムをバインドしてください"
   },
   "timezone_picker": {
     "search_placeholder": "タイムゾーンを検索..."

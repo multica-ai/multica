@@ -72,6 +72,7 @@ type fakeBinder struct {
 	ensureID     pgtype.UUID
 	ensureErr    error
 	appendResult AppendResult
+	parseIssue   bool
 	appendErr    error
 	appendDelay  time.Duration
 	bindErr      error
@@ -89,6 +90,13 @@ func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendRes
 	delay := f.appendDelay
 	f.lastAppend = p
 	res, err := f.appendResult, f.appendErr
+	if f.parseIssue {
+		commandSource := p.Message.CommandText
+		if commandSource == "" {
+			commandSource = p.Message.Text
+		}
+		res.IssueCommand, _ = ParseIssueCommand(commandSource)
+	}
 	f.mu.Unlock()
 	if delay > 0 {
 		time.Sleep(delay)
@@ -236,13 +244,15 @@ func (f *fakeMedia) calls() int {
 type fakeIssues struct {
 	called bool
 	params service.IssueCreateParams
+	opts   service.IssueCreateOpts
 	result service.IssueCreateResult
 	err    error
 }
 
-func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, _ service.IssueCreateOpts) (service.IssueCreateResult, error) {
+func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o service.IssueCreateOpts) (service.IssueCreateResult, error) {
 	f.called = true
 	f.params = p
+	f.opts = o
 	return f.result, f.err
 }
 
@@ -871,6 +881,117 @@ func TestRouter_ForceFresh_Propagates(t *testing.T) {
 	}
 	if !waitFor(time.Second, h.tasks.wasCalled) || !h.tasks.freshArg() {
 		t.Fatalf("ForceFresh must propagate to EnqueueChatTask")
+	}
+}
+
+func TestRouter_NewCommand_ForcesFreshAndStripsDirective(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Source.ChannelType = channel.Type("test-channel")
+	msg.Text = "/new answer with the current model"
+	h.router.Register(msg.Source.ChannelType, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		OriginType:   "test_chat",
+	})
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("/new must enqueue a fresh provider session")
+	}
+	if got := h.binder.lastAppend.Message.Text; got != "answer with the current model" {
+		t.Fatalf("appended text=%q, want command stripped", got)
+	}
+	if got := h.binder.lastAppend.Message.CommandText; got != "/new answer with the current model" {
+		t.Fatalf("command text=%q, want original user text", got)
+	}
+}
+
+func TestRouter_NewCommandDoesNotReparseStrippedBodyAsIssue(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType channel.Type
+		text        string
+		commandText string
+		forceFresh  bool
+	}{
+		{
+			name:        "Slack same line",
+			channelType: channel.Type("slack"),
+			text:        "/new /issue investigate deploy",
+			commandText: "/new /issue investigate deploy",
+		},
+		{
+			name:        "Slack next line",
+			channelType: channel.Type("slack"),
+			text:        "/new\n/issue investigate deploy",
+			commandText: "/new\n/issue investigate deploy",
+		},
+		{
+			name:        "Feishu same line",
+			channelType: channel.TypeFeishu,
+			text:        "/issue investigate deploy",
+			commandText: "/new /issue investigate deploy",
+			forceFresh:  true,
+		},
+		{
+			name:        "Feishu next line",
+			channelType: channel.TypeFeishu,
+			text:        "/issue investigate deploy",
+			commandText: "/new\n/issue investigate deploy",
+			forceFresh:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.binder.parseIssue = true
+			msg := p2pMessage(t)
+			msg.Source.ChannelType = tc.channelType
+			msg.Text = tc.text
+			msg.CommandText = tc.commandText
+			msg.ForceFresh = tc.forceFresh
+			if tc.channelType == channel.Type("slack") {
+				h.router.Register(channel.Type("slack"), ResolverSet{
+					Installation: h.inst,
+					Identity:     h.ident,
+					Dedup:        h.dedup,
+					Session:      h.binder,
+					Audit:        h.audit,
+					OriginType:   "slack_chat",
+				})
+			}
+
+			if err := h.router.Handle(context.Background(), msg); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if h.issues.called {
+				t.Fatal("/new must not be re-parsed as /issue after its directive is stripped")
+			}
+			if !h.binder.lastAppend.Message.ForceFresh {
+				t.Fatal("/new must still request a fresh provider session")
+			}
+		})
+	}
+}
+
+func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := h.binder.lastAppend.Message.Text; got != msg.Text {
+		t.Fatalf("adapter-enriched body changed: got %q want %q", got, msg.Text)
 	}
 }
 

@@ -29,7 +29,7 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("@multica/core/runtimes/mutations", () => ({
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
-  useArchiveAgentsAndDeleteRuntime: () => ({
+  useUnbindAgentsAndDeleteRuntime: () => ({
     mutate: vi.fn(),
     isPending: false,
     mutateAsync: vi.fn(),
@@ -72,7 +72,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     deleteRuntime: vi.fn(),
-    archiveAgentsAndDeleteRuntime: vi.fn(),
+    unbindAgentsAndDeleteRuntime: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
 }));

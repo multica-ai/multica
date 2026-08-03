@@ -77,6 +77,7 @@
   "row": {
     "you": "You",
     "archived": "Archived",
+    "needs_runtime": "Needs a runtime",
     "no_description": "No description",
     "fallback_runtime_cloud": "Cloud",
     "fallback_runtime_local": "Local",
@@ -139,6 +140,8 @@
     "no_access_hint": "Only the agent owner or a workspace admin can view this private agent.",
     "try_again": "Try again",
     "archived_banner": "This agent is archived. It cannot be assigned or mentioned.",
+    "runtime_required_banner": "This agent kept its configuration and history, but needs a runtime before it can run.",
+    "bind_runtime": "Bind runtime",
     "restore": "Restore",
     "archive_dialog_title": "Archive agent?",
     "archive_dialog_description": "\"{{name}}\" will be archived. It won't be assignable or mentionable, but all history is preserved. You can restore it later.",
@@ -153,6 +156,7 @@
     "restore_failed_toast": "Failed to restore agent",
     "dm": "DM",
     "dm_no_permission_toast": "You don't have access to chat with this agent.",
+    "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
     "updated": "Updated {{when}}"
@@ -277,11 +281,10 @@
     "back": "Go back",
     "eyebrow": "Agent creation",
     "choose_title": "How would you like to start?",
-    "choose_description": "Start with full control, adapt a proven template, or describe what you need and build it through conversation.",
+    "choose_description": "Start with full control, or describe what you need and build it through conversation.",
     "recommended": "Recommended",
     "continue": "Continue",
     "step_choose": "Choose a starting point",
-    "step_template": "Choose a template",
     "step_configure": "Review and configure",
     "step_ai": "Build through conversation",
     "modes": {
@@ -297,15 +300,6 @@
         "title": "Build with AI",
         "description": "Describe the outcome you want. An Agent Builder will ask focused questions and prepare a live draft."
       }
-    },
-    "templates": {
-      "search": "Search templates…",
-      "search_label": "Search agent templates",
-      "empty": "No templates match your search.",
-      "select_hint": "Select a template to preview its instructions and skills.",
-      "skills": "Included skills",
-      "instructions": "Instructions",
-      "use": "Use this template"
     },
     "sections": {
       "identity": "Identity",
@@ -367,7 +361,17 @@
     "creating": "Creating agent…",
     "create_failed": "Could not create the agent.",
     "name_conflict": "An agent with this name already exists.",
-    "created": "{{name}} was created"
+    "created": "{{name}} was created",
+    "drafts": {
+      "title": "Drafts",
+      "untitled": "Untitled draft",
+      "discard": "Discard",
+      "discard_confirm": "The conversation and its configuration are deleted permanently.",
+      "discard_title": "Discard this draft?",
+      "discard_cancel": "Keep editing",
+      "banner": "You have {{count}} unfinished draft(s)",
+      "pick_hint": "Pick one to continue."
+    }
   },
   "create_dialog": {
     "title_create": "Create Agent",

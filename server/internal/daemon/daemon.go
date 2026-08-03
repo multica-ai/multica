@@ -243,6 +243,7 @@ type workspaceState struct {
 
 type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
+	BarePath(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
 	WithRepoLock(barePath string, fn func() error) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
@@ -1909,6 +1910,45 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	}
 	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
 		return true
+	}
+	return false
+}
+
+// repoBarePathIsLive reports whether some watched workspace still claims the
+// repo cached at barePath, so the GC can refuse to evict it.
+//
+// Answering per-path rather than materializing the whole set lets the GC ask
+// again immediately before it deletes. A snapshot taken once per cycle goes
+// stale while the caller runs git and filesystem work on each repo in turn,
+// which is exactly the window in which a workspace can re-attach one.
+//
+// It mirrors workspaceRepoAllowed by unioning both sources: allowedRepoURLs
+// (workspace-level bindings) and taskRepoURLs (project repos the server
+// surfaced through a task claim, which never appear in GetWorkspaceRepos).
+// Missing the second set would make the GC evict repos that tasks actively
+// check out.
+//
+// Read from in-memory state on purpose. The alternative — asking the server
+// for each workspace's repo list during GC — would make a transient API
+// failure look like "nothing is attached", and this set is what protects
+// caches from deletion.
+func (d *Daemon) repoBarePathIsLive(barePath string) bool {
+	if d.repoCache == nil || barePath == "" {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for workspaceID, ws := range d.workspaces {
+		for url := range ws.allowedRepoURLs {
+			if d.repoCache.BarePath(workspaceID, url) == barePath {
+				return true
+			}
+		}
+		for url := range ws.taskRepoURLs {
+			if d.repoCache.BarePath(workspaceID, url) == barePath {
+				return true
+			}
+		}
 	}
 	return false
 }

@@ -23,6 +23,13 @@ multica agent skills list <agent-id> --output json   # current skill bindings
 multica agent env get <agent-id> --output json  # plaintext env (agent owner or ws owner/admin; agents denied)
 ```
 
+An agent can also be **unbound**: `runtime_id` is `NULL` (served as `""` with
+`runtime_bound: false`) after its runtime was deleted, which unbinds instead of
+deleting its agents (MUL-5559). An unbound agent keeps everything it owns and
+stays editable, but no trigger path will run it — they all refuse with
+`agent_runtime_required` — until `agent update <id> --runtime-id <runtime-id>` binds
+it again. Unbound is orthogonal to archived.
+
 `agent get` returns the persisted agent including `runtime_id`, `model`,
 `thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
 `custom_env_key_count`, and `skills`. It never returns plaintext `custom_env`.
@@ -110,7 +117,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `description` | `agent.description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
-| `runtime_id` | `agent.runtime_id` | required (400) + must resolve to a runtime in this workspace | selects runtime/provider |
+| `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
 | `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |

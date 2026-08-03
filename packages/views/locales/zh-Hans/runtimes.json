@@ -135,15 +135,15 @@
         "submitting": "删除中..."
       },
       "cascade": {
-        "title_other": "归档 {{count}} 个智能体并删除该运行时？",
-        "description": "删除「{{name}}」。下列智能体将被归档并从可用工作流中移除，其排队中或运行中的 task 会被取消，随后运行时本身会被删除。",
-        "warning": "此操作具有破坏性。归档的智能体将从可用工作流中移除，其排队中或运行中的 task 会被取消。",
+        "title_other": "解绑 {{count}} 个智能体并删除该运行时？",
+        "description": "删除「{{name}}」。下列智能体会保留——其指令、聊天记录和任务历史都不会丢失——但它们将被解绑，在重新绑定运行时之前无法运行。其排队中或运行中的 task 会被取消，随后运行时本身会被删除。",
+        "warning": "排队中和运行中的 task 会被取消；在重新绑定运行时之前，这些智能体无法接受新任务。",
         "notice_runtime_has_active_agents": "自打开此弹窗后，又有新的活动智能体加入。请确认新方案后继续。",
         "notice_runtime_delete_plan_changed": "在弹窗打开期间，活动智能体集合发生了变化。请确认新方案后继续。",
-        "checkbox_other": "我已了解：这 {{count}} 个智能体将被归档，其排队中或运行中的 task 会被取消。",
+        "checkbox_other": "我已了解：这 {{count}} 个智能体将被解绑，在重新绑定运行时之前无法运行，其排队中或运行中的 task 会被取消。",
         "cancel": "取消",
-        "confirm_other": "归档 {{count}} 个智能体并删除运行时",
-        "submitting": "正在归档并删除...",
+        "confirm_other": "解绑 {{count}} 个智能体并删除运行时",
+        "submitting": "正在解绑并删除...",
         "delete_failed_toast": "删除运行时失败",
         "table": {
           "header_agent": "智能体",

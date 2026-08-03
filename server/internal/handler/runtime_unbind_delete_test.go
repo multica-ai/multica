@@ -168,6 +168,84 @@ func TestDeleteAgentRuntime_StructuredConflict(t *testing.T) {
 	}
 }
 
+func TestRuntimeDeleteLockBlocksConcurrentAgentBinding(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Runtime Delete Lock")
+
+	deleteTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin delete transaction: %v", err)
+	}
+	defer deleteTx.Rollback(ctx)
+	if _, err := testHandler.Queries.WithTx(deleteTx).LockAgentRuntime(
+		ctx,
+		parseUUID(runtimeID),
+	); err != nil {
+		t.Fatalf("lock runtime for delete: %v", err)
+	}
+
+	bindTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin bind transaction: %v", err)
+	}
+	defer bindTx.Rollback(ctx)
+	if _, err := bindTx.Exec(ctx, `SET LOCAL lock_timeout = '50ms'`); err != nil {
+		t.Fatalf("set lock timeout: %v", err)
+	}
+	if _, err := bindTx.Exec(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'concurrent bind probe', '', 'cloud', '{}'::jsonb,
+			$2, 'workspace', 1, $3)
+	`, testWorkspaceID, runtimeID, testUserID); err == nil {
+		t.Fatal("agent bind unexpectedly bypassed the runtime delete lock")
+	}
+}
+
+func TestAutopilotAssignmentLockBlocksRuntimeTeardown(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Autopilot Assignment Lock")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Autopilot Assignment Agent")
+
+	assignmentTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin assignment transaction: %v", err)
+	}
+	defer assignmentTx.Rollback(ctx)
+	if _, err := testHandler.Queries.WithTx(assignmentTx).LockAgentForAutopilotAssignment(
+		ctx,
+		db.LockAgentForAutopilotAssignmentParams{
+			ID:          parseUUID(agentID),
+			WorkspaceID: parseUUID(testWorkspaceID),
+		},
+	); err != nil {
+		t.Fatalf("lock Agent for Autopilot assignment: %v", err)
+	}
+
+	deleteTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin delete transaction: %v", err)
+	}
+	defer deleteTx.Rollback(ctx)
+	if _, err := deleteTx.Exec(ctx, `SET LOCAL lock_timeout = '50ms'`); err != nil {
+		t.Fatalf("set lock timeout: %v", err)
+	}
+	if _, err := testHandler.Queries.WithTx(deleteTx).ListUserAgentsByRuntimeForUpdate(
+		ctx,
+		parseUUID(runtimeID),
+	); err == nil {
+		t.Fatal("runtime teardown unexpectedly bypassed the Autopilot assignment lock")
+	}
+}
+
 func TestDeleteAgentRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -231,11 +309,11 @@ func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
 	}
 }
 
-// TestArchiveAgentsAndDeleteRuntime_HappyPath exercises the cascade endpoint
+// TestUnbindAgentsAndDeleteRuntime_HappyPath exercises the confirmed endpoint
 // end-to-end: with the correct expected_active_agent_ids snapshot, it must
-// archive the active agent, delete the runtime row, and respond 200 with the
+// unbind the active agent, delete the runtime row, and respond 200 with the
 // counts.
-func TestArchiveAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
+func TestUnbindAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -245,10 +323,10 @@ func TestArchiveAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Cascade Happy Agent")
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{agentID}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -261,18 +339,51 @@ func TestArchiveAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	if rtRows != 0 {
 		t.Fatalf("expected runtime row to be deleted, found %d", rtRows)
 	}
-	// Agent row must be gone too — DeleteArchivedAgentsByRuntime hard-deletes
-	// the archived rows so the agent.runtime_id FK no longer pins the runtime.
-	var agentRows int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE id = $1`, agentID).Scan(&agentRows); err != nil {
+	// The agent must SURVIVE, unbound and un-archived. This is the whole point
+	// of MUL-5559: the old flow archived it and then hard-deleted the row, taking
+	// its chat sessions with it, while the dialog promised an archive.
+	var (
+		agentRows  int
+		hasRuntime bool
+		archived   bool
+	)
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent WHERE id = $1`, agentID).Scan(&agentRows); err != nil {
 		t.Fatalf("count agent rows: %v", err)
 	}
-	if agentRows != 0 {
-		t.Fatalf("expected archived agent to be hard-deleted with runtime, found %d", agentRows)
+	if agentRows != 1 {
+		t.Fatalf("expected the agent to survive its runtime, found %d rows", agentRows)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id IS NOT NULL, archived_at IS NOT NULL FROM agent WHERE id = $1`,
+		agentID).Scan(&hasRuntime, &archived); err != nil {
+		t.Fatalf("read agent binding: %v", err)
+	}
+	if hasRuntime {
+		t.Fatalf("expected the surviving agent to be unbound (runtime_id IS NULL)")
+	}
+	if archived {
+		t.Fatalf("unbinding must not archive the agent: unbound and archived are orthogonal")
+	}
+
+	var body struct {
+		AgentsUnbound  int `json:"agents_unbound"`
+		AgentsArchived int `json:"agents_archived"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.AgentsUnbound != 1 {
+		t.Fatalf("agents_unbound = %d, want 1", body.AgentsUnbound)
+	}
+	// Deprecated mirror kept for installed clients built against the
+	// archive-and-delete contract.
+	if body.AgentsArchived != 1 {
+		t.Fatalf("agents_archived mirror = %d, want 1", body.AgentsArchived)
 	}
 }
 
-func TestArchiveAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.T) {
+func TestUnbindAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -281,10 +392,10 @@ func TestArchiveAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(
 	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Custom Instance Cascade Guard")
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}
@@ -308,7 +419,7 @@ func TestArchiveAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(
 	}
 }
 
-func TestArchiveAgentsAndDeleteRuntime_OrphanedProfileAllowsCascade(t *testing.T) {
+func TestUnbindAgentsAndDeleteRuntime_OrphanedProfileAllowsCascade(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -320,10 +431,10 @@ func TestArchiveAgentsAndDeleteRuntime_OrphanedProfileAllowsCascade(t *testing.T
 	}
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -337,12 +448,12 @@ func TestArchiveAgentsAndDeleteRuntime_OrphanedProfileAllowsCascade(t *testing.T
 	}
 }
 
-// TestArchiveAgentsAndDeleteRuntime_PlanChanged proves the dialog-confirm
+// TestUnbindAgentsAndDeleteRuntime_PlanChanged proves the dialog-confirm
 // race guard: if the user's snapshot of active agents drifts from the live
 // set (somebody added or archived an agent while the dialog was open), the
 // cascade endpoint must refuse with 409 + runtime_delete_plan_changed and
 // surface the new live snapshot so the dialog can re-prompt.
-func TestArchiveAgentsAndDeleteRuntime_PlanChanged(t *testing.T) {
+func TestUnbindAgentsAndDeleteRuntime_PlanChanged(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -354,10 +465,10 @@ func TestArchiveAgentsAndDeleteRuntime_PlanChanged(t *testing.T) {
 
 	// User confirmed only agent1 — but the live set is {agent1, agent2}.
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{agent1}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}

@@ -434,14 +434,7 @@ func describeOptionsInUse(existingConfig []byte, rows []db.CountIssuesUsingPrope
 
 // parseIssueProperties mirrors parseIssueMetadata for the properties bag.
 func parseIssueProperties(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
-		return map[string]any{}
-	}
-	return out
+	return util.JSONObjectOrEmpty(raw)
 }
 
 // ---------------------------------------------------------------------------
