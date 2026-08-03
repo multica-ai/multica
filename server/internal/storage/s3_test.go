@@ -191,6 +191,43 @@ func TestS3StorageUploadPathsAvoidChecksumTrailer(t *testing.T) {
 	})
 }
 
+// usesAWSEndpoint decides whether a request keeps the SDK's checksum trailer,
+// so a wrong answer either reintroduces the OSS/COS failure or strips the
+// checksum from an AWS bucket that requires one. Both directions have to hold
+// on the host label boundary.
+func TestS3StorageUsesAWSEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		endpointURL string
+		want        bool
+	}{
+		{"", true}, // unset: the SDK resolves the default AWS endpoint
+		{"https://s3.us-east-1.amazonaws.com", true},
+		{"https://S3.US-EAST-1.AMAZONAWS.COM", true},
+		{"https://bucket.s3.us-east-1.amazonaws.com:443", true},
+		{"https://bucket.s3.amazonaws.com.", true},
+		{"https://bucket.vpce-0abc-xyz.s3.us-east-1.vpce.amazonaws.com", true},
+		{"https://s3-fips.us-gov-west-1.amazonaws.com", true},
+		{"https://s3.dualstack.us-east-1.amazonaws.com", true},
+		{"https://s3.cn-north-1.amazonaws.com.cn", true},
+		{"s3.us-east-1.amazonaws.com", true}, // scheme-less but still AWS
+
+		{"https://oss-cn-shanghai-internal.aliyuncs.com", false},
+		{"https://cos.ap-shanghai.myqcloud.com", false},
+		{"https://notamazonaws.com", false},
+		{"https://s3.amazonaws.com.example.net", false},
+		{"https://minio.internal:9000?probe=amazonaws.com", false},
+		{"https://minio.internal:9000/amazonaws.com", false},
+		{"oss-cn-shanghai-internal.aliyuncs.com", false},
+	} {
+		t.Run(tc.endpointURL, func(t *testing.T) {
+			s := &S3Storage{endpointURL: tc.endpointURL}
+			if got := s.usesAWSEndpoint(); got != tc.want {
+				t.Fatalf("usesAWSEndpoint(%q) = %v, want %v", tc.endpointURL, got, tc.want)
+			}
+		})
+	}
+}
+
 // The OSS/COS workaround costs the request its client-side checksum, so it
 // must not reach AWS: real AWS S3 accepts the aws-chunked trailer, and buckets
 // carrying a default Object Lock retention require a checksum to be present.

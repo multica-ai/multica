@@ -136,11 +136,43 @@ func parseBoolEnv(raw string) (bool, error) {
 	}
 }
 
+// awsEndpointDomains are the parent domains AWS serves S3 from. VPC, dualstack
+// and FIPS hostnames all live under them, as does the China partition.
+var awsEndpointDomains = []string{"amazonaws.com", "amazonaws.com.cn"}
+
 // usesAWSEndpoint reports whether uploads go to real AWS S3 — either the
-// default endpoint or an explicitly configured AWS one, since VPC, dualstack
-// and FIPS hostnames all live under amazonaws.com.
+// default endpoint or an explicitly configured AWS one. The match is on the
+// host label boundary, so "notamazonaws.com" and "s3.amazonaws.com.evil.net"
+// are correctly treated as third-party endpoints.
 func (s *S3Storage) usesAWSEndpoint() bool {
-	return s.endpointURL == "" || strings.Contains(s.endpointURL, "amazonaws.com")
+	if s.endpointURL == "" {
+		return true
+	}
+	host := endpointHostname(s.endpointURL)
+	for _, domain := range awsEndpointDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// endpointHostname extracts the comparable hostname from a configured
+// endpoint: lowercased, without the port, and without a trailing root dot.
+// A value written without a scheme is retried as an https URL, since
+// url.Parse otherwise reads the whole thing as a path.
+func endpointHostname(endpointURL string) string {
+	parsed, err := url.Parse(endpointURL)
+	if err != nil {
+		return ""
+	}
+	if parsed.Hostname() == "" {
+		parsed, err = url.Parse("https://" + endpointURL)
+		if err != nil {
+			return ""
+		}
+	}
+	return strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
 }
 
 // uploadChecksumOptions returns the per-request options for the buffered
