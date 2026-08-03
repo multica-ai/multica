@@ -22,7 +22,7 @@ WHERE id = $1
       child_done_lease_token IS NULL
       OR child_done_lease_expires_at <= now()
   )
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 func (q *Queries) ClaimChildDoneDispatchByID(ctx context.Context, id pgtype.UUID) (Comment, error) {
@@ -43,6 +43,7 @@ func (q *Queries) ClaimChildDoneDispatchByID(ctx context.Context, id pgtype.UUID
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -53,7 +54,6 @@ func (q *Queries) ClaimChildDoneDispatchByID(ctx context.Context, id pgtype.UUID
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -77,7 +77,7 @@ SET child_done_lease_token = gen_random_uuid(),
     child_done_lease_expires_at = now() + interval '30 seconds'
 FROM candidate
 WHERE c.id = candidate.id
-RETURNING c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.child_done_barrier_key, c.child_done_target_type, c.child_done_target_id, c.child_done_origin_task_id, c.child_done_dispatch_status, c.child_done_available_at, c.child_done_lease_token, c.child_done_lease_expires_at, c.child_done_dispatch_attempts, c.child_done_dispatch_error, c.quick_action_id
+RETURNING c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.child_done_barrier_key, c.child_done_target_type, c.child_done_target_id, c.child_done_origin_task_id, c.child_done_dispatch_status, c.child_done_available_at, c.child_done_lease_token, c.child_done_lease_expires_at, c.child_done_dispatch_attempts, c.child_done_dispatch_error
 `
 
 func (q *Queries) ClaimNextChildDoneDispatch(ctx context.Context) (Comment, error) {
@@ -98,6 +98,7 @@ func (q *Queries) ClaimNextChildDoneDispatch(ctx context.Context) (Comment, erro
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -108,7 +109,6 @@ func (q *Queries) ClaimNextChildDoneDispatch(ctx context.Context) (Comment, erro
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -147,7 +147,7 @@ UPDATE comment SET
 WHERE comment.id IN (SELECT id FROM descendants)
   AND comment.id <> $1
   AND comment.resolved_at IS NOT NULL
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type ClearOtherThreadResolutionsParams struct {
@@ -190,6 +190,7 @@ func (q *Queries) ClearOtherThreadResolutions(ctx context.Context, arg ClearOthe
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.QuickActionID,
 			&i.ChildDoneBarrierKey,
 			&i.ChildDoneTargetType,
 			&i.ChildDoneTargetID,
@@ -200,7 +201,6 @@ func (q *Queries) ClearOtherThreadResolutions(ctx context.Context, arg ClearOthe
 			&i.ChildDoneLeaseExpiresAt,
 			&i.ChildDoneDispatchAttempts,
 			&i.ChildDoneDispatchError,
-			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -222,7 +222,7 @@ SET child_done_dispatch_status = $1,
 WHERE id = $2
   AND child_done_dispatch_status = 'queued'
   AND child_done_lease_token = $3
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type CompleteClaimedChildDoneDispatchParams struct {
@@ -249,6 +249,7 @@ func (q *Queries) CompleteClaimedChildDoneDispatch(ctx context.Context, arg Comp
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -259,7 +260,6 @@ func (q *Queries) CompleteClaimedChildDoneDispatch(ctx context.Context, arg Comp
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -340,7 +340,7 @@ FROM touched_issue ti
 ON CONFLICT (issue_id, child_done_barrier_key)
     WHERE child_done_barrier_key IS NOT NULL
 DO NOTHING
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type CreateChildDoneDispatchCommentParams struct {
@@ -355,9 +355,10 @@ type CreateChildDoneDispatchCommentParams struct {
 }
 
 // The system comment is also the durable dispatch outbox row. The barrier key
-// identifies one concrete terminal transition, so retries/process crashes
-// reuse the same comment while a genuine reopen -> terminal cycle can emit a
-// new event. The partial unique index makes concurrent duplicate ingress safe.
+// identifies one closed barrier generation, so retries, process crashes, and
+// independent completion groups reuse the same comment while a genuine
+// reopen -> terminal cycle can emit a new event. The partial unique index
+// makes concurrent duplicate ingress safe.
 func (q *Queries) CreateChildDoneDispatchComment(ctx context.Context, arg CreateChildDoneDispatchCommentParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, createChildDoneDispatchComment,
 		arg.AuthorID,
@@ -385,6 +386,7 @@ func (q *Queries) CreateChildDoneDispatchComment(ctx context.Context, arg Create
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -395,7 +397,6 @@ func (q *Queries) CreateChildDoneDispatchComment(ctx context.Context, arg Create
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -409,7 +410,7 @@ WITH touched_issue AS (
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id)
 SELECT ti.id, ti.workspace_id, $1, $2, $3, $4, $5, $6, $7
 FROM touched_issue ti
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type CreateCommentParams struct {
@@ -468,6 +469,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -478,7 +480,6 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -499,7 +500,7 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) er
 }
 
 const getChildDoneDispatchByBarrier = `-- name: GetChildDoneDispatchByBarrier :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE issue_id = $1
   AND child_done_barrier_key = $2
 `
@@ -527,6 +528,7 @@ func (q *Queries) GetChildDoneDispatchByBarrier(ctx context.Context, arg GetChil
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -537,13 +539,12 @@ func (q *Queries) GetChildDoneDispatchByBarrier(ctx context.Context, arg GetChil
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE id = $1
 `
 
@@ -565,6 +566,7 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -575,13 +577,12 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -608,6 +609,7 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -618,13 +620,12 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
 
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE issue_id = $1
   AND author_type = 'member'
   AND created_at > $2
@@ -664,6 +665,7 @@ func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg G
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -674,7 +676,6 @@ func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg G
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -689,7 +690,7 @@ WITH RECURSIVE root_of AS (
     FROM comment p
     JOIN root_of r ON p.id = r.parent_id
 )
-SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.child_done_barrier_key, c.child_done_target_type, c.child_done_target_id, c.child_done_origin_task_id, c.child_done_dispatch_status, c.child_done_available_at, c.child_done_lease_token, c.child_done_lease_expires_at, c.child_done_dispatch_attempts, c.child_done_dispatch_error, c.quick_action_id FROM comment c
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.child_done_barrier_key, c.child_done_target_type, c.child_done_target_id, c.child_done_origin_task_id, c.child_done_dispatch_status, c.child_done_available_at, c.child_done_lease_token, c.child_done_lease_expires_at, c.child_done_dispatch_attempts, c.child_done_dispatch_error FROM comment c
 WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
 `
 
@@ -721,6 +722,7 @@ func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (C
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -731,7 +733,6 @@ func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (C
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -780,7 +781,7 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 }
 
 const listChildCommentsForParents = `-- name: ListChildCommentsForParents :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE parent_id = ANY($1::uuid[])
   AND issue_id = $2
   AND workspace_id = $3
@@ -838,6 +839,7 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.QuickActionID,
 			&i.ChildDoneBarrierKey,
 			&i.ChildDoneTargetType,
 			&i.ChildDoneTargetID,
@@ -848,7 +850,6 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 			&i.ChildDoneLeaseExpiresAt,
 			&i.ChildDoneDispatchAttempts,
 			&i.ChildDoneDispatchError,
-			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -861,7 +862,7 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 }
 
 const listCommentsByIDsForIssue = `-- name: ListCommentsByIDsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE id = ANY($1::uuid[])
   AND issue_id = $2
   AND workspace_id = $3
@@ -907,6 +908,7 @@ func (q *Queries) ListCommentsByIDsForIssue(ctx context.Context, arg ListComment
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.QuickActionID,
 			&i.ChildDoneBarrierKey,
 			&i.ChildDoneTargetType,
 			&i.ChildDoneTargetID,
@@ -917,7 +919,6 @@ func (q *Queries) ListCommentsByIDsForIssue(ctx context.Context, arg ListComment
 			&i.ChildDoneLeaseExpiresAt,
 			&i.ChildDoneDispatchAttempts,
 			&i.ChildDoneDispatchError,
-			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -930,8 +931,8 @@ func (q *Queries) ListCommentsByIDsForIssue(ctx context.Context, arg ListComment
 }
 
 const listCommentsForIssue = `-- name: ListCommentsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM (
-    SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM (
+    SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
     WHERE issue_id = $1 AND workspace_id = $2
     ORDER BY created_at DESC, id DESC
     LIMIT $3
@@ -986,6 +987,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.QuickActionID,
 			&i.ChildDoneBarrierKey,
 			&i.ChildDoneTargetType,
 			&i.ChildDoneTargetID,
@@ -996,7 +998,6 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 			&i.ChildDoneLeaseExpiresAt,
 			&i.ChildDoneDispatchAttempts,
 			&i.ChildDoneDispatchError,
-			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1009,7 +1010,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 }
 
 const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC, id ASC
 LIMIT $4
@@ -1053,6 +1054,7 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.QuickActionID,
 			&i.ChildDoneBarrierKey,
 			&i.ChildDoneTargetType,
 			&i.ChildDoneTargetID,
@@ -1063,7 +1065,6 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 			&i.ChildDoneLeaseExpiresAt,
 			&i.ChildDoneDispatchAttempts,
 			&i.ChildDoneDispatchError,
-			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1221,7 +1222,7 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error FROM comment
 WHERE issue_id = $1
   AND author_type IN ('member', 'agent')
   AND (
@@ -1288,6 +1289,7 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.QuickActionID,
 			&i.ChildDoneBarrierKey,
 			&i.ChildDoneTargetType,
 			&i.ChildDoneTargetID,
@@ -1298,7 +1300,6 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 			&i.ChildDoneLeaseExpiresAt,
 			&i.ChildDoneDispatchAttempts,
 			&i.ChildDoneDispatchError,
-			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1701,7 +1702,7 @@ UPDATE comment SET
     resolved_by_id = COALESCE(resolved_by_id, $3),
     updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type ResolveCommentParams struct {
@@ -1730,6 +1731,7 @@ func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) 
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -1740,7 +1742,6 @@ func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) 
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -1755,7 +1756,7 @@ SET content = $1,
 WHERE id = $5
   AND child_done_dispatch_status = 'queued'
   AND child_done_lease_token = $6
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type RetargetClaimedChildDoneDispatchParams struct {
@@ -1792,6 +1793,7 @@ func (q *Queries) RetargetClaimedChildDoneDispatch(ctx context.Context, arg Reta
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -1802,7 +1804,6 @@ func (q *Queries) RetargetClaimedChildDoneDispatch(ctx context.Context, arg Reta
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -1817,7 +1818,7 @@ SET child_done_available_at = $1,
 WHERE id = $3
   AND child_done_dispatch_status = 'queued'
   AND child_done_lease_token = $4
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type RetryClaimedChildDoneDispatchParams struct {
@@ -1850,6 +1851,7 @@ func (q *Queries) RetryClaimedChildDoneDispatch(ctx context.Context, arg RetryCl
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -1860,7 +1862,6 @@ func (q *Queries) RetryClaimedChildDoneDispatch(ctx context.Context, arg RetryCl
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -1872,7 +1873,7 @@ UPDATE comment SET
     resolved_by_id = NULL,
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 // Idempotent: a no-op clear (already unresolved) just returns the row.
@@ -1894,6 +1895,7 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -1904,7 +1906,6 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }
@@ -1915,7 +1916,7 @@ UPDATE comment SET
     source_task_id = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error, quick_action_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, child_done_barrier_key, child_done_target_type, child_done_target_id, child_done_origin_task_id, child_done_dispatch_status, child_done_available_at, child_done_lease_token, child_done_lease_expires_at, child_done_dispatch_attempts, child_done_dispatch_error
 `
 
 type UpdateCommentParams struct {
@@ -1942,6 +1943,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.QuickActionID,
 		&i.ChildDoneBarrierKey,
 		&i.ChildDoneTargetType,
 		&i.ChildDoneTargetID,
@@ -1952,7 +1954,6 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.ChildDoneLeaseExpiresAt,
 		&i.ChildDoneDispatchAttempts,
 		&i.ChildDoneDispatchError,
-		&i.QuickActionID,
 	)
 	return i, err
 }

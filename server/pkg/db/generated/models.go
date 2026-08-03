@@ -424,6 +424,7 @@ type ChildDoneTransition struct {
 	Stage          pgtype.Int4        `json:"stage"`
 	TransitionAt   pgtype.Timestamptz `json:"transition_at"`
 	Status         string             `json:"status"`
+	GroupReady     bool               `json:"group_ready"`
 	AvailableAt    pgtype.Timestamptz `json:"available_at"`
 	LeaseToken     pgtype.UUID        `json:"lease_token"`
 	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
@@ -466,6 +467,7 @@ type Comment struct {
 	ResolvedByType            pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID              pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID              pgtype.UUID        `json:"source_task_id"`
+	QuickActionID             pgtype.UUID        `json:"quick_action_id"`
 	ChildDoneBarrierKey       pgtype.Text        `json:"child_done_barrier_key"`
 	ChildDoneTargetType       pgtype.Text        `json:"child_done_target_type"`
 	ChildDoneTargetID         pgtype.UUID        `json:"child_done_target_id"`
@@ -476,7 +478,6 @@ type Comment struct {
 	ChildDoneLeaseExpiresAt   pgtype.Timestamptz `json:"child_done_lease_expires_at"`
 	ChildDoneDispatchAttempts int32              `json:"child_done_dispatch_attempts"`
 	ChildDoneDispatchError    pgtype.Text        `json:"child_done_dispatch_error"`
-	QuickActionID             pgtype.UUID        `json:"quick_action_id"`
 }
 
 type CommentReaction struct {

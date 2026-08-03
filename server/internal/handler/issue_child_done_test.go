@@ -913,6 +913,135 @@ func TestChildDoneBatchTransitionWaitsForRelease(t *testing.T) {
 	}
 }
 
+// TestChildDoneAbandonedBatchWaitsForEveryTransition covers recovery after a
+// process exits between the per-issue commits and the group release. Staggered
+// watchdog deadlines must not expose a prefix of the logical batch.
+func TestChildDoneAbandonedBatchWaitsForEveryTransition(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	sibling := createChildDoneSibling(t, fx.parent.ID)
+	groupID := newChildDoneGroupID()
+
+	commitDeferred := func(childID string) {
+		t.Helper()
+		child, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(childID))
+		if err != nil {
+			t.Fatalf("load deferred child: %v", err)
+		}
+		_, _, err = testHandler.updateIssueAndRecordChildDone(ctx, db.UpdateIssueParams{
+			ID:            child.ID,
+			Status:        pgtype.Text{String: "done", Valid: true},
+			AssigneeType:  child.AssigneeType,
+			AssigneeID:    child.AssigneeID,
+			StartDate:     child.StartDate,
+			DueDate:       child.DueDate,
+			ParentIssueID: child.ParentIssueID,
+			ProjectID:     child.ProjectID,
+			Stage:         child.Stage,
+		}, groupID, true)
+		if err != nil {
+			t.Fatalf("commit deferred child transition: %v", err)
+		}
+	}
+	commitDeferred(fx.child.ID)
+	commitDeferred(sibling.ID)
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE child_done_transition
+		SET group_ready = FALSE,
+		    available_at = CASE child_issue_id
+		        WHEN $2::uuid THEN now() - interval '1 minute'
+		        ELSE now() + interval '1 hour'
+		    END
+		WHERE group_id = $1
+	`, uuidToString(groupID), fx.child.ID); err != nil {
+		t.Fatalf("stagger abandoned group deadlines: %v", err)
+	}
+
+	worked, err := testHandler.ChildDoneDispatchWorker.ProcessNextTransitionGroup(ctx)
+	if err != nil {
+		t.Fatalf("inspect partially expired abandoned group: %v", err)
+	}
+	if worked {
+		t.Fatal("worker claimed only the expired prefix of an abandoned group")
+	}
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Fatalf("partial abandoned group produced %d comments, want 0", got)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE child_done_transition
+		SET available_at = now() - interval '1 minute'
+		WHERE group_id = $1
+	`, uuidToString(groupID)); err != nil {
+		t.Fatalf("expire complete abandoned group: %v", err)
+	}
+	worked, err = testHandler.ChildDoneDispatchWorker.ProcessNextTransitionGroup(ctx)
+	if err != nil {
+		t.Fatalf("recover complete abandoned group: %v", err)
+	}
+	if !worked {
+		t.Fatal("worker did not claim the complete abandoned group")
+	}
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("complete abandoned group produced %d comments, want 1", got)
+	}
+	var processed int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM child_done_transition
+		WHERE group_id = $1 AND status = 'processed'
+	`, uuidToString(groupID)).Scan(&processed); err != nil {
+		t.Fatalf("count recovered transitions: %v", err)
+	}
+	if processed != 2 {
+		t.Fatalf("processed abandoned transitions = %d, want 2", processed)
+	}
+}
+
+// TestIndependentChildDoneGroupsShareBarrierGeneration covers two single-
+// issue commits that both become recoverable before either worker pass. Both
+// observe one closed barrier and must reuse one comment and continuation task.
+func TestIndependentChildDoneGroupsShareBarrierGeneration(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	sibling := createChildDoneSibling(t, fx.parent.ID)
+	agentID := createHandlerTestAgent(t, "Child Done Barrier Generation", nil)
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	groups := []pgtype.UUID{newChildDoneGroupID(), newChildDoneGroupID()}
+	for i, childID := range []string{fx.child.ID, sibling.ID} {
+		if _, _, err := testHandler.updateIssueStatusAndRecordChildDone(
+			ctx,
+			util.MustParseUUID(childID),
+			util.MustParseUUID(testWorkspaceID),
+			"done",
+			groups[i],
+		); err != nil {
+			t.Fatalf("commit independent terminal transition %d: %v", i, err)
+		}
+	}
+
+	for i, groupID := range groups {
+		worked, err := testHandler.ChildDoneDispatchWorker.ProcessTransitionGroup(ctx, groupID)
+		if err != nil {
+			t.Fatalf("recover independent transition group %d: %v", i, err)
+		}
+		if !worked {
+			t.Fatalf("independent transition group %d was not claimed", i)
+		}
+	}
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("independent groups produced %d comments, want 1", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Fatalf("independent groups produced %d continuation tasks, want 1", got)
+	}
+}
+
 func TestChildDoneDispatchWorker_AssigneeClearedDoesNotHotRetryStoredTarget(t *testing.T) {
 	ctx := context.Background()
 	fx := newChildDoneFixture(t, "in_progress")

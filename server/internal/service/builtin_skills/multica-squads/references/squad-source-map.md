@@ -225,8 +225,11 @@ Contracts:
   a later blocked -> done transition emits a distinct completion handoff;
 - the system comment persists the dispatch target, exact origin task, barrier
   event key, retry state, and lease. `ChildDoneDispatchWorker` reclaims queued
-  or expired rows across restarts/replicas. The comment ID is the advisory-lock
-  idempotency key for task creation, closing the insert/ack crash window;
+  or expired rows across restarts/replicas. Deferred batch transitions are
+  claimed only as a complete released or abandoned group, and independent
+  groups reuse one stable barrier-generation event key. The comment ID is the
+  advisory-lock idempotency key for task creation, closing the insert/ack crash
+  window;
 - no self-trigger guard: a same-squad or shared-leader child still wakes the
   parent squad leader — the wake is a serial handoff onto the PARENT and is the
   only carrier of the stage-barrier "advance / wrap up" instruction (MUL-3969,

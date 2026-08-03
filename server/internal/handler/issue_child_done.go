@@ -342,11 +342,25 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	if staged {
 		barrierName = "stage:" + strconv.Itoa(int(closedStage))
 	}
-	transitionAt := completed.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
-	barrierKey := fmt.Sprintf("%s:%s:%s:%s", barrierName, outcome, childID, transitionAt)
+	generation, err := h.Queries.GetChildDoneBarrierGeneration(ctx, db.GetChildDoneBarrierGenerationParams{
+		ParentIssueID: parent.ID,
+		Staged:        staged,
+		Stage:         pgtype.Int4{Int32: closedStage, Valid: staged},
+	})
+	if err != nil {
+		return fmt.Errorf("load child-done barrier generation: %w", err)
+	}
+	if !generation.Valid {
+		// The triggering transition is normally present. Keep the fallback for
+		// pre-migration terminal siblings and tests that call this helper with
+		// synthetic issues.
+		generation = completed.UpdatedAt
+	}
+	barrierKey := fmt.Sprintf("%s:%s:%s", barrierName, outcome, generation.Time.UTC().Format(time.RFC3339Nano))
 
 	// The comment doubles as a durable outbox row. A zero-row return means the
-	// exact transition was already persisted by another request/replica.
+	// same closed barrier generation was already persisted by another group or
+	// replica.
 	comment, err := h.Queries.CreateChildDoneDispatchComment(ctx, db.CreateChildDoneDispatchCommentParams{
 		IssueID:               parent.ID,
 		WorkspaceID:           parent.WorkspaceID,

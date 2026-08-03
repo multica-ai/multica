@@ -437,9 +437,10 @@ RETURNING *;
 
 -- name: CreateChildDoneDispatchComment :one
 -- The system comment is also the durable dispatch outbox row. The barrier key
--- identifies one concrete terminal transition, so retries/process crashes
--- reuse the same comment while a genuine reopen -> terminal cycle can emit a
--- new event. The partial unique index makes concurrent duplicate ingress safe.
+-- identifies one closed barrier generation, so retries, process crashes, and
+-- independent completion groups reuse the same comment while a genuine
+-- reopen -> terminal cycle can emit a new event. The partial unique index
+-- makes concurrent duplicate ingress safe.
 WITH touched_issue AS (
     UPDATE issue SET updated_at = now()
     WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)

@@ -10,6 +10,7 @@ CREATE TABLE child_done_transition (
     transition_at TIMESTAMPTZ NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued'
         CHECK (status IN ('queued', 'processed')),
+    group_ready BOOLEAN NOT NULL DEFAULT TRUE,
     available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     lease_token UUID,
     lease_expires_at TIMESTAMPTZ,

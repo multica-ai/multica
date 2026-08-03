@@ -211,8 +211,11 @@ leader. A concurrent leader rotation is re-resolved and retried. If an explicit
 assignment wins, the stage comment and wake are retargeted to that assignee;
 archived squads still fail closed. The system comment is also a durable outbox:
 leased workers retry after crashes or transient database failures, while the
-comment ID makes task creation idempotent. A later `blocked` → `done` transition
-is a distinct completion handoff and wakes the coordinator again.
+comment ID makes task creation idempotent. Batch transitions become claimable
+as one complete persisted group, including crash recovery, and independent
+completion groups share one stable barrier-generation key so they cannot emit
+duplicate comments or continuation tasks. A later `blocked` → `done`
+transition is a distinct completion handoff and wakes the coordinator again.
 
 ## Autopilot behavior
 

@@ -250,6 +250,11 @@ but do not guess a coordinator. A completion that does not close a stage is sile
 so the parent is woken once when the *last* sub-issue finishes — not on every
 child.
 
+Terminal status batches are persisted and recovered as one complete group.
+Independent status updates that observe the same newly closed barrier share a
+stable barrier-generation key, so they produce only one comment and one
+coordinator continuation.
+
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the resolved parent coordinator, who then decides whether to promote the
 next stage's `backlog` sub-issues to `todo`.
