@@ -84,6 +84,78 @@ func TestRunTaskSquadLeaderDoesNotReuseExternalPriorWorkdir(t *testing.T) {
 	}
 }
 
+func TestRunTaskFreshPrepareSamePriorPathDoesNotResumeSession(t *testing.T) {
+	t.Parallel()
+
+	d, argsFile, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+
+	task := leaderReuseTestTask("task-fresh-same-path")
+	task.PriorWorkDir = filepath.Join(
+		execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID),
+		"workdir",
+	)
+	task.PriorSessionID = "session-must-not-resume"
+
+	result, err := d.runTask(context.Background(), task, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatalf("runTask: %v", err)
+	}
+	if result.WorkDir != task.PriorWorkDir {
+		t.Fatalf("fresh Prepare workdir = %q, want same pathname %q", result.WorkDir, task.PriorWorkDir)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read claude args: %v", err)
+	}
+	if strings.Contains(string(args), "--resume\nsession-must-not-resume\n") {
+		t.Fatalf("fresh Prepare resumed session from pathname equality; args:\n%s", args)
+	}
+}
+
+func TestRunTaskPriorWorkdirRetargetAfterLeaseFailsClosed(t *testing.T) {
+	t.Parallel()
+	d, _, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+	first := leaderReuseTestTask("alpha-retarget-first")
+	first.IsLeaderTask = false
+	firstResult, err := d.runTask(context.Background(), first, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorRoot := firstResult.EnvRoot
+	movedRoot := priorRoot + "-moved"
+	externalRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(externalRoot, "workdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hookRan := false
+	d.envRootPreOpenHook = func(string) {
+		d.envRootPreOpenHook = nil
+		hookRan = true
+		if err := os.Rename(priorRoot, movedRoot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(externalRoot, priorRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := leaderReuseTestTask("beta-retarget-second")
+	second.IsLeaderTask = false
+	second.PriorWorkDir = firstResult.WorkDir
+	second.PriorSessionID = firstResult.SessionID
+	secondResult, err := d.runTask(context.Background(), second, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hookRan {
+		t.Fatal("retarget hook did not run")
+	}
+	if secondResult.WorkDir == firstResult.WorkDir || secondResult.EnvRoot == externalRoot {
+		t.Fatalf("retargeted prior workdir was reused: %+v", secondResult)
+	}
+}
+
 // TestShouldReusePriorWorkdirNonLeaderReusesUnchanged locks the refactor's
 // non-leader branch: the leader-only provenance/marker gate must not touch the
 // pre-existing behavior where any non-local prior workdir is reused.
