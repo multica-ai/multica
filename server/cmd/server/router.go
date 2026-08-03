@@ -1119,6 +1119,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// path lives in exactly one place — chi panics on duplicates.
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfAccessVerifier)) // CEREBRO-PATCH(cf-access-auth): pass Cloudflare Access verifier
+		r.Use(middleware.ResolveTaskScopeEnforcement(cerebroQueries))                 // CEREBRO-PATCH(task-scope-feature-flag): FIR-4076 default-on workspace kill switch for the three task-resource matchers.
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// Attachment upload — agents drop screenshots/logs onto their
