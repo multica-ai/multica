@@ -13,6 +13,7 @@
   "expected_interval_seconds": 60,
   "minimum_sample_coverage": 0.8,
   "growth_scan_interval_seconds": 900,
+  "growth_scan_budget_seconds": 5,
   "required_field_max_gap_seconds": 1800,
   "retention_report_max_age_seconds": 1800,
   "shadow_runs_path": "/Users/example/path/to/m0-shadow-observer/data/runs",

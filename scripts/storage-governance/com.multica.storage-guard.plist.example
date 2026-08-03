@@ -7,6 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
+    <string>-E</string>
     <string>__INSTALL_ROOT__/storage_guard.py</string>
     <string>--config</string>
     <string>__INSTALL_ROOT__/config.json</string>

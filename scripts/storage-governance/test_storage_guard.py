@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import plistlib
 import signal
 import sys
 import tempfile
@@ -21,6 +22,15 @@ from storage_guard import (  # noqa: E402
 
 
 GIB = 1024**3
+
+
+class LaunchdContractTest(unittest.TestCase):
+    def test_guard_ignores_ambient_python_environment(self) -> None:
+        plist_path = Path(__file__).with_name("com.multica.storage-guard.plist.example")
+        with plist_path.open("rb") as handle:
+            program_arguments = plistlib.load(handle)["ProgramArguments"]
+
+        self.assertEqual(program_arguments[:2], ["/usr/bin/python3", "-E"])
 
 
 def base_config(root: Path) -> dict:
@@ -326,6 +336,22 @@ class CapacityReportTest(unittest.TestCase):
 
 
 class SystemCollectorTest(unittest.TestCase):
+    def test_growth_metrics_respect_shared_scan_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspaces"
+            workspace.mkdir()
+            (workspace / "payload.bin").write_bytes(b"payload")
+            collector = SystemCollector(
+                {
+                    "growth_scan_budget_seconds": 0,
+                    "workspace_roots": [str(workspace)],
+                    "logs_paths": [],
+                },
+                mock.Mock(),
+            )
+
+            self.assertIsNone(collector.growth_metrics()["workspace_total_bytes"])
+
     def test_fast_collect_does_not_scan_growth_directories(self) -> None:
         runner = mock.Mock()
         runner.run.side_effect = [

@@ -16,6 +16,7 @@ import re
 import signal
 import subprocess
 import tempfile
+import time
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -96,15 +97,21 @@ class SystemCollector:
         return value if isinstance(value, dict) else {"status": "unknown"}
 
     @staticmethod
-    def directory_size(path: Path) -> Optional[int]:
+    def directory_size(path: Path, *, deadline: Optional[float] = None) -> Optional[int]:
+        if deadline is not None and time.monotonic() >= deadline:
+            return None
         if not path.is_dir() or path.is_symlink():
             return None
         total = 0
         try:
             for current, dirnames, filenames in os.walk(str(path), topdown=True, followlinks=False):
+                if deadline is not None and time.monotonic() >= deadline:
+                    return None
                 current_path = Path(current)
                 dirnames[:] = [name for name in dirnames if not (current_path / name).is_symlink()]
                 for name in filenames:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        return None
                     candidate = current_path / name
                     if not candidate.is_symlink():
                         total += candidate.stat().st_size
@@ -113,11 +120,16 @@ class SystemCollector:
         return total
 
     def growth_metrics(self) -> Dict[str, Optional[int]]:
-        shadow = self.directory_size(Path(str(self.config.get("shadow_runs_path", "")))) if self.config.get("shadow_runs_path") else None
-        cursor = self.directory_size(Path(str(self.config.get("cursor_path", "")))) if self.config.get("cursor_path") else None
-        log_values = [self.directory_size(Path(str(path))) for path in self.config.get("logs_paths", [])]
+        deadline = time.monotonic() + max(0.0, float(self.config.get("growth_scan_budget_seconds", 5)))
+
+        def scan(path: object) -> Optional[int]:
+            return self.directory_size(Path(str(path)), deadline=deadline)
+
+        shadow = scan(self.config["shadow_runs_path"]) if self.config.get("shadow_runs_path") else None
+        cursor = scan(self.config["cursor_path"]) if self.config.get("cursor_path") else None
+        log_values = [scan(path) for path in self.config.get("logs_paths", [])]
         logs = sum(value for value in log_values if value is not None) if log_values and all(value is not None for value in log_values) else None
-        workspace_values = [self.directory_size(Path(str(path))) for path in self.config.get("workspace_roots", [])]
+        workspace_values = [scan(path) for path in self.config.get("workspace_roots", [])]
         workspace_total = (
             sum(value for value in workspace_values if value is not None)
             if workspace_values and all(value is not None for value in workspace_values)
