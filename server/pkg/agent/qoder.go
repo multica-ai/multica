@@ -383,6 +383,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
 				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
 				c.usageMu.Unlock()
 			default:
 			}

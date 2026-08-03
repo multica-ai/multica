@@ -376,6 +376,8 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
+				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
 				c.usageMu.Unlock()
 			default:
 			}

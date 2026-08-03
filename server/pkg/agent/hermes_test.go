@@ -2240,6 +2240,90 @@ func TestHermesBackendAttributesUsageToACPDefaultModel(t *testing.T) {
 	}
 }
 
+// fakeHermesACPCacheWriteUsageScript returns a fake ACP script that reports
+// cacheWriteTokens in the prompt result usage. This exercises the promptDone
+// accumulation path — the only source of usage data when the runtime does not
+// emit usage_update notifications.
+func fakeHermesACPCacheWriteUsageScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_cw","models":{"currentModelId":"test-model","availableModels":[{"modelId":"test-model","name":"Test"}]}}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_cw","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":200,"outputTokens":50,"cacheReadTokens":30,"cacheWriteTokens":15}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestHermesBackendAccumulatesCacheWriteTokens verifies that
+// CacheWriteTokens from the promptDone (turn_end/result) usage is
+// accumulated into the final Result.Usage. Prior to the fix, this field
+// was silently dropped by the promptDone handler even though
+// parseACPTokenUsage correctly parsed it from the wire.
+func TestHermesBackendAccumulatesCacheWriteTokens(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPCacheWriteUsageScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got %q: %s", result.Status, result.Error)
+		}
+		usage, ok := result.Usage["test-model"]
+		if !ok {
+			t.Fatalf("expected usage under test-model, got %+v", result.Usage)
+		}
+		if usage.InputTokens != 200 {
+			t.Errorf("InputTokens = %d, want 200", usage.InputTokens)
+		}
+		if usage.OutputTokens != 50 {
+			t.Errorf("OutputTokens = %d, want 50", usage.OutputTokens)
+		}
+		if usage.CacheReadTokens != 30 {
+			t.Errorf("CacheReadTokens = %d, want 30", usage.CacheReadTokens)
+		}
+		if usage.CacheWriteTokens != 15 {
+			t.Errorf("CacheWriteTokens = %d, want 15", usage.CacheWriteTokens)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // fakeHermesACPRateLimitScript impersonates hermes for the GitHub
 // multica#1952 scenario: the upstream LLM returns HTTP 429 (rate
 // limited / no credit), hermes retries internally and ultimately

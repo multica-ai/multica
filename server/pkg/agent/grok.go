@@ -453,6 +453,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
 				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
 				// xAI prices the turn itself and reports the result here.
 				// Carrying it through is the only way the ≥200K long-context
 				// surcharge reaches the bill — token counts alone cannot
