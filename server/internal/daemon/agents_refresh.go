@@ -241,7 +241,7 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 		return
 	}
 
-	builtins, belowMinimum := d.detectBuiltinRuntimes(ctx)
+	builtins, belowMinimum, _ := d.detectBuiltinRuntimes(ctx)
 	// Runs before the early return below: a downgrade drops the provider from
 	// builtins entirely, so there is no version change left to detect and the
 	// machine could otherwise look idle while a too-old CLI keeps taking work.
@@ -465,7 +465,7 @@ func (d *Daemon) convergeRuntimeRegistrations(ctx context.Context) {
 	// detectBuiltinRuntimes version-gates the availability set and publishes
 	// this round's drops for /health, so a provider that cannot register still
 	// gets a visible reason even though registration is skipped.
-	builtins, _ := d.detectBuiltinRuntimes(ctx)
+	builtins, _, _ := d.detectBuiltinRuntimes(ctx)
 	if len(builtins) == 0 {
 		return
 	}

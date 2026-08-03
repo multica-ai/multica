@@ -60,6 +60,14 @@ type batchFixture struct {
 	// deregistered accumulates every runtime ID sent to /api/daemon/deregister,
 	// so a test can assert the server was actually told to stop routing work.
 	deregistered []string
+	// registerDelay, when non-zero, makes the register handler sleep before
+	// recording the call, widening the window in which two unserialized
+	// register calls for the same workspace would overlap.
+	registerDelay time.Duration
+	// registerInFlight / registerMaxInFlight track how many register handlers
+	// run at once, so a test can assert same-workspace serialization.
+	registerInFlight    int
+	registerMaxInFlight int
 }
 
 // failRegister toggles register failure for every workspace.
@@ -171,6 +179,29 @@ func (fx *batchFixture) deregisteredCount() int {
 	return len(fx.deregistered)
 }
 
+// deregisteredIDs copies the runtime IDs deregistered server-side, in order.
+func (fx *batchFixture) deregisteredIDs() []string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return append([]string(nil), fx.deregistered...)
+}
+
+// setRegisterDelay makes every register call linger, so a test can detect two
+// of them overlapping when they should be serialized.
+func (fx *batchFixture) setRegisterDelay(d time.Duration) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.registerDelay = d
+}
+
+// maxRegisterInFlight reports the peak number of concurrently running
+// register handlers.
+func (fx *batchFixture) maxRegisterInFlight() int {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return fx.registerMaxInFlight
+}
+
 func (fx *batchFixture) registerCallCount() int {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
@@ -222,6 +253,21 @@ func newBatchFixture(t *testing.T) *batchFixture {
 				Runtimes    []map[string]string `json:"runtimes"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.mu.Lock()
+			fx.registerInFlight++
+			if fx.registerInFlight > fx.registerMaxInFlight {
+				fx.registerMaxInFlight = fx.registerInFlight
+			}
+			delay := fx.registerDelay
+			fx.mu.Unlock()
+			defer func() {
+				fx.mu.Lock()
+				fx.registerInFlight--
+				fx.mu.Unlock()
+			}()
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			if fx.registerShouldFail(body.WorkspaceID) {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"error":"injected register failure"}`))
@@ -419,7 +465,7 @@ func TestRegisterRuntimesForWorkspace_ProbesOnStandaloneCall(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/fake/claude"}}
 
 	for i := 1; i <= 2; i++ {
-		if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+		if _, _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
 			t.Fatalf("register #%d: %v", i, err)
 		}
 		if got := fx.probeCount("/fake/claude"); got != i {
@@ -509,7 +555,7 @@ func TestDetectBuiltinRuntimes_DropsProviderAfterRetriesExhausted(t *testing.T) 
 		return nil
 	})
 
-	runtimes, _ := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _, _ := d.detectBuiltinRuntimes(context.Background())
 
 	if got := fx.probeCount("/fake/codex"); got != runtimeVersionProbeAttempts {
 		t.Errorf("probed /fake/codex %d times, want %d (retry must stay bounded)", got, runtimeVersionProbeAttempts)
@@ -534,7 +580,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe(t *testing.T) {
 		return errors.New("signal: killed")
 	})
 
-	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {
@@ -608,7 +654,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := probes.Load(); got != 2 {
@@ -647,7 +693,7 @@ func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testin
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	runtimes, belowMin := d.detectBuiltinRuntimes(context.Background())
+	runtimes, belowMin, _ := d.detectBuiltinRuntimes(context.Background())
 	if len(runtimes) != 0 {
 		t.Fatalf("detected %v (healed path %q), want none: a below-minimum candidate must not be adopted", runtimes, healed)
 	}
@@ -680,7 +726,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetryMinVersionRejection(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
 
-	if runtimes, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {

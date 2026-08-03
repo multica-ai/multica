@@ -285,6 +285,14 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// registerSerial holds one mutex per workspace, serializing the
+	// "send Register, record what it carried" critical section
+	// (workspaceRegisterLock). Entries are never deleted — a daemon tracks a
+	// handful of workspaces, and a mutex for a workspace that went away is a
+	// few bytes, not a leak worth a lifecycle. Guarded by registerSerialMu.
+	registerSerialMu sync.Mutex
+	registerSerial   map[string]*sync.Mutex
+
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
 	//
@@ -553,6 +561,41 @@ func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string 
 	return out
 }
 
+// workspaceRegisterLock returns the mutex serializing one workspace's
+// "send Register, record what it carried" critical section.
+//
+// The per-workspace version record (workspaceState.builtinVersions) must
+// reflect the order the SERVER processed the register calls in, because the
+// server's upsert order decides which payload's versions its rows end up
+// holding. Registration entry points are concurrent (refresh, sync, a
+// runtime_gone recovery, profile drift), and without this lock two calls for
+// the same workspace could complete their HTTP responses in the opposite
+// order from the server's processing — recording the NEWER payload locally
+// while the server kept the OLDER one. The refresh round would then see the
+// record agreeing with disk and never re-register: the mismatch is invisible
+// precisely because the record is wrong, so it persists until the next
+// version change or restart. Holding the lock across the request AND the
+// record makes lock order = server order = record order.
+//
+// Only the send+record section is serialized. The runtime-ID merges stay
+// outside on purpose: both flavors re-derive convergent state from a response
+// (mergeBuiltinRegisterResponse upserts additively and swaps rotated IDs;
+// applyRegisterResponseInPlace replaces the whole set), so their ordering
+// cannot strand anything the way a wrong version record can.
+func (d *Daemon) workspaceRegisterLock(workspaceID string) *sync.Mutex {
+	d.registerSerialMu.Lock()
+	defer d.registerSerialMu.Unlock()
+	if d.registerSerial == nil {
+		d.registerSerial = make(map[string]*sync.Mutex)
+	}
+	mu, ok := d.registerSerial[workspaceID]
+	if !ok {
+		mu = &sync.Mutex{}
+		d.registerSerial[workspaceID] = mu
+	}
+	return mu
+}
+
 // recordBuiltinVersionsSent stores, per provider, the version a SUCCESSFUL
 // register call carried for a workspace (see workspaceState.builtinVersions).
 // Merged per provider rather than replaced: a provider absent from this
@@ -560,8 +603,10 @@ func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string 
 // holds whatever the previous call carried and the record must keep saying so.
 // Callers invoke this only after client.Register succeeds — a failed call
 // records nothing, which is what keeps the workspace behind for the next
-// refresh round. A workspace not yet tracked records nothing here; the sync
-// path seeds the record when it creates the workspaceState.
+// refresh round — and while holding the workspace's register lock, so the
+// record's write order matches the server's processing order
+// (workspaceRegisterLock). A workspace not yet tracked records nothing here;
+// the sync path seeds the record when it creates the workspaceState.
 func (d *Daemon) recordBuiltinVersionsSent(workspaceID string, runtimes []map[string]string) {
 	sent := builtinVersionsFromPayload(runtimes)
 	if len(sent) == 0 {
@@ -1058,7 +1103,17 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 // profileSig is the digest captured during the register; an empty value is
 // the explicit "fetch failed, keep the previous signature" sentinel from
 // appendProfileRuntimes.
-func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string) (newIDs, droppedIDs []string, ok bool) {
+//
+// preserveProviders lists built-in providers whose probe was UNAVAILABLE this
+// round (version unreadable), keyed by provider. Their entries are absent from
+// the payload — and therefore from the response — because of a transient
+// failure, not because anything decided they should go: treating the response
+// as authoritative for them would delete (and, on the drift path, Deregister)
+// a healthy runtime over one failed probe. Their existing built-in runtime
+// rows are kept instead. A below-minimum provider is deliberately NOT in this
+// set — that verdict is confirmed, and dropping its rows here matches what
+// demoteBelowMinimumRuntimes does on the refresh path.
+func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs, droppedIDs []string, ok bool) {
 	newIDs = make([]string, 0, len(resp.Runtimes))
 	newIDSet := make(map[string]struct{}, len(resp.Runtimes))
 	for _, rt := range resp.Runtimes {
@@ -1076,11 +1131,19 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 	// return — typically there are none for upsert-on-existing-provider, but
 	// a daemon config change (provider removed) or a profile disable would
 	// leak entries otherwise.
+	kept := newIDs
 	for _, oldID := range ws.runtimeIDs {
-		if _, kept := newIDSet[oldID]; !kept {
-			delete(d.runtimeIndex, oldID)
-			droppedIDs = append(droppedIDs, oldID)
+		if _, stillThere := newIDSet[oldID]; stillThere {
+			continue
 		}
+		if rt, tracked := d.runtimeIndex[oldID]; tracked && rt.ProfileID == "" {
+			if _, preserve := preserveProviders[rt.Provider]; preserve {
+				kept = append(kept, oldID)
+				continue
+			}
+		}
+		delete(d.runtimeIndex, oldID)
+		droppedIDs = append(droppedIDs, oldID)
 	}
 	for _, rt := range resp.Runtimes {
 		d.runtimeIndex[rt.ID] = rt
@@ -1089,7 +1152,7 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 	// catches the rare case where UpsertAgentRuntime returns a different ID
 	// for a surviving provider (e.g. schema change); the daemon converges on
 	// what the server says without leaving stale heartbeat goroutines.
-	ws.runtimeIDs = newIDs
+	ws.runtimeIDs = kept
 	if resp.ReposVersion != "" {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
@@ -1193,12 +1256,12 @@ func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *Register
 }
 
 func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
-	resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	resp, profileSig, unavailable, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("register runtimes: %w", err)
 	}
 
-	newIDs, _, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig)
+	newIDs, _, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, unavailable)
 	if !ok {
 		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
 	}
@@ -1745,17 +1808,27 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 // refresh), so a caller acting on the shared copy can act on someone else's
 // probe — and demoting a runtime is not a decision to make on another round's
 // evidence.
-func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]string) {
+//
+// The third return value is THIS round's unavailable providers (version could
+// not be read), provider to reason. Callers that treat a register response as
+// AUTHORITATIVE for a workspace's whole runtime set (the runtime_gone recovery
+// and the profile drift refresh, via applyRegisterResponseInPlace) must
+// preserve these providers' existing runtimes: they are absent from the
+// payload because the probe failed, which is transient — tearing a working
+// runtime down over it is exactly what the unavailable/below-minimum verdict
+// split exists to prevent. Only a below-minimum verdict may demote.
+func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]string, map[string]string) {
 	type detected struct {
 		name    string
 		version string
 	}
 	var (
-		mu       sync.Mutex
-		results  []detected
-		skipped  = map[string]string{}
-		belowMin = map[string]string{}
-		g        errgroup.Group
+		mu          sync.Mutex
+		results     []detected
+		skipped     = map[string]string{}
+		belowMin    = map[string]string{}
+		unavailable = map[string]string{}
+		g           errgroup.Group
 	)
 	g.SetLimit(runtimeVersionProbeConcurrency)
 	for name, entry := range d.agents() {
@@ -1767,6 +1840,8 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 				skipped[name] = reason
 				if verdict == builtinProbeBelowMinimum {
 					belowMin[name] = version
+				} else {
+					unavailable[name] = reason
 				}
 				mu.Unlock()
 				return nil
@@ -1804,7 +1879,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 			"status":  "online",
 		})
 	}
-	return runtimes, belowMin
+	return runtimes, belowMin, unavailable
 }
 
 // cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
@@ -1832,9 +1907,15 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // Registering a batch of workspaces at once (daemon startup) goes through
 // registerRuntimesForWorkspaceBatch instead, which shares one probe round
 // across the batch.
-func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
-	builtins, _ := d.detectBuiltinRuntimes(ctx)
-	return d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, builtins)
+//
+// The third return value is the probe round's unavailable providers (version
+// unreadable this round, dropped from the payload). Callers that apply the
+// response as AUTHORITATIVE must pass it to applyRegisterResponseInPlace so
+// those providers' existing runtimes survive a transient probe failure.
+func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, map[string]string, error) {
+	builtins, _, unavailable := d.detectBuiltinRuntimes(ctx)
+	resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, builtins)
+	return resp, profileSig, unavailable, err
 }
 
 // registerRuntimesForWorkspaceBatch registers one workspace against an already
@@ -1891,6 +1972,12 @@ func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspac
 		"failed_profiles":   failedProfiles,
 	}
 
+	// Send and record under the workspace's register lock so the version
+	// record can never contradict the server's processing order — see
+	// workspaceRegisterLock.
+	regLock := d.workspaceRegisterLock(workspaceID)
+	regLock.Lock()
+	defer regLock.Unlock()
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("register runtimes: %w", err)
@@ -1934,6 +2021,12 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspace(ctx context.Context, worksp
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},
 	}
+	// Send and record under the workspace's register lock so the version
+	// record can never contradict the server's processing order — see
+	// workspaceRegisterLock.
+	regLock := d.workspaceRegisterLock(workspaceID)
+	regLock.Lock()
+	defer regLock.Unlock()
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register builtin runtimes: %w", err)
@@ -2413,9 +2506,20 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 		"workspace_id", workspaceID, "previous_sig", cached, "current_sig", live,
 		"profile_count", len(profiles))
 
-	regResp, profileSig, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	regResp, profileSig, unavailable, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
 	if err != nil {
 		if errors.Is(err, ErrNoRuntimesToRegister) {
+			// An empty payload only proves "nothing to host" when every probe
+			// actually concluded. A provider dropped as UNAVAILABLE is a
+			// transient failure, and converging to zero on it would Deregister
+			// every healthy runtime this workspace has; skip and let a later
+			// drift notification retry (the signature was not cached, so the
+			// drift is still detectable).
+			if len(unavailable) > 0 {
+				d.logger.Warn("skip runtime convergence-to-zero: builtin probes failed this round",
+					"workspace_id", workspaceID, "unavailable", unavailable)
+				return nil
+			}
 			// Convergence-to-zero: a custom-only daemon's only enabled
 			// profile was just disabled / deleted, and there are no built-in
 			// agents to fall back on. Drop the daemon's local tracking and
@@ -2427,7 +2531,7 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 		return err
 	}
 
-	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, regResp, profileSig)
+	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, regResp, profileSig, unavailable)
 	if !ok {
 		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
 	}
@@ -2777,7 +2881,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	)
 	probeBuiltins := func() []map[string]string {
 		if !builtinsProbed {
-			builtins, _ = d.detectBuiltinRuntimes(ctx)
+			builtins, _, _ = d.detectBuiltinRuntimes(ctx)
 			builtinsProbed = true
 		}
 		return builtins

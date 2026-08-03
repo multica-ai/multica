@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,7 +138,7 @@ func TestRefreshAgentVersions_ReachesWorkspacesAnotherPathDidNotRegister(t *test
 	// codex is upgraded, and something other than the refresh round probes it
 	// first. detectBuiltinRuntimes is exactly what those paths call.
 	fx.setProbeVersion("10.0.0")
-	if _, belowMin := d.detectBuiltinRuntimes(context.Background()); len(belowMin) != 0 {
+	if _, belowMin, _ := d.detectBuiltinRuntimes(context.Background()); len(belowMin) != 0 {
 		t.Fatalf("below-minimum = %v, want none", belowMin)
 	}
 	if got := d.agentVersion("codex"); got != "10.0.0" {
@@ -556,6 +557,205 @@ func TestRefreshAgentVersions_BlankProbeDoesNotWipeAnUnflooredProvidersVersion(t
 	}
 	if got := d.agentVersion("claude"); got != "9.9.9" {
 		t.Errorf("cached claude version = %q, want 9.9.9", got)
+	}
+}
+
+// TestReregisterAfterRuntimeGone_KeepsRuntimeWhoseProbeFailed covers the
+// authoritative half of the unavailable/below-minimum split. The runtime_gone
+// recovery re-registers the whole workspace and applies the response as the
+// complete runtime set — but a provider dropped from the payload because its
+// probe FAILED is absent by accident, not by decision. Treating the response
+// as authoritative for it deletes a healthy runtime over one transient probe
+// failure (mid-upgrade, ETXTBSY) — the exact case the verdict split promises
+// to leave alone. Only a below-minimum verdict may take runtimes down.
+func TestReregisterAfterRuntimeGone_KeepsRuntimeWhoseProbeFailed(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 {
+		t.Fatalf("providers before recovery = %v, want [claude codex]", got)
+	}
+
+	// codex is mid-upgrade: its --version fails while the recovery runs.
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	fx.setProbeErr(func(path string, _ int) error {
+		if strings.Contains(path, "codex") {
+			return errors.New("fork/exec: text file busy")
+		}
+		return nil
+	})
+
+	if err := d.reregisterWorkspaceAfterRuntimeGone(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("reregisterWorkspaceAfterRuntimeGone: %v", err)
+	}
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
+		t.Errorf("providers after recovery = %v, want [claude codex] — a transient probe failure must not "+
+			"evict a healthy runtime from an authoritative re-register", got)
+	}
+}
+
+// TestProfileDriftRefresh_KeepsRuntimeWhoseProbeFailed is the same contract on
+// the drift path, which is sharper-edged: it Deregisters whatever the
+// authoritative apply drops, so without the preserve the transient failure
+// would not just untrack the healthy runtime locally but proactively take it
+// offline server-side, failing its in-flight tasks via the offline sweeper.
+func TestProfileDriftRefresh_KeepsRuntimeWhoseProbeFailed(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+	var codexID string
+	d.mu.Lock()
+	for _, id := range d.workspaces["ws-1"].runtimeIDs {
+		if rt := d.runtimeIndex[id]; rt.Provider == "codex" {
+			codexID = id
+		}
+	}
+	d.mu.Unlock()
+	if codexID == "" {
+		t.Fatal("codex runtime not registered in setup")
+	}
+
+	// The drift: a profile appears server-side. Its command_name is blank, so
+	// it changes the profile signature without entering the payload — the
+	// register carries built-ins only.
+	fx.mu.Lock()
+	fx.profiles["ws-1"] = []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Broken",
+		ProtocolFamily: "codex", Visibility: "workspace", Enabled: true,
+	}}
+	fx.mu.Unlock()
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	fx.setProbeErr(func(path string, _ int) error {
+		if strings.Contains(path, "codex") {
+			return errors.New("fork/exec: text file busy")
+		}
+		return nil
+	})
+
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
+		t.Errorf("providers after drift refresh = %v, want [claude codex]", got)
+	}
+	for _, id := range fx.deregisteredIDs() {
+		if id == codexID {
+			t.Errorf("codex runtime %s was Deregistered — the drift path took a healthy runtime offline "+
+				"over a failed probe", id)
+		}
+	}
+}
+
+// TestProfileDriftRefresh_DoesNotConvergeToZeroOnFailedProbes guards the
+// sharpest corner of the same gap: when EVERY builtin probe fails in the same
+// round, the register payload is empty and the drift path used to read that as
+// "this daemon hosts nothing here" — deregistering every healthy runtime the
+// workspace has. An empty payload only proves convergence-to-zero when every
+// probe actually concluded.
+func TestProfileDriftRefresh_DoesNotConvergeToZeroOnFailedProbes(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{"codex": {Path: "/fake/codex"}})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	fx.mu.Lock()
+	fx.profiles["ws-1"] = []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Broken",
+		ProtocolFamily: "codex", Visibility: "workspace", Enabled: true,
+	}}
+	fx.mu.Unlock()
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	fx.setProbeErr(func(string, int) error { return errors.New("fork/exec: text file busy") })
+
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Errorf("providers after drift refresh = %v, want [codex] — an all-probes-failed round must not "+
+			"converge the workspace to zero", got)
+	}
+	if got := fx.deregisteredCount(); got != 0 {
+		t.Errorf("deregistered %d runtimes off failed probes, want 0", got)
+	}
+}
+
+// TestConcurrentRegisters_SameWorkspaceSerializedSoRecordMatchesServer pins the
+// workspaceRegisterLock contract: the per-workspace version record must follow
+// the SERVER's processing order. Two concurrent registers for one workspace
+// whose HTTP responses complete in the opposite order from the server's
+// processing would otherwise record the newer payload while the server kept
+// the older one — a mismatch the refresh round cannot see, precisely because
+// the record is what it compares against, so it would persist until the next
+// version change or restart.
+func TestConcurrentRegisters_SameWorkspaceSerializedSoRecordMatchesServer(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{"codex": {Path: "/fake/codex"}})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Make every register linger, so unserialized sends would overlap.
+	fx.setRegisterDelay(30 * time.Millisecond)
+	payloads := [][]map[string]string{
+		{{"name": "Codex", "type": "codex", "version": "1.0.0", "status": "online"}},
+		{{"name": "Codex", "type": "codex", "version": "2.0.0", "status": "online"}},
+	}
+	var wg sync.WaitGroup
+	for _, p := range payloads {
+		p := p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-1", p); err != nil {
+				t.Errorf("register: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := fx.maxRegisterInFlight(); got != 1 {
+		t.Errorf("max concurrent Register calls for one workspace = %d, want 1 — unserialized sends let "+
+			"the record contradict the server's processing order", got)
+	}
+	serverHas := fx.registeredVersionFor("ws-1", "codex")
+	d.mu.Lock()
+	recorded := d.workspaces["ws-1"].builtinVersions["codex"]
+	d.mu.Unlock()
+	if recorded != serverHas {
+		t.Errorf("recorded version %q != server's final version %q — the refresh round would never "+
+			"re-register this workspace", recorded, serverHas)
 	}
 }
 
