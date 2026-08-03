@@ -23,12 +23,10 @@ const (
 // IssueTriggerProbe carries the request-scoped checks WillEnqueueRun cannot
 // resolve from issue state alone.
 //
-// CanAccessAgent is the private-agent gate. The write paths enforce it at the
-// HTTP boundary (validateAssigneePair on assign, canEnqueueSquadLeader inside
-// the squad enqueue helper) and therefore pass an allow-all probe so the gate
-// is never duplicated or sunk into the service layer. Preview passes the real
-// gate so it never leaks a private agent's readiness to a member who cannot
-// see it. A nil func is treated as allow-all.
+// CanAccessAgent is the invocation-permission gate shared by preview and write
+// paths. Keeping it in this decision is required for status-only writes, which
+// do not revalidate an unchanged assignee. A nil func is treated as allow-all
+// for callers that have no request-scoped permission model.
 //
 // IsSelfLoop reports whether activating this parked issue would be the calling
 // agent re-triggering its own running task. Only the status source consults it;

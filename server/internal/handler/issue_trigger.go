@@ -16,25 +16,10 @@ import (
 // selection cannot fan out into thousands of readiness probes.
 const maxPreviewTriggerIssues = 500
 
-// issueTriggerWriteProbe builds the probe the write paths feed to
-// WillEnqueueRun. The private-agent gate is already enforced at the HTTP
-// boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
-// (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
-// allow-all. The self-loop check needs the request's X-Task-ID header.
-func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issue db.Issue) service.IssueTriggerProbe {
-	return service.IssueTriggerProbe{
-		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
-		IsSelfLoop: func() bool {
-			return h.isAgentRunningOnIssue(r, actorType, issue)
-		},
-	}
-}
-
-// issueTriggerPreviewProbe mirrors the real write-time gates for the read-only
-// preview: the private-agent gate (so preview never leaks a private agent's
-// readiness to a member who cannot see it — matching validateAssigneePair /
-// canEnqueueSquadLeader) and the same self-loop guard.
-func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, workspaceID string, issue db.Issue) service.IssueTriggerProbe {
+// issueTriggerProbe builds the request-scoped gates shared by preview and the
+// real write paths. Status-only updates do not pass through validateAssigneePair,
+// so the invocation gate must remain part of the enqueue decision itself.
+func (h *Handler) issueTriggerProbe(r *http.Request, actorType, actorID, workspaceID string, issue db.Issue) service.IssueTriggerProbe {
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
@@ -158,7 +143,7 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 	resp := IssueTriggerPreviewResponse{Triggers: make([]IssueTriggerPreviewItem, 0)}
 
 	appendTrigger := func(issue db.Issue, in service.IssueTriggerInput) {
-		probe := h.issueTriggerPreviewProbe(r, actorType, actorID, workspaceID, issue)
+		probe := h.issueTriggerProbe(r, actorType, actorID, workspaceID, issue)
 		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(), in, probe); ok {
 			resp.Triggers = append(resp.Triggers, IssueTriggerPreviewItem{
 				IssueID:          uuidToString(trigger.IssueID),

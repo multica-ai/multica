@@ -24,9 +24,13 @@ func seededReadyAgentID(t *testing.T) string {
 }
 
 func previewIssueTrigger(t *testing.T, body map[string]any) IssueTriggerPreviewResponse {
+	return previewIssueTriggerAs(t, testUserID, body)
+}
+
+func previewIssueTriggerAs(t *testing.T, userID string, body map[string]any) IssueTriggerPreviewResponse {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues/preview-trigger?workspace_id="+testWorkspaceID, body)
+	req := newRequestAs(userID, "POST", "/api/issues/preview-trigger?workspace_id="+testWorkspaceID, body)
 	testHandler.PreviewIssueTrigger(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("PreviewIssueTrigger: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -66,6 +70,15 @@ func taskCountFor(t *testing.T, issueID, agentID string) int {
 		t.Fatalf("count tasks: %v", err)
 	}
 	return n
+}
+
+func assignIssueToAgentForTest(t *testing.T, issueID, agentID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1
+	`, issueID, agentID); err != nil {
+		t.Fatalf("assign issue to agent: %v", err)
+	}
 }
 
 // TestPreviewIssueTrigger_CreateAgentVsBacklog covers the create entry point:
@@ -211,6 +224,125 @@ func TestBlockedToNonRunnableStatusDoesNotRestart(t *testing.T) {
 				t.Fatalf("blocked->%s: expected no trigger, got %+v", status, preview)
 			}
 		})
+	}
+}
+
+// TestBlockedPrivateAgentResumeRequiresInvokePermission covers status-only
+// writes, which keep the existing assignee and therefore do not pass through
+// validateAssigneePair. Preview and write must both deny an unrelated member,
+// while still applying the requested issue status.
+func TestBlockedPrivateAgentResumeRequiresInvokePermission(t *testing.T) {
+	agentID, _, memberID := privateAgentTestFixture(t)
+
+	for _, status := range []string{"todo", "in_progress", "in_review"} {
+		t.Run(status, func(t *testing.T) {
+			issue := createIssueForTest(t, map[string]any{
+				"title":  "private agent resume denied " + status,
+				"status": "blocked",
+			})
+			assignIssueToAgentForTest(t, issue.ID, agentID)
+
+			preview := previewIssueTriggerAs(t, memberID, map[string]any{
+				"issue_ids": []string{issue.ID},
+				"status":    status,
+			})
+			if preview.TotalCount != 0 {
+				t.Fatalf("blocked->%s preview: expected no trigger, got %+v", status, preview)
+			}
+
+			w := httptest.NewRecorder()
+			req := withURLParam(newRequestAs(memberID, "PUT", "/api/issues/"+issue.ID, map[string]any{
+				"status": status,
+			}), "id", issue.ID)
+			testHandler.UpdateIssue(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("UpdateIssue blocked->%s: %d %s", status, w.Code, w.Body.String())
+			}
+			var updated IssueResponse
+			if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+				t.Fatalf("decode blocked->%s response: %v", status, err)
+			}
+			if updated.Status != status {
+				t.Fatalf("blocked->%s status was not applied: got %q", status, updated.Status)
+			}
+			if got := taskCountFor(t, issue.ID, agentID); got != 0 {
+				t.Fatalf("blocked->%s write disagreed with preview: enqueued %d tasks", status, got)
+			}
+		})
+	}
+}
+
+func TestBatchBlockedPrivateAgentResumeRequiresInvokePermission(t *testing.T) {
+	agentID, _, memberID := privateAgentTestFixture(t)
+	issues := []IssueResponse{
+		createIssueForTest(t, map[string]any{"title": "private batch resume 1", "status": "blocked"}),
+		createIssueForTest(t, map[string]any{"title": "private batch resume 2", "status": "blocked"}),
+	}
+	issueIDs := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		assignIssueToAgentForTest(t, issue.ID, agentID)
+		issueIDs = append(issueIDs, issue.ID)
+	}
+
+	preview := previewIssueTriggerAs(t, memberID, map[string]any{
+		"issue_ids": issueIDs,
+		"status":    "todo",
+	})
+	if preview.TotalCount != 0 {
+		t.Fatalf("batch preview: expected no triggers, got %+v", preview)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequestAs(memberID, "POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": issueIDs,
+		"updates":   map[string]any{"status": "todo"},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues: %d %s", w.Code, w.Body.String())
+	}
+	var batchResp struct {
+		Updated int `json:"updated"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&batchResp); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if batchResp.Updated != len(issues) {
+		t.Fatalf("batch status update: expected %d updated, got %d", len(issues), batchResp.Updated)
+	}
+	for _, issue := range issues {
+		if got := taskCountFor(t, issue.ID, agentID); got != 0 {
+			t.Fatalf("batch write disagreed with preview for issue %s: enqueued %d tasks", issue.ID, got)
+		}
+	}
+}
+
+func TestBlockedPrivateAgentResumeAllowsOwner(t *testing.T) {
+	agentID, ownerID, _ := privateAgentTestFixture(t)
+	issue := createIssueForTest(t, map[string]any{
+		"title":  "private agent owner resume",
+		"status": "blocked",
+	})
+	assignIssueToAgentForTest(t, issue.ID, agentID)
+
+	preview := previewIssueTriggerAs(t, ownerID, map[string]any{
+		"issue_ids": []string{issue.ID},
+		"status":    "todo",
+	})
+	if preview.TotalCount != 1 || len(preview.Triggers) != 1 {
+		t.Fatalf("owner preview: expected one trigger, got %+v", preview)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequestAs(ownerID, "PUT", "/api/issues/"+issue.ID, map[string]any{
+		"status": "todo",
+	}), "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue as owner: %d %s", w.Code, w.Body.String())
+	}
+	if got := taskCountFor(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("owner write disagreed with preview: expected 1 task, got %d", got)
 	}
 }
 
