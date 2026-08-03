@@ -199,22 +199,47 @@ Contracts:
 - when a child issue closes a stage barrier and the parent is assigned to a
   squad, the parent squad leader is triggered (triggerChildDoneSquad in
   issue_child_done.go);
-- routing is leader-only — one `EnqueueTaskForSquadLeader` on the leader, no
-  member fan-out (triggerChildDoneSquad / dispatchParentAssigneeTrigger);
+- an unassigned parent can also resume a mention-started squad orchestration:
+  the completed child must have `origin_type=agent_create`, and its exact
+  `origin_id` task must be a squad leader task on that parent by the child's
+  creator. The task's `squad_id` is used only as the dispatch target; the parent
+  remains unassigned, while the continuation inherits the task's human
+  attribution. Missing or mismatched provenance fails closed instead of
+  guessing from timestamps or the latest task. Every child in the closed stage
+  (or every sibling in an unstaged barrier), including already-terminal
+  siblings, must share that exact origin task; mixed origins leave the comment
+  unmentioned and enqueue no leader. The final task insert locks and rechecks
+  that the parent remains unassigned, the squad remains active, and the target
+  agent remains its current leader. Concurrent leader rotation is re-resolved
+  and retried; when explicit assignment wins, the comment and wake are
+  retargeted to the assignee; archival still fails closed (GH #5706);
+- routing is leader-only — one `EnqueueTaskForSquadLeader` for an assigned
+  parent, or `EnqueueTaskForSquadLeaderFromOriginTask` for the proven unassigned
+  continuation, with no member fan-out (triggerChildDoneSquad /
+  dispatchParentAssigneeTrigger);
+- archived squads fail closed in `triggerChildDoneSquad` and the task-creation
+  row-lock queries; leader rotation is protected by
+  `LockActiveSquadLeaderForTaskCreate`'s current-leader predicate;
+- `done`, `blocked`, and `cancelled` all count as terminal for the stage
+  barrier; blocked wakes the coordinator so it can resolve the dependency, and
+  a later blocked -> done transition emits a distinct completion handoff;
+- the system comment persists the dispatch target, exact origin task, barrier
+  event key, retry state, and lease. `ChildDoneDispatchWorker` reclaims queued
+  or expired rows across restarts/replicas. Deferred batch transitions are
+  claimed only as a complete released or abandoned group, and independent
+  groups reuse one stable barrier-generation event key. The comment ID is the
+  advisory-lock idempotency key for task creation, closing the insert/ack crash
+  window;
 - no self-trigger guard: a same-squad or shared-leader child still wakes the
   parent squad leader — the wake is a serial handoff onto the PARENT and is the
   only carrier of the stage-barrier "advance / wrap up" instruction (MUL-3969,
   mirrors the agent path from MUL-2808). Re-triggering is bounded only by
   `HasPendingTaskForIssueAndAgent` (idempotent per parent issue + agent).
-- no leader-invocation gate: child-done does NOT re-check whether the child's
-  completer can invoke the leader. The parent was already permission-checked at
-  squad-assign time (`validateAssigneePair`), so waking its own leader is a
-  coordination handoff, not a fresh invocation. Re-checking it here failed
-  closed for the DEFAULT private leader (the child's completer is an
-  agent/system actor with no resolvable human originator), stranding every
-  process-squad pipeline after stage 1 while direct-to-leader-agent parents
-  advanced fine (MUL-4063 / GH #4928). Agent and squad child-done now share one
-  ungated path; any future invocation gate must be added to BOTH together.
+- assigned squad parents have no leader-invocation recheck: assignment already
+  authorized the coordination handoff (MUL-4063 / GH #4928). An unassigned
+  origin-task continuation does recheck the origin task's human authority
+  against the squad's current leader, so permission revocation or leader
+  rotation takes effect before a new task is created.
 - parent status is not auto-advanced by the barrier: the system comment asks the
   leader to continue or — when the overall goal is met — run
   `multica issue status <parent-id> in_review`. That explicit ask is what lets a

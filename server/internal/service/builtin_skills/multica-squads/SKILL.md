@@ -193,6 +193,30 @@ Current behavior: resolve the squad, read `leader_id`, enqueue a leader task,
 and use the current comment as the trigger comment. It does not enqueue every
 squad member.
 
+A squad mention does not assign the issue. If that mention-started leader task
+creates child issues, however, each agent-created child's exact `origin_id`
+preserves the scoped orchestration handoff. When a child closes a stage barrier
+under an otherwise unassigned parent, Multica wakes that same squad leader
+without changing the parent's assignee, and the continuation inherits the
+origin task's human authority and accountability. Missing or mismatched
+provenance does not fall back to timestamp or latest-task inference. A handoff
+wakes the leader only when every child in the closed stage (or every sibling in
+an unstaged barrier) shares the same exact origin task, including children that
+finished earlier. Mixed origins still produce the stage-complete comment but do
+not dispatch a coordinator. `done`, `blocked`, and `cancelled` all close a stage
+barrier; a blocked child wakes the coordinator to resolve the blocker. Task
+creation revalidates under database row locks that the parent is still
+unassigned, the squad is active, and the target agent is still its current
+leader. A concurrent leader rotation is re-resolved and retried. If an explicit
+assignment wins, the stage comment and wake are retargeted to that assignee;
+archived squads still fail closed. The system comment is also a durable outbox:
+leased workers retry after crashes or transient database failures, while the
+comment ID makes task creation idempotent. Batch transitions become claimable
+as one complete persisted group, including crash recovery, and independent
+completion groups share one stable barrier-generation key so they cannot emit
+duplicate comments or continuation tasks. A later `blocked` → `done`
+transition is a distinct completion handoff and wakes the coordinator again.
+
 ## Autopilot behavior
 
 Autopilots can be assigned to squads. For `assignee_type = "squad"`:

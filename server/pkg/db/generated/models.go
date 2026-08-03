@@ -414,6 +414,24 @@ type ChatSession struct {
 	ProjectID    pgtype.UUID        `json:"project_id"`
 }
 
+type ChildDoneTransition struct {
+	ID             pgtype.UUID        `json:"id"`
+	GroupID        pgtype.UUID        `json:"group_id"`
+	ChildIssueID   pgtype.UUID        `json:"child_issue_id"`
+	ParentIssueID  pgtype.UUID        `json:"parent_issue_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	TerminalStatus string             `json:"terminal_status"`
+	Stage          pgtype.Int4        `json:"stage"`
+	TransitionAt   pgtype.Timestamptz `json:"transition_at"`
+	Status         string             `json:"status"`
+	GroupReady     bool               `json:"group_ready"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	Attempts       int32              `json:"attempts"`
+	Error          pgtype.Text        `json:"error"`
+}
+
 type ClientUsageDaily struct {
 	UserID          pgtype.UUID        `json:"user_id"`
 	ClientType      string             `json:"client_type"`
@@ -435,21 +453,31 @@ type ClientUsageDaily struct {
 }
 
 type Comment struct {
-	ID             pgtype.UUID        `json:"id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	AuthorType     string             `json:"author_type"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Content        string             `json:"content"`
-	Type           string             `json:"type"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ParentID       pgtype.UUID        `json:"parent_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
+	ID                        pgtype.UUID        `json:"id"`
+	IssueID                   pgtype.UUID        `json:"issue_id"`
+	AuthorType                string             `json:"author_type"`
+	AuthorID                  pgtype.UUID        `json:"author_id"`
+	Content                   string             `json:"content"`
+	Type                      string             `json:"type"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	ParentID                  pgtype.UUID        `json:"parent_id"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt                pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType            pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID              pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID              pgtype.UUID        `json:"source_task_id"`
+	QuickActionID             pgtype.UUID        `json:"quick_action_id"`
+	ChildDoneBarrierKey       pgtype.Text        `json:"child_done_barrier_key"`
+	ChildDoneTargetType       pgtype.Text        `json:"child_done_target_type"`
+	ChildDoneTargetID         pgtype.UUID        `json:"child_done_target_id"`
+	ChildDoneOriginTaskID     pgtype.UUID        `json:"child_done_origin_task_id"`
+	ChildDoneDispatchStatus   pgtype.Text        `json:"child_done_dispatch_status"`
+	ChildDoneAvailableAt      pgtype.Timestamptz `json:"child_done_available_at"`
+	ChildDoneLeaseToken       pgtype.UUID        `json:"child_done_lease_token"`
+	ChildDoneLeaseExpiresAt   pgtype.Timestamptz `json:"child_done_lease_expires_at"`
+	ChildDoneDispatchAttempts int32              `json:"child_done_dispatch_attempts"`
+	ChildDoneDispatchError    pgtype.Text        `json:"child_done_dispatch_error"`
 }
 
 type CommentReaction struct {

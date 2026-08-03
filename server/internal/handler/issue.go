@@ -2886,12 +2886,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	childDoneGroupID := newChildDoneGroupID()
+	committedPrevIssue, issue, err := h.updateIssueAndRecordChildDone(r.Context(), params, childDoneGroupID, false)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
+	prevIssue = committedPrevIssue
 
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
@@ -2973,13 +2975,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
 	}
 
-	// Platform-driven parent notification: when this issue transitions into
-	// `done` and has a parent, post a top-level system comment on the parent
-	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
-	// loops in PR #2918). The helper guards on transition + parent state and
-	// fails best-effort.
-	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+	if statusChanged && h.ChildDoneDispatchWorker != nil {
+		worked, processErr := h.ChildDoneDispatchWorker.ProcessTransitionGroup(r.Context(), childDoneGroupID)
+		if processErr != nil {
+			slog.Warn("child done: immediate transition processing deferred",
+				"error", processErr, "group_id", uuidToString(childDoneGroupID))
+		}
+		if !worked || processErr != nil {
+			h.ChildDoneDispatchWorker.Notify()
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -3171,7 +3175,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+	err := h.deleteIssueWithChildDoneTransitions(r.Context(), db.DeleteIssueParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 	})
@@ -3274,10 +3278,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := 0
-	// Children that transitioned into a terminal status this batch, collected so
-	// the parent/stage notification is evaluated once against the final state
-	// after the loop (MUL-4155) rather than per-child mid-batch.
-	var childDoneCompleted []db.Issue
+	childDoneGroupID := newChildDoneGroupID()
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -3429,11 +3430,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
+		committedPrevIssue, issue, err := h.updateIssueAndRecordChildDone(r.Context(), params, childDoneGroupID, true)
 		if err != nil {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
 			continue
 		}
+		prevIssue = committedPrevIssue
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
@@ -3474,27 +3476,30 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// No status change — not even → cancelled — cancels active tasks here,
 		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
 
-		// Platform-driven parent notification, mirrored from UpdateIssue
-		// (MUL-2538) but DEFERRED to after the loop. Evaluating the stage
-		// barrier here, per-child, would read a mid-batch sibling snapshot and
-		// fire a stale "advance Stage N+1" wake when one batch closes several
-		// stages at once (MUL-4155). Collect the terminal transitions and let
-		// notifyParentsOfBatchChildDone below evaluate each parent once against
-		// the batch's final committed state. Same transition guard as
-		// notifyParentOfChildDone: a non-terminal -> terminal move on a child.
-		if statusChanged && issue.ParentIssueID.Valid &&
-			!isTerminalChildStatus(prevIssue.Status) && isTerminalChildStatus(issue.Status) {
-			childDoneCompleted = append(childDoneCompleted, issue)
-		}
-
 		updated++
 	}
 
-	// Aggregate parent/stage notification over the whole batch's final state so
-	// each affected parent gets at most one accurate comment + wake, independent
-	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
-	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
-	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
+	// All terminal transitions in this request share one durable group so the
+	// final-state barrier is evaluated once and remains order-independent.
+	releaseErr := h.Queries.ReleaseChildDoneTransitionGroup(r.Context(), childDoneGroupID)
+	if releaseErr != nil {
+		slog.Warn("batch child done: release transition group deferred to watchdog",
+			"error", releaseErr, "group_id", uuidToString(childDoneGroupID))
+	}
+	if h.ChildDoneDispatchWorker != nil {
+		if releaseErr != nil {
+			h.ChildDoneDispatchWorker.Notify()
+		} else {
+			worked, processErr := h.ChildDoneDispatchWorker.ProcessTransitionGroup(r.Context(), childDoneGroupID)
+			if processErr != nil {
+				slog.Warn("batch child done: immediate transition processing deferred",
+					"error", processErr, "group_id", uuidToString(childDoneGroupID))
+			}
+			if !worked || processErr != nil {
+				h.ChildDoneDispatchWorker.Notify()
+			}
+		}
+	}
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
@@ -3546,7 +3551,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
 		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+		if err := h.deleteIssueWithChildDoneTransitions(r.Context(), db.DeleteIssueParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 		}); err != nil {

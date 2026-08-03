@@ -65,6 +65,29 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM issue
 WHERE id = $1;
 
+-- name: GetIssueForUpdate :one
+SELECT * FROM issue
+WHERE id = $1
+FOR UPDATE;
+
+-- name: LockUnassignedIssueForTaskCreate :one
+-- Serialize unassigned-parent continuation creation with explicit assignment.
+-- If assignment wins the row lock, the NULL predicates are rechecked after its
+-- commit and the continuation fails closed.
+SELECT id FROM issue
+WHERE id = $1 AND assignee_type IS NULL AND assignee_id IS NULL
+FOR SHARE;
+
+-- name: LockAssignedIssueForTaskCreate :one
+-- Child-done resolves an explicit assignee before it prepares the task. Lock
+-- and recheck that target at INSERT time so a concurrent reassignment is
+-- handled by the durable worker instead of waking the stale assignee.
+SELECT id FROM issue
+WHERE id = @id
+  AND assignee_type = @assignee_type
+  AND assignee_id = @assignee_id
+FOR SHARE;
+
 -- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
 FROM issue

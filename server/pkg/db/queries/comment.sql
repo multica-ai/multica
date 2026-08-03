@@ -435,6 +435,109 @@ SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.
 FROM touched_issue ti
 RETURNING *;
 
+-- name: CreateChildDoneDispatchComment :one
+-- The system comment is also the durable dispatch outbox row. The barrier key
+-- identifies one closed barrier generation, so retries, process crashes, and
+-- independent completion groups reuse the same comment while a genuine
+-- reopen -> terminal cycle can emit a new event. The partial unique index
+-- makes concurrent duplicate ingress safe.
+WITH touched_issue AS (
+    UPDATE issue SET updated_at = now()
+    WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
+    RETURNING issue.id, issue.workspace_id
+)
+INSERT INTO comment (
+    issue_id, workspace_id, author_type, author_id, content, type, parent_id,
+    child_done_barrier_key, child_done_target_type, child_done_target_id,
+    child_done_origin_task_id, child_done_dispatch_status,
+    child_done_available_at
+)
+SELECT
+    ti.id, ti.workspace_id, 'system', sqlc.arg(author_id), sqlc.arg(content),
+    'system', NULL, sqlc.arg(child_done_barrier_key),
+    sqlc.narg(child_done_target_type), sqlc.narg(child_done_target_id),
+    sqlc.narg(child_done_origin_task_id), 'queued', now()
+FROM touched_issue ti
+ON CONFLICT (issue_id, child_done_barrier_key)
+    WHERE child_done_barrier_key IS NOT NULL
+DO NOTHING
+RETURNING *;
+
+-- name: GetChildDoneDispatchByBarrier :one
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND child_done_barrier_key = @child_done_barrier_key;
+
+-- name: ClaimChildDoneDispatchByID :one
+UPDATE comment
+SET child_done_lease_token = gen_random_uuid(),
+    child_done_lease_expires_at = now() + interval '30 seconds'
+WHERE id = @id
+  AND child_done_dispatch_status = 'queued'
+  AND child_done_available_at <= now()
+  AND (
+      child_done_lease_token IS NULL
+      OR child_done_lease_expires_at <= now()
+  )
+RETURNING *;
+
+-- name: ClaimNextChildDoneDispatch :one
+WITH candidate AS (
+    SELECT id
+    FROM comment
+    WHERE child_done_dispatch_status = 'queued'
+      AND child_done_available_at <= now()
+      AND (
+          child_done_lease_token IS NULL
+          OR child_done_lease_expires_at <= now()
+      )
+    ORDER BY child_done_available_at, created_at, id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE comment c
+SET child_done_lease_token = gen_random_uuid(),
+    child_done_lease_expires_at = now() + interval '30 seconds'
+FROM candidate
+WHERE c.id = candidate.id
+RETURNING c.*;
+
+-- name: RetryClaimedChildDoneDispatch :one
+UPDATE comment
+SET child_done_available_at = @available_at,
+    child_done_dispatch_attempts = child_done_dispatch_attempts + 1,
+    child_done_dispatch_error = @child_done_dispatch_error,
+    child_done_lease_token = NULL,
+    child_done_lease_expires_at = NULL
+WHERE id = @id
+  AND child_done_dispatch_status = 'queued'
+  AND child_done_lease_token = @child_done_lease_token
+RETURNING *;
+
+-- name: CompleteClaimedChildDoneDispatch :one
+UPDATE comment
+SET child_done_dispatch_status = @child_done_dispatch_status,
+    child_done_dispatch_attempts = child_done_dispatch_attempts + 1,
+    child_done_dispatch_error = NULL,
+    child_done_lease_token = NULL,
+    child_done_lease_expires_at = NULL
+WHERE id = @id
+  AND child_done_dispatch_status = 'queued'
+  AND child_done_lease_token = @child_done_lease_token
+RETURNING *;
+
+-- name: RetargetClaimedChildDoneDispatch :one
+UPDATE comment
+SET content = @content,
+    child_done_target_type = sqlc.narg(child_done_target_type),
+    child_done_target_id = sqlc.narg(child_done_target_id),
+    child_done_origin_task_id = sqlc.narg(child_done_origin_task_id),
+    updated_at = now()
+WHERE id = @id
+  AND child_done_dispatch_status = 'queued'
+  AND child_done_lease_token = @child_done_lease_token
+RETURNING *;
+
 -- name: UpdateComment :one
 UPDATE comment SET
     content = $2,

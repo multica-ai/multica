@@ -430,6 +430,9 @@ func main() {
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}
+	if h.ChildDoneDispatchWorker != nil {
+		go h.ChildDoneDispatchWorker.Run(sweepCtx)
+	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
 	h.PRRefresh.Start(sweepCtx)
@@ -530,6 +533,9 @@ func main() {
 	heartbeatScheduler.Stop()
 	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+	}
+	if h.ChildDoneDispatchWorker != nil && !h.ChildDoneDispatchWorker.WaitWithTimeout(5*time.Second) {
+		slog.Warn("child-done dispatch worker did not exit within shutdown timeout")
 	}
 
 	// Join the channel supervisor's per-installation goroutines so the
