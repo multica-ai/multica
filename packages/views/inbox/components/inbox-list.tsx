@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Archive, ChevronRight, Inbox } from "lucide-react";
+import { isEditableShortcutTarget } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxListItem } from "./inbox-list-item";
@@ -27,8 +29,8 @@ import { useT } from "../../i18n";
  *
  * Known virtualization tradeoff: keyboard Tab only reaches currently-mounted
  * rows; a keyboard-only user must scroll to bring off-screen rows into the
- * tab order. The inbox has no custom arrow-key list navigation, so the
- * practical surface is small, but it is called out for the manual pass.
+ * tab order. Arrow-key navigation (below) covers off-screen rows, because it
+ * walks the data rather than the DOM.
  */
 export function InboxList({
   items,
@@ -54,7 +56,69 @@ export function InboxList({
   // A callback ref into state hands the element over once it mounts and
   // triggers the re-render that lets Virtuoso attach to it.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isArchivedView = view === "archived";
+
+  // Keyboard focus for the list lives on the scroll container, not on a row:
+  // virtualization unmounts the row the user clicked as soon as it scrolls
+  // out, and focus falling back to <body> would silently stop the next arrow
+  // key from reaching this handler. `preventScroll` because focusing a box
+  // scrolls every scrollable ancestor to reveal it, which on desktop shoves
+  // the shell around (#3929).
+  const focusList = useCallback(() => {
+    scrollEl?.focus({ preventScroll: true });
+  }, [scrollEl]);
+
+  const selectItem = useCallback(
+    (item: InboxItem) => {
+      // Safari does not focus a <button> on click, so the container has to be
+      // focused explicitly or the arrow keys would stay dead after a click.
+      focusList();
+      onSelect(item);
+    },
+    [focusList, onSelect],
+  );
+
+  // Arrow keys move the selection instead of scrolling the container — what
+  // every mail-style list does (MUL-5622). Bound to the scroll container
+  // rather than the document so it only fires while focus is inside the list:
+  // pressing Down while reading the issue detail must not swap the row out
+  // from under the reader.
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    // A menu, editor, or text field that already acted on the arrow key owns
+    // it; so does an IME candidate list mid-composition.
+    if (event.defaultPrevented || isImeComposing(event)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    if (isEditableShortcutTarget(event.target)) return;
+
+    // Claim the key even at the ends of the list: falling through to the
+    // native scroll there would move the viewport away from the selected row.
+    event.preventDefault();
+    focusList();
+
+    const current = items.findIndex(
+      (item) => (item.issue_id ?? item.id) === selectedKey,
+    );
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    // Nothing selected yet: Down enters the list at the top, Up at the bottom.
+    const nextIndex =
+      current < 0
+        ? step === 1
+          ? 0
+          : items.length - 1
+        : Math.min(Math.max(current + step, 0), items.length - 1);
+    if (nextIndex === current) return;
+    const nextItem = items[nextIndex];
+    if (!nextItem) return;
+
+    // Virtuoso's own scrollIntoView, never the DOM element's: the target row
+    // may not be mounted, and the native call scrolls ancestors too. It is a
+    // no-op while the row is already fully visible, so a selection moving
+    // inside the viewport does not scroll the list.
+    virtuosoRef.current?.scrollIntoView({ index: nextIndex });
+    onSelect(nextItem);
+  };
 
   // The entry into the archive sits below the last row and scrolls with the
   // list (same placement as chat's). Virtuoso mounts it via `components.Footer`,
@@ -110,7 +174,7 @@ export function InboxList({
       item={item}
       view={view}
       isSelected={(item.issue_id ?? item.id) === selectedKey}
-      onClick={() => onSelect(item)}
+      onClick={() => selectItem(item)}
       onAction={() => onAction(item.id)}
     />
   );
@@ -120,10 +184,19 @@ export function InboxList({
   // never paints blank; once it's set, mount the Virtuoso with a matching
   // `initialItemCount` so the measurement frame keeps those rows (MUL-4750).
   return (
-    <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto">
+    <div
+      ref={setScrollEl}
+      // Programmatically focusable only: the rows are buttons and already
+      // carry their own tab stops, so a tabbable container would just add a
+      // redundant one.
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      className="flex-1 min-h-0 overflow-y-auto outline-none"
+    >
       <div className="px-2 py-1">
         {scrollEl ? (
           <Virtuoso
+            ref={virtuosoRef}
             customScrollParent={scrollEl}
             data={items}
             computeItemKey={computeItemKey}
