@@ -513,6 +513,34 @@ export function DeleteSkillsDialog({
 // Update-from-source confirmation (single row or batch; creator + URL origin)
 // ---------------------------------------------------------------------------
 
+// A re-import holds a server-side upstream fetch open for up to 45s. Cap a
+// large selection instead of sending it all at once.
+const UPDATE_BATCH_CONCURRENCY = 4;
+
+// Promise.allSettled with a concurrency cap. Results keep input order.
+async function runBounded<T>(
+  items: T[],
+  fn: (item: T) => Promise<unknown>,
+  limit: number,
+): Promise<PromiseSettledResult<unknown>[]> {
+  const results: PromiseSettledResult<unknown>[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let index = next++; index < items.length; index = next++) {
+      const item = items[index] as T;
+      try {
+        results[index] = { status: "fulfilled", value: await fn(item) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return results;
+}
+
 export function UpdateSkillDialog({
   rows,
   ctx,
@@ -533,32 +561,57 @@ export function UpdateSkillDialog({
   const count = rows.length;
   const sourceUrl = single ? readOrigin(single.skill).source_url ?? "" : "";
 
+  // Each re-import overwrites its skill in its own server transaction. A
+  // failure part-way through a batch leaves the earlier skills replaced. So
+  // settle every row rather than abort on the first rejection. Aborting would
+  // skip the cache invalidation and report "nothing happened", while the
+  // finished overwrites are already committed and unrecoverable.
   const handleConfirm = async () => {
     setUpdating(true);
-    try {
-      for (const row of rows) {
-        await api.reimportSkill(row.skill.id);
-      }
+    const results = await runBounded(
+      rows,
+      (row) => api.reimportSkill(row.skill.id),
+      UPDATE_BATCH_CONCURRENCY,
+    );
+    const rejected = results.filter((r) => r.status === "rejected");
+    const failed = rejected.length;
+    const succeeded = results.length - failed;
+
+    if (succeeded > 0) {
       // Prefix key invalidates both the skills list and the skill detail; the
       // agent list carries each skill's name/description inline, so refresh it too.
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(ctx.wsId) });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(ctx.wsId) });
+    }
+
+    if (failed === 0) {
       toast.success(
         single
           ? t(($) => $.actions.updated_toast, { name: single.skill.name })
           : t(($) => $.actions.updated_multi_toast, { count }),
       );
-      onOpenChange(false);
-      onUpdated?.();
-    } catch (e) {
+    } else if (succeeded === 0) {
+      const reason = (rejected[0] as PromiseRejectedResult | undefined)?.reason;
       toast.error(
-        e instanceof Error && e.message
-          ? e.message
+        reason instanceof Error && reason.message
+          ? reason.message
           : t(($) => $.actions.update_failed_toast),
       );
-    } finally {
-      setUpdating(false);
+    } else {
+      toast.warning(
+        t(($) => $.actions.update_partial_toast, {
+          succeeded,
+          failed,
+          total: count,
+        }),
+      );
     }
+
+    setUpdating(false);
+    onOpenChange(false);
+    // Clear the selection only when every row landed. On a partial failure the
+    // selection stays, so the user can see what was picked and retry.
+    if (failed === 0) onUpdated?.();
   };
 
   return (
