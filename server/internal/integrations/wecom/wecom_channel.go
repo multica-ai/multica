@@ -174,13 +174,21 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 	// via the shared writer mutex so it interleaves cleanly with other
 	// outbound frames.
 	pingCtx, pingCancel := context.WithCancel(ctx)
-	defer pingCancel()
 	pingDone := make(chan struct{})
 	go func() {
 		defer close(pingDone)
 		c.pingLoop(pingCtx, sender, log)
 	}()
-	defer func() { <-pingDone }()
+	// Cancel and wait in ONE defer, in that order. Two separate defers would
+	// run LIFO — the wait first, the cancel second — and pingLoop only returns
+	// on pingCtx.Done. On any exit path where the parent ctx is still live
+	// (read error, dispatch error) nothing would ever cancel pingCtx, so the
+	// wait would block forever and Connect would never return to the
+	// Supervisor for reconnect.
+	defer func() {
+		pingCancel()
+		<-pingDone
+	}()
 
 	// Read loop. Every frame comes back through the same decode → dispatch
 	// → (maybe) reply path. A single bad frame does NOT tear the socket
