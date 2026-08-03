@@ -239,6 +239,20 @@ type workspaceState struct {
 	// successful profile fetch (older server / network blip); guarded by
 	// Daemon.mu like every other field on this struct.
 	profileSetSig string
+	// builtinVersions records, per built-in provider, the version carried by
+	// the last register call the server ACCEPTED for this workspace. This is
+	// the daemon's per-workspace record of what the server knows — which the
+	// shared agentVersions cache deliberately is not: every probing path
+	// writes that cache, but each register call covers only the workspaces it
+	// was invoked for. refreshAgentVersions compares this record against the
+	// current probe round and re-registers exactly the workspaces that are
+	// behind. Scoping the acknowledgement to the workspace is what makes a
+	// concurrent older-generation registration safe: a register that probed
+	// before an upgrade and lands after everyone else was refreshed simply
+	// re-creates the mismatch for its own workspace, and the next round
+	// revisits it. A failed register records nothing, so the workspace stays
+	// behind and is retried. Guarded by Daemon.mu.
+	builtinVersions map[string]string
 }
 
 type repoCacheBackend interface {
@@ -270,19 +284,6 @@ type Daemon struct {
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
-
-	// pendingAgentVersions maps provider -> the version refreshAgentVersions
-	// detected but has not confirmed the server was told about. Guarded by
-	// versionsMu alongside agentVersions, which is the cache that makes it
-	// necessary: setAgentVersion has already moved on by the time a register
-	// call fails, so without this the next round would see no change and never
-	// retry.
-	//
-	// Per-provider rather than a single flag on purpose. A round whose probe
-	// dropped one provider still registers the others, and clearing a shared
-	// flag there would strand the dropped provider's version — its cache is
-	// already current, so no later round would report it as a change either.
-	pendingAgentVersions map[string]string
 
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
@@ -511,22 +512,15 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 // version-keyed policy reads, on a provider that was working a moment ago.
 // "Couldn't read it" is not a version.
 //
-// Advancing a KNOWN provider's version also records it as pending, because this
-// cache is not a record of what the server knows. Every path that probes writes
-// through here — the converge round, the workspace sync, a self-heal at task
-// launch — and each of those re-registers only the workspaces it happened to be
-// working on, or none at all. Whichever writer lands first destroys the
-// before/after difference refreshAgentVersions would otherwise have detected, so
-// the write itself has to carry the obligation; refreshAgentVersions clears it
-// once every tracked workspace has accepted the version.
-//
-// A FIRST sighting is deliberately not pending: that provider has no runtime
-// yet, so bringing it online is the converge path's job, and marking every
-// provider at startup would buy one pointless re-registration round per
-// workspace.
+// This cache is the daemon's LOCAL knowledge only — it is not a record of
+// what the server has been told. Every path that probes writes through here
+// (the converge round, the workspace sync, a self-heal at task launch), while
+// each register call covers only the workspaces it was invoked for. What the
+// server accepted is therefore tracked per workspace, in
+// workspaceState.builtinVersions; refreshAgentVersions compares the two.
 func (d *Daemon) setAgentVersion(provider, version string) {
 	d.versionsMu.Lock()
-	prev, known := d.agentVersions[provider]
+	prev := d.agentVersions[provider]
 	if version == "" && prev != "" {
 		d.versionsMu.Unlock()
 		d.logger.Warn("agent CLI reported no version; keeping the previous one",
@@ -534,12 +528,6 @@ func (d *Daemon) setAgentVersion(provider, version string) {
 		return
 	}
 	d.agentVersions[provider] = version
-	if known && version != "" && version != prev {
-		if d.pendingAgentVersions == nil {
-			d.pendingAgentVersions = make(map[string]string)
-		}
-		d.pendingAgentVersions[provider] = version
-	}
 	d.versionsMu.Unlock()
 }
 
@@ -551,29 +539,46 @@ func (d *Daemon) agentVersion(provider string) string {
 	return d.agentVersions[provider]
 }
 
-// confirmAgentVersionsRegistered drops the pending entries that registered is
-// known to have carried. An entry whose version doesn't match what was sent —
-// the provider's probe failed this round, so it never made the payload — stays
-// pending for a round that actually reports it.
-func (d *Daemon) confirmAgentVersionsRegistered(registered map[string]string) {
-	d.versionsMu.Lock()
-	defer d.versionsMu.Unlock()
-	for provider, version := range d.pendingAgentVersions {
-		if sent, ok := registered[provider]; ok && sent == version {
-			delete(d.pendingAgentVersions, provider)
+// builtinVersionsFromPayload extracts provider -> version from a registration
+// payload's BUILT-IN entries. Custom profile entries (profile_id set) are not
+// version-tracked — the drift path owns their lifecycle.
+func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string {
+	out := make(map[string]string, len(runtimes))
+	for _, rt := range runtimes {
+		if rt["profile_id"] != "" {
+			continue
 		}
-	}
-}
-
-// pendingAgentVersionsSnapshot copies the not-yet-confirmed set.
-func (d *Daemon) pendingAgentVersionsSnapshot() map[string]string {
-	d.versionsMu.RLock()
-	defer d.versionsMu.RUnlock()
-	out := make(map[string]string, len(d.pendingAgentVersions))
-	for provider, version := range d.pendingAgentVersions {
-		out[provider] = version
+		out[rt["type"]] = rt["version"]
 	}
 	return out
+}
+
+// recordBuiltinVersionsSent stores, per provider, the version a SUCCESSFUL
+// register call carried for a workspace (see workspaceState.builtinVersions).
+// Merged per provider rather than replaced: a provider absent from this
+// payload (its probe failed this round) was not re-sent, so the server still
+// holds whatever the previous call carried and the record must keep saying so.
+// Callers invoke this only after client.Register succeeds — a failed call
+// records nothing, which is what keeps the workspace behind for the next
+// refresh round. A workspace not yet tracked records nothing here; the sync
+// path seeds the record when it creates the workspaceState.
+func (d *Daemon) recordBuiltinVersionsSent(workspaceID string, runtimes []map[string]string) {
+	sent := builtinVersionsFromPayload(runtimes)
+	if len(sent) == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return
+	}
+	if ws.builtinVersions == nil {
+		ws.builtinVersions = make(map[string]string, len(sent))
+	}
+	for provider, version := range sent {
+		ws.builtinVersions[provider] = version
+	}
 }
 
 // refreshHealedVersion keeps a self-healed {path, version} pair honest when the
@@ -604,8 +609,7 @@ func (d *Daemon) refreshHealedVersion(provider, path, version string) {
 }
 
 // agentVersionSnapshot copies the detected-version cache. refreshAgentVersions
-// takes it before re-probing, because the probe itself writes through
-// setAgentVersion — the snapshot is the only "what did we think before" it gets.
+// uses its emptiness as the "has anything ever registered" guard.
 func (d *Daemon) agentVersionSnapshot() map[string]string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
@@ -763,6 +767,18 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 		return healOutcome{}
 	}
 	if err := checkAgentMinVersion(provider, version); err != nil {
+		var tooOld *agent.BelowMinimumError
+		if !errors.As(err, &tooOld) {
+			// Read something, understood nothing: not a verdict. Refusing to
+			// adopt is still right, but reporting a rejection would let the
+			// caller demote a runtime on an unreadable version — the exact
+			// transient case the below-minimum machinery must never act on.
+			// This also keeps the rejectedVersion sentinel sound: a genuine
+			// verdict always carries a version that parsed, hence non-blank.
+			d.logger.Warn("re-resolved agent executable version could not be validated; keeping pinned path",
+				"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
+			return healOutcome{}
+		}
 		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
 			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
 		return healOutcome{rejectedVersion: version, rejectedReason: err.Error()}
@@ -1648,16 +1664,42 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 			}
 			continue
 		}
-		// The min-version verdict is a pure function of the detected version,
-		// so a retry would reach the same conclusion — drop the provider now.
 		if err := checkAgentMinVersion(name, version); err != nil {
-			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
-			// The version is returned even though the provider is dropped: the
-			// caller needs it to report what it demoted.
-			return version, err.Error(), builtinProbeBelowMinimum
+			var tooOld *agent.BelowMinimumError
+			if errors.As(err, &tooOld) {
+				// The verdict is a pure function of a version that PARSED, so a
+				// retry would reach the same conclusion — drop the provider now.
+				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
+				// The version is returned even though the provider is dropped: the
+				// caller needs it to report what it demoted.
+				return version, err.Error(), builtinProbeBelowMinimum
+			}
+			// The CLI ran but printed something (or nothing) the gate could not
+			// parse. That is "we didn't learn a version", not "we verified it is
+			// too old" — the same transient rule as a failed exec, because the
+			// below-minimum verdict tears runtimes down and must never fire on
+			// evidence this thin.
+			lastErr = err
+			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
+				break
+			}
+			if attempts < runtimeVersionProbeAttempts {
+				d.logger.Debug("agent version unparseable; retrying", "name", name, "attempt", attempts, "error", err)
+			}
+			continue
 		}
 		d.setAgentVersion(name, version)
 		d.refreshHealedVersion(name, resolved.Path, version)
+		if version == "" {
+			// A provider with no minimum-version floor reaches here with a blank
+			// when its `--version` exits 0 printing nothing. setAgentVersion just
+			// refused to let it overwrite the cache; the payload needs the same
+			// protection, because a whole-set re-registration triggered by a
+			// NEIGHBOUR's upgrade would otherwise send the blank and wipe a
+			// version the server already knows. Reuse the last known one; a
+			// provider that never had a version stays blank, as before.
+			version = d.agentVersion(name)
+		}
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
 		return version, "", builtinProbeOK
 	}
@@ -1856,6 +1898,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspac
 		return nil, "", fmt.Errorf("register runtimes: empty response")
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
+	d.recordBuiltinVersionsSent(workspaceID, runtimes)
 	return resp, profileSig, nil
 }
 
@@ -1898,6 +1941,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspace(ctx context.Context, worksp
 		return nil, fmt.Errorf("register builtin runtimes: empty response")
 	}
 	d.logger.Debug("builtin register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes))
+	d.recordBuiltinVersionsSent(workspaceID, runtimes)
 	return resp, nil
 }
 
@@ -2763,7 +2807,8 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			registered++
 			continue
 		}
-		resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, id, probeBuiltins())
+		payload := probeBuiltins()
+		resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, id, payload)
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
@@ -2781,6 +2826,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		// appendProfileRuntimes; on first registration there is no previous
 		// value, so empty stays empty).
 		ws.profileSetSig = profileSig
+		// Seed the per-workspace record of what the server was told (the
+		// register call above ran before this workspaceState existed, so
+		// recordBuiltinVersionsSent inside it had nowhere to write).
+		ws.builtinVersions = builtinVersionsFromPayload(payload)
 		d.workspaces[id] = ws
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt

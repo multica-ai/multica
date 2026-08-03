@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // stubAgentProbe replaces CLI discovery for the duration of a test. The returned
@@ -396,7 +398,7 @@ func TestDiscovery_BelowMinVersionRecoversAfterUpgrade(t *testing.T) {
 	t.Cleanup(func() { checkAgentMinVersion = origCheck })
 	checkAgentMinVersion = func(provider, _ string) error {
 		if provider == "antigravity" && tooOld {
-			return errors.New("antigravity version 1.0.0 is below minimum required 1.1.0")
+			return &agent.BelowMinimumError{AgentType: provider, Detected: "1.0.0", Minimum: "1.1.0"}
 		}
 		return nil
 	}

@@ -204,14 +204,23 @@ func (d *Daemon) refreshAgentAvailability() []string {
 // round keeps its previous version and is retried next round — a failed probe
 // never looks like a version change.
 //
-// What to send is decided from the PENDING set, not from a before/after diff of
-// the version cache. The cache is written by every path that probes, so a diff
-// only sees a change when this round happens to be the first writer: a converge
-// round, a new workspace registering, or a self-heal at task launch will all
-// move it first and leave this round seeing nothing to do — while the
-// workspaces those paths did not touch keep the old version indefinitely.
-// setAgentVersion records the obligation at the write, and it is discharged here
-// once every tracked workspace has accepted the version.
+// What to send is decided per WORKSPACE, from workspaceState.builtinVersions —
+// the versions the last register call the server accepted for that workspace
+// actually carried — never from a before/after diff of the shared version
+// cache. The cache is written by every path that probes, so a diff only sees a
+// change when this round happens to be the first writer: a converge round, a
+// new workspace registering, or a self-heal at task launch will all move it
+// first and leave this round seeing nothing to do — while the workspaces those
+// paths did not touch keep the old version indefinitely.
+//
+// The acknowledgement is per-workspace rather than a global pending set for
+// the same reason in reverse: registration entry points are not serialized, so
+// a register that probed BEFORE an upgrade can land AFTER a refresh round has
+// updated every workspace it could see. A global "done" flag cleared at that
+// moment would strand the late workspace on the old version forever. Scoped to
+// the workspace, the late-landing call simply records what it sent, the record
+// disagrees with the next probe round, and that round re-registers exactly the
+// workspace that fell behind.
 //
 // Re-registration carries the whole built-in set because that is the shape the
 // register endpoint upserts, so one provider's upgrade re-sends its neighbours
@@ -226,8 +235,9 @@ func (d *Daemon) refreshAgentAvailability() []string {
 // an upgrade — so yielding to it would let one stuck CLI silently disable version
 // refresh for every healthy provider on the machine, forever.
 func (d *Daemon) refreshAgentVersions(ctx context.Context) {
-	before := d.agentVersionSnapshot()
-	if len(before) == 0 {
+	// Nothing has ever been version-detected: the daemon is still starting up,
+	// and initial registration is the sync path's job.
+	if len(d.agentVersionSnapshot()) == 0 {
 		return
 	}
 
@@ -242,48 +252,73 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 		return
 	}
 	// What this round's payload actually carries, per provider. A provider whose
-	// probe failed is absent, which is what stops its pending entry from being
-	// confirmed by a registration that never mentioned it.
+	// probe failed is absent — and only carried providers are compared below,
+	// which is what stops an uninstalled CLI from triggering registrations. It
+	// is never dropped from the availability set (refreshAgentAvailability is
+	// deliberately one-directional), so it keeps failing its probe and never
+	// reappears in the payload; comparing records against a payload that cannot
+	// mention it would otherwise turn into one register call per workspace
+	// every few minutes, forever.
 	carried := make(map[string]string, len(builtins))
 	for _, rt := range builtins {
 		carried[rt["type"]] = rt["version"]
 	}
 
-	// Register only when this round can actually advance something: some pending
-	// version that this round's payload carries.
-	//
-	// The narrower condition matters because a pending entry can outlive its
-	// provider. An uninstalled CLI is never dropped from the availability set
-	// (refreshAgentAvailability is deliberately one-directional), so it keeps
-	// failing its probe and never reappears in the payload — and "retry whenever
-	// anything is pending" would turn that into one register call per workspace
-	// every few minutes, forever. Holding the entry costs nothing; acting on a
-	// payload that cannot confirm it costs a request storm.
-	var advancing []string
-	for provider, version := range d.pendingAgentVersionsSnapshot() {
-		if carried[provider] != version {
-			continue
+	// A workspace is behind when some carried provider's last accepted register
+	// call for it carried a different version. A provider with no record for a
+	// workspace is skipped: it has never registered there, so bringing it
+	// online is the converge path's job, not a version change.
+	d.mu.Lock()
+	var behind []string
+	transitions := make(map[string]struct{})
+	for id, ws := range d.workspaces {
+		lagging := false
+		for provider, version := range carried {
+			sent, has := ws.builtinVersions[provider]
+			if !has || sent == version {
+				continue
+			}
+			lagging = true
+			if sent == "" {
+				transitions[fmt.Sprintf("%s %s", provider, version)] = struct{}{}
+			} else {
+				transitions[fmt.Sprintf("%s %s -> %s", provider, sent, version)] = struct{}{}
+			}
 		}
-		if prev, known := before[provider]; known && prev != version {
-			advancing = append(advancing, fmt.Sprintf("%s %s -> %s", provider, prev, version))
-			continue
+		if lagging {
+			behind = append(behind, id)
 		}
-		// Detected by an earlier round, or by another path this round: the cache
-		// already holds it, so only the server is behind.
-		advancing = append(advancing, fmt.Sprintf("%s %s", provider, version))
 	}
-	if len(advancing) == 0 {
+	d.mu.Unlock()
+	if len(behind) == 0 {
 		return
+	}
+	sort.Strings(behind)
+	advancing := make([]string, 0, len(transitions))
+	for t := range transitions {
+		advancing = append(advancing, t)
 	}
 	sort.Strings(advancing)
 	d.logger.Info("agent CLI version not yet on the server; refreshing registration without a restart",
-		"versions", advancing)
-	if !d.reregisterBuiltins(ctx, builtins) {
-		return
+		"versions", advancing, "workspace_ids", behind)
+
+	// Register only the workspaces that are behind. A failure records nothing,
+	// so that workspace stays behind and the next round retries it.
+	var changed bool
+	for _, id := range behind {
+		resp, err := d.registerBuiltinRuntimesForWorkspace(ctx, id, builtins)
+		if err != nil {
+			d.logger.Warn("re-register after agent CLI version change failed; will retry",
+				"workspace_id", id, "error", err)
+			continue
+		}
+		if newIDs, ok := d.mergeBuiltinRegisterResponse(id, resp); ok && len(newIDs) > 0 {
+			changed = true
+		}
 	}
-	// Every workspace accepted this payload, so the server now knows about the
-	// versions it carried — and only those.
-	d.confirmAgentVersionsRegistered(carried)
+	if changed {
+		d.notifyRuntimeSetChanged()
+	}
 }
 
 // demoteBelowMinimumRuntimes takes offline the built-in runtimes of providers
@@ -334,6 +369,11 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 			delete(d.runtimeIndex, rid)
 			demoted = append(demoted, rid)
 			demotedProviders[rt.Provider] = version
+			// The runtime is gone, so the record of what was registered for it
+			// goes too. When the provider recovers, converge re-registers it and
+			// the record is re-seeded — first sighting is converge's job, not a
+			// version change for the refresh round to chase.
+			delete(ws.builtinVersions, rt.Provider)
 		}
 		ws.runtimeIDs = kept
 	}
@@ -353,40 +393,6 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 			"runtime_ids", demoted, "error", err)
 	}
 	d.notifyRuntimeSetChanged()
-}
-
-// reregisterBuiltins re-sends the built-in registration payload for every
-// tracked workspace and returns whether all of them succeeded.
-func (d *Daemon) reregisterBuiltins(ctx context.Context, builtins []map[string]string) bool {
-	d.mu.Lock()
-	workspaceIDs := make([]string, 0, len(d.workspaces))
-	for id := range d.workspaces {
-		workspaceIDs = append(workspaceIDs, id)
-	}
-	d.mu.Unlock()
-	if len(workspaceIDs) == 0 {
-		return true
-	}
-	sort.Strings(workspaceIDs)
-
-	allOK := true
-	var changed bool
-	for _, id := range workspaceIDs {
-		resp, err := d.registerBuiltinRuntimesForWorkspace(ctx, id, builtins)
-		if err != nil {
-			d.logger.Warn("re-register after agent CLI version change failed; will retry",
-				"workspace_id", id, "error", err)
-			allOK = false
-			continue
-		}
-		if newIDs, ok := d.mergeBuiltinRegisterResponse(id, resp); ok && len(newIDs) > 0 {
-			changed = true
-		}
-	}
-	if changed {
-		d.notifyRuntimeSetChanged()
-	}
-	return allOK
 }
 
 // providersMissingRuntimes returns the discovered providers that do not have a

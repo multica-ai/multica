@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // batchFixture wires a Daemon against a fake server that serves a configurable
@@ -637,7 +639,7 @@ func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testin
 	})
 	checkAgentMinVersion = func(_, version string) error {
 		if version == "0.0.1" {
-			return errors.New("version too old")
+			return &agent.BelowMinimumError{AgentType: "codex", Detected: version, Minimum: "1.0.0"}
 		}
 		return nil
 	}
@@ -669,9 +671,9 @@ func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testin
 func TestDetectBuiltinRuntimes_DoesNotRetryMinVersionRejection(t *testing.T) {
 	fx := newBatchFixture(t)
 	stubProbeRetry(t, time.Millisecond, time.Second)
-	checkAgentMinVersion = func(provider, _ string) error {
+	checkAgentMinVersion = func(provider, version string) error {
 		if provider == "codex" {
-			return errors.New("version too old")
+			return &agent.BelowMinimumError{AgentType: provider, Detected: version, Minimum: "1.0.0"}
 		}
 		return nil
 	}

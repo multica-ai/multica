@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // newVersionRefreshFixture brings up a daemon with one registered codex runtime
@@ -222,7 +224,7 @@ func TestRefreshAgentVersions_DemotesRuntimeDowngradedBelowMinimum(t *testing.T)
 	t.Cleanup(func() { checkAgentMinVersion = origCheck })
 	checkAgentMinVersion = func(_, version string) error {
 		if version == "0.0.1" {
-			return errors.New("version 0.0.1 is below minimum required 1.0.0")
+			return &agent.BelowMinimumError{AgentType: "codex", Detected: version, Minimum: "1.0.0"}
 		}
 		return nil
 	}
@@ -288,7 +290,7 @@ func TestRefreshAgentVersions_DemotesWhenTheDowngradeMovedThePath(t *testing.T) 
 	t.Cleanup(func() { checkAgentMinVersion = origCheck })
 	checkAgentMinVersion = func(_, version string) error {
 		if version == "0.0.1" {
-			return errors.New("version 0.0.1 is below minimum required 1.0.0")
+			return &agent.BelowMinimumError{AgentType: "codex", Detected: version, Minimum: "1.0.0"}
 		}
 		return nil
 	}
@@ -477,46 +479,43 @@ func TestRefreshAgentVersions_BlankVersionKeepsThePreviousOne(t *testing.T) {
 	}
 }
 
-// TestRefreshAgentVersions_RetriesAfterRegisterFailure closes the hole the
-// version cache creates: setAgentVersion has already moved on by the time the
-// register call fails, so the next round sees no change. Without a pending
-// record a transient 5xx would leave the server displaying a version the daemon
-// stopped using, until something unrelated re-registered.
-func TestRefreshAgentVersions_RetriesAfterRegisterFailure(t *testing.T) {
+// TestRefreshAgentVersions_KeepsRuntimeWhenTheVersionGoesBlank runs a blank
+// probe through the REAL minimum-version gate, where codex has a floor.
+// CheckMinVersion fails on a blank for two very different reasons — the version
+// parsed and is genuinely too old, or it could not be parsed at all — and only
+// the first is a verdict. Classifying the parse failure as below-minimum would
+// demote a healthy, online runtime because one probe printed nothing.
+func TestRefreshAgentVersions_KeepsRuntimeWhenTheVersionGoesBlank(t *testing.T) {
 	fx := newVersionRefreshFixture(t)
 	d := fx.daemon
-	fx.failRegisterFor("ws-2", true)
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	origCheck := checkAgentMinVersion
+	t.Cleanup(func() { checkAgentMinVersion = origCheck })
+	checkAgentMinVersion = agent.CheckMinVersion
 
-	fx.setProbeVersion("10.0.0")
+	fx.setProbeVersion("")
 	d.refreshAgentVersions(context.Background())
 
-	if got := fx.registeredVersionFor("ws-2", "codex"); got == "10.0.0" {
-		t.Fatal("ws-2 register was supposed to fail")
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Errorf("providers after a blank probe = %v, want [codex] — an unreadable version is transient "+
+			"and must never tear down a working runtime", got)
 	}
-	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
-		t.Fatalf("pending = %v, want codex 10.0.0 held for retry or the version change is lost", got)
+	if got := fx.deregisteredCount(); got != 0 {
+		t.Errorf("deregistered %d runtimes off a blank version, want 0", got)
 	}
-
-	fx.failRegisterFor("ws-2", false)
-	d.refreshAgentVersions(context.Background())
-
-	if got := fx.registeredVersionFor("ws-2", "codex"); got != "10.0.0" {
-		t.Errorf("ws-2 registered codex version = %q after the retry, want 10.0.0", got)
-	}
-	if got := d.pendingAgentVersionsSnapshot(); len(got) != 0 {
-		t.Errorf("pending = %v, want empty once every workspace re-registered", got)
+	if got := d.agentVersion("codex"); got != "9.9.9" {
+		t.Errorf("cached codex version = %q, want the previous 9.9.9 preserved", got)
 	}
 }
 
-// TestRefreshAgentVersions_PendingSurvivesAnIncompletePayload is why the pending
-// record is per-provider rather than one flag.
-//
-// codex's new version fails to register, then codex's probe fails on the next
-// round while claude's succeeds. That round registers a payload with no codex in
-// it at all. A shared flag would be cleared by that success — and because
-// codex's cache already holds the new version, no later round would report it as
-// a change, so the server would keep showing the old version indefinitely.
-func TestRefreshAgentVersions_PendingSurvivesAnIncompletePayload(t *testing.T) {
+// TestRefreshAgentVersions_BlankProbeDoesNotWipeAnUnflooredProvidersVersion is
+// the other direction of the same gap. A provider with no MinVersions floor
+// passes the gate with a blank version, and the payload is rebuilt from probe
+// results — so a NEIGHBOUR's legitimate upgrade re-sends the whole built-in
+// set and would carry the blank to the server, wiping a version it already
+// knows while the daemon's own cache (protected by setAgentVersion) still
+// holds it. The payload must reuse the last known version instead.
+func TestRefreshAgentVersions_BlankProbeDoesNotWipeAnUnflooredProvidersVersion(t *testing.T) {
 	fx := newBatchFixture(t)
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{
@@ -532,12 +531,150 @@ func TestRefreshAgentVersions_PendingSurvivesAnIncompletePayload(t *testing.T) {
 		t.Fatalf("syncWorkspacesFromAPI: %v", err)
 	}
 
-	// Round 1: both upgrade, the register fails.
+	// claude's `--version` starts exiting 0 while printing nothing; the fixture
+	// gate has no floor, so the blank sails through to the payload builder.
+	origDetect := detectAgentVersion
+	t.Cleanup(func() { detectAgentVersion = origDetect })
+	detectAgentVersion = func(ctx context.Context, path string) (string, error) {
+		if strings.Contains(path, "claude") {
+			return "", nil
+		}
+		return origDetect(ctx, path)
+	}
+
+	// codex upgrades, which re-registers the whole built-in set — claude rides
+	// along in the same payload.
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Fatalf("codex registered version = %q, want 10.0.0", got)
+	}
+	if got := fx.registeredVersionFor("ws-1", "claude"); got != "9.9.9" {
+		t.Errorf("claude registered version = %q, want 9.9.9 — one provider's upgrade must not carry "+
+			"its neighbour's blank to the server", got)
+	}
+	if got := d.agentVersion("claude"); got != "9.9.9" {
+		t.Errorf("cached claude version = %q, want 9.9.9", got)
+	}
+}
+
+// TestRefreshAgentVersions_RevisitsWorkspaceRegisteredByAnOlderConcurrentRound
+// pins the interleave that breaks any GLOBAL acknowledgement: registration
+// entry points are not serialized, so a register that probed before an upgrade
+// can land after a refresh round already brought every workspace it could see
+// up to date. A global "done" cleared at that moment would strand the late
+// workspace on the old version forever. Scoped per workspace, the late call
+// simply records what it sent, the record disagrees with the next probe round,
+// and that round revisits exactly the workspace that fell behind.
+func TestRefreshAgentVersions_RevisitsWorkspaceRegisteredByAnOlderConcurrentRound(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	// codex upgrades; the refresh round brings both workspaces to 10.0.0.
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+	if got := fx.registeredVersionFor("ws-2", "codex"); got != "10.0.0" {
+		t.Fatalf("ws-2 registered codex version = %q, want 10.0.0", got)
+	}
+
+	// A register that probed BEFORE the upgrade lands now, exactly as the
+	// production entry points would send it: the server holds 9.9.9 for ws-2
+	// again, and the daemon records what that call carried.
+	stale := []map[string]string{{"name": "Codex", "type": "codex", "version": "9.9.9", "status": "online"}}
+	resp, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-2", stale)
+	if err != nil {
+		t.Fatalf("late register: %v", err)
+	}
+	if _, ok := d.mergeBuiltinRegisterResponse("ws-2", resp); !ok {
+		t.Fatal("merge of the late register response failed")
+	}
+	if got := fx.registeredVersionFor("ws-2", "codex"); got != "9.9.9" {
+		t.Fatalf("ws-2 registered codex version = %q, want the stale 9.9.9 (interleave precondition)", got)
+	}
+
+	// The next round must notice ws-2 fell behind and bring it back — without
+	// dragging ws-1 through another register to do it.
+	_, ws1Calls := fx.registrationFor("ws-1")
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-2", "codex"); got != "10.0.0" {
+		t.Errorf("ws-2 registered codex version = %q, want 10.0.0 — a workspace registered by an older "+
+			"concurrent round must be revisited, or it is stuck on the old version forever", got)
+	}
+	if _, calls := fx.registrationFor("ws-1"); calls != ws1Calls {
+		t.Errorf("ws-1 received %d extra Register calls, want 0 — only the workspace that fell behind "+
+			"needs revisiting", calls-ws1Calls)
+	}
+}
+
+// TestRefreshAgentVersions_RetriesAfterRegisterFailure closes the hole the
+// version cache creates: setAgentVersion has already moved on by the time the
+// register call fails, so a cache diff would see no change on the next round.
+// The per-workspace record only advances on a register the server accepted, so
+// the failed workspace stays behind and is retried — without dragging the
+// workspaces that succeeded back through another register.
+func TestRefreshAgentVersions_RetriesAfterRegisterFailure(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+	fx.failRegisterFor("ws-2", true)
+
+	fx.setProbeVersion("10.0.0")
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-2", "codex"); got == "10.0.0" {
+		t.Fatal("ws-2 register was supposed to fail")
+	}
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Fatalf("ws-1 registered codex version = %q, want 10.0.0 — one workspace failing must not block the others", got)
+	}
+
+	fx.failRegisterFor("ws-2", false)
+	d.refreshAgentVersions(context.Background())
+
+	if got := fx.registeredVersionFor("ws-2", "codex"); got != "10.0.0" {
+		t.Errorf("ws-2 registered codex version = %q after the retry, want 10.0.0", got)
+	}
+	// And it settles: the retry advanced ws-2's record, so nothing is behind.
+	calls := fx.registerCallCount()
+	d.refreshAgentVersions(context.Background())
+	if got := fx.registerCallCount() - calls; got != 0 {
+		t.Errorf("made %d Register calls after settling, want 0", got)
+	}
+}
+
+// TestRefreshAgentVersions_ObligationSurvivesAnIncompletePayload is why the
+// per-workspace record is merged per provider rather than replaced with each
+// payload.
+//
+// codex's new version fails to register, then codex's probe fails on the next
+// round while claude's succeeds. That round registers a payload with no codex in
+// it at all. Counting that success as covering codex too would strand it — its
+// cache already holds the new version, so no cache diff would ever report a
+// change again and the server would keep showing the old version indefinitely.
+func TestRefreshAgentVersions_ObligationSurvivesAnIncompletePayload(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	})
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Round 1: both upgrade, the register fails, so the server still holds the
+	// versions the initial sync registered.
 	fx.failRegister(true)
 	fx.setProbeVersion("10.0.0")
 	d.refreshAgentVersions(context.Background())
-	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
-		t.Fatalf("pending after failed register = %v, want codex 10.0.0", got)
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "9.9.9" {
+		t.Fatalf("registered codex version after failed register = %q, want the original 9.9.9", got)
 	}
 
 	// Round 2: register recovers, but codex's probe now fails, so codex is
@@ -554,31 +691,33 @@ func TestRefreshAgentVersions_PendingSurvivesAnIncompletePayload(t *testing.T) {
 	if got := fx.registeredVersionFor("ws-1", "claude"); got != "10.0.0" {
 		t.Errorf("claude registered version = %q, want 10.0.0 — a dropped provider must not block the others", got)
 	}
-	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
-		t.Fatalf("pending = %v, want codex still held: that payload never mentioned it", got)
-	}
 
 	// Round 3: codex's probe recovers. Its cache already reads 10.0.0, so
-	// nothing here is a "change" — the pending record is the only reason the
-	// server ever learns about it.
+	// nothing here is a "change" — the per-workspace record still saying 9.9.9
+	// is the only reason the server ever learns about it.
 	fx.setProbeErr(nil)
 	d.refreshAgentVersions(context.Background())
 
 	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
 		t.Errorf("codex registered version = %q, want 10.0.0 once its probe recovered", got)
 	}
-	if got := d.pendingAgentVersionsSnapshot(); len(got) != 0 {
-		t.Errorf("pending = %v, want empty", got)
+	// And it settles.
+	calls := fx.registerCallCount()
+	d.refreshAgentVersions(context.Background())
+	if got := fx.registerCallCount() - calls; got != 0 {
+		t.Errorf("made %d Register calls after settling, want 0", got)
 	}
 }
 
 // TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer guards the
-// regression the pending map invites: an entry can outlive its provider.
+// regression the per-workspace record invites: an entry can outlive its
+// provider.
 //
 // refreshAgentAvailability is deliberately one-directional, so an uninstalled
 // CLI is never dropped from the availability set — it just keeps failing its
-// probe and never reappears in the payload, leaving its pending entry
-// unconfirmable forever. Retrying on "anything pending" would turn that into one
+// probe and never reappears in the payload, leaving its record permanently
+// behind. Retrying on "any record disagrees" rather than "a version this
+// round's payload actually carries disagrees" would turn that into one
 // register call per workspace every few minutes for the life of the daemon.
 func TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer(t *testing.T) {
 	fx := newBatchFixture(t)
@@ -610,11 +749,11 @@ func TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer(t *testin
 		return nil
 	})
 
-	// The round that can still confirm claude registers once.
+	// The round that can still advance claude registers once.
 	d.refreshAgentVersions(context.Background())
 	settled := fx.registerCallCount()
-	if got := d.pendingAgentVersionsSnapshot(); got["codex"] != "10.0.0" {
-		t.Fatalf("pending = %v, want codex still held", got)
+	if got := fx.registeredVersionFor("ws-1", "claude"); got != "10.0.0" {
+		t.Fatalf("claude registered version = %q, want 10.0.0 — the reachable provider must still advance", got)
 	}
 
 	// Every later round can confirm nothing, so it must issue no requests at all.
