@@ -49,9 +49,8 @@ type ToolContext struct {
 	// override them.
 	IssueID       pgtype.UUID
 	ChatMessageID pgtype.UUID
-	// CEREBRO-PATCH(toolctx-loopstore): FIR-2283 — loop check outcome store, used
-	// by FirtalReportLoopCheckTool so worker agents can report check exit codes
-	// back to the delivery gate. Nil disables the tool (no loop check reporting).
+	// CEREBRO-PATCH(toolctx-loopstore): Chain v2 store used by open_loop_step.
+	// Nil disables the successor-step tool.
 	LoopStore *cerebroloops.Store
 	// CapabilitiesProvider builds the agent's own capabilities card for
 	// get_agent_capabilities (FIR-3398). Nil disables the tool, so the Gateway

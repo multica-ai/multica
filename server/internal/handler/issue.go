@@ -3059,10 +3059,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CEREBRO-PATCH(issue-status-gate): FIR-3659 — agent status changes may be blocked by before.issue.status_change hook policies; see cerebro_issue_status_gate.go.
-	if code, msg := h.cerebroGateIssueStatusChange(r, prevIssue, req.Status, actorType, actorID); code != 0 {
-		writeError(w, code, msg)
-		return
+	// CEREBRO-PATCH(issue-status-workflow-gate): FIR-3692 makes the HTTP API,
+	// and therefore UI/CLI/MCP callers, share Chain v2's Workflow decision.
+	if req.Status != nil && *req.Status != prevIssue.Status && h.IssueStatusWorkflowGate != nil {
+		status, err := h.IssueStatusWorkflowGate.BeforeIssueStatusChange(r.Context(), prevIssue, *req.Status, actorType, actorID)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		params.Status = pgtype.Text{String: status, Valid: true}
 	}
 
 	// CEREBRO-PATCH(issue-update-transaction): keep issue updates atomic with side effects below.
@@ -3654,6 +3659,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 				continue
 			}
+		}
+
+		// CEREBRO-PATCH(issue-status-workflow-gate): FIR-3692 mirrors the
+		// single-update gate for batch callers.
+		if req.Updates.Status != nil && *req.Updates.Status != prevIssue.Status && h.IssueStatusWorkflowGate != nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			status, err := h.IssueStatusWorkflowGate.BeforeIssueStatusChange(r.Context(), prevIssue, *req.Updates.Status, actorType, actorID)
+			if err != nil {
+				continue
+			}
+			params.Status = pgtype.Text{String: status, Valid: true}
 		}
 
 		issue, err := h.Queries.UpdateIssue(r.Context(), params)

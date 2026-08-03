@@ -253,6 +253,9 @@ type RouterOptions struct {
 	// the bus. When nil, the route is registered with a 503 stub so the
 	// router still builds for tests that don't wire the engine.
 	WorkflowService *cerebroworkflows.Service
+	// CEREBRO-PATCH(workflow-hooks-shared-lifecycle): FIR-3692 shares one hook
+	// evaluator between HTTP handlers and background wakeup/task workers.
+	WorkflowHooks *cerebroworkflows.HookFeature
 }
 
 type workflowBusyWakeupScheduler struct {
@@ -748,7 +751,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroNoteHandler.Gate = mentionGate                                          // CEREBRO-PATCH(cerebro-notes-handler): FIR-1621 gate send-to-issue agent triggers.
 	cerebroNoteHandler.Pool = pool                                                 // CEREBRO-PATCH(cerebro-note-search): FIR-2022 raw pool for FTS note/document search.
 	cerebroNoteHandler.Issues = h                                                  // CEREBRO-PATCH(cerebro-note-comment-issue): FIR-3102 create-issue-from-comment via shared IssueService.Create.
-	h.CommentTargetGuard = cerebrocommentguard.New(cerebroQueries)                 // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — gated by the cerebro_comment_target_guard feature flag (registry.ts), resolved per workspace; default off.
 	h.ChannelCreateGuard = cerebrochannels.NewCreateGuard(cerebroQueries, queries) // CEREBRO-PATCH(router-channel-create-guard): FIR-2660 — gated by the cerebro_channel_create_restricted feature flag (registry.ts); default off so any member/agent can still create until an admin turns it on.
 	// CEREBRO-PATCH(router-private-agent-run-request): FIR-2385 — member tag of an unowned private agent → owner inbox run-request.
 	h.PrivateAgentRunRequester = cerebroprivateagentrun.New(queries, cerebroQueries, bus) // CEREBRO-PATCH(router-private-agent-run-request): TECH-3533 pass upstream queries for the System Activity record.
@@ -812,13 +814,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(router-tool-executor): TECH-3226 wire server-side tool
 	// executor so POST /api/agents/{id}/tools/{name}/invoke can dispatch any
 	// granted tool including connections (web_fetch, firtal_registry, Sheets).
-	h.ToolExecutor = &cerebroruntime.ToolExecutorInvoker{
+	// CEREBRO-PATCH(workflow-hooks-tool-executor-wire): FIR-3692 retains the executor so the shared Workflow evaluator can observe tool failures.
+	toolExecutor := &cerebroruntime.ToolExecutorInvoker{
 		Queries:        queries,
 		CerebroQueries: cerebroQueries,
 		Pool:           pool, // Server-side tools retain database-backed configuration access.
 		Policy:         cerebrotoolpolicy.NewStore(pool),
 		LoopStore:      cerebroloops.NewStore(pool), // CEREBRO-PATCH(workflow-open-step-invoker): FIR-3493 wires task-scoped step opening into external runtimes.
 	}
+	h.ToolExecutor = toolExecutor
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 wire capability register API.
 	capabilityRegisterSvc := cerebrocapabilityregistry.New(pool)
 	h.SetCapabilityRegister(newCapabilityRegisterAdapter(capabilityRegisterSvc))
@@ -843,10 +847,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonHub.SetDisconnectHandler(cerebroTerminalBridge.OnDaemonDisconnect)
 	// CEREBRO-PATCH(workflow-plan-document-wire): FIR-3052 wire shared plan document creation/logging for Issue workflows.
 	workflowPlanDocuments := cerebroworkflows.NewPlanDocumentService(queries)
-	var legacyLoopAdvancer *cerebroworkflows.LoopPhaseAdvancer
+	// CEREBRO-PATCH(workflow-chain-v2-only): FIR-3692 removes the parallel legacy loop advancer.
 	if opts.WorkflowService != nil {
 		opts.WorkflowService.WithPlanDocuments(workflowPlanDocuments)
-		legacyLoopAdvancer = cerebroworkflows.NewLoopPhaseAdvancer(opts.WorkflowService)
 	}
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).
@@ -855,16 +858,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	evalExecutor := cerebroevalrun.New(pool)
 	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor).WithActorResolver(h.ResolveActor).WithBlockingGateAuthorizer(evalBlockingGateAdapter{svc: cerebroGroupPermissionsHandler.Service}) // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner. CEREBRO-PATCH(cerebro-evals-blocking-gate): FIR-3496 restrict blocking bindings. CEREBRO-PATCH(cerebro-evals-actor): FIR-3496 trusted ownership identity.
 	cerebroCommandsHandler := cerebrocommands.NewHandler(pool).WithActorResolver(h.ResolveActor)                                                                                                                          // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
-	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor))                                                            // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
-	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                                                                                                                                            // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
-	h.IssueStatusGate = workflowHooksFeature.StatusGate                                                                                                                                                                   // CEREBRO-PATCH(issue-status-gate-wire): FIR-3659 before.issue.status_change gate into UpdateIssue.
-	workflowHooksFeature.FailureGate.Attach(bus)                                                                                                                                                                          // CEREBRO-PATCH(task-failure-gate-wire): FIR-3760 fire on.task.failure from the task:failed bus broadcast.
-	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
-	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
+	workflowHooksFeature := opts.WorkflowHooks
+	if workflowHooksFeature == nil {
+		workflowHooksFeature = cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
+	}
+	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate     // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
+	h.TaskService.WorkflowFailureGate = workflowHooksFeature.FailureGate           // CEREBRO-PATCH(workflow-hooks-failure-wire): FIR-3692 task failure routing is selected by Workflow.
+	toolExecutor.Hooks = workflowHooksFeature.Evaluator                            // CEREBRO-PATCH(workflow-hooks-tool-failure-wire): FIR-3692 tool failures emit Workflow events.
+	h.CommentTargetGuard = cerebrocommentguard.New(workflowHooksFeature.Evaluator) // CEREBRO-PATCH(router-comment-workflow-gate): FIR-3692 before.message.send is the only comment decision path.
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
-	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus)
+	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus).WithHooks(workflowHooksFeature.Evaluator)
 	cerebroIssueLoopBridge := cerebroloops.NewIssueLoopBridge(pool, cerebroQueries, queries, cerebroIssueLoopColumns).
+		WithHooks(workflowHooksFeature.Evaluator).
 		WithSkillLister(queries).
 		WithMonitorEvalBindingLister(cerebroevals.NewStore(pool)).
 		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor).WithAdvisoryWarner(cerebroevals.NewAdvisoryWarner(cerebroevals.NewStore(pool), cerebroQueries, queries, bus))). // CEREBRO-PATCH(cerebro-eval-block-advisory): FIR-3496 phase-aware BlockEval uses the same warn-only notifier.
@@ -876,10 +882,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkflowsHandler.WithIssueLoopColumns(cerebroIssueLoopColumns).
 		// CEREBRO-PATCH(cerebro-issue-loop-skill-validate): FIR-2283 followup — reject a recipe naming a skill the workspace lacks at save time.
 		WithIssueLoopCompiler(cerebroIssueLoopBridge)
-	// FIR-3493 bid 8: block tasks complete their durable step and immediately
-	// advance the same chain. The old plan-only hook remains a no-op fallback
-	// for tasks created before the cutover.
-	h.TaskService.WorkflowLoopAdvancer = cerebroloops.NewChainTaskAdvancer(cerebroIssueLoopBridge, legacyLoopAdvancer)
+	// CEREBRO-PATCH(cerebro-issue-loop-chain-only): FIR-3692 block tasks
+	// complete their durable step and advance only Chain v2.
+	h.TaskService.WorkflowLoopAdvancer = cerebroloops.NewChainTaskAdvancer(cerebroIssueLoopBridge)
+	h.IssueStatusWorkflowGate = cerebroIssueLoopBridge // CEREBRO-PATCH(issue-status-workflow-gate-wire): FIR-3692 UI/API/CLI/MCP status changes share the Chain v2 Workflow hook.
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop-activation): FIR-2283 v2 point 8 — plug the upstream issue lookup so the per-issue activation endpoints can confirm the target issue exists and belongs to the caller's workspace.
 	cerebroWorkflowsHandler.WithIssueLookup(queries)
 	// CEREBRO-PATCH(handler-issue-workflow-activator-wire): FIR-2283 followup — let CreateIssue (HTTP + CLI `--workflow`) start a new issue on an Issue workflow in the same call, reusing the workflows handler's ActivateForIssue.
@@ -904,7 +910,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions handler instance.
-	cerebroSessionsHandler := cerebrosessions.NewHandler(pool, queries, h.TaskService, bus) // CEREBRO-PATCH(cerebro-sessions-routes): FIR-2021 inject TaskService+bus for one-command handoff start-new
+	cerebroSessionsHandler := cerebrosessions.NewHandler(pool, queries, h.TaskService, bus).WithHooks(workflowHooksFeature.Evaluator) // CEREBRO-PATCH(cerebro-sessions-routes): FIR-2021 inject TaskService+bus for one-command handoff start-new; FIR-3692 Workflow decides the handoff
 	h.CommentSessionMode = cerebroSessionsHandler                                           // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 transactional Mode seam.
 	cerebroSessionModeStore := cerebrosessionmode.NewStore(pool)
 	cerebroSessionModeHandler := cerebrosessionmode.NewHandler(cerebroSessionModeStore) // CEREBRO-PATCH(session-mode-config): FIR-3111 Settings-managed version registry.
@@ -925,7 +931,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-reminder): FIR-394 reminder entity handler.
 	cerebroReminderHandler := cerebroreminder.New(queries, cerebroQueries)
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API handler.
-	cerebroWakeupHandler := cerebrowakeup.NewHandler(cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus))
+	cerebroWakeupHandler := cerebrowakeup.NewHandler(cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus).WithHooks(workflowHooksFeature.Evaluator)) // CEREBRO-PATCH(workflow-hooks-wakeup-handler-wire): FIR-3692 applies the shared Workflow evaluator to HTTP wakeups.
 	// CEREBRO-PATCH(cerebro-rounds-routes): grouping and answer-snapshot lifecycle.
 	cerebroRoundsService := cerebrorounds.New(pool, queries)
 	cerebroRoundsHandler := cerebrorounds.NewHandler(cerebroRoundsService)

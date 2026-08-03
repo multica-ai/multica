@@ -87,9 +87,8 @@ type FirtalGatewayExecutor struct {
 
 	attachmentStorage storage.Storage
 
-	// CEREBRO-PATCH(executor-loopstore): FIR-2283 — loop check outcome store wired
-	// into ToolContext so worker agents can call report_loop_check to report exit
-	// codes back to the delivery gate. Nil disables the tool.
+	// CEREBRO-PATCH(executor-loopstore): Chain v2 store wired into ToolContext
+	// so an authorized block can call open_loop_step.
 	loopStore *cerebroloops.Store
 
 	// capabilitiesProvider builds the agent self-lookup card (FIR-3398). Wired
@@ -168,9 +167,8 @@ func (e *FirtalGatewayExecutor) SetAttachmentStorage(s storage.Storage) {
 	}
 }
 
-// CEREBRO-PATCH(executor-loopstore): FIR-2283 — SetLoopStore wires the loop
-// check store so worker agents can call report_loop_check to report check exit
-// codes back to the delivery gate. Nil keeps the tool absent (safe default).
+// CEREBRO-PATCH(executor-loopstore): SetLoopStore wires the Chain v2 store used
+// by open_loop_step. Nil keeps that tool absent.
 func (e *FirtalGatewayExecutor) SetLoopStore(s *cerebroloops.Store) *FirtalGatewayExecutor {
 	if e != nil {
 		e.loopStore = s
@@ -1064,7 +1062,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// on_behalf_of-enabled connections stamp the agent's delegated identity.
 	ctx = WithConnectionAgent(ctx, meta.AgentID)
 	var taskMandateGeneration int64
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled, TaskMandateGeneration: &taskMandateGeneration} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398/FIR-4289: thread the self-lookup card provider, mandate generation, and circuit breaker.
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled, TaskMandateGeneration: &taskMandateGeneration} // CEREBRO-PATCH(executor-loopstore): thread the Chain v2 store into tctx for open_loop_step. FIR-3398/FIR-4289: thread the self-lookup card provider, mandate generation, and circuit breaker.
 	if taskID, err := util.ParseUUID(meta.TaskID); err == nil {
 		tctx.TaskID = taskID
 		if e.queries != nil {

@@ -58,19 +58,6 @@ const (
 // thread, otherwise stay in_review".
 const OpEvidencePresent = "evidence_present"
 
-// OpCheckPasses is the loop delivery-gate condition: it holds only when every
-// programmatic check the loop requires has run and exited zero. Like
-// evidence_present it is not a pure in-memory comparison — it reads the
-// reported check outcomes out of band — so conditionsHold routes it through
-// the injected GateEvaluator (see check_gate.go) rather than evaluate().
-//
-// The string MUST equal loops.CheckGateOp. The two packages cannot share the
-// constant directly: loops imports workflows (to compile a spec into Rules),
-// so workflows importing loops would be a cycle. The op string is the wire
-// contract across that boundary; the GateEvaluator interface inverts the
-// dependency so the loops adapter is plugged in at main.go.
-const OpCheckPasses = "check_passes"
-
 // EvidenceConfig is the shape stored under Condition.Value when Op is
 // "evidence_present". All fields are optional; sensible defaults apply when
 // the field is empty:
@@ -196,40 +183,18 @@ type ActionConfigRunSkill struct {
 	Model         string         `json:"model,omitempty"`
 	ThinkingLevel string         `json:"thinking_level,omitempty"`
 	SkillInput    map[string]any `json:"skill_input,omitempty"`
-	// LoopPlanning signals that this run_skill action is the build step of a
-	// loop that requires an explicit planning phase. When true, the loop engine
-	// (FIR-2283) prepends a planning-dispatch rule so the agent must produce a
-	// plan before the build phase begins. The field is persisted as part of the
-	// opaque action_config JSON and has no effect on the base run_skill action
-	// runner — it is consumed only by the loop compiler.
-	LoopPlanning bool `json:"loop_planning,omitempty"`
-	// PlanMode marks THIS run_skill dispatch as the planning phase itself
-	// (FIR-2283 followup point 3). Unlike LoopPlanning (a compiler-only hint on
-	// the build step), PlanMode IS consumed by the action runner: it makes the
+	// PlanMode marks this run_skill dispatch as a planning session. It makes the
 	// dispatched run carry an explicit plan-mode instruction — "only produce a
 	// plan in Multica, do not write code" — and stamps loop_phase=plan on the
-	// task so the run genuinely knows it is planning, instead of being expected
-	// to infer it from the issue status. Set by the loop compiler on the
-	// planning-dispatch rule.
+	// task so the runtime does not infer the phase from issue status.
 	PlanMode bool `json:"plan_mode,omitempty"`
-	// LoopPhase names the Issue-workflow phase this run_skill dispatch belongs
-	// to ("plan" / "build"). Set by the loop compiler on the phase dispatch
-	// rules. When set AND the trigger has an issue, the action runner starts
+	// LoopPhase names the Workflow phase this run_skill dispatch belongs to.
+	// When set and the trigger has an issue, the action runner starts
 	// the run ON that issue — a visible kickoff comment opens a session thread
 	// (badged with the phase) and the agent task is issue-bound — instead of a
 	// detached quick_create task nobody can see on the issue (Tine's live-test
-	// finding: 0 comments / 0 sessions on the workflow's target issue).
+	// finding: 0 comments / 0 sessions on the Workflow's target issue).
 	LoopPhase string `json:"loop_phase,omitempty"`
-	// AdvanceFromStatus / AdvanceToStatus turn a plan-phase dispatch into a
-	// deterministic step hook (FIR-3052): when the plan run completes, the loop
-	// advances the issue From -> To so the loop:dispatch-build rule (which
-	// triggers on entry to BuildStatus) fires without the plan agent having to
-	// flip the status by hand. Set by the loop compiler on the
-	// loop:planning-dispatch rule (From = PlanningStatus, To = BuildStatus) and
-	// stamped onto the plan task context; consumed by LoopPhaseAdvancer on task
-	// completion. Empty on every non-planning dispatch — the advance is a no-op.
-	AdvanceFromStatus string `json:"advance_from_status,omitempty"`
-	AdvanceToStatus   string `json:"advance_to_status,omitempty"`
 }
 
 // ActionConfigCommentOnIssue — post a workflow-authored comment on either

@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
+	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -40,10 +41,60 @@ type Handler struct {
 	// degrades to close-only (the caller starts the new session manually).
 	tasks *service.TaskService
 	bus   *events.Bus
+	// hooks lets Workflow decide the handoff, so the promised order of the
+	// agent loop holds for this seam too (FIR-3692). Nil-safe: without it the
+	// handoff runs unchanged.
+	hooks workflows.HookEvaluator
 }
 
 func NewHandler(pool *pgxpool.Pool, upstream *db.Queries, tasks *service.TaskService, bus *events.Bus) *Handler {
 	return &Handler{pool: pool, upstream: upstream, tasks: tasks, bus: bus}
+}
+
+// WithHooks attaches the Workflow evaluator consulted before a handoff runs.
+func (h *Handler) WithHooks(hooks workflows.HookEvaluator) *Handler {
+	if h != nil {
+		h.hooks = hooks
+	}
+	return h
+}
+
+// evaluateHandoff raises before.session.end for this handoff and returns
+// Workflow's decision. A block or require decision stops the handoff; a
+// modified prompt replaces the kickoff the fresh session starts from.
+func (h *Handler) evaluateHandoff(ctx context.Context, issue db.Issue, rootID pgtype.UUID, startNew bool, kickoff string) (string, error) {
+	if h == nil || h.hooks == nil {
+		return kickoff, nil
+	}
+	actorType, actorID := actorFromContext(ctx)
+	result, err := h.hooks.Evaluate(ctx, workflows.HookEvent{
+		EventID:     fmt.Sprintf("%s:handoff:%s", util.UUIDToString(issue.ID), util.UUIDToString(rootID)),
+		Type:        workflows.HookBeforeSessionEnd,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		IssueID:     util.UUIDToString(issue.ID),
+		AgentID:     util.UUIDToString(issue.AssigneeID),
+		SessionID:   util.UUIDToString(rootID),
+		Context: map[string]any{
+			"handoff": map[string]any{
+				"root_comment_id": util.UUIDToString(rootID),
+				"start_new":       startNew,
+				"prompt":          kickoff,
+			},
+			"issue": map[string]any{"id": util.UUIDToString(issue.ID), "status": issue.Status},
+			"actor": map[string]any{"type": actorType, "id": util.UUIDToString(actorID)},
+		},
+		MutableFields: []string{"prompt"},
+	})
+	if err != nil {
+		return kickoff, fmt.Errorf("evaluate handoff: %w", err)
+	}
+	if err := workflows.BlockingHookError(result); err != nil {
+		return kickoff, err
+	}
+	if prompt, ok := result.Modifications["prompt"].(string); ok && strings.TrimSpace(prompt) != "" {
+		return strings.TrimSpace(prompt), nil
+	}
+	return kickoff, nil
 }
 
 // RecordCommentSessionMode runs inside the upstream comment transaction, so
@@ -248,6 +299,16 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var kickoff string
+	var delegation service.TaskDelegationContext
+	if req.StartNew {
+		kickoff, delegation, err = h.prepareFreshSession(r, issue, req.Prompt)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "failed to start fresh session: "+err.Error())
+			return
+		}
+	}
+
 	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start fresh")
@@ -268,6 +329,14 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FIR-3692: Handoff runs through the same Workflow decision as every other
+	// gate, before anything is written.
+	kickoff, err = h.evaluateHandoff(r.Context(), issue, rootID, req.StartNew, kickoff)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
 	// Handoff: agent brief if supplied, else an auto-summary of the thread.
 	handoff := req.Handoff
 	agentAuthored := handoff != nil
@@ -281,6 +350,24 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		handoff = normalizeHandoff(handoff)
 	}
 
+	var freshComment db.Comment
+	var freshTask db.AgentTaskQueue
+	if req.StartNew {
+		freshComment, err = h.upstream.WithTx(tx).CreateComment(r.Context(), db.CreateCommentParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			AuthorType:  "agent",
+			AuthorID:    issue.AssigneeID,
+			Content:     kickoff,
+			Type:        "comment",
+			ParentID:    pgtype.UUID{},
+		})
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "failed to create fresh-session comment")
+			return
+		}
+	}
+
 	// Upsert the metadata row for this thread, preserving any name a human or an
 	// earlier agent set unless this brief carries a fresh one.
 	name := sessionNameFromHandoff(handoff, agentAuthored)
@@ -288,6 +375,16 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to write handoff")
 		return
+	}
+
+	if req.StartNew {
+		freshTask, err = h.tasks.CreateFreshSessionTaskTx(
+			r.Context(), tx, issue, freshComment.ID, kickoff, delegation,
+		)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "failed to enqueue fresh-session run: "+err.Error())
+			return
+		}
 	}
 
 	// Close the session = resolve its thread root (FIR-1874 point 3, B-100%).
@@ -317,76 +414,42 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 
 	resp := startFreshResponse{sessionResponse: session}
 
-	// One-command handoff (FIR-2021): the old thread is now closed and the brief
-	// stored — open a NEW session and start a clean run on it. Done after the
-	// commit so the close stays durable regardless of the enqueue outcome.
 	if req.StartNew {
-		fresh, ferr := h.startFreshSession(r, issue, req.Prompt)
-		if ferr != nil {
-			// The handoff (close + brief) already succeeded; only opening the fresh
-			// session failed. 502 tells the caller the new session did not start.
-			writeError(w, http.StatusBadGateway, "session closed but failed to start fresh session: "+ferr.Error())
-			return
+		h.publishCommentCreated(issue, freshComment)
+		h.tasks.PublishCreatedTask(r.Context(), freshTask)
+		resp.FreshRun = &freshRunInfo{
+			RootCommentID: util.UUIDToString(freshComment.ID),
+			TaskID:        util.UUIDToString(freshTask.ID),
+			AgentID:       util.UUIDToString(freshTask.AgentID),
 		}
-		resp.FreshRun = fresh
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// startFreshSession opens a brand-new session on the issue and starts a fresh run
-// on it: a new top-level comment (the new session root, authored by the assignee
-// agent) + a force_fresh_session task triggered by it. Stays entirely on exported
-// TaskService APIs so the orchestration lives in the cerebro zone. v1 targets the
-// issue's assignee agent — the demonstrated self-handoff to clean context.
-func (h *Handler) startFreshSession(r *http.Request, issue db.Issue, prompt string) (*freshRunInfo, error) {
+// prepareFreshSession validates the non-transactional inputs before the
+// Handoff transaction starts. The comment and task writes happen later inside
+// that transaction, and notifications are emitted only after commit.
+func (h *Handler) prepareFreshSession(r *http.Request, issue db.Issue, prompt string) (string, service.TaskDelegationContext, error) {
 	if h.tasks == nil {
-		return nil, fmt.Errorf("starting a fresh session is not available on this server")
+		return "", service.TaskDelegationContext{}, fmt.Errorf("starting a fresh session is not available on this server")
 	}
 	if issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return nil, fmt.Errorf("issue is not assigned to an agent; assign an agent before handing off to a fresh session")
+		return "", service.TaskDelegationContext{}, fmt.Errorf("issue is not assigned to an agent; assign an agent before handing off to a fresh session")
 	}
-	ctx := r.Context()
 
 	// Resolve the human principal that authorises the fresh run. A member caller
 	// (UI button) seeds from their own id; an agent caller inherits via X-Task-ID.
 	delegation, err := h.delegationForCaller(r)
 	if err != nil {
-		return nil, err
+		return "", service.TaskDelegationContext{}, err
 	}
 
-	// Open the new session: a fresh top-level comment authored by the assignee
-	// agent (the agent that will run). This is what makes the handoff land in a
-	// new session under the thread = session model.
 	kickoff := strings.TrimSpace(prompt)
 	if kickoff == "" {
 		kickoff = defaultHandoffKickoff
 	}
-	comment, err := h.upstream.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "agent",
-		AuthorID:    issue.AssigneeID,
-		Content:     kickoff,
-		Type:        "comment",
-		ParentID:    pgtype.UUID{}, // top-level == new session root
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create fresh-session comment: %w", err)
-	}
-	h.publishCommentCreated(issue, comment)
-
-	// Start the clean run, triggered by the new session root. forceFreshSession so
-	// the daemon skips the (agent_id, issue_id) resume and starts with no memory.
-	task, err := h.tasks.EnqueueTaskForIssueFromComment(ctx, issue, comment.ID, delegation, true)
-	if err != nil {
-		return nil, fmt.Errorf("enqueue fresh-session run: %w", err)
-	}
-	return &freshRunInfo{
-		RootCommentID: util.UUIDToString(comment.ID),
-		TaskID:        util.UUIDToString(task.ID),
-		AgentID:       util.UUIDToString(task.AgentID),
-	}, nil
+	return kickoff, delegation, nil
 }
 
 // delegationForCaller derives the task-delegation context (the human principal an

@@ -8,62 +8,42 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-type PostgresTaskFailureStore struct {
+type PostgresTaskFailureContextStore struct {
 	db cerebrodb.DBTX
 }
 
-func NewPostgresTaskFailureStore(db cerebrodb.DBTX) *PostgresTaskFailureStore {
-	return &PostgresTaskFailureStore{db: db}
+func NewPostgresTaskFailureContextStore(db cerebrodb.DBTX) *PostgresTaskFailureContextStore {
+	return &PostgresTaskFailureContextStore{db: db}
 }
 
-// LoadTaskFailureContext resolves the failed task's issue/workspace context and
-// whether a retry child is already queued. The inner JOIN on issue makes
-// chat-session tasks resolve to pgx.ErrNoRows, which the gate treats as skip.
-func (s *PostgresTaskFailureStore) LoadTaskFailureContext(ctx context.Context, taskID pgtype.UUID) (TaskFailureContext, error) {
+// WorkflowHooksEnabledForTask reports whether the task's workspace still runs
+// the Workflow failure gate, per the cerebro_workflow_hooks flag.
+func (s *PostgresTaskFailureContextStore) WorkflowHooksEnabledForTask(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	return workflowHooksFlagForTask(ctx, s.db, taskID)
+}
+
+func (s *PostgresTaskFailureContextStore) LoadTaskFailureContext(ctx context.Context, taskID pgtype.UUID) (TaskCompletionContext, error) {
 	var task, workspace, issue, agent pgtype.UUID
-	var projectID, issueStatus, model, failureReason, errorText string
+	var projectID, workflowID, model string
 	var sessionID pgtype.Text
-	var attempt, maxAttempts int32
-	var retryPending bool
 	err := s.db.QueryRow(ctx, `
-SELECT t.id, i.workspace_id, t.issue_id, t.agent_id,
-       COALESCE(t.context->>'project_id',''),
-       i.status, COALESCE(t.model_override, a.model, ''), t.session_id,
-       t.attempt, t.max_attempts,
-       COALESCE(t.failure_reason,''), COALESCE(t.error,''),
-       EXISTS(
-         SELECT 1 FROM agent_task_queue c
-         WHERE c.parent_task_id = t.id
-           AND c.status NOT IN ('failed','cancelled','completed')
-       )
+SELECT t.id, COALESCE(i.workspace_id, a.workspace_id), t.issue_id, t.agent_id,
+       COALESCE(t.context->>'project_id',''), COALESCE(t.context->>'workflow_id',''),
+       COALESCE(t.model_override, a.model, ''), t.session_id
 FROM agent_task_queue t
-JOIN agent a ON a.id = t.agent_id
-JOIN issue i ON i.id = t.issue_id
-WHERE t.id = $1`, taskID).Scan(
-		&task, &workspace, &issue, &agent, &projectID,
-		&issueStatus, &model, &sessionID, &attempt, &maxAttempts,
-		&failureReason, &errorText, &retryPending,
+JOIN agent a ON a.id=t.agent_id
+LEFT JOIN issue i ON i.id=t.issue_id
+WHERE t.id=$1`, taskID).Scan(
+		&task, &workspace, &issue, &agent, &projectID, &workflowID, &model, &sessionID,
 	)
 	if err != nil {
-		return TaskFailureContext{}, err
+		return TaskCompletionContext{}, err
 	}
-	enabled := false
-	flags, err := cerebrodb.New(s.db).ListCerebroWorkspaceFeatureFlags(ctx, workspace)
-	if err != nil {
-		return TaskFailureContext{}, err
-	}
-	for _, flag := range flags {
-		if flag.FlagKey == "cerebro_workflow_hooks" {
-			enabled = flag.Enabled
-		}
-	}
-	return TaskFailureContext{
-		HooksEnabled: enabled,
-		TaskID:       util.UUIDToString(task), WorkspaceID: util.UUIDToString(workspace),
-		ProjectID: projectID, IssueID: util.UUIDToString(issue), IssueStatus: issueStatus,
+	return TaskCompletionContext{
+		TaskID: util.UUIDToString(task), WorkspaceID: util.UUIDToString(workspace),
+		ProjectID: projectID, WorkflowID: workflowID, IssueID: util.UUIDToString(issue),
 		AgentID: util.UUIDToString(agent), Model: model, SessionID: sessionID.String,
-		FailureReason: failureReason, ErrorText: errorText,
-		Attempt: int(attempt), MaxAttempts: int(maxAttempts),
-		RetryPending: retryPending,
 	}, nil
 }
+
+var _ TaskFailureContextStore = (*PostgresTaskFailureContextStore)(nil)

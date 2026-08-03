@@ -175,6 +175,8 @@ export type CerebroFlagKey =
   | "cerebro_workflows"
   | "cerebro_workflows_engine"
   | "cerebro_evals"
+  // FIR-3692: Workflow owns every agent-loop code gate. ON by default; a
+  // workspace can switch the decision engine off without a deploy.
   | "cerebro_workflow_hooks"
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
@@ -281,14 +283,6 @@ export type CerebroFlagKey =
   // fired reminder only lives in its own Reminders box, not in two places.
   // Opt-in per user; OFF by default (reminders show in All messages).
   | "cerebro_inbox_hide_reminders"
-  // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
-  | "cerebro_comment_target_guard"
-  // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
-  // the recipient requirement when it already has an active wakeup on the issue.
-  | "cerebro_comment_target_guard_wakeup_exempt"
-  // FIR-3308: reject an agent comment that promises the agent will carry on
-  // while no wakeup is scheduled to deliver it. Independent of the target guard.
-  | "cerebro_comment_no_unbacked_promise"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
   // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
@@ -334,11 +328,6 @@ export type CerebroFlagKey =
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
   | "cerebro_skill_learning"
-  // TECH-3099: sub-issue comment guard — three checks extending cerebro_comment_target_guard.
-  // All default OFF; each is independently toggled so workspaces can adopt them one by one.
-  | "cerebro_sub_issue_no_owner_mention"
-  | "cerebro_sub_issue_require_agent_tag"
-  | "cerebro_sub_issue_no_split_session"
   // FIR-2563/FIR-3403: per-workspace toggle for the approval inbox. When off,
   // Ask remains blocked but no inbox request is opened. Allow / Ask / Block
   // access itself is always enforced by the Policy Decision Service.
@@ -353,10 +342,6 @@ export type CerebroFlagKey =
   | "cerebro_wakeup_time"
   | "cerebro_wakeup_issue_status"
   | "cerebro_wakeup_github_ci"
-  // FIR-2679: loop-guard — cap how many self-wakeups an agent may chain on one
-  // issue without objective progress. The cap itself is a per-workspace number
-  // setting; this flag turns the guard on/off.
-  | "cerebro_wakeup_loop_guard"
   // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
   // mirroring the running banner (live countdown / waited-for status / CI).
   | "cerebro_wakeup_bar"
@@ -585,7 +570,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_workflows: false,
   cerebro_workflows_engine: false,
   cerebro_evals: false,
-  cerebro_workflow_hooks: false,
+  // FIR-3692: ON. Workflow is the only decision path for the agent loop's
+  // code gates, so it stays on until a workspace turns it off.
+  cerebro_workflow_hooks: true,
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
@@ -760,22 +747,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // to hide reminder rows from "All messages" so they only appear in the
   // standalone Reminders box (no duplicate across two boxes).
   cerebro_inbox_hide_reminders: false,
-  // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
-  // no target at all (no person, agent, or issue) is rejected by the server
-  // with a 422 telling the agent to add one. Members are never affected. Off
-  // restores the prior behaviour (comments with no target allowed).
-  cerebro_comment_target_guard: false,
-  // TECH-3761: OFF by default. When on (and the base guard is on), an agent
-  // that already has an active wakeup scheduled on the issue is exempt from the
-  // recipient requirement — the wakeup is the follow-up action, so the comment
-  // need not also tag a human. Off keeps the base guard's behaviour unchanged.
-  cerebro_comment_target_guard_wakeup_exempt: false,
-  // FIR-3308: OFF by default. When on, an agent comment that says the agent
-  // itself will continue — while it has no active wakeup on the issue — is
-  // rejected with a message telling it to schedule the wakeup first or to state
-  // a delivered result instead. Independent of cerebro_comment_target_guard.
-  // Members are never affected. Off restores the prior behaviour.
-  cerebro_comment_no_unbacked_promise: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
   // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
@@ -838,10 +809,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
   cerebro_skill_learning: false,
-  // TECH-3099: sub-issue comment guard checks — all OFF by default.
-  cerebro_sub_issue_no_owner_mention: false,
-  cerebro_sub_issue_require_agent_tag: false,
-  cerebro_sub_issue_no_split_session: false,
   // FIR-3403: ON by default. Turning it off disables inbox requests without
   // disabling access enforcement; Ask remains blocked.
   cerebro_approval_gate: true,
@@ -853,9 +820,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_wakeup_time: true,
   cerebro_wakeup_issue_status: true,
   cerebro_wakeup_github_ci: true,
-  // FIR-2679: ON by default — cap consecutive self-wakeups per issue. Off lets an
-  // agent chain self-wakeups without the loop guard.
-  cerebro_wakeup_loop_guard: true,
   // FIR-1521: ON by default — additive top-of-issue banner. Off restores the
   // sidebar-only wakeup list with no banner.
   cerebro_wakeup_bar: true,
@@ -1410,7 +1374,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Workflow hooks",
     group: "workspace",
     description:
-      "Enable reusable trigger, scope, filter, decision, and action hooks inside the Workflow engine. Server-side enforcement additionally requires CEREBRO_WORKFLOW_HOOKS_ENABLED.",
+      "Let the Workflow engine own the agent loop's code gates: handoff, task completion, task failure, tool failure, and issue status change. ON by default. Turn it off for this workspace to run the loop with no Workflow decision. The server-wide emergency stop is CEREBRO_WORKFLOW_HOOKS_ENABLED.",
   },
   {
     key: "cerebro_workflow_step_model_override",
@@ -1580,20 +1544,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
-  },
-  {
-    key: "cerebro_comment_target_guard",
-    label: "Require a recipient on agent comments",
-    group: "issues",
-    description:
-      "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
-  },
-  {
-    key: "cerebro_comment_target_guard_wakeup_exempt",
-    label: "Exempt agents with a scheduled wakeup",
-    group: "issues",
-    description:
-      "Sub-setting of 'Require a recipient on agent comments'. When on, an agent that has already scheduled an active wakeup on this issue may post without naming a recipient — the wakeup is the follow-up action, so a human tag is not also required. Only the recipient requirement is waived; the sub-issue checks still apply. Requires 'Require a recipient on agent comments' to be on. Off keeps every agent comment subject to the recipient rule. TECH-3761.",
   },
   {
     key: "cerebro_firtal_welcome",
@@ -1883,27 +1833,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to blocked. Off silences the notification for the effective flag scope. TECH-3006.",
   },
   {
-    key: "cerebro_sub_issue_no_owner_mention",
-    label: "Block on-behalf-of user @mention on sub-issues",
-    group: "issues",
-    description:
-      "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-  },
-  {
-    key: "cerebro_sub_issue_require_agent_tag",
-    label: "Require parent-agent tag on sub-issues",
-    group: "issues",
-    description:
-      "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-  },
-  {
-    key: "cerebro_sub_issue_no_split_session",
-    label: "Block split-session across parent and sub-issue",
-    group: "issues",
-    description:
-      "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-  },
-  {
     key: "cerebro_display_currency",
     label: "Display currency",
     group: "workspace",
@@ -2017,13 +1946,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
-  },
-  {
-    key: "cerebro_wakeup_loop_guard",
-    label: "Wakeup: loop guard",
-    group: "agents",
-    description:
-      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply or issue status/progress event resets the count; ordinary agent comments and pull-request updates do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
   },
   {
     key: "cerebro_wakeup_bar",

@@ -20,7 +20,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
 	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics" // CEREBRO-PATCH(analytics-projection): project completed/failed tasks into canonical analytics.
 	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"
-	"github.com/multica-ai/multica/server/internal/cerebro/failrouter" // CEREBRO-PATCH(failure-router): FIR-2751 central failure routing policy.
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -78,6 +77,7 @@ type TaskService struct {
 	// from router.go; nil-safe.
 	WorkflowLoopAdvancer      WorkflowLoopAdvancer
 	WorkflowCompletionGate    WorkflowCompletionGate // CEREBRO-PATCH(workflow-hooks-completion-field): FIR-3101 delegates pre-completion policy to the Workflow feature.
+	WorkflowFailureGate       WorkflowFailureGate    // CEREBRO-PATCH(workflow-hooks-failure-field): FIR-3692 delegates failure routing to Workflow.
 	QuickCreatePropertyWriter QuickCreatePropertyWriter
 
 	analyticsContextMu    sync.Mutex
@@ -123,8 +123,8 @@ type WorkflowSessionStamper interface {
 	StampOnComplete(ctx context.Context, task db.AgentTaskQueue)
 }
 
-// CEREBRO-PATCH(workflow-loop-advancer-iface): FIR-3052 step-hook seam.
-// Implemented by cerebro/workflows.LoopPhaseAdvancer; the interface keeps the
+// CEREBRO-PATCH(workflow-loop-advancer-iface): Chain v2 completion seam.
+// Implemented by cerebro/loops.ChainTaskAdvancer; the interface keeps the
 // upstream service package free of a cerebro import.
 type WorkflowLoopAdvancer interface {
 	AdvanceOnComplete(ctx context.Context, task db.AgentTaskQueue)
@@ -1852,6 +1852,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	if failureReason == "" {
 		failureReason = taskfailure.Classify(errMsg).String()
 	}
+	failureDecision := TaskFailureDecision{Action: TaskFailureSurface}
+	if pendingTask, err := s.Queries.GetAgentTask(ctx, taskID); err == nil {
+		failureDecision = s.taskFailureDecision(ctx, pendingTask, failureReason, errMsg)
+	}
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
@@ -1873,7 +1877,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
-		if t.ChatSessionID.Valid && !resumeUnsafeFailureReason(failureReason) {
+		if t.ChatSessionID.Valid && !resumeUnsafeFailureReason(failureReason, failureDecision) { // CEREBRO-PATCH(workflow-failure-session-policy): FIR-3692 lets Workflow require a fresh retry session.
 			// Pin the chat_session's runtime_id alongside the session_id so the
 			// next claim can apply the runtime-guard. Both fields move together:
 			// when there's no session_id to record, leave runtime_id untouched
@@ -1928,20 +1932,19 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// fail-safe 5-min loop does not re-queue the same task indefinitely. See
 	// cerebro/runtime/auto_pause.go for the full trade-off explanation.
 	autoPaused := s.AutoPause != nil && s.AutoPause.MaybeAutoPauseOnFailure(ctx, task)
-	route, _ := failrouter.Lookup(failureReason) // CEREBRO-PATCH(failure-router): use the exhaustive Cerebro policy table.
-	if route.Action == "" {
-		route.Action = failrouter.ActionSurface
+	if failureDecision.Action == "" {
+		failureDecision.Action = TaskFailureSurface
 	}
 	if autoPaused {
-		route.Action = failrouter.ActionPause
-	} else if route.Action == failrouter.ActionPause {
-		route.Action = failrouter.ActionSurface
-	} else if route.Action == failrouter.ActionAlert && s.AutoPause != nil {
+		failureDecision.Action = TaskFailurePause
+	} else if failureDecision.Action == TaskFailurePause {
+		failureDecision.Action = TaskFailureSurface
+	} else if failureDecision.Action == TaskFailureAlert && s.AutoPause != nil {
 		s.AutoPause.AlertRuntimeFailure(ctx, task)
 	}
-	s.Metrics.RecordTaskFailureDecision(failureReason, string(route.Action))
-	if message := failrouter.UserMessage(failureReason); message != "" {
-		errMsg = message
+	s.Metrics.RecordTaskFailureDecision(failureReason, string(failureDecision.Action))
+	if failureDecision.UserMessage != "" {
+		errMsg = failureDecision.UserMessage
 	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
@@ -1949,7 +1952,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// and only triggers for issue/chat tasks.
 	var retried *db.AgentTaskQueue
 	if !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure): no retry when rate-limited
-		retried, _ = s.MaybeRetryFailedTask(ctx, task)
+		retried, _ = s.MaybeRetryFailedTask(ctx, task, failureDecision) // CEREBRO-PATCH(workflow-failure-retry-policy): FIR-3692 retries only when Workflow selects retry.
 	}
 
 	// Skip the per-failure system comment when we'll immediately retry —
@@ -2019,14 +2022,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // allowed to act on. Agent-side errors (compile failures, model rejections,
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
-func resumeUnsafeFailureReason(reason string) bool {
-	if route, ok := failrouter.Lookup(reason); ok && route.FreshSession { // CEREBRO-PATCH(failure-router): fresh retries cannot reuse poisoned sessions.
+func resumeUnsafeFailureReason(reason string, decisions ...TaskFailureDecision) bool {
+	if len(decisions) > 0 && decisions[0].FreshSession {
 		return true
 	}
 	switch reason {
 	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
 	// CreateRetryTask's fresh-session CASE WHEN.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity",
+		"idle_watchdog", "agent_error.context_overflow", "agent_error.empty_or_unparseable_output":
 		return true
 	default:
 		return false
@@ -2043,7 +2047,7 @@ func resumeUnsafeFailureReason(reason string) bool {
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
-func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
+func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue, decisions ...TaskFailureDecision) (*db.AgentTaskQueue, error) { // CEREBRO-PATCH(workflow-failure-retry-seam): FIR-3692 accepts the already-evaluated Workflow decision.
 	if parent.Status != "failed" {
 		return nil, nil
 	}
@@ -2051,11 +2055,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
-	route, ok := failrouter.Lookup(reason) // CEREBRO-PATCH(failure-router): all retry eligibility comes from one table.
-	if !ok || route.Action != failrouter.ActionRetry {
+	decision := s.taskFailureDecision(ctx, parent, reason, parent.Error.String)
+	if len(decisions) > 0 {
+		decision = decisions[0]
+	}
+	if decision.Action != TaskFailureRetry {
 		return nil, nil
 	}
-	if route.RetryLimit > 0 && parent.Attempt > route.RetryLimit {
+	if decision.RetryLimit > 0 && parent.Attempt > decision.RetryLimit {
 		return nil, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {

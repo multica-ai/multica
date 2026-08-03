@@ -44,6 +44,9 @@ const (
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
+	// CEREBRO-PATCH(workflow-hooks-integration-default): FIR-3692 keeps upstream integration fixtures on their pre-hook behavior.
+	previousHooks, hadHooks := os.LookupEnv("CEREBRO_WORKFLOW_HOOKS_ENABLED")
+	_ = os.Setenv("CEREBRO_WORKFLOW_HOOKS_ENABLED", "off")
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
@@ -87,6 +90,11 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+	if hadHooks {
+		_ = os.Setenv("CEREBRO_WORKFLOW_HOOKS_ENABLED", previousHooks)
+	} else {
+		_ = os.Unsetenv("CEREBRO_WORKFLOW_HOOKS_ENABLED")
+	}
 
 	if err := cleanupIntegrationTestFixture(context.Background(), pool); err != nil {
 		fmt.Printf("Failed to clean up integration test fixture: %v\n", err)

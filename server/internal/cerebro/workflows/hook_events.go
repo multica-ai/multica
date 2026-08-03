@@ -38,7 +38,7 @@ var HookEventCatalog = map[HookEventType]HookEventDefinition{
 	HookBeforePromptAssemble: {Label: "Before prompt is assembled", Phase: "before", CanBlock: true, CanModify: true, Advanced: true},
 	HookBeforeToolCall:       {Label: "Before tool call", Phase: "before", CanBlock: true, CanModify: true, Advanced: true},
 	HookAfterToolCall:        {Label: "After tool call", Phase: "after", Advanced: true},
-	HookOnToolFailure:        {Label: "When a tool fails", Phase: "failure", Advanced: true},
+	HookOnToolFailure:        {Label: "When a tool fails", Phase: "failure", CanBlock: true, CanModify: true, Advanced: true},
 	HookBeforeTaskComplete:   {Label: "Before task completes", Phase: "before", CanBlock: true},
 	HookBeforeAgentStop:      {Label: "Before agent stops", Phase: "before", CanBlock: true, Advanced: true},
 	HookBeforeSubagentStart:  {Label: "Before subagent starts", Phase: "before", CanBlock: true, Advanced: true},

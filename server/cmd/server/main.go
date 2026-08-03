@@ -355,12 +355,7 @@ func main() {
 	// CEREBRO-PATCH(main-workflow-session-stamper): FIR-2283 — dispatch-time session badge writer shared by the engine's phase dispatch and the loop revision dispatcher.
 	workflowSessionStamper := cerebroworkflows.NewSessionPhaseStamper(pool)
 	workflowSvc.WithSessionStamper(workflowSessionStamper)
-	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
-	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
-	baseLoopGate := cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries).WithSessionStamper(workflowSessionStamper)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)) // CEREBRO-PATCH(main-eval-gate): FIR-3308 preserve existing checks.
-	evalGateStore := cerebroevals.NewStore(pool)                                                                                                                                                                        // CEREBRO-PATCH(main-eval-advisory): FIR-3496 share one store between the blocking gate and the advisory warner.
-	evalAdvisoryWarner := cerebroevals.NewAdvisoryWarner(evalGateStore, cerebrodb.New(pool), queries, bus)                                                                                                              // CEREBRO-PATCH(main-eval-advisory): FIR-3496 warn owners/admins on failing advisory (non-blocking) eval bindings.
-	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, evalGateStore).WithAdvisoryWarner(evalAdvisoryWarner))                                                                                    // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
+	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(cerebroevalrun.New(pool))) // CEREBRO-PATCH(main-workflow-hooks-shared): FIR-3692 one evaluator for request and background paths.
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
@@ -369,6 +364,7 @@ func main() {
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
 		WorkflowService:    workflowSvc,
+		WorkflowHooks:      workflowHooksFeature,
 	})
 
 	srv := &http.Server{
@@ -385,10 +381,12 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
+	taskSvc.WorkflowCompletionGate = workflowHooksFeature.CompletionGate // CEREBRO-PATCH(main-workflow-completion-gate): FIR-3692 background task paths share the Workflow completion decision.
+	taskSvc.WorkflowFailureGate = workflowHooksFeature.FailureGate       // CEREBRO-PATCH(main-workflow-failure-gate): FIR-3692 background task paths share the Workflow failure decision.
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 issue/time/GitHub-CI wakeup listeners.
-	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus)
+	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus).WithHooks(workflowHooksFeature.Evaluator)
 	cerebrowakeup.RegisterListeners(bus, wakeupSvc)
 	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 snapshot a version whenever an agent-created document (artifact) is created/updated, reusing the note version engine.
 	cerebronote.RegisterArtifactVersionListener(bus, cerebrodb.New(pool))
@@ -465,7 +463,7 @@ func main() {
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-api-connection-tools): FIR-2166 C PR2 — expose enabled API-type connections as server-side-dispatched agent tools, behind the default-off cerebro_api_connection_tools workspace flag.
 		gatewayExecutor.SetAPIConnectionStore(cerebroconnections.New(pool))
-		// CEREBRO-PATCH(main-loop-report-store): FIR-2283 — wire the loop check store so worker agents can call report_loop_check to report check exit codes back to the delivery gate.
+		// CEREBRO-PATCH(main-loop-step-store): wire the Chain v2 store used by open_loop_step.
 		gatewayExecutor.SetLoopStore(cerebroloops.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-agent-capabilities): FIR-3398 — wire the capabilities card builder so the gateway answers get_agent_capabilities from the same implementation as the HTTP route.
 		gatewayExecutor.SetAgentCapabilitiesProvider(h)

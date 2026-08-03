@@ -1,15 +1,15 @@
 -- Cerebro agent wakeups: agent-requested future re-entry points.
 
 -- name: CountActiveWakeupsForAgentIssue :one
--- TECH-3298: how many non-cancelled wakeups this agent already has on this
--- issue. Dispatched (already-fired) ones count toward the budget so the cap is
--- "how many times total an agent may wake itself on one issue".
+-- TECH-3298: how many wakeups this agent currently has waiting or claimed on
+-- this issue. Historical dispatched wakeups are governed by the separate
+-- progress policy and do not consume the active budget forever.
 SELECT count(*)
 FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND agent_id = $2
   AND issue_id = $3
-  AND state <> 'cancelled';
+  AND state IN ('pending', 'claimed');
 
 -- name: CountConsecutiveSelfWakeupsForAgentIssue :one
 -- FIR-3098: how many self-wakeups this agent has stacked on this issue since
@@ -34,6 +34,42 @@ WHERE w.workspace_id = $1
          ) progress),
         '-infinity'::timestamptz
       );
+
+-- name: WakeupProgressCounters :one
+-- Workflow receives separate counters so the policy, rather than this query,
+-- decides which observable signals reset a self-wakeup chain.
+SELECT
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(c.created_at) FROM comment c
+      WHERE c.issue_id = $3 AND c.author_type = 'member'
+    ), '-infinity'::timestamptz)
+  ) AS since_member_reply,
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(c.created_at) FROM comment c
+      WHERE c.issue_id = $3 AND c.type = 'status_change'
+    ), '-infinity'::timestamptz)
+  ) AS since_status_change,
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(c.created_at) FROM comment c
+      WHERE c.issue_id = $3 AND c.type = 'progress_update'
+    ), '-infinity'::timestamptz)
+  ) AS since_progress_update,
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(pr.pr_updated_at)
+      FROM issue_pull_request link
+      JOIN github_pull_request pr ON pr.id = link.pull_request_id
+      WHERE link.issue_id = $3
+    ), '-infinity'::timestamptz)
+  ) AS since_pull_request_update
+FROM cerebro_agent_wakeup w
+WHERE w.workspace_id = $1
+  AND w.agent_id = $2
+  AND w.issue_id = $3
+  AND w.state <> 'cancelled';
 
 -- name: MaxActiveTimeWakeupFireAtForAgentIssue :one
 -- TECH-3298: the latest scheduled fire time among this agent's still-active

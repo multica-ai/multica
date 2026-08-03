@@ -444,9 +444,9 @@
     {
       "key": "cerebro_workflow_hooks",
       "label": "Workflow hooks",
-      "description": "Enable reusable trigger, scope, filter, decision, and action hooks inside the Workflow engine. Server-side enforcement additionally requires CEREBRO_WORKFLOW_HOOKS_ENABLED.",
+      "description": "Let the Workflow engine own the agent loop's code gates: handoff, task completion, task failure, tool failure, and issue status change. ON by default. Turn it off for this workspace to run the loop with no Workflow decision. The server-wide emergency stop is CEREBRO_WORKFLOW_HOOKS_ENABLED.",
       "group": "workspace",
-      "default": false
+      "default": true
     },
     {
       "key": "cerebro_workflow_step_model_override",
@@ -615,20 +615,6 @@
       "description": "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
       "group": "issues",
       "default": true
-    },
-    {
-      "key": "cerebro_comment_target_guard",
-      "label": "Require a recipient on agent comments",
-      "description": "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
-      "group": "issues",
-      "default": false
-    },
-    {
-      "key": "cerebro_comment_target_guard_wakeup_exempt",
-      "label": "Exempt agents with a scheduled wakeup",
-      "description": "Sub-setting of 'Require a recipient on agent comments'. When on, an agent that has already scheduled an active wakeup on this issue may post without naming a recipient — the wakeup is the follow-up action, so a human tag is not also required. Only the recipient requirement is waived; the sub-issue checks still apply. Requires 'Require a recipient on agent comments' to be on. Off keeps every agent comment subject to the recipient rule. TECH-3761.",
-      "group": "issues",
-      "default": false
     },
     {
       "key": "cerebro_firtal_welcome",
@@ -918,27 +904,6 @@
       "default": true
     },
     {
-      "key": "cerebro_sub_issue_no_owner_mention",
-      "label": "Block on-behalf-of user @mention on sub-issues",
-      "description": "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-      "group": "issues",
-      "default": false
-    },
-    {
-      "key": "cerebro_sub_issue_require_agent_tag",
-      "label": "Require parent-agent tag on sub-issues",
-      "description": "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-      "group": "issues",
-      "default": false
-    },
-    {
-      "key": "cerebro_sub_issue_no_split_session",
-      "label": "Block split-session across parent and sub-issue",
-      "description": "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-      "group": "issues",
-      "default": false
-    },
-    {
       "key": "cerebro_display_currency",
       "label": "Display currency",
       "description": "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
@@ -1040,13 +1005,6 @@
       "key": "cerebro_wakeup_github_ci",
       "label": "Wakeup: on GitHub CI",
       "description": "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
-      "group": "agents",
-      "default": true
-    },
-    {
-      "key": "cerebro_wakeup_loop_guard",
-      "label": "Wakeup: loop guard",
-      "description": "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply or issue status/progress event resets the count; ordinary agent comments and pull-request updates do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
       "group": "agents",
       "default": true
     },

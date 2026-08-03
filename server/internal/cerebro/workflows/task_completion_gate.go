@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-var ErrTaskContinuationRequired = errors.New("task completion requires an actual continuation")
+var (
+	ErrTaskContinuationRequired         = errors.New("task completion requires an actual continuation")
+	ErrTaskCompletionContextUnavailable = errors.New("task completion context is unavailable")
+)
 
 type TaskContinuationKind string
 
@@ -76,12 +79,15 @@ func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.U
 		return result, nil
 	}
 	enabled, err := g.store.WorkflowHooksEnabled(ctx, taskID)
-	if err != nil || !enabled {
+	if err != nil {
+		return result, fmt.Errorf("%w: %v", ErrTaskCompletionContextUnavailable, err)
+	}
+	if !enabled {
 		return result, nil
 	}
 	completion, err := g.store.LoadTaskCompletionContext(ctx, taskID)
 	if err != nil {
-		return result, nil
+		return result, fmt.Errorf("%w: %v", ErrTaskCompletionContextUnavailable, err)
 	}
 	if completion.IssueID == "" || isTerminalIssueStatus(completion.IssueStatus) {
 		return result, nil
@@ -124,9 +130,6 @@ func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.U
 	if continuation != nil {
 		return result, nil
 	}
-	if attempt >= 3 {
-		return result, nil
-	}
 	requirement := "create a wakeup, member request, dispatch, handoff, or mark the issue blocked"
 	if len(evaluation.Requirements) > 0 {
 		requirement = evaluation.Requirements[0]
@@ -137,6 +140,7 @@ func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.U
 func combineCompletionEvaluations(results ...HookResult) HookResult {
 	combined := HookResult{Decision: HookAllow}
 	for _, result := range results {
+		combined.Evaluated = combined.Evaluated || result.Evaluated
 		combined.Decision = strongerDecision(combined.Decision, result.Decision)
 		combined.WouldDecision = strongerDecision(combined.WouldDecision, result.WouldDecision)
 		combined.Requirements = append(combined.Requirements, result.Requirements...)

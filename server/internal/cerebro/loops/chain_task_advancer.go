@@ -51,25 +51,17 @@ func decodeChainTaskEnvelope(raw json.RawMessage) (chainTaskEnvelope, bool) {
 	return envelope, envelope.Type == "workflow_block" || envelope.Type == "workflow_chain_wakeup"
 }
 
-type taskCompletionAdvancer interface {
-	AdvanceOnComplete(context.Context, db.AgentTaskQueue)
-}
-
 type ChainTaskAdvancer struct {
-	bridge   *IssueLoopBridge
-	fallback taskCompletionAdvancer
+	bridge *IssueLoopBridge
 }
 
-func NewChainTaskAdvancer(bridge *IssueLoopBridge, fallback taskCompletionAdvancer) *ChainTaskAdvancer {
-	return &ChainTaskAdvancer{bridge: bridge, fallback: fallback}
+func NewChainTaskAdvancer(bridge *IssueLoopBridge) *ChainTaskAdvancer {
+	return &ChainTaskAdvancer{bridge: bridge}
 }
 
 func (a *ChainTaskAdvancer) AdvanceOnComplete(ctx context.Context, task db.AgentTaskQueue) {
 	envelope, ok := decodeChainTaskEnvelope(task.Context)
 	if a == nil || a.bridge == nil || !ok {
-		if a != nil && a.fallback != nil {
-			a.fallback.AdvanceOnComplete(ctx, task)
-		}
 		return
 	}
 	workflowID, werr := parseChainUUID(envelope.Step.WorkflowID)
@@ -94,6 +86,30 @@ func (a *ChainTaskAdvancer) AdvanceOnComplete(ctx context.Context, task db.Agent
 	chain, err := decodeChain(fields.LoopSpec)
 	if err != nil {
 		return
+	}
+	if envelope.Type == "workflow_block" {
+		for _, phase := range chain.Phases {
+			if phase.ID != envelope.Step.PhaseID {
+				continue
+			}
+			for _, block := range phase.Blocks {
+				if block.ID != envelope.Step.BlockID {
+					continue
+				}
+				ref := StepRef{PhaseRunKey: PhaseRunKey{IssueID: issueID, WorkflowID: workflowID, PhaseID: envelope.Step.PhaseID}, BlockID: envelope.Step.BlockID, Number: int32(envelope.Step.Number)}
+				outcome := json.RawMessage(`{"completed":true}`)
+				if len(task.Result) > 0 && json.Valid(task.Result) {
+					outcome = task.Result
+				}
+				if err := a.bridge.AfterStepCompleted(ctx, BlockDispatch{
+					Run:   ChainRun{IssueID: issueID, WorkflowID: workflowID, AgentID: envelope.AgentID},
+					Phase: phase, Block: block,
+				}, ChainStep{StepRef: ref, Status: StepCompleted, Outcome: outcome}); err != nil {
+					return
+				}
+				break
+			}
+		}
 	}
 	_ = a.bridge.advanceChain(ctx, workflowID, issueID, chain)
 }

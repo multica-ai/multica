@@ -65,6 +65,10 @@ func TestMain(m *testing.M) {
 	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
 	testHandler.CerebroQueries = cerebrodb.New(pool)                                                                                      // CEREBRO-PATCH(handler-test-cerebro-queries): metadata-backed handlers need fork queries in shared test handler.
 	testHandler.PlatformActionGate = platformaction.NewDefault(toolpolicy.NewStore(pool), queries, testHandler.CerebroQueries, pool, bus) // CEREBRO-PATCH(handler-test-platform-action-gate): Exercise FIR-3266 in shared handler tests.
+	// CEREBRO-PATCH(handler-test-workflow-comment-gate): FIR-3692 gives unrelated upstream handler tests an explicit allow-only Workflow seam.
+	testHandler.CommentTargetGuard = commentWorkflowGateFunc(func(_ context.Context, input CommentWorkflowGateInput) (CommentWorkflowGateResult, error) {
+		return CommentWorkflowGateResult{Allowed: true, ParentID: input.ParentID}, nil
+	})
 	testHandler.BudgetService = service.NewBudgetService(queries)
 	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
 	// test in the suite shares one IP bucket. With the production default

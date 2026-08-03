@@ -63,11 +63,32 @@ func parseConditions(raw []byte) ([]Condition, error) {
 // Service.conditionsHold before this is called, and short-circuit there.
 func evaluate(conds []Condition, ctx map[string]any) bool {
 	for _, c := range conds {
+		c = resolveConditionValues(c, ctx)
 		if !match(c, ctx) {
 			return false
 		}
 	}
 	return true
+}
+
+func resolveConditionValues(condition Condition, ctx map[string]any) Condition {
+	if path, ok := condition.Value.(string); ok && strings.HasPrefix(path, "$event.") {
+		if value, found := lookup(strings.TrimPrefix(path, "$event."), ctx); found {
+			condition.Value = value
+		}
+	}
+	values := append([]any(nil), condition.Values...)
+	for index, candidate := range values {
+		path, ok := candidate.(string)
+		if !ok || !strings.HasPrefix(path, "$event.") {
+			continue
+		}
+		if value, found := lookup(strings.TrimPrefix(path, "$event."), ctx); found {
+			values[index] = value
+		}
+	}
+	condition.Values = values
+	return condition
 }
 
 func match(c Condition, ctx map[string]any) bool {

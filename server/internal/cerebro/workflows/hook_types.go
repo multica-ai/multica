@@ -138,6 +138,7 @@ type HookMatch struct {
 
 type HookResult struct {
 	RunID             string             `json:"run_id,omitempty"`
+	Evaluated         bool               `json:"evaluated"`
 	Decision          HookDecision       `json:"decision"`
 	WouldDecision     HookDecision       `json:"would_decision,omitempty"`
 	Requirements      []string           `json:"requirements,omitempty"`

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -36,8 +35,6 @@ type Handler struct {
 	// In production this is nil and the test endpoint returns 404. The e2e
 	// suite gates the endpoint with CEREBRO_WORKFLOWS_TEST_ENDPOINTS=1.
 	Service *Service
-	// loopPlanningMaterializer is optional and nil-safe: see loop_planning.go.
-	loopPlanningMaterializer LoopPlanningMaterializer
 	// issueLoopCompiler is optional and nil-safe: see issue_loop.go.
 	issueLoopCompiler IssueLoopCompiler
 	// issueLoopColumns is optional and nil-safe: without it, workflow_type
@@ -524,8 +521,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create workflow")
 		return
 	}
-	h.materializeLoopPlanning(r.Context(), wsUUID, creatorUUID, actorType(r), req)
-
 	if req.isIssueLoop() {
 		resp, syncErr := h.materializeIssueLoop(r.Context(), wsUUID, row.ID, projectID, creatorUUID, actorType(r), req.LoopSpec)
 		if syncErr != nil {
@@ -568,32 +563,6 @@ func (h *Handler) materializeIssueLoop(ctx context.Context, wsUUID, workflowID, 
 		return workflowResponse{}, err
 	}
 	return withIssueLoopFields(toWorkflowResponse(row), fields), nil
-}
-
-// materializeLoopPlanning creates the companion loop:planning-dispatch
-// workflow row (see loop_planning.go) when the just-created workflow is a
-// run_skill action with loop_planning=true in its action_config. Best-effort:
-// a failure here is logged, not surfaced as a 500, so a transient DB error on
-// the companion row never blocks creation of the workflow the user asked for.
-func (h *Handler) materializeLoopPlanning(ctx context.Context, wsUUID, creatorUUID pgtype.UUID, createdByType string, req writeWorkflowRequest) {
-	if h.loopPlanningMaterializer == nil || req.ActionType != ActionRunSkill {
-		return
-	}
-	var cfg ActionConfigRunSkill
-	if len(req.ActionConfig) > 0 {
-		if err := json.Unmarshal(req.ActionConfig, &cfg); err != nil {
-			return
-		}
-	}
-	if !cfg.LoopPlanning {
-		return
-	}
-	if err := h.loopPlanningMaterializer.CreatePlanningDispatch(ctx, wsUUID, creatorUUID, createdByType, cfg.AgentID, cfg.SkillName); err != nil {
-		slog.Error("workflow create: loop planning-dispatch materialization failed",
-			"agent_id", cfg.AgentID,
-			"error", err,
-		)
-	}
 }
 
 // Update handles PUT /api/cerebro/workflows/{id}.
