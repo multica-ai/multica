@@ -176,7 +176,7 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":200,"outputTokens":50,"cacheReadTokens":30,"cacheWriteTokens":15}}}\n' "$id"
       if [ -n "$KIMI_LATE_CHUNK" ]; then
         sleep 0.05
         printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" tail"}}}}\n'
@@ -493,5 +493,35 @@ func TestKimiBackendDropsHistoryReplayOnResume(t *testing.T) {
 		if m.Type == MessageText && strings.Contains(m.Content, "old history") {
 			t.Fatalf("history replay leaked into message stream: %+v", m)
 		}
+	}
+}
+
+func TestKimiBackendAccumulatesPromptResultUsage(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPPromptScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	want := TokenUsage{InputTokens: 200, OutputTokens: 50, CacheReadTokens: 30, CacheWriteTokens: 15}
+	if usage := result.Usage["unknown"]; usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}
 }

@@ -107,9 +107,11 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","name":"Shell","output":"hi\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
       if [ -n "$GROK_USAGE" ]; then
-        # Match live Grok Build ACP (0.2.x): metering lives under result._meta,
-        # not a top-level usage field or sessionUpdate=usage_update.
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":120,"outputTokens":30,"cachedReadTokens":20,"cacheWriteTokens":8,"usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cachedReadTokens":20,"cacheWriteTokens":8,"modelCalls":1,"costUsdTicks":98765}}}}\n' "$id"
+        # Grok Build ACP (0.2.x) puts metering under result._meta rather than a
+        # top-level usage field or usage_update. The cache-write extension is
+        # synthetic, so keep its four token buckets mutually exclusive and
+        # totalTokens self-consistent: 100 + 30 + 20 + 8 = 158.
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":100,"outputTokens":30,"cachedReadTokens":20,"cacheWriteTokens":8,"usage":{"inputTokens":100,"outputTokens":30,"totalTokens":158,"cachedReadTokens":20,"cacheWriteTokens":8,"modelCalls":1,"costUsdTicks":98765}}}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       fi
@@ -610,9 +612,8 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage missing grok-4.5 key: %+v", result.Usage)
 	}
-	// The fixture's totalTokens (150) equals input + output, so its 20 cached
-	// reads sit inside inputTokens and are billed once: input is stored as the
-	// uncached remainder 120 - 20 = 100.
+	// The fixture uses mutually exclusive counters whose sum matches
+	// totalTokens, so no bucket is charged twice.
 	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
 		t.Fatalf("unexpected usage: %+v", usage)
 	}

@@ -1241,6 +1241,13 @@ func TestParseACPTokenUsageCachedInputBucketing(t *testing.T) {
 			want: TokenUsage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 30},
 		},
 		{
+			// Cache writes are a separate bucket too. When all four buckets sum
+			// to totalTokens, inputTokens is already the uncached remainder.
+			name: "exclusive cache read and write buckets are left alone",
+			raw:  `{"inputTokens":100,"outputTokens":30,"totalTokens":158,"cachedReadTokens":20,"cacheWriteTokens":8}`,
+			want: TokenUsage{InputTokens: 100, OutputTokens: 30, CacheReadTokens: 20, CacheWriteTokens: 8},
+		},
+		{
 			// No totalTokens: nothing in the payload describes the overlap, so
 			// the counters are persisted as reported.
 			name: "missing totalTokens keeps counters as reported",
@@ -2257,6 +2264,9 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_cw","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}\n'
+      if [ -n "$HERMES_USAGE_UPDATE" ]; then
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_cw","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":200,"outputTokens":50,"cacheReadTokens":30,"cacheWriteTokens":15}}}}\n'
+      fi
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":200,"outputTokens":50,"cacheReadTokens":30,"cacheWriteTokens":15}}}\n' "$id"
       exit 0
       ;;
@@ -2272,11 +2282,33 @@ done
 // parseACPTokenUsage correctly parsed it from the wire.
 func TestHermesBackendAccumulatesCacheWriteTokens(t *testing.T) {
 	t.Parallel()
+	usage := runHermesCacheWriteUsage(t, nil)
+	want := TokenUsage{InputTokens: 200, OutputTokens: 50, CacheReadTokens: 30, CacheWriteTokens: 15}
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
+	}
+}
+
+// TestHermesBackendDeduplicatesUsageUpdateAndPromptResult pins the merge
+// semantics when an ACP runtime reports the same cumulative counters through
+// both supported usage paths. Each counter must be charged once, regardless
+// of which frame the stdout reader observes first.
+func TestHermesBackendDeduplicatesUsageUpdateAndPromptResult(t *testing.T) {
+	t.Parallel()
+	usage := runHermesCacheWriteUsage(t, map[string]string{"HERMES_USAGE_UPDATE": "1"})
+	want := TokenUsage{InputTokens: 200, OutputTokens: 50, CacheReadTokens: 30, CacheWriteTokens: 15}
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
+	}
+}
+
+func runHermesCacheWriteUsage(t *testing.T, env map[string]string) TokenUsage {
+	t.Helper()
 
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeHermesACPCacheWriteUsageScript()))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: env})
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -2307,21 +2339,11 @@ func TestHermesBackendAccumulatesCacheWriteTokens(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected usage under test-model, got %+v", result.Usage)
 		}
-		if usage.InputTokens != 200 {
-			t.Errorf("InputTokens = %d, want 200", usage.InputTokens)
-		}
-		if usage.OutputTokens != 50 {
-			t.Errorf("OutputTokens = %d, want 50", usage.OutputTokens)
-		}
-		if usage.CacheReadTokens != 30 {
-			t.Errorf("CacheReadTokens = %d, want 30", usage.CacheReadTokens)
-		}
-		if usage.CacheWriteTokens != 15 {
-			t.Errorf("CacheWriteTokens = %d, want 15", usage.CacheWriteTokens)
-		}
+		return usage
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
 	}
+	return TokenUsage{}
 }
 
 // fakeHermesACPRateLimitScript impersonates hermes for the GitHub

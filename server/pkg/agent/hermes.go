@@ -557,12 +557,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "aborted"
 					finalError = "hermes cancelled the prompt"
 				}
-				// Merge usage from the PromptResponse.
+				// Prompt responses and usage_update notifications can carry the
+				// same cumulative counters. Take the larger value from either path
+				// so a runtime that emits both is charged exactly once.
 				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
+				mergeACPTokenCountsMax(&c.usage, pr.usage)
 				c.usageMu.Unlock()
 			default:
 			}
@@ -1744,23 +1743,30 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	usage := parseACPTokenUsage(msg.Usage)
 
 	c.usageMu.Lock()
-	// Usage updates from ACP are cumulative snapshots, so take the latest.
-	if usage.InputTokens > c.usage.InputTokens {
-		c.usage.InputTokens = usage.InputTokens
-	}
-	if usage.OutputTokens > c.usage.OutputTokens {
-		c.usage.OutputTokens = usage.OutputTokens
-	}
-	if usage.CacheReadTokens > c.usage.CacheReadTokens {
-		c.usage.CacheReadTokens = usage.CacheReadTokens
-	}
-	if usage.CacheWriteTokens > c.usage.CacheWriteTokens {
-		c.usage.CacheWriteTokens = usage.CacheWriteTokens
-	}
+	mergeACPTokenCountsMax(&c.usage, usage)
 	if usage.CostUSDTicks > c.usage.CostUSDTicks {
 		c.usage.CostUSDTicks = usage.CostUSDTicks
 	}
 	c.usageMu.Unlock()
+}
+
+// mergeACPTokenCountsMax merges cumulative counters reported through ACP's
+// usage_update and PromptResponse paths. Runtimes may emit the same snapshot
+// through both, so adding them would double-charge one turn. Per-field maxima
+// also preserve a richer later snapshot when one path omits a counter.
+func mergeACPTokenCountsMax(dst *TokenUsage, next TokenUsage) {
+	if next.InputTokens > dst.InputTokens {
+		dst.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens > dst.OutputTokens {
+		dst.OutputTokens = next.OutputTokens
+	}
+	if next.CacheReadTokens > dst.CacheReadTokens {
+		dst.CacheReadTokens = next.CacheReadTokens
+	}
+	if next.CacheWriteTokens > dst.CacheWriteTokens {
+		dst.CacheWriteTokens = next.CacheWriteTokens
+	}
 }
 
 func parseACPTokenUsage(data json.RawMessage) TokenUsage {
