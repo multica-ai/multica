@@ -986,12 +986,107 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	msg := p2pMessage(t)
 	msg.ForceFresh = true
 	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
+	msg.CommandText = "/new current prompt"
 
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := h.binder.lastAppend.Message.Text; got != msg.Text {
 		t.Fatalf("adapter-enriched body changed: got %q want %q", got, msg.Text)
+	}
+}
+
+func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "/new"
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+	if h.binder.appendedParams().Message.MessageID != "" {
+		t.Fatal("bare fresh must not append an empty user message")
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("bare fresh must not schedule an empty agent run")
+	}
+	if h.typing.calls() != 0 {
+		t.Fatal("bare fresh must not start a typing indicator without a run")
+	}
+	if h.dedup.marks() != 1 {
+		t.Fatalf("bare fresh dedup marks = %d, want 1", h.dedup.marks())
+	}
+
+	next := p2pMessage(t)
+	next.MessageID = "om-2"
+	next.Text = "start the new topic"
+	if err := h.router.Handle(context.Background(), next); err != nil {
+		t.Fatalf("next Handle: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("the next real message must consume the pending ForceFresh intent")
+	}
+
+	again := p2pMessage(t)
+	again.MessageID = "om-3"
+	if err := h.router.Handle(context.Background(), again); err != nil {
+		t.Fatalf("again Handle: %v", err)
+	}
+	if h.tasks.freshArg() {
+		t.Fatal("the pending ForceFresh intent must be consumed exactly once")
+	}
+}
+
+func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "<recent_context>old topic</recent_context>"
+	reset.CommandText = "/new"
+	reset.ForceFresh = true
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+	if h.binder.appendedParams().Message.MessageID != "" {
+		t.Fatal("adapter-enriched bare fresh must not append a user message")
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("adapter-enriched bare fresh must not schedule an empty agent run")
+	}
+}
+
+func TestRouter_BareFreshSurvivesFailedEnqueue(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "/new"
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+
+	h.tasks.err = service.ErrChatTaskAgentNoRuntime
+	failed := p2pMessage(t)
+	failed.MessageID = "om-2"
+	failed.Text = "first attempt while offline"
+	if err := h.router.Handle(context.Background(), failed); err != nil {
+		t.Fatalf("failed enqueue Handle: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("failed enqueue must still receive the pending ForceFresh intent")
+	}
+
+	h.tasks.err = nil
+	next := p2pMessage(t)
+	next.MessageID = "om-3"
+	next.Text = "retry after runtime is available"
+	if err := h.router.Handle(context.Background(), next); err != nil {
+		t.Fatalf("retry Handle: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("pending ForceFresh intent must survive until a run queues")
 	}
 }
 

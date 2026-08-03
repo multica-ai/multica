@@ -56,7 +56,7 @@ type Router struct {
 	logger *slog.Logger
 
 	pendingFreshMu sync.Mutex
-	pendingFresh   map[string]bool
+	pendingFresh   map[string]time.Time
 }
 
 // Config tunes the Router. Zero values default.
@@ -108,7 +108,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		mediaCancel:  mediaCancel,
 		mediaSem:     make(chan struct{}, cfg.MediaConcurrency),
 		logger:       cfg.Logger,
-		pendingFresh: make(map[string]bool),
+		pendingFresh: make(map[string]time.Time),
 		mediaQueues:  make(map[string]*mediaQueueEntry),
 	}
 }
@@ -187,12 +187,16 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	}
 
 	// /new is a channel-wide product command, not an adapter capability. Parse
-	// it here so every adapter that delivers it as message text gets the same
-	// fresh-session behavior. Feishu already strips /new before its context
-	// enricher runs and sets ForceFresh; the guard preserves that enriched body.
-	if !msg.ForceFresh {
-		if body, ok := ParseFreshSessionCommand(msg.CommandText); ok {
-			msg.ForceFresh = true
+	// the original command source here even when an adapter already set
+	// ForceFresh, so bare-command classification stays identical across
+	// platforms. Only rewrite Text when the adapter has not already stripped
+	// the directive; Feishu enriches that stripped body before it reaches us.
+	bareFresh := false
+	if body, ok := ParseFreshSessionCommand(msg.CommandText); ok {
+		adapterAlreadyStripped := msg.ForceFresh
+		msg.ForceFresh = true
+		bareFresh = body == ""
+		if !adapterAlreadyStripped {
 			msg.Text = body
 		}
 	}
@@ -205,7 +209,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 		return ErrNoResolverSet
 	}
 
-	res, inst, err := r.dispatch(ctx, set, msg)
+	res, inst, err := r.dispatch(ctx, set, msg, bareFresh)
 	if err != nil {
 		r.logger.Error("channel router: dispatch error",
 			"channel_type", string(msg.Source.ChannelType),
@@ -223,7 +227,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never
 	// blocks the connector ACK path.
-	if res.Outcome == OutcomeIngested && set.Typing != nil {
+	if res.Outcome == OutcomeIngested && res.runScheduled && set.Typing != nil {
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
@@ -236,7 +240,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 
 // dispatch runs the pipeline and returns the typed result plus the resolved
 // installation (needed by the outbound side). Mirrors lark.Dispatcher.Handle.
-func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.InboundMessage) (Result, ResolvedInstallation, error) {
+func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.InboundMessage, bareFresh bool) (Result, ResolvedInstallation, error) {
 	// 1. Route to installation. The adapter maps the platform routing key
 	//    (carried on the message) to its installation row. These drop
 	//    branches run BEFORE the dedup claim because they have no valid
@@ -271,7 +275,7 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 		claimed = true
 	}
 
-	res, finalize, err := r.processClaimed(ctx, set, msg, inst, claimToken)
+	res, finalize, err := r.processClaimed(ctx, set, msg, inst, claimToken, bareFresh)
 
 	if claimed {
 		r.applyFinalize(ctx, set, inst.ID, msg.MessageID, claimToken, finalize)
@@ -295,7 +299,7 @@ const (
 
 // processClaimed runs the post-dedup pipeline. Mirrors
 // lark.Dispatcher.processClaimed; see its boundary contract per step.
-func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channel.InboundMessage, inst ResolvedInstallation, claimToken pgtype.UUID) (Result, dedupFinalize, error) {
+func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channel.InboundMessage, inst ResolvedInstallation, claimToken pgtype.UUID, bareFresh bool) (Result, dedupFinalize, error) {
 	// 3. Group-mention filter (group chats only), before identity so an
 	//    unbound user's idle group chatter never spams a binding card.
 	if msg.Source.ChatType == channel.ChatTypeGroup && !msg.AddressedToBot {
@@ -337,6 +341,18 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	if err != nil {
 		// Single tx; an error rolled it back, nothing landed. Release.
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
+	}
+	if bareFresh {
+		// ForceFresh is a task-dispatch property. A bare command has no useful
+		// task to dispatch, so remember the intent and apply it to the next real
+		// message instead of writing or running an empty turn.
+		r.markPendingFresh(keyForSession(sessionID))
+		return Result{
+			Outcome:        OutcomeIngested,
+			InstallationID: inst.ID,
+			ChatSessionID:  sessionID,
+			Sender:         msg.Source.SenderID,
+		}, finalizeMark, nil
 	}
 	// 6. Append message + in-tx dedup Mark — the durable transition point.
 	// The media budget is persisted only when the message actually carries
@@ -410,6 +426,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+	res.runScheduled = true
 	if resolveMedia {
 		r.enqueueMedia(set, inst, identity, appendRes.MessageID, msg, sessionID, localMediaDeadline)
 	}
@@ -548,7 +565,7 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 	key := keyForSession(sessionID)
 	fresh := msg.ForceFresh
 	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
 		return
 	}
 	if fresh {
@@ -573,12 +590,21 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 
 	session, err := r.reader.GetChatSession(ctx, sessionID)
 	if err != nil {
+		if forceFresh {
+			r.markPendingFresh(keyForSession(sessionID))
+		}
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
 		r.clearTyping(ctx, set, sessionID)
 		return
 	}
 	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+		if forceFresh {
+			// ForceFresh belongs to the first successfully queued run, not the
+			// first attempt. Preserve it across offline, archived, or transient
+			// enqueue failures so the next real message cannot resume old context.
+			r.markPendingFresh(keyForSession(sessionID))
+		}
 		// No task was enqueued, so no task lifecycle event will ever publish and
 		// the platform's bus-driven typing clear can never fire. Clear the
 		// indicator here (before any notice) so the "processing" reaction does
@@ -608,16 +634,28 @@ func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgt
 func (r *Router) markPendingFresh(key string) {
 	r.pendingFreshMu.Lock()
 	defer r.pendingFreshMu.Unlock()
-	r.pendingFresh[key] = true
+	now := time.Now()
+	cutoff := now.Add(-pendingFreshTTL)
+	for pendingKey, markedAt := range r.pendingFresh {
+		if markedAt.Before(cutoff) {
+			delete(r.pendingFresh, pendingKey)
+		}
+	}
+	r.pendingFresh[key] = now
 }
 
 func (r *Router) takePendingFresh(key string, fallback bool) bool {
 	r.pendingFreshMu.Lock()
 	defer r.pendingFreshMu.Unlock()
-	fresh := fallback || r.pendingFresh[key]
+	markedAt, ok := r.pendingFresh[key]
 	delete(r.pendingFresh, key)
-	return fresh
+	return fallback || (ok && time.Since(markedAt) <= pendingFreshTTL)
 }
+
+// Bare fresh intent is in-memory plumbing between the command and the next
+// real message. Bound it so abandoned sessions cannot grow the Router map
+// forever. A process restart has the same reset-loss boundary.
+const pendingFreshTTL = 24 * time.Hour
 
 // emitFlushReply delivers an offline/archived notice for a flushed run.
 func (r *Router) emitFlushReply(ctx context.Context, set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, outcome Outcome) {
