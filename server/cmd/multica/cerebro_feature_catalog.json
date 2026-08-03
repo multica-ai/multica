@@ -498,6 +498,13 @@
       "default": false
     },
     {
+      "key": "cerebro_task_scope_enforcement",
+      "label": "Task scope enforcement",
+      "description": "Require task tokens to match their bound issue, agent, and workspace on routes guarded by AllowTaskScopeForIssue, AllowTaskScopeForAgent, or AllowTaskScopeForWorkspace. Off bypasses only those three route matchers; Permissions, approvals, credentials, Connections, sandbox, repository, and every other security boundary remain active. Default ON. FIR-4076.",
+      "group": "permissions",
+      "default": true
+    },
+    {
       "key": "cerebro_access_diagnostics",
       "label": "Access diagnostics",
       "description": "Show the shared provider, discovery and Task access diagnostics on Runtime, Connection and transcript surfaces. This is observation-only and does not enable Task Mandate enforcement. FIR-4293.",

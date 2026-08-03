@@ -194,6 +194,7 @@ export type CerebroFlagKey =
   | "cerebro_web_fetch_policy"
   | "cerebro_task_mandate_diagnostics"
   | "cerebro_task_mandate_enforcement"
+  | "cerebro_task_scope_enforcement"
   | "cerebro_access_diagnostics"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
@@ -602,6 +603,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-4220: kill switch for call-time Task Mandate enforcement. Keep OFF
   // until mandate generation covers every callable offered to the agent.
   cerebro_task_mandate_enforcement: false,
+  // FIR-4076: default ON preserves the task-bound issue, agent, and workspace
+  // route matchers. OFF bypasses only those three matchers as an incident switch.
+  cerebro_task_scope_enforcement: true,
   // FIR-4293: one rollout gate for Runtime, Connection and Task access
   // diagnostics. Keep separate from enforcement so operators can validate
   // observation-only evidence before call-time denials are enabled.
@@ -1458,6 +1462,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enforce the immutable Task Mandate on every local and Firtal Gateway call. Keep this off while validating that every callable offered to an agent is present in the same mandate generation. FIR-4220.",
   },
   {
+    key: "cerebro_task_scope_enforcement",
+    label: "Task scope enforcement",
+    group: "permissions",
+    description:
+      "Require task tokens to match their bound issue, agent, and workspace on routes guarded by AllowTaskScopeForIssue, AllowTaskScopeForAgent, or AllowTaskScopeForWorkspace. Off bypasses only those three route matchers; Permissions, approvals, credentials, Connections, sandbox, repository, and every other security boundary remain active. Default ON. FIR-4076.",
+  },
+  {
     key: "cerebro_access_diagnostics",
     label: "Access diagnostics",
     group: "permissions",
@@ -2145,6 +2156,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_web_fetch_permissions: "tool_permissions",
   cerebro_task_mandate_diagnostics: "tool_permissions",
   cerebro_task_mandate_enforcement: "tool_permissions",
+  cerebro_task_scope_enforcement: "tool_permissions",
   cerebro_access_diagnostics: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",

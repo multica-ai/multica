@@ -96,7 +96,8 @@ func RequireUserScope(next http.Handler) http.Handler {
 func AllowTaskScopeForIssue(param string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if AuthScopeFromContext(r.Context()) == ScopeTask {
+			// CEREBRO-PATCH(task-scope-feature-flag): FIR-4076 bypass only this resource matcher when explicitly off.
+			if AuthScopeFromContext(r.Context()) == ScopeTask && taskScopeEnforcementEnabled(r.Context()) {
 				ts := TaskScopeFromContext(r.Context())
 				urlID := chiURLParam(r, param)
 				if urlID == "" || urlID != ts.IssueID {
@@ -114,7 +115,8 @@ func AllowTaskScopeForIssue(param string) func(http.Handler) http.Handler {
 func AllowTaskScopeForAgent(param string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if AuthScopeFromContext(r.Context()) == ScopeTask {
+			// CEREBRO-PATCH(task-scope-feature-flag): FIR-4076 bypass only this resource matcher when explicitly off.
+			if AuthScopeFromContext(r.Context()) == ScopeTask && taskScopeEnforcementEnabled(r.Context()) {
 				ts := TaskScopeFromContext(r.Context())
 				urlID := chiURLParam(r, param)
 				if urlID == "" || urlID != ts.AgentID {
@@ -135,7 +137,8 @@ func AllowTaskScopeForAgent(param string) func(http.Handler) http.Handler {
 func AllowTaskScopeForWorkspace(param string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if AuthScopeFromContext(r.Context()) == ScopeTask {
+			// CEREBRO-PATCH(task-scope-feature-flag): FIR-4076 bypass only this resource matcher when explicitly off.
+			if AuthScopeFromContext(r.Context()) == ScopeTask && taskScopeEnforcementEnabled(r.Context()) {
 				ts := TaskScopeFromContext(r.Context())
 				urlID := chiURLParam(r, param)
 				resolved := WorkspaceIDFromContext(r.Context())
