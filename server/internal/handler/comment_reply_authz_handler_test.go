@@ -50,10 +50,70 @@ func TestCreateComment_TriggeredTaskRejectsTopLevelComment(t *testing.T) {
 		"top-level comments",   // reason
 		fx.TriggerCommentID,    // the comment to reply under
 		"parent_id (--parent)", // actionable fix
+		"new_thread",           // explicit opt-in for a new top-level thread
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("409 message should contain %q, got %q", want, msg)
 		}
+	}
+}
+
+func TestCreateComment_TriggeredTaskAllowsExplicitNewThread(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newRunningSquadLeaderTaskFixture(t)
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+fx.IssueID+"/comments", map[string]any{
+		"content":    "starting a human-facing decision thread",
+		"new_thread": true,
+	})
+	r = withURLParam(r, "id", fx.IssueID)
+	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Task-ID", fx.TaskID)
+
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment explicit new thread: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var got struct {
+		ParentID     *string `json:"parent_id"`
+		SourceTaskID *string `json:"source_task_id"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode comment response: %v", err)
+	}
+	if got.ParentID != nil {
+		t.Fatalf("explicit new thread should be top-level, got parent_id %q", *got.ParentID)
+	}
+	if got.SourceTaskID == nil || *got.SourceTaskID != fx.TaskID {
+		t.Fatalf("explicit new thread should be stamped with source_task_id %q, got %#v", fx.TaskID, got.SourceTaskID)
+	}
+}
+
+func TestCreateComment_NewThreadRejectsParentID(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newRunningSquadLeaderTaskFixture(t)
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+fx.IssueID+"/comments", map[string]any{
+		"content":    "ambiguous reply",
+		"parent_id":  fx.TriggerCommentID,
+		"new_thread": true,
+	})
+	r = withURLParam(r, "id", fx.IssueID)
+	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Task-ID", fx.TaskID)
+
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateComment new_thread + parent_id: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

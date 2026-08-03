@@ -359,8 +359,60 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().String("parent", "", "")
+	cmd.Flags().Bool("new-thread", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestRunIssueCommentAddSendsNewThreadIntent(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode comment body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "decision for humans")
+	_ = cmd.Flags().Set("new-thread", "true")
+
+	if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueCommentAdd: %v", err)
+	}
+	if got := body["new_thread"]; got != true {
+		t.Fatalf("new_thread = %#v, want true in request body", got)
+	}
+	if _, ok := body["parent_id"]; ok {
+		t.Fatalf("parent_id should be omitted for --new-thread, body = %#v", body)
+	}
+}
+
+func TestRunIssueCommentAddRejectsNewThreadWithParent(t *testing.T) {
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "ambiguous")
+	_ = cmd.Flags().Set("parent", "22222222-2222-4222-8222-222222222222")
+	_ = cmd.Flags().Set("new-thread", "true")
+
+	err := runIssueCommentAdd(cmd, []string{"11111111-1111-4111-8111-111111111111"})
+	if err == nil {
+		t.Fatalf("expected --new-thread with --parent to be rejected")
+	}
+	if !strings.Contains(err.Error(), "--new-thread cannot be combined with --parent") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 // TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads is the MUL-4252
