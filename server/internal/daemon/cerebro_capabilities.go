@@ -42,6 +42,10 @@ func cerebroProviderCapabilities(providerType, executable string) map[string]any
 	}
 	fallback["tools"] = tools
 	fallback["discovery_method"] = "probed"
+	// Pin the moment the provider process was actually measured. The successful
+	// snapshot is cached, so later heartbeats may re-report it without pretending
+	// that a new provider probe ran.
+	fallback["provider_observed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	providerCapabilityProbeCache.Store(cacheKey, fallback)
 	return fallback
 }

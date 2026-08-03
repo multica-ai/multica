@@ -192,6 +192,7 @@ func TestBuildTaskDiagnosticsExplainsFrozenCeilingAndObservedDenial(t *testing.T
 			Decision:              "deny",
 			PolicyDecision:        "deny",
 			LegacyPath:            "policy_decision_service",
+			ReasonCode:            "policy_denied",
 			Reason:                "canonical policy did not allow the capability",
 		}},
 	})
@@ -225,13 +226,20 @@ func TestBuildTaskDiagnosticsReportsDecisionLedgerReadFailure(t *testing.T) {
 		OfferedCount:       1,
 		AuthorizedCount:    1,
 		LedgerError:        "database unavailable",
+		LedgerUnavailable:  true,
 	})
+	found := false
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == CodeDecisionLedgerError && diagnostic.State == StateError {
-			return
+			found = true
+		}
+		if diagnostic.Code == CodeTaskDecisionDiagnosticsUnavailable {
+			t.Fatalf("specific Decision Ledger error must not emit a duplicate unavailable diagnostic: %#v", diagnostics)
 		}
 	}
-	t.Fatalf("decision ledger error diagnostic missing: %#v", diagnostics)
+	if !found {
+		t.Fatalf("decision ledger error diagnostic missing: %#v", diagnostics)
+	}
 }
 
 func TestBuildTaskDiagnosticsUsesEnforcedDenialAndExactSource(t *testing.T) {
@@ -250,6 +258,7 @@ func TestBuildTaskDiagnosticsUsesEnforcedDenialAndExactSource(t *testing.T) {
 				CanonicalCapabilityID: "connection:company-brain/search",
 				Decision:              "deny",
 				PolicyDecision:        "allow",
+				ReasonCode:            "runtime_capability_unavailable",
 				Reason:                "canonical capability is absent from the live runtime surface",
 			},
 			wantCount: 1, wantState: StateDenied, wantSource: "Runtime availability", wantCapability: "connection:company-brain/search",
@@ -260,6 +269,7 @@ func TestBuildTaskDiagnosticsUsesEnforcedDenialAndExactSource(t *testing.T) {
 				ObservedToolName: "add_comment",
 				Decision:         "deny",
 				PolicyDecision:   "error",
+				ReasonCode:       "task_generation_stale",
 				Reason:           "task mandate task_generation_stale: The task claim generation is stale.",
 			},
 			wantCount: 1, wantState: StateDenied, wantSource: "Task Mandate", wantCapability: "add_comment",
@@ -270,6 +280,7 @@ func TestBuildTaskDiagnosticsUsesEnforcedDenialAndExactSource(t *testing.T) {
 				ObservedToolName: "add_comment",
 				Decision:         "allow",
 				PolicyDecision:   "error",
+				ReasonCode:       "task_tool_not_authorized",
 				Reason:           "task mandate denied the call",
 			},
 			wantCount: 0,
@@ -295,6 +306,90 @@ func TestBuildTaskDiagnosticsUsesEnforcedDenialAndExactSource(t *testing.T) {
 			got := diagnostics[0]
 			if got.State != tt.wantState || got.SourcePolicy != tt.wantSource || got.AffectedCapability != tt.wantCapability {
 				t.Fatalf("diagnostic = %#v", got)
+			}
+		})
+	}
+}
+
+func TestBuildTaskDiagnosticsUsesReasonCodeNotDisplayText(t *testing.T) {
+	diagnostics := BuildTaskDiagnostics(TaskInput{
+		EnforcementEnabled: true,
+		Status:             "active",
+		LifecycleState:     "finalized",
+		OfferedCount:       1,
+		AuthorizedCount:    1,
+		VerdictAllowed:     true,
+		Ledger: []DecisionEvidence{{
+			ObservedToolName: "add_comment",
+			Decision:         "deny",
+			PolicyDecision:   "deny",
+			ReasonCode:       "policy_denied",
+			Reason:           "task mandate task_generation_stale appears only in display copy",
+		}},
+	})
+
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v, want one denial", diagnostics)
+	}
+	if diagnostics[0].SourcePolicy != "Settings → Permissions" ||
+		diagnostics[0].RecoveryAction != "Review the capability in Settings → Permissions and start a new task after changing access." {
+		t.Fatalf("diagnostic classified from display Reason = %#v", diagnostics[0])
+	}
+}
+
+func TestBuildTaskDiagnosticsMakesLedgerFailureExplicit(t *testing.T) {
+	diagnostics := BuildTaskDiagnostics(TaskInput{
+		EnforcementEnabled: false,
+		Status:             "active",
+		LifecycleState:     "finalized",
+		OfferedCount:       1,
+		AuthorizedCount:    1,
+		VerdictAllowed:     true,
+		LedgerUnavailable:  true,
+	})
+
+	found := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == CodeTaskDecisionDiagnosticsUnavailable && diagnostic.State == StateUnavailable {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %#v, want explicit decision-ledger unavailability", diagnostics)
+	}
+}
+
+func TestBuildTaskDiagnosticsMapsTaskVerdictCodesToRecovery(t *testing.T) {
+	tests := []struct {
+		code     string
+		recovery string
+	}{
+		{code: "task_mandate_missing", recovery: "Retry the task claim and investigate Task Mandate persistence if the snapshot is still missing."},
+		{code: "task_mandate_expired", recovery: "Start a new task to receive an active Task Mandate."},
+		{code: "task_identity_mismatch", recovery: "Refresh the task context and retry with the matching task, workspace and agent identity."},
+		{code: "task_generation_stale", recovery: "Retry the task claim so it can finalize against the current claim generation."},
+		{code: "task_tool_not_authorized", recovery: "Review the frozen Task Mandate and start a new task after changing newly allowed access."},
+		{code: "task_finalization_conflict", recovery: "Fix the provider inventory mismatch, then retry the task claim."},
+		{code: "task_mandate_internal_error", recovery: "Retry the Task Mandate decision and investigate the server error if it repeats."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			diagnostics := BuildTaskDiagnostics(TaskInput{
+				EnforcementEnabled: true,
+				Status:             "active",
+				LifecycleState:     "finalized",
+				OfferedCount:       1,
+				AuthorizedCount:    1,
+				VerdictAllowed:     true,
+				Ledger: []DecisionEvidence{{
+					ObservedToolName: "add_comment",
+					Decision:         "deny",
+					ReasonCode:       tt.code,
+					Reason:           "display-only copy",
+				}},
+			})
+			if len(diagnostics) != 1 || diagnostics[0].SourcePolicy != "Task Mandate" || diagnostics[0].RecoveryAction != tt.recovery {
+				t.Fatalf("diagnostics = %#v, want Task Mandate recovery %q", diagnostics, tt.recovery)
 			}
 		})
 	}

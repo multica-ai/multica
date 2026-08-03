@@ -344,7 +344,8 @@ func (h *Handler) recordDaemonTaskMandateDenial(ctx context.Context, workspaceID
 		PolicyDecision:        string(accessdecision.PolicyError),
 		EvidenceLevel:         string(availabilityevidence.LevelDiscovered),
 		Differs:               false,
-		Reason:                fmt.Sprintf("task mandate %s: %s", verdict.Code, verdict.Message),
+		ReasonCode:            string(verdict.Code),
+		Reason:                verdict.Message,
 	}); err != nil {
 		slog.Warn("local tool-policy: could not record Task Mandate denial",
 			"workspace_id", util.UUIDToString(workspaceID), "agent_id", util.UUIDToString(agentID),

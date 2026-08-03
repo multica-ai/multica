@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/accessdiagnostics"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
@@ -89,30 +92,18 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 			verdict = taskmandate.VerdictForError(taskmandate.ErrExpired)
 		}
 	}
-	decisionEvidence := make([]accessdiagnostics.DecisionEvidence, 0)
 	var decisionLedgerError string
+	var loadDecisionDiagnostics func(context.Context, pgtype.UUID) ([]cerebrodb.ListTaskAccessDecisionDiagnosticsRow, error)
 	if h.CerebroQueries != nil {
-		rows, listErr := h.CerebroQueries.ListTaskAccessDecisionDiagnostics(r.Context(), taskUUID)
-		if listErr == nil {
-			decisionEvidence = make([]accessdiagnostics.DecisionEvidence, 0, len(rows))
-			for _, row := range rows {
-				evidence := accessdiagnostics.DecisionEvidence{
-					ObservedToolName:      row.ObservedToolName,
-					CanonicalCapabilityID: row.CanonicalCapabilityID,
-					Decision:              row.Decision,
-					PolicyDecision:        row.PolicyDecision,
-					LegacyPath:            row.LegacyPath,
-					Reason:                row.Reason,
-				}
-				if row.CreatedAt.Valid {
-					evidence.CreatedAt = row.CreatedAt.Time
-				}
-				decisionEvidence = append(decisionEvidence, evidence)
+		loadDecisionDiagnostics = func(ctx context.Context, taskID pgtype.UUID) ([]cerebrodb.ListTaskAccessDecisionDiagnosticsRow, error) {
+			rows, err := h.CerebroQueries.ListTaskAccessDecisionDiagnostics(ctx, taskID)
+			if err != nil {
+				decisionLedgerError = err.Error()
 			}
-		} else {
-			decisionLedgerError = listErr.Error()
+			return rows, err
 		}
 	}
+	decisionEvidence, ledgerUnavailable := loadTaskDecisionEvidence(r.Context(), taskUUID, loadDecisionDiagnostics)
 	diagnostics := accessdiagnostics.BuildTaskDiagnostics(accessdiagnostics.TaskInput{
 		EnforcementEnabled: enforcementEnabled,
 		Status:             status,
@@ -125,6 +116,7 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 		RecoveryAction:     string(verdict.RecoveryAction),
 		Ledger:             decisionEvidence,
 		LedgerError:        decisionLedgerError,
+		LedgerUnavailable:  ledgerUnavailable && decisionLedgerError == "",
 	})
 	writeJSON(w, http.StatusOK, taskMandateResponse{
 		EnforcementEnabled:   enforcementEnabled,
@@ -146,4 +138,35 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 		Verdict:              verdict,
 		Diagnostics:          diagnostics,
 	})
+}
+
+func loadTaskDecisionEvidence(
+	ctx context.Context,
+	taskID pgtype.UUID,
+	load func(context.Context, pgtype.UUID) ([]cerebrodb.ListTaskAccessDecisionDiagnosticsRow, error),
+) ([]accessdiagnostics.DecisionEvidence, bool) {
+	if load == nil {
+		return nil, true
+	}
+	rows, err := load(ctx, taskID)
+	if err != nil {
+		return nil, true
+	}
+	evidence := make([]accessdiagnostics.DecisionEvidence, 0, len(rows))
+	for _, row := range rows {
+		item := accessdiagnostics.DecisionEvidence{
+			ObservedToolName:      row.ObservedToolName,
+			CanonicalCapabilityID: row.CanonicalCapabilityID,
+			Decision:              row.Decision,
+			PolicyDecision:        row.PolicyDecision,
+			LegacyPath:            row.LegacyPath,
+			ReasonCode:            row.ReasonCode,
+			Reason:                row.Reason,
+		}
+		if row.CreatedAt.Valid {
+			item.CreatedAt = row.CreatedAt.Time
+		}
+		evidence = append(evidence, item)
+	}
+	return evidence, false
 }

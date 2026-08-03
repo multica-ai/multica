@@ -165,12 +165,20 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 		WHERE agent_id = $1
 		  AND task_id = $2
 		  AND observed_tool_name = $3
-		  AND reason LIKE 'task mandate task_tool_not_authorized:%'
+		  AND reason_code = 'task_tool_not_authorized'
 	`, agentID, taskID, deniedTool).Scan(&mandateDenials); err != nil {
 		t.Fatalf("read task mandate denial observation: %v", err)
 	}
 	if mandateDenials < 1 {
 		t.Fatal("local Task Mandate denial was not recorded for Capabilities drift")
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE cerebro_access_decision_ledger
+		SET reason = 'display copy contains no authority token'
+		WHERE agent_id = $1 AND task_id = $2 AND observed_tool_name = $3
+		  AND reason_code = 'task_tool_not_authorized'
+	`, agentID, taskID, deniedTool); err != nil {
+		t.Fatalf("rewrite display-only denial reason: %v", err)
 	}
 	observed, err := testHandler.CerebroQueries.ListAgentObservedToolUsage(ctx, cerebrodb.ListAgentObservedToolUsageParams{
 		AgentID:    parseUUID(agentID),

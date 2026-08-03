@@ -194,6 +194,7 @@ export type CerebroFlagKey =
   | "cerebro_web_fetch_policy"
   | "cerebro_task_mandate_diagnostics"
   | "cerebro_task_mandate_enforcement"
+  | "cerebro_access_diagnostics"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
@@ -601,6 +602,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-4220: kill switch for call-time Task Mandate enforcement. Keep OFF
   // until mandate generation covers every callable offered to the agent.
   cerebro_task_mandate_enforcement: false,
+  // FIR-4293: one rollout gate for Runtime, Connection and Task access
+  // diagnostics. Keep separate from enforcement so operators can validate
+  // observation-only evidence before call-time denials are enabled.
+  cerebro_access_diagnostics: false,
   // FIR-4220 (formerly miscited as FIR-2594): surface the Multica platform
   // actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
@@ -1453,6 +1458,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enforce the immutable Task Mandate on every local and Firtal Gateway call. Keep this off while validating that every callable offered to an agent is present in the same mandate generation. FIR-4220.",
   },
   {
+    key: "cerebro_access_diagnostics",
+    label: "Access diagnostics",
+    group: "permissions",
+    description:
+      "Show the shared provider, discovery and Task access diagnostics on Runtime, Connection and transcript surfaces. This is observation-only and does not enable Task Mandate enforcement. FIR-4293.",
+  },
+  {
     key: "cerebro_approvals",
     label: "Approval inbox",
     group: "permissions",
@@ -2133,6 +2145,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_web_fetch_permissions: "tool_permissions",
   cerebro_task_mandate_diagnostics: "tool_permissions",
   cerebro_task_mandate_enforcement: "tool_permissions",
+  cerebro_access_diagnostics: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_policy_cel: "tool_permissions",

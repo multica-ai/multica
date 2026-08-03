@@ -80,3 +80,19 @@ func TestGetRuntimeAccessDiagnosticsUsesSharedContractAndAdminGate(t *testing.T)
 		t.Fatalf("report = %#v, want shared provider and MCP diagnostics", report)
 	}
 }
+
+func TestProviderObservedAtComesFromCapabilityProbeSnapshot(t *testing.T) {
+	want := time.Date(2026, time.August, 2, 19, 30, 0, 0, time.UTC)
+	capabilities := normalizedRuntimeCapabilities("claude", []byte(fmt.Sprintf(
+		`{"tools":["Read"],"discovery_method":"probed","provider_observed_at":%q}`,
+		want.Format(time.RFC3339Nano),
+	)), nil)
+	got := providerObservedAt(capabilities)
+
+	if !got.Equal(want) {
+		t.Fatalf("provider observation = %s, want snapshot time %s", got, want)
+	}
+	if got.IsZero() {
+		t.Fatal("provider observation must not fall back to Runtime updated_at")
+	}
+}

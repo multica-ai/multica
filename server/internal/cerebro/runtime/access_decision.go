@@ -141,7 +141,7 @@ func (e *FirtalGatewayExecutor) recordTaskMandateDenial(
 	if !ok {
 		return
 	}
-	e.accessDecisions.RecordTaskMandateDenial(ctx, call, string(verdict.Code), verdict.Message)
+	e.accessDecisions.RecordTaskMandateDenial(ctx, call, verdict)
 }
 
 func gatewayPolicyRequestContext(toolName string, args map[string]any) toolpolicy.RequestContext {

@@ -3,6 +3,7 @@ import {
   CEREBRO_FLAGS,
   CEREBRO_FLAG_GROUPS,
   CEREBRO_FLAG_DEFAULTS,
+  CEREBRO_FLAG_SUBGROUP_OF,
   flagsForGroup,
 } from "./registry";
 
@@ -50,6 +51,14 @@ describe("cerebro feature flag grouping", () => {
     expect(
       CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_task_mandate_enforcement")?.group,
     ).toBe("permissions");
+  });
+
+  it("ships access diagnostics behind one default-off operator gate", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_access_diagnostics).toBe(false);
+    expect(
+      CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_access_diagnostics")?.group,
+    ).toBe("permissions");
+    expect(CEREBRO_FLAG_SUBGROUP_OF.cerebro_access_diagnostics).toBe("tool_permissions");
   });
 
   it("keeps mini apps unavailable until an admin enables the product", () => {

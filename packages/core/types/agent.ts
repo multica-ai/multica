@@ -221,6 +221,7 @@ export interface TaskMandateVerdict {
   message: string;
 }
 
+// CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 shared operator diagnostic types.
 export type AccessDiagnosticState =
   | "success"
   | "info"

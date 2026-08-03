@@ -28,17 +28,18 @@ const (
 type Code string
 
 const (
-	CodeProviderProbe       Code = "provider_probe"
-	CodeMCPDiscovery        Code = "mcp_discovery"
-	CodeConnectionDiscovery Code = "connection_discovery"
-	CodeTaskObservationOnly Code = "task_observation_only"
-	CodeTaskPartial         Code = "task_partial"
-	CodeTaskEmpty           Code = "task_empty"
-	CodeTaskExpired         Code = "task_expired"
-	CodeTaskDraft           Code = "task_not_finalized"
-	CodeTaskMissing         Code = "task_mandate_missing"
-	CodeObservedDenial      Code = "observed_denial"
-	CodeDecisionLedgerError Code = "decision_ledger_unavailable"
+	CodeProviderProbe                      Code = "provider_probe"
+	CodeMCPDiscovery                       Code = "mcp_discovery"
+	CodeConnectionDiscovery                Code = "connection_discovery"
+	CodeTaskObservationOnly                Code = "task_observation_only"
+	CodeTaskPartial                        Code = "task_partial"
+	CodeTaskEmpty                          Code = "task_empty"
+	CodeTaskExpired                        Code = "task_expired"
+	CodeTaskDraft                          Code = "task_not_finalized"
+	CodeTaskMissing                        Code = "task_mandate_missing"
+	CodeObservedDenial                     Code = "observed_denial"
+	CodeDecisionLedgerError                Code = "decision_ledger_unavailable"
+	CodeTaskDecisionDiagnosticsUnavailable Code = "task_decision_diagnostics_unavailable"
 )
 
 // Diagnostic is the additive wire shape shared by REST, CLI, MCP and the app.
@@ -289,6 +290,7 @@ type DecisionEvidence struct {
 	Decision              string
 	PolicyDecision        string
 	LegacyPath            string
+	ReasonCode            string
 	Reason                string
 	CreatedAt             time.Time
 }
@@ -305,6 +307,7 @@ type TaskInput struct {
 	RecoveryAction     string
 	Ledger             []DecisionEvidence
 	LedgerError        string
+	LedgerUnavailable  bool
 }
 
 func BuildTaskDiagnostics(in TaskInput) []Diagnostic {
@@ -358,6 +361,14 @@ func BuildTaskDiagnostics(in TaskInput) []Diagnostic {
 			RecoveryAction: "Check the Runtime provider probe, MCP discovery and Settings → Permissions before retrying the task.",
 		})
 	}
+	if in.LedgerUnavailable && strings.TrimSpace(in.LedgerError) == "" {
+		out = append(out, Diagnostic{
+			Code: CodeTaskDecisionDiagnosticsUnavailable, State: StateUnavailable, Title: "Task decision diagnostics unavailable",
+			Message:            "The Task access snapshot loaded, but its Decision Ledger evidence could not be read.",
+			AffectedCapability: "task:*", SourcePolicy: "Decision Ledger",
+			RecoveryAction: "Retry the snapshot and investigate the Decision Ledger data source before relying on the denial history.",
+		})
+	}
 	if in.EnforcementEnabled && !in.VerdictAllowed && in.VerdictCode != "" {
 		out = append(out, Diagnostic{
 			Code: Code(in.VerdictCode), State: StateDenied, Title: "Task Mandate denied access",
@@ -369,25 +380,42 @@ func BuildTaskDiagnostics(in TaskInput) []Diagnostic {
 		if evidence.Decision != "deny" {
 			continue
 		}
-		lowerReason := strings.ToLower(strings.TrimSpace(evidence.Reason))
-		source := "Settings → Permissions"
-		recovery := "Review the capability in Settings → Permissions and start a new task after changing access."
-		switch {
-		case strings.Contains(lowerReason, "task mandate"):
+		source := "Decision Ledger"
+		recovery := "Inspect the decision producer and record a structured reason code before relying on this denial classification."
+		switch evidence.ReasonCode {
+		case "task_mandate_missing":
 			source = "Task Mandate"
-			if strings.Contains(lowerReason, "task_generation_stale") {
-				recovery = "Retry the task claim so it can finalize against the current claim generation."
-			} else {
-				recovery = "Review the frozen Task Mandate and start a new task after changing newly allowed access."
-			}
-		case strings.Contains(lowerReason, "absent from the live runtime surface"), strings.Contains(lowerReason, "did not resolve to a canonical capability"):
+			recovery = "Retry the task claim and investigate Task Mandate persistence if the snapshot is still missing."
+		case "task_mandate_expired":
+			source = "Task Mandate"
+			recovery = "Start a new task to receive an active Task Mandate."
+		case "task_identity_mismatch":
+			source = "Task Mandate"
+			recovery = "Refresh the task context and retry with the matching task, workspace and agent identity."
+		case "task_generation_stale":
+			source = "Task Mandate"
+			recovery = "Retry the task claim so it can finalize against the current claim generation."
+		case "task_tool_not_authorized":
+			source = "Task Mandate"
+			recovery = "Review the frozen Task Mandate and start a new task after changing newly allowed access."
+		case "task_finalization_conflict":
+			source = "Task Mandate"
+			recovery = "Fix the provider inventory mismatch, then retry the task claim."
+		case "task_mandate_internal_error":
+			source = "Task Mandate"
+			recovery = "Retry the Task Mandate decision and investigate the server error if it repeats."
+		case "runtime_capability_unavailable", "canonical_capability_unresolved":
 			source = "Runtime availability"
 			recovery = "Refresh provider and MCP discovery, then retry after the capability appears on the live Runtime surface."
-		case evidence.PolicyDecision == "ask":
+		case "policy_approval_required":
+			source = "Settings → Permissions"
 			recovery = "Approve the pending request or change the capability decision, then retry the call."
-		case evidence.PolicyDecision == "error":
+		case "policy_unavailable":
 			source = "Policy Decision Service"
 			recovery = "Retry the policy lookup and investigate the Policy Decision Service before enabling enforcement."
+		case "policy_denied", "policy_allowed":
+			source = "Settings → Permissions"
+			recovery = "Review the capability in Settings → Permissions and start a new task after changing access."
 		}
 		capability := strings.TrimSpace(evidence.CanonicalCapabilityID)
 		if capability == "" {

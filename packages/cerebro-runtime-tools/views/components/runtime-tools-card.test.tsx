@@ -7,7 +7,7 @@ import type { AgentRuntime } from "@multica/core/types/agent";
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockGetRuntimeAccessDiagnostics = vi.hoisted(() => vi.fn());
-const diagnosticsFlag = vi.hoisted(() => ({ enabled: false }));
+const featureFlags = vi.hoisted(() => ({ accessDiagnostics: false }));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -25,7 +25,12 @@ vi.mock("@multica/core/api", async () => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => diagnosticsFlag.enabled }));
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) =>
+    key === "cerebro_access_diagnostics" ? featureFlags.accessDiagnostics : false,
+  useFlagValue: (key: string) =>
+    key === "cerebro_access_diagnostics" ? featureFlags.accessDiagnostics : false,
+}));
 
 import { RuntimeToolsCard } from "./runtime-tools-card";
 
@@ -56,7 +61,7 @@ function renderWithClient(node: React.ReactNode) {
 }
 
 beforeEach(() => {
-  diagnosticsFlag.enabled = false;
+  featureFlags.accessDiagnostics = false;
   mockListRuntimeTools.mockReset();
   mockCerebroRequest.mockReset();
   mockGetRuntimeAccessDiagnostics.mockReset();
@@ -92,6 +97,16 @@ beforeEach(() => {
 });
 
 describe("RuntimeToolsCard", () => {
+  it("does not expose or load capability diagnostics while the operator gate is off", async () => {
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    expect(screen.queryByText("Capability discovery")).not.toBeInTheDocument();
+    expect(mockGetRuntimeAccessDiagnostics).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
+  });
+
   it("always renders canonical tool policy even when the feature flag is off", async () => {
     renderWithClient(
       <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
@@ -104,7 +119,7 @@ describe("RuntimeToolsCard", () => {
   });
 
   it("loads capability diagnostics when the diagnostics feature flag is on", async () => {
-    diagnosticsFlag.enabled = true;
+    featureFlags.accessDiagnostics = true;
     renderWithClient(
       <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
     );
@@ -128,7 +143,7 @@ describe("RuntimeToolsCard", () => {
   });
 
   it("shows provider probe and MCP discovery as separate diagnostics", async () => {
-    diagnosticsFlag.enabled = true;
+    featureFlags.accessDiagnostics = true;
     renderWithClient(
       <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
     );

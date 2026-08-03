@@ -2,6 +2,8 @@
 
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import type { AgentTask } from "@multica/core/types/agent";
 import { renderWithI18n } from "../../test/i18n";
 import { TranscriptButton } from "./transcript-button";
@@ -15,6 +17,15 @@ const mockApi = vi.hoisted(() => ({
 
 vi.mock("@multica/core/api", () => ({
   api: mockApi,
+}));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => key === "cerebro_access_diagnostics",
+  useFlagValue: (key: string) => key === "cerebro_access_diagnostics",
 }));
 
 vi.mock("../actor-avatar", () => ({
@@ -76,6 +87,13 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
     created_at: "2026-06-05T19:00:00Z",
     ...overrides,
   };
+}
+
+function renderTranscript(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithI18n(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 describe("TranscriptButton", () => {
@@ -152,7 +170,7 @@ describe("TranscriptButton", () => {
     const stopPropagation = vi.fn();
     const preventDefault = vi.fn();
 
-    renderWithI18n(
+    renderTranscript(
       <div onClick={stopPropagation}>
         <TranscriptButton
           task={makeTask()}
@@ -197,7 +215,7 @@ describe("TranscriptButton", () => {
       authorized_count: 1,
     });
 
-    renderWithI18n(<TranscriptButton task={makeTask()} agentName="Charlene" title="Vis run-detaljer" />);
+    renderTranscript(<TranscriptButton task={makeTask()} agentName="Charlene" title="Vis run-detaljer" />);
     fireEvent.click(screen.getByRole("button", { name: "Vis run-detaljer" }));
 
     expect(await screen.findAllByText("Observation only")).toHaveLength(2);

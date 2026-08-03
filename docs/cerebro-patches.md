@@ -6,7 +6,8 @@ documents one named patch + its rationale + the file location(s).
 ## FIR-4293 — Shared access diagnostics and frozen Task Mandate explanation
 
 - `runtime-access-diagnostics` adds the shared read-only Runtime contract to
-  `packages/core/api/client.ts`, `packages/core/api/schemas.ts`, and
+  `packages/core/api/client.ts`, `packages/core/api/schemas.ts`,
+  `packages/core/types/agent.ts`, and
   `server/cmd/server/router.go`, exposes it through `server/cmd/multica/cmd_runtime.go`,
   and documents it in the built-in `multica-runtimes-and-repos` skill;
   `runtime-access-diagnostics-matrix` records the
@@ -16,8 +17,14 @@ documents one named patch + its rationale + the file location(s).
   with independent versions.
 - `task-access-disclosure` replaces the inline task transcript presentation in
   `packages/views/common/task-transcript/agent-transcript-dialog.tsx` with the
-  shared `@multica/cerebro-ui` component. Settings → Permissions is identified
-  as live authoring while the claimed Task Mandate is visibly frozen.
+  shared TanStack Query-backed `@multica/cerebro-ui` component. Settings →
+  Permissions is identified as live authoring while the claimed Task Mandate is
+  visibly frozen.
+- `task-access-diagnostics-gate` keeps Runtime capability diagnostics,
+  Connection discovery diagnostics, and transcript Task access behind the one
+  default-off `cerebro_access_diagnostics` operator gate. It is intentionally
+  separate from `cerebro_task_mandate_enforcement`, so observation can be
+  reviewed before call-time denial is enabled.
 - **Why:** discovery evidence, current policy, and a per-run Task Mandate answer
   different operator questions. One diagnostic shape makes absence, denial,
   partial, stale, and error states explainable without introducing another

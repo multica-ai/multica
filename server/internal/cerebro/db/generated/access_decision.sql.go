@@ -15,11 +15,11 @@ const appendCerebroAccessDecisionLedger = `-- name: AppendCerebroAccessDecisionL
 INSERT INTO cerebro_access_decision_ledger (
     workspace_id, agent_id, runtime_id, on_behalf_of_user_id, task_id, issue_id,
     observed_tool_name, canonical_capability_id, legacy_decision, legacy_path,
-    shadow_decision, policy_decision, evidence_level, differs, reason
+    shadow_decision, policy_decision, evidence_level, differs, reason_code, reason
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
-    $11, $12, $13, $14, $15
+    $11, $12, $13, $14, $15, $16
 )
 `
 
@@ -38,6 +38,7 @@ type AppendCerebroAccessDecisionLedgerParams struct {
 	PolicyDecision        string      `json:"policy_decision"`
 	EvidenceLevel         string      `json:"evidence_level"`
 	Differs               bool        `json:"differs"`
+	ReasonCode            string      `json:"reason_code"`
 	Reason                string      `json:"reason"`
 }
 
@@ -57,6 +58,7 @@ func (q *Queries) AppendCerebroAccessDecisionLedger(ctx context.Context, arg App
 		arg.PolicyDecision,
 		arg.EvidenceLevel,
 		arg.Differs,
+		arg.ReasonCode,
 		arg.Reason,
 	)
 	return err
@@ -68,6 +70,7 @@ SELECT observed_tool_name,
        legacy_decision AS decision,
        policy_decision,
        legacy_path,
+       reason_code,
        reason,
        created_at
 FROM cerebro_access_decision_ledger
@@ -83,6 +86,7 @@ type ListTaskAccessDecisionDiagnosticsRow struct {
 	Decision              string             `json:"decision"`
 	PolicyDecision        string             `json:"policy_decision"`
 	LegacyPath            string             `json:"legacy_path"`
+	ReasonCode            string             `json:"reason_code"`
 	Reason                string             `json:"reason"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
@@ -102,6 +106,7 @@ func (q *Queries) ListTaskAccessDecisionDiagnostics(ctx context.Context, taskID 
 			&i.Decision,
 			&i.PolicyDecision,
 			&i.LegacyPath,
+			&i.ReasonCode,
 			&i.Reason,
 			&i.CreatedAt,
 		); err != nil {

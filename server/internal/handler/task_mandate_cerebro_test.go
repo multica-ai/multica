@@ -3,15 +3,31 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestLoadTaskDecisionEvidenceMakesSourceFailureExplicit(t *testing.T) {
+	_, unavailable := loadTaskDecisionEvidence(
+		context.Background(),
+		util.MustParseUUID("00000000-0000-0000-0000-000000000001"),
+		func(context.Context, pgtype.UUID) ([]cerebrodb.ListTaskAccessDecisionDiagnosticsRow, error) {
+			return nil, errors.New("decision ledger unavailable")
+		},
+	)
+	if !unavailable {
+		t.Fatal("Decision Ledger query error was treated as complete diagnostics")
+	}
+}
 
 func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 	if testHandler == nil {
@@ -48,10 +64,10 @@ func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 		INSERT INTO cerebro_access_decision_ledger (
 			workspace_id, agent_id, runtime_id, task_id, observed_tool_name,
 			canonical_capability_id, legacy_decision, legacy_path, shadow_decision,
-			policy_decision, evidence_level, differs, reason, created_at
+			policy_decision, evidence_level, differs, reason_code, reason, created_at
 		) VALUES
-			($1,$2,$3,$4,'mcp__company-brain__search','connection:company-brain/search','deny','policy_decision_service','deny','allow','declared',true,'canonical capability is absent from the live runtime surface',now() - interval '1 second'),
-			($1,$2,$3,$4,'mcp__company-brain__search','connection:company-brain/search','allow','policy_decision_service','allow','allow','discovered',false,'canonical policy allowed a capability present on the live runtime surface',now())
+			($1,$2,$3,$4,'mcp__company-brain__search','connection:company-brain/search','deny','policy_decision_service','deny','allow','declared',true,'runtime_capability_unavailable','display-only denial copy',now() - interval '1 second'),
+			($1,$2,$3,$4,'mcp__company-brain__search','connection:company-brain/search','allow','policy_decision_service','allow','allow','discovered',false,'policy_allowed','display-only allow copy',now())
 	`, testWorkspaceID, agentID, agent.RuntimeID, taskID); err != nil {
 		t.Fatalf("insert access decision evidence: %v", err)
 	}

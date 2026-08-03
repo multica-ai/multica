@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -88,12 +89,18 @@ func TestDecisionServiceRecordsExactTaskMandateDenialForTranscriptDiagnostics(t 
 		TaskID:                observerUUID(4),
 		ObservedToolName:      "mcp__company-brain__search",
 		CanonicalCapabilityID: "connection:company-brain/search",
-	}, "task_generation_stale", "The task claim generation is stale.")
+	}, taskmandate.Verdict{
+		Code:           taskmandate.VerdictStaleGeneration,
+		RecoveryAction: taskmandate.RecoveryRetryClaim,
+		Message:        "The task claim generation is stale.",
+	})
 
 	if entry.Decision != DecisionDeny || entry.PolicyDecision != PolicyError {
 		t.Fatalf("entry = %#v", entry)
 	}
-	if len(writer.entries) != 1 || writer.entries[0].Reason != "task mandate task_generation_stale: The task claim generation is stale." {
+	if len(writer.entries) != 1 ||
+		writer.entries[0].ReasonCode != ReasonCode("task_generation_stale") ||
+		writer.entries[0].Reason != "The task claim generation is stale." {
 		t.Fatalf("ledger = %#v", writer.entries)
 	}
 }
@@ -246,8 +253,8 @@ func TestDecisionServiceTaskMandateCircuitBreaker(t *testing.T) {
 
 		entry := service.Decide(context.Background(), call)
 
-		if entry.Decision != DecisionDeny || mandates.calls != 1 {
-			t.Fatalf("enforced decision = %q and calls = %d, want deny and one mandate call", entry.Decision, mandates.calls)
+		if entry.Decision != DecisionDeny || mandates.calls != 1 || entry.ReasonCode != ReasonCode(taskmandate.VerdictInternalError) {
+			t.Fatalf("enforced decision = %q, reason code = %q and calls = %d, want deny/internal error and one mandate call", entry.Decision, entry.ReasonCode, mandates.calls)
 		}
 	})
 }

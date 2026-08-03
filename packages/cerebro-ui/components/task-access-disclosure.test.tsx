@@ -1,19 +1,18 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import type React from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, setApiInstance } from "@multica/core/api";
 import type { TaskAccessSnapshot } from "@multica/core/types";
 
 import { TaskAccessDisclosure } from "./task-access-disclosure";
 
-function renderDisclosure(node: React.ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
-}
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
+}));
 
 const snapshot = {
   enforcement_enabled: false,
@@ -37,6 +36,20 @@ const snapshot = {
     recovery_action: "Review Permissions and start a new task after changing access.",
   }],
 } satisfies TaskAccessSnapshot;
+
+function createClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderDisclosure(
+  node: ReactNode,
+  client = createClient(),
+) {
+  return {
+    client,
+    ...render(<QueryClientProvider client={client}>{node}</QueryClientProvider>),
+  };
+}
 
 describe("TaskAccessDisclosure", () => {
   afterEach(() => {
@@ -119,5 +132,17 @@ describe("TaskAccessDisclosure", () => {
     );
 
     expect(await screen.findByText("No capabilities were frozen for this run.")).toBeInTheDocument();
+  });
+
+  it("owns the Task access snapshot in the shared query cache", async () => {
+    const client = createClient();
+    const load = vi.fn().mockResolvedValue(snapshot);
+    renderDisclosure(
+      <TaskAccessDisclosure taskId="task-1" load={load} />,
+      client,
+    );
+
+    expect(await screen.findByText("Observation only")).toBeInTheDocument();
+    expect(client.getQueryData(["cerebro", "task-access", "workspace-1", "task-1"])).toEqual(snapshot);
   });
 });

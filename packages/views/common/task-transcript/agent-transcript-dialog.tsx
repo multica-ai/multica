@@ -40,7 +40,7 @@ import {
 import { ActorAvatar } from "../actor-avatar";
 // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — AttributionBadge and RichContent land in later upstream commits this fork does not carry yet; their two call sites below degrade instead of importing.
 import { RunFailureCard } from "@multica/cerebro-runtime/views/components/run-failure-card"; // CEREBRO-PATCH(run-failure-card): FIR-3782 — direct entry, not the views barrel: the barrel re-exports pages that import @multica/views and the cycle blanks this dialog.
-import { useFlagValue } from "@multica/cerebro-feature-flags"; // CEREBRO-PATCH(run-failure-card): FIR-3782 — a store read, so the dialog needs no QueryClient of its own.
+import { useFeatureFlag, useFlagValue } from "@multica/cerebro-feature-flags"; // CEREBRO-PATCH(task-access-diagnostics-gate): FIR-4293 hydrates the shared operator gate from the server; older transcript flags remain store reads.
 // CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — Resume / Start over inside the run log modal. Direct entry, not the views barrel, for the same cycle reason as RunFailureCard above.
 import { TranscriptRunRetryActions } from "@multica/cerebro-runtime/views/components/run-retry-actions";
 import { TaskAccessDisclosure } from "@multica/cerebro-ui"; // CEREBRO-PATCH(task-access-diagnostics): FIR-4293 shared Task Mandate operator states.
@@ -504,7 +504,7 @@ export function AgentTranscriptDialog({
     : null;
   const failureCardEnabled = useFlagValue("cerebro_run_failure_card"); // CEREBRO-PATCH(run-failure-card): FIR-3782 — gate the failure summary card.
   const failedRunActionsEnabled = useFlagValue("cerebro_failed_run_bar"); // CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — same flag as the failed-run alert.
-  const taskAccessDiagnosticsEnabled = useFlagValue("cerebro_task_mandate_diagnostics"); // CEREBRO-PATCH(task-access-diagnostics): FIR-4293 — keep evidence independently switchable from enforcement.
+  const accessDiagnosticsEnabled = useFeatureFlag("cerebro_access_diagnostics"); // CEREBRO-PATCH(task-access-diagnostics-gate): FIR-4293 — one server-hydrated operator gate across Runtime, Connection and transcript surfaces.
   const hasRunDetails =
     !!runtimeInfo ||
     !!task.relative_work_dir ||
@@ -782,7 +782,8 @@ export function AgentTranscriptDialog({
         <RunPromptDisclosure task={task} />
         {/* CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot. */}
         {/* CEREBRO-PATCH(task-access-diagnostics): FIR-4293 shared disclosure loads its read model. */}
-        {taskAccessDiagnosticsEnabled ? <TaskAccessDisclosure taskId={task.id} /> : null}
+        {/* CEREBRO-PATCH(task-access-diagnostics-gate): FIR-4293 keep Task access behind the shared operator gate. */}
+        {accessDiagnosticsEnabled ? <TaskAccessDisclosure taskId={task.id} /> : null}
 
         {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and density. */}
         {failureCardEnabled && task.status === "failed" && (

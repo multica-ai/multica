@@ -327,6 +327,7 @@ type CerebroAccessDecisionLedger struct {
 	Differs               bool               `json:"differs"`
 	Reason                string             `json:"reason"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	ReasonCode            string             `json:"reason_code"`
 }
 
 type CerebroAccount struct {

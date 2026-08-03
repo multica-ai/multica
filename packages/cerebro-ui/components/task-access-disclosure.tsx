@@ -1,8 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, LockKeyhole, RefreshCw } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { AccessDiagnostic, TaskAccessSnapshot } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -24,9 +25,11 @@ export function TaskAccessDisclosure({
   taskId: string;
   load?: TaskAccessLoader;
 }) {
+  const workspaceId = useWorkspaceId();
   const snapshotQuery = useQuery({
-    queryKey: ["cerebro", "task-access", taskId],
+    queryKey: ["cerebro", "task-access", workspaceId, taskId],
     queryFn: () => load(taskId),
+    retry: false,
   });
   const snapshot = snapshotQuery.data ?? null;
   const errorDiagnostics = snapshotQuery.isError

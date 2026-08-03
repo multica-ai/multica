@@ -1,6 +1,9 @@
 # Task Mandate rollout and rollback
 
-`cerebro_task_mandate_enforcement` defaults to off. While it is off, Multica
+`cerebro_task_mandate_enforcement` and `cerebro_access_diagnostics` default to
+off. Enable `cerebro_access_diagnostics` only for the named observation cohort;
+this reveals the read-only evidence without enabling call-time denial. While
+`cerebro_task_mandate_enforcement` is off, Multica
 still freezes a Task Mandate for every claimed run and records diagnostic
 observations, but that snapshot cannot reject a call. Settings → Permissions
 remains the live authoring surface; a task transcript is a historical ceiling,
@@ -20,11 +23,13 @@ not a place to edit access.
   Mandate. The task transcript shows that ceiling and observed exact-call
   denials for the current or historical run.
 - `cerebro_task_mandate_enforcement` remains off for observation. The release
-  owner controls cohort enablement after the gates below are clean.
+  owner enables `cerebro_access_diagnostics` for the observation cohort and
+  controls enforcement cohort enablement after the gates below are clean.
 
 ## Operator evidence
 
-Use all three views before changing the flag:
+Enable `cerebro_access_diagnostics` for the observation cohort and use all three
+views before changing `cerebro_task_mandate_enforcement`:
 
 1. Runtime capability discovery: open the Runtime capability card or run
    `multica runtime diagnostics <runtime-id> --output json` or
@@ -60,8 +65,9 @@ unavailable discovery result treated as current.
 
 ## Controlled rollout
 
-1. Deploy the diagnostic surfaces with enforcement off and complete the
-   observation gates above.
+1. Deploy the diagnostic surfaces with enforcement off, enable
+   `cerebro_access_diagnostics` for the named observation cohort, and complete
+   the observation gates above.
 2. Enable `cerebro_task_mandate_enforcement` for one explicitly named workspace
    cohort. Do not combine the first enforcement change with Runtime, provider,
    Connection, Role, or Settings → Permissions changes.
@@ -79,7 +85,8 @@ Settings → Permissions and the independent credential, sandbox, repository,
 approval, and resource-scope ceilings continue to enforce normally.
 
 The diagnostic REST, CLI, MCP, Runtime, Connection, and task transcript
-surfaces are read-only and may remain deployed during rollback. Preserve the
+surfaces are read-only. `cerebro_access_diagnostics` may remain on during
+rollback while `cerebro_task_mandate_enforcement` is turned off. Preserve the
 affected task IDs, exact `verdict.code`, content versions, ledger rows, and
 recovery actions for investigation. Do not widen Settings → Permissions to
 work around a frozen task; fix the source and start a new task.

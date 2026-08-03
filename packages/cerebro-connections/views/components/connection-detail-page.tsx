@@ -30,7 +30,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { PageHeader } from "@multica/views/layout/page-header";
-import { AccessDiagnostics } from "@multica/cerebro-ui";
+import { ConnectionAccessDiagnostics } from "./connection-access-diagnostics";
 
 import type { Connection, ConnectionType, CreateConnectionInput, DefaultAccess, EndpointPermission, ScopableArg, UpdateConnectionInput } from "../types";
 import {
@@ -458,11 +458,7 @@ function ConnectionFormBody({
                 <p className="text-xs text-muted-foreground mb-2">{testResult.error}</p>
               )}
 
-              <AccessDiagnostics
-                diagnostics={testResult.diagnostics}
-                emptyMessage="No discovery diagnostics were returned."
-                className="mb-3"
-              />
+              <ConnectionAccessDiagnostics diagnostics={testResult.diagnostics} />
 
               {testResult.tools && testResult.tools.length > 0 && (
                 <div className="space-y-1">
