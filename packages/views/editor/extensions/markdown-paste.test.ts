@@ -58,6 +58,7 @@ function pasteThroughEditorDom(editor: Editor, text: string, html: string): void
 interface JsonNode {
   type: string;
   text?: string;
+  attrs?: Record<string, unknown>;
   content?: JsonNode[];
 }
 
@@ -228,6 +229,28 @@ describe("markdownPaste — code block context", () => {
     );
   });
 
+  it("keeps an explicit ordered-list start when repairing fragmented rich HTML", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    pasteThroughEditorDom(
+      editor,
+      "4. Fourth\n5. Fifth",
+      '<ol start="4"><li>Fourth</li></ol>' +
+        '<ol start="5"><li>Fifth</li></ol>',
+    );
+
+    const json = editor.getJSON() as JsonNode;
+    const orderedLists = (json.content ?? []).filter(
+      (node) => node.type === "orderedList",
+    );
+    expect(orderedLists).toHaveLength(1);
+    expect(orderedLists[0]?.attrs?.start).toBe(4);
+    expect(editor.getMarkdown()).toContain("4. Fourth\n5. Fifth");
+  });
+
   it("repairs fragmented ordered lists nested inside another list item", () => {
     editor = makeEditor({
       type: "doc",
@@ -273,7 +296,7 @@ describe("markdownPaste — code block context", () => {
       content: [{ type: "paragraph" }],
     });
 
-    const handled = paste(
+    pasteThroughEditorDom(
       editor,
       "1. First\n1. Restarted",
       '<div data-pm-slice="0 0 []">' +
@@ -282,7 +305,29 @@ describe("markdownPaste — code block context", () => {
         "</div>",
     );
 
-    expect(handled).toBe(false);
+    const json = editor.getJSON() as JsonNode;
+    const orderedLists = (json.content ?? []).filter(
+      (node) => node.type === "orderedList",
+    );
+    expect(orderedLists).toHaveLength(2);
+    expect(orderedLists.map(nodeText)).toEqual(["First", "Restarted"]);
+  });
+
+  it("does not reparse ProseMirror-owned plain paragraphs as markdown", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    pasteThroughEditorDom(
+      editor,
+      "# Heading",
+      '<div data-pm-slice="0 0 []"><p># Heading</p></div>',
+    );
+
+    const json = editor.getJSON() as JsonNode;
+    expect(json.content?.map((node) => node.type)).toEqual(["paragraph"]);
+    expect(editor.getText()).toBe("# Heading");
   });
 
   it("does not paste rich HTML natively when its text would drop raw tag-like lines", () => {
