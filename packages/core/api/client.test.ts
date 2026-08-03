@@ -1989,3 +1989,50 @@ describe("ApiClient startMikaOnboarding", () => {
     ).resolves.toEqual({ started: false });
   });
 });
+
+describe("ApiClient reimportSkill response schema", () => {
+  const stubJSON = (body: unknown) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  };
+
+  it("parses a valid skill and defaults the optional fields", async () => {
+    stubJSON({
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "deploy",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z",
+    });
+
+    const skill = await new ApiClient("https://api.example.test")
+      .reimportSkill("skill-1");
+
+    expect(skill).toMatchObject({
+      id: "skill-1",
+      name: "deploy",
+      description: "",
+      content: "",
+      config: {},
+      created_by: null,
+      files: [],
+    });
+  });
+
+  // A malformed body must not report a failed update. The server already
+  // committed the overwrite, and the dialog refetches through invalidation.
+  it("falls back to null on a malformed body instead of throwing", async () => {
+    stubJSON({ id: 42, files: "not-an-array" });
+
+    await expect(
+      new ApiClient("https://api.example.test").reimportSkill("skill-1"),
+    ).resolves.toBeNull();
+  });
+});

@@ -345,6 +345,7 @@ import {
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
+  SkillSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -2227,8 +2228,18 @@ export class ApiClient {
 
   // Re-imports a URL-sourced skill in place from its stored config.origin.
   // No body — the server reads the source URL from the skill's provenance.
-  async reimportSkill(id: string): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}/reimport`, { method: "POST" });
+  //
+  // A malformed body returns null instead of throwing. A 2xx here means the
+  // server already committed the overwrite, so a parse failure is contract
+  // drift, not a failed update. Callers ignore the return value and refetch
+  // through query invalidation.
+  async reimportSkill(id: string): Promise<Skill | null> {
+    const raw = await this.fetch<unknown>(`/api/skills/${id}/reimport`, {
+      method: "POST",
+    });
+    return parseWithFallback<Skill | null>(raw, SkillSchema, null, {
+      endpoint: "POST /api/skills/:id/reimport",
+    });
   }
 
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
