@@ -72,6 +72,15 @@ documents one named patch + its rationale + the file location(s).
 - **Reporting:** an offline recipient is surfaced as one extra line in the
   sender's own comment. The handoff itself is never blocked or delayed.
 
+## FIR-4029 — Skills sidebar review count
+
+- `packages/views/layout/app-sidebar.tsx` mounts the Cerebro-owned
+  `SkillChangesNavBadge` beside the existing `Skills` navigation label.
+- **Why:** skill owners and approvers need to see their pending review count
+  before opening the Skills page. The query and badge remain in
+  `packages/cerebro-skill-ownership`; the upstream sidebar keeps only the
+  smallest marked integration seam.
+
 ## FIR-3986 — Names are copied, never translated
 
 - `server/internal/daemon/execenv/runtime_config_names_verbatim_cerebro.go`

@@ -15,5 +15,6 @@ export {
 // FIR-2742: workspace-wide change review — alert banner + cross-skill sheet.
 export { useSkillChanges, type SkillChangesData } from "./use-skill-changes";
 export { SkillChangesAlert } from "./components/skill-changes-alert";
+export { SkillChangesNavBadge } from "./components/skill-changes-nav-badge";
 export { SkillChangesReviewSheet } from "./components/skill-changes-review-sheet";
 export { SkillChangeInboxDetail } from "./components/skill-change-inbox-detail";

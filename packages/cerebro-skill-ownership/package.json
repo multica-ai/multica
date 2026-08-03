@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

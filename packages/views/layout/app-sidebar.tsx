@@ -124,6 +124,7 @@ import { ProjectIcon } from "../projects/components/project-icon";
 // CEREBRO-PATCH(project-tree): FIR-1614 nested project tree (design, 3-dot menu, sprints, DnD).
 import { CerebroProjectTree } from "./cerebro-project-tree";
 import { useT } from "../i18n";
+import { SkillChangesNavBadge } from "@multica/cerebro-skill-ownership/views"; // CEREBRO-PATCH(skills-sidebar-badge): FIR-4029 mounts the fork-owned review count.
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -937,6 +938,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <span>{t(($) => $.nav[item.labelKey])}</span>
                           {item.key === "runtimes" && hasRuntimeUpdates && (
                             <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                          )}
+                          {/* CEREBRO-PATCH(skills-sidebar-badge): FIR-4029 */}
+                          {item.key === "skills" && wsId && (
+                            <SkillChangesNavBadge workspaceId={wsId} />
                           )}
                         </SidebarMenuButton>
                       </SidebarMenuItem>
