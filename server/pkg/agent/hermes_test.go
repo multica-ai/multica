@@ -1569,6 +1569,58 @@ func TestHermesClientHandleUsageUpdateCumulative(t *testing.T) {
 	}
 }
 
+func TestMergeACPUsageSnapshotPrefersSelfDescribingRecords(t *testing.T) {
+	t.Parallel()
+
+	var usage TokenUsage
+	var totalTokens int64
+
+	// Start with an ambiguous snapshot whose input may include cached reads.
+	mergeACPUsageSnapshot(&usage, &totalTokens, TokenUsage{
+		InputTokens:     120,
+		OutputTokens:    30,
+		CacheReadTokens: 20,
+		CostUSDTicks:    800,
+	}, 0)
+
+	// An equivalent self-describing snapshot has already been normalized by
+	// parseACPTokenUsageSnapshot, so its mutually exclusive buckets replace the
+	// ambiguous counters as a whole.
+	mergeACPUsageSnapshot(&usage, &totalTokens, TokenUsage{
+		InputTokens:     100,
+		OutputTokens:    30,
+		CacheReadTokens: 20,
+		CostUSDTicks:    900,
+	}, 150)
+	want := TokenUsage{InputTokens: 100, OutputTokens: 30, CacheReadTokens: 20, CostUSDTicks: 900}
+	if usage != want || totalTokens != 150 {
+		t.Fatalf("after normalized snapshot: usage=%+v total=%d, want usage=%+v total=150", usage, totalTokens, want)
+	}
+
+	// A later ambiguous duplicate cannot reintroduce overlapping buckets, but
+	// a newer provider cost still wins independently.
+	mergeACPUsageSnapshot(&usage, &totalTokens, TokenUsage{
+		InputTokens:     120,
+		OutputTokens:    30,
+		CacheReadTokens: 20,
+		CostUSDTicks:    1000,
+	}, 0)
+	want.CostUSDTicks = 1000
+	if usage != want || totalTokens != 150 {
+		t.Fatalf("after ambiguous duplicate: usage=%+v total=%d, want usage=%+v total=150", usage, totalTokens, want)
+	}
+
+	// Older cumulative totals cannot roll the selected token record back.
+	mergeACPUsageSnapshot(&usage, &totalTokens, TokenUsage{
+		InputTokens:     90,
+		OutputTokens:    25,
+		CacheReadTokens: 15,
+	}, 130)
+	if usage != want || totalTokens != 150 {
+		t.Fatalf("after older normalized snapshot: usage=%+v total=%d, want usage=%+v total=150", usage, totalTokens, want)
+	}
+}
+
 // ── extractPromptResult ──
 
 func TestHermesClientExtractPromptResult(t *testing.T) {
@@ -1676,6 +1728,9 @@ func TestHermesClientExtractPromptResultMetaUsage(t *testing.T) {
 	}
 	if got.usage.CacheReadTokens != 10880 {
 		t.Errorf("cacheReadTokens: got %d, want 10880", got.usage.CacheReadTokens)
+	}
+	if got.usageTotalTokens != 12958 {
+		t.Errorf("usageTotalTokens: got %d, want 12958", got.usageTotalTokens)
 	}
 	// The turn stamps the model it billed against. A resumed session has no
 	// other source for this (session/load reports no model id), so losing it
@@ -2264,6 +2319,11 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_cw","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}\n'
+      if [ -n "$HERMES_MIXED_NORMALIZATION" ]; then
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_cw","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":120,"outputTokens":30,"cacheReadTokens":20}}}}\n'
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cacheReadTokens":20}}}\n' "$id"
+        exit 0
+      fi
       if [ -n "$HERMES_USAGE_UPDATE" ]; then
         printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_cw","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":200,"outputTokens":50,"cacheReadTokens":30,"cacheWriteTokens":15}}}}\n'
       fi
@@ -2297,6 +2357,21 @@ func TestHermesBackendDeduplicatesUsageUpdateAndPromptResult(t *testing.T) {
 	t.Parallel()
 	usage := runHermesCacheWriteUsage(t, map[string]string{"HERMES_USAGE_UPDATE": "1"})
 	want := TokenUsage{InputTokens: 200, OutputTokens: 50, CacheReadTokens: 30, CacheWriteTokens: 15}
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
+	}
+}
+
+// TestHermesBackendPrefersNormalizedPromptUsage covers two equivalent
+// cumulative snapshots with different information quality: usage_update omits
+// totalTokens, while the terminal PromptResponse includes it and proves cached
+// reads are contained in inputTokens. The normalized terminal record must win
+// as a whole; mixing per-field maxima would leave input at 120 and charge 170
+// tokens instead of the provider-reported total of 150.
+func TestHermesBackendPrefersNormalizedPromptUsage(t *testing.T) {
+	t.Parallel()
+	usage := runHermesCacheWriteUsage(t, map[string]string{"HERMES_MIXED_NORMALIZATION": "1"})
+	want := TokenUsage{InputTokens: 100, OutputTokens: 30, CacheReadTokens: 20}
 	if usage != want {
 		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}

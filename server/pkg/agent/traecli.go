@@ -380,7 +380,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 					finalError = "traecli cancelled the prompt"
 				}
 				c.usageMu.Lock()
-				mergeACPTokenCountsMax(&c.usage, pr.usage)
+				mergeACPUsageSnapshot(&c.usage, &c.usageTotalTokens, pr.usage, pr.usageTotalTokens)
 				c.usageMu.Unlock()
 			default:
 			}

@@ -380,7 +380,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					finalError = "qoder cancelled the prompt"
 				}
 				c.usageMu.Lock()
-				mergeACPTokenCountsMax(&c.usage, pr.usage)
+				mergeACPUsageSnapshot(&c.usage, &c.usageTotalTokens, pr.usage, pr.usageTotalTokens)
 				c.usageMu.Unlock()
 			default:
 			}

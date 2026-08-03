@@ -558,10 +558,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalError = "hermes cancelled the prompt"
 				}
 				// Prompt responses and usage_update notifications can carry the
-				// same cumulative counters. Take the larger value from either path
+				// same cumulative counters. Reconcile whole normalized snapshots
 				// so a runtime that emits both is charged exactly once.
 				c.usageMu.Lock()
-				mergeACPTokenCountsMax(&c.usage, pr.usage)
+				mergeACPUsageSnapshot(&c.usage, &c.usageTotalTokens, pr.usage, pr.usageTotalTokens)
 				c.usageMu.Unlock()
 			default:
 			}
@@ -741,8 +741,9 @@ func waitForHermesPipeDrain(readerDone, stderrDone <-chan struct{}, timeout time
 // ── hermesClient: ACP JSON-RPC 2.0 transport ──
 
 type hermesPromptResult struct {
-	stopReason string
-	usage      TokenUsage
+	stopReason       string
+	usage            TokenUsage
+	usageTotalTokens int64
 	// modelID is the model the agent actually billed this turn against, as
 	// reported on `result._meta.modelId`. Empty for agents that don't report
 	// it. Backends use it to attribute usage when the session handshake
@@ -777,8 +778,9 @@ type hermesClient struct {
 	toolMu       sync.Mutex
 	pendingTools map[string]*pendingToolCall
 
-	usageMu sync.Mutex
-	usage   TokenUsage
+	usageMu          sync.Mutex
+	usage            TokenUsage
+	usageTotalTokens int64
 }
 
 // pendingToolCall buffers state for a tool call while its arguments
@@ -1213,7 +1215,9 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 		modelID:    parseACPModelIDFromMeta(resp.Meta),
 	}
 	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
-		pr.usage = parseACPTokenUsage(resp.Usage)
+		snapshot := parseACPTokenUsageSnapshot(resp.Usage)
+		pr.usage = snapshot.usage
+		pr.usageTotalTokens = snapshot.totalTokens
 	}
 	// Prefer the standard top-level ACP `usage` field when present. Some
 	// agents (notably xAI Grok Build) put per-turn metering only under
@@ -1221,8 +1225,9 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	// `_meta` itself. Without this fallback, tasks complete with an empty
 	// usage map and Multica's Usage/cost dashboards stay at zero.
 	if !acpTokenUsagePresent(pr.usage) {
-		if metaUsage := parseACPTokenUsageFromMeta(resp.Meta); acpTokenUsagePresent(metaUsage) {
-			pr.usage = metaUsage
+		if metaUsage := parseACPTokenUsageSnapshotFromMeta(resp.Meta); acpTokenUsagePresent(metaUsage.usage) {
+			pr.usage = metaUsage.usage
+			pr.usageTotalTokens = metaUsage.totalTokens
 		}
 	}
 
@@ -1236,28 +1241,28 @@ func acpTokenUsagePresent(u TokenUsage) bool {
 	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0
 }
 
-// parseACPTokenUsageFromMeta extracts token usage from an ACP result `_meta`
-// object. Grok Build returns shapes like:
+// parseACPTokenUsageSnapshotFromMeta extracts token usage from an ACP result
+// `_meta` object. Grok Build returns shapes like:
 //
 //	{"inputTokens":…,"outputTokens":…,"cachedReadTokens":…,"usage":{…}}
 //
 // Prefer the nested `usage` object when it carries counters; otherwise parse
 // the flat `_meta` fields with the same alias rules as top-level usage.
-func parseACPTokenUsageFromMeta(meta json.RawMessage) TokenUsage {
+func parseACPTokenUsageSnapshotFromMeta(meta json.RawMessage) acpTokenUsageSnapshot {
 	if len(meta) == 0 || string(meta) == "null" {
-		return TokenUsage{}
+		return acpTokenUsageSnapshot{}
 	}
 	var envelope struct {
 		Usage json.RawMessage `json:"usage"`
 	}
 	if err := json.Unmarshal(meta, &envelope); err == nil {
 		if len(envelope.Usage) > 0 && string(envelope.Usage) != "null" {
-			if u := parseACPTokenUsage(envelope.Usage); acpTokenUsagePresent(u) {
-				return u
+			if snapshot := parseACPTokenUsageSnapshot(envelope.Usage); acpTokenUsagePresent(snapshot.usage) {
+				return snapshot
 			}
 		}
 	}
-	return parseACPTokenUsage(meta)
+	return parseACPTokenUsageSnapshot(meta)
 }
 
 // parseACPModelIDFromMeta pulls the model id off an ACP result `_meta`
@@ -1740,42 +1745,65 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
-	usage := parseACPTokenUsage(msg.Usage)
+	usage := parseACPTokenUsageSnapshot(msg.Usage)
 
 	c.usageMu.Lock()
-	mergeACPTokenCountsMax(&c.usage, usage)
-	if usage.CostUSDTicks > c.usage.CostUSDTicks {
-		c.usage.CostUSDTicks = usage.CostUSDTicks
-	}
+	mergeACPUsageSnapshot(&c.usage, &c.usageTotalTokens, usage.usage, usage.totalTokens)
 	c.usageMu.Unlock()
 }
 
-// mergeACPTokenCountsMax merges cumulative counters reported through ACP's
-// usage_update and PromptResponse paths. Runtimes may emit the same snapshot
-// through both, so adding them would double-charge one turn. Per-field maxima
-// also preserve a richer later snapshot when one path omits a counter.
-func mergeACPTokenCountsMax(dst *TokenUsage, next TokenUsage) {
-	if next.InputTokens > dst.InputTokens {
-		dst.InputTokens = next.InputTokens
+// mergeACPUsageSnapshot reconciles cumulative usage reported through ACP's
+// usage_update and PromptResponse paths. A snapshot with totalTokens is
+// self-describing and has already been normalized into mutually exclusive
+// token buckets, so keep its counters together instead of mixing them with an
+// ambiguous snapshot that may still include cached tokens in inputTokens.
+// Among self-describing snapshots the largest cumulative total wins; without
+// one, per-field maxima retain the most complete available counters. Provider
+// cost is cumulative too and always uses the largest reported value.
+func mergeACPUsageSnapshot(dst *TokenUsage, dstTotalTokens *int64, next TokenUsage, nextTotalTokens int64) {
+	if nextTotalTokens > 0 {
+		if *dstTotalTokens == 0 || nextTotalTokens >= *dstTotalTokens {
+			dst.InputTokens = next.InputTokens
+			dst.OutputTokens = next.OutputTokens
+			dst.CacheReadTokens = next.CacheReadTokens
+			dst.CacheWriteTokens = next.CacheWriteTokens
+			*dstTotalTokens = nextTotalTokens
+		}
+	} else if *dstTotalTokens == 0 {
+		if next.InputTokens > dst.InputTokens {
+			dst.InputTokens = next.InputTokens
+		}
+		if next.OutputTokens > dst.OutputTokens {
+			dst.OutputTokens = next.OutputTokens
+		}
+		if next.CacheReadTokens > dst.CacheReadTokens {
+			dst.CacheReadTokens = next.CacheReadTokens
+		}
+		if next.CacheWriteTokens > dst.CacheWriteTokens {
+			dst.CacheWriteTokens = next.CacheWriteTokens
+		}
 	}
-	if next.OutputTokens > dst.OutputTokens {
-		dst.OutputTokens = next.OutputTokens
-	}
-	if next.CacheReadTokens > dst.CacheReadTokens {
-		dst.CacheReadTokens = next.CacheReadTokens
-	}
-	if next.CacheWriteTokens > dst.CacheWriteTokens {
-		dst.CacheWriteTokens = next.CacheWriteTokens
+	if next.CostUSDTicks > dst.CostUSDTicks {
+		dst.CostUSDTicks = next.CostUSDTicks
 	}
 }
 
 func parseACPTokenUsage(data json.RawMessage) TokenUsage {
+	return parseACPTokenUsageSnapshot(data).usage
+}
+
+type acpTokenUsageSnapshot struct {
+	usage       TokenUsage
+	totalTokens int64
+}
+
+func parseACPTokenUsageSnapshot(data json.RawMessage) acpTokenUsageSnapshot {
 	if len(data) == 0 || string(data) == "null" {
-		return TokenUsage{}
+		return acpTokenUsageSnapshot{}
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
-		return TokenUsage{}
+		return acpTokenUsageSnapshot{}
 	}
 	usage := TokenUsage{
 		InputTokens:  acpUsageInt64(fields, "inputTokens", "input_tokens"),
@@ -1798,7 +1826,11 @@ func parseACPTokenUsage(data json.RawMessage) TokenUsage {
 		// counts (see TokenUsage.CostUSDTicks).
 		CostUSDTicks: acpUsageInt64(fields, "costUsdTicks", "cost_usd_ticks"),
 	}
-	return excludeACPCachedInput(usage, acpUsageInt64(fields, "totalTokens", "total_tokens"))
+	totalTokens := acpUsageInt64(fields, "totalTokens", "total_tokens")
+	return acpTokenUsageSnapshot{
+		usage:       excludeACPCachedInput(usage, totalTokens),
+		totalTokens: totalTokens,
+	}
 }
 
 // excludeACPCachedInput re-buckets a usage record whose `inputTokens` already

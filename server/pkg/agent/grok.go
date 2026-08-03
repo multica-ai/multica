@@ -449,15 +449,10 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				if effectiveModel == "" {
 					effectiveModel = pr.modelID
 				}
+				// The shared merge also preserves xAI's authoritative cost for
+				// long-context turns, which token counts alone cannot reconstruct.
 				c.usageMu.Lock()
-				mergeACPTokenCountsMax(&c.usage, pr.usage)
-				// xAI prices the turn itself and reports the result here.
-				// Carrying it through is the only way the ≥200K long-context
-				// surcharge reaches the bill — token counts alone cannot
-				// reconstruct which tier a request hit.
-				if pr.usage.CostUSDTicks > c.usage.CostUSDTicks {
-					c.usage.CostUSDTicks = pr.usage.CostUSDTicks
-				}
+				mergeACPUsageSnapshot(&c.usage, &c.usageTotalTokens, pr.usage, pr.usageTotalTokens)
 				c.usageMu.Unlock()
 			default:
 			}
