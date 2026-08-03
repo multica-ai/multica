@@ -92,7 +92,8 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -128,9 +129,16 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if runCtx.Err() == context.Canceled {
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
-		} else if exitErr != nil && scanResult.status == "completed" {
-			scanResult.status = "failed"
-			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
+		} else if exitErr != nil {
+			if scanResult.status == "completed" {
+				scanResult.status = "failed"
+				scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
+			} else if scanResult.errMsg == openclawNoParseableOutput {
+				scanResult.errMsg = fmt.Sprintf("%s (process exited with %v)", scanResult.errMsg, exitErr)
+			}
+		}
+		if scanResult.status == "failed" && scanResult.errMsg != "" {
+			scanResult.errMsg = withAgentStderr(scanResult.errMsg, "openclaw", stderrBuf.Tail())
 		}
 
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())

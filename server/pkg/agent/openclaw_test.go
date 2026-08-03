@@ -1567,3 +1567,53 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 }
+
+func TestOpenclawExecuteIncludesStderrWhenOutputIsUnparseable(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then\n" +
+		"  echo 'openclaw 2026.5.5 c37871e'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"echo 'openclaw config validation failed: missing gateway.auth.token' >&2\n" +
+		"exit 7\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute returned synchronous error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("status = %q, want failed", result.Status)
+		}
+		for _, want := range []string{
+			openclawNoParseableOutput,
+			"process exited with exit status 7",
+			"openclaw stderr: openclaw config validation failed: missing gateway.auth.token",
+		} {
+			if !strings.Contains(result.Error, want) {
+				t.Errorf("result error missing %q: %s", want, result.Error)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
