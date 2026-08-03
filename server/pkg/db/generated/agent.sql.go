@@ -3882,6 +3882,135 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 	return items, nil
 }
 
+const listIssueGCProtectedWorkDirs = `-- name: ListIssueGCProtectedWorkDirs :many
+WITH requested_tasks AS (
+    SELECT
+        atq.id,
+        atq.agent_id,
+        atq.issue_id,
+        atq.status,
+        atq.dispatched_at,
+        atq.started_at,
+        atq.completed_at,
+        atq.error,
+        atq.created_at,
+        atq.session_id,
+        atq.work_dir,
+        atq.failure_reason,
+        atq.rerun_of_task_id,
+        atq.retired_session_id
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    WHERE a.workspace_id = $1
+      AND atq.issue_id = ANY($2::uuid[])
+), retired_sessions AS (
+    SELECT DISTINCT r.agent_id, r.issue_id, r.retired_session_id AS session_id
+    FROM requested_tasks r
+    WHERE r.retired_session_id IS NOT NULL
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.agent_id, t.issue_id, t.session_id)
+        t.agent_id,
+        t.issue_id,
+        t.session_id,
+        t.work_dir,
+        t.status,
+        t.failure_reason,
+        t.error,
+        COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM requested_tasks t
+    WHERE t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed')
+    ORDER BY t.agent_id, t.issue_id, t.session_id,
+             COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
+), resume_candidates AS (
+    SELECT DISTINCT ON (l.agent_id, l.issue_id)
+        l.issue_id,
+        l.work_dir
+    FROM latest_per_session l
+    WHERE NOT EXISTS (
+          SELECT 1
+          FROM retired_sessions r
+          WHERE r.agent_id = l.agent_id
+            AND r.issue_id = l.issue_id
+            AND r.session_id = l.session_id
+      )
+      AND (
+        l.status = 'completed'
+        OR (
+          l.status = 'failed'
+          AND COALESCE(l.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
+          AND NOT (COALESCE(l.error, '') ILIKE '%400%' AND COALESCE(l.error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(l.error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(l.error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(l.error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(l.error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+    ORDER BY l.agent_id, l.issue_id, l.terminal_at DESC
+), active_workdirs AS (
+    SELECT t.issue_id, t.work_dir
+    FROM requested_tasks t
+    WHERE t.status IN ('deferred', 'queued', 'dispatched', 'running', 'waiting_local_directory')
+      AND t.work_dir IS NOT NULL
+), active_rerun_sources AS (
+    SELECT source.issue_id, source.work_dir
+    FROM requested_tasks active
+    JOIN agent_task_queue source ON source.id = active.rerun_of_task_id
+    WHERE active.status IN ('deferred', 'queued', 'dispatched', 'running', 'waiting_local_directory')
+      AND source.issue_id = active.issue_id
+      AND source.work_dir IS NOT NULL
+)
+SELECT DISTINCT issue_id, work_dir
+FROM (
+    SELECT issue_id, work_dir FROM resume_candidates
+    UNION ALL
+    SELECT issue_id, work_dir FROM active_workdirs
+    UNION ALL
+    SELECT issue_id, work_dir FROM active_rerun_sources
+) protected
+ORDER BY issue_id, work_dir
+`
+
+type ListIssueGCProtectedWorkDirsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+type ListIssueGCProtectedWorkDirsRow struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	WorkDir pgtype.Text `json:"work_dir"`
+}
+
+// Returns the workdirs that daemon GC must preserve for the requested issues.
+// This is server-owned because only the server can authoritatively apply the
+// same resume rules as GetLastTaskSession. The protected set contains:
+//  1. the current healthy resume candidate for every (agent, issue) pair;
+//  2. workdirs already pinned on non-terminal tasks; and
+//  3. exact source workdirs referenced by non-terminal manual reruns.
+//
+// Keep latest_per_session and its poison filters in sync with
+// GetLastTaskSession above. Returning only the protected set lets the daemon
+// reclaim older superseded env roots without treating every terminal task on
+// an open issue as disposable.
+func (q *Queries) ListIssueGCProtectedWorkDirs(ctx context.Context, arg ListIssueGCProtectedWorkDirsParams) ([]ListIssueGCProtectedWorkDirsRow, error) {
+	rows, err := q.db.Query(ctx, listIssueGCProtectedWorkDirs, arg.WorkspaceID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueGCProtectedWorkDirsRow{}
+	for rows.Next() {
+		var i ListIssueGCProtectedWorkDirsRow
+		if err := rows.Scan(&i.IssueID, &i.WorkDir); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')

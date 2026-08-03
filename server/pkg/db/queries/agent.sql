@@ -839,6 +839,104 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
 ORDER BY terminal_at DESC
 LIMIT 1;
 
+-- name: ListIssueGCProtectedWorkDirs :many
+-- Returns the workdirs that daemon GC must preserve for the requested issues.
+-- This is server-owned because only the server can authoritatively apply the
+-- same resume rules as GetLastTaskSession. The protected set contains:
+--   1. the current healthy resume candidate for every (agent, issue) pair;
+--   2. workdirs already pinned on non-terminal tasks; and
+--   3. exact source workdirs referenced by non-terminal manual reruns.
+--
+-- Keep latest_per_session and its poison filters in sync with
+-- GetLastTaskSession above. Returning only the protected set lets the daemon
+-- reclaim older superseded env roots without treating every terminal task on
+-- an open issue as disposable.
+WITH requested_tasks AS (
+    SELECT
+        atq.id,
+        atq.agent_id,
+        atq.issue_id,
+        atq.status,
+        atq.dispatched_at,
+        atq.started_at,
+        atq.completed_at,
+        atq.error,
+        atq.created_at,
+        atq.session_id,
+        atq.work_dir,
+        atq.failure_reason,
+        atq.rerun_of_task_id,
+        atq.retired_session_id
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    WHERE a.workspace_id = sqlc.arg('workspace_id')
+      AND atq.issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
+), retired_sessions AS (
+    SELECT DISTINCT r.agent_id, r.issue_id, r.retired_session_id AS session_id
+    FROM requested_tasks r
+    WHERE r.retired_session_id IS NOT NULL
+), latest_per_session AS (
+    SELECT DISTINCT ON (t.agent_id, t.issue_id, t.session_id)
+        t.agent_id,
+        t.issue_id,
+        t.session_id,
+        t.work_dir,
+        t.status,
+        t.failure_reason,
+        t.error,
+        COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM requested_tasks t
+    WHERE t.session_id IS NOT NULL
+      AND t.status IN ('completed', 'failed')
+    ORDER BY t.agent_id, t.issue_id, t.session_id,
+             COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
+), resume_candidates AS (
+    SELECT DISTINCT ON (l.agent_id, l.issue_id)
+        l.issue_id,
+        l.work_dir
+    FROM latest_per_session l
+    WHERE NOT EXISTS (
+          SELECT 1
+          FROM retired_sessions r
+          WHERE r.agent_id = l.agent_id
+            AND r.issue_id = l.issue_id
+            AND r.session_id = l.session_id
+      )
+      AND (
+        l.status = 'completed'
+        OR (
+          l.status = 'failed'
+          AND COALESCE(l.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
+          AND NOT (COALESCE(l.error, '') ILIKE '%400%' AND COALESCE(l.error, '') ILIKE '%invalid_request_error%')
+          AND NOT (COALESCE(l.error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(l.error, '') ILIKE '%image.source.base64.data%')
+          AND NOT (COALESCE(l.error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
+                   AND COALESCE(l.error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+        )
+      )
+    ORDER BY l.agent_id, l.issue_id, l.terminal_at DESC
+), active_workdirs AS (
+    SELECT t.issue_id, t.work_dir
+    FROM requested_tasks t
+    WHERE t.status IN ('deferred', 'queued', 'dispatched', 'running', 'waiting_local_directory')
+      AND t.work_dir IS NOT NULL
+), active_rerun_sources AS (
+    SELECT source.issue_id, source.work_dir
+    FROM requested_tasks active
+    JOIN agent_task_queue source ON source.id = active.rerun_of_task_id
+    WHERE active.status IN ('deferred', 'queued', 'dispatched', 'running', 'waiting_local_directory')
+      AND source.issue_id = active.issue_id
+      AND source.work_dir IS NOT NULL
+)
+SELECT DISTINCT issue_id, work_dir
+FROM (
+    SELECT issue_id, work_dir FROM resume_candidates
+    UNION ALL
+    SELECT issue_id, work_dir FROM active_workdirs
+    UNION ALL
+    SELECT issue_id, work_dir FROM active_rerun_sources
+) protected
+ORDER BY issue_id, work_dir;
+
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)
 -- withheld its Codex session because the rollout was missing (MUL-5305). When

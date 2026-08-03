@@ -183,16 +183,17 @@ Daemon behavior is configured via flags or environment variables:
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
-| GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
+| GC full-cleanup TTL | — | `MULTICA_GC_TTL` | `24h` |
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
 
 #### Workspace garbage collection
 
-The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space in three modes:
+The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space in four modes:
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
+- **Superseded workdir cleanup** — when an issue remains open, a completed task directory older than `MULTICA_GC_TTL` is removed if the server confirms it is no longer a resume candidate and no non-terminal task references it. The server protects the latest healthy resume workdir for every `(agent, issue)` pair, every workdir pinned by a `deferred`, `queued`, `dispatched`, `running`, or `waiting_local_directory` task, and the exact source workdir of a non-terminal manual rerun. If the server is too old to provide this authoritative protection set, or the lookup fails, the daemon fails closed and preserves the full task directory.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
 - **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
 

@@ -365,6 +365,113 @@ func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
 	}
 }
 
+func TestGCWorkspace_ReclaimsSupersededOpenIssueWorkdirButKeepsResumeCandidate(t *testing.T) {
+	issueID := "77777777-7777-7777-7777-777777777779"
+	protectedWorkDir := ""
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-superseded/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{
+				"id":                       issueID,
+				"found":                    true,
+				"status":                   "in_progress",
+				"updated_at":               time.Now(),
+				"workdir_protection_known": true,
+				"protected_work_dirs":      []string{protectedWorkDir},
+			},
+		}})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-superseded")
+	oldDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-superseded", "old-run", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-superseded", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	protectedDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-superseded", "latest-run", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-superseded", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	protectedWorkDir = filepath.Join(protectedDir, "workdir")
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+		t.Fatalf("superseded workdir must be reclaimed, stat err=%v", err)
+	}
+	if _, err := os.Stat(protectedDir); err != nil {
+		t.Fatalf("current resume candidate must remain: %v", err)
+	}
+	if stats.cleaned != 1 || stats.skipped != 1 {
+		t.Fatalf("stats = cleaned:%d skipped:%d, want 1/1", stats.cleaned, stats.skipped)
+	}
+}
+
+func TestGCWorkspace_OpenIssueWithoutProtectionKnowledgeFailsClosed(t *testing.T) {
+	issueID := "77777777-7777-7777-7777-777777777780"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-unknown-protection/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{
+				"id":         issueID,
+				"found":      true,
+				"status":     "in_progress",
+				"updated_at": time.Now(),
+			},
+		}})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-unknown-protection")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-unknown-protection", "old-run", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-unknown-protection", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("old server without authoritative protection must preserve task dir: %v", err)
+	}
+	if stats.cleaned != 0 || stats.skipped != 1 {
+		t.Fatalf("stats = cleaned:%d skipped:%d, want 0/1", stats.cleaned, stats.skipped)
+	}
+}
+
+func TestGCWorkspace_RecentTerminalIssueDoesNotUseSupersededCleanup(t *testing.T) {
+	issueID := "77777777-7777-7777-7777-777777777781"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-recent-terminal/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{
+				"id":                       issueID,
+				"found":                    true,
+				"status":                   "done",
+				"updated_at":               time.Now(),
+				"workdir_protection_known": true,
+			},
+		}})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-recent-terminal")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-recent-terminal", "old-run", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-recent-terminal", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("recently terminal issue must retain its task dir until issue TTL: %v", err)
+	}
+	if stats.cleaned != 0 || stats.skipped != 1 {
+		t.Fatalf("stats = cleaned:%d skipped:%d, want 0/1", stats.cleaned, stats.skipped)
+	}
+}
+
 func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
 	issueA := "77777777-7777-7777-7777-777777777773"
 	issueB := "77777777-7777-7777-7777-777777777774"

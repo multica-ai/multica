@@ -4019,10 +4019,12 @@ type batchIssueGCCheckRequest struct {
 }
 
 type batchIssueGCCheckItem struct {
-	ID        string     `json:"id"`
-	Found     bool       `json:"found"`
-	Status    string     `json:"status,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ID                     string     `json:"id"`
+	Found                  bool       `json:"found"`
+	Status                 string     `json:"status,omitempty"`
+	UpdatedAt              *time.Time `json:"updated_at,omitempty"`
+	WorkdirProtectionKnown bool       `json:"workdir_protection_known,omitempty"`
+	ProtectedWorkDirs      []string   `json:"protected_work_dirs,omitempty"`
 }
 
 // BatchIssueGCCheck returns one explicit result for every requested issue ID.
@@ -4078,6 +4080,12 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 			rows[uuidToString(row.ID)] = row
 		}
 	}
+	protectedWorkDirs, err := h.listIssueGCProtectedWorkDirs(r.Context(), workspaceUUID, parsedIDs)
+	if err != nil {
+		slog.Warn("list issue GC protected workdirs failed", "workspace_id", workspaceID, "count", len(parsedIDs), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to check issue workdirs")
+		return
+	}
 
 	items := make([]batchIssueGCCheckItem, 0, len(req.IssueIDs))
 	for i, issueID := range req.IssueIDs {
@@ -4087,6 +4095,8 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 			item.Status = row.Status
 			updatedAt := row.UpdatedAt.Time
 			item.UpdatedAt = &updatedAt
+			item.WorkdirProtectionKnown = true
+			item.ProtectedWorkDirs = protectedWorkDirs[canonicalIDs[i]]
 		}
 		items = append(items, item)
 	}
@@ -4110,10 +4120,40 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
+	protectedWorkDirs, err := h.listIssueGCProtectedWorkDirs(r.Context(), issue.WorkspaceID, []pgtype.UUID{issueUUID})
+	if err != nil {
+		slog.Warn("list issue GC protected workdirs failed", "issue_id", issueID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to check issue workdirs")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     issue.Status,
-		"updated_at": issue.UpdatedAt.Time,
+		"status":                   issue.Status,
+		"updated_at":               issue.UpdatedAt.Time,
+		"workdir_protection_known": true,
+		"protected_work_dirs":      protectedWorkDirs[uuidToString(issueUUID)],
 	})
+}
+
+func (h *Handler) listIssueGCProtectedWorkDirs(ctx context.Context, workspaceID pgtype.UUID, issueIDs []pgtype.UUID) (map[string][]string, error) {
+	protected := make(map[string][]string, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return protected, nil
+	}
+	rows, err := h.Queries.ListIssueGCProtectedWorkDirs(ctx, db.ListIssueGCProtectedWorkDirsParams{
+		WorkspaceID: workspaceID,
+		IssueIds:    issueIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if !row.WorkDir.Valid || strings.TrimSpace(row.WorkDir.String) == "" {
+			continue
+		}
+		issueID := uuidToString(row.IssueID)
+		protected[issueID] = append(protected[issueID], row.WorkDir.String)
+	}
+	return protected, nil
 }
 
 // GetChatSessionGCCheck returns the status and updated_at of a chat session
