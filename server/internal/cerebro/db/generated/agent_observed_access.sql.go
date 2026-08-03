@@ -55,7 +55,7 @@ mandate_denials AS (
            MAX(created_at)::timestamptz    AS last_denied
     FROM cerebro_access_decision_ledger
     WHERE agent_id = $1
-      AND reason = 'task mandate denied the call'
+      AND reason LIKE 'task mandate %'
       AND observed_tool_name <> ''
       AND created_at >= now() - make_interval(days => $2::int)
     GROUP BY observed_tool_name
@@ -144,7 +144,7 @@ mandate_denials AS (
            MAX(created_at)::timestamptz    AS last_denied
     FROM cerebro_access_decision_ledger
     WHERE agent_id = $1
-      AND reason = 'task mandate denied the call'
+      AND reason LIKE 'task mandate %'
       AND observed_tool_name <> ''
       AND created_at > $2::timestamptz
       AND created_at <= $3::timestamptz

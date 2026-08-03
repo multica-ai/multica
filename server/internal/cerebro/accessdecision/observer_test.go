@@ -78,6 +78,26 @@ func observerUUID(b byte) pgtype.UUID {
 	return id
 }
 
+func TestDecisionServiceRecordsExactTaskMandateDenialForTranscriptDiagnostics(t *testing.T) {
+	writer := &observerWriter{}
+	service := NewService(nil, nil, writer)
+	entry := service.RecordTaskMandateDenial(context.Background(), Call{
+		WorkspaceID:           observerUUID(1),
+		AgentID:               observerUUID(2),
+		RuntimeID:             observerUUID(3),
+		TaskID:                observerUUID(4),
+		ObservedToolName:      "mcp__company-brain__search",
+		CanonicalCapabilityID: "connection:company-brain/search",
+	}, "task_generation_stale", "The task claim generation is stale.")
+
+	if entry.Decision != DecisionDeny || entry.PolicyDecision != PolicyError {
+		t.Fatalf("entry = %#v", entry)
+	}
+	if len(writer.entries) != 1 || writer.entries[0].Reason != "task mandate task_generation_stale: The task claim generation is stale." {
+		t.Fatalf("ledger = %#v", writer.entries)
+	}
+}
+
 func TestDecisionServiceRecordsCanonicalOutcomesForDifferentAgents(t *testing.T) {
 	allowAgent := observerUUID(1)
 	denyAgent := observerUUID(2)

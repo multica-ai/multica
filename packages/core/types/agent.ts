@@ -221,6 +221,36 @@ export interface TaskMandateVerdict {
   message: string;
 }
 
+export type AccessDiagnosticState =
+  | "success"
+  | "info"
+  | "partial"
+  | "stale"
+  | "empty"
+  | "denied"
+  | "unavailable"
+  | "error";
+
+export interface AccessDiagnostic {
+  code: string;
+  state: AccessDiagnosticState;
+  title: string;
+  message: string;
+  affected_capability?: string;
+  source_policy: string;
+  recovery_action: string;
+  version?: string;
+  count?: number;
+  observed_at?: string;
+}
+
+export interface RuntimeAccessDiagnostics {
+  runtime_id: string;
+  provider: string;
+  status: string;
+  diagnostics: AccessDiagnostic[];
+}
+
 export interface TaskAccessSnapshot {
 	/** False means the snapshot is diagnostic only; call-time enforcement is disabled. */
 	enforcement_enabled: boolean;
@@ -240,6 +270,7 @@ export interface TaskAccessSnapshot {
   authorized_count?: number;
   grant_digest?: string;
   verdict?: TaskMandateVerdict;
+  diagnostics?: AccessDiagnostic[];
 }
 
 export interface WorkSession {

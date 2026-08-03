@@ -33,6 +33,16 @@
 > assignments; it reports expired, orphaned, and unused access in severity
 > order. Permission audit rows use the same critical-to-low ordering.
 
+> **FIR-4293 access diagnostics.** Runtime provider probing and MCP `tools/list`
+> discovery now project one additive, read-only diagnostic contract through
+> `GET /api/runtimes/{runtimeId}/access-diagnostics`,
+> `multica runtime diagnostics <runtime-id>`, and
+> `get_runtime_access_diagnostics`. Provider and MCP evidence retain separate
+> content versions, states, affected capabilities, source policies, observed
+> times, and recovery actions. Connection Test & discover and the task
+> transcript use the same diagnostic shape. These surfaces explain inventory
+> and decisions; they never author access or participate in authorization.
+
 **Read this before you touch anything that grants, denies, gates, or approves an
 agent action.** Permission enforcement in this codebase is spread across many
 subsystems, and they are easy to confuse. This document is the map.
@@ -81,6 +91,9 @@ surfaces must project the same effective decision:
 
 - **Settings → Permissions** authors direct rules and reusable Roles, and its
   **Why Access** detail names the deciding layer or Role version.
+- **Runtime capability discovery** reports provider probing separately from MCP
+  `tools/list` through the Runtime UI, REST, CLI, and MCP. A successful or stale
+  inventory is evidence about what was discovered, never an Allow decision.
 - **Capabilities** and `get_agent_capabilities` tell the agent what is available,
   allowed, approval-gated or denied using that same effective decision. A
   read-only, externally managed permission also names the concrete security
@@ -90,6 +103,11 @@ surfaces must project the same effective decision:
   producer/finalizer, inventory/discovery versions, offered/authorized counts,
   grant digest, active/ended window, and the stable `verdict.code` plus
   `recovery_action` contract.
+  The transcript also maps observed call-time denials from
+  `cerebro_access_decision_ledger` into the shared diagnostic shape, including
+  the exact rejected callable, source policy, and safe recovery. Settings →
+  Permissions remains live authoring; changing it never widens an already
+  claimed task. Start a new task to capture a new Task Mandate.
   `get_agent_capabilities` is the single deliberate mandate exception: it
   remains subject to canonical policy and its self-only actor check, but the
   snapshot it diagnoses cannot block the lookup itself.
@@ -675,7 +693,7 @@ reuse authority from an older attempt.
 
 | System | Off-switch | Default | What turning it on does |
 |---|---|---|---|
-| **Task Mandate call-time enforcement** | feature flag `cerebro_task_mandate_enforcement` | **off** | Enforces the finalized per-run intersection at local hooks, task-token REST, CLI/MCP, Capabilities, and Firtal Gateway. `SessionModeConfig.AllowedTools` accepts exact callables plus typed `connection:<name>` and `mcp__<server>__*` scopes; it can only tighten the offered inventory. Denials expose the same stable `verdict.code` and `recovery_action` on every surface. While off, mandates are still issued and observable, but cannot reject calls: an expired snapshot keeps `status=expired` for history while its diagnostic verdict remains `allowed` / `none`, matching call time. `offered_count` and `authorized_count` both count callable identities; authorization-only Connection and MCP wildcard scopes remain visible in `allowed_tools` but are excluded from both counts. |
+| **Task Mandate call-time enforcement** | feature flag `cerebro_task_mandate_enforcement` | **off** | Enforces the finalized per-run intersection at local hooks, task-token REST, CLI/MCP, Capabilities, and Firtal Gateway. `SessionModeConfig.AllowedTools` accepts exact callables plus typed `connection:<name>` and `mcp__<server>__*` scopes; it can only tighten the offered inventory. Denials expose the same stable `verdict.code` and `recovery_action` on every surface and append the exact denial to `cerebro_access_decision_ledger`; the task transcript then shows the affected callable, source policy, and recovery. While off, mandates are still issued and observable, but cannot reject calls: an expired snapshot keeps `status=expired` for history while its diagnostic verdict remains `allowed` / `none`, matching call time. `offered_count` and `authorized_count` both count callable identities; authorization-only Connection and MCP wildcard scopes remain visible in `allowed_tools` but are excluded from both counts. Follow [`task-mandate-rollout.md`](./task-mandate-rollout.md) before changing the flag. |
 | **Policy Decision Service for Firtal Gateway tool calls** | always on for Firtal Gateway | **fail closed** | Every Gateway tool list and call resolves through the canonical policy plus presence in the live per-task Gateway registry. Unknown identity, an absent callable, Ask, Deny, lookup error, or missing service returns Deny. The separate availability card still requires two-sided `verified` evidence before it presents a capability as proven reality; that reporting threshold is not an authorization input. There is no runtime-tool cascade, `agent_tool_grant`, or hardcoded POC fallback in the Gateway. Connection, API-endpoint, credential, sandbox, repo, and `create_issue` safety floors remain additional ceilings. |
 | **Old capability resolver + grants** (`approval_required` → Ask) | no live switch | **retired** | Gateway calls resolve through the Policy Decision Service. The approval gate remains only as the shared inbox/wait seam for Ask outcomes. |
 | **Local-runtime per-tool enforcement** (Claude/Codex/Cursor/Gemini) | `ResolveDaemonToolPolicy` plus provider-native before-call seams | **always enforced** | FIR-3401 / FIR-3723 / FIR-3753 — every daemon-spawned local runtime resolves built-in and direct MCP calls through the same canonical tool-policy chain and approval inbox as Gateway. Claude and Codex use wildcard `PreToolUse`, Gemini uses `BeforeTool`, and Cursor uses fail-closed `preToolUse`. Codex starts with hooks explicitly enabled, the daemon-vetted task-local hook trusted, and the enable flag last so agent settings cannot disable the gate. Direct MCP calls keep their provider identity `mcp__<server>__<tool>` through call-time resolution. When the connection resolver admits an entire raw MCP server as Allow-only, the immutable task mandate snapshots the server-scoped `mcp__<server>__*` capability as well as currently discovered exact tools. This matches the raw relay's whole live `tools/list` surface even when the stored discovery manifest is stale, without widening to another server; Deny and mixed-verdict relay-withheld connections receive no wildcard. The task-scoped Capabilities card applies this same mandate to both top-level tools and `connections[].tools`, so `callable` reflects the running task rather than policy alone. Server-dispatched workspace Connection endpoints are the exception: local hooks wrap their shared `<connection>__<operation>` dispatch identity as `mcp__multica__<connection>__<operation>`, so the mandate gate removes only that wrapper before its exact snapshot check while policy resolution keeps the provider-native key. Cursor hook names (`Shell`, `Read`, `Write`, `StrReplace`, `Delete`, `Grep`, `Glob`, `WebSearch`) and their resource arguments are normalized server-side to the Cursor runtime inventory before both the immutable task-mandate check and policy resolution, so older daemons receive the fix without a protocol update and resource-specific rules still apply. Deny blocks; Ask waits for a final approval decision; resolver or transport failure blocks. Runtime reports are authoritative for built-in inventory; claim-injected connection servers are authoritative through the unified connection resolver. The runnable local-provider list comes from the complete-before-call adapter registry; providers without a complete adapter are rejected before spawn and cannot run outside the engine. The former rollout switches and claim-time stage are deleted, so no local runtime can silently spawn without enforcement. Credentials, sandbox and repo floors remain independent and unchanged. |

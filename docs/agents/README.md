@@ -18,6 +18,12 @@ matches what you are about to touch before you start.
   **live today** from what is **off by default**, because confusing the two has
   already caused a wrong conclusion once.
 
+- [`task-mandate-rollout.md`](./task-mandate-rollout.md) — **How to observe,
+  release, and roll back Task Mandate enforcement.** It keeps
+  `cerebro_task_mandate_enforcement` off until provider, MCP/API Connection, and
+  ordinary platform-action evidence agree across the task transcript and the
+  shared Runtime diagnostics.
+
 - [`system-activity/`](./system-activity/README.md) — **System Activity — the
   platform wakeup mechanism.** How `schedule_wakeup` / `list_wakeups` /
   `cancel_wakeup` work, what constraints apply (15-min min interval,

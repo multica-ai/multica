@@ -942,7 +942,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@1.21.7)(terser@5.48.0)(yaml@2.9.0))
 
   packages/cerebro-access:
     dependencies:
@@ -2296,6 +2296,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-ui':
+        specifier: workspace:*
+        version: link:../cerebro-ui
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -4232,6 +4235,9 @@ importers:
       '@multica/cerebro-types':
         specifier: workspace:*
         version: link:../cerebro-types
+      '@multica/cerebro-ui':
+        specifier: workspace:*
+        version: link:../cerebro-ui
       '@multica/core':
         specifier: workspace:*
         version: link:../core

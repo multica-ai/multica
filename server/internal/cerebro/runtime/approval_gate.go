@@ -236,7 +236,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	if e.taskMandates != nil && e.taskMandateEnforcementEnabled(ctx, workspaceID) {
 		taskID := optionalGatewayUUID(meta.TaskID)
 		if !taskID.Valid {
-			return e.denyTaskMandateCall(meta, toolName, taskmandate.ErrMissing)
+			return e.denyTaskMandateCall(ctx, agentID, workspaceID, reg, meta, toolName, taskmandate.ErrMissing)
 		}
 		var err error
 		if authorizer, ok := e.taskMandates.(taskMandateGenerationAuthorizer); ok {
@@ -249,7 +249,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			err = e.taskMandates.Authorize(ctx, taskID, workspaceID, agentID, toolName)
 		}
 		if err != nil {
-			return e.denyTaskMandateCall(meta, toolName, err)
+			return e.denyTaskMandateCall(ctx, agentID, workspaceID, reg, meta, toolName, err)
 		}
 	}
 	var decision, connNameLog string
@@ -350,9 +350,10 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	return true, ""
 }
 
-func (e *FirtalGatewayExecutor) denyTaskMandateCall(meta GatewayRequestMeta, toolName string, err error) (bool, string) {
+func (e *FirtalGatewayExecutor) denyTaskMandateCall(ctx context.Context, agentID, workspaceID pgtype.UUID, reg *Registry, meta GatewayRequestMeta, toolName string, err error) (bool, string) {
 	verdict := taskmandate.VerdictForError(err)
 	reason := taskmandate.VerdictJSON(err)
+	e.recordTaskMandateDenial(ctx, agentID, workspaceID, toolName, reg, meta, verdict)
 	if e != nil && e.logger != nil {
 		e.logger.Warn("runtime tool decision (FIR-2243 B1)",
 			"event", "tool_call_decision",

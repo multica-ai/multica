@@ -106,6 +106,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerCerebroGroupTools(srv, client)
 	// CEREBRO-PATCH(mcp-agent-capabilities): TECH-3642 per-agent capabilities card MCP tool.
 	registerCerebroAgentCapabilitiesTools(srv, client)
+	// CEREBRO-PATCH(mcp-runtime-access-diagnostics): FIR-4293 provider probe + MCP discovery diagnostics over the shared REST contract.
+	registerRuntimeAccessDiagnosticsTools(srv, client)
 	// CEREBRO-PATCH(mcp-credentials-tools): credential governance MCP tools (JEH-1199 + JEH-1217 live-wire).
 	registerCredentialTools(srv, client, workspaceID)
 	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.

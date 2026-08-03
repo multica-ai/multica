@@ -1994,6 +1994,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tools", h.ListRuntimeTools)
 					// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective access preview.
 					r.Get("/tools/effective", h.ListRuntimeToolEffectiveAccess)
+					// CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 shared provider probe + MCP discovery contract for app, CLI and MCP.
+					r.Get("/access-diagnostics", h.GetRuntimeAccessDiagnostics)
 					// CEREBRO-PATCH(router-runtime-tools-scan-now): FIR-2230 admin-triggered live scan.
 					r.Post("/tools/scan-now", h.RequestRuntimeToolScan)
 					// CEREBRO-PATCH(runtime-tool-policy-only): FIR-3403 legacy runtime authoring routes removed; use /api/tool-policy.

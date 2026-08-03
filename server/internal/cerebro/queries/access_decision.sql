@@ -8,3 +8,17 @@ INSERT INTO cerebro_access_decision_ledger (
     $7, $8, $9, $10,
     $11, $12, $13, $14, $15
 );
+
+-- name: ListTaskAccessDecisionDiagnostics :many
+SELECT observed_tool_name,
+       COALESCE(canonical_capability_id, '') AS canonical_capability_id,
+       legacy_decision AS decision,
+       policy_decision,
+       legacy_path,
+       reason,
+       created_at
+FROM cerebro_access_decision_ledger
+WHERE task_id = $1
+  AND legacy_decision = 'deny'
+ORDER BY created_at DESC
+LIMIT 50;

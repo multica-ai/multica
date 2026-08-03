@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdiagnostics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -238,15 +239,47 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 	// When connection_id is provided, merge stored (real) credentials over masked form fields.
 	var storedConnID pgtype.UUID
 	haveStoredConn := false
+	var storedConnection Connection
 	if req.ConnectionID != "" {
 		if connID, err := util.ParseUUID(req.ConnectionID); err == nil {
 			if stored, err := h.Store.Get(r.Context(), connID, wsID); err == nil {
 				storedConnID, haveStoredConn = connID, true
+				storedConnection = stored
 				req.AuthConfig = mergeStoredTestAuth(req.AuthConfig, stored.AuthConfig)
 			}
 		}
 	}
 	result := doTestConnection(r.Context(), req)
+	if haveStoredConn && !storedConnection.Enabled {
+		result.Diagnostics = append(result.Diagnostics, accessdiagnostics.Diagnostic{
+			Code:               "connection_disabled",
+			State:              accessdiagnostics.StateDenied,
+			Title:              "Connection disabled",
+			Message:            "Discovery can be tested, but this saved Connection is not offered to runtimes or tasks.",
+			AffectedCapability: "connection:" + storedConnection.Name,
+			SourcePolicy:       "Connection configuration",
+			RecoveryAction:     "Enable the Connection only after its discovery and Permissions are ready.",
+		})
+	}
+	if haveStoredConn && (storedConnection.DefaultAccess == DefaultAccessAsk || storedConnection.DefaultAccess == DefaultAccessDeny) {
+		state := accessdiagnostics.StateDenied
+		message := "The Connection defaults to Deny until a more specific policy admits an actor."
+		recovery := "Grant the exact actor or group in Settings → Permissions when access is intended."
+		if storedConnection.DefaultAccess == DefaultAccessAsk {
+			state = accessdiagnostics.StatePartial
+			message = "The Connection defaults to Ask and requires a human approval before each unoverridden call."
+			recovery = "Keep Ask for approval-gated access or author an explicit Allow for the intended actor."
+		}
+		result.Diagnostics = append(result.Diagnostics, accessdiagnostics.Diagnostic{
+			Code:               accessdiagnostics.Code("connection_default_" + storedConnection.DefaultAccess),
+			State:              state,
+			Title:              "Connection default access",
+			Message:            message,
+			AffectedCapability: "connection:" + storedConnection.Name,
+			SourcePolicy:       "Connection default access",
+			RecoveryAction:     recovery,
+		})
+	}
 	// Persist the discovered tool list on the saved connection so the
 	// permissions UI can render one row per tool (TECH-3156). Best-effort: a
 	// failed probe (no tools) leaves the previous list untouched.

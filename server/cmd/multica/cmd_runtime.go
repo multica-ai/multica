@@ -43,11 +43,19 @@ var runtimeUpdateCmd = &cobra.Command{
 	RunE:  runRuntimeUpdate,
 }
 
+var runtimeDiagnosticsCmd = &cobra.Command{
+	Use:   "diagnostics <runtime-id>",
+	Short: "Show provider probe and MCP discovery diagnostics",
+	Args:  exactArgs(1),
+	RunE:  runRuntimeDiagnostics,
+}
+
 func init() {
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
 	runtimeCmd.AddCommand(runtimeActivityCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
+	runtimeCmd.AddCommand(runtimeDiagnosticsCmd)
 
 	// runtime list
 	runtimeListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -63,6 +71,9 @@ func init() {
 	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
 	runtimeUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeUpdateCmd.Flags().Bool("wait", false, "Wait for update to complete (poll until done)")
+
+	// runtime diagnostics
+	runtimeDiagnosticsCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +138,40 @@ func runtimeStatusDisplay(rt map[string]any) string {
 		return fmt.Sprintf("paused (%s)", reason)
 	}
 	return strVal(rt, "status")
+}
+
+func runRuntimeDiagnostics(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var report map[string]any
+	path := "/api/runtimes/" + args[0] + "/access-diagnostics"
+	if err := client.GetJSON(ctx, path, &report); err != nil {
+		return fmt.Errorf("get runtime access diagnostics: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, report)
+	}
+	diagnostics, _ := report["diagnostics"].([]any)
+	rows := make([][]string, 0, len(diagnostics))
+	for _, raw := range diagnostics {
+		diagnostic, _ := raw.(map[string]any)
+		rows = append(rows, []string{
+			strVal(diagnostic, "state"),
+			strVal(diagnostic, "title"),
+			strVal(diagnostic, "affected_capability"),
+			strVal(diagnostic, "source_policy"),
+			strVal(diagnostic, "version"),
+			strVal(diagnostic, "recovery_action"),
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"STATE", "DIAGNOSTIC", "AFFECTED", "SOURCE", "VERSION", "RECOVERY"}, rows)
+	return nil
 }
 
 func runRuntimeUsage(cmd *cobra.Command, args []string) error {

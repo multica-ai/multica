@@ -389,19 +389,22 @@ test("Codex uses one permission identity in inventory, Capabilities, observed ac
     });
     await expect(transcriptButton).toHaveCount(1);
     await transcriptButton.click();
-    const taskAccess = page.getByText("Task access · 1 allowed", {
+    const taskAccess = page.getByText("Task access", {
       exact: true,
     });
     await expect(taskAccess).toBeVisible();
-    await expect(page.getByText("Run window ended", { exact: true })).toBeVisible();
-    await taskAccess.click();
-    await expect(page.getByText("tools:bash", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("1 capabilities · ended", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Observation only", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Task access expired", { exact: true })).toBeVisible();
     await expect(
       page.getByText(
-        "Locked when this run started. Every tool call is checked against this exact list.",
+        "Settings → Permissions is live: a later Deny or safety ceiling can still tighten this run, but a later Allow cannot widen its frozen Task Mandate. Start a new task to capture newly allowed access.",
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(page.getByText("tools:bash", { exact: true })).toBeVisible();
     const taskAccessPath = test.info().outputPath("codex-task-access.png");
     const taskAccessScreenshot = await page
       .getByRole("dialog")

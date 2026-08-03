@@ -97,6 +97,10 @@ export type {
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
   WorkSession,
+  AccessDiagnostic,
+  AccessDiagnosticState,
+  RuntimeAccessDiagnostics,
+  TaskMandateVerdict,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, MemberUsage, Invitation } from "./workspace";
 export type {

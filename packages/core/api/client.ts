@@ -29,6 +29,7 @@ import type {
   UpdateAgentEnvRequest,
   AgentTask,
   TaskAccessSnapshot,
+  RuntimeAccessDiagnostics,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
@@ -210,6 +211,8 @@ import {
   AgentToolsListSchema,
   RuntimeToolsListSchema,
   RuntimeToolEffectiveAccessListSchema,
+  RuntimeAccessDiagnosticsSchema,
+  TaskAccessSnapshotSchema,
   // CEREBRO-PATCH(runtime-authoring-retirement): FIR-3403 removed legacy grant schema import.
   CapabilityListResponseSchema,
   AgentAvatarBackfillStatusSchema,
@@ -2296,6 +2299,27 @@ export class ApiClient {
     }) as import("@multica/cerebro-types").RuntimeToolEffectiveAccess[];
   }
 
+  // CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 shared REST contract
+  // consumed by Runtime UI, `multica runtime diagnostics`, and MCP.
+  async getRuntimeAccessDiagnostics(runtimeId: string): Promise<RuntimeAccessDiagnostics> {
+    const path = `/api/runtimes/${runtimeId}/access-diagnostics`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, RuntimeAccessDiagnosticsSchema, {
+      runtime_id: runtimeId,
+      provider: "unknown",
+      status: "unknown",
+      diagnostics: [{
+        code: "runtime_diagnostics_contract_error",
+        state: "error",
+        title: "Runtime diagnostics response unavailable",
+        message: "The server returned a Runtime diagnostics shape this client could not read safely.",
+        affected_capability: `runtime:${runtimeId}`,
+        source_policy: "Runtime diagnostics API",
+        recovery_action: "Refresh after the client and server versions are aligned.",
+      }],
+    }, { endpoint: path }) as RuntimeAccessDiagnostics;
+  }
+
   // CEREBRO-PATCH(runtime-authoring-retirement): legacy runtime grant writers were removed; tool-policy is canonical.
 
   // CEREBRO-PATCH(capability-register-client): FIR-2129 single capability register client API.
@@ -2612,7 +2636,26 @@ export class ApiClient {
 
   // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 expose the task-scoped permission snapshot.
   async getTaskAccess(taskId: string): Promise<TaskAccessSnapshot> {
-    return this.fetch(`/api/tasks/${taskId}/access`);
+    const path = `/api/tasks/${taskId}/access`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, TaskAccessSnapshotSchema, {
+      enforcement_enabled: false,
+      task_id: taskId,
+      agent_id: "",
+      allowed_tools: [],
+      issued_at: "",
+      expires_at: "",
+      status: "expired",
+      diagnostics: [{
+        code: "task_access_contract_error",
+        state: "error",
+        title: "Task access response unavailable",
+        message: "The server returned a Task access shape this client could not read safely.",
+        affected_capability: "task:*",
+        source_policy: "Task Mandate API",
+        recovery_action: "Refresh after the client and server versions are aligned.",
+      }],
+    }, { endpoint: path }) as TaskAccessSnapshot;
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {

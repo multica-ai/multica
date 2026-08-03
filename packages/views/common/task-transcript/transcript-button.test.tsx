@@ -99,7 +99,7 @@ describe("TranscriptButton", () => {
     mockApi.getAgent.mockResolvedValue({ id: "agent-1", name: "Charlene" });
     mockApi.listRuntimes.mockResolvedValue([]);
     mockApi.getTaskAccess.mockResolvedValue({
-	  enforcement_enabled: true,
+      enforcement_enabled: true,
       task_id: "task-1",
       agent_id: "agent-1",
       allowed_tools: ["tools:Read", "firtal_registry"],
@@ -120,6 +120,26 @@ describe("TranscriptButton", () => {
         recovery_action: "start_new_task",
         message: "The Task Mandate run window has ended.",
       },
+      diagnostics: [
+        {
+          code: "task_mandate_expired",
+          state: "denied",
+          title: "Task Mandate denied access",
+          message: "The Task Mandate run window has ended.",
+          affected_capability: "task:*",
+          source_policy: "Task Mandate",
+          recovery_action: "Start a new task to receive a current Task Mandate.",
+        },
+        {
+          code: "task_partial",
+          state: "partial",
+          title: "Partial task access",
+          message: "2 offered capabilities were removed before the Task Mandate was finalized.",
+          affected_capability: "2 capabilities",
+          source_policy: "Task Mandate",
+          recovery_action: "Review Settings → Permissions and start a new task after changing access.",
+        },
+      ],
     });
   });
 
@@ -152,36 +172,38 @@ describe("TranscriptButton", () => {
     expect(await screen.findByRole("dialog", { name: "Agent Execution Transcript" })).toBeInTheDocument();
     expect(screen.getByText("Starter run")).toBeInTheDocument();
     expect(screen.getByText("Command failed with exit code 1")).toBeInTheDocument();
-    expect(await screen.findByText("Task access · 2 authorized")).toBeInTheDocument();
+    expect(await screen.findByText("Task access")).toBeInTheDocument();
+    expect(screen.getByText("2 capabilities · ended")).toBeInTheDocument();
     expect(stopPropagation).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("Task access · 2 authorized"));
     expect(await screen.findByText("tools:Read")).toBeInTheDocument();
     expect(screen.getByText("Generation 3")).toBeInTheDocument();
     expect(screen.getByText("4 offered")).toBeInTheDocument();
-    expect(screen.getByText(/Recovery: start_new_task/)).toBeInTheDocument();
-    expect(screen.getByText(/Every tool call is checked against this exact list/)).toBeInTheDocument();
+    expect(screen.getByText("Task Mandate denied access")).toBeInTheDocument();
+    expect(screen.getByText("Partial task access")).toBeInTheDocument();
+    expect(screen.getByText("Start a new task to receive a current Task Mandate.")).toBeInTheDocument();
+    expect(screen.getByText(/a later Deny or safety ceiling can still tighten this run/)).toBeInTheDocument();
+    expect(screen.getByText(/a later Allow cannot widen its frozen Task Mandate/)).toBeInTheDocument();
   });
 
-	it("labels a stored snapshot as diagnostic when enforcement is off", async () => {
-	  mockApi.getTaskAccess.mockResolvedValue({
-		enforcement_enabled: false,
-		task_id: "task-1",
-		agent_id: "agent-1",
-		allowed_tools: ["tools:Read"],
-		issued_at: "2026-06-05T19:02:00Z",
-		expires_at: "2026-06-05T20:02:00Z",
-		status: "active",
-		authorized_count: 1,
-	  });
+  it("labels a stored snapshot as diagnostic when enforcement is off", async () => {
+    mockApi.getTaskAccess.mockResolvedValue({
+      enforcement_enabled: false,
+      task_id: "task-1",
+      agent_id: "agent-1",
+      allowed_tools: ["tools:Read"],
+      issued_at: "2026-06-05T19:02:00Z",
+      expires_at: "2026-06-05T20:02:00Z",
+      status: "active",
+      authorized_count: 1,
+    });
 
-	  renderWithI18n(<TranscriptButton task={makeTask()} agentName="Charlene" title="Vis run-detaljer" />);
-	  fireEvent.click(screen.getByRole("button", { name: "Vis run-detaljer" }));
-	  const observation = await screen.findByText("Observation only", {}, { timeout: 10_000 });
-	  const trigger = observation.closest("button");
-	  expect(trigger).not.toBeNull();
-	  fireEvent.click(trigger!);
+    renderWithI18n(<TranscriptButton task={makeTask()} agentName="Charlene" title="Vis run-detaljer" />);
+    fireEvent.click(screen.getByRole("button", { name: "Vis run-detaljer" }));
 
-	  expect(screen.getByText(/Enforcement is off, so this snapshot is diagnostic only/)).toBeInTheDocument();
-	  expect(screen.queryByText(/Every tool call is checked against this exact list/)).not.toBeInTheDocument();
-	});
+    expect(await screen.findAllByText("Observation only")).toHaveLength(2);
+    expect(mockApi.getTaskAccess).toHaveBeenCalledWith("task-1");
+    expect(screen.getByText(/Task Mandate enforcement is off/)).toBeInTheDocument();
+    expect(screen.getByText(/This snapshot cannot reject calls/)).toBeInTheDocument();
+    expect(screen.getByText(/a later Allow cannot widen its frozen Task Mandate/)).toBeInTheDocument();
+  });
 });

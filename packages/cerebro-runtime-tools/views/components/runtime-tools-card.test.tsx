@@ -6,6 +6,7 @@ import type { AgentRuntime } from "@multica/core/types/agent";
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockGetRuntimeAccessDiagnostics = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -17,6 +18,7 @@ vi.mock("@multica/core/api", async () => {
       ...actual.api,
       listRuntimeTools: mockListRuntimeTools,
       cerebroRequest: mockCerebroRequest,
+      getRuntimeAccessDiagnostics: mockGetRuntimeAccessDiagnostics,
     },
   };
 });
@@ -55,8 +57,36 @@ function renderWithClient(node: React.ReactNode) {
 beforeEach(() => {
   mockListRuntimeTools.mockReset();
   mockCerebroRequest.mockReset();
+  mockGetRuntimeAccessDiagnostics.mockReset();
   mockListRuntimeTools.mockResolvedValue([]);
   mockCerebroRequest.mockResolvedValue({ tools: [] });
+  mockGetRuntimeAccessDiagnostics.mockResolvedValue({
+    runtime_id: "rt-1",
+    provider: "claude",
+    status: "online",
+    diagnostics: [
+      {
+        code: "provider_probe",
+        state: "success",
+        title: "Provider capability probe",
+        message: "The provider probe measured 12 callable capabilities.",
+        affected_capability: "provider:claude",
+        source_policy: "Provider probe",
+        recovery_action: "Run Scan now after changing the provider.",
+        version: "sha256:provider",
+      },
+      {
+        code: "mcp_discovery",
+        state: "stale",
+        title: "MCP discovery",
+        message: "The latest MCP discovery is older than 30m0s.",
+        affected_capability: "mcp:*",
+        source_policy: "MCP tools/list",
+        recovery_action: "Run Scan now.",
+        version: "sha256:mcp",
+      },
+    ],
+  });
 });
 
 describe("RuntimeToolsCard", () => {
@@ -81,5 +111,16 @@ describe("RuntimeToolsCard", () => {
         { method: "POST" },
       ),
     );
+  });
+
+  it("shows provider probe and MCP discovery as separate diagnostics", async () => {
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    expect(await screen.findByText("Provider capability probe")).toBeInTheDocument();
+    expect(screen.getByText("MCP discovery")).toBeInTheDocument();
+    expect(screen.getByText("sha256:provider")).toBeInTheDocument();
+    expect(screen.getByText("sha256:mcp")).toBeInTheDocument();
   });
 });

@@ -40,6 +40,21 @@ func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 	`, taskID, testWorkspaceID, agentID, expiresAt); err != nil {
 		t.Fatalf("insert task mandate: %v", err)
 	}
+	agent, err := testHandler.Queries.GetAgent(context.Background(), util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_access_decision_ledger (
+			workspace_id, agent_id, runtime_id, task_id, observed_tool_name,
+			canonical_capability_id, legacy_decision, legacy_path, shadow_decision,
+			policy_decision, evidence_level, differs, reason, created_at
+		) VALUES
+			($1,$2,$3,$4,'mcp__company-brain__search','connection:company-brain/search','deny','policy_decision_service','deny','allow','declared',true,'canonical capability is absent from the live runtime surface',now() - interval '1 second'),
+			($1,$2,$3,$4,'mcp__company-brain__search','connection:company-brain/search','allow','policy_decision_service','allow','allow','discovered',false,'canonical policy allowed a capability present on the live runtime surface',now())
+	`, testWorkspaceID, agentID, agent.RuntimeID, taskID); err != nil {
+		t.Fatalf("insert access decision evidence: %v", err)
+	}
 
 	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
 		UserID: util.MustParseUUID(testUserID), WorkspaceID: util.MustParseUUID(testWorkspaceID),
@@ -77,6 +92,19 @@ func TestGetTaskMandateByUserReturnsExactStoredSnapshot(t *testing.T) {
 	}
 	if response.EnforcementEnabled {
 		t.Fatal("default-off workspace reported Task Mandate enforcement as enabled")
+	}
+	if len(response.Diagnostics) == 0 || response.Diagnostics[0].Code != "task_observation_only" {
+		t.Fatalf("diagnostics = %#v, want observation-only explanation", response.Diagnostics)
+	}
+	foundDenial := false
+	for _, diagnostic := range response.Diagnostics {
+		if diagnostic.Code == "observed_denial" && diagnostic.State == "denied" &&
+			diagnostic.SourcePolicy == "Runtime availability" && diagnostic.AffectedCapability == "connection:company-brain/search" {
+			foundDenial = true
+		}
+	}
+	if !foundDenial {
+		t.Fatalf("diagnostics = %#v, want the earlier enforced runtime-absence denial even after a later success", response.Diagnostics)
 	}
 }
 
@@ -134,6 +162,15 @@ func TestGetTaskMandateByUserReportsExpiredSnapshotAsAllowedWhenEnforcementOff(t
 	if !response.Verdict.Allowed || response.Verdict.Code != "allowed" || response.Verdict.RecoveryAction != "none" {
 		t.Fatalf("diagnostic verdict = %+v, want allowed/none to match call-time behavior while enforcement is off", response.Verdict)
 	}
+	foundExpired := false
+	for _, diagnostic := range response.Diagnostics {
+		if diagnostic.Code == "task_expired" && diagnostic.State == "stale" && diagnostic.RecoveryAction != "" {
+			foundExpired = true
+		}
+	}
+	if !foundExpired {
+		t.Fatalf("diagnostics = %#v, want stale expired snapshot with recovery", response.Diagnostics)
+	}
 }
 
 func TestGetTaskMandateByUserRejectsInvalidTaskID(t *testing.T) {
@@ -143,5 +180,59 @@ func TestGetTaskMandateByUserRejectsInvalidTaskID(t *testing.T) {
 	(&Handler{}).GetTaskMandateByUser(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetTaskMandateByUserReturnsSharedDiagnosticWhenSnapshotIsMissing(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "task-access-missing", []byte(`{}`))
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position)
+		VALUES ($1, 'missing task access snapshot', 'todo', 'none', 'member', $2, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1`, issueID)
+	})
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("clear seeded task mandate: %v", err)
+	}
+	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID: util.MustParseUUID(testUserID), WorkspaceID: util.MustParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	req := newRequest(http.MethodGet, "/api/tasks/"+taskID+"/access", nil)
+	req = withURLParam(req, "taskId", taskID)
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, member))
+	w := httptest.NewRecorder()
+
+	testHandler.GetTaskMandateByUser(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Diagnostics []struct {
+			Code               string `json:"code"`
+			State              string `json:"state"`
+			AffectedCapability string `json:"affected_capability"`
+			SourcePolicy       string `json:"source_policy"`
+			RecoveryAction     string `json:"recovery_action"`
+		} `json:"diagnostics"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.Diagnostics) != 1 || response.Diagnostics[0].Code != "task_mandate_missing" ||
+		response.Diagnostics[0].State != "unavailable" || response.Diagnostics[0].AffectedCapability != "task:"+taskID ||
+		response.Diagnostics[0].SourcePolicy != "Task Mandate" || response.Diagnostics[0].RecoveryAction == "" {
+		t.Fatalf("diagnostics = %#v, want shared missing-snapshot recovery", response.Diagnostics)
 	}
 }

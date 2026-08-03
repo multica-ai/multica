@@ -123,6 +123,29 @@ describe("TestResultSchema — scope suggestions", () => {
   });
 });
 
+describe("TestResultSchema — access diagnostics", () => {
+  it("preserves the MCP discovery version and recovery contract", () => {
+    const parsed = TestResultSchema.parse({
+      reachable: true,
+      diagnostics: [{
+        code: "connection_discovery",
+        state: "success",
+        title: "MCP discovery",
+        message: "Discovery returned 2 capabilities.",
+        affected_capability: "mcp:*",
+        source_policy: "MCP tools/list",
+        recovery_action: "Retest after changing the Connection identity.",
+        version: "sha256:abc123",
+      }],
+    });
+
+    expect(parsed.diagnostics[0]).toEqual(expect.objectContaining({
+      source_policy: "MCP tools/list",
+      version: "sha256:abc123",
+    }));
+  });
+});
+
 describe("CompanyBrainMigrationCensusSchema", () => {
   const source = {
     connection_id: "c1",

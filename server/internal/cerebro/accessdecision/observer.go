@@ -2,6 +2,7 @@ package accessdecision
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
@@ -133,6 +134,34 @@ func (s *Service) Decide(ctx context.Context, call Call) Entry {
 		entry.Decision = DecisionDeny
 		entry.Reason = "task mandate denied the call"
 	}
+	if s != nil && s.writer != nil {
+		_ = s.writer.Append(ctx, entry)
+	}
+	return entry
+}
+
+// RecordTaskMandateDenial appends the exact call-time mandate verdict before
+// policy resolution. It is observability only: the caller has already denied
+// the call, and a ledger write failure cannot alter that verdict.
+func (s *Service) RecordTaskMandateDenial(ctx context.Context, call Call, verdictCode, message string) Entry {
+	evidenceLevel := call.EvidenceLevel
+	if evidenceLevel == "" {
+		evidenceLevel = availabilityevidence.LevelDeclared
+	}
+	entry := NewEntry(Observation{
+		WorkspaceID:           util.UUIDToString(call.WorkspaceID),
+		AgentID:               util.UUIDToString(call.AgentID),
+		RuntimeID:             util.UUIDToString(call.RuntimeID),
+		OnBehalfOfUserID:      util.UUIDToString(call.OnBehalfOfID),
+		TaskID:                util.UUIDToString(call.TaskID),
+		IssueID:               util.UUIDToString(call.IssueID),
+		ObservedToolName:      call.ObservedToolName,
+		CanonicalCapabilityID: call.CanonicalCapabilityID,
+		PolicyDecision:        PolicyError,
+		EvidenceLevel:         evidenceLevel,
+	})
+	entry.Decision = DecisionDeny
+	entry.Reason = fmt.Sprintf("task mandate %s: %s", verdictCode, message)
 	if s != nil && s.writer != nil {
 		_ = s.writer.Append(ctx, entry)
 	}

@@ -3,6 +3,24 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4293 — Shared access diagnostics and frozen Task Mandate explanation
+
+- `runtime-access-diagnostics` adds the shared read-only Runtime contract to
+  `packages/core/api/client.ts`, `packages/core/api/schemas.ts`, and
+  `server/cmd/server/router.go`; `runtime-access-diagnostics-matrix` records the
+  CLI-runtime MCP tool in `server/internal/cerebro/runtime/tools_registry.go`
+  without turning diagnostics into an implicit Gateway grant. The Runtime UI,
+  CLI, and MCP consume the same provider-probe and MCP `tools/list` evidence
+  with independent versions.
+- `task-access-disclosure` replaces the inline task transcript presentation in
+  `packages/views/common/task-transcript/agent-transcript-dialog.tsx` with the
+  shared `@multica/cerebro-ui` component. Settings → Permissions is identified
+  as live authoring while the claimed Task Mandate is visibly frozen.
+- **Why:** discovery evidence, current policy, and a per-run Task Mandate answer
+  different operator questions. One diagnostic shape makes absence, denial,
+  partial, stale, and error states explainable without introducing another
+  authoring or authorization path.
+
 ## FIR-4292 — Exact Task Mandate admission and diagnostics
 
 - `task-mandate-callable-propagation` carries the exact CLI or MCP operation

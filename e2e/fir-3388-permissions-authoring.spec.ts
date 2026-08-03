@@ -95,6 +95,16 @@ test("Settings Permissions writes the canonical policy and persists after reload
     });
     await dismissAttributionSurvey(page);
 
+    await expect(
+      page.getByRole("heading", { name: "How access is decided" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Settings → Permissions is the live authoring source. A task freezes its Task Mandate when the run starts. A later Deny or safety ceiling can tighten the active run, but a later Allow never widens its frozen Task Mandate. Start a new task to capture newly allowed access.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+
     const row = page.getByTestId(`tool-card-${toolKey}`);
     await expect(row).toBeVisible();
     await expect(row.getByRole("button", { name: "Decision: Allow" })).toBeVisible();

@@ -43,7 +43,7 @@ export interface ExtraSettingsTab {
   wide?: boolean;
 }
 
-function PermissionDecisionGuide() {
+export function PermissionDecisionGuide() {
   const steps = [
     {
       icon: ShieldCheck,
@@ -63,7 +63,7 @@ function PermissionDecisionGuide() {
     {
       icon: ListChecks,
       title: "Task access",
-      body: "A locked per-run list can narrow what the agent may use on one task.",
+      body: "A frozen per-run Task Mandate can narrow access. It never becomes a second authoring surface.",
     },
     {
       icon: Eye,
@@ -84,6 +84,12 @@ function PermissionDecisionGuide() {
           All permission screens feed one live decision. The declared contract
           decides which specific overrides may open a default and which safety
           floors can only tighten.
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          Settings → Permissions is the live authoring source. A task freezes its
+          Task Mandate when the run starts. A later Deny or safety ceiling can
+          tighten the active run, but a later Allow never widens its frozen Task
+          Mandate. Start a new task to capture newly allowed access.
         </p>
       </div>
       <ol className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-5">

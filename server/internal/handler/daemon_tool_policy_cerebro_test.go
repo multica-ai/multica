@@ -165,7 +165,7 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 		WHERE agent_id = $1
 		  AND task_id = $2
 		  AND observed_tool_name = $3
-		  AND reason = 'task mandate denied the call'
+		  AND reason LIKE 'task mandate task_tool_not_authorized:%'
 	`, agentID, taskID, deniedTool).Scan(&mandateDenials); err != nil {
 		t.Fatalf("read task mandate denial observation: %v", err)
 	}

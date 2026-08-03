@@ -6,6 +6,30 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("maps a malformed Runtime diagnostics payload to an explicit Error diagnostic", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ diagnostics: "not-an-array" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+
+    const report = await client.getRuntimeAccessDiagnostics("runtime-1");
+
+    expect(report.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "runtime_diagnostics_contract_error",
+        state: "error",
+        affected_capability: "runtime:runtime-1",
+        source_policy: "Runtime diagnostics API",
+      }),
+    ]);
+  });
+
   it("sends the selected mode when creating a new issue thread", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "comment-1" }), {

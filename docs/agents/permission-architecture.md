@@ -25,6 +25,13 @@
 > orphaned, and unused access by severity. The Permission
 > audit read model exposes and sorts by the same explicit severity concept.
 
+> **FIR-4293 diagnostic projection.** `accessdiagnostics` is one read-only wire
+> contract for provider probes, MCP/API discovery, and frozen Task Mandate
+> observations. REST, CLI, MCP, Runtime, Connection Test & discover, and the
+> task transcript consume that projection. It is neither a sixth permission
+> interface nor an authorizer: `cerebro_tool_policy` remains the live authored
+> source, and the Task Mandate remains the immutable per-run ceiling.
+
 > **FIR-4012 system-authored capability rules.** The `driftwatch` sweeper is a
 > second, non-human writer into `cerebro_tool_policy`. When
 > `cerebro_capability_auto_permission` is ON (default OFF) it calls `Store.Set`
@@ -92,7 +99,19 @@ Workspace/runtime/agent/group/user choices are authored only in
 - **Task Mandate is a run snapshot, not a second policy store.** It freezes the
   exact allowed-tool envelope when a task is claimed and is checked again before
   every managed or local-runtime call. The task transcript and
-  `multica permissions task <id>` expose that historical snapshot.
+  `multica permissions task <id>` expose that historical snapshot. The
+  transcript's diagnostics can explain partial, stale, empty, unavailable, or
+  denied results and cite the source policy, but cannot change the snapshot.
+  A later Deny or safety ceiling in Settings → Permissions can tighten an
+  active run at call time. A later Allow cannot widen the frozen Task Mandate;
+  newly allowed access requires a newly claimed task.
+- **Runtime and Connection diagnostics are evidence projections, not policy.**
+  `GET /api/runtimes/{runtimeId}/access-diagnostics` separates provider probe
+  evidence from MCP `tools/list` evidence and versions their content
+  independently. `multica runtime diagnostics <runtime-id>` and
+  `get_runtime_access_diagnostics` call that same route. Connection Test &
+  discover uses the same shape for MCP or OpenAPI results. None of these paths
+  write `cerebro_tool_policy`, issue a Task Mandate, or admit a call.
 - **Resolver:** `toolpolicy.ResolveWithMode` contains the two pure folds. Public
   DB callers use `Store.ResolveDeclared` or `Store.ResolvePermission`, so the
   key registry — not the caller — selects hard-floor versus openable semantics.

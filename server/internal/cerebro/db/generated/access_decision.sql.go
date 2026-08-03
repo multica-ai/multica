@@ -61,3 +61,56 @@ func (q *Queries) AppendCerebroAccessDecisionLedger(ctx context.Context, arg App
 	)
 	return err
 }
+
+const listTaskAccessDecisionDiagnostics = `-- name: ListTaskAccessDecisionDiagnostics :many
+SELECT observed_tool_name,
+       COALESCE(canonical_capability_id, '') AS canonical_capability_id,
+       legacy_decision AS decision,
+       policy_decision,
+       legacy_path,
+       reason,
+       created_at
+FROM cerebro_access_decision_ledger
+WHERE task_id = $1
+  AND legacy_decision = 'deny'
+ORDER BY created_at DESC
+LIMIT 50
+`
+
+type ListTaskAccessDecisionDiagnosticsRow struct {
+	ObservedToolName      string             `json:"observed_tool_name"`
+	CanonicalCapabilityID string             `json:"canonical_capability_id"`
+	Decision              string             `json:"decision"`
+	PolicyDecision        string             `json:"policy_decision"`
+	LegacyPath            string             `json:"legacy_path"`
+	Reason                string             `json:"reason"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListTaskAccessDecisionDiagnostics(ctx context.Context, taskID pgtype.UUID) ([]ListTaskAccessDecisionDiagnosticsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskAccessDecisionDiagnostics, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskAccessDecisionDiagnosticsRow{}
+	for rows.Next() {
+		var i ListTaskAccessDecisionDiagnosticsRow
+		if err := rows.Scan(
+			&i.ObservedToolName,
+			&i.CanonicalCapabilityID,
+			&i.Decision,
+			&i.PolicyDecision,
+			&i.LegacyPath,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

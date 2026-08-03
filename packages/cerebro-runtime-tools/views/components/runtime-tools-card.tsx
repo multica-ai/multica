@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { AccessDiagnostics } from "@multica/cerebro-ui";
 import { ToolPolicyTabs } from "@multica/cerebro-tool-policy/views";
 import { toolPolicyKeys } from "@multica/cerebro-tool-policy/core";
 import { Button } from "@multica/ui/components/ui/button";
@@ -24,6 +25,9 @@ interface RuntimeToolsCardProps {
 const runtimeToolsKey = (runtimeId: string) =>
   ["cerebro", "runtime-tools", runtimeId] as const;
 
+const runtimeAccessDiagnosticsKey = (runtimeId: string) =>
+  ["cerebro", "runtime-access-diagnostics", runtimeId] as const;
+
 export function RuntimeToolsCard({
   runtime,
   workspaceId,
@@ -35,6 +39,10 @@ export function RuntimeToolsCard({
   const toolsQuery = useQuery({
     queryKey: runtimeToolsKey(runtime.id),
     queryFn: () => api.listRuntimeTools(runtime.id),
+  });
+  const diagnosticsQuery = useQuery({
+    queryKey: runtimeAccessDiagnosticsKey(runtime.id),
+    queryFn: () => api.getRuntimeAccessDiagnostics(runtime.id),
   });
   const lastScannedAt = useMemo(() => {
     let newest: string | null = null;
@@ -48,6 +56,7 @@ export function RuntimeToolsCard({
   async function refreshInventory() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: runtimeToolsKey(runtime.id) }),
+      qc.invalidateQueries({ queryKey: runtimeAccessDiagnosticsKey(runtime.id) }),
       qc.invalidateQueries({ queryKey: toolPolicyKeys.all(wsId) }),
     ]);
   }
@@ -80,6 +89,38 @@ export function RuntimeToolsCard({
   return (
     <div className="space-y-4">
       <SandboxProfileCard runtime={runtime} wsId={wsId} canEdit={canEdit} />
+      <section className="rounded-md border bg-card" aria-labelledby="runtime-capability-discovery">
+        <div className="border-b p-4">
+          <h3 id="runtime-capability-discovery" className="text-sm font-medium">
+            Capability discovery
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Provider probe and MCP tools/list are separate evidence. Neither changes Settings → Permissions.
+          </p>
+        </div>
+        <div className="p-3">
+          {diagnosticsQuery.isPending ? (
+            <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground" role="status">
+              Loading capability diagnostics…
+            </div>
+          ) : diagnosticsQuery.isError ? (
+            <AccessDiagnostics diagnostics={[{
+              code: "runtime_diagnostics_error",
+              state: "error",
+              title: "Capability diagnostics unavailable",
+              message: diagnosticsQuery.error instanceof Error ? diagnosticsQuery.error.message : "The diagnostics request failed.",
+              affected_capability: `runtime:${runtime.id}`,
+              source_policy: "Runtime diagnostics API",
+              recovery_action: "Retry the page, then check the Runtime and server logs if the request still fails.",
+            }]} />
+          ) : (
+            <AccessDiagnostics
+              diagnostics={diagnosticsQuery.data?.diagnostics ?? []}
+              emptyMessage="No capability diagnostics were returned for this Runtime."
+            />
+          )}
+        </div>
+      </section>
       <div className="rounded-md border bg-card">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
           <div>

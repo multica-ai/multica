@@ -335,6 +335,56 @@ export const RuntimeToolEffectiveAccessListSchema = z.array(
   RuntimeToolEffectiveAccessSchema,
 );
 
+// CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 one additive contract for
+// provider probe, MCP discovery, Task Mandate and live Permissions evidence.
+export const AccessDiagnosticSchema = z.object({
+  code: z.string(),
+  state: z
+    .enum(["success", "info", "partial", "stale", "empty", "denied", "unavailable", "error"])
+    .catch("info"),
+  title: z.string(),
+  message: z.string(),
+  affected_capability: z.string().optional(),
+  source_policy: z.string().default("Unknown source"),
+  recovery_action: z.string().default("Refresh the diagnostic and investigate the source."),
+  version: z.string().optional(),
+  count: z.number().optional(),
+  observed_at: z.string().optional(),
+}).loose();
+
+export const RuntimeAccessDiagnosticsSchema = z.object({
+  runtime_id: z.string(),
+  provider: z.string(),
+  status: z.string(),
+  diagnostics: z.array(AccessDiagnosticSchema).default([]),
+}).loose();
+
+export const TaskAccessSnapshotSchema = z.object({
+  enforcement_enabled: BooleanWithDefaultSchema(false),
+  task_id: z.string(),
+  agent_id: z.string(),
+  allowed_tools: z.array(z.string()).default([]),
+  issued_at: z.string(),
+  expires_at: z.string(),
+  status: z.enum(["active", "expired"]).catch("expired"),
+  claim_generation: z.number().optional(),
+  lifecycle_state: z.enum(["legacy", "draft", "finalized"]).catch("legacy").optional(),
+  producer: z.string().optional(),
+  finalizer: z.string().optional(),
+  inventory_version: z.string().optional(),
+  discovery_version: z.string().optional(),
+  offered_count: z.number().optional(),
+  authorized_count: z.number().optional(),
+  grant_digest: z.string().optional(),
+  verdict: z.object({
+    allowed: z.boolean(),
+    code: z.string(),
+    recovery_action: z.string(),
+    message: z.string(),
+  }).loose().optional(),
+  diagnostics: z.array(AccessDiagnosticSchema).default([]),
+}).loose();
+
 // CEREBRO-PATCH(runtime-authoring-retirement): legacy runtime grant schemas were deleted with their API.
 
 const CapabilitySubjectSchema = z.object({

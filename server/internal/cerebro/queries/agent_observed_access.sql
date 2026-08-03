@@ -30,7 +30,7 @@ mandate_denials AS (
            MAX(created_at)::timestamptz    AS last_denied
     FROM cerebro_access_decision_ledger
     WHERE agent_id = sqlc.arg(agent_id)
-      AND reason = 'task mandate denied the call'
+      AND reason LIKE 'task mandate %'
       AND observed_tool_name <> ''
       AND created_at >= now() - make_interval(days => sqlc.arg(window_days)::int)
     GROUP BY observed_tool_name
@@ -82,7 +82,7 @@ mandate_denials AS (
            MAX(created_at)::timestamptz    AS last_denied
     FROM cerebro_access_decision_ledger
     WHERE agent_id = sqlc.arg(agent_id)
-      AND reason = 'task mandate denied the call'
+      AND reason LIKE 'task mandate %'
       AND observed_tool_name <> ''
       AND created_at > sqlc.arg(window_start_at)::timestamptz
       AND created_at <= sqlc.arg(window_end_at)::timestamptz

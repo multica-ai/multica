@@ -1942,13 +1942,20 @@ type CerebroTaskContextFootprintHistory struct {
 }
 
 type CerebroTaskMandate struct {
-	ID           pgtype.UUID        `json:"id"`
-	TaskID       pgtype.UUID        `json:"task_id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	AgentID      pgtype.UUID        `json:"agent_id"`
-	AllowedTools []byte             `json:"allowed_tools"`
-	IssuedAt     pgtype.Timestamptz `json:"issued_at"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	TaskID               pgtype.UUID        `json:"task_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	AllowedTools         []byte             `json:"allowed_tools"`
+	IssuedAt             pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	ClaimGeneration      int64              `json:"claim_generation"`
+	Producer             pgtype.Text        `json:"producer"`
+	Finalizer            pgtype.Text        `json:"finalizer"`
+	LifecycleState       string             `json:"lifecycle_state"`
+	InventoryVersion     pgtype.Text        `json:"inventory_version"`
+	DiscoveryVersion     pgtype.Text        `json:"discovery_version"`
+	FinalizedGrantDigest pgtype.Text        `json:"finalized_grant_digest"`
 }
 
 type CerebroToolPolicy struct {

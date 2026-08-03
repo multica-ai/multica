@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdiagnostics"
 	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
@@ -30,6 +31,7 @@ type taskMandateResponse struct {
 	AuthorizedCount      int                             `json:"authorized_count"`
 	FinalizedGrantDigest *string                         `json:"grant_digest,omitempty"`
 	Verdict              taskmandate.Verdict             `json:"verdict"`
+	Diagnostics          []accessdiagnostics.Diagnostic  `json:"diagnostics"`
 }
 
 // GetTaskMandateByUser exposes the immutable access snapshot next to the task
@@ -62,6 +64,12 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{
 			"error":   "task access snapshot not found",
 			"verdict": taskmandate.VerdictForError(taskmandate.ErrMissing),
+			"diagnostics": []accessdiagnostics.Diagnostic{{
+				Code: accessdiagnostics.CodeTaskMissing, State: accessdiagnostics.StateUnavailable,
+				Title: "Task access snapshot missing", Message: "No persisted Task Mandate exists for this task.",
+				AffectedCapability: "task:" + taskID, SourcePolicy: "Task Mandate",
+				RecoveryAction: "Retry the task claim and investigate Task Mandate persistence before enabling enforcement.",
+			}},
 		})
 		return
 	}
@@ -81,6 +89,39 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 			verdict = taskmandate.VerdictForError(taskmandate.ErrExpired)
 		}
 	}
+	decisionEvidence := make([]accessdiagnostics.DecisionEvidence, 0)
+	if h.CerebroQueries != nil {
+		rows, listErr := h.CerebroQueries.ListTaskAccessDecisionDiagnostics(r.Context(), taskUUID)
+		if listErr == nil {
+			decisionEvidence = make([]accessdiagnostics.DecisionEvidence, 0, len(rows))
+			for _, row := range rows {
+				evidence := accessdiagnostics.DecisionEvidence{
+					ObservedToolName:      row.ObservedToolName,
+					CanonicalCapabilityID: row.CanonicalCapabilityID,
+					Decision:              row.Decision,
+					PolicyDecision:        row.PolicyDecision,
+					LegacyPath:            row.LegacyPath,
+					Reason:                row.Reason,
+				}
+				if row.CreatedAt.Valid {
+					evidence.CreatedAt = row.CreatedAt.Time
+				}
+				decisionEvidence = append(decisionEvidence, evidence)
+			}
+		}
+	}
+	diagnostics := accessdiagnostics.BuildTaskDiagnostics(accessdiagnostics.TaskInput{
+		EnforcementEnabled: enforcementEnabled,
+		Status:             status,
+		LifecycleState:     string(snapshot.LifecycleState),
+		OfferedCount:       snapshot.OfferedCount,
+		AuthorizedCount:    snapshot.AuthorizedCount,
+		VerdictAllowed:     verdict.Allowed,
+		VerdictCode:        string(verdict.Code),
+		VerdictMessage:     verdict.Message,
+		RecoveryAction:     string(verdict.RecoveryAction),
+		Ledger:             decisionEvidence,
+	})
 	writeJSON(w, http.StatusOK, taskMandateResponse{
 		EnforcementEnabled:   enforcementEnabled,
 		TaskID:               uuidToString(snapshot.TaskID),
@@ -99,5 +140,6 @@ func (h *Handler) GetTaskMandateByUser(w http.ResponseWriter, r *http.Request) {
 		AuthorizedCount:      snapshot.AuthorizedCount,
 		FinalizedGrantDigest: snapshot.FinalizedGrantDigest,
 		Verdict:              verdict,
+		Diagnostics:          diagnostics,
 	})
 }
