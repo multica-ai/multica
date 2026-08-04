@@ -7,6 +7,17 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 const mocks = vi.hoisted(() => ({
   account: null as CerebroAccount | null,
   enabled: true,
+  usageRows: [] as Array<{
+    agent_id: string;
+    model: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    task_count: number;
+    cost_cents?: number;
+  }>,
+  formatUsd: (usd: number) => `$${usd.toFixed(2)}`,
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
@@ -17,9 +28,51 @@ vi.mock("./use-cerebro-accounts", () => ({
   useCerebroAccount: () => ({ account: mocks.account, isLoading: false }),
 }));
 
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/dashboard", () => ({
+  dashboardUsageByAgentOptions: () => ({
+    queryKey: ["dashboard", "by-agent", "ws-1", 1, null],
+    queryFn: async () => mocks.usageRows,
+  }),
+}));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query",
+  );
+  return {
+    ...actual,
+    useQuery: (opts: { queryFn?: () => unknown }) => ({
+      data: mocks.usageRows,
+      isLoading: false,
+      queryFn: opts?.queryFn,
+    }),
+  };
+});
+
+vi.mock("@multica/cerebro-display-currency/views", () => ({
+  useCostFormatter: () => ({
+    formatUsd: mocks.formatUsd,
+    formatCents: (c: number) => `$${(c / 100).toFixed(2)}`,
+    formatUsdCompact: mocks.formatUsd,
+    currency: "USD",
+    rate: 1,
+    fetchedAt: undefined,
+  }),
+}));
+
+vi.mock("@multica/views/runtimes/utils", () => ({
+  estimateCost: (row: { cost_cents?: number }) =>
+    row.cost_cents && row.cost_cents > 0 ? row.cost_cents / 100 : 0,
+}));
+
 import {
   AgentProfileAccount,
   AgentProfileSettings,
+  AgentProfileSpend,
 } from "./agent-profile-tooltip-details";
 
 const agent: Agent = {
@@ -94,6 +147,7 @@ const account: CerebroAccount = {
 beforeEach(() => {
   mocks.enabled = true;
   mocks.account = account;
+  mocks.usageRows = [];
 });
 
 describe("agent profile tooltip details", () => {
@@ -147,6 +201,36 @@ describe("agent profile tooltip details", () => {
     expect(screen.getByText("27% left")).toBeInTheDocument();
   });
 
+  it("shows spend today for the agent from the 1d usage rollup", () => {
+    mocks.usageRows = [
+      {
+        agent_id: "agent-1",
+        model: "claude-opus-5",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        task_count: 2,
+        cost_cents: 425,
+      },
+      {
+        agent_id: "other-agent",
+        model: "claude-opus-5",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        task_count: 1,
+        cost_cents: 9999,
+      },
+    ];
+
+    render(<AgentProfileSpend agentId="agent-1" />);
+
+    expect(screen.getByText("Spend today")).toBeInTheDocument();
+    expect(screen.getByText("$4.25")).toBeInTheDocument();
+  });
+
   it("hides account data when no account resolves and restores model-only details when disabled", () => {
     mocks.account = null;
     const { rerender } = render(<AgentProfileAccount runtime={runtime} />);
@@ -157,5 +241,8 @@ describe("agent profile tooltip details", () => {
     expect(screen.getByText("claude-opus-5")).toBeInTheDocument();
     expect(screen.queryByText("high")).not.toBeInTheDocument();
     expect(screen.queryByText("3 tasks")).not.toBeInTheDocument();
+
+    rerender(<AgentProfileSpend agentId="agent-1" />);
+    expect(screen.queryByText("Spend today")).not.toBeInTheDocument();
   });
 });

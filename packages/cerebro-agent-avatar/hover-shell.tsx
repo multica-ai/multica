@@ -128,7 +128,9 @@ function CoarseSheetShell({
           <SheetHeader className="sr-only">
             <SheetTitle>Profile</SheetTitle>
           </SheetHeader>
-          <div className="overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {/* pr-12 clears the absolute Sheet close (top-3 right-3, icon-sm)
+              so Detail links in profile cards do not sit under the X. */}
+          <div className="overflow-y-auto p-4 pr-12 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {content}
           </div>
         </SheetContent>
