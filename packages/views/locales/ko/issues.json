@@ -628,5 +628,17 @@
     "row_backlog_hint": "에이전트를 대기 상태로 유지",
     "row_todo_label": "할 일",
     "row_todo_hint": "에이전트 시작"
+  },
+  "ask_user_question": {
+    "prompt": "아래 질문에 대해 선택해 주세요:",
+    "submit": "확인",
+    "ignore": "무시",
+    "submitted": "선택됨",
+    "ignored": "무시함",
+    "submit_failed": "선택 제출에 실패했습니다",
+    "ignore_failed": "무시에 실패했습니다",
+    "other": "기타",
+    "custom_placeholder": "답변을 입력하세요…",
+    "multi_hint": "(복수 선택 가능)"
   }
 }

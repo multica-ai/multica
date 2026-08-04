@@ -1107,3 +1107,129 @@ describe("RuntimeModelListRequestSchema", () => {
     );
   });
 });
+
+describe("ask_user_question metadata schema drift", () => {
+  const base = {
+    type: "comment",
+    id: "c1",
+    actor_type: "agent",
+    actor_id: "a1",
+    created_at: "2026-01-01T00:00:00Z",
+    comment_type: "ask_user_question",
+  };
+
+  it("parses a well-formed ask_user_question metadata payload", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        ...base,
+        metadata: {
+          ask_user_question: {
+            target_user: "u1",
+            source_user: "a1",
+            question: "Which cache?",
+            options: [
+              { label: "Redis", description: "distributed" },
+              { label: "Local", description: "single-node" },
+            ],
+            answer: { state: "submitted", selected_index: 0, answered_at: "2026-01-01T01:00:00Z" },
+          },
+        },
+      },
+    ]);
+    const aq = parsed[0]?.metadata?.ask_user_question;
+    expect(aq?.question).toBe("Which cache?");
+    expect(aq?.options).toHaveLength(2);
+    expect(aq?.answer?.selected_index).toBe(0);
+  });
+
+  it("downgrades gracefully when metadata is missing (ordinary comment)", () => {
+    const parsed = TimelineEntriesSchema.parse([{ ...base, comment_type: "comment" }]);
+    expect(parsed[0]?.metadata).toBeUndefined();
+  });
+
+  it("does not throw when options is null and defaults it to []", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        ...base,
+        metadata: {
+          ask_user_question: {
+            target_user: "u1",
+            question: "Q?",
+            options: null,
+          },
+        },
+      },
+    ]);
+    expect(parsed[0]?.metadata?.ask_user_question?.options).toEqual([]);
+  });
+
+  it("does not throw on a partial option missing description", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        ...base,
+        metadata: {
+          ask_user_question: {
+            target_user: "u1",
+            question: "Q?",
+            options: [{ label: "only-label" }],
+          },
+        },
+      },
+    ]);
+    const opt = parsed[0]?.metadata?.ask_user_question?.options?.[0];
+    expect(opt?.label).toBe("only-label");
+    expect(opt?.description).toBe("");
+  });
+});
+
+describe("ask_user_question multi-select + custom fields", () => {
+  const base = {
+    type: "comment", id: "c1", actor_type: "agent", actor_id: "a1",
+    created_at: "2026-01-01T00:00:00Z", comment_type: "ask_user_question",
+  };
+
+  it("parses multi_select / allow_custom + selected_indices + custom_text", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        ...base,
+        metadata: {
+          ask_user_question: {
+            target_user: "u1", source_user: "a1", question: "Q?",
+            options: [{ label: "A", description: "a" }, { label: "B", description: "b" }],
+            multi_select: true,
+            allow_custom: true,
+            answer: {
+              state: "submitted",
+              selected_indices: [0, 1],
+              custom_text: "mine",
+              answered_at: "2026-01-01T01:00:00Z",
+            },
+          },
+        },
+      },
+    ]);
+    const aq = parsed[0]?.metadata?.ask_user_question;
+    expect(aq?.multi_select).toBe(true);
+    expect(aq?.allow_custom).toBe(true);
+    expect(aq?.answer?.selected_indices).toEqual([0, 1]);
+    expect(aq?.answer?.custom_text).toBe("mine");
+  });
+
+  it("defaults multi_select / allow_custom to undefined when absent (legacy single)", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        ...base,
+        metadata: {
+          ask_user_question: {
+            target_user: "u1", question: "Q?",
+            options: [{ label: "A", description: "a" }],
+            answer: { state: "submitted", selected_index: 0, answered_at: "x" },
+          },
+        },
+      },
+    ]);
+    const aq = parsed[0]?.metadata?.ask_user_question;
+    expect(aq?.multi_select).toBeUndefined();
+    expect(aq?.answer?.selected_index).toBe(0);
+  });
+});

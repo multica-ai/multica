@@ -1032,6 +1032,32 @@ export class ApiClient {
     return this.fetch(`/api/comments/${commentId}/resolve`, { method: "DELETE" });
   }
 
+  /** Record the target user's response to an ask_user_question comment.
+   *  For "submitted", pass exactly one of the selection shapes: `selectedIndex`
+   *  (single), `selectedIndices` (multi), and/or `customText` (the "Other"
+   *  free-text). "ignored" needs no selection. Matches the sibling comment
+   *  mutations (createComment/updateComment/resolveComment) in returning the
+   *  updated Comment via the shared fetch path. */
+  async answerAskUserQuestion(
+    commentId: string,
+    state: "submitted" | "ignored",
+    selection?: {
+      selectedIndex?: number;
+      selectedIndices?: number[];
+      customText?: string;
+    },
+  ): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}/answer`, {
+      method: "POST",
+      body: JSON.stringify({
+        state,
+        ...(selection?.selectedIndex !== undefined ? { selected_index: selection.selectedIndex } : {}),
+        ...(selection?.selectedIndices !== undefined ? { selected_indices: selection.selectedIndices } : {}),
+        ...(selection?.customText !== undefined ? { custom_text: selection.customText } : {}),
+      }),
+    });
+  }
+
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {
     return this.fetch(`/api/comments/${commentId}/reactions`, {
       method: "POST",

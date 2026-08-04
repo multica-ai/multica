@@ -84,6 +84,7 @@ func TestCreateComment_WorkspaceMismatchPersistsNothing(t *testing.T) {
 		AuthorID:    parseUUID(testUserID),
 		Content:     "should never persist",
 		Type:        "comment",
+		Metadata:    []byte("{}"),
 	})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("expected pgx.ErrNoRows on workspace mismatch, got %v", err)

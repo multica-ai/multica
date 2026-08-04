@@ -1,4 +1,4 @@
-import type { CommentAuthorType, Reaction } from "./comment";
+import type { CommentAuthorType, CommentMetadata, Reaction } from "./comment";
 import type { Attachment } from "./attachment";
 
 export interface AssigneeFrequencyEntry {
@@ -21,6 +21,9 @@ export interface TimelineEntry {
   parent_id?: string | null;
   updated_at?: string;
   comment_type?: string;
+  /** Structured payload for typed comments (currently ask_user_question).
+   *  Omitted for ordinary comments and activities. */
+  metadata?: CommentMetadata | null;
   /** Set only on comments a quick action produced (MUL-5465). Unforgeable. */
   quick_action_id?: string | null;
   reactions?: Reaction[];

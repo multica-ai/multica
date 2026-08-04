@@ -271,3 +271,36 @@ func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadRe
 		len(targets), len(targets), targetLines, cookbook,
 	)
 }
+
+// BuildAskUserQuestionHint teaches the agent to ask the human a *structured*
+// question — rendered as a selectable card in the UI — instead of asking in
+// prose and hoping the user replies in a parseable way. Injected on both the
+// comment-triggered and assignment-triggered prompts so the agent always knows
+// the option exists.
+//
+// The card is created via `issue comment add --type ask_user_question`. Keep the
+// flag list and JSON shape in sync with server/cmd/multica/cmd_issue.go
+// (buildAskUserQuestionMeta) and the server handler validation.
+func BuildAskUserQuestionHint(issueID string) string {
+	return fmt.Sprintf(
+		"## Asking the user a question\n\n"+
+			"When you need the user to make a CHOICE or DECISION (pick an option, approve/reject, "+
+			"resolve ambiguity), do NOT ask in a plain prose comment. Post a structured question "+
+			"that renders as a selectable card the user can click to answer:\n\n"+
+			"    multica issue comment add %s --type ask_user_question \\\n"+
+			"      --target-user <the person's name / email / user UUID> \\\n"+
+			"      --question \"What should I do about X?\" \\\n"+
+			"      --options-json '[{\"label\":\"Option A\",\"description\":\"what it means\"},{\"label\":\"Option B\",\"description\":\"...\"}]'\n\n"+
+			"Flags:\n"+
+			"- `--target-user` (required): who must answer. Usually the user who asked you (see the "+
+			"triggering comment's author) — resolve them by name, email, or user UUID.\n"+
+			"- `--options-json` (required): 2+ options, each with a `label` (short) and `description` (why).\n"+
+			"- `--multi-select` (optional): let the user pick more than one option.\n"+
+			"- `--allow-custom` (optional): add an \"Other\" choice with a free-text box for answers "+
+			"outside your presets.\n\n"+
+			"After the user answers, a reply comment (`我选择【...】`) is posted back to you automatically, "+
+			"which re-triggers you to continue. Prefer this over prose questions whenever the answer is a "+
+			"choice — it is unambiguous and the user can respond in one click.\n\n",
+		issueID,
+	)
+}

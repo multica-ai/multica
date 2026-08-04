@@ -628,5 +628,17 @@
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "Todo",
     "row_todo_hint": "启动智能体"
+  },
+  "ask_user_question": {
+    "prompt": "以下问题请做选择:",
+    "submit": "确认提交",
+    "ignore": "忽略",
+    "submitted": "已选择",
+    "ignored": "已忽略",
+    "submit_failed": "提交选择失败",
+    "ignore_failed": "忽略失败",
+    "other": "其他",
+    "custom_placeholder": "请输入…",
+    "multi_hint": "(可多选)"
   }
 }

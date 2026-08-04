@@ -628,5 +628,17 @@
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
     "row_todo_hint": "エージェントを開始します"
+  },
+  "ask_user_question": {
+    "prompt": "以下の質問について選択してください:",
+    "submit": "確認",
+    "ignore": "無視",
+    "submitted": "選択済み",
+    "ignored": "無視しました",
+    "submit_failed": "選択の送信に失敗しました",
+    "ignore_failed": "無視に失敗しました",
+    "other": "その他",
+    "custom_placeholder": "回答を入力…",
+    "multi_hint": "(複数選択可)"
   }
 }

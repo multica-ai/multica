@@ -105,6 +105,7 @@ func buildPromptBody(task Task, provider string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	b.WriteString(execenv.BuildAskUserQuestionHint(task.IssueID))
 	return b.String()
 }
 
@@ -343,6 +344,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	} else {
 		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	}
+	b.WriteString(execenv.BuildAskUserQuestionHint(task.IssueID))
 	return b.String()
 }
 

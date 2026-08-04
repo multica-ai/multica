@@ -35,6 +35,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
+import { AskUserQuestionCard } from "./ask-user-question-card";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
@@ -725,10 +726,23 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="pl-12 pr-4 pt-1 text-body leading-relaxed text-foreground">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
+          {entry.comment_type === "ask_user_question" && entry.metadata?.ask_user_question ? (
+            <div className="mt-1.5 pl-12 pr-4">
+              <AskUserQuestionCard
+                issueId={issueId}
+                commentId={entry.id}
+                meta={entry.metadata.ask_user_question}
+                currentUserId={currentUserId}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="pl-12 pr-4 pt-1 text-body leading-relaxed text-foreground">
+                <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+              </div>
+              <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
+            </>
+          )}
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
               issueId={issueId}
@@ -1041,10 +1055,23 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-body leading-relaxed text-foreground">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                {entry.comment_type === "ask_user_question" && entry.metadata?.ask_user_question ? (
+                  <div className="mt-1.5 pl-10">
+                    <AskUserQuestionCard
+                      issueId={issueId}
+                      commentId={entry.id}
+                      meta={entry.metadata.ask_user_question}
+                      currentUserId={currentUserId}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="pl-10 text-body leading-relaxed text-foreground">
+                      <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                    </div>
+                    <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                  </>
+                )}
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}

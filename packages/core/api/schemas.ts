@@ -404,6 +404,42 @@ const AttachmentSchema = z.object({
   id: z.string(),
 }).loose();
 
+// ask_user_question payload carried on comment.metadata. Lenient on shape
+// (.loose + optional) so a malformed or partial payload from a drifted server
+// downgrades gracefully instead of crashing the timeline parse — the render
+// layer nil-guards every field.
+const AskUserQuestionOptionSchema = z.object({
+  label: z.string().default(""),
+  description: z.string().default(""),
+}).loose();
+
+const CommentMetadataSchema = z.object({
+  ask_user_question: z.object({
+    target_user: z.string().default(""),
+    source_user: z.string().default(""),
+    question: z.string().default(""),
+    // Coerce null/undefined → [] so a drifted server sending options:null
+    // degrades to an empty list instead of throwing the whole timeline parse.
+    options: z.preprocess(
+      (v) => (Array.isArray(v) ? v : []),
+      z.array(AskUserQuestionOptionSchema).default([]),
+    ),
+    multi_select: z.boolean().optional(),
+    allow_custom: z.boolean().optional(),
+    answer: z
+      .object({
+        state: z.string().default(""),
+        selected_index: z.number().optional(),
+        selected_indices: z.array(z.number()).optional(),
+        custom_text: z.string().optional(),
+        answered_at: z.string().default(""),
+      })
+      .loose()
+      .nullable()
+      .optional(),
+  }).loose().optional(),
+}).loose();
+
 const ChatQuickActionSchema = z.object({
   label: z.string(),
   prompt: z.string(),
@@ -498,6 +534,7 @@ const TimelineEntrySchema = z.object({
   parent_id: z.string().nullable().optional(),
   updated_at: z.string().optional(),
   comment_type: z.string().optional(),
+  metadata: CommentMetadataSchema.nullable().optional(),
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
   source_task_id: z.string().nullable().optional(),
@@ -588,6 +625,7 @@ export const CommentSchema = z.object({
   content: z.string(),
   type: z.string(),
   parent_id: z.string().nullable(),
+  metadata: CommentMetadataSchema.nullable().optional(),
   reactions: z.array(ReactionSchema).default([]),
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
