@@ -350,6 +350,11 @@ test("Permission profiles are separated, explained, assigned, and enforced throu
 
     const editor = page.getByRole("dialog", { name: "Create profile" });
     await expect(editor).toBeVisible({ timeout: 15_000 });
+    await expect(
+      editor.getByText("No permission overrides yet.", { exact: true }),
+    ).toBeVisible();
+    await expect(editor.getByRole("combobox", { name: / decision$/ })).toHaveCount(0);
+    expect((await editor.boundingBox())?.width).toBeGreaterThan(640);
     await editor.getByLabel("Name", { exact: true }).fill(roleName);
     await editor
       .getByLabel("Description", { exact: true })
@@ -359,6 +364,17 @@ test("Permission profiles are separated, explained, assigned, and enforced throu
       .getByRole("combobox", { name: `${toolTitle} decision`, exact: true })
       .click();
     await page.getByRole("option", { name: "Deny", exact: true }).click();
+    await editor.getByLabel("Search permissions").fill("");
+    await expect(
+      editor.getByRole("combobox", { name: `${toolTitle} decision`, exact: true }),
+    ).toContainText(/deny/i);
+    const desktopEditorScreenshot = await page.screenshot({
+      path: test.info().outputPath("permission-profile-editor-desktop.png"),
+    });
+    await test.info().attach("permission-profile-editor-desktop", {
+      body: desktopEditorScreenshot,
+      contentType: "image/png",
+    });
     await dismissAttributionSurvey(page);
     await editor.getByRole("button", { name: "Save version", exact: true }).click();
 
@@ -408,6 +424,24 @@ test("Permission profiles are separated, explained, assigned, and enforced throu
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const mobileEditor = page.getByRole("dialog", { name: `Edit ${roleName}` });
+    await expect(mobileEditor).toBeVisible();
+    await expect(mobileEditor).toHaveCSS("opacity", "1");
+    expect((await mobileEditor.boundingBox())?.height).toBeLessThanOrEqual(844);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    const mobileEditorScreenshot = await mobileEditor.screenshot({
+      path: test.info().outputPath("permission-profile-editor-mobile.png"),
+    });
+    await test.info().attach("permission-profile-editor-mobile", {
+      body: mobileEditorScreenshot,
+      contentType: "image/png",
+    });
+    await mobileEditor.getByRole("button", { name: "Cancel", exact: true }).click();
 
     await page.goto(
       `/${workspaceSlug}/cerebro/permissions/${encodeURIComponent(toolKey)}`,
