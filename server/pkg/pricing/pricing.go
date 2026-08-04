@@ -92,15 +92,64 @@ func lookup(model string) (Pricing, bool) {
 	if strings.HasPrefix(key, "gemma") {
 		return Pricing{}, true
 	}
-	if p, ok := tableGet(key); ok { // CEREBRO-PATCH(pricing-registry-table): lookup against the injected registry table.
-		return p, true
-	}
-	if stripped := stripDateSuffix(key); stripped != key {
-		if p, ok := tableGet(stripped); ok { // CEREBRO-PATCH(pricing-registry-table): lookup against the injected registry table.
+	// Peel routing prefixes (Hermes `provider:model`, OpenRouter `vendor/model`)
+	// and dated snapshots until a registry row hits or nothing left to strip.
+	seen := map[string]struct{}{}
+	for key != "" {
+		if _, dup := seen[key]; dup {
+			break
+		}
+		seen[key] = struct{}{}
+		if p, ok := tableGet(key); ok { // CEREBRO-PATCH(pricing-registry-table): lookup against the injected registry table.
 			return p, true
 		}
+		if stripped := stripDateSuffix(key); stripped != key {
+			if p, ok := tableGet(stripped); ok { // CEREBRO-PATCH(pricing-registry-table): lookup against the injected registry table.
+				return p, true
+			}
+			key = stripped
+			continue
+		}
+		// CEREBRO-PATCH(pricing-hermes-routing-prefix): Hermes reports modelId as provider:model (and openrouter/x-ai/… nested slash paths); strip one routing segment per pass so registry bare SKUs still match.
+		if next := stripRoutingPrefix(key); next != key {
+			key = next
+			continue
+		}
+		break
 	}
 	return Pricing{}, false
+}
+
+// stripRoutingPrefix removes one leading routing segment (`provider:` or
+// `vendor/`) when the segment is a simple identifier. Leaves bare SKUs and
+// Ollama-style tags alone once the local-free gate above has already run.
+func stripRoutingPrefix(model string) string {
+	if i := strings.IndexByte(model, ':'); i > 0 && isRoutingPrefix(model[:i]) {
+		return model[i+1:]
+	}
+	if i := strings.IndexByte(model, '/'); i > 0 && isRoutingPrefix(model[:i]) {
+		return model[i+1:]
+	}
+	return model
+}
+
+func isRoutingPrefix(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if i == 0 {
+			if c < 'a' || c > 'z' {
+				return false
+			}
+			continue
+		}
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // dateSuffixPattern matches a trailing dated snapshot or `-latest` tag.

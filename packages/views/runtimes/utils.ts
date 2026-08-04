@@ -193,7 +193,13 @@ function canonicalCandidates(model: string): string[] {
   };
   const stripDate = (s: string) =>
     s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
+  // CEREBRO-PATCH(pricing-hermes-routing-prefix): Hermes reports provider:model;
+  // also peel nested slash paths (openrouter/x-ai/grok-4.5 → grok-4.5).
   const stripProvider = (s: string) => {
+    const colon = s.indexOf(":");
+    if (colon > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, colon))) {
+      return s.slice(colon + 1);
+    }
     const i = s.indexOf("/");
     return i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i)) ? s.slice(i + 1) : s;
   };
@@ -206,19 +212,27 @@ function canonicalCandidates(model: string): string[] {
   // pricing trade-off.
   const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
-  const raw = model;
-  const noProvider = stripProvider(raw);
-  const dashed = canonAnthropic(noProvider);
-  const noTag = stripContextTag(dashed);
+  // CEREBRO-PATCH(pricing-hermes-routing-prefix): peel routing prefixes iteratively
+  // (colon then slash) so Hermes provider:model and openrouter/x-ai/… resolve.
+  const pushForms = (s: string) => {
+    const dashed = canonAnthropic(s);
+    const noTag = stripContextTag(dashed);
+    push(s);
+    push(dashed);
+    push(noTag);
+    push(stripDate(s));
+    push(stripDate(dashed));
+    push(stripDate(noTag));
+  };
 
-  push(raw);
-  push(noProvider);
-  push(dashed);
-  push(noTag);
-  push(stripDate(raw));
-  push(stripDate(noProvider));
-  push(stripDate(dashed));
-  push(stripDate(noTag));
+  let peeled = model;
+  pushForms(peeled);
+  for (let i = 0; i < 4; i++) {
+    const next = stripProvider(peeled);
+    if (next === peeled) break;
+    peeled = next;
+    pushForms(peeled);
+  }
   return out;
 }
 

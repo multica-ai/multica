@@ -168,3 +168,49 @@ func TestKnown(t *testing.T) {
 		t.Error("expected future-model to be unknown")
 	}
 }
+
+// CEREBRO-PATCH(pricing-hermes-routing-prefix-test): Hermes/OpenRouter model IDs
+// carry a routing prefix (provider:model or vendor/model). lookup must peel it
+// so bare registry SKUs still price the run.
+func TestComputeCents_StripsHermesRoutingPrefix(t *testing.T) {
+	usage := Usage{InputTokens: 100_000, OutputTokens: 100_000}
+	cases := []struct {
+		routed, base string
+	}{
+		{"xai:grok-4.5", "grok-4.5"},
+		{"google:gemini-3.6-flash", "gemini-3.6-flash"},
+		{"opencode-go:kimi-k3", "kimi-k3"},
+		{"nous:moonshotai/kimi-k2.6", "kimi-k2.6"},
+		{"openrouter/x-ai/grok-4.5", "grok-4.5"},
+		{"anthropic/claude-opus-4-7", "claude-opus-4-7"},
+	}
+	for _, c := range cases {
+		t.Run(c.routed, func(t *testing.T) {
+			// Seed bare SKU into the injected table; restore fixture after.
+			table := map[string]Pricing{
+				c.base: {
+					InputCentsPerMtok:  100,
+					OutputCentsPerMtok: 200,
+				},
+				"claude-opus-4-1": {InputCentsPerMtok: 1500, OutputCentsPerMtok: 7500},
+				// Keep a known fixture row so bare claude-opus-4-7 still works
+				// when that's the base under test.
+				"claude-opus-4-7": testTable["claude-opus-4-7"],
+			}
+			if c.base == "claude-opus-4-7" {
+				table[c.base] = testTable["claude-opus-4-7"]
+			}
+			SetTable(table, "claude-opus-4-1", "test-routing")
+			t.Cleanup(func() { SetTable(testTable, "claude-opus-4-1", "registry-test") })
+
+			want := ComputeCents(c.base, usage)
+			got := ComputeCents(c.routed, usage)
+			if got != want {
+				t.Errorf("ComputeCents(%q) = %d, want %d (== bare %q)", c.routed, got, want, c.base)
+			}
+			if !Known(c.routed) {
+				t.Errorf("Known(%q) = false, expected true after routing-prefix strip", c.routed)
+			}
+		})
+	}
+}
