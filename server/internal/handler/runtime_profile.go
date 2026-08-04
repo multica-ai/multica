@@ -376,6 +376,20 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// Workspace mutex FIRST, before the profile, its runtimes or their tasks
+	// (MUL-4332 review: sweeper vs teardown lock order). This cascade ends in the
+	// same runtime -> task teardown the direct runtime delete runs, which is the
+	// reverse of the bulk sweepers' task -> runtime order; the FOR UPDATE here
+	// conflicts with the sweepers' FOR KEY SHARE so the two can never interleave.
+	if _, err := qtx.LockWorkspaceForRuntimeTeardown(r.Context(), wsUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "runtime profile not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+
 	// Lock the profile before planning the cascade. Daemon registration takes
 	// a conflicting KEY SHARE lock in its own transaction, so it cannot insert
 	// a runtime after the plan and have that row escape deletion. If the profile

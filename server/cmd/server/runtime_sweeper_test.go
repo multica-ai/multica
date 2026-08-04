@@ -7,9 +7,54 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// selectAndFailStale / selectAndFailExpiredQueued run the two-step MUL-4332
+// bulk-fail (candidate SELECT then FailAgentTasksByIDs) that replaced the old
+// single-statement UPDATE queries, so these predicate tests keep asserting on
+// genuinely-failed rows. Poison isolation and workspace resolution are covered
+// separately by the FailBulkTasksWithEvents service tests; here we exercise the
+// raw SQL predicate + fail.
+func selectAndFailStale(t *testing.T, ctx context.Context, queries *db.Queries, p db.SelectStaleTasksToFailParams) []db.AgentTaskQueue {
+	t.Helper()
+	candidates, err := queries.SelectStaleTasksToFail(ctx, p)
+	if err != nil {
+		t.Fatalf("SelectStaleTasksToFail failed: %v", err)
+	}
+	return failCandidatesByIDs(t, ctx, queries, candidates, "task timed out", "timeout")
+}
+
+func selectAndFailExpiredQueued(t *testing.T, ctx context.Context, queries *db.Queries, p db.SelectExpiredQueuedTasksParams) []db.AgentTaskQueue {
+	t.Helper()
+	candidates, err := queries.SelectExpiredQueuedTasks(ctx, p)
+	if err != nil {
+		t.Fatalf("SelectExpiredQueuedTasks failed: %v", err)
+	}
+	return failCandidatesByIDs(t, ctx, queries, candidates, "task expired in queue", "queued_expired")
+}
+
+func failCandidatesByIDs(t *testing.T, ctx context.Context, queries *db.Queries, candidates []db.AgentTaskQueue, errMsg, reason string) []db.AgentTaskQueue {
+	t.Helper()
+	if len(candidates) == 0 {
+		return nil
+	}
+	ids := make([]pgtype.UUID, len(candidates))
+	for i, c := range candidates {
+		ids[i] = c.ID
+	}
+	failed, err := queries.FailAgentTasksByIDs(ctx, db.FailAgentTasksByIDsParams{
+		Ids:           ids,
+		Error:         pgtype.Text{String: errMsg, Valid: true},
+		FailureReason: pgtype.Text{String: reason, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("FailAgentTasksByIDs failed: %v", err)
+	}
+	return failed
+}
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
 // timestamps old enough to trigger the sweeper. Returns (issueID, agentID, taskID).
@@ -175,14 +220,12 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	})
 
 	// Use very short timeouts to trigger the sweep on our test task
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, context.Background(), queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0, // 1 second — our task is 3 hours old
 		RuntimeStaleSecs:    staleThresholdSeconds,
+		MaxPerTick:          bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks query failed: %v", err)
-	}
 	if len(failedTasks) == 0 {
 		t.Fatal("expected at least 1 stale task to be failed")
 	}
@@ -225,7 +268,7 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 
 	// Verify DB: task should be failed
 	var status string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	err := testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if err != nil {
 		t.Fatalf("failed to query task status: %v", err)
 	}
@@ -259,14 +302,12 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 	})
 
 	// Fail stale tasks with short timeout
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, context.Background(), queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
 		RuntimeStaleSecs:    staleThresholdSeconds,
+		MaxPerTick:          bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks failed: %v", err)
-	}
 	if len(failedTasks) == 0 {
 		t.Fatal("expected at least 1 stale task")
 	}
@@ -275,7 +316,7 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 
 	// Verify agent status is now "idle" in DB
 	var agentStatus string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent WHERE id = $1`, agentID).Scan(&agentStatus)
+	err := testPool.QueryRow(context.Background(), `SELECT status FROM agent WHERE id = $1`, agentID).Scan(&agentStatus)
 	if err != nil {
 		t.Fatalf("failed to query agent status: %v", err)
 	}
@@ -321,16 +362,14 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 	})
 
 	// Fail stale tasks — dispatch timeout of 1 second (our task is 10 minutes old)
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, context.Background(), queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 1.0,
 		RunningTimeoutSecs:  9000.0,
 		// RuntimeStaleSecs only affects the running branch — irrelevant for
 		// this dispatched-timeout test, but wired for API consistency.
 		RuntimeStaleSecs: staleThresholdSeconds,
+		MaxPerTick:       bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks failed: %v", err)
-	}
 	if len(failedTasks) == 0 {
 		t.Fatal("expected at least 1 stale dispatched task")
 	}
@@ -339,7 +378,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 
 	// Verify DB: task should be failed
 	var status string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	err := testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if err != nil {
 		t.Fatalf("failed to query task: %v", err)
 	}
@@ -397,14 +436,12 @@ func TestSweepRunningTaskSkippedWhenRuntimeFresh(t *testing.T) {
 	// Task started_at is 3h ago; RunningTimeoutSecs=1s would kill on wall clock
 	// alone — but the runtime is proving liveness, so the sweeper must skip it.
 	queries := db.New(testPool)
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, context.Background(), queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
 		RuntimeStaleSecs:    staleThresholdSeconds,
+		MaxPerTick:          bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks failed: %v", err)
-	}
 
 	for _, ft := range failedTasks {
 		if ft.ID.Bytes == parseUUIDBytes(taskID) {
@@ -440,14 +477,12 @@ func TestSweepRunningTaskKilledWhenRuntimeStale(t *testing.T) {
 	ageOutAgentRuntime(t, agentID, 10*time.Minute)
 
 	queries := db.New(testPool)
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, context.Background(), queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
 		RuntimeStaleSecs:    staleThresholdSeconds,
+		MaxPerTick:          bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks failed: %v", err)
-	}
 
 	found := false
 	for _, ft := range failedTasks {
@@ -531,14 +566,12 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	ageOutAgentRuntime(t, agentID, 10*time.Minute)
 
 	// Fail the stale task (running timeout of 1 second — our task is 3 hours old).
-	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, ctx, queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
 		RuntimeStaleSecs:    staleThresholdSeconds,
+		MaxPerTick:          bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks failed: %v", err)
-	}
 
 	// Confirm our task was swept.
 	found := false
@@ -619,14 +652,12 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	// Runtime must be stale for the running-task wall clock to fire (MUL-4107).
 	ageOutAgentRuntime(t, agentID, 10*time.Minute)
 
-	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+	failedTasks := selectAndFailStale(t, ctx, queries, db.SelectStaleTasksToFailParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
 		RuntimeStaleSecs:    staleThresholdSeconds,
+		MaxPerTick:          bulkFailBatchSize,
 	})
-	if err != nil {
-		t.Fatalf("FailStaleTasks failed: %v", err)
-	}
 
 	broadcastFailedTasks(ctx, queries, nil, bus, failedTasks)
 
@@ -706,13 +737,10 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+	failed := selectAndFailExpiredQueued(t, ctx, queries, db.SelectExpiredQueuedTasksParams{
 		TtlSecs:    3600.0, // 1h TTL — old task is 5h, fresh task is 0s
 		MaxPerTick: 100,
 	})
-	if err != nil {
-		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
-	}
 	if len(failed) != 1 {
 		t.Fatalf("expected exactly 1 expired task, got %d", len(failed))
 	}
@@ -802,13 +830,10 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+	failed := selectAndFailExpiredQueued(t, ctx, queries, db.SelectExpiredQueuedTasksParams{
 		TtlSecs:    3600.0,
 		MaxPerTick: 2, // cap below the backlog
 	})
-	if err != nil {
-		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
-	}
 	if len(failed) != 2 {
 		t.Fatalf("expected batch cap of 2, got %d", len(failed))
 	}

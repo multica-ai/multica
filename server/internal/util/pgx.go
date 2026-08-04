@@ -5,8 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// NewUUID mints a fresh random (v4) pgtype.UUID. Use for app-generated primary
+// keys — e.g. two related rows that must reference each other before either is
+// inserted, so neither can rely on a DB DEFAULT round-trip.
+func NewUUID() pgtype.UUID {
+	return pgtype.UUID{Bytes: uuid.New(), Valid: true}
+}
 
 // ParseUUID parses s into a pgtype.UUID. Invalid input returns an error
 // instead of a zero-valued UUID — silently dropping bad input has caused

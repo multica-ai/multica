@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/admission"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -146,17 +147,7 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 // view gate and the ListAgents batch filter. A workspace target admits any
 // member; a member target admits the matching user; team targets are inert.
 func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID string) bool {
-	for _, t := range targets {
-		switch t.TargetType {
-		case "workspace":
-			return true
-		case "member":
-			if uuidToString(t.TargetID) == userID {
-				return true
-			}
-		}
-	}
-	return false
+	return admission.MemberHitsInvocationTargets(targets, userID)
 }
 
 // memberAllowedToViewAgent is the ListAgents / aggregation filter predicate.

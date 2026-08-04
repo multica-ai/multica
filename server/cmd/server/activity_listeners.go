@@ -7,6 +7,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -49,26 +50,32 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 
 	// issue:updated — record specific changes as separate activities
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
+		payload, ok := e.Payload.(issueevent.IssueUpdatedPayload)
+		if !ok || !payload.TriggerSideEffects {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
-		if !ok {
-			return
-		}
+		issue := payload.Snapshot
 
-		statusChanged, _ := payload["status_changed"].(bool)
-		priorityChanged, _ := payload["priority_changed"].(bool)
-		assigneeChanged, _ := payload["assignee_changed"].(bool)
-		descriptionChanged, _ := payload["description_changed"].(bool)
+		statusChanged := payload.StatusChanged
+		priorityChanged := payload.PriorityChanged
+		assigneeChanged := payload.AssigneeChanged
+		descriptionChanged := payload.DescriptionChanged
 
 		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
-			details, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
-			})
+			prevStatus := payload.PrevStatus
+			d := map[string]string{"from": prevStatus, "to": issue.Status}
+			// An automated change is recorded under the system actor (activity_log's
+			// actor_type CHECK forbids hook); keep the automation identity here so the
+			// audit log still attributes the change to the hook that made it. Status is
+			// the only change type the executor produces, so it is the only one that
+			// carries automation attribution today.
+			if a := payload.Automation; a != nil {
+				d["automation_source"] = a.Type
+				if a.ID != "" {
+					d["automation_id"] = a.ID
+				}
+			}
+			details, _ := json.Marshal(d)
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -86,7 +93,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if priorityChanged {
-			prevPriority, _ := payload["prev_priority"].(string)
+			prevPriority := payload.PrevPriority
 			details, _ := json.Marshal(map[string]string{
 				"from": prevPriority,
 				"to":   issue.Priority,
@@ -108,8 +115,8 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if assigneeChanged {
-			prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
-			prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
+			prevAssigneeType := payload.PrevAssigneeType
+			prevAssigneeID := payload.PrevAssigneeID
 
 			detailsMap := map[string]string{}
 			if prevAssigneeType != nil {
@@ -142,9 +149,9 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+		if payload.StartDateChanged {
 			prevStartDate := ""
-			if v, ok := payload["prev_start_date"].(*string); ok && v != nil {
+			if v := payload.PrevStartDate; v != nil {
 				prevStartDate = *v
 			}
 			newStartDate := ""
@@ -171,9 +178,9 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
+		if payload.DueDateChanged {
 			prevDueDate := ""
-			if v, ok := payload["prev_due_date"].(*string); ok && v != nil {
+			if v := payload.PrevDueDate; v != nil {
 				prevDueDate = *v
 			}
 			newDueDate := ""
@@ -200,8 +207,8 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if titleChanged, _ := payload["title_changed"].(bool); titleChanged {
-			prevTitle, _ := payload["prev_title"].(string)
+		if payload.TitleChanged {
+			prevTitle := payload.PrevTitle
 			details, _ := json.Marshal(map[string]string{
 				"from": prevTitle,
 				"to":   issue.Title,

@@ -225,19 +225,24 @@ WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
--- name: FailTasksForOfflineRuntimes :many
--- Marks dispatched/running/waiting_local_directory tasks as failed when
--- their runtime is offline. This cleans up orphaned tasks after a daemon
--- crash or network partition.
-UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'runtime went offline',
-    failure_reason = 'runtime_offline',
-    wait_reason = NULL
+-- name: SelectTasksForOfflineRuntimes :many
+-- Selects (and row-locks) up to @max_per_tick dispatched/running/
+-- waiting_local_directory tasks whose runtime is offline — the orphans a daemon
+-- crash or network partition leaves behind. This is the candidate half of the
+-- MUL-4332 poison-isolated fail path (review point 2): the caller resolves each
+-- task's workspace, fails only the resolvable set via FailAgentTasksByIDs and
+-- emits its task.failed event in the SAME transaction, so an unresolvable poison
+-- row is skipped instead of rolling back the whole batch. FOR UPDATE SKIP LOCKED
+-- keeps the sweeper off rows a daemon is actively claiming; the LIMIT bounds the
+-- lock hold and the rest drain on later ticks.
+SELECT * FROM agent_task_queue
 WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING *;
+ORDER BY created_at ASC
+LIMIT @max_per_tick::int
+FOR UPDATE SKIP LOCKED;
 
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime
@@ -396,3 +401,66 @@ WHERE status = 'offline'
     WHERE agent.runtime_id = agent_runtime.id
   )
 RETURNING id, workspace_id;
+
+
+-- name: PeekTasksForOfflineRuntimes :many
+-- UNLOCKED candidate peek for the offline-runtime sweeper (MUL-4332 review: bulk
+-- workspace-first). Same predicate as SelectTasksForOfflineRuntimes with NO row
+-- lock, so the sweeper locks each candidate's workspace before re-locking its tasks.
+SELECT * FROM agent_task_queue
+WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND runtime_id IN (
+    SELECT id FROM agent_runtime WHERE status = 'offline'
+  )
+ORDER BY created_at ASC
+LIMIT @max_per_tick::int;
+
+
+-- name: LockOfflineRuntimeTasksByIDsForFail :many
+-- Re-applies the offline-runtime eligibility predicate under the task row lock (see
+-- the re-lock note in agent.sql). A runtime that came back online between the peek
+-- and here makes its tasks ineligible again, so they are left alone.
+SELECT * FROM agent_task_queue
+WHERE id = ANY(@ids::uuid[])
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND runtime_id IN (
+    SELECT id FROM agent_runtime WHERE status = 'offline'
+  )
+ORDER BY created_at ASC
+FOR UPDATE SKIP LOCKED;
+
+
+-- name: FailOfflineRuntimeTasksByIDs :many
+-- The offline-runtime sweeper's terminal statement, and the ONE atomic boundary for
+-- its eligibility. Same reasoning as FailStaleTasksByIDs in agent.sql: the task row
+-- lock says nothing about agent_runtime.status, so a daemon that re-registers via
+-- MarkAgentRuntimeOnline after the re-lock returned would still have its running task
+-- failed with a `runtime_offline` event. The runtime condition is therefore repeated
+-- in this statement and its row is held FOR SHARE until the fact + event commit.
+--
+-- `OFFSET 0` fences the status test out of the locked scan so the row is locked
+-- whatever its state, matching FailStaleTasksByIDs and staying correct regardless of
+-- how the planner chooses to push predicates down.
+--
+-- Same lock order and the same teardown mutex as FailStaleTasksByIDs: see the note
+-- there and on LockWorkspaceForRuntimeTeardown.
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = @error,
+    failure_reason = @failure_reason,
+    wait_reason = NULL,
+    prepare_lease_expires_at = NULL
+WHERE id = ANY(@ids::uuid[])
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND EXISTS (
+      SELECT 1 FROM (
+          SELECT r.status
+          FROM agent_runtime r
+          WHERE r.id = agent_task_queue.runtime_id
+          FOR SHARE
+          OFFSET 0
+      ) locked_runtime
+      WHERE locked_runtime.status = 'offline'
+  )
+RETURNING *;

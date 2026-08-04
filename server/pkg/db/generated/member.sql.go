@@ -86,6 +86,64 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const getMemberByUserAndWorkspaceForShare = `-- name: GetMemberByUserAndWorkspaceForShare :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR SHARE
+`
+
+type GetMemberByUserAndWorkspaceForShareParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Locking membership read for authorization inside a write transaction. FOR SHARE
+// takes a shared row lock that blocks a concurrent role UPDATE (demotion) or member
+// DELETE (removal) from committing until this transaction ends, so a hook write can
+// never commit under a membership/role that was revoked mid-transaction — a plain
+// read under READ COMMITTED would miss that (MUL-4332 PR2 review round 5). Multiple
+// concurrent hook writes may still share-lock the same member without blocking each
+// other. Use ONLY inside the hook write transaction; the plain variant remains for
+// non-transactional reads.
+func (q *Queries) GetMemberByUserAndWorkspaceForShare(ctx context.Context, arg GetMemberByUserAndWorkspaceForShareParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getMemberByUserAndWorkspaceForShare, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getMemberInWorkspace = `-- name: GetMemberInWorkspace :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetMemberInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Workspace-scoped member existence check by member row id. Used to fail-closed
+// validate a send_inbox action target belongs to the hook's workspace
+// (MUL-4332 PR2 review point 2).
+func (q *Queries) GetMemberInWorkspace(ctx context.Context, arg GetMemberInWorkspaceParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getMemberInWorkspace, arg.ID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE workspace_id = $1
@@ -156,6 +214,47 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 			&i.UserName,
 			&i.UserEmail,
 			&i.UserAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceMembersByRoles = `-- name: ListWorkspaceMembersByRoles :many
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE workspace_id = $1 AND role = ANY($2::text[])
+ORDER BY created_at ASC
+`
+
+type ListWorkspaceMembersByRolesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Roles       []string    `json:"roles"`
+}
+
+// Members holding any of the given roles, for notifications that must reach the
+// people able to act on them (e.g. an automation paused because its authorization
+// principal left). Role filtering elsewhere is a per-caller authorization check;
+// this is the fan-out selector, which did not previously exist.
+func (q *Queries) ListWorkspaceMembersByRoles(ctx context.Context, arg ListWorkspaceMembersByRolesParams) ([]Member, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceMembersByRoles, arg.WorkspaceID, arg.Roles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Member{}
+	for rows.Next() {
+		var i Member
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.Role,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

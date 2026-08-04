@@ -1233,6 +1233,64 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
+const lockIssueRowForUpdate = `-- name: LockIssueRowForUpdate :one
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockIssueRowForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Row-locks an issue and returns its full authoritative row for both a
+// concurrency-safe update and domain-event emission (MUL-4332 review points 3 &
+// 1). Callers read this INSIDE the update transaction, immediately before
+// UpdateIssue/UpdateIssueStatus. Two purposes:
+//  1. The event's `from` (status/assignee) reflects the truly-current row
+//     rather than a pre-tx snapshot, so concurrent transitions serialize on
+//     the lock and each records the correct edge instead of a stale `from`.
+//  2. UpdateIssue writes the nullable columns (assignee, dates, parent,
+//     project, stage) as bare narg — an untouched field carries whatever the
+//     caller pre-filled. Pre-filling from a pre-tx snapshot lets a concurrent
+//     writer's change be silently rolled back; callers instead rebuild every
+//     untouched field from THIS locked row so an unrelated update never clobbers
+//     a field it did not intend to change.
+func (q *Queries) LockIssueRowForUpdate(ctx context.Context, arg LockIssueRowForUpdateParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, lockIssueRowForUpdate, arg.ID, arg.WorkspaceID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+	)
+	return i, err
+}
+
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
 UPDATE issue
 SET first_executed_at = now()

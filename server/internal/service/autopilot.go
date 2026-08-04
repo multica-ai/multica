@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/dispatch"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -675,6 +676,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("link run to issue: %w", err)
 	}
 	*run = updatedRun
+
+	// Transactional outbox (MUL-4332): emit issue.created atomically with the
+	// autopilot-dispatched issue insert, same as the HTTP create path.
+	if _, err := domainevent.Write(ctx, qtx, domainevent.IssueCreatedFromRow(issue)); err != nil {
+		return fmt.Errorf("write issue.created event: %w", err)
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
