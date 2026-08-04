@@ -55,11 +55,11 @@ type ExecOptions struct {
 	// live resume RPC was rejected, or a transport failure forced a fresh retry —
 	// the backend surfaces a continuity notice to the user instead of silently
 	// restarting. Currently honoured by the codex backend (MUL-4424).
-	ResumeExpected bool
-	ExtraArgs      []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs     []string        // per-agent CLI arguments appended after ExtraArgs
-	QwenpawWorkspace string        // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
-	McpConfig      json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeExpected   bool
+	ExtraArgs        []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs       []string        // per-agent CLI arguments appended after ExtraArgs
+	QwenpawWorkspace string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
+	McpConfig        json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means

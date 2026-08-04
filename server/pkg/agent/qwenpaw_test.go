@@ -209,15 +209,26 @@ func TestQwenpawSessionLoadNotFound(t *testing.T) {
 
 func TestQwenpawListModels(t *testing.T) {
 	t.Parallel()
-	// ListModels for qwenpaw returns an empty catalog without spawning
-	// an ACP process (model selection is unsupported). Verify it's a
-	// recognized type by asserting the error is NOT "unknown agent type".
-	cat, err := ListModels(context.Background(), "qwenpaw", "/nonexistent/qwenpaw")
+	// Model selection is unsupported for qwenpaw, so ListModels must return
+	// an empty catalog WITHOUT spawning an ACP subprocess.
+	//
+	// Point it at a real, executable fake that records its own invocation.
+	// A non-existent path cannot guard this: the previous discovery helper
+	// also returned an empty catalog when the binary was missing, so such a
+	// test passes whether or not the discovery path is reintroduced.
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "invoked")
+	bin := writeFakeQwenpawScript(t, "#!/bin/sh\ntouch '"+marker+"'\nexit 0\n")
+
+	cat, err := ListModels(context.Background(), "qwenpaw", bin)
 	if err != nil {
 		t.Fatalf("qwenpaw ListModels should not error, got: %v", err)
 	}
 	if len(cat.Models) != 0 {
 		t.Fatalf("qwenpaw ListModels should return empty catalog, got %d models", len(cat.Models))
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("qwenpaw ListModels executed the CLI; it must return an empty catalog without spawning a discovery subprocess")
 	}
 }
 

@@ -22,7 +22,9 @@ import (
 //   - the --workspace flag is accepted (qwenpaw acp's workspace skill discovery)
 //
 // This test is gated by MULTICA_RUN_REAL_AGENT_SMOKE=1 and requires
-// `qwenpaw` on PATH. It is validated against QwenPaw v2.1.0-beta.1.
+// `qwenpaw` on PATH. The RPCs it exercises are the ones the execution
+// path needs, all present since QwenPaw v2.0.1 (see qwenpaw.go for the
+// version contract).
 //
 // NOTE: model override via session/set_model is deliberately not attempted;
 // QwenPaw does not support it, and the backend declares model override

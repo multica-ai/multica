@@ -29,20 +29,23 @@ var qwenpawBlockedArgs = map[string]blockedArgMode{
 // Hermes/Kimi/Kiro/Traecli use, so we reuse the hermesClient ACP
 // transport — only the binary, env, and tool-name extraction differ.
 //
-// Supported QwenPaw version: v2.1.0-beta.1 (validated via
-// TestQwenpawRealACPSmoke integration test). The code is designed for
-// the v2.0 ACP API surface; earlier versions (v1.x) have a different
-// protocol and are not supported.
+// Minimum supported QwenPaw version: v2.0.1 (the current stable release).
+// Every ACP feature the execution path below relies on is present there;
+// see TestQwenpawRealACPSmoke for the integration check. The code targets
+// the v2.0 ACP API surface — v1.x speaks a different protocol and is not
+// supported.
 //
-// Notable contract with QwenPaw v2.1.0-beta.1:
+// Notable contract with QwenPaw v2.0.1:
 //   - `session/new` and `session/load` accept `_meta["qwenpaw.coding_project_dir"]`
 //     to enable Coding Mode (qwenpaw.coding_project_dir meta key).
-//   - `session/new` response includes a `models` field (SessionModelState)
-//     for model discovery (QwenPaw v2.1.0-beta.1+, agentscope-ai/QwenPaw#6531).
-//     ListModels uses this to populate the model picker. However,
-//     `session/set_model` is NOT called — it persists to agent.json at the
-//     agent scope (not session-scoped), so calling it would mutate the
-//     user's shared agent config. Model override is declared unsupported.
+//   - `session/set_model` is NOT called: it persists to agent.json at the
+//     agent scope rather than the session scope, so calling it would mutate
+//     the user's shared agent config. Model override is therefore declared
+//     unsupported (see ModelSelectionSupported), and ListModels returns an
+//     empty catalog without spawning a discovery subprocess. QwenPaw did
+//     gain a `models` field on `session/new` in v2.1.0-beta.1
+//     (agentscope-ai/QwenPaw#6531), but with selection unsupported there is
+//     no consumer for that catalog.
 //   - Skills are discovered from the workspace's `skills` directory
 //     (not `skill_pool`) — see execenv/qwenpaw_workspace.go.
 type qwenpawBackend struct {
