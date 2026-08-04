@@ -315,9 +315,25 @@ func TestAppendUserMessage_CommandTextOverridesEnrichedBody(t *testing.T) {
 	if res.IssueCommand == nil || res.IssueCommand.Title != "Real intent" {
 		t.Errorf("CommandText should drive /issue parsing: %+v", res.IssueCommand)
 	}
+	if !f.lastCreate.MessageKind.Valid || f.lastCreate.MessageKind.String != channelCommandMessageKind {
+		t.Errorf("handled command message kind = %+v", f.lastCreate.MessageKind)
+	}
 	// The stored message is still the full (enriched) body.
 	if f.messages[0] != "> quoted context from another message\n/issue Real intent" {
 		t.Errorf("stored body should be the enriched Body: %q", f.messages[0])
+	}
+}
+
+func TestAppendUserMessage_OrdinaryTurnKeepsDefaultMessageKind(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "hello", CommandText: "hello", MessageID: "m1",
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.lastCreate.MessageKind.Valid {
+		t.Fatalf("ordinary message kind must use the database default: %+v", f.lastCreate.MessageKind)
 	}
 }
 

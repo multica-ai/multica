@@ -999,6 +999,7 @@ SET task_id = $1
 WHERE message.chat_session_id = $2
   AND message.role = 'user'
   AND message.task_id IS NULL
+  AND message.message_kind != 'channel_command'
   AND NOT EXISTS (
       SELECT 1
       FROM chat_message AS prior
@@ -1016,6 +1017,8 @@ type LinkUnownedChannelChatMessagesToTaskParams struct {
 // Seals the trailing channel-message batch to its task. The task row and these
 // links are committed together, so an older in-flight task cannot absorb a
 // newer media message and a later assistant row cannot hide that message.
+// channel_command turns were already handled synchronously by Router; keeping
+// them visible but unowned prevents both immediate and delayed re-execution.
 func (q *Queries) LinkUnownedChannelChatMessagesToTask(ctx context.Context, arg LinkUnownedChannelChatMessagesToTaskParams) error {
 	_, err := q.db.Exec(ctx, linkUnownedChannelChatMessagesToTask, arg.TaskID, arg.ChatSessionID)
 	return err

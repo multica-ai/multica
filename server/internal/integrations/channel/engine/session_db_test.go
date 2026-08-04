@@ -97,6 +97,64 @@ func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPers
 	return f
 }
 
+func TestChannelIssueCommandIsExcludedFromLaterChatTaskBatch(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+
+	command, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: fixture.sessionID, Sender: fixture.userID,
+		Body: "/issue handled once", CommandText: "/issue handled once",
+	})
+	if err != nil {
+		t.Fatalf("append command: %v", err)
+	}
+	ordinary, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: fixture.sessionID, Sender: fixture.userID,
+		Body: "next question", CommandText: "next question",
+	})
+	if err != nil {
+		t.Fatalf("append ordinary message: %v", err)
+	}
+
+	var agentID, runtimeID pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `
+		SELECT cs.agent_id, a.runtime_id
+		FROM chat_session cs
+		JOIN agent a ON a.id = cs.agent_id
+		WHERE cs.id = $1`, fixture.sessionID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load task routing: %v", err)
+	}
+	var taskID pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, completed_at)
+		VALUES ($1, $2, $3, 'completed', now()) RETURNING id`, agentID, runtimeID, fixture.sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	if err := db.New(pool).LinkUnownedChannelChatMessagesToTask(context.Background(), db.LinkUnownedChannelChatMessagesToTaskParams{
+		TaskID: taskID, ChatSessionID: fixture.sessionID,
+	}); err != nil {
+		t.Fatalf("seal chat input: %v", err)
+	}
+
+	var commandOwner, ordinaryOwner pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `SELECT task_id FROM chat_message WHERE id = $1`, command.MessageID).Scan(&commandOwner); err != nil {
+		t.Fatalf("load command owner: %v", err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT task_id FROM chat_message WHERE id = $1`, ordinary.MessageID).Scan(&ordinaryOwner); err != nil {
+		t.Fatalf("load ordinary owner: %v", err)
+	}
+	if commandOwner.Valid {
+		t.Fatalf("handled command was linked to a later task: %v", commandOwner)
+	}
+	if ordinaryOwner != taskID {
+		t.Fatalf("ordinary message owner = %v, want %v", ordinaryOwner, taskID)
+	}
+}
+
 func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)

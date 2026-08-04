@@ -281,6 +281,11 @@ type BindMediaInput struct {
 	MediaRefs   []channel.MediaRef
 }
 
+// channelCommandMessageKind marks a visible user turn handled synchronously by
+// Router. It remains an ordinary public message, but the task batch seal omits
+// it so the agent cannot execute the command again on a later turn.
+const channelCommandMessageKind = "channel_command"
+
 // AppendUserMessage writes the user message into the chat_session (touching it
 // and recording the reply target), runs the in-tx dedup Mark when a claim token
 // is supplied, and returns the durable message id plus the parsed `/issue`
@@ -318,6 +323,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		ChatSessionID:           in.SessionID,
 		Role:                    "user",
 		Content:                 in.Body,
+		MessageKind:             textOrNullIf(cmd != nil, channelCommandMessageKind),
 		ChannelMediaPendingSecs: pgtype.Float8{Float64: in.MediaPendingSeconds, Valid: in.MediaPendingSeconds > 0},
 		ChannelIngested:         pgtype.Bool{Bool: true, Valid: true},
 	})
@@ -531,4 +537,8 @@ func textOrNull(s string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: s, Valid: true}
+}
+
+func textOrNullIf(valid bool, s string) pgtype.Text {
+	return pgtype.Text{String: s, Valid: valid}
 }
