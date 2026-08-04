@@ -181,6 +181,7 @@ Root-level reminders:
 ## UI Rules
 
 - Prefer shadcn/Base UI components over custom implementations. Add them with `pnpm ui:add <component>` from the repo root.
+- The `@reui` registry (Pro) is configured in `packages/ui/components.json`. It needs `REUI_LICENSE_KEY` exported in your shell or set in `packages/ui/.env.local` (gitignored); add items with `pnpm ui:add @reui/<name>`. Answer `n` to overwrite prompts so local component customizations survive.
 - Use design tokens and semantic classes; avoid hardcoded colors.
 - Do not introduce extra local state unless the design requires it.
 - Handle overflow, long text, scrolling, alignment, and spacing deliberately.
