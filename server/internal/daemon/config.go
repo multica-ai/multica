@@ -423,15 +423,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// older server build, which a fresh CLI may no longer talk to. Keeping
 	// auto-update off by default for self-host avoids both footguns (MUL-2381).
 	// Operators on either side can flip the default with MULTICA_DAEMON_AUTO_UPDATE.
-	autoUpdateEnabled := isOfficialCloudServer(serverBaseURL)
-	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_UPDATE")); v != "" {
-		switch strings.ToLower(v) {
-		case "false", "0", "no", "off":
-			autoUpdateEnabled = false
-		case "true", "1", "yes", "on":
-			autoUpdateEnabled = true
-		}
-	}
+	autoUpdateEnabled := boolFromEnv("MULTICA_DAEMON_AUTO_UPDATE", isOfficialCloudServer(serverBaseURL))
 	if overrides.DisableAutoUpdate {
 		autoUpdateEnabled = false
 	}
@@ -449,15 +441,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// off (don't clobber my fork) argues the opposite way for the latter: an
 	// operator who installed a build by hand wants the daemon to run it.
 	// Default on for every CLI-launched daemon; Desktop opts out at the loop.
-	autoReloadEnabled := true
-	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_RELOAD")); v != "" {
-		switch strings.ToLower(v) {
-		case "false", "0", "no", "off":
-			autoReloadEnabled = false
-		case "true", "1", "yes", "on":
-			autoReloadEnabled = true
-		}
-	}
+	autoReloadEnabled := boolFromEnv("MULTICA_DAEMON_AUTO_RELOAD", true)
 	if overrides.DisableAutoReload {
 		autoReloadEnabled = false
 	}

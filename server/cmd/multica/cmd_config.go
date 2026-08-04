@@ -213,32 +213,35 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 			return err
 		}
 	case "disable_auto_update":
-		if value == "" {
-			cfg.DisableAutoUpdate = false
-			return nil
+		if err := assignBool(&cfg.DisableAutoUpdate, key, value); err != nil {
+			return err
 		}
-		b, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("disable_auto_update must be 'true' or 'false' (got %q)", value)
-		}
-		cfg.DisableAutoUpdate = b
 	case "auto_update_check_interval":
 		if err := assignPositiveDuration(&cfg.AutoUpdateCheckInterval, key, value); err != nil {
 			return err
 		}
 	case "disable_auto_reload":
-		if value == "" {
-			cfg.DisableAutoReload = false
-			return nil
+		if err := assignBool(&cfg.DisableAutoReload, key, value); err != nil {
+			return err
 		}
-		b, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("disable_auto_reload must be 'true' or 'false' (got %q)", value)
-		}
-		cfg.DisableAutoReload = b
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}
+	return nil
+}
+
+// assignBool parses value as a strict bool into dst. Shared by the
+// disable_* toggles. Empty string clears the field (false).
+func assignBool(dst *bool, key, value string) error {
+	if value == "" {
+		*dst = false
+		return nil
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return fmt.Errorf("%s must be 'true' or 'false' (got %q)", key, value)
+	}
+	*dst = b
 	return nil
 }
 
