@@ -64,6 +64,12 @@ type batchFixture struct {
 	// recording the call, widening the window in which two unserialized
 	// register calls for the same workspace would overlap.
 	registerDelay time.Duration
+	// registerGate, when set, is invoked by the register handler (off fx.mu)
+	// with the workspace ID before the response is built. A test blocks in it to
+	// hold one register in flight while it drives another state change, which is
+	// how the "response predates a verdict" interleaves are made deterministic
+	// instead of timing-dependent.
+	registerGate func(workspaceID string)
 	// registerInFlight / registerMaxInFlight track how many register handlers
 	// run at once, so a test can assert same-workspace serialization.
 	registerInFlight    int
@@ -188,6 +194,13 @@ func (fx *batchFixture) deregisteredIDs() []string {
 
 // setRegisterDelay makes every register call linger, so a test can detect two
 // of them overlapping when they should be serialized.
+// setRegisterGate installs a hook the register handler calls before responding.
+func (fx *batchFixture) setRegisterGate(fn func(workspaceID string)) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.registerGate = fn
+}
+
 func (fx *batchFixture) setRegisterDelay(d time.Duration) {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
@@ -259,7 +272,11 @@ func newBatchFixture(t *testing.T) *batchFixture {
 				fx.registerMaxInFlight = fx.registerInFlight
 			}
 			delay := fx.registerDelay
+			gate := fx.registerGate
 			fx.mu.Unlock()
+			if gate != nil {
+				gate(body.WorkspaceID)
+			}
 			defer func() {
 				fx.mu.Lock()
 				fx.registerInFlight--

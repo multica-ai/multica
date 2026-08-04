@@ -407,12 +407,17 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 	d.logger.Warn("agent CLI downgraded below the minimum supported version; taking its runtimes offline",
 		"providers", demotedProviders, "runtime_ids", demoted)
 
-	// Best-effort, like every other deregistration path: the daemon has already
-	// stopped heartbeating these rows, so the server's stale-heartbeat sweep is
-	// the backstop if this call fails.
-	if err := d.client.Deregister(ctx, demoted); err != nil {
-		d.logger.Warn("deregister after below-minimum downgrade failed",
-			"runtime_ids", demoted, "error", err)
+	// Same re-check as deregisterRevivedRuntimes: the rows were dropped under
+	// d.mu but this call runs without it, so an upgrade that recovered the
+	// provider in between must not be undone by this older cleanup.
+	if stale := d.untrackedRuntimeIDs(demoted); len(stale) > 0 {
+		// Best-effort, like every other deregistration path: the daemon has
+		// already stopped heartbeating these rows, so the server's
+		// stale-heartbeat sweep is the backstop if this call fails.
+		if err := d.client.Deregister(ctx, stale); err != nil {
+			d.logger.Warn("deregister after below-minimum downgrade failed",
+				"runtime_ids", stale, "error", err)
+		}
 	}
 	d.notifyRuntimeSetChanged()
 }
@@ -426,6 +431,12 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 // tasks would sit unclaimed until the stale-heartbeat sweep. Best-effort for the
 // same reason every other deregistration path is — the sweep is the backstop.
 func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID string, runtimeIDs []string) {
+	// Re-check tracking first: the rejection happened under d.mu but this call
+	// runs without it, and a legitimate recovery register landing in that gap
+	// re-creates the same row — usually under the same ID. Deregistering then
+	// would take the recovered runtime offline on the strength of an older
+	// decision. Anything the daemon tracks now is newer than this cleanup.
+	runtimeIDs = d.untrackedRuntimeIDs(runtimeIDs)
 	if len(runtimeIDs) == 0 {
 		return
 	}

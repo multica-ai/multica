@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -1213,5 +1215,154 @@ func TestDemoteBelowMinimumRuntimes_UpgradeClearsTheHold(t *testing.T) {
 	}
 	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
 		t.Errorf("ws-1 registered codex version = %q, want 10.0.0", got)
+	}
+}
+
+// TestSyncWorkspacesFromAPI_FirstRegistrationRejectsDemotedProvider covers the
+// third path a register response reaches local state through.
+//
+// A workspace seen for the first time does not go through
+// applyRegisterResponseInPlace or mergeBuiltinRegisterResponse — it builds the
+// workspaceState directly — so the demotion guard on those two left this one
+// open. A workspace joining while a provider is held below-minimum would bring
+// that provider back, on the strength of a payload probed before the verdict.
+func TestSyncWorkspacesFromAPI_FirstRegistrationRejectsDemotedProvider(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	// Hold the new workspace's register in flight. Its payload was probed while
+	// codex was still acceptable; the demotion lands while it waits.
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	fx.setRegisterGate(func(workspaceID string) {
+		if workspaceID != "ws-3" {
+			return
+		}
+		once.Do(func() { close(arrived) })
+		<-release
+	})
+
+	fx.setWorkspaces(
+		WorkspaceInfo{ID: "ws-1", Name: "one"},
+		WorkspaceInfo{ID: "ws-2", Name: "two"},
+		WorkspaceInfo{ID: "ws-3", Name: "three"},
+	)
+	synced := make(chan error, 1)
+	go func() { synced <- d.syncWorkspacesFromAPI(context.Background(), false) }()
+	<-arrived
+
+	// The downgrade is confirmed while ws-3's register is still in flight.
+	stubBelowMinimumAt(t, "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	d.refreshAgentVersions(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Fatalf("providers for ws-1 after downgrade = %v, want none (demotion precondition)", got)
+	}
+	deregsBefore := fx.deregisteredCount()
+
+	close(release)
+	if err := <-synced; err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	if got := registeredProviders(t, d, "ws-3"); len(got) != 0 {
+		t.Errorf("ws-3 providers = %v, want none — a workspace joining while codex is held "+
+			"below the minimum must not be how it comes back online", got)
+	}
+	if got := fx.deregisteredCount(); got <= deregsBefore {
+		t.Errorf("deregister calls %d -> %d; the row the server created for ws-3 was left online, so it "+
+			"would keep routing work to a runtime the daemon does not track", deregsBefore, got)
+	}
+	// The version record must not claim ws-3 is current for a provider it
+	// refused, or the next refresh round would skip repairing it.
+	d.mu.Lock()
+	_, recorded := d.workspaces["ws-3"].builtinVersions["codex"]
+	d.mu.Unlock()
+	if recorded {
+		t.Error("ws-3 recorded a codex version for a provider whose rows it rejected")
+	}
+}
+
+// TestClearProviderDemotions_KeepsHoldWhenEvidencePredatesTheVerdict pins the
+// ordering rule that d.mu alone cannot supply.
+//
+// Four callers run probe rounds concurrently and version sampling happens off
+// the lock, so the round that finishes last is not necessarily the one that
+// looked last. An OK sample taken before a downgrade must not release the hold
+// that downgrade established — once the hold is gone, a stale register response
+// passes every other guard.
+func TestClearProviderDemotions_KeepsHoldWhenEvidencePredatesTheVerdict(t *testing.T) {
+	d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), runtimeIndex: map[string]Runtime{}}
+
+	// A round that started before the verdict.
+	sampledAfter := d.demotionSeqSnapshot()
+
+	d.mu.Lock()
+	d.markProvidersDemotedLocked(map[string]string{"codex": "0.0.1"})
+	d.mu.Unlock()
+
+	d.clearProviderDemotions([]string{"codex"}, sampledAfter)
+	d.mu.Lock()
+	stillHeld := d.providerDemotedLocked("codex")
+	d.mu.Unlock()
+	if !stillHeld {
+		t.Fatal("an OK sample taken before the downgrade released the hold; a stale register response " +
+			"would now walk through every remaining guard")
+	}
+
+	// A round that starts after the verdict carries newer evidence and releases.
+	d.clearProviderDemotions([]string{"codex"}, d.demotionSeqSnapshot())
+	d.mu.Lock()
+	stillHeld = d.providerDemotedLocked("codex")
+	d.mu.Unlock()
+	if stillHeld {
+		t.Error("a probe round that started after the verdict must release the hold, or the provider " +
+			"could never recover")
+	}
+}
+
+// TestDetectBuiltinRuntimes_StaleOKRoundDoesNotReleaseANewerHold drives the same
+// ordering through the real probe round rather than the counter directly: the
+// round samples an acceptable version, blocks, and only finishes after a
+// downgrade has been confirmed.
+func TestDetectBuiltinRuntimes_StaleOKRoundDoesNotReleaseANewerHold(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	// The stub reads probeVersion BEFORE consulting this hook, so the round has
+	// already sampled the acceptable version by the time it blocks here.
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	fx.setProbeErr(func(string, int) error {
+		once.Do(func() {
+			close(arrived)
+			<-release
+		})
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.detectBuiltinRuntimes(context.Background())
+	}()
+	<-arrived
+
+	// The downgrade is confirmed while that round is still in flight.
+	d.mu.Lock()
+	d.markProvidersDemotedLocked(map[string]string{"codex": "0.0.1"})
+	d.mu.Unlock()
+
+	close(release)
+	<-done
+
+	d.mu.Lock()
+	stillHeld := d.providerDemotedLocked("codex")
+	d.mu.Unlock()
+	if !stillHeld {
+		t.Error("a probe round that sampled before the downgrade cleared the newer hold — ordering the " +
+			"map writes is not enough when the evidence itself is sampled off the lock")
 	}
 }

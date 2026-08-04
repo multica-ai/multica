@@ -328,10 +328,23 @@ type Daemon struct {
 	// probe round that finds the provider acceptable again, which is also the
 	// round that lets converge register it.
 	//
-	// Guarded by demotedMu, which is always taken innermost and never held
-	// across another lock.
-	demotedMu        sync.RWMutex
-	demotedProviders map[string]string // provider -> the version that was rejected
+	// Guarded by d.mu — deliberately the same lock every register-response
+	// apply takes, which is what totally orders "record the verdict" against
+	// "apply a response" instead of merely narrowing the window between them.
+	demotedProviders map[string]demotionRecord // provider -> the rejected version and when it was rejected
+
+	// demotionSeq is a monotonic counter stamped onto each demotion record so a
+	// probe round can tell whether its evidence predates a verdict.
+	//
+	// Ordering the map writes is not enough on its own: version sampling
+	// happens outside d.mu, so a round that started earlier, sampled an
+	// acceptable version, and returned late could otherwise clear a hold
+	// established by a NEWER below-minimum verdict — and once the hold is gone,
+	// a stale register response walks through every guard above. A round
+	// snapshots this counter before it samples anything and may only clear
+	// holds recorded at or before that snapshot, which makes "my evidence is
+	// newer than that verdict" a fact rather than a hope. Guarded by d.mu.
+	demotionSeq uint64
 
 	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
 	// The daemon pins each agent's absolute path at startup so a later PATH
@@ -1322,6 +1335,13 @@ func (d *Daemon) providerDemotedLocked(provider string) bool {
 	return demoted
 }
 
+// demotionRecord is a confirmed below-minimum verdict: the version that was
+// rejected, plus the demotionSeq tick that establishes when it was reached.
+type demotionRecord struct {
+	version string
+	seq     uint64
+}
+
 // markProvidersDemoted records a CONFIRMED below-minimum verdict so a register
 // response still in flight cannot revive the provider. Callers must hold d.mu.
 func (d *Daemon) markProvidersDemotedLocked(providers map[string]string) {
@@ -1329,18 +1349,37 @@ func (d *Daemon) markProvidersDemotedLocked(providers map[string]string) {
 		return
 	}
 	if d.demotedProviders == nil {
-		d.demotedProviders = make(map[string]string, len(providers))
+		d.demotedProviders = make(map[string]demotionRecord, len(providers))
 	}
+	// One tick per verdict batch: every record written here is newer than any
+	// probe round that snapshotted the counter before this call.
+	d.demotionSeq++
 	for provider, version := range providers {
-		d.demotedProviders[provider] = version
+		d.demotedProviders[provider] = demotionRecord{version: version, seq: d.demotionSeq}
 	}
 }
 
+// demotionSeqSnapshot returns the current demotion counter. A probe round takes
+// this BEFORE it samples any version, so a later clearProviderDemotions call can
+// prove its evidence postdates a verdict rather than merely arriving after it.
+func (d *Daemon) demotionSeqSnapshot() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.demotionSeq
+}
+
 // clearProviderDemotions drops the verdict for providers whose version probed
-// acceptable again, which is what lets converge register them back. Called once
-// per probe round rather than per apply: the round that produced an OK verdict
-// is the authority on the binary now on disk.
-func (d *Daemon) clearProviderDemotions(providers []string) {
+// acceptable again, which is what lets converge register them back.
+//
+// sampledAfter is the counter the calling round snapshotted before it probed. A
+// hold recorded after that snapshot is NEWER evidence than anything this round
+// saw, so it survives: four callers probe concurrently and sampling happens off
+// the lock, which means "returned last" says nothing about "looked last". The
+// round that overlapped a demotion simply declines to clear it and the next one
+// — which starts after the verdict exists, so its sample cannot predate it —
+// does the release. Recovery is at worst one round late; clearing on stale
+// evidence would let a stale register response through every other guard.
+func (d *Daemon) clearProviderDemotions(providers []string, sampledAfter uint64) {
 	if len(providers) == 0 {
 		return
 	}
@@ -1350,12 +1389,44 @@ func (d *Daemon) clearProviderDemotions(providers []string) {
 		return
 	}
 	for _, provider := range providers {
-		if version, was := d.demotedProviders[provider]; was {
-			delete(d.demotedProviders, provider)
-			d.logger.Info("agent CLI is back at or above the minimum supported version",
-				"provider", provider, "rejected_version", version)
+		record, was := d.demotedProviders[provider]
+		if !was {
+			continue
 		}
+		if record.seq > sampledAfter {
+			d.logger.Info("keeping below-minimum hold: this probe round started before the verdict",
+				"provider", provider, "rejected_version", record.version)
+			continue
+		}
+		delete(d.demotedProviders, provider)
+		d.logger.Info("agent CLI is back at or above the minimum supported version",
+			"provider", provider, "rejected_version", record.version)
 	}
+}
+
+// untrackedRuntimeIDs filters ids down to those the daemon does not currently
+// track, so a deregistration decided a moment ago cannot take a row offline that
+// a NEWER legitimate registration has since brought back.
+//
+// Every deregistration on the demotion paths is decided under d.mu and issued
+// after releasing it — the HTTP call must not hold the daemon lock. A recovery
+// register completing in that gap re-creates the same server-side row, usually
+// under the same runtime ID, and the older cleanup would then knock out the row
+// that just recovered.
+func (d *Daemon) untrackedRuntimeIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, tracked := d.runtimeIndex[id]; tracked {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
@@ -1947,6 +2018,10 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		name    string
 		version string
 	}
+	// Snapshot before any probe runs: everything sampled below is at least as
+	// new as every verdict recorded up to this point, which is exactly the
+	// claim clearProviderDemotions needs and cannot make from timing alone.
+	sampledAfter := d.demotionSeqSnapshot()
 	var (
 		mu          sync.Mutex
 		results     []detected
@@ -1994,11 +2069,14 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	// A provider that probes OK is no longer below the minimum, so release any
 	// demotion held against it — otherwise the register that converge is about
 	// to make would be rejected by the very guard that protects the demotion.
+	// Only holds that already existed when this round started sampling are
+	// released; see clearProviderDemotions for why "returned last" is not the
+	// same as "sampled last".
 	recovered := make([]string, 0, len(results))
 	for _, r := range results {
 		recovered = append(recovered, r.name)
 	}
-	d.clearProviderDemotions(recovered)
+	d.clearProviderDemotions(recovered, sampledAfter)
 
 	runtimes := make([]map[string]string, 0, len(results))
 	for _, r := range results {
@@ -3072,12 +3150,23 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
 		}
-		runtimeIDs := make([]string, len(resp.Runtimes))
-		for i, rt := range resp.Runtimes {
-			runtimeIDs[i] = rt.ID
+		// First registration is the third path a response reaches local state
+		// through — it builds the workspaceState directly instead of going via
+		// applyRegisterResponseInPlace / mergeBuiltinRegisterResponse — so it
+		// needs the same demotion guard, taken in the same d.mu section that
+		// publishes the state. A workspace joining while a provider is held
+		// below-minimum must not be the way that provider comes back.
+		d.mu.Lock()
+		runtimeIDs := make([]string, 0, len(resp.Runtimes))
+		var revivedIDs []string
+		for _, rt := range resp.Runtimes {
+			if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+				revivedIDs = append(revivedIDs, rt.ID)
+				continue
+			}
+			runtimeIDs = append(runtimeIDs, rt.ID)
 			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
-		d.mu.Lock()
 		ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
 		// Seed the profile signature so later on-demand change notifications can
 		// detect drift without re-registering on duplicates (empty sig is the
@@ -3089,11 +3178,29 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		// register call above ran before this workspaceState existed, so
 		// recordBuiltinVersionsSent inside it had nowhere to write).
 		ws.builtinVersions = builtinVersionsFromPayload(payload)
+		for provider := range ws.builtinVersions {
+			// Same reason recordBuiltinVersionsSent skips these: a version
+			// record for a provider whose rows are being refused reads as
+			// "this workspace is current" to the next refresh round.
+			if d.providerDemotedLocked(provider) {
+				delete(ws.builtinVersions, provider)
+			}
+		}
 		d.workspaces[id] = ws
 		for _, rt := range resp.Runtimes {
+			if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+				continue
+			}
 			d.runtimeIndex[rt.ID] = rt
 		}
 		d.mu.Unlock()
+
+		// The server upserted the refused rows into existence, so it alone
+		// would believe they are online and keep routing work to them. Take
+		// them offline before anything else touches this workspace — and never
+		// RecoverOrphans them below: that reports tasks for a runtime the
+		// daemon does not track and will never claim for.
+		d.deregisterRevivedRuntimes(ctx, id, revivedIDs)
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
@@ -3109,7 +3216,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			}
 		}
 
-		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
+		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(runtimeIDs), "repos", len(resp.Repos))
 		registered++
 	}
 
