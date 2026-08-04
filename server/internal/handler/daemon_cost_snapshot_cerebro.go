@@ -78,6 +78,8 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 		}
 		// CEREBRO-PATCH(snapshot-thread-scope): on channels, inline only the triggering thread, not unrelated chatter (TECH-3691)
 		comments = cost_optimization.ScopeSnapshotToTriggerThread(issue.Kind, comments, triggerCommentID)
+		// CEREBRO-PATCH(snapshot-resolved-scope): settled threads stay out of the start prompt; a Handoff's fresh run must not re-read the thread it just closed (FIR-4500)
+		comments = cost_optimization.DropResolvedThreads(comments, triggerCommentID)
 		snapshot := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
 
 		// CEREBRO-PATCH(daemon-snapshot-compression): overflow guard — activate B or C when snapshot is too large (FIR-3074)

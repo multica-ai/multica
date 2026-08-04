@@ -320,8 +320,11 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	// One-command handoff (FIR-2021): the old thread is now closed and the brief
 	// stored — open a NEW session and start a clean run on it. Done after the
 	// commit so the close stays durable regardless of the enqueue outcome.
+	// The brief is passed into startFreshSession so it can ride in the kickoff
+	// comment (FIR-4500) — production still opens the fresh session after the
+	// close-commit, unlike main where the kickoff is written inside StartFresh.
 	if req.StartNew {
-		fresh, ferr := h.startFreshSession(r, issue, req.Prompt)
+		fresh, ferr := h.startFreshSession(r, issue, req.Prompt, handoff)
 		if ferr != nil {
 			// The handoff (close + brief) already succeeded; only opening the fresh
 			// session failed. 502 tells the caller the new session did not start.
@@ -339,7 +342,9 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 // agent) + a force_fresh_session task triggered by it. Stays entirely on exported
 // TaskService APIs so the orchestration lives in the cerebro zone. v1 targets the
 // issue's assignee agent — the demonstrated self-handoff to clean context.
-func (h *Handler) startFreshSession(r *http.Request, issue db.Issue, prompt string) (*freshRunInfo, error) {
+// brief is the carry-over from the closed session; when non-empty it is appended
+// to the kickoff so the fresh run gets it in the start prompt without a lookup.
+func (h *Handler) startFreshSession(r *http.Request, issue db.Issue, prompt string, brief *handoffBrief) (*freshRunInfo, error) {
 	if h.tasks == nil {
 		return nil, fmt.Errorf("starting a fresh session is not available on this server")
 	}
@@ -362,6 +367,9 @@ func (h *Handler) startFreshSession(r *http.Request, issue db.Issue, prompt stri
 	if kickoff == "" {
 		kickoff = defaultHandoffKickoff
 	}
+	// The brief travels in the kickoff itself: the daemon inlines the triggering
+	// comment into the fresh run's start prompt, so it arrives without a lookup.
+	kickoff = kickoffWithBrief(kickoff, brief)
 	comment, err := h.upstream.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -441,10 +449,11 @@ func (h *Handler) publishCommentCreated(issue db.Issue, comment db.Comment) {
 }
 
 // defaultHandoffKickoff is the opening message of a handed-off fresh session when
-// the caller supplies no custom prompt. It tells the fresh run (which has no
-// memory of the prior thread) where to find the carry-over brief.
+// the caller supplies no custom prompt. kickoffWithBrief appends the carry-over
+// brief below it, so the fresh run (which has no memory of the prior thread) gets
+// it in the start prompt instead of spending a tool call to look it up.
 const defaultHandoffKickoff = "🔄 Fresh session (handoff). This is a brand-new run with no memory of the previous thread.\n\n" +
-	"Read the carry-over brief from the handed-off session — run `multica issue session list <issue>` and look at the `handoff` field on the most recently closed thread (summary / done / remaining) — then continue from the `remaining` items."
+	"The carry-over brief from the closed session follows below — continue from its `remaining` items. If no brief follows, run `multica issue session list <issue>` and read the `handoff` field on the most recently closed thread."
 
 // generateHandoff auto-summarises a THREAD (its root comment + replies) when no
 // agent brief is supplied. Deterministic, no LLM: it captures how many comments
