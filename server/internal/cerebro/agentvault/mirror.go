@@ -53,6 +53,32 @@ type BoxGrant struct {
 // be truly enforced now.
 const VaultResourcePrefix = "agentvault-vault:"
 
+// BrowserLoginVaultPrefix is the logical Infisical path every browser-login
+// vault lives under. Agent Vault stores the same box under its flattened name
+// (`shared-browser-login-<app>`); RevealCredential does that translation itself,
+// so the logical path is the ONLY form a caller may pass in.
+const BrowserLoginVaultPrefix = "Shared/browser-login/"
+
+// BrowserLoginVaultFormatHint is the single wording used everywhere a bad
+// browser-login vault value is rejected, so the CLI flag help, the reveal error
+// and the handler's 400 cannot drift apart.
+const BrowserLoginVaultFormatHint = "vault must be " + BrowserLoginVaultPrefix + "<app>"
+
+// BrowserLoginApp returns the <app> segment of a browser-login vault path, and
+// ok=false when vault is not of the form Shared/browser-login/<app>. This is the
+// ONE place that rule lives: callers that gate on the vault (the provisioning
+// handlers) and the reveal path itself both use it, so a value that passes the
+// gate can never be rejected later as malformed — the drift that made FIR-4447
+// surface as an opaque 502 instead of a 400.
+func BrowserLoginApp(vault string) (app string, ok bool) {
+	vault = strings.TrimSpace(vault)
+	app = strings.TrimPrefix(vault, BrowserLoginVaultPrefix)
+	if app == vault || app == "" || strings.Contains(app, "/") {
+		return "", false
+	}
+	return app, true
+}
+
 // VaultFromResourcePattern returns the vault name when pattern names an Agent
 // Vault vault directly (`agentvault-vault:<vault>`), and ok=false otherwise.
 // Pure and trims surrounding space so a blank vault never projects.
