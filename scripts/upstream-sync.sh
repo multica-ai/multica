@@ -139,13 +139,33 @@ fi
 
 # 7. Merge with --no-commit so we can apply the fork-owned-docs rule before sealing.
 if ! git merge --no-commit --no-ff "${UPSTREAM_REF}"; then
-  if [ -n "$(git ls-files -u)" ]; then
+  if [ -z "$(git ls-files -u)" ]; then
+    # Merge failed for a non-conflict reason (dirty tree, bad ref, ...).
+    exit 1
+  fi
+  # README.md is fork-owned by policy. Resolve that expected conflict with
+  # the fork's copy now; step 9 snapshots upstream's copy separately before
+  # the merge is sealed. Any other conflict still requires human review.
+  CONFLICTS=$(git diff --name-only --diff-filter=U | sort -u)
+  UNEXPECTED_CONFLICTS=$(printf '%s\n' "${CONFLICTS}" | grep -vxF 'README.md' || true)
+  if printf '%s\n' "${CONFLICTS}" | grep -qxF 'README.md' \
+    && [ -z "${UNEXPECTED_CONFLICTS}" ]; then
+    git checkout "${FORK_REMOTE}/${FORK_BRANCH}" -- README.md
+    git add -- README.md
+    echo "resolved fork-owned README.md; upstream copy will be saved as ${UPSTREAM_README_SNAPSHOT}"
+  else
     echo "conflict — aborting for human review:"
-    git diff --name-only --diff-filter=U
+    printf '%s\n' "${CONFLICTS}"
     git merge --abort
     exit 2
   fi
-  exit 1
+  # Nothing may still be unmerged once the policy resolution has run.
+  if [ -n "$(git ls-files -u)" ]; then
+    echo "unresolved paths remain after applying the fork-owned-docs rule:"
+    git diff --name-only --diff-filter=U
+    git merge --abort
+    exit 1
+  fi
 fi
 
 # 8a. Enforce upstream authority on every non-fork-owned path.
