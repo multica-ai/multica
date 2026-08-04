@@ -492,12 +492,15 @@ configuration. Verified against the code.
 ### Platform capabilities enforced through the tool-policy engine (FIR-4220)
 
 The former advisory "Managed externally" rows in Settings → Permissions are now
-live gates. Eight platform capabilities resolve the authored Allow/Ask/Deny
-through the tool-policy chain for **agent actors** (members pass through to the
-existing role/membership gates, which stay as tighten-only ceilings — a policy
-Allow can never open what those checks close):
+live gates. Platform capabilities resolve the authored Allow/Ask/Deny through
+the tool-policy chain for agent actors. `create_autopilot`,
+`trigger_autopilot`, and `autopilot_scope` also resolve member actions through
+the same `workspace → group → user` chain; owner/admin keeps its existing
+override, member Ask fails closed, and scope/private-assignee checks remain
+tighten-only ceilings. Other member actions keep their existing role/membership
+gates.
 
-- `rerun_issue`, `trigger_autopilot`, `autopilot_scope`,
+- `rerun_issue`, `create_autopilot`, `trigger_autopilot`, `autopilot_scope`,
   `schedule_agent_wakeup`, `manage_project_access` (slice 1) — route middleware
   `RequirePlatformCapability` in
   `server/internal/handler/platform_capability_gate_cerebro.go`;

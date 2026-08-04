@@ -19,6 +19,7 @@ import (
 type Request struct {
 	WorkspaceID  pgtype.UUID
 	AgentID      pgtype.UUID
+	MemberID     pgtype.UUID
 	TaskID       pgtype.UUID
 	OnBehalfOfID pgtype.UUID
 	SystemID     pgtype.UUID
@@ -52,8 +53,34 @@ func NewDefault(policy *toolpolicy.Store, queries *db.Queries, cerebro *cerebrod
 }
 
 func (g *Gate) Authorize(ctx context.Context, in Request) (permgate.Result, error) {
-	if g == nil || g.Policy == nil || g.Queries == nil || !in.AgentID.Valid || !in.WorkspaceID.Valid {
+	if g == nil || g.Policy == nil || g.Queries == nil || !in.WorkspaceID.Valid || (!in.AgentID.Valid && !in.MemberID.Valid) {
 		return denied("platform action gate not configured"), errors.New("platformaction: gate not configured")
+	}
+	if in.MemberID.Valid {
+		member, err := g.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: in.MemberID, WorkspaceID: in.WorkspaceID})
+		if err != nil {
+			return denied("member identity lookup failed"), errors.New("platformaction: invalid member identity")
+		}
+		if member.Role == "owner" || member.Role == "admin" {
+			return permgate.Result{Outcome: permgate.OutcomeAllowed, Reason: "workspace owner or administrator"}, nil
+		}
+		effective, err := g.Policy.ResolvePermission(ctx, toolpolicy.Query{
+			WorkspaceID: in.WorkspaceID, ToolKey: in.Capability, UserID: in.MemberID,
+			Base: toolpolicy.SettingAllow, RequestContext: toolpolicy.RequestContext{Action: toolpolicy.ActionOf(in.Capability)},
+		}, platformaccess.Actor{Authenticated: true})
+		if err != nil {
+			return denied("permission lookup failed"), err
+		}
+		g.Policy.RecordUsage(ctx, toolpolicy.UsageParams{
+			WorkspaceID: in.WorkspaceID, ToolKey: in.Capability, EnforcementPoint: in.Surface,
+			SubjectType: "member", SubjectID: in.MemberID, Resource: in.Resource,
+			Decision: effective.Setting, DecidedBy: string(effective.DecidedBy),
+		})
+		decision := decisionFor(effective)
+		if decision.Kind == permissions.DecisionAllow {
+			return permgate.Result{Outcome: permgate.OutcomeAllowed, Decision: decision, Reason: decision.Reason}, nil
+		}
+		return permgate.Result{Outcome: permgate.OutcomeDenied, Decision: decision, Reason: decision.Reason}, nil
 	}
 	agent, err := g.Queries.GetAgent(ctx, in.AgentID)
 	if err != nil || agent.WorkspaceID != in.WorkspaceID {

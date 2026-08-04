@@ -371,6 +371,11 @@ var catalog = []Capability{
 			"PUT /api/autopilots/{id}/triggers/{triggerId}/signing-secret",
 			"POST /api/autopilots/{id}/triggers/{triggerId}/rotate-webhook-token",
 		},
+		ToolBindings: []string{
+			"create_autopilot", "update_autopilot", "delete_autopilot",
+			"create_autopilot_trigger", "update_autopilot_trigger", "delete_autopilot_trigger",
+			"rotate_autopilot_webhook_token", "set_autopilot_signing_secret",
+		},
 	},
 	{
 		Key:           "trigger_autopilot",
@@ -383,6 +388,7 @@ var catalog = []Capability{
 			"POST /api/autopilots/{id}/trigger",
 			"POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
 		},
+		ToolBindings: []string{"trigger_autopilot", "replay_autopilot_delivery"},
 	},
 	{
 		Key:           "autopilot_scope",

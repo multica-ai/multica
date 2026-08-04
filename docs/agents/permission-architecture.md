@@ -275,10 +275,11 @@ person or agent for Allow/Ask/Deny to judge. Each carries `WorkspaceIntakeSwitch
 workspace-layer policy row IS read at the intake point (`platformaction.IntakeAllowed`) as a live
 off-switch (Deny/Disable turns the intake off; lookup errors fail open), and Settings accepts
 workspace-layer writes only. Every other formerly-advisory platform key (`rerun_issue`,
-`trigger_autopilot`, `autopilot_scope`, `schedule_agent_wakeup`, `use_other_runtime`,
+`create_autopilot`, `trigger_autopilot`, `autopilot_scope`, `schedule_agent_wakeup`, `use_other_runtime`,
 `manage_project_access`, `read_issues`, `read_projects`) is enforced by the tool-policy engine
-since FIR-4220 — a policy row on them is the real gate, with the pre-existing code checks kept as
-tighten-only ceilings. `catalog_advisory_tripwire_test.go` pins this exact 3-key set so a new
+since FIR-4220/FIR-4359 — a policy row on them is the real gate, with the pre-existing code checks kept as
+tighten-only ceilings. Autopilot management is the member-aware exception: members use the same
+workspace/group/user resolver and no separate grant or check path. `catalog_advisory_tripwire_test.go` pins this exact 3-key set so a new
 advisory row cannot appear silently.
 
 **Two dimensions, do not confuse them:**
@@ -360,7 +361,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 | **web_fetch host policy** | `webfetchpolicy/policy.go:73,156`; gate `firtal_gateway_tools_extended.go:830` | which hosts `web_fetch` reaches | allow-list `{firtal.com, docs.anthropic.com}` | `cerebro_web_fetch_policy` table |
 | **firtal_registry scope** | `runtime/firtal_gateway_tools_extended.go` + `toolpolicy.chainGateDataSource` | data-source/app/write scope | **deny-by-default** for resource rows; write is never implied by read | canonical `cerebro_tool_policy` resource rows plus server-owned Registry connection configuration |
 | **agentvault** | `agentvault/store.go` `ListForAgent`/`SetAccess`, reconciled via `mirror.go` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
-| **autopilot scope** | `access/autopilot_scope.go:118,150,179` `CanSee/Edit/Trigger` | autopilot visibility/edit/trigger | unknown scope → **fail closed**; private → creator-only | `autopilot.scope` columns |
+| **autopilot scope** | `access/autopilot_scope.go:118,150,179` `CanSee/Edit/Trigger` | autopilot visibility/edit/trigger after the canonical Permissions decision | unknown scope → **fail closed**; private → creator-only; workspace edit → admitted member | `autopilot.scope` columns |
 | **sandbox profile** (OS wall) | `sandboxprofile/profile.go:91-139`; `daemon/sandbox.go:98` | network mode, writable/denied paths, shell deny, keychain | empty → Developer (open); ReadOnly → DenyShell; keychain **deny-by-default** for new agents | hardcoded preset → `sandbox_policy` jsonb |
 | **commentguard** | `commentguard/guard.go` | reject agent comment with no recipient + sub-issue rules | **flags default OFF**; DB err → fail-open | feature flags |
 | **Firtal Gateway tool exposure** | `runtime.policyDecisionTools` / `runtime.guardToolCall` | which tools a Gateway agent is handed and may call (empty/error → chat-only) | **fail closed** through the Policy Decision Service; no cascade or `agent_tool_grant` fallback | live per-task registry + canonical capability catalog + `cerebro_tool_policy`; availability-card verification remains reporting-only |

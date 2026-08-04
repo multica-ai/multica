@@ -99,8 +99,8 @@ func TestCanEdit(t *testing.T) {
 	personal := AutopilotView{Scope: ScopePersonal, OwnerUserID: owner}
 	groupAuto := AutopilotView{Scope: ScopeGroup, GroupID: group}
 
-	if CanEdit(wsAuto, Viewer{UserID: other}) {
-		t.Fatal("workspace: regular member must NOT edit")
+	if !CanEdit(wsAuto, Viewer{UserID: other}) {
+		t.Fatal("workspace: member admitted by Permissions must edit")
 	}
 	if !CanEdit(wsAuto, Viewer{UserID: other, IsAdmin: true}) {
 		t.Fatal("workspace: admin must edit")

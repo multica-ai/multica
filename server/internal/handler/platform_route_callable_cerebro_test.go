@@ -70,6 +70,12 @@ func TestPlatformRouteCallablesCoverMutatingSideOperations(t *testing.T) {
 		{http.MethodPost, "/api/cerebro/workflows/abc/regenerate-token", "manage_workflows", []string{"regenerate_workflow_token"}},
 		{http.MethodPost, "/api/cerebro/workflows/abc/human-checks/check-1/approve", "manage_workflows", []string{"approve_workflow_human_check"}},
 		{http.MethodPost, "/api/cerebro/workflows/_test/cron-sweep", "manage_workflows", []string{"sweep_workflow_cron"}},
+		{http.MethodPost, "/api/autopilots", "create_autopilot", []string{"create_autopilot"}},
+		{http.MethodPatch, "/api/autopilots/abc", "create_autopilot", []string{"update_autopilot"}},
+		{http.MethodPost, "/api/autopilots/abc/trigger", "trigger_autopilot", []string{"trigger_autopilot"}},
+		{http.MethodPost, "/api/autopilots/abc/triggers/def/rotate-webhook-token", "create_autopilot", []string{"rotate_autopilot_webhook_token"}},
+		{http.MethodPut, "/api/autopilots/abc/triggers/def/signing-secret", "create_autopilot", []string{"set_autopilot_signing_secret"}},
+		{http.MethodPost, "/api/autopilots/abc/deliveries/def/replay", "trigger_autopilot", []string{"replay_autopilot_delivery"}},
 	}
 	for _, tc := range tests {
 		r := &http.Request{Method: tc.method, URL: &url.URL{Path: tc.path}}

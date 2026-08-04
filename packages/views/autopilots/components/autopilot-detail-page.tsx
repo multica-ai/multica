@@ -58,6 +58,7 @@ import { PrivateBadge } from "@multica/cerebro-access/views";
 import { AutopilotPermissionsSection } from "@multica/cerebro-tool-policy/views";
 import { useT } from "../../i18n";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
+import { useAutopilotControlPermissions } from "./autopilot-control-permissions";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleString(undefined, {
@@ -220,7 +221,16 @@ function SkippedRunsGroup({
   );
 }
 
-function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
+// CEREBRO-PATCH(autopilot-permissions): management controls mirror the existing effective decision (FIR-4359).
+function TriggerRow({
+  trigger,
+  autopilotId,
+  manageBlocked,
+}: {
+  trigger: AutopilotTrigger;
+  autopilotId: string;
+  manageBlocked: boolean;
+}) {
   const { t } = useT("autopilots");
   const deleteTrigger = useDeleteAutopilotTrigger();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -303,6 +313,9 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         variant="ghost"
         className="h-7 w-7 shrink-0"
         onClick={() => setConfirmOpen(true)}
+        disabled={manageBlocked}
+        title={manageBlocked ? "Blocked by Permissions" : undefined}
+        aria-label={t(($) => $.trigger_row.delete_dialog.title)}
       >
         <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
       </Button>
@@ -320,9 +333,10 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
-              disabled={deleting}
+              disabled={deleting || manageBlocked}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
+              {/* CEREBRO-PATCH(autopilot-permissions): trigger deletion mirrors create_autopilot (FIR-4359). */}
               {deleting
                 ? t(($) => $.trigger_row.delete_dialog.deleting)
                 : t(($) => $.trigger_row.delete_dialog.confirm)}
@@ -456,6 +470,9 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const updateAutopilot = useUpdateAutopilot();
   const deleteAutopilot = useDeleteAutopilot();
   const triggerAutopilot = useTriggerAutopilot();
+  const { canManage, canTrigger, isLoading: permissionsLoading } = useAutopilotControlPermissions(wsId);
+  const manageBlocked = permissionsLoading || !canManage;
+  const triggerBlocked = permissionsLoading || !canTrigger;
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   // CEREBRO-PATCH(autopilot-detail-nav-state): editDialogOpen removed, edit navigates to full page (JEH-1766)
@@ -551,11 +568,13 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           {/* CEREBRO-PATCH(autopilot-private-badge-header): owner-only autopilot badge (JEH-1750). */}
           {autopilot.is_private && <PrivateBadge className="ml-1 shrink-0" />}
           <div className="ml-1 flex items-center gap-1.5 shrink-0">
+            {/* CEREBRO-PATCH(autopilot-permissions): pause/resume mirrors create_autopilot (FIR-4359). */}
             <Switch
               size="sm"
               checked={autopilot.status === "active"}
               onCheckedChange={handleToggleStatus}
-              disabled={autopilot.status === "archived"}
+              disabled={autopilot.status === "archived" || manageBlocked}
+              title={manageBlocked ? "Blocked by Permissions" : undefined}
               aria-label={
                 autopilot.status === "active"
                   ? t(($) => $.detail.pause_aria)
@@ -573,11 +592,11 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotEdit(autopilotId))}> {/* CEREBRO-PATCH(autopilot-detail-nav-edit-button): navigates to full-page edit (JEH-1766) */}
+          <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotEdit(autopilotId))} disabled={manageBlocked} title={manageBlocked ? "Blocked by Permissions" : undefined}> {/* CEREBRO-PATCH(autopilot-detail-nav-edit-button): navigates to full-page edit (JEH-1766) */}
             <Pencil className="h-3.5 w-3.5 mr-1" />
             {t(($) => $.detail.edit)}
           </Button>
-          <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
+          <Button size="sm" onClick={handleRunNow} disabled={triggerBlocked || autopilot.status !== "active" || triggerAutopilot.isPending} title={triggerBlocked ? "Blocked by Permissions" : undefined}>
             <Play className="h-3.5 w-3.5 mr-1" />
             {triggerAutopilot.isPending
               ? t(($) => $.detail.running)
@@ -627,7 +646,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 {t(($) => $.detail.section_triggers)}
               </h2>
-              <Button size="sm" variant="outline" onClick={() => setTriggerDialogOpen(true)}>
+              <Button size="sm" variant="outline" onClick={() => setTriggerDialogOpen(true)} disabled={manageBlocked} title={manageBlocked ? "Blocked by Permissions" : undefined}> {/* CEREBRO-PATCH(autopilot-permissions): FIR-4359. */}
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 {t(($) => $.detail.add_trigger)}
               </Button>
@@ -639,13 +658,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             ) : (
               <div className="space-y-2">
                 {triggers.map((trig) => (
-                  <TriggerRow key={trig.id} trigger={trig} autopilotId={autopilotId} />
+                  /* CEREBRO-PATCH(autopilot-permissions): FIR-4359. */
+                  <TriggerRow key={trig.id} trigger={trig} autopilotId={autopilotId} manageBlocked={manageBlocked} />
                 ))}
               </div>
             )}
           </section>
 
-          <WebhookDeliveriesSection autopilotId={autopilotId} hasWebhookTrigger={hasWebhookTrigger} />
+          <WebhookDeliveriesSection autopilotId={autopilotId} hasWebhookTrigger={hasWebhookTrigger} replayBlocked={triggerBlocked} /> {/* CEREBRO-PATCH(autopilot-permissions): FIR-4359. */}
 
           {/* Run History */}
           <section className="space-y-3">
@@ -676,7 +696,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">
               {t(($) => $.detail.section_danger)}
             </h2>
-            <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
+            <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={manageBlocked} title={manageBlocked ? "Blocked by Permissions" : undefined}> {/* CEREBRO-PATCH(autopilot-permissions): FIR-4359. */}
               <Trash2 className="h-3.5 w-3.5 mr-1" />
               {t(($) => $.detail.delete_button)}
             </Button>

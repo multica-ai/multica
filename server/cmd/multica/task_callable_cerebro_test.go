@@ -23,6 +23,7 @@ func TestTaskCallableForCommandUsesExactRegisteredIdentity(t *testing.T) {
 		"Rerun":        {commandPath: "issue rerun", want: "rerun_issue"},
 		"Artifact":     {commandPath: "artifact folder delete", want: "delete_artifact_folder"},
 		"Wakeup":       {commandPath: "wakeup cancel", want: "cancel_wakeup"},
+		"Autopilot":    {commandPath: "autopilot update", want: "update_autopilot"},
 		"Handoff":      {commandPath: "issue session handoff", want: "handoff_session"},
 		"Workflow":     {commandPath: "workflow toggle", want: "toggle_workflow"},
 		"Command":      {commandPath: "command update", want: "update_command"},

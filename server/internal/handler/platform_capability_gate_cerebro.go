@@ -27,6 +27,7 @@ import (
 
 const (
 	rerunIssuePlatformAction          = "rerun_issue"
+	createAutopilotPlatformAction     = "create_autopilot"
 	triggerAutopilotPlatformAction    = "trigger_autopilot"
 	autopilotScopePlatformAction      = "autopilot_scope"
 	scheduleAgentWakeupPlatformAction = "schedule_agent_wakeup"
@@ -43,8 +44,10 @@ const (
 
 // RequirePlatformCapability returns route middleware that enforces the named
 // platform capability through the tool-policy engine for agent actors. Member
-// requests pass through unchanged — their access is decided by the existing
-// role/membership gates on the wrapped handler.
+// requests pass through unchanged EXCEPT for the autopilot capabilities listed
+// in autopilotCapabilityUsesMemberPolicy, where the same policy chain decides
+// the member too (FIR-4359) — for every other capability a member's access is
+// still decided by the existing role/membership gates on the wrapped handler.
 func (h *Handler) RequirePlatformCapability(capability string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +56,15 @@ func (h *Handler) RequirePlatformCapability(capability string) func(http.Handler
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func autopilotCapabilityUsesMemberPolicy(capability string) bool {
+	switch capability {
+	case createAutopilotPlatformAction, triggerAutopilotPlatformAction, autopilotScopePlatformAction:
+		return true
+	default:
+		return false
 	}
 }
 

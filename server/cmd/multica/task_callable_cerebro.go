@@ -37,6 +37,11 @@ var taskCallableByCommand = map[string]string{
 	"wakeup create": "schedule_wakeup", "wakeup list": "list_wakeups",
 	"wakeup get": "list_wakeups", "wakeup cancel": "cancel_wakeup",
 
+	"autopilot create": "create_autopilot", "autopilot update": "update_autopilot",
+	"autopilot delete": "delete_autopilot", "autopilot trigger": "trigger_autopilot",
+	"autopilot trigger-add": "create_autopilot_trigger", "autopilot trigger-update": "update_autopilot_trigger",
+	"autopilot trigger-delete": "delete_autopilot_trigger", "autopilot trigger-rotate-url": "rotate_autopilot_webhook_token",
+
 	"workflow list": "list_workflows", "workflow get": "get_workflow",
 	"workflow create": "create_workflow", "workflow update": "update_workflow",
 	"workflow delete": "delete_workflow", "workflow toggle": "toggle_workflow",

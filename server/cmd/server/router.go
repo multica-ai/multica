@@ -1647,7 +1647,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
-					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/subscribe", h.SubscribeToIssue)     // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
+					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/subscribe", h.SubscribeToIssue)       // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
 					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/unsubscribe", h.UnsubscribeFromIssue) // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.With(h.RequirePlatformCapability("rerun_issue")).Post("/tasks/{taskId}/cancel", h.CancelTask) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 rerun_issue policy gate.
@@ -1657,7 +1657,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/usage", h.GetIssueUsage)
 					// CEREBRO-PATCH(comment-cost-route): FIR-39 per-comment cost badge.
 					r.Get("/comment-costs", h.GetIssueCommentCosts)
-					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/reactions", h.AddIssueReaction)     // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
+					r.With(h.RequirePlatformCapability("subscribe_issue")).Post("/reactions", h.AddIssueReaction)      // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
 					r.With(h.RequirePlatformCapability("subscribe_issue")).Delete("/reactions", h.RemoveIssueReaction) // CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 enforce subscribe_issue at REST.
 					r.Get("/attachments", h.ListAttachments)
 					// CEREBRO-PATCH(task-mandate-exact-platform-routes): FIR-4292 artifact listing moved outside this read_issues route.
@@ -1770,23 +1770,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)
-				r.Post("/", h.CreateAutopilot)
+				r.With(h.RequirePlatformCapability("create_autopilot")).Post("/", h.CreateAutopilot) // CEREBRO-PATCH(autopilot-permissions): FIR-4359 reuse the canonical Permissions gate.
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAutopilot)
-					r.Patch("/", h.UpdateAutopilot)
-					r.Delete("/", h.DeleteAutopilot)
+					r.With(h.RequirePlatformCapability("create_autopilot")).Patch("/", h.UpdateAutopilot)         // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
+					r.With(h.RequirePlatformCapability("create_autopilot")).Delete("/", h.DeleteAutopilot)        // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
 					r.With(h.RequirePlatformCapability("trigger_autopilot")).Post("/trigger", h.TriggerAutopilot) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 trigger_autopilot policy gate.
 					r.Get("/runs", h.ListAutopilotRuns)
 					r.Get("/runs/{runId}", h.GetAutopilotRun)
 					r.Get("/deliveries", h.ListAutopilotDeliveries)
 					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
 					r.With(h.RequirePlatformCapability("trigger_autopilot")).Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery) // CEREBRO-PATCH(platform-capability-gates): FIR-4220 trigger_autopilot policy gate.
-					r.Post("/triggers", h.CreateAutopilotTrigger)
+					r.With(h.RequirePlatformCapability("create_autopilot")).Post("/triggers", h.CreateAutopilotTrigger)                         // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
 					r.Route("/triggers/{triggerId}", func(r chi.Router) {
-						r.Patch("/", h.UpdateAutopilotTrigger)
-						r.Delete("/", h.DeleteAutopilotTrigger)
-						r.Post("/rotate-webhook-token", h.RotateAutopilotTriggerWebhookToken)
-						r.Put("/signing-secret", h.SetAutopilotTriggerSigningSecret)
+						r.With(h.RequirePlatformCapability("create_autopilot")).Patch("/", h.UpdateAutopilotTrigger)                                // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
+						r.With(h.RequirePlatformCapability("create_autopilot")).Delete("/", h.DeleteAutopilotTrigger)                               // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
+						r.With(h.RequirePlatformCapability("create_autopilot")).Post("/rotate-webhook-token", h.RotateAutopilotTriggerWebhookToken) // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
+						r.With(h.RequirePlatformCapability("create_autopilot")).Put("/signing-secret", h.SetAutopilotTriggerSigningSecret)          // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
 					})
 				})
 			})

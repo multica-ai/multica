@@ -227,6 +227,10 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	// CEREBRO-PATCH(autopilot-permissions): replay keeps the existing trigger scope ceiling (FIR-4359).
+	if !h.cerebroAutopilotTriggerable(w, r, workspaceID, autopilot) {
+		return
+	}
 	original, ok := h.loadDeliveryForAutopilot(w, r, autopilot, deliveryID)
 	if !ok {
 		return

@@ -30,11 +30,58 @@ func platformRouteCallables(r *http.Request, capability string) []string {
 		return sessionRouteCallables(method, parts)
 	case "manage_artifacts":
 		return artifactRouteCallables(method, parts)
+	case createAutopilotPlatformAction, triggerAutopilotPlatformAction:
+		return autopilotRouteCallables(method, parts)
 	case manageWorkflowsPlatformAction:
 		return workflowRouteCallables(method, parts)
 	default:
 		return nil
 	}
+}
+
+func autopilotRouteCallables(method string, parts []string) []string {
+	if len(parts) < 2 || strings.Join(parts[:2], "/") != "api/autopilots" {
+		return nil
+	}
+	if len(parts) == 2 && method == http.MethodPost {
+		return []string{"create_autopilot"}
+	}
+	if len(parts) == 3 {
+		switch method {
+		case http.MethodPatch:
+			return []string{"update_autopilot"}
+		case http.MethodDelete:
+			return []string{"delete_autopilot"}
+		}
+	}
+	if len(parts) == 4 {
+		if parts[3] == "trigger" && method == http.MethodPost {
+			return []string{"trigger_autopilot"}
+		}
+		if parts[3] == "triggers" && method == http.MethodPost {
+			return []string{"create_autopilot_trigger"}
+		}
+	}
+	if len(parts) == 5 && parts[3] == "triggers" {
+		switch method {
+		case http.MethodPatch:
+			return []string{"update_autopilot_trigger"}
+		case http.MethodDelete:
+			return []string{"delete_autopilot_trigger"}
+		}
+	}
+	if len(parts) == 6 && parts[3] == "triggers" {
+		switch {
+		case parts[5] == "rotate-webhook-token" && method == http.MethodPost:
+			return []string{"rotate_autopilot_webhook_token"}
+		case parts[5] == "signing-secret" && method == http.MethodPut:
+			return []string{"set_autopilot_signing_secret"}
+		}
+	}
+	if len(parts) == 6 && parts[3] == "deliveries" && parts[5] == "replay" && method == http.MethodPost {
+		return []string{"replay_autopilot_delivery"}
+	}
+	return nil
 }
 
 func readIssueRouteCallables(method string, parts []string) []string {

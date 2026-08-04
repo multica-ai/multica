@@ -41,11 +41,31 @@ func (h *Handler) authorizePlatformAction(ctx context.Context, r *http.Request, 
 // identity; a broad family key can never stand in for one of those bindings.
 // Capabilities without ToolBindings remain governed only by the policy engine.
 func (h *Handler) authorizePlatformActionWithMandate(ctx context.Context, r *http.Request, workspaceID pgtype.UUID, actorType, actorID, capability, surface string, actionContext map[string]any, resourcePayload any, wait, requireMandate bool) platformActionAnswer {
-	if actorType != "agent" {
+	if actorType != "agent" && !(actorType == "member" && autopilotCapabilityUsesMemberPolicy(capability)) {
 		return platformActionAnswer{Allowed: true}
 	}
+	if h.PlatformActionGate == nil {
+		return platformActionAnswer{Reason: "platform action gate unavailable"}
+	}
+	if actorType == "member" {
+		memberID, err := util.ParseUUID(actorID)
+		if err != nil {
+			return platformActionAnswer{Reason: "invalid member identity"}
+		}
+		result, err := h.PlatformActionGate.Authorize(ctx, platformaction.Request{
+			WorkspaceID: workspaceID, MemberID: memberID, Capability: capability,
+			Resource: platformActionResource(resourcePayload), Surface: surface, Context: actionContext,
+		})
+		if err != nil {
+			return platformActionAnswer{Reason: err.Error()}
+		}
+		if result.Outcome == permgate.OutcomeAllowed {
+			return platformActionAnswer{Allowed: true, Reason: result.Reason}
+		}
+		return platformActionAnswer{Reason: result.Reason}
+	}
 	agentID, err := util.ParseUUID(actorID)
-	if err != nil || h.PlatformActionGate == nil {
+	if err != nil {
 		return platformActionAnswer{Reason: "platform action gate unavailable"}
 	}
 	mandate := h.authorizeExactPlatformTaskMandate(ctx, r, workspaceID, agentID, capability, requireMandate)

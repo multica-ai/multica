@@ -142,8 +142,7 @@ func CanSee(view AutopilotView, viewer Viewer) bool {
 
 // CanEdit gates Update / Delete. Plan §Visibility-regler:
 //
-//	workspace → admin/owner + creator (here: admin only; creator-check is layered
-//	            in the handler since it has the row's CreatedByID).
+//	workspace → members admitted by the canonical Permissions gate.
 //	personal  → owner only.
 //	group     → group members (until group roles land — JEH-721 follow-up —
 //	            members can edit) + workspace admins.
@@ -153,7 +152,7 @@ func CanEdit(view AutopilotView, viewer Viewer) bool {
 	}
 	switch view.Scope {
 	case ScopeWorkspace, "":
-		return viewer.IsAdmin
+		return true
 	case ScopePersonal:
 		return uuidEqual(view.OwnerUserID, viewer.UserID)
 	case ScopeGroup:
