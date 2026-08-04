@@ -2,13 +2,12 @@ package execenv
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
 
-type providerConfigCheck func(path string) error
-
-func resolveAndGuardProviderConfigPath(provider, source, rawPath, workspacesRoot string, check providerConfigCheck) (string, error) {
+func resolveAndGuardProviderConfigPath(provider, source, rawPath, workspacesRoot string) (string, error) {
 	path := strings.TrimSpace(rawPath)
 	if path == "" {
 		return "", fmt.Errorf("%s: %s is empty", provider, source)
@@ -17,29 +16,47 @@ func resolveAndGuardProviderConfigPath(provider, source, rawPath, workspacesRoot
 	if err != nil {
 		return "", fmt.Errorf("%s: resolve %s: %w", provider, source, err)
 	}
-	if pathIsUnder(abs, workspacesRoot) {
-		return "", fmt.Errorf("%s: inherited %s points inside Multica workspaces root (%s); refusing task-scoped provider state as shared config", provider, source, abs)
+	under, err := pathIsUnder(abs, workspacesRoot)
+	if err != nil {
+		return "", fmt.Errorf("%s: guard %s: %w", provider, source, err)
 	}
-	if check != nil {
-		if err := check(abs); err != nil {
-			return "", fmt.Errorf("%s: inherited %s is not usable (%s): %w", provider, source, abs, err)
-		}
+	if under {
+		return "", fmt.Errorf("%s: inherited %s points inside Multica workspaces root (%s); refusing task-scoped provider state as shared config", provider, source, abs)
 	}
 	return abs, nil
 }
 
-func pathIsUnder(path, root string) bool {
+func pathIsUnder(path, root string) (bool, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
-		return false
+		return false, fmt.Errorf("workspaces root is empty")
 	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("resolve workspaces root: %w", err)
 	}
-	rel, err := filepath.Rel(absRoot, path)
+	resolvedRoot := filepath.Clean(resolvePathBestEffort(absRoot))
+	resolvedPath := filepath.Clean(resolvePathBestEffort(path))
+	if isPathUnder(resolvedRoot, resolvedPath) {
+		return true, nil
+	}
+	return pathHasSameFileAncestor(path, absRoot) || pathHasSameFileAncestor(resolvedPath, resolvedRoot), nil
+}
+
+func pathHasSameFileAncestor(path, root string) bool {
+	rootInfo, err := os.Stat(root)
 	if err != nil {
 		return false
 	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+	dir := path
+	for {
+		if info, err := os.Stat(dir); err == nil && os.SameFile(info, rootInfo) {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }

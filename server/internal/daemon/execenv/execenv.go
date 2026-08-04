@@ -342,6 +342,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err := hydrateCodexSkills(codexHome, params.WorkspacesRoot, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
+		if err := ensureCodexProviderConfigUsable(codexHome); err != nil {
+			return nil, fmt.Errorf("execenv: codex provider config unusable: %w", err)
+		}
 		env.CodexHome = codexHome
 	}
 
@@ -554,13 +557,18 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{WorkspacesRoot: params.WorkspacesRoot, CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
-			logger.Warn("execenv: refresh codex-home failed", "error", err)
-		} else {
-			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.WorkspacesRoot, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
-				logger.Warn("execenv: refresh codex skills failed", "error", err)
-			}
+			logger.Warn("execenv: refresh codex-home failed; forcing fresh prepare", "error", err)
+			return nil
 		}
+		if err := hydrateCodexSkills(codexHome, params.WorkspacesRoot, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+			logger.Warn("execenv: refresh codex skills failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		if err := ensureCodexProviderConfigUsable(codexHome); err != nil {
+			logger.Warn("execenv: codex provider config unusable after reuse refresh; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.CodexHome = codexHome
 	}
 
 	if params.Provider == "claude" && env.RootDir != "" {

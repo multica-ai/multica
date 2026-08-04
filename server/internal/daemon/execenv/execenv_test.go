@@ -21,6 +21,31 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func codexTestProviderConfig(extra string) string {
+	config := `model_provider = "test-provider"
+`
+	if strings.TrimSpace(extra) != "" {
+		config += "\n" + extra + "\n"
+	}
+	return config + `
+
+[model_providers.test-provider]
+name = "Test"
+base_url = "https://example.invalid/v1"
+env_key = "TEST_API_KEY"
+`
+}
+
+func writeCodexTestProviderConfig(t *testing.T, home string, extra string) {
+	t.Helper()
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(codexTestProviderConfig(extra)), 0o644); err != nil {
+		t.Fatalf("write codex config.toml: %v", err)
+	}
+}
+
 func TestShortID(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -2973,6 +2998,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 
 	// Empty shared home — no files to seed.
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
@@ -3842,7 +3868,7 @@ func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
 
 	// Shared home the user has since pointed at a native Windows sandbox.
 	sharedHome := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte("windows.sandbox = \"unelevated\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(codexTestProviderConfig("windows.sandbox = \"unelevated\"\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
@@ -3868,7 +3894,7 @@ func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
 		_ = os.Chmod(configPath, 0o644)
 	})
 
-	err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "windows", CodexVersion: "0.144.5"}, testLogger())
+	err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{WorkspacesRoot: filepath.Join(codexHome, "workspaces-root"), GOOS: "windows", CodexVersion: "0.144.5"}, testLogger())
 	if err == nil {
 		t.Fatal("expected prepareCodexHomeWithOpts to fail closed when the sandbox block cannot be written, got nil")
 	}
@@ -3896,6 +3922,7 @@ func TestPrepareCodexHomeWritesManagedSandboxBlock(t *testing.T) {
 
 	// Empty shared home — no config.toml to copy.
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
@@ -3925,6 +3952,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	workspacesRoot := t.TempDir()
@@ -3948,7 +3976,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 
 	// Reuse should restore CodexHome.
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-test"}}, testLogger())
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-test"}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -3971,6 +3999,7 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
 	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
 		t.Fatalf("create shared plugin cache: %v", err)
@@ -3998,7 +4027,7 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 		t.Fatalf("remove codex plugins dir: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -4016,10 +4045,12 @@ func TestReusePreservesTaskLocalModelsCacheWhenSharedMissing(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-model-cache-missing",
 		TaskID:         "b5f6a7b8-c9d0-1234-efab-567890123456",
 		AgentName:      "Codex Agent",
@@ -4037,9 +4068,10 @@ func TestReusePreservesTaskLocalModelsCacheWhenSharedMissing(t *testing.T) {
 	}
 
 	reused := Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
 	}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
@@ -4058,13 +4090,15 @@ func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T)
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
 		t.Fatalf("write shared models cache: %v", err)
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-model-cache-stale",
 		TaskID:         "c5f6a7b8-c9d0-1234-efab-567890123456",
 		AgentName:      "Codex Agent",
@@ -4082,9 +4116,10 @@ func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T)
 	}
 
 	reused := Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
 	}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
@@ -4104,7 +4139,13 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 
 	sharedHome := t.TempDir()
 	configPath := filepath.Join(sharedHome, "config.toml")
-	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-a"`), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-a"
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.invalid/v1"
+env_key = "PROVIDER_A_API_KEY"
+`), 0o644); err != nil {
 		t.Fatalf("write provider A config: %v", err)
 	}
 	sharedCache := filepath.Join(sharedHome, "models_cache.json")
@@ -4113,8 +4154,9 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-model-cache-provider-change",
 		TaskID:         "d5f6a7b8-c9d0-1234-efab-567890123456",
 		AgentName:      "Codex Agent",
@@ -4130,7 +4172,13 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-a"}`), 0o644); err != nil {
 		t.Fatalf("refresh provider A task cache: %v", err)
 	}
-	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-b"`), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-b"
+
+[model_providers.provider-b]
+name = "Provider B"
+base_url = "https://provider-b.example.invalid/v1"
+env_key = "PROVIDER_B_API_KEY"
+`), 0o644); err != nil {
 		t.Fatalf("write provider B config: %v", err)
 	}
 	// Even a changed shared snapshot is not safe to copy: Codex's cache format
@@ -4140,9 +4188,10 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 	}
 
 	reused := Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
 	}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
@@ -4164,9 +4213,10 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 		t.Fatalf("write provider B task cache: %v", err)
 	}
 	if Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
 	}, testLogger()) == nil {
 		t.Fatal("second Reuse returned nil")
 	}
@@ -4183,7 +4233,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "catalog.json"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(codexTestProviderConfig(`model_catalog_json = "catalog.json"`)), 0o644); err != nil {
 		t.Fatalf("write model catalog config: %v", err)
 	}
 	catalogPath := filepath.Join(sharedHome, "catalog.json")
@@ -4195,8 +4245,9 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-model-catalog-change",
 		TaskID:         "e5f6a7b8-c9d0-1234-efab-567890123456",
 		AgentName:      "Codex Agent",
@@ -4217,9 +4268,10 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.
 	}
 
 	reused := Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
 	}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
@@ -4240,13 +4292,20 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_provider = "provider-a"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_provider = "provider-a"
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.invalid/v1"
+env_key = "PROVIDER_A_API_KEY"
+`), 0o644); err != nil {
 		t.Fatalf("write provider config: %v", err)
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-model-cache-legacy",
 		TaskID:         "f5f6a7b8-c9d0-1234-efab-567890123456",
 		AgentName:      "Codex Agent",
@@ -4267,9 +4326,10 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 	}
 
 	if Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
 	}, testLogger()) == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -4286,9 +4346,10 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 		t.Fatalf("write shared cache: %v", err)
 	}
 	if Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
 	}, testLogger()) == nil {
 		t.Fatal("second Reuse returned nil")
 	}
@@ -4301,6 +4362,7 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	workspacesRoot := t.TempDir()
@@ -4321,7 +4383,7 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 		t.Fatalf("remove codex skills dir: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-skill-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -4355,6 +4417,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	workspacesRoot := t.TempDir()
@@ -4380,7 +4443,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-skill-update-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -4418,6 +4481,7 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	// Lay out two user-installed skills with both a SKILL.md and a
@@ -4483,6 +4547,7 @@ func TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	userSkillDir := filepath.Join(sharedHome, "skills", "writing")
@@ -4535,6 +4600,7 @@ func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	env, err := Prepare(PrepareParams{
@@ -4565,6 +4631,7 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	installerRoot := filepath.Join(t.TempDir(), "installer", "lark-mail")
@@ -4619,6 +4686,7 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	userSkill := filepath.Join(sharedHome, "skills", "summarize")
@@ -4647,7 +4715,7 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 		t.Fatalf("update user SKILL.md: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "user-skill-reuse-test",
 	}}, testLogger())
 	if reused == nil {
@@ -4671,6 +4739,7 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	userSkillDir := filepath.Join(sharedHome, "skills", "writing")
@@ -4684,8 +4753,9 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 		t.Fatalf("seed user support file: %v", err)
 	}
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-reuse-conflict",
 		TaskID:         "c1d2e3f4-a5b6-7890-abcd-123456789012",
 		AgentName:      "Codex Agent",
@@ -4702,7 +4772,7 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 		t.Fatalf("user support file should be seeded in round 1: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-conflict-test",
 		AgentSkills: []SkillContextForEnv{
 			{Name: "Writing", Content: "workspace writing"},
@@ -4732,6 +4802,7 @@ func TestReuseClearsRemovedUserSkill(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	userSkill := filepath.Join(sharedHome, "skills", "deprecated")
@@ -4742,8 +4813,9 @@ func TestReuseClearsRemovedUserSkill(t *testing.T) {
 		t.Fatalf("seed user SKILL.md: %v", err)
 	}
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-reuse-remove",
 		TaskID:         "d2e3f4a5-b6c7-8901-abcd-234567890123",
 		AgentName:      "Codex Agent",
@@ -4764,7 +4836,7 @@ func TestReuseClearsRemovedUserSkill(t *testing.T) {
 		t.Fatalf("remove user skill: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{WorkspacesRoot: workspacesRoot, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-remove-test",
 	}}, testLogger())
 	if reused == nil {

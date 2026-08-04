@@ -47,6 +47,11 @@ func installOpenclawStub(t *testing.T, responses map[string]openclawResponse) *o
 	return stub
 }
 
+func openclawTestPrep(t *testing.T, stub *openclawCLIStub) OpenclawConfigPrep {
+	t.Helper()
+	return OpenclawConfigPrep{OpenclawBin: stub.bin, WorkspacesRoot: t.TempDir()}
+}
+
 func (s *openclawCLIStub) exec(_ context.Context, bin string, args ...string) (string, error) {
 	s.calls = append(s.calls, openclawCall{bin: bin, args: append([]string(nil), args...)})
 	key := strings.Join(args, " ")
@@ -116,7 +121,7 @@ func TestPrepareOpenclawConfigDelegatesParsingToCLI(t *testing.T) {
 		]`},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -187,7 +192,7 @@ func TestPrepareOpenclawConfigFailsClosedOnCLIError(t *testing.T) {
 		"config file": {err: errors.New("exec: openclaw: no such file or directory")},
 	})
 
-	_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	_, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err == nil {
 		t.Fatal("prepareOpenclawConfig succeeded on CLI failure; expected fail closed")
 	}
@@ -228,7 +233,7 @@ func TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported(t *testing.T) {
 		]`},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -496,7 +501,7 @@ func TestPrepareOpenclawConfigFailsClosedOnMalformedAgentsList(t *testing.T) {
 		"config get agents.list --json": {stdout: "<<<garbage>>>"},
 	})
 
-	_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	_, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err == nil {
 		t.Fatal("prepareOpenclawConfig succeeded on malformed agents.list output; expected fail closed")
 	}
@@ -531,7 +536,7 @@ func TestPrepareOpenclawConfigKeyMissingTreatedAsEmpty(t *testing.T) {
 		"agents list --json": {stdout: "null"},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -565,7 +570,7 @@ func TestPrepareOpenclawConfigFreshInstallNoOnDiskConfig(t *testing.T) {
 		// the stub will fail "unexpected args" if it is.
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -610,7 +615,7 @@ func TestPrepareOpenclawConfigExpandsTilde(t *testing.T) {
 		"config get agents.list --json": {stdout: "null"},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -670,7 +675,7 @@ func TestPrepareOpenclawConfigParsesPathFromUITerminalOutput(t *testing.T) {
 		"config get agents.list --json": {stdout: "null"},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -722,7 +727,7 @@ func TestPrepareOpenclawConfigWrapperLoadableUnderIncludeConfinement(t *testing.
 		"config get agents.list --json": {stdout: "null"},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -803,8 +808,9 @@ func TestPrepareOpenclawConfigStrictReplacesUserMcpServers(t *testing.T) {
 	}`)
 
 	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-		OpenclawBin: stub.bin,
-		McpConfig:   mcpConfig,
+		OpenclawBin:    stub.bin,
+		WorkspacesRoot: t.TempDir(),
+		McpConfig:      mcpConfig,
 	})
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
@@ -906,8 +912,9 @@ func TestPrepareOpenclawConfigStrictPreservesNonServerMcpKeys(t *testing.T) {
 	mcpConfig := json.RawMessage(`{"mcpServers": {"managed_only": {"command": "uvx", "args": ["m"]}}}`)
 
 	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-		OpenclawBin: stub.bin,
-		McpConfig:   mcpConfig,
+		OpenclawBin:    stub.bin,
+		WorkspacesRoot: t.TempDir(),
+		McpConfig:      mcpConfig,
 	})
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
@@ -969,8 +976,9 @@ func TestPrepareOpenclawConfigStrictEmptyManagedSetDropsUserMcp(t *testing.T) {
 				"config get agents.list --json": {stdout: "null"},
 			})
 			result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-				OpenclawBin: stub.bin,
-				McpConfig:   raw,
+				OpenclawBin:    stub.bin,
+				WorkspacesRoot: t.TempDir(),
+				McpConfig:      raw,
 			})
 			if err != nil {
 				t.Fatalf("prepareOpenclawConfig: %v", err)
@@ -1030,8 +1038,9 @@ func TestPrepareOpenclawConfigNullMcpConfigKeepsUserInclude(t *testing.T) {
 				// not call it (would burn an extra CLI roundtrip per task).
 			})
 			result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-				OpenclawBin: stub.bin,
-				McpConfig:   raw,
+				OpenclawBin:    stub.bin,
+				WorkspacesRoot: t.TempDir(),
+				McpConfig:      raw,
 			})
 			if err != nil {
 				t.Fatalf("prepareOpenclawConfig: %v", err)
@@ -1072,8 +1081,9 @@ func TestPrepareOpenclawConfigManagedSetFreshInstall(t *testing.T) {
 	mcpConfig := json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx", "args": ["context7-mcp"]}}}`)
 
 	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-		OpenclawBin: stub.bin,
-		McpConfig:   mcpConfig,
+		OpenclawBin:    stub.bin,
+		WorkspacesRoot: t.TempDir(),
+		McpConfig:      mcpConfig,
 	})
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
@@ -1123,8 +1133,9 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 	mcpConfig := json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx"}}}`)
 
 	_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-		OpenclawBin: stub.bin,
-		McpConfig:   mcpConfig,
+		OpenclawBin:    stub.bin,
+		WorkspacesRoot: t.TempDir(),
+		McpConfig:      mcpConfig,
 	})
 	if err == nil {
 		t.Fatal("prepareOpenclawConfig succeeded when `config get --json` errored; expected fail closed")
@@ -1169,8 +1180,9 @@ func TestPrepareOpenclawConfigFailsClosedOnMalformedMcpConfig(t *testing.T) {
 				"config get agents.list --json": {stdout: "null"},
 			})
 			_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-				OpenclawBin: stub.bin,
-				McpConfig:   raw,
+				OpenclawBin:    stub.bin,
+				WorkspacesRoot: t.TempDir(),
+				McpConfig:      raw,
 			})
 			if err == nil {
 				t.Fatalf("prepareOpenclawConfig succeeded on %s; expected fail closed", name)
@@ -1210,7 +1222,7 @@ func TestPrepareOpenclawSkillWriteMatchesScanPath(t *testing.T) {
 		{Name: "Local Dev", Content: "Spin up the local dev env."},
 	}
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -1530,7 +1542,7 @@ func TestPrepareOpenclawConfigNewSchemaOmitsAgentsList(t *testing.T) {
 		"agents list --json": {stdout: registry},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
@@ -1564,7 +1576,7 @@ func TestPrepareOpenclawConfigNewSchemaEmptyRegistry(t *testing.T) {
 		"agents list --json":            {stdout: "[]"},
 	})
 
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	result, err := prepareOpenclawConfig(envRoot, workDir, openclawTestPrep(t, stub))
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}

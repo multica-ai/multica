@@ -214,7 +214,10 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		return OpenclawConfigResult{}, fmt.Errorf("locate openclaw active config: %w", err)
 	}
 	if activePath != "" {
-		activePath, err = resolveAndGuardProviderConfigPath("openclaw", "active config path", activePath, opts.WorkspacesRoot, nil)
+		// OpenClaw config usability is checked by its CLI calls below; this
+		// guard only prevents inherited active config paths from selecting
+		// task-scoped state under the daemon workspaces root.
+		activePath, err = resolveAndGuardProviderConfigPath("openclaw", "active config path", activePath, opts.WorkspacesRoot)
 		if err != nil {
 			return OpenclawConfigResult{}, err
 		}

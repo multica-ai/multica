@@ -252,8 +252,12 @@ func guardInheritedHermesHome(res HermesProfileResolution, inherited bool, works
 	if !inherited || res.Err != nil {
 		return res
 	}
-	if _, err := resolveAndGuardProviderConfigPath("hermes", "HERMES_HOME", res.SourceHome, workspacesRoot, hermesSourceHomeProviderConfig); err != nil {
+	if _, err := resolveAndGuardProviderConfigPath("hermes", "HERMES_HOME", res.SourceHome, workspacesRoot); err != nil {
 		res.Err = err
+		return res
+	}
+	if err := hermesSourceHomeProviderConfig(res.SourceHome); err != nil {
+		res.Err = fmt.Errorf("hermes: inherited HERMES_HOME is not usable (%s): %w", res.SourceHome, err)
 	}
 	return res
 }

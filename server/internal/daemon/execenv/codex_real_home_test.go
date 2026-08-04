@@ -24,10 +24,12 @@ func TestPrepareCodexKeepsRealHomeAndScopesOnlyCodexHome(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-real-home",
 		TaskID:         "b1c2d3e4-f5a6-7890-bcde-f01234567890",
 		AgentName:      "Codex Agent",
@@ -60,10 +62,12 @@ func TestReuseCodexToleratesLegacyTaskHome(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
 
+	workspacesRoot := t.TempDir()
 	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-legacy-home",
 		TaskID:         "c1d2e3f4-a5b6-7890-cdef-012345678901",
 		AgentName:      "Codex Agent",
@@ -85,9 +89,10 @@ func TestReuseCodexToleratesLegacyTaskHome(t *testing.T) {
 	}
 
 	reused := Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "codex",
-		Task:     TaskContextForEnv{IssueID: "legacy-home-test"},
+		WorkspacesRoot: workspacesRoot,
+		WorkDir:        env.WorkDir,
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "legacy-home-test"},
 	}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil on an env root carrying a legacy task home")

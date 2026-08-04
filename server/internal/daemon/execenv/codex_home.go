@@ -96,7 +96,7 @@ type CodexHomeOptions struct {
 // so the sandbox block it writes is stable regardless of the host running the
 // test.
 func prepareCodexHome(codexHome string, logger *slog.Logger) error {
-	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, logger)
+	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{WorkspacesRoot: filepath.Join(codexHome, "workspaces-root"), GOOS: "linux"}, logger)
 }
 
 // sharedConfigPresence is the tri-state existence of the shared
@@ -327,7 +327,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 // seed every task from that task-scoped home.
 func resolveSharedCodexHome(workspacesRoot string) (string, error) {
 	if v := os.Getenv("CODEX_HOME"); strings.TrimSpace(v) != "" {
-		return resolveAndGuardProviderConfigPath("codex", "CODEX_HOME", v, workspacesRoot, codexSharedHomeProviderConfig)
+		return resolveAndGuardProviderConfigPath("codex", "CODEX_HOME", v, workspacesRoot)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -336,31 +336,42 @@ func resolveSharedCodexHome(workspacesRoot string) (string, error) {
 	return filepath.Join(home, ".codex"), nil
 }
 
-func codexSharedHomeProviderConfig(home string) error {
-	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+func ensureCodexProviderConfigUsable(codexHome string) error {
+	configPath := filepath.Join(codexHome, "config.toml")
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return fmt.Errorf("config.toml is missing model_provider")
 		}
 		return fmt.Errorf("read config.toml: %w", err)
 	}
-	cfg := map[string]any{}
+	var cfg struct {
+		ModelProvider  string                    `toml:"model_provider"`
+		ModelProviders map[string]map[string]any `toml:"model_providers"`
+	}
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse config.toml: %w", err)
 	}
-	for _, key := range []string{
-		"sandbox_mode",
-		"sandbox_workspace_write",
-		"shell_environment_policy",
-		"features",
-		"memories",
-	} {
-		delete(cfg, key)
+	provider := strings.TrimSpace(cfg.ModelProvider)
+	if provider == "" {
+		return fmt.Errorf("config.toml is missing model_provider")
 	}
-	if len(cfg) == 0 {
-		return fmt.Errorf("config.toml has no user provider/config settings beyond daemon-managed defaults")
+	if _, ok := cfg.ModelProviders[provider]; ok {
+		return nil
 	}
-	return nil
+	if isBuiltInCodexModelProvider(provider) {
+		if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat auth.json for built-in provider %q: %w", provider, err)
+		}
+		return fmt.Errorf("config.toml selects built-in model_provider %q but auth.json is missing", provider)
+	}
+	return fmt.Errorf("config.toml selects model_provider %q but [model_providers.%s] is missing", provider, provider)
+}
+
+func isBuiltInCodexModelProvider(provider string) bool {
+	return provider == "openai"
 }
 
 // codexSessionStateGlobs are the session-derived SQLite state Codex builds

@@ -21,6 +21,7 @@ import (
 func TestPrepareIsolated_PermanentFIFOBlockThenImmediateRetry(t *testing.T) {
 	sharedCodexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", sharedCodexHome)
+	writeCodexTestProviderConfig(t, sharedCodexHome, "")
 	fifo := filepath.Join(sharedCodexHome, "config.json")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatalf("create config FIFO: %v", err)
