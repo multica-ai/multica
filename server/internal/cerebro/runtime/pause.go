@@ -260,6 +260,11 @@ func (s *Service) RunUnpauseSweeper(ctx context.Context) {
 			if n := s.SweepUnpauseDue(ctx); n > 0 {
 				slog.Info("unpause sweeper: unpaused runtimes", "count", n)
 			}
+			// CEREBRO-PATCH(agent-unpause-sweeper): FIR-4508 — multi-provider
+			// agent-scoped pauses share this tick with runtime unpause.
+			if n := s.SweepAgentUnpauseDue(ctx); n > 0 {
+				slog.Info("unpause sweeper: unpaused agents", "count", n)
+			}
 		}
 	}
 }

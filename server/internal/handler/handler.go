@@ -159,6 +159,8 @@ type Handler struct {
 	ChatStream ChatRunStreamBroker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
 	RuntimePause RuntimePauseInvoker
+	// CEREBRO-PATCH(handler-agent-pause): FIR-4508 agent-scoped pause/unpause.
+	AgentPause AgentPauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
 	GroupPermissions GroupPermissionsInvoker
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
@@ -393,6 +395,28 @@ type RuntimePauseOptions struct {
 // RuntimePauseState is the subset of the post-pause/unpause runtime row
 // that the HTTP handler needs to render the API response.
 type RuntimePauseState struct {
+	WorkspaceID pgtype.UUID
+	PausedAt    pgtype.Timestamptz
+	UnpauseAt   pgtype.Timestamptz
+	PauseReason pgtype.Text
+}
+
+// CEREBRO-PATCH(handler-agent-pause-iface): FIR-4508 — agent-scoped pause for
+// multi-provider runtimes (Hermes). Same shape as RuntimePauseInvoker.
+type AgentPauseInvoker interface {
+	PauseAgent(ctx context.Context, agentID pgtype.UUID, opts AgentPauseOptions) (AgentPauseState, error)
+	UnpauseAgent(ctx context.Context, agentID pgtype.UUID) (AgentPauseState, error)
+}
+
+// AgentPauseOptions is the body for POST /api/agents/{agentId}/pause.
+type AgentPauseOptions struct {
+	UnpauseAt time.Time
+	Reason    string
+}
+
+// AgentPauseState is the subset of the post-pause/unpause agent row the
+// HTTP handler needs to render the API response.
+type AgentPauseState struct {
 	WorkspaceID pgtype.UUID
 	PausedAt    pgtype.Timestamptz
 	UnpauseAt   pgtype.Timestamptz

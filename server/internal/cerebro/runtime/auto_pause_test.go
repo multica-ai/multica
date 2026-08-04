@@ -75,6 +75,14 @@ func TestClassifyAutoPause(t *testing.T) {
 			wantManual: true,
 		},
 		{
+			name:       "invalid api key — auth_error, manual only",
+			task:       mkTask(validRuntime, "Error: Invalid API key provided"),
+			wantWorthy: true,
+			wantReset:  false,
+			wantReason: "auth_error",
+			wantManual: true,
+		},
+		{
 			name:       "http 429 — pause-worthy, no parseable reset",
 			task:       mkTask(validRuntime, "Request failed: HTTP 429 Too Many Requests"),
 			wantWorthy: true,
@@ -140,6 +148,47 @@ func TestClassifyAutoPause(t *testing.T) {
 				t.Fatalf("resetAt=%s, want %s", got.resetAt.Format(time.RFC3339), tc.wantResetAt.Format(time.RFC3339))
 			}
 		})
+	}
+}
+
+func TestSkipsRuntimeAutoPause(t *testing.T) {
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		{provider: "hermes", want: true},
+		{provider: "Hermes", want: true},
+		{provider: " HERMES ", want: true},
+		{provider: "claude", want: false},
+		{provider: "codex", want: false},
+		{provider: "opencode", want: false},
+		{provider: "pi", want: false},
+		{provider: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			if got := pausesAgentNotRuntime(tc.provider); got != tc.want {
+				t.Fatalf("pausesAgentNotRuntime(%q)=%v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsProviderAuthErrorIncludesInvalidAPIKey(t *testing.T) {
+	cases := []struct {
+		err  string
+		want bool
+	}{
+		{err: "Invalid API key provided", want: true},
+		{err: `API Error: 401 {"type":"authentication_error","message":"invalid api key"}`, want: true},
+		{err: "Failed to authenticate. API Error: 401 Invalid authentication credentials", want: true},
+		{err: "tool execution failed: command not found", want: false},
+		{err: "You've hit your org's monthly usage limit", want: false},
+	}
+	for _, tc := range cases {
+		if got := isProviderAuthError(tc.err); got != tc.want {
+			t.Errorf("isProviderAuthError(%q)=%v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
 

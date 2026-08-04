@@ -709,6 +709,10 @@
       "gate": "cerebro_agent_access"
     },
     {
+      "id": "POST /api/agents/{id}/pause",
+      "gate": "cerebro_agent_access — FIR-4508 agent-scoped pause (owner/admin or agent owner)"
+    },
+    {
       "id": "POST /api/agents/{id}/restore",
       "gate": "cerebro_agent_access"
     },
@@ -719,6 +723,10 @@
     {
       "id": "POST /api/agents/{id}/tools/{name}/invoke",
       "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/agents/{id}/unpause",
+      "gate": "cerebro_agent_access — FIR-4508 agent-scoped unpause (owner/admin or agent owner)"
     },
     {
       "id": "POST /api/artifact-folder-suggestions/{id}/accept",

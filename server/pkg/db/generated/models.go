@@ -57,6 +57,10 @@ type Agent struct {
 	ContextOwnerID     pgtype.UUID        `json:"context_owner_id"`
 	ContextApproverIds []pgtype.UUID      `json:"context_approver_ids"`
 	ContextVersion     string             `json:"context_version"`
+	PausedAt           pgtype.Timestamptz `json:"paused_at"`
+	UnpauseAt          pgtype.Timestamptz `json:"unpause_at"`
+	PauseReason        pgtype.Text        `json:"pause_reason"`
+	AutoPauseCount     int32              `json:"auto_pause_count"`
 }
 
 type AgentBudgetOverride struct {

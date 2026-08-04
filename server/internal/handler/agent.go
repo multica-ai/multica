@@ -77,6 +77,10 @@ type AgentResponse struct {
 	CanTrigger bool `json:"can_trigger"`
 	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery flags.
 	SurfaceVisibility map[string]bool `json:"surface_visibility,omitempty"`
+	// CEREBRO-PATCH(agent-pause-fields): FIR-4508 — agent-scoped pause state.
+	PausedAt    *string `json:"paused_at,omitempty"`
+	UnpauseAt   *string `json:"unpause_at,omitempty"`
+	PauseReason *string `json:"pause_reason,omitempty"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -145,6 +149,10 @@ func agentToResponse(a db.Agent) AgentResponse {
 		// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 no longer maps persona_sandbox.
 		// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — expose per-surface flags.
 		SurfaceVisibility: surfaceVisibilityResponse(a.SurfaceVisibility),
+		// CEREBRO-PATCH(agent-pause-fields): FIR-4508 — expose agent pause state.
+		PausedAt:    timestampToPtr(a.PausedAt),
+		UnpauseAt:   timestampToPtr(a.UnpauseAt),
+		PauseReason: textToPtr(a.PauseReason),
 	}
 }
 

@@ -784,6 +784,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// PauseRuntime / UnpauseRuntime in runtime_pause_cerebro.go can delegate to it.
 	runtimePauseSvc := cerebroruntime.New(cerebroQueries, h.TaskService, bus)
 	h.RuntimePause = runtimePauseSvc
+	// CEREBRO-PATCH(handler-agent-pause): FIR-4508 — same service implements agent pause.
+	h.AgentPause = runtimePauseSvc
 	// CEREBRO-PATCH(router-auto-pause-on-failure): wire cerebro auto-pause
 	// hook into TaskService so FailTask can pause on provider-error signals.
 	h.TaskService.AutoPause = runtimePauseSvc
@@ -1849,6 +1851,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/generate-avatar", h.CerebroGenerateAgentAvatar) // CEREBRO-PATCH(agent-avatar-async): TECH-3760 background per-agent avatar regen.
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
+					// CEREBRO-PATCH(router-agent-pause): FIR-4508 agent-scoped pause/unpause.
+					r.Post("/pause", h.PauseAgent)
+					r.Post("/unpause", h.UnpauseAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)

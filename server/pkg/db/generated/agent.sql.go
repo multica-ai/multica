@@ -14,7 +14,7 @@ import (
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type ArchiveAgentParams struct {
@@ -52,6 +52,10 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -60,7 +64,7 @@ const archiveAgentsByIDs = `-- name: ArchiveAgentsByIDs :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type ArchiveAgentsByIDsParams struct {
@@ -112,6 +116,10 @@ func (q *Queries) ArchiveAgentsByIDs(ctx context.Context, arg ArchiveAgentsByIDs
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
 			&i.ContextVersion,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -127,7 +135,7 @@ const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE runtime_id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type ArchiveAgentsByRuntimeParams struct {
@@ -175,6 +183,10 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
 			&i.ContextVersion,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -597,7 +609,9 @@ UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id -- CEREBRO-PATCH(claim-agent-pause-sql)
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND a.paused_at IS NULL -- CEREBRO-PATCH(claim-agent-pause-sql)
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -617,7 +631,7 @@ WHERE id = (
       )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF atq SKIP LOCKED -- CEREBRO-PATCH(claim-agent-pause-sql): JOIN requires OF atq
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override, thinking_override
 `
@@ -631,6 +645,8 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 // otherwise a user mashing the create button could fire concurrent quick-creates
 // whose completion lookup would race over "most recent issue by this agent".
+// CEREBRO-PATCH(claim-agent-pause-sql): FIR-4508 — refuse claim while agent.paused_at
+// is set (closes the race between GetAgent pause check and this UPDATE).
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue
@@ -679,7 +695,7 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -712,6 +728,10 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -719,7 +739,7 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 const clearAgentThinkingLevel = `-- name: ClearAgentThinkingLevel :one
 UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona_sandbox clear query.
@@ -756,6 +776,10 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -843,7 +867,7 @@ INSERT INTO agent (
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     surface_visibility
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type CreateAgentParams struct {
@@ -916,6 +940,10 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -1181,6 +1209,13 @@ WITH victims AS (
           WHERE rt.id = atq.runtime_id
             AND rt.paused_at IS NOT NULL
       )
+      -- CEREBRO-PATCH(paused-agent-queued-ttl): FIR-4508 — protect agent-scoped
+      -- pause queues the same way as runtime pause.
+      AND NOT EXISTS ( -- CEREBRO-PATCH(paused-agent-queued-ttl)
+          SELECT 1 FROM agent a -- CEREBRO-PATCH(paused-agent-queued-ttl)
+          WHERE a.id = atq.agent_id -- CEREBRO-PATCH(paused-agent-queued-ttl)
+            AND a.paused_at IS NOT NULL -- CEREBRO-PATCH(paused-agent-queued-ttl)
+      ) -- CEREBRO-PATCH(paused-agent-queued-ttl)
       -- CEREBRO-PATCH(offline-parked-queued-grace): FIR-1722 — spare a parked queued
       -- task on a runtime that is only temporarily offline (the runtime row still
       -- exists, so it is expected to reconnect and claim it on the same runtime_id)
@@ -1212,6 +1247,12 @@ WHERE t.id = v.id
       WHERE rt.id = t.runtime_id
         AND rt.paused_at IS NOT NULL
   )
+  -- CEREBRO-PATCH(paused-agent-queued-ttl): FIR-4508 — mirror agent-pause exemption.
+  AND NOT EXISTS ( -- CEREBRO-PATCH(paused-agent-queued-ttl)
+      SELECT 1 FROM agent a -- CEREBRO-PATCH(paused-agent-queued-ttl)
+      WHERE a.id = t.agent_id -- CEREBRO-PATCH(paused-agent-queued-ttl)
+        AND a.paused_at IS NOT NULL -- CEREBRO-PATCH(paused-agent-queued-ttl)
+  ) -- CEREBRO-PATCH(paused-agent-queued-ttl)
   -- CEREBRO-PATCH(offline-parked-queued-grace): mirror the CTE offline-grace exemption
   -- in the apply-time re-check so a runtime that went offline between selection and
   -- update still has its parked task spared (FIR-1722).
@@ -1476,7 +1517,7 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count FROM agent
 WHERE id = $1
 `
 
@@ -1510,12 +1551,16 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
 
 const getAgentInWorkspace = `-- name: GetAgentInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count FROM agent
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -1554,6 +1599,10 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -1983,7 +2032,7 @@ func (q *Queries) LinkTaskToIssue(ctx context.Context, arg LinkTaskToIssueParams
 }
 
 const listActiveAgentsByRuntime = `-- name: ListActiveAgentsByRuntime :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL
 ORDER BY name ASC
 `
@@ -2030,6 +2079,10 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
 			&i.ContextVersion,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2042,7 +2095,7 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listActiveAgentsByRuntimeForUpdate = `-- name: ListActiveAgentsByRuntimeForUpdate :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL
 ORDER BY name ASC
 FOR UPDATE
@@ -2092,6 +2145,10 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
 			&i.ContextVersion,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2185,11 +2242,13 @@ func (q *Queries) ListActiveIssueTaskStatusesInWorkspace(ctx context.Context, wo
 }
 
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
+
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override, thinking_override FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC
 `
 
+// CEREBRO-PATCH(claim-candidates-skip-paused-agent)
 // Backs the issue-detail "agent live" banner. Includes 'queued' so the
 // banner shows up the moment a task is enqueued — not only after a runtime
 // claims it. The queued window can be long when the runtime is offline or
@@ -2318,7 +2377,7 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC
 `
@@ -2360,6 +2419,10 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
 			&i.ContextVersion,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2372,7 +2435,7 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 }
 
 const listAllAgents = `-- name: ListAllAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count FROM agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -2413,6 +2476,10 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
 			&i.ContextVersion,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2489,9 +2556,11 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override, thinking_override FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.original_user_id, atq.delegating_agent_id, atq.source_task_id, atq.delegation_source, atq.wait_reason, atq.initiator_user_id, atq.squad_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.title, atq.model_override, atq.thinking_override FROM agent_task_queue atq -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+JOIN agent a ON a.id = atq.agent_id -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+WHERE atq.runtime_id = $1 AND atq.status = 'queued' -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+  AND a.paused_at IS NULL -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+ORDER BY atq.priority DESC, atq.created_at ASC
 `
 
 // Returns rows the runtime can attempt to claim. Status is restricted to
@@ -2502,6 +2571,7 @@ ORDER BY priority DESC, created_at ASC
 // ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 // runtime is busy on a long-running task. Backed by the partial index
 // idx_agent_task_queue_claim_candidates so the warm path is cheap.
+// CEREBRO-PATCH(claim-candidates-skip-paused-agent): FIR-4508 — skip paused agents.
 func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, runtimeID)
 	if err != nil {
@@ -2808,13 +2878,15 @@ UPDATE agent_task_queue
 SET dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id -- CEREBRO-PATCH(reclaim-agent-pause-sql)
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
+      AND a.paused_at IS NULL -- CEREBRO-PATCH(reclaim-agent-pause-sql)
       AND atq.dispatched_at < now() - make_interval(secs => $2::double precision)
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
     LIMIT 1
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF atq SKIP LOCKED -- CEREBRO-PATCH(reclaim-agent-pause-sql): JOIN requires OF atq
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override, thinking_override
 `
@@ -2829,6 +2901,7 @@ type ReclaimStaleDispatchedTaskForRuntimeParams struct {
 // with no `started_at`, so the daemon has not acknowledged it via StartTask.
 // Refresh dispatched_at so the server-side dispatch timeout measures from the
 // recovered delivery attempt.
+// CEREBRO-PATCH(reclaim-agent-pause-sql): FIR-4508 — do not redeliver to a paused agent.
 func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg ReclaimStaleDispatchedTaskForRuntimeParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, reclaimStaleDispatchedTaskForRuntime, arg.RuntimeID, arg.ClaimRecoverySecs)
 	var i AgentTaskQueue
@@ -2957,7 +3030,7 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -2990,6 +3063,10 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -2997,7 +3074,7 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -3030,6 +3107,10 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -3114,7 +3195,7 @@ UPDATE agent SET
     surface_visibility = COALESCE($17, surface_visibility),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type UpdateAgentParams struct {
@@ -3185,6 +3266,10 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -3193,7 +3278,7 @@ const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
 UPDATE agent
 SET custom_env = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type UpdateAgentCustomEnvParams struct {
@@ -3236,6 +3321,10 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -3243,7 +3332,7 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
 `
 
 type UpdateAgentStatusParams struct {
@@ -3281,6 +3370,10 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
 		&i.ContextVersion,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
