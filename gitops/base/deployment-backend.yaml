@@ -140,6 +140,16 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+          # Keep the pod listening for a few seconds after it's marked for
+          # termination so kube-proxy/EndpointSlice propagation can drain it
+          # from the agentfarm-backend Service before the process actually
+          # stops accepting connections. Without this, agentfarm-web's proxy
+          # to http://agentfarm-backend:8080 can hit ECONNREFUSED during a
+          # rolling restart (AIPLAT-179).
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           resources:
             requests:
               cpu: 500m
