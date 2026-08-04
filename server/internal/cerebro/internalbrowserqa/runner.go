@@ -93,6 +93,20 @@ var targets = map[string]Target{
 		ExpectedPathSuffix: "/issues", VersionPath: "/version",
 		ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
 	},
+	// FIR-4480: production QA of Settings → Permissions. The "multica" target
+	// stops at the issue list, so a production permission change could only be
+	// approved on staging evidence. Same internal host and server-minted session
+	// as "multica" — the internal route already reaches the production container,
+	// so this needs no Cloudflare Access token and no browser-login vault.
+	"multica-permissions": {
+		Name: "multica-permissions", URL: "http://multica.internal:3000/login",
+		SessionCookie: true, VersionPath: "/version",
+		// The workspace slug is part of the settings route, and production has
+		// exactly one: firtal-tech. Same hardcoding as the staging permission
+		// target's /firtal.
+		NavigatePath: "/firtal-tech/settings?tab=permissions", ExpectedPathSuffix: "/firtal-tech/settings",
+		ExpectedText: []string{"Permissions", "Access rules", "Permission profiles", "Security controls", "How access is decided"},
+	},
 	// Cerebro staging runs on its own Sliplane server, so the verifier cannot
 	// resolve its internal address. It is reached over the public edge with a
 	// Cloudflare Access service token instead, and signs in with the staging
