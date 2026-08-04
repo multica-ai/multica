@@ -444,7 +444,7 @@ SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type,
        (SELECT COUNT(*)::integer FROM cerebro_object_connection c
         WHERE c.workspace_id = r.workspace_id AND c.source_type = 'rock'
           AND c.source_id = r.id AND c.target_type = 'project') AS project_count,
-       COALESCE(si.id, '00000000-0000-0000-0000-000000000000'::uuid) AS strategy_item_id,
+       si.id AS strategy_item_id,
        COALESCE(si.title, '') AS strategy_item_title
 FROM cerebro_rock r
 JOIN cerebro_operating_period op ON op.id = r.period_id AND op.workspace_id = r.workspace_id

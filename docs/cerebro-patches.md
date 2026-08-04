@@ -1758,7 +1758,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | `operating-system-paths` | packages/core/paths/paths.ts (2 marked route builders) | 2 inline | FIR-2816 — shared workspace paths for the fork-owned Rocks and Strategy pages. |
 | `operating-system-sidebar-component` + `operating-system-sidebar` | packages/views/layout/cerebro-operating-system-nav.tsx (fork-owned sibling) + app-sidebar.tsx (1 import, 1 mount) | sibling + 2 inline | FIR-2816 — feature-flagged Strategy/Rocks navigation; all behavior stays in the named sibling and the upstream sidebar only mounts it. |
-| `operating-system-routes` | server/cmd/server/router.go (1 import, 1 constructor, 1 mount) | 3 inline | FIR-2816 — mounts the fork-owned Strategy/Rocks service; endpoint definitions remain in `server/internal/cerebro/operatingsystem`. |
+| `operating-system-routes` | server/cmd/server/router.go (1 import, 1 constructor, 1 mount) | 3 inline | FIR-2816 — mounts the fork-owned Strategy/Rocks service and supplies its transaction boundary so each Rock save is atomic; endpoint definitions remain in `server/internal/cerebro/operatingsystem`. |
 
 # cerebro-workflow-cli-management
 

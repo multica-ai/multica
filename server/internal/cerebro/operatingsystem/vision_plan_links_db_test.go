@@ -62,7 +62,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	vplPool = pool
-	vplService = NewService(cerebrodb.New(pool), db.New(pool))
+	vplService = NewService(cerebrodb.New(pool), db.New(pool), pool)
 	code := m.Run()
 	if err := cleanupVPL(context.Background(), pool); err != nil {
 		fmt.Printf("Failed to clean vision-plan link fixture: %v\n", err)
@@ -93,6 +93,9 @@ func setupVPL(ctx context.Context, pool *pgxpool.Pool) error {
 func cleanupVPL(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
 		`DELETE FROM cerebro_object_connection WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
+		`DELETE FROM cerebro_rock_check_in WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
+		`DELETE FROM cerebro_rock WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
+		`DELETE FROM cerebro_operating_period WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM cerebro_strategy_item WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM cerebro_vision_plan_section WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM cerebro_vision_plan_page WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
@@ -162,6 +165,82 @@ func vplIssue(t *testing.T, ctx context.Context, title string) pgtype.UUID {
 		t.Fatalf("create issue: %v", err)
 	}
 	return id
+}
+
+func vplPeriod(t *testing.T, ctx context.Context) OperatingPeriodResponse {
+	t.Helper()
+	period, err := vplService.CreatePeriod(ctx, vplWsID, OperatingPeriodInput{
+		Name: t.Name(), Unit: "custom", StartsOn: "2026-01-01", EndsOn: "2026-03-31",
+	})
+	if err != nil {
+		t.Fatalf("create period: %v", err)
+	}
+	return period
+}
+
+func vplRock(t *testing.T, ctx context.Context, title string) RockResponse {
+	t.Helper()
+	period := vplPeriod(t, ctx)
+	rock, err := vplService.SaveRock(ctx, vplWsID, "member", vplMember, nil, RockInput{
+		Title: title, PeriodID: period.ID, Confidence: 50, ReportedHealth: "unset",
+	})
+	if err != nil {
+		t.Fatalf("create rock: %v", err)
+	}
+	return rock
+}
+
+func TestStandaloneRockReturnsNoStrategyConnection(t *testing.T) {
+	vplSkip(t)
+	rock := vplRock(t, context.Background(), "Independent Rock")
+	if rock.StrategyItemID != "" {
+		t.Fatalf("strategy_item_id = %q, want empty", rock.StrategyItemID)
+	}
+}
+
+func TestSaveRockDoesNotPartiallyPersistWhenStrategyConnectionFails(t *testing.T) {
+	vplSkip(t)
+	ctx := context.Background()
+	rock := vplRock(t, ctx, "Original title")
+
+	rockID := mustParseUUIDForTest(t, rock.ID)
+	_, err := vplService.SaveRock(ctx, vplWsID, "member", vplMember, &rockID, RockInput{
+		Title: "Partially saved title", PeriodID: rock.PeriodID, Confidence: 50, ReportedHealth: "unset",
+		StrategyItemID: "550e8400-e29b-41d4-a716-44665544dead",
+	})
+	if err == nil {
+		t.Fatal("missing strategy item was accepted")
+	}
+
+	var title string
+	if err := vplPool.QueryRow(ctx, `SELECT title FROM cerebro_rock WHERE id = $1`, rockID).Scan(&title); err != nil {
+		t.Fatalf("read rock after failed save: %v", err)
+	}
+	if title != "Original title" {
+		t.Fatalf("title = %q after failed save, want original title", title)
+	}
+}
+
+func TestSaveRockRollsBackWhenConnectionReplacementFails(t *testing.T) {
+	vplSkip(t)
+	ctx := context.Background()
+	rock := vplRock(t, ctx, "Atomic title")
+
+	rockID := mustParseUUIDForTest(t, rock.ID)
+	_, err := vplService.SaveRock(ctx, vplWsID, "invalid", vplMember, &rockID, RockInput{
+		Title: "Should roll back", PeriodID: rock.PeriodID, Confidence: 50, ReportedHealth: "unset",
+	})
+	if err == nil {
+		t.Fatal("invalid connection actor was accepted")
+	}
+
+	var title string
+	if err := vplPool.QueryRow(ctx, `SELECT title FROM cerebro_rock WHERE id = $1`, rockID).Scan(&title); err != nil {
+		t.Fatalf("read rock after failed save: %v", err)
+	}
+	if title != "Atomic title" {
+		t.Fatalf("title = %q after failed save, want atomic title", title)
+	}
 }
 
 func TestVisionPlanLinksReturnProjectAndIssue(t *testing.T) {

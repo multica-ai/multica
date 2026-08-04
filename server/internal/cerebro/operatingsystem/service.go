@@ -50,14 +50,19 @@ type ProjectReader interface {
 	GetAgentInWorkspace(context.Context, db.GetAgentInWorkspaceParams) (db.Agent, error)
 }
 
+type TxStarter interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 type Service struct {
 	queries  *cerebrodb.Queries
 	projects ProjectReader
+	tx       TxStarter
 	now      func() time.Time
 }
 
-func NewService(queries *cerebrodb.Queries, projects ProjectReader) *Service {
-	return &Service{queries: queries, projects: projects, now: time.Now}
+func NewService(queries *cerebrodb.Queries, projects ProjectReader, tx TxStarter) *Service {
+	return &Service{queries: queries, projects: projects, tx: tx, now: time.Now}
 }
 
 func DefaultTerminology() Terminology {
@@ -1434,6 +1439,27 @@ func (s *Service) SaveRock(ctx context.Context, workspaceID pgtype.UUID, actorTy
 			return RockResponse{}, err
 		}
 	}
+	if err := s.validateRockConnections(ctx, workspaceID, input); err != nil {
+		return RockResponse{}, err
+	}
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return RockResponse{}, err
+	}
+	defer tx.Rollback(ctx)
+	txService := *s
+	txService.queries = s.queries.WithTx(tx)
+	out, err := txService.saveRock(ctx, workspaceID, actorType, actorID, rockID, input, periodID, ownerID, goalTypeID)
+	if err != nil {
+		return RockResponse{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return RockResponse{}, err
+	}
+	return out, nil
+}
+
+func (s *Service) saveRock(ctx context.Context, workspaceID pgtype.UUID, actorType string, actorID pgtype.UUID, rockID *pgtype.UUID, input RockInput, periodID, ownerID, goalTypeID pgtype.UUID) (RockResponse, error) {
 	var id pgtype.UUID
 	if rockID == nil {
 		row, err := s.queries.CreateRock(ctx, cerebrodb.CreateRockParams{
@@ -1559,24 +1585,9 @@ func (s *Service) replaceRockConnections(ctx context.Context, workspaceID pgtype
 	if actorType != "member" && actorType != "agent" {
 		return errors.New("invalid actor type")
 	}
-	for _, raw := range input.ProjectIDs {
-		id, _ := util.ParseUUID(raw)
-		if err := EnsureProjectInWorkspace(ctx, s.projects, id, workspaceID); err != nil {
-			return err
-		}
-	}
-	for _, raw := range input.IssueIDs {
-		id, _ := util.ParseUUID(raw)
-		if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
-			return err
-		}
-	}
 	var strategyID pgtype.UUID
 	if input.StrategyItemID != "" {
 		strategyID, _ = util.ParseUUID(input.StrategyItemID)
-		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: strategyID, WorkspaceID: workspaceID}); err != nil {
-			return err
-		}
 	}
 	if err := s.queries.DeleteObjectConnectionsForSource(ctx, cerebrodb.DeleteObjectConnectionsForSourceParams{
 		WorkspaceID: workspaceID, SourceType: "rock", SourceID: rockID, TargetTypes: []string{"project", "issue"},
@@ -1608,6 +1619,29 @@ func (s *Service) replaceRockConnections(ctx context.Context, workspaceID pgtype
 			Provenance: "manual", CreatedByType: actorType, CreatedByID: actorID,
 		})
 		return err
+	}
+	return nil
+}
+
+func (s *Service) validateRockConnections(ctx context.Context, workspaceID pgtype.UUID, input RockInput) error {
+	for _, raw := range input.ProjectIDs {
+		id, _ := util.ParseUUID(raw)
+		if err := EnsureProjectInWorkspace(ctx, s.projects, id, workspaceID); err != nil {
+			return err
+		}
+	}
+	for _, raw := range input.IssueIDs {
+		id, _ := util.ParseUUID(raw)
+		if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
+	}
+	var strategyID pgtype.UUID
+	if input.StrategyItemID != "" {
+		strategyID, _ = util.ParseUUID(input.StrategyItemID)
+		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: strategyID, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -902,7 +902,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
-	cerebroOperatingSystemHandler := operatingsystem.NewHandler(operatingsystem.NewService(cerebroQueries, queries)) // CEREBRO-PATCH(operating-system-routes): FIR-2816 wire Strategy/Rocks service.
+	cerebroOperatingSystemHandler := operatingsystem.NewHandler(operatingsystem.NewService(cerebroQueries, queries, pool)) // CEREBRO-PATCH(operating-system-routes): FIR-2816 wire Strategy/Rocks service with atomic saves.
 	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 issue start/due time-of-day handler instance
 	cerebroIssueDateTimeHandler := cerebroissuedatetime.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 workspace default agent-start handler instance
