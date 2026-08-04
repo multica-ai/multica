@@ -66,7 +66,7 @@ type ExecOptions struct {
 	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude, codex, opencode, codebuddy, and grok (ACP
+	// by the claude, codex, opencode, codebuddy, kimi, and grok (ACP
 	// `--effort` on `grok agent`) backends; other backends ignore
 	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).

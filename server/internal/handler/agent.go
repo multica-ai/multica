@@ -1075,7 +1075,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// thinking_level validation: fixed-enum providers reject unknown literals;
-	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
+	// dynamic-catalog providers (Codex/OpenCode/Kimi) reject malformed tokens here.
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {

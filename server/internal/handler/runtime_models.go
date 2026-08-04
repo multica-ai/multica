@@ -78,8 +78,8 @@ type ModelListRequest struct {
 // badge it — don't drop it when marshalling.
 //
 // `Thinking` carries the per-model reasoning-effort catalog discovered
-// by the daemon for runtimes that support it (claude, codex — see
-// MUL-2339). nil means "no picker for this model"; the UI hides the
+// by the daemon for runtimes that support it (including claude, codex, and
+// kimi). nil means "no picker for this model"; the UI hides the
 // thinking_level selector. Older daemons (pre-2026-05) won't send this
 // field, which is fine: the UI hides the selector and the agent runs
 // with the runtime default.

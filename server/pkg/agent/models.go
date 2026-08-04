@@ -120,10 +120,11 @@ const modelCacheTTL = 60 * time.Second
 // pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, and opencode, the catalog is augmented with per-model
-// thinking-level options discovered from the local CLI. Codex discovery
-// failures fall back to a model + thinking snapshot; providers without a safe
-// fallback leave Thinking nil, which makes the UI hide the thinking picker.
+// For claude, codex, opencode, and kimi, the catalog is augmented with
+// per-model thinking-level options discovered from the local CLI. Codex
+// discovery failures fall back to a model + thinking snapshot; providers
+// without a safe fallback leave Thinking nil, which makes the UI hide the
+// thinking picker.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
@@ -166,7 +167,7 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 			return discovered(discoverHermesModels(ctx, executablePath))
 		})
 	case "kimi":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverKimiModels(ctx, executablePath))
 		})
 	case "kiro":
@@ -882,21 +883,238 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	})
 }
 
-// discoverKimiModels spins up a throwaway `kimi acp` process and
-// drives the same minimal ACP handshake as Hermes to surface the
-// model catalog advertised by Kimi's `session/new` response. Kimi
-// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
-// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
-// shared parser accepts both, so the discovery path stays identical.
+// discoverKimiModels combines Kimi's ACP session catalog with the structured
+// per-model effort data from `kimi provider list --json`. The ACP
+// `session/new` response describes the models available to the current
+// account and which one is active. The provider catalog is the authoritative
+// source for per-model supportEfforts/defaultEffort: current K3 variants
+// expose low/high/max, while kimi-for-coding variants intentionally expose no
+// effort override.
 //
-// Failure modes (kimi missing, not logged in, config error) all
-// return an empty list so the UI falls back to manual entry.
+// Older Kimi builds may not support the provider-list command. In that case,
+// the thought_level option from ACP is attached only to the model marked
+// current by that same session/new response. It must never be copied to every
+// model because the option describes the current session, not the entire
+// catalog.
+//
+// Failure modes (kimi missing, not logged in, config error) return an empty
+// list so the UI falls back to manual entry.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
-	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+	var sessionThinking *ModelThinking
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+		annotate: func(_ []Model, sessionResult json.RawMessage) {
+			sessionThinking = parseACPThoughtLevelOptions(sessionResult)
+		},
 	})
+	if err != nil || len(models) == 0 {
+		return models, err
+	}
+
+	perModel, err := discoverKimiProviderThinking(ctx, executablePath)
+	if err != nil {
+		slog.Debug("kimi per-model thinking discovery failed; using ACP current-model fallback", "error", err)
+		annotateKimiCurrentModelThinking(models, sessionThinking)
+		return models, nil
+	}
+	for i := range models {
+		if thinking, ok := perModel[models[i].ID]; ok {
+			models[i].Thinking = thinking
+			continue
+		}
+		// A model can be visible in ACP before it appears in provider-list
+		// output. The ACP option is still valid for the current model only.
+		if models[i].Default && sessionThinking != nil {
+			models[i].Thinking = sessionThinking
+		}
+	}
+	return models, nil
+}
+
+func annotateKimiCurrentModelThinking(models []Model, thinking *ModelThinking) {
+	if thinking == nil {
+		return
+	}
+	for i := range models {
+		if models[i].Default {
+			models[i].Thinking = thinking
+			return
+		}
+	}
+}
+
+func discoverKimiProviderThinking(ctx context.Context, executablePath string) (map[string]*ModelThinking, error) {
+	if executablePath == "" {
+		executablePath = "kimi"
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, executablePath, "provider", "list", "--json")
+	hideAgentWindow(cmd)
+	cmd.Stderr = io.Discard
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("kimi provider list: %w", err)
+	}
+	return parseKimiProviderThinking(raw)
+}
+
+type kimiProviderModel struct {
+	SupportEfforts      []string `json:"supportEfforts"`
+	SupportEffortsSnake []string `json:"support_efforts"`
+	DefaultEffort       string   `json:"defaultEffort"`
+	DefaultEffortSnake  string   `json:"default_effort"`
+}
+
+func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
+	var response struct {
+		Models map[string]kimiProviderModel `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("parse kimi provider catalog: %w", err)
+	}
+	if len(response.Models) == 0 {
+		return nil, fmt.Errorf("kimi provider catalog contained no models")
+	}
+
+	result := make(map[string]*ModelThinking, len(response.Models))
+	for modelID, model := range response.Models {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		efforts := model.SupportEfforts
+		if len(efforts) == 0 {
+			efforts = model.SupportEffortsSnake
+		}
+		seen := make(map[string]bool, len(efforts))
+		levels := make([]ThinkingLevel, 0, len(efforts))
+		for _, rawEffort := range efforts {
+			effort := strings.TrimSpace(rawEffort)
+			if effort == "" || seen[effort] || !isValidDynamicThinkingValue(effort) {
+				continue
+			}
+			seen[effort] = true
+			levels = append(levels, ThinkingLevel{
+				Value: effort,
+				Label: kimiThinkingLabel(effort),
+			})
+		}
+		if len(levels) == 0 {
+			// Keep an explicit nil entry so a successful provider-list call
+			// can distinguish "this model has no efforts" from "the model
+			// was absent from the provider catalog".
+			result[modelID] = nil
+			continue
+		}
+
+		defaultEffort := strings.TrimSpace(model.DefaultEffort)
+		if defaultEffort == "" {
+			defaultEffort = strings.TrimSpace(model.DefaultEffortSnake)
+		}
+		if !seen[defaultEffort] {
+			defaultEffort = ""
+		}
+		result[modelID] = &ModelThinking{
+			SupportedLevels: levels,
+			DefaultLevel:    defaultEffort,
+		}
+	}
+	return result, nil
+}
+
+func kimiThinkingLabel(value string) string {
+	switch value {
+	case "low":
+		return "Low"
+	case "medium":
+		return "Medium"
+	case "high":
+		return "High"
+	case "max":
+		return "Max"
+	default:
+		return strings.Title(value) //nolint:staticcheck
+	}
+}
+
+type acpThoughtLevelOption struct {
+	Type              string `json:"type"`
+	ID                string `json:"id"`
+	Category          string `json:"category"`
+	CurrentValue      string `json:"currentValue"`
+	CurrentValueSnake string `json:"current_value"`
+	Options           []struct {
+		Value       string `json:"value"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"options"`
+}
+
+// parseACPThoughtLevelOptions extracts the current session's effort selector.
+// It accepts both camelCase and snake_case top-level fields because ACP agents
+// in the wild emit both spellings.
+func parseACPThoughtLevelOptions(raw json.RawMessage) *ModelThinking {
+	var response struct {
+		ConfigOptions      []acpThoughtLevelOption `json:"configOptions"`
+		ConfigOptionsSnake []acpThoughtLevelOption `json:"config_options"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil
+	}
+	options := response.ConfigOptions
+	if len(options) == 0 {
+		options = response.ConfigOptionsSnake
+	}
+	for _, option := range options {
+		optionType := strings.TrimSpace(option.Type)
+		if optionType != "" && !strings.EqualFold(optionType, "select") {
+			continue
+		}
+		category := strings.TrimSpace(option.Category)
+		id := strings.TrimSpace(option.ID)
+		if !strings.EqualFold(category, "thought_level") &&
+			!(category == "" && strings.EqualFold(id, "thinking")) {
+			continue
+		}
+
+		seen := make(map[string]bool, len(option.Options))
+		levels := make([]ThinkingLevel, 0, len(option.Options))
+		for _, choice := range option.Options {
+			value := strings.TrimSpace(choice.Value)
+			if value == "" || seen[value] || !isValidDynamicThinkingValue(value) {
+				continue
+			}
+			seen[value] = true
+			label := strings.TrimSpace(choice.Name)
+			if label == "" || strings.EqualFold(label, "unknown") {
+				label = kimiThinkingLabel(value)
+			}
+			levels = append(levels, ThinkingLevel{
+				Value:       value,
+				Label:       label,
+				Description: strings.TrimSpace(choice.Description),
+			})
+		}
+		if len(levels) == 0 {
+			return nil
+		}
+		defaultLevel := strings.TrimSpace(option.CurrentValue)
+		if defaultLevel == "" {
+			defaultLevel = strings.TrimSpace(option.CurrentValueSnake)
+		}
+		if !seen[defaultLevel] {
+			defaultLevel = ""
+		}
+		return &ModelThinking{
+			SupportedLevels: levels,
+			DefaultLevel:    defaultLevel,
+		}
+	}
+	return nil
 }
 
 // discoverKiroModels spins up a throwaway `kiro-cli acp` process and parses

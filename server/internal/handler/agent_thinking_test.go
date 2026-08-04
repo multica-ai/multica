@@ -250,6 +250,42 @@ func TestUpdateAgent_ThinkingLevel_TriState(t *testing.T) {
 	})
 }
 
+func TestUpdateAgent_KimiThinkingLevelPersists(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	kimiRuntimeID := createKimiProviderRuntime(t)
+	agentID := createAgentOnRuntime(t, "kimi-thinking-persistence", kimiRuntimeID, "")
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+		"thinking_level": "high",
+	}), "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set Kimi thinking_level: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["thinking_level"] != "high" {
+		t.Fatalf("response thinking_level = %v, want high", response["thinking_level"])
+	}
+
+	var stored string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT thinking_level FROM agent WHERE id = $1`, agentID,
+	).Scan(&stored); err != nil {
+		t.Fatalf("read persisted thinking_level: %v", err)
+	}
+	if stored != "high" {
+		t.Errorf("persisted thinking_level = %q, want high", stored)
+	}
+}
+
 // TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid covers
 // the gap Elon flagged in PR1 review: a PATCH that switches `runtime_id`
 // without explicitly touching `thinking_level` used to silently keep
@@ -489,6 +525,26 @@ func createCodexProviderRuntime(t *testing.T) string {
 	`, testWorkspaceID, "Codex Thinking Runtime", "Codex thinking-level test runtime", testUserID).Scan(&runtimeID)
 	if err != nil {
 		t.Fatalf("create codex runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func createKimiProviderRuntime(t *testing.T) string {
+	t.Helper()
+	var runtimeID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'kimi', 'online', $3, '{}'::jsonb, now(), $4)
+		RETURNING id
+	`, testWorkspaceID, "Kimi Thinking Runtime", "Kimi thinking-level test runtime", testUserID).Scan(&runtimeID)
+	if err != nil {
+		t.Fatalf("create kimi runtime: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)

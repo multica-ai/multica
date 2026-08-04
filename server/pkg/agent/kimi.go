@@ -327,6 +327,42 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			b.cfg.Logger.Info("kimi session model set", "model", opts.Model)
 		}
 
+		// 3b. Apply a persisted thinking override through Kimi's native ACP
+		// config option before prompting. Fail hard if the runtime rejects it:
+		// silently continuing would make the UI claim an effort that the model
+		// did not actually use.
+		if opts.ThinkingLevel != "" {
+			if _, err := c.request(runCtx, "session/set_config_option", map[string]any{
+				"sessionId": sessionID,
+				"configId":  "thinking",
+				"value":     opts.ThinkingLevel,
+			}); err != nil {
+				b.cfg.Logger.Warn("kimi set_config_option/thinking failed", "error", err, "requested_level", opts.ThinkingLevel)
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("kimi could not set thinking level %q: %v", opts.ThinkingLevel, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// A stale resumed session can first surface here, after
+					// session/resume and set_model appeared to succeed. Mark the
+					// rejection so the daemon retries with a fresh session.
+					b.cfg.Logger.Warn("resumed session not found at set_config_option time; clearing session id so the daemon retries fresh",
+						"backend", "kimi",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+					resumeRejected = true
+				}
+				resCh <- Result{
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
+				}
+				return
+			}
+			b.cfg.Logger.Info("kimi session thinking level set", "level", opts.ThinkingLevel)
+		}
+
 		// 4. Build the prompt content. If we have a system prompt, prepend it.
 		userText := prompt
 		if opts.SystemPrompt != "" {
