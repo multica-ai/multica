@@ -868,6 +868,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.WorkflowFailureGate = workflowHooksFeature.FailureGate           // CEREBRO-PATCH(workflow-hooks-failure-wire): FIR-3692 task failure routing is selected by Workflow.
 	toolExecutor.Hooks = workflowHooksFeature.Evaluator                            // CEREBRO-PATCH(workflow-hooks-tool-failure-wire): FIR-3692 tool failures emit Workflow events.
 	h.CommentTargetGuard = cerebrocommentguard.New(workflowHooksFeature.Evaluator) // CEREBRO-PATCH(router-comment-workflow-gate): FIR-3692 before.message.send is the only comment decision path.
+	workflowHooksFeature.AssignGate.Attach(bus)                                    // CEREBRO-PATCH(issue-assign-gate-wire): FIR-4183 before.issue.assigned fires from the issue:updated broadcast.
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
 	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus).WithHooks(workflowHooksFeature.Evaluator)

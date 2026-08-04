@@ -224,6 +224,9 @@ export type CerebroFlagKey =
   | "cerebro_disable_onboarding"
   // FIR-2504: show similar open issues + LLM verdict when creating an issue.
   | "cerebro_duplicate_check_on_create"
+  // FIR-4183: check for an existing issue on the same matter when an issue is
+  // handed to an agent.
+  | "cerebro_related_check_on_assign"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
   // FIR-2580: per-workspace logo (upload + sidebar/breadcrumbs + web favicon + desktop dock icon).
@@ -660,6 +663,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // of duplicating. Defaults ON so the feature lands behind the standard
   // workspace/user override (Off restores upstream create flow).
   cerebro_duplicate_check_on_create: true,
+  // FIR-4183: the same question, asked at hand-over instead of at creation —
+  // an agent picking up an issue gets told when the work already exists.
+  // Defaults ON: with no workflow-hook policy bound to before.issue.assigned
+  // nothing fires automatically, so the flag only opens the manual
+  // `multica issue check-related` route until a workspace binds a policy.
+  cerebro_related_check_on_assign: true,
   // FIR-2523: Auth & Permissions tab + Google Workspace auto-membership.
   // Default ON for the cerebro fork (Jesper, 2026-05-30): firtal.com auto-
   // signup is the launch feature, and the table starts empty so a fresh
@@ -1596,6 +1605,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
+  },
+  {
+    key: "cerebro_related_check_on_assign",
+    label: "Find similar at hand-over",
+    group: "issues",
+    description:
+      "Ask the same question when an issue is handed to an agent instead of when it is created: search the workspace for open issues about the same matter, link every match as related on both issues, and post one comment naming them. Bind the issue.check_related action to the before.issue.assigned workflow hook to run it. Requires the Firtal AI Gateway credentials. FIR-4183.",
   },
   {
     key: "cerebro_google_identity",

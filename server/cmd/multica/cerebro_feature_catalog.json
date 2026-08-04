@@ -652,6 +652,13 @@
       "default": true
     },
     {
+      "key": "cerebro_related_check_on_assign",
+      "label": "Find similar at hand-over",
+      "description": "Ask the same question when an issue is handed to an agent instead of when it is created: search the workspace for open issues about the same matter, link every match as related on both issues, and post one comment naming them. Bind the issue.check_related action to the before.issue.assigned workflow hook to run it. Requires the Firtal AI Gateway credentials. FIR-4183.",
+      "group": "issues",
+      "default": true
+    },
+    {
       "key": "cerebro_google_identity",
       "label": "Google Workspace identity",
       "description": "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",

@@ -19,6 +19,9 @@ type HookFeature struct {
 	Evaluator      HookEvaluator
 	CompletionGate *TaskCompletionGate
 	FailureGate    *TaskFailureGate
+	// AssignGate fires before.issue.assigned when an issue is handed to an
+	// agent (FIR-4183). It subscribes to the bus itself — see its Attach.
+	AssignGate *IssueAssignGate
 }
 
 func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalStore) *HookFeature {
@@ -41,6 +44,7 @@ func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore Eva
 		Evaluator:      evaluator,
 		CompletionGate: NewTaskCompletionGate(NewPostgresTaskCompletionStore(db), evaluator, hookFeatureEnabled()),
 		FailureGate:    NewTaskFailureGate(NewPostgresTaskFailureContextStore(db), evaluator, hookFeatureEnabled()),
+		AssignGate:     NewIssueAssignGate(evaluator),
 	}
 }
 

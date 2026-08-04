@@ -18,6 +18,10 @@ const (
 	HookBeforeWakeupCreate   HookEventType = "before.wakeup.create"
 	HookOnWakeupFireFailure  HookEventType = "on.wakeup.fire_failure"
 	HookBeforeIssueStatus    HookEventType = "before.issue.status_change"
+	// HookBeforeIssueAssigned fires when an issue is handed to an agent and a
+	// task is about to be enqueued for it (FIR-4183). It is the seam where the
+	// platform can look for an issue on the same matter before work starts.
+	HookBeforeIssueAssigned HookEventType = "before.issue.assigned"
 	HookBeforeMessageSend    HookEventType = "before.message.send"
 	HookAfterWorkflowStep    HookEventType = "after.workflow.step_completed"
 )
@@ -48,6 +52,7 @@ var HookEventCatalog = map[HookEventType]HookEventDefinition{
 	HookBeforeWakeupCreate:   {Label: "Before wakeup is created", Phase: "before", CanBlock: true},
 	HookOnWakeupFireFailure:  {Label: "When a wakeup fails", Phase: "failure"},
 	HookBeforeIssueStatus:    {Label: "Before issue status changes", Phase: "before", CanBlock: true},
+	HookBeforeIssueAssigned:  {Label: "Before an issue is handed to an agent", Phase: "before", CanBlock: true},
 	HookBeforeMessageSend:    {Label: "Before message is sent", Phase: "before", CanBlock: true, CanModify: true},
 	HookAfterWorkflowStep:    {Label: "After workflow step completes", Phase: "after"},
 }
