@@ -285,13 +285,12 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
-	// registerSerial holds one mutex per workspace, serializing the
-	// "send Register, record what it carried" critical section
-	// (workspaceRegisterLock). Entries are never deleted — a daemon tracks a
-	// handful of workspaces, and a mutex for a workspace that went away is a
-	// few bytes, not a leak worth a lifecycle. Guarded by registerSerialMu.
-	registerSerialMu sync.Mutex
-	registerSerial   map[string]*sync.Mutex
+	// registerSerial holds one mutex per workspace (workspace_id ->
+	// *sync.Mutex), serializing the "send Register, record what it carried"
+	// critical section (workspaceRegisterLock). Entries are never deleted — a
+	// daemon tracks a handful of workspaces, and a mutex for a workspace that
+	// went away is a few bytes, not a leak worth a lifecycle.
+	registerSerial sync.Map
 
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
@@ -386,10 +385,17 @@ type Daemon struct {
 	// trySelfReload reads RestartBinary() from the latter to avoid racing the
 	// former into a second handoff.
 	restartMu     sync.Mutex
-	restartBinary string       // non-empty after a successful update; path to the new binary
-	updating      atomic.Bool  // prevents concurrent update attempts
-	activeTasks   atomic.Int64 // number of tasks currently in handleTask; exposed via /health
-	ready         atomic.Bool  // false until preflight completes; gates /health status (starting -> running)
+	restartBinary string // non-empty after a successful update; path to the new binary
+	// brewTargetOnce caches the brew half of restartTargetBinary. The install
+	// method and brew prefix cannot change for the lifetime of the process, and
+	// trySelfReload now calls restartTargetBinary every check tick — without
+	// the cache that is up to two uncached `brew --prefix` forks per tick.
+	brewTargetOnce sync.Once
+	brewInstall    bool         // resolved once: was this binary installed via brew?
+	brewTarget     string       // "<prefix>/bin/multica" when brewInstall and the prefix resolved
+	updating       atomic.Bool  // prevents concurrent update attempts
+	activeTasks    atomic.Int64 // number of tasks currently in handleTask; exposed via /health
+	ready          atomic.Bool  // false until preflight completes; gates /health status (starting -> running)
 	// reloadPendingReason explains why a confirmed multica version change hasn't
 	// restarted the daemon yet (a task was running at the barrier check). Set
 	// and cleared by trySelfReload, read by /health. Diagnostic only.
@@ -583,17 +589,8 @@ func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string 
 // applyRegisterResponseInPlace replaces the whole set), so their ordering
 // cannot strand anything the way a wrong version record can.
 func (d *Daemon) workspaceRegisterLock(workspaceID string) *sync.Mutex {
-	d.registerSerialMu.Lock()
-	defer d.registerSerialMu.Unlock()
-	if d.registerSerial == nil {
-		d.registerSerial = make(map[string]*sync.Mutex)
-	}
-	mu, ok := d.registerSerial[workspaceID]
-	if !ok {
-		mu = &sync.Mutex{}
-		d.registerSerial[workspaceID] = mu
-	}
-	return mu
+	mu, _ := d.registerSerial.LoadOrStore(workspaceID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
 }
 
 // recordBuiltinVersionsSent stores, per provider, the version a SUCCESSFUL
@@ -653,16 +650,13 @@ func (d *Daemon) refreshHealedVersion(provider, path, version string) {
 	d.resolvedPaths[provider] = healedAgent{path: path, version: version}
 }
 
-// agentVersionSnapshot copies the detected-version cache. refreshAgentVersions
-// uses its emptiness as the "has anything ever registered" guard.
-func (d *Daemon) agentVersionSnapshot() map[string]string {
+// hasDetectedAgentVersions reports whether any CLI version has ever been
+// detected. refreshAgentVersions uses it as the "has anything ever registered"
+// guard.
+func (d *Daemon) hasDetectedAgentVersions() bool {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
-	out := make(map[string]string, len(d.agentVersions))
-	for provider, version := range d.agentVersions {
-		out[provider] = version
-	}
-	return out
+	return len(d.agentVersions) > 0
 }
 
 // healedAgent bundles a self-healed executable path with the CLI version
@@ -720,12 +714,14 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 
 // healOutcome is what one self-heal attempt concluded. At most one half is
 // meaningful: adopted names a binary that cleared the same gates registration
-// applies, while rejectedVersion names a candidate that was found and
-// version-detected but refused for being below the minimum supported version.
+// applies, while rejected carries the typed verdict for a candidate that was
+// found and version-detected but refused for being below the minimum supported
+// version. rejected is nil unless the verdict is genuine — it is only ever set
+// from a *agent.BelowMinimumError, which by construction carries a version
+// that parsed.
 type healOutcome struct {
-	adopted         healedAgent
-	rejectedVersion string
-	rejectedReason  string
+	adopted  healedAgent
+	rejected *agent.BelowMinimumError
 }
 
 // resolveAgentEntryWithHeal is resolveAgentEntry plus what the self-heal
@@ -818,15 +814,13 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 			// adopt is still right, but reporting a rejection would let the
 			// caller demote a runtime on an unreadable version — the exact
 			// transient case the below-minimum machinery must never act on.
-			// This also keeps the rejectedVersion sentinel sound: a genuine
-			// verdict always carries a version that parsed, hence non-blank.
 			d.logger.Warn("re-resolved agent executable version could not be validated; keeping pinned path",
 				"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
 			return healOutcome{}
 		}
 		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
 			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
-		return healOutcome{rejectedVersion: version, rejectedReason: err.Error()}
+		return healOutcome{rejected: tooOld}
 	}
 
 	adopted := healedAgent{path: newPath, version: version}
@@ -1091,10 +1085,12 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 //     the order they were returned. These are the daemon's authoritative
 //     current runtime set after the call.
 //   - droppedIDs: runtime IDs that were tracked before this call but did
-//     NOT survive the response. Drift callers Deregister these so the
-//     server marks them offline immediately instead of waiting on the 150 s
-//     stale-heartbeat sweep; the runtime_gone path can ignore them because
-//     those rows were already deleted server-side.
+//     NOT survive the response. Callers Deregister these so the server marks
+//     them offline immediately instead of waiting on the 150 s
+//     stale-heartbeat sweep. On the runtime_gone path the triggering row was
+//     already deleted server-side (and pruned locally before the register),
+//     but a SIBLING dropped here — e.g. a provider confirmed below-minimum
+//     this round — still has a live server row that must be deregistered.
 //   - ok:         false when the workspace was forgotten between the
 //     register call and this apply (e.g. the user left the workspace and
 //     syncWorkspacesFromAPI removed it). The caller must abort silently in
@@ -1261,7 +1257,7 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 		return fmt.Errorf("register runtimes: %w", err)
 	}
 
-	newIDs, _, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, unavailable)
+	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, unavailable)
 	if !ok {
 		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
 	}
@@ -1271,6 +1267,18 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 			"workspace_id", workspaceID, "runtime_id", rid)
 	}
 	d.notifyRuntimeSetChanged()
+
+	// A sibling runtime dropped by this recovery (a provider confirmed
+	// below-minimum this round) still has a live server row — the runtime_gone
+	// trigger only deleted its own. Eagerly mark those offline, matching the
+	// drift path, instead of leaving them claimable until the stale-heartbeat
+	// sweep. Best-effort: the sweep is the backstop.
+	if len(droppedIDs) > 0 {
+		if err := d.client.Deregister(ctx, droppedIDs); err != nil {
+			d.logger.Warn("deregister of dropped runtimes after runtime_gone recovery failed",
+				"workspace_id", workspaceID, "runtime_ids", droppedIDs, "error", err)
+		}
+	}
 
 	// Tell the server about any tasks the previous (now-deleted) runtime
 	// was working on, mirroring the registration path's recover-orphans call.
@@ -1632,10 +1640,11 @@ var runtimeVersionProbeRetryDelay = 500 * time.Millisecond
 // re-resolved candidate, so an attempt can spend its entire budget there and
 // still fail instantly on the outer probe of the stale path.
 //
-// One deterministic failure does slip through and get retried: a self-heal
-// candidate rejected by the minimum-version gate, whose stale path then fails
-// fast. It is not worth plumbing a reason out of resolveAgentEntry to catch —
-// the retry is bounded, and every probe in it fails fast by construction.
+// A self-heal candidate rejected by the minimum-version gate is also retried
+// within this window, deliberately: the rejection is a verdict about whatever
+// PATH resolved to during the upgrade window the heal exists for, and the
+// retry gives the upgrade a beat to publish the new binary before the verdict
+// demotes runtimes (see probeBuiltinRuntime).
 //
 // Overridable for tests.
 var runtimeVersionProbeRetryWindow = time.Second
@@ -1706,16 +1715,25 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		// the new one yet on the first attempt.
 		resolved, _, heal := d.resolveAgentEntryWithHeal(ctx, name, entry)
 		// The pinned path is gone and the binary its command resolves to now is
-		// too old. Concluding here is the same rule the direct case below
-		// applies — the verdict is a pure function of a version already read, so
-		// a retry reaches it again — and it is the only way this shape reaches
-		// the caller: probing the vanished path can only produce "version
-		// detection failed", which by design leaves the runtime online and
-		// claiming tasks for a CLI that cannot launch.
-		if heal.rejectedVersion != "" {
+		// too old. Unlike the direct case below, this verdict is about whatever
+		// PATH resolves to at this instant — and the pinned path vanishing is
+		// exactly the mid-upgrade window the per-attempt heal exists for, where
+		// a stale sibling install can shadow the not-yet-published new binary.
+		// Give it the same bounded fast-failure retry as every other outcome
+		// before returning the demotable verdict; a retry that finds the
+		// upgraded binary adopts it instead. It is still the only way this
+		// shape reaches the caller: probing the vanished path can only produce
+		// "version detection failed", which by design leaves the runtime online
+		// and claiming tasks for a CLI that cannot launch.
+		if heal.rejected != nil {
+			if attempts < runtimeVersionProbeAttempts && time.Since(startedAt) < runtimeVersionProbeRetryWindow {
+				d.logger.Debug("re-resolved agent version too old; retrying probe",
+					"name", name, "attempt", attempts, "version", heal.rejected.Detected)
+				continue
+			}
 			d.logger.Warn("skip registering runtime: re-resolved version too old",
-				"name", name, "version", heal.rejectedVersion, "error", heal.rejectedReason)
-			return heal.rejectedVersion, heal.rejectedReason, builtinProbeBelowMinimum
+				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
+			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
 		version, err := detectAgentVersion(ctx, resolved.Path)
 		if err != nil {
@@ -2509,24 +2527,23 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	regResp, profileSig, unavailable, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
 	if err != nil {
 		if errors.Is(err, ErrNoRuntimesToRegister) {
-			// An empty payload only proves "nothing to host" when every probe
-			// actually concluded. A provider dropped as UNAVAILABLE is a
-			// transient failure, and converging to zero on it would Deregister
-			// every healthy runtime this workspace has; skip and let a later
-			// drift notification retry (the signature was not cached, so the
-			// drift is still detectable).
-			if len(unavailable) > 0 {
-				d.logger.Warn("skip runtime convergence-to-zero: builtin probes failed this round",
-					"workspace_id", workspaceID, "unavailable", unavailable)
-				return nil
-			}
 			// Convergence-to-zero: a custom-only daemon's only enabled
 			// profile was just disabled / deleted, and there are no built-in
 			// agents to fall back on. Drop the daemon's local tracking and
 			// proactively Deregister the orphaned server-side rows so the
 			// runtime list converges to empty without waiting on the 150 s
 			// stale-heartbeat sweep.
-			return d.convergeWorkspaceRuntimesToZero(ctx, workspaceID, profileSig)
+			//
+			// An empty payload only proves "nothing to host" for the providers
+			// whose probe actually concluded. A provider dropped as UNAVAILABLE
+			// is a transient failure, and treating its absence as authoritative
+			// would Deregister a healthy runtime over one failed probe — so its
+			// existing built-in rows are preserved (the same rule
+			// applyRegisterResponseInPlace applies) while the profile runtimes
+			// the drift is actually about still converge. Skipping the whole
+			// convergence instead would let one permanently unprobeable CLI
+			// keep a disabled profile's runtime online forever.
+			return d.convergeWorkspaceRuntimesToZero(ctx, workspaceID, profileSig, unavailable)
 		}
 		return err
 	}
@@ -2565,40 +2582,61 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 // tracking so taskWakeup / heartbeat / poll loops stop attempting work
 // against runtimes that should now be offline.
 //
+// preserveProviders lists built-in providers whose probe was UNAVAILABLE this
+// round: their absence from the payload is a transient failure, not a
+// decision, so their existing built-in rows survive — the same preserve rule
+// applyRegisterResponseInPlace applies. Everything else (the disabled/deleted
+// profiles' runtimes, and any builtin whose probe concluded) converges away.
+//
 // The workspaceState pointer is preserved: the workspace itself is still a
 // valid workspace the user belongs to, just one with no agents on this
 // daemon for the moment. If the user re-enables a profile or installs a
 // built-in agent, the profile-change notification or the next daemon WS
 // reconnect will register it again.
-func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string) error {
+func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string, preserveProviders map[string]string) error {
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
 		d.mu.Unlock()
 		return nil
 	}
-	oldRuntimeIDs := append([]string(nil), ws.runtimeIDs...)
-	for _, rid := range oldRuntimeIDs {
+	// A fresh array, not ws.runtimeIDs[:0]: the health handler copies this
+	// slice header under d.mu and serializes it after releasing the lock
+	// (removeStaleRuntime keeps the same rule).
+	kept := ws.runtimeIDs[:0:0]
+	var dropped []string
+	for _, rid := range ws.runtimeIDs {
+		if rt, tracked := d.runtimeIndex[rid]; tracked && rt.ProfileID == "" {
+			if _, preserve := preserveProviders[rt.Provider]; preserve {
+				kept = append(kept, rid)
+				continue
+			}
+			// A builtin row converging away here was confirmed gone this
+			// round; drop its version record too, mirroring the demote path.
+			delete(ws.builtinVersions, rt.Provider)
+		}
 		delete(d.runtimeIndex, rid)
+		dropped = append(dropped, rid)
 	}
-	ws.runtimeIDs = nil
+	ws.runtimeIDs = kept
 	if profileSig != "" {
-		// Cache the converged-empty signature so we don't loop into
-		// re-converging on every subsequent sync tick.
+		// Cache the converged signature so we don't loop into re-converging
+		// on every subsequent sync tick.
 		ws.profileSetSig = profileSig
 	}
 	d.mu.Unlock()
 
 	d.logger.Info("custom runtime profile drift converged to zero; clearing local tracking",
-		"workspace_id", workspaceID, "deregistered_runtime_ids", oldRuntimeIDs)
+		"workspace_id", workspaceID, "deregistered_runtime_ids", dropped,
+		"preserved_providers", preserveProviders)
 
-	if len(oldRuntimeIDs) > 0 {
-		if err := d.client.Deregister(ctx, oldRuntimeIDs); err != nil {
+	if len(dropped) > 0 {
+		if err := d.client.Deregister(ctx, dropped); err != nil {
 			// Best-effort: the server's stale-heartbeat sweep marks the rows
 			// offline within ~150 s as a backstop, and on the daemon side
 			// we have already stopped heartbeating them.
 			d.logger.Warn("deregister after zero-runtime convergence failed",
-				"workspace_id", workspaceID, "runtime_ids", oldRuntimeIDs, "error", err)
+				"workspace_id", workspaceID, "runtime_ids", dropped, "error", err)
 		}
 	}
 	d.notifyRuntimeSetChanged()
@@ -3800,12 +3838,23 @@ func (d *Daemon) restartTargetBinary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if isBrewInstall() {
-		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
-			return filepath.Join(brewPrefix, "bin", "multica"), nil
+	// The install method and brew prefix are fixed for the process lifetime;
+	// resolve them once so the per-tick reload probe doesn't fork
+	// `brew --prefix` every 5 minutes.
+	d.brewTargetOnce.Do(func() {
+		d.brewInstall = isBrewInstall()
+		if !d.brewInstall {
+			return
 		}
-		if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
-			return filepath.Join(prefix, "bin", "multica"), nil
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			d.brewTarget = filepath.Join(brewPrefix, "bin", "multica")
+		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			d.brewTarget = filepath.Join(prefix, "bin", "multica")
+		}
+	})
+	if d.brewInstall {
+		if d.brewTarget != "" {
+			return d.brewTarget, nil
 		}
 		d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
 			"executable", newBin)

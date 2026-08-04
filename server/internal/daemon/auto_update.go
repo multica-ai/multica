@@ -23,7 +23,14 @@ var (
 // detectSelfVersion runs `<path> --version` and returns the version field.
 // Indirection so tests never fork a real process.
 var detectSelfVersion = func(ctx context.Context, path string) (string, error) {
-	out, err := exec.CommandContext(ctx, path, "--version").Output()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	// Context cancellation only kills the direct child; a descendant that
+	// inherited our stdout pipe keeps Output() blocked past the deadline.
+	// WaitDelay force-closes the pipes after the kill — without it a replaced
+	// binary that misbehaves would park the autoUpdateLoop goroutine forever
+	// with the updating flag held. Same guard as detectCLIVersion.
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("run %s --version: %w", path, err)
 	}

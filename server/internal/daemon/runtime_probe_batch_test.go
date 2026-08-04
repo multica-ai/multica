@@ -704,10 +704,14 @@ func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testin
 	if belowMin["codex"] != "0.0.1" {
 		t.Errorf("below-minimum verdict = %v, want codex 0.0.1", belowMin)
 	}
-	// And it concludes on the first attempt: the verdict is a pure function of a
-	// version already read, so retrying could only reach it again.
-	if got := probes.Load(); got != 1 {
-		t.Errorf("ran %d version probes, want 1", got)
+	// Unlike the direct below-minimum case, the heal verdict gets the bounded
+	// fast-failure retry before it is returned: the heal re-resolves PATH per
+	// attempt, and mid-upgrade a stale sibling install can shadow the
+	// not-yet-published new binary — so the demotable verdict is only returned
+	// once the retry reached the same conclusion. One probe per attempt, both
+	// on the healed candidate (the outer probe of the vanished path never runs).
+	if got := probes.Load(); got != 2 {
+		t.Errorf("ran %d version probes, want 2 (one per bounded attempt)", got)
 	}
 }
 

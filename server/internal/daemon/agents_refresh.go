@@ -237,7 +237,7 @@ func (d *Daemon) refreshAgentAvailability() []string {
 func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	// Nothing has ever been version-detected: the daemon is still starting up,
 	// and initial registration is the sync path's job.
-	if len(d.agentVersionSnapshot()) == 0 {
+	if !d.hasDetectedAgentVersions() {
 		return
 	}
 
@@ -259,10 +259,7 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	// reappears in the payload; comparing records against a payload that cannot
 	// mention it would otherwise turn into one register call per workspace
 	// every few minutes, forever.
-	carried := make(map[string]string, len(builtins))
-	for _, rt := range builtins {
-		carried[rt["type"]] = rt["version"]
-	}
+	carried := builtinVersionsFromPayload(builtins)
 
 	// A workspace is behind when some carried provider's last accepted register
 	// call for it carried a different version. A provider with no record for a
@@ -346,6 +343,21 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 // runtime over one is exactly the mistake refreshAgentAvailability's
 // one-directional rule exists to avoid.
 func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum map[string]string) {
+	// Serialize with task claiming the way the restart paths do: the barrier
+	// only sets when no claim is in flight and no task is running, so a
+	// runtime is never deregistered under a task that is still executing —
+	// the server's sweep would fail-and-retry that task while the local
+	// process keeps going, and an upgrade-back would revive the runtime ID
+	// into a genuine duplicate execution. A busy daemon defers to the next
+	// refresh tick; the too-old CLI keeps its runtimes a little longer, which
+	// is the pre-demotion status quo, not a new exposure.
+	if !d.trySetClaimBarrier() {
+		d.logger.Info("defer below-minimum demotion: task or claim in flight",
+			"providers", belowMinimum)
+		return
+	}
+	defer d.releaseClaimBarrier()
+
 	d.mu.Lock()
 	var demoted []string
 	demotedProviders := make(map[string]string)
