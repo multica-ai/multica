@@ -120,7 +120,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
         <p className="text-micro text-muted-foreground truncate">
           {pr.repo_owner}/{pr.repo_name}
           {pr.provider === "code" ? "!" : "#"}
-          {pr.number} · {pr.provider === "code" ? "Code" : stateLabel}
+          {pr.number} · {pr.provider === "code" && pr.snapshot_available !== true ? "Code" : stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
         <PullRequestRowDetails pr={pr} />
@@ -134,9 +134,40 @@ function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   const timeAgo = useTimeAgo();
 
   if (pr.provider === "code") {
+    if (pr.snapshot_available === true) {
+      const commentCount = pr.comment_count ?? 0;
+      const unresolvedCount = pr.unresolved_comment_count ?? 0;
+      const isTerminal = pr.state === "merged" || pr.state === "closed";
+      const mergeBadge = isTerminal
+        ? null
+        : getMergeBadge(
+            pr.ready_to_merge === true
+              ? { kind: "ready" }
+              : pr.ready_to_merge === false
+                ? { kind: "blocked" }
+                : { kind: "none" },
+            t,
+          );
+      return (
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground">
+          {commentCount > 0 ? (
+            <span>
+              {t(($) => $.detail.pull_request_comments_summary, {
+                count: commentCount,
+                unresolved: unresolvedCount,
+              })}
+            </span>
+          ) : null}
+          {pr.sync_error ? <span>{t(($) => $.detail.pull_request_external_sync_failed)}</span> : null}
+          {mergeBadge ? <PullRequestBadge badge={mergeBadge} /> : null}
+        </div>
+      );
+    }
     return (
       <p className="mt-1 text-micro text-muted-foreground">
-        {t(($) => $.detail.pull_request_external_status_unknown)}
+        {pr.sync_error
+          ? t(($) => $.detail.pull_request_external_sync_failed)
+          : t(($) => $.detail.pull_request_external_status_unknown)}
       </p>
     );
   }

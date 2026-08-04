@@ -508,18 +508,30 @@ type DaemonToken struct {
 }
 
 type ExternalPullRequest struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	Provider       string             `json:"provider"`
-	RepositoryPath string             `json:"repository_path"`
-	ReviewNumber   int32              `json:"review_number"`
-	Title          string             `json:"title"`
-	HtmlUrl        string             `json:"html_url"`
-	CreatedByType  pgtype.Text        `json:"created_by_type"`
-	CreatedByID    pgtype.UUID        `json:"created_by_id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	IssueID                pgtype.UUID        `json:"issue_id"`
+	Provider               string             `json:"provider"`
+	RepositoryPath         string             `json:"repository_path"`
+	ReviewNumber           int32              `json:"review_number"`
+	Title                  string             `json:"title"`
+	HtmlUrl                string             `json:"html_url"`
+	CreatedByType          pgtype.Text        `json:"created_by_type"`
+	CreatedByID            pgtype.UUID        `json:"created_by_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	State                  string             `json:"state"`
+	SourceBranch           pgtype.Text        `json:"source_branch"`
+	TargetBranch           pgtype.Text        `json:"target_branch"`
+	AuthorLogin            pgtype.Text        `json:"author_login"`
+	PrCreatedAt            pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt            pgtype.Timestamptz `json:"pr_updated_at"`
+	ReadyToMerge           pgtype.Bool        `json:"ready_to_merge"`
+	CommentCount           int32              `json:"comment_count"`
+	UnresolvedCommentCount int32              `json:"unresolved_comment_count"`
+	SyncRequestedAt        pgtype.Timestamptz `json:"sync_requested_at"`
+	LastSyncAt             pgtype.Timestamptz `json:"last_sync_at"`
+	SyncError              pgtype.Text        `json:"sync_error"`
 }
 
 type Feedback struct {

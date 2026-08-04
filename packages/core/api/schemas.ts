@@ -158,6 +158,10 @@ export const GitHubPullRequestSchema = z.object({
   additions: z.number().optional().default(0),
   deletions: z.number().optional().default(0),
   changed_files: z.number().optional().default(0),
+  ready_to_merge: z.boolean().nullable().optional(),
+  comment_count: z.number().optional().default(0),
+  unresolved_comment_count: z.number().optional().default(0),
+  sync_error: z.string().nullable().optional(),
 }).loose();
 
 export const IssuePullRequestsResponseSchema = z.object({

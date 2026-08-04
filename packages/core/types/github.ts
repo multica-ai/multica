@@ -116,6 +116,12 @@ export interface GitHubPullRequest {
   additions?: number;
   deletions?: number;
   changed_files?: number;
+  /** a1-backed Code platform snapshot fields. Omitted by older backends and
+   * non-Code providers. */
+  ready_to_merge?: boolean | null;
+  comment_count?: number;
+  unresolved_comment_count?: number;
+  sync_error?: string | null;
 }
 
 export interface ListGitHubInstallationsResponse {

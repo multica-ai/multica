@@ -115,6 +115,22 @@ describe("GitHubPullRequestSchema", () => {
     expect(parsed.state).toBe("unknown");
   });
 
+  it("parses an a1-synced Code MR snapshot", () => {
+    const parsed = GitHubPullRequestSchema.parse({
+      ...githubPullRequest,
+      provider: "code",
+      snapshot_available: true,
+      ready_to_merge: false,
+      comment_count: 3,
+      unresolved_comment_count: 2,
+      snapshot_fetched_at: "2026-08-04T09:00:00Z",
+    });
+    expect(parsed.snapshot_available).toBe(true);
+    expect(parsed.ready_to_merge).toBe(false);
+    expect(parsed.comment_count).toBe(3);
+    expect(parsed.unresolved_comment_count).toBe(2);
+  });
+
   it("degrades a malformed list response to an empty list", () => {
     const parsed = parseWithFallback(
       { pull_requests: "not-an-array" },

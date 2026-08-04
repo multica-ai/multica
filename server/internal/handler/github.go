@@ -134,6 +134,12 @@ type GitHubPullRequestResponse struct {
 	Additions    int32 `json:"additions"`
 	Deletions    int32 `json:"deletions"`
 	ChangedFiles int32 `json:"changed_files"`
+	// Code platform snapshot fields populated by the daemon's authenticated a1
+	// CLI. GitHub and token-based providers omit these additive fields.
+	ReadyToMerge           *bool   `json:"ready_to_merge,omitempty"`
+	CommentCount           int32   `json:"comment_count,omitempty"`
+	UnresolvedCommentCount int32   `json:"unresolved_comment_count,omitempty"`
+	SyncError              *string `json:"sync_error,omitempty"`
 }
 
 type GitHubConnectResponse struct {
@@ -281,20 +287,53 @@ func externalPullRequestToResponse(p db.ExternalPullRequest) GitHubPullRequestRe
 	parts := strings.Split(p.RepositoryPath, "/")
 	repoName := parts[len(parts)-1]
 	repoOwner := strings.Join(parts[:len(parts)-1], "/")
-	return GitHubPullRequestResponse{
-		ID:               uuidToString(p.ID),
-		Provider:         p.Provider,
-		WorkspaceID:      uuidToString(p.WorkspaceID),
-		RepoOwner:        repoOwner,
-		RepoName:         repoName,
-		Number:           p.ReviewNumber,
-		Title:            p.Title,
-		State:            "unknown",
-		HtmlURL:          p.HtmlUrl,
-		PRCreatedAt:      timestampToString(p.CreatedAt),
-		PRUpdatedAt:      timestampToString(p.UpdatedAt),
-		FailedCheckNames: []string{},
+	createdAt := p.CreatedAt
+	if p.PrCreatedAt.Valid {
+		createdAt = p.PrCreatedAt
 	}
+	updatedAt := p.UpdatedAt
+	if p.PrUpdatedAt.Valid {
+		updatedAt = p.PrUpdatedAt
+	}
+	snapshotAvailable := p.LastSyncAt.Valid
+	var mergeStateStatus *string
+	if p.ReadyToMerge.Valid {
+		state := "blocked"
+		if p.ReadyToMerge.Bool {
+			state = "clean"
+		}
+		mergeStateStatus = &state
+	}
+	return GitHubPullRequestResponse{
+		ID:                     uuidToString(p.ID),
+		Provider:               p.Provider,
+		WorkspaceID:            uuidToString(p.WorkspaceID),
+		RepoOwner:              repoOwner,
+		RepoName:               repoName,
+		Number:                 p.ReviewNumber,
+		Title:                  p.Title,
+		State:                  p.State,
+		HtmlURL:                p.HtmlUrl,
+		Branch:                 textToPtr(p.SourceBranch),
+		AuthorLogin:            textToPtr(p.AuthorLogin),
+		PRCreatedAt:            timestampToString(createdAt),
+		PRUpdatedAt:            timestampToString(updatedAt),
+		MergeStateStatus:       mergeStateStatus,
+		SnapshotAvailable:      &snapshotAvailable,
+		SnapshotFetchedAt:      timestampToPtr(p.LastSyncAt),
+		ReadyToMerge:           boolToPtr(p.ReadyToMerge),
+		CommentCount:           p.CommentCount,
+		UnresolvedCommentCount: p.UnresolvedCommentCount,
+		SyncError:              textToPtr(p.SyncError),
+		FailedCheckNames:       []string{},
+	}
+}
+
+func boolToPtr(v pgtype.Bool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Bool
 }
 
 func currentGitHubSnapshotAvailable(
@@ -1031,6 +1070,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for _, row := range externalRows {
+		h.maybeRequestCodeMRSync(r.Context(), issue, row)
 		out = append(out, externalPullRequestToResponse(row))
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -1150,12 +1190,63 @@ func (h *Handler) autoLinkCodePullRequestsFromText(ctx context.Context, issue db
 		return err
 	}
 	for _, row := range linked {
+		h.maybeRequestCodeMRSync(ctx, issue, row)
 		h.publish(protocol.EventPullRequestLinked, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 			"pull_request":     externalPullRequestToResponse(row),
 			"linked_issue_ids": []string{uuidToString(issue.ID)},
 		})
 	}
 	return nil
+}
+
+func (h *Handler) codeMRSyncRuntimeID(ctx context.Context, issue db.Issue, row db.ExternalPullRequest) string {
+	candidates := make([]pgtype.UUID, 0, 2)
+	if row.CreatedByType.Valid && row.CreatedByType.String == "agent" && row.CreatedByID.Valid {
+		candidates = append(candidates, row.CreatedByID)
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		candidates = append(candidates, issue.AssigneeID)
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		key := uuidToString(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID: candidate, WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil && agent.RuntimeID.Valid && agent.ArchivedAt.Valid == false {
+			return uuidToString(agent.RuntimeID)
+		}
+	}
+	return ""
+}
+
+func (h *Handler) maybeRequestCodeMRSync(ctx context.Context, issue db.Issue, row db.ExternalPullRequest) {
+	if h.CodeMRSync == nil || row.Provider != "code" {
+		return
+	}
+	runtimeID := h.codeMRSyncRuntimeID(ctx, issue, row)
+	if runtimeID == "" {
+		return
+	}
+	marked, err := h.Queries.MarkExternalPullRequestSyncRequested(ctx, db.MarkExternalPullRequestSyncRequestedParams{
+		ID: row.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		if !isNotFound(err) {
+			slog.Warn("code: failed to mark MR sync requested", "external_pull_request_id", uuidToString(row.ID), "error", err)
+		}
+		return
+	}
+	h.CodeMRSync.NotifyCodeMRSync(protocol.CodeMRSyncPayload{
+		RuntimeID:             runtimeID,
+		ExternalPullRequestID: uuidToString(marked.ID),
+		RepositoryPath:        marked.RepositoryPath,
+		ReviewNumber:          marked.ReviewNumber,
+	})
 }
 
 func (h *Handler) discoverCodePullRequestsForIssue(ctx context.Context, issue db.Issue) error {

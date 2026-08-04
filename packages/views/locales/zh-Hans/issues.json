@@ -259,6 +259,8 @@
     "pull_requests_loading": "加载中…",
     "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本任务的 identifier 可自动关联 GitHub PR；issue 内容中的 Code 平台 MR 链接也会自动关联。",
     "pull_request_external_status_unknown": "外部 MR · 状态未同步",
+    "pull_request_external_sync_failed": "外部 MR · 同步失败",
+    "pull_request_comments_summary_other": "{{count}} 条评论 · {{unresolved}} 条未解决",
     "pull_request_state_unknown": "未知",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",

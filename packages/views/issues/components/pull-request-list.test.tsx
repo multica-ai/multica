@@ -90,6 +90,7 @@ describe("PullRequestList sidebar rows", () => {
         html_url: "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841",
         branch: null,
         author_login: null,
+        snapshot_available: false,
       }),
     ];
     renderList();
@@ -100,6 +101,33 @@ describe("PullRequestList sidebar rows", () => {
       "href",
       "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841",
     );
+  });
+
+  it("renders a synced Code platform MR state and comment summary", async () => {
+    mockPRs = [
+      makePR({
+        provider: "code",
+        state: "open",
+        repo_owner: "base-biz",
+        repo_name: "agentworks-python",
+        number: 28981841,
+        title: "Deliver model catalog",
+        html_url: "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841",
+        branch: "feature/DAT-77",
+        author_login: "guanjing.pangj",
+        snapshot_available: true,
+        ready_to_merge: false,
+        comment_count: 3,
+        unresolved_comment_count: 2,
+        snapshot_fetched_at: "2026-08-04T09:00:00Z",
+      }),
+    ];
+    renderList();
+    await waitForRender();
+
+    expect(screen.getByText(/base-biz\/agentworks-python!28981841 · Open/)).toBeInTheDocument();
+    expect(screen.getByText("3 comments · 2 unresolved")).toBeInTheDocument();
+    expect(screen.queryByText("External MR · status not synced")).not.toBeInTheDocument();
   });
 
   it("explains automatic MR linking when no pull request is linked", async () => {
