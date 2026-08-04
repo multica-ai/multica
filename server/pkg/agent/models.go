@@ -206,15 +206,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
 	case "qwenpaw":
-		// QwenPaw is ACP-native (`qwenpaw acp`); model catalog comes from
-		// session/new. QwenPaw v2.1.0-beta.1+ includes the `models` field
-		// (SessionModelState) in the session/new response, added by
-		// agentscope-ai/QwenPaw#6531 (first included in v2.1.0-beta.1).
-		// On older versions or auth failure, the empty fallback keeps
-		// manual model entry available.
-		return cachedDiscovery(providerType, func() (Catalog, error) {
-			return discovered(discoverQwenpawModels(ctx, executablePath))
-		})
+		// QwenPaw's model selection is unsupported (session/set_model
+		// persists to agent scope, not session scope), so there is no
+		// consumer for a discovered catalog. Return an empty list to
+		// avoid spawning an ACP subprocess that has no effect.
+		// If upstream makes model selection session-scoped, revert to
+		// discoverQwenpawModels().
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the

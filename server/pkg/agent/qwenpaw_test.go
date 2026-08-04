@@ -209,19 +209,15 @@ func TestQwenpawSessionLoadNotFound(t *testing.T) {
 
 func TestQwenpawListModels(t *testing.T) {
 	t.Parallel()
-	// ListModels for qwenpaw now uses ACP session/new model discovery
-	// (QwenPaw v2.0.1+ via agentscope-ai/QwenPaw#6531). Without a real
-	// qwenpaw binary and configured agent, discovery fails — but the
-	// error must come from the discovery layer, not from "unknown agent
-	// type". We verify qwenpaw is a recognized type by asserting the
-	// error is NOT the unknown-type error.
-	_, err := ListModels(context.Background(), "qwenpaw", "/nonexistent/qwenpaw")
-	if err == nil {
-		// Discovery may succeed if a real qwenpaw is on PATH; that's fine.
-		return
+	// ListModels for qwenpaw returns an empty catalog without spawning
+	// an ACP process (model selection is unsupported). Verify it's a
+	// recognized type by asserting the error is NOT "unknown agent type".
+	cat, err := ListModels(context.Background(), "qwenpaw", "/nonexistent/qwenpaw")
+	if err != nil {
+		t.Fatalf("qwenpaw ListModels should not error, got: %v", err)
 	}
-	if strings.Contains(err.Error(), "unknown agent type") {
-		t.Fatalf("qwenpaw should be a recognized agent type in ListModels, got: %v", err)
+	if len(cat.Models) != 0 {
+		t.Fatalf("qwenpaw ListModels should return empty catalog, got %d models", len(cat.Models))
 	}
 }
 
@@ -368,6 +364,54 @@ func TestQwenpawBackendUsage(t *testing.T) {
 	result := <-session.Result
 	if result.Usage == nil {
 		t.Fatal("expected usage in result")
+	}
+	usage, ok := result.Usage["unknown"]
+	if !ok {
+		t.Fatalf("expected usage entry for model 'unknown', got %+v", result.Usage)
+	}
+	if usage.InputTokens != 10 {
+		t.Fatalf("expected 10 input tokens, got %d", usage.InputTokens)
+	}
+	if usage.OutputTokens != 20 {
+		t.Fatalf("expected 20 output tokens, got %d", usage.OutputTokens)
+	}
+}
+
+// TestQwenpawUsageModelIgnored verifies that opts.Model is never used as
+// the usage attribution key — QwenPaw's model selection is unsupported,
+// so usage must always be attributed to "unknown".
+func TestQwenpawUsageModelIgnored(t *testing.T) {
+	t.Parallel()
+	bin := writeFakeQwenpawScript(t, fakeQwenpawACPScript())
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	// Pass a model that should never appear in the usage map
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "must-not-be-reported",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+
+	result := <-session.Result
+	if result.Usage == nil {
+		t.Fatal("expected usage in result")
+	}
+	if _, ok := result.Usage["must-not-be-reported"]; ok {
+		t.Fatal("opts.Model must not be used as usage attribution key for qwenpaw")
 	}
 	usage, ok := result.Usage["unknown"]
 	if !ok {

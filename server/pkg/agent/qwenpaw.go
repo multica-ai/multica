@@ -345,11 +345,10 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+			// QwenPaw's model selection is unsupported — the backend never
+			// sends opts.Model to the agent. Always attribute usage to
+			// "unknown" rather than a model that was never applied.
+			usageMap = map[string]TokenUsage{"unknown": u}
 		}
 
 		resCh <- Result{
