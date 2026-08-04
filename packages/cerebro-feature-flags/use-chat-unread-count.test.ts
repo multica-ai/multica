@@ -58,6 +58,7 @@ describe("countUnreadConversations", () => {
   it("counts nothing while nothing is placed in Chat", () => {
     const count = countUnreadConversations(
       [channel({ unread_count: 3 })],
+      [],
       [session({ has_unread: true })],
       NONE_IN_CHAT,
     );
@@ -69,6 +70,7 @@ describe("countUnreadConversations", () => {
     // inbox-only, so an unread agent chat is NOT counted in the Chat badge.
     const count = countUnreadConversations(
       [channel({ unread_count: 3 })],
+      [],
       [session({ has_unread: true })],
       DEFAULT_PLACEMENT,
     );
@@ -77,7 +79,7 @@ describe("countUnreadConversations", () => {
 
   it("counts an unread channel once, however many messages are unread", () => {
     expect(
-      countUnreadConversations([channel({ unread_count: 7 })], [], ALL_IN_CHAT),
+      countUnreadConversations([channel({ unread_count: 7 })], [], [], ALL_IN_CHAT),
     ).toBe(1);
   });
 
@@ -88,18 +90,20 @@ describe("countUnreadConversations", () => {
       countUnreadConversations(
         [channel({ unread_count: 0, has_unread_activity: true })],
         [],
+        [],
         ALL_IN_CHAT,
       ),
     ).toBe(0);
   });
 
   it("ignores a read channel", () => {
-    expect(countUnreadConversations([channel({})], [], ALL_IN_CHAT)).toBe(0);
+    expect(countUnreadConversations([channel({})], [], [], ALL_IN_CHAT)).toBe(0);
   });
 
   it("counts channels and agent chats together", () => {
     const count = countUnreadConversations(
-      [channel({ unread_count: 1 }), channel({ id: "c2", kind: "dm", unread_count: 2 })],
+      [channel({ unread_count: 1 })],
+      [channel({ id: "c2", kind: "dm", unread_count: 2 })],
       [session({ has_unread: true })],
       ALL_IN_CHAT,
     );
@@ -109,7 +113,8 @@ describe("countUnreadConversations", () => {
   it("excludes a type that is not placed in Chat", () => {
     const noDmInChat = setPlace(ALL_IN_CHAT, "dm", "chat", false);
     const count = countUnreadConversations(
-      [channel({ unread_count: 1 }), channel({ id: "c2", kind: "dm", unread_count: 2 })],
+      [channel({ unread_count: 1 })],
+      [channel({ id: "c2", kind: "dm", unread_count: 2 })],
       [],
       noDmInChat,
     );
@@ -122,14 +127,42 @@ describe("countUnreadConversations", () => {
       countUnreadConversations(
         [channel({ kind: "group", unread_count: 1 })],
         [],
+        [],
         noDmInChat,
       ),
     ).toBe(0);
   });
 
+  it("does NOT count an unread DM the rail cannot show (only in the archived roster)", () => {
+    // FIR-4350 — an inbox-archived DM (e.g. snoozed as a reminder) sits in the
+    // include-archived roster but not the non-archived list the rail's People
+    // section renders from. Counting it made the badge claim an unread the user
+    // found nowhere in Chat — Jesper's "1 unread but nothing there".
+    expect(
+      countUnreadConversations(
+        [channel({ id: "dm-archived", kind: "dm", unread_count: 2 })],
+        [],
+        [],
+        ALL_IN_CHAT,
+      ),
+    ).toBe(0);
+  });
+
+  it("counts a non-archived unread DM", () => {
+    expect(
+      countUnreadConversations(
+        [],
+        [channel({ id: "dm-live", kind: "dm", unread_count: 2 })],
+        [],
+        ALL_IN_CHAT,
+      ),
+    ).toBe(1);
+  });
+
   it("ignores archived agent chat sessions", () => {
     expect(
       countUnreadConversations(
+        [],
         [],
         [session({ status: "archived", has_unread: true })],
         ALL_IN_CHAT,
