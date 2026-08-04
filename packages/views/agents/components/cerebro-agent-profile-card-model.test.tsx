@@ -18,11 +18,13 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// Paths only needs agentDetail for the hover-only "Detail →" link.
+// Paths: agentDetail for Detail →, plus useCurrentWorkspace for Spend today
+// (AgentProfileSpend → useCostFormatter → useDisplayCurrencyQuery).
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (id: string) => `/test/agents/${id}`,
   }),
+  useCurrentWorkspace: () => ({ id: "ws-1" }),
 }));
 
 vi.mock("@multica/core/api", () => ({
