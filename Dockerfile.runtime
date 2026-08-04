@@ -34,8 +34,10 @@ COPY server/ ./server/
 # When no build-arg is passed (e.g. Sliplane auto-deploy, which does not pass one),
 # this default is what the runtime reports in `multica runtime list`, so keep it
 # bumped to the current release line (homebrew-tap latest) instead of letting it
-# drift back to a stale baseline.
-ARG VERSION=v1.21.0
+# drift back to a stale baseline. Letting it drift is not cosmetic: the server
+# schedules a CLI update for every runtime reporting an older version, which is
+# what produced the FIR-4369 update loop on multica-runtime-jesper.
+ARG VERSION=v1.23.0
 ARG COMMIT=unknown
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 
@@ -47,8 +49,12 @@ ARG CURSOR_AGENT_VERSION=2026.07.20-8cc9c0b
 # git: the daemon checks out repos into per-task worktrees.
 # ripgrep: Claude Code's search backend. curl/jq/ca-certificates: setup-token
 # exchange + TLS. tini: clean PID 1 signal handling for the long-running daemon.
+# chromium: the browser `agent-browser` drives. The distro package pulls in the
+# ~24 shared libraries Chrome needs (libglib, libnss3, libgbm, …) — an agent in
+# the container is non-root, so it can neither apt-get them nor keep a
+# self-downloaded Chrome across a redeploy (FIR-4274 measured both failing).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ripgrep curl jq ca-certificates tini python3 python3-venv tar \
+      git ripgrep curl jq ca-certificates tini python3 python3-venv tar chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Agent CLIs that the daemon shells out to. Cursor Agent and Pi are pinned so an
@@ -68,6 +74,10 @@ RUN set -eux; \
     cursor-agent --version
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.7 \
     && pi --version
+# Same pin as Dockerfile and Dockerfile.browser-verifier — keep the three in sync.
+RUN npm install -g agent-browser@0.26.0 \
+    && npm cache clean --force \
+    && agent-browser --version
 RUN python3 -m venv /opt/hermes \
     && /opt/hermes/bin/pip install --no-cache-dir 'hermes-agent[acp]==0.18.2' \
     && ln -s /opt/hermes/bin/hermes /usr/local/bin/hermes \
@@ -88,6 +98,8 @@ USER multica
 WORKDIR /home/multica
 
 ENV HOME=/home/multica \
+    AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
+    AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage \
     MULTICA_WORKSPACES_ROOT=/home/multica/workspaces \
     MULTICA_CLAUDE_PATH=/usr/local/bin/claude \
     MULTICA_CURSOR_PATH=/usr/local/bin/cursor-agent \

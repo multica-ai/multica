@@ -29,6 +29,7 @@ type ServiceStore interface {
 	ListObservations(ctx context.Context, workspaceID, metricID uuid.UUID) ([]Observation, error)
 	ListWorkspaceObservations(ctx context.Context, workspaceID uuid.UUID) ([]Observation, error)
 	ListPeopleImpact(ctx context.Context, workspaceID uuid.UUID, period PeoplePeriod, now time.Time) ([]PersonImpact, error)
+	ListDerivedEvidence(ctx context.Context, workspaceID uuid.UUID, now time.Time) ([]EvidenceReadModel, error)
 }
 
 func (s *Service) ListPeopleImpact(
@@ -185,22 +186,25 @@ func (s *Service) listWorkspaceEvidence(
 		metricsByID[metric.ID] = metric
 	}
 
-	evidence := make([]EvidenceReadModel, 0, len(observations))
+	// Derived evidence keeps the taxonomy populated from the analytics projection,
+	// so a workspace that never registered a Function still reports measured runs.
+	derived, err := s.store.ListDerivedEvidence(ctx, workspaceID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+
+	evidence := make([]EvidenceReadModel, 0, len(observations)+len(derived))
+	for _, item := range derived {
+		if keepObservation(item.Observation, filter) {
+			evidence = append(evidence, item)
+		}
+	}
+
 	filteredObservations := make([]Observation, 0, len(observations))
 	for _, observation := range observations {
-		if observation.Confidence < filter.MinimumConfidence {
-			continue
+		if keepObservation(observation, filter) {
+			filteredObservations = append(filteredObservations, observation)
 		}
-		if filter.Source != "" && observation.Source != filter.Source {
-			continue
-		}
-		if !filter.PeriodStart.IsZero() && observation.PeriodStart.Before(filter.PeriodStart) {
-			continue
-		}
-		if !filter.PeriodEnd.IsZero() && observation.PeriodEnd.After(filter.PeriodEnd) {
-			continue
-		}
-		filteredObservations = append(filteredObservations, observation)
 	}
 
 	for _, observation := range LatestObservations(filteredObservations) {
@@ -224,6 +228,22 @@ func (s *Service) listWorkspaceEvidence(
 		})
 	}
 	return evidence, nil
+}
+
+func keepObservation(observation Observation, filter EvidenceFilter) bool {
+	if observation.Confidence < filter.MinimumConfidence {
+		return false
+	}
+	if filter.Source != "" && observation.Source != filter.Source {
+		return false
+	}
+	if !filter.PeriodStart.IsZero() && observation.PeriodStart.Before(filter.PeriodStart) {
+		return false
+	}
+	if !filter.PeriodEnd.IsZero() && observation.PeriodEnd.After(filter.PeriodEnd) {
+		return false
+	}
+	return true
 }
 
 type EvidenceFilter struct {
@@ -343,6 +363,23 @@ func (s *Service) ListQualityRiskDecisions(
 		}
 		loopOrder = append(loopOrder, operatingLoop.ID)
 	}
+	// Derived Operating Loops are not in the registry tables, so admit any loop the
+	// evidence itself carries. Without this every derived Function stays invisible.
+	for _, item := range evidence {
+		if _, ok := byLoop[item.OperatingLoop.ID]; ok {
+			continue
+		}
+		if !item.Function.Active || !item.OperatingLoop.Active {
+			continue
+		}
+		byLoop[item.OperatingLoop.ID] = &decisionEvidence{
+			function:         item.Function,
+			operatingLoop:    item.OperatingLoop,
+			outcomesPositive: true,
+			evidenceMeasured: true,
+		}
+		loopOrder = append(loopOrder, item.OperatingLoop.ID)
+	}
 	for _, item := range evidence {
 		if item.Metric.TargetValue == nil || (!item.Metric.Guardrail && item.Metric.Family != FamilyOutcome) {
 			continue
@@ -404,11 +441,20 @@ func (s *Service) ListFunctionSummaries(
 	}
 
 	byFunction := make(map[uuid.UUID][]FunctionSummaryLoopReadModel, len(functions))
+	known := make(map[uuid.UUID]struct{}, len(functions))
+	for _, function := range functions {
+		known[function.ID] = struct{}{}
+	}
 	for _, item := range decisions {
 		byFunction[item.Function.ID] = append(byFunction[item.Function.ID], FunctionSummaryLoopReadModel{
 			OperatingLoop: item.OperatingLoop,
 			Decision:      item.Decision,
 		})
+		// A derived Function only exists on its decisions, never in the registry table.
+		if _, ok := known[item.Function.ID]; !ok {
+			known[item.Function.ID] = struct{}{}
+			functions = append(functions, item.Function)
+		}
 	}
 
 	result := make([]FunctionSummaryReadModel, 0, len(functions))

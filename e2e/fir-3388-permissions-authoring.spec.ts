@@ -166,7 +166,7 @@ test("Settings identifies externally enforced permissions without offering an ad
     await expect(row).toBeVisible();
     await expect(row.getByText("Managed externally", { exact: true })).toBeVisible();
     const owner = row.getByText(
-      "Issue visibility, private-agent access, and task-to-issue integrity",
+      "Issue access and task ownership gates",
       { exact: true },
     );
     await expect(owner).toBeVisible();

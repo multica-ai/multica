@@ -19,6 +19,7 @@ import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 import { VisibilityBadge } from "./visibility-badge";
 import { useT } from "../../i18n";
+import { AgentProfileAccount, AgentProfileSettings } from "@multica/cerebro-runtime/views/components/agent-profile-tooltip-details"; // CEREBRO-PATCH(profile-card-details): FIR-3660 fork-owned agent settings + account usage.
 
 interface AgentProfileCardProps {
   agentId: string;
@@ -113,15 +114,15 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         </p>
       )}
 
-      {/* Meta rows — minimal set: runtime (where it lives), skills (what
-          it knows), owner (who manages it). Model is intentionally
-          omitted — power-user detail lives on the detail page. */}
+      {/* Meta rows — runtime, agent settings, skills, owner, and account usage. */}
       <div className="flex flex-col gap-1.5 text-xs">
         <RuntimeRow agent={agent} runtime={runtime} />
+        <AgentProfileSettings agent={agent} /> {/* CEREBRO-PATCH(profile-card-details): FIR-3660 */}
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
+        <AgentProfileAccount runtime={runtime} /> {/* CEREBRO-PATCH(profile-card-details): FIR-3660 */}
       </div>
     </div>
   );
@@ -180,7 +181,7 @@ function RuntimeRow({
       : t(($) => $.profile_card.unknown_runtime));
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.runtime_label)}</span>
+      <span className="w-20 shrink-0 text-muted-foreground">{t(($) => $.profile_card.runtime_label)}</span> {/* CEREBRO-PATCH(profile-card-details): FIR-3660 */}
       <HealthIcon health={health} className="h-3 w-3 shrink-0" />
       <span className="min-w-0 truncate" title={label}>
         {label}
@@ -200,7 +201,7 @@ function MetaRow({
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">{label}</span>
+      <span className="w-20 shrink-0 text-muted-foreground">{label}</span> {/* CEREBRO-PATCH(profile-card-details): FIR-3660 */}
       <span className={`truncate ${mono ? "font-mono text-[11px]" : ""}`} title={value}>
         {value}
       </span>

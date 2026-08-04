@@ -412,6 +412,9 @@ export type CerebroFlagKey =
   // Account column to the runtimes table, and a search box + Account/Thinking
   // level columns to the agents table. Default ON.
   | "cerebro_interface_columns"
+  // FIR-3660: agent hover-card model, thinking, concurrency, account status,
+  // and rolling account usage. Default ON; off restores the model-only card.
+  | "cerebro_agent_profile_card_details"
   // FIR-2670: opt-in preview of the redesigned agent detail page (new card
   // chrome, identity rail, flat tab strip). Default OFF — the live agent page
   // is untouched until this is flipped on per workspace/user.
@@ -880,6 +883,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the app is not already installed, and is dismissible.
   cerebro_pwa_install_banner: true,
   cerebro_interface_columns: true,
+  cerebro_agent_profile_card_details: true,
   // FIR-2670: default OFF — opt-in preview of the redesigned agent page.
   cerebro_agent_page_redesign: false,
   // FIR-3212: default OFF until QA'd on staging.
@@ -1002,6 +1006,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Add the Apps catalog, app builder, app SDK runtime, and interactive in-chat app views. Off hides every user-facing Apps entry while keeping stored apps intact.",
+  },
+  {
+    key: "cerebro_agent_profile_card_details",
+    label: "Agent hover card details",
+    group: "agents",
+    description:
+      "Show Model, Thinking, Concurrency, account identity, account status, and remaining 5-hour and weekly usage in agent hover cards. Off restores the previous model-only details.",
   },
   {
     key: "cerebro_agent_page_redesign",

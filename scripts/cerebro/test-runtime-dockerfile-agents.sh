@@ -64,5 +64,13 @@ assert_contains "$canary" 'claude-sonnet-5' \
   'runtime canary must test the managed gateway model'
 assert_contains "$runbook" 'Log out all.*does not manage' \
   'runbook must not claim that general ChatGPT logout revokes Codex OAuth'
+assert_contains "$dockerfile" '^ +git ripgrep .*chromium' \
+  'runtime image must install the distro chromium — a non-root agent cannot apt-get Chrome deps at runtime'
+assert_contains "$dockerfile" 'agent-browser@0\.26\.0' \
+  'agent-browser must stay pinned at 0.26.0, the same pin as Dockerfile and Dockerfile.browser-verifier'
+assert_contains "$dockerfile" 'AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium' \
+  'AGENT_BROWSER_EXECUTABLE_PATH must point at the image chromium binary'
+assert_contains "$dockerfile" 'AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage' \
+  'Chrome must run without the sandbox — the container has no user namespaces'
 
 printf 'Docker runtime pins Cursor Agent, Pi, and Hermes with persistent state\n'

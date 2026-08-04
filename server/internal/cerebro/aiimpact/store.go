@@ -110,7 +110,11 @@ func (s *Store) ListPeopleImpact(
 			GROUP BY pr.id, pr.person_type
 		),
 		issue_totals AS (
-			SELECT p.id, p.person_type, COUNT(DISTINCT i.id)::bigint AS issues
+			SELECT p.id, p.person_type, COUNT(DISTINCT i.id)::bigint AS issues,
+				COUNT(DISTINCT i.id) FILTER (
+					WHERE i.status IN ('done', 'cancelled')
+				)::bigint AS needs_measurable,
+				COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'done')::bigint AS needs_solved
 			FROM people p
 			JOIN issue i ON i.workspace_id = $1 AND i.kind = 'issue'
 				AND i.created_at >= $2
@@ -160,6 +164,7 @@ func (s *Store) ListPeopleImpact(
 			COALESCE(pt.projects, 0),
 			COALESCE(ct.chats, 0), COALESCE(cht.channels, 0),
 			COALESCE(st.skill_activity, 0), rt.cost_cents,
+			COALESCE(it.needs_solved, 0), COALESCE(it.needs_measurable, 0),
 			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.solution_quality END,
 			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.frustration_free END,
 			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.prompt_effectiveness END,
@@ -186,11 +191,13 @@ func (s *Store) ListPeopleImpact(
 		var person PersonImpact
 		var cost sql.NullInt64
 		var solutionQuality, frustrationFree, promptEffectiveness, confidence sql.NullFloat64
+		var needsSolved, needsMeasurable int64
 		if err := rows.Scan(
 			&person.ID, &person.Type, &person.Name,
 			&person.Usage.Runs, &person.Usage.Issues, &person.Usage.Projects,
 			&person.Usage.Chats, &person.Usage.Channels,
 			&person.Outcomes.SkillActivity, &cost,
+			&needsSolved, &needsMeasurable,
 			&solutionQuality, &frustrationFree, &promptEffectiveness, &confidence,
 			&person.SampleSize,
 		); err != nil {
@@ -199,6 +206,11 @@ func (s *Store) ListPeopleImpact(
 		person.Activity = make([]PeopleActivityBucket, 0)
 		if cost.Valid {
 			person.Outcomes.CostCents = &cost.Int64
+		}
+		// A need is only measurable once its issue reached a terminal status;
+		// anything still open has no outcome to report yet.
+		if needsMeasurable > 0 {
+			person.Outcomes.NeedsSolved = &NeedsSolved{Solved: needsSolved, Measurable: needsMeasurable}
 		}
 		if solutionQuality.Valid {
 			person.Outcomes.SolutionQuality = &solutionQuality.Float64
