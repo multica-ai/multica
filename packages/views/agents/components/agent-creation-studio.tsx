@@ -9,6 +9,7 @@ import {
   Check,
   ChevronRight,
   FileText,
+  Folder,
   Loader2,
   MessageSquare,
   Search,
@@ -81,8 +82,9 @@ import { ServiceTierSettingField } from "./inspector/service-tier-setting-field"
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { SkillMultiSelect } from "./skill-multi-select";
+import { LocalDirectoryPicker } from "./local-directory-picker";
 
-type StudioMode = "choose" | "templates" | "blank" | "template" | "ai";
+type StudioMode = "choose" | "templates" | "blank" | "template" | "directory" | "ai";
 type StudioScreenKey =
   | "choose"
   | "templates"
@@ -96,7 +98,7 @@ export function getAgentCreationScreenKey(
   mode: StudioMode,
   builderSessionId: string,
 ): StudioScreenKey {
-  if (mode === "blank" || mode === "template") return "configure";
+  if (mode === "blank" || mode === "template" || mode === "directory") return "configure";
   if (mode === "ai") return builderSessionId ? "ai-builder" : "ai-setup";
   return mode;
 }
@@ -112,6 +114,8 @@ export interface AgentDraft {
   thinkingLevel: string;
   /** Runtime-native execution tier (Codex Speed), scoped to `model`. */
   serviceTier: string;
+  /** Absolute local directory for a directory-based agent ("" = normal agent). */
+  localDirectory: string;
   skillIds: Set<string>;
   permissionScope: PermissionScope;
   memberIds: Set<string>;
@@ -198,6 +202,7 @@ const EMPTY_DRAFT: AgentDraft = {
   model: "",
   thinkingLevel: "",
   serviceTier: "",
+  localDirectory: "",
   skillIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
@@ -471,6 +476,7 @@ export function AgentCreationStudio() {
     draft.teamIds.size === 0;
   const canCreate =
     draft.name.trim().length > 0 &&
+    (mode !== "directory" || draft.localDirectory.trim().length > 0) &&
     selectedRuntime != null &&
     isRuntimeUsableForUser(selectedRuntime, currentUser?.id ?? null) &&
     isDraftDescriptionWithinLimit(draft.description) &&
@@ -552,6 +558,16 @@ export function AgentCreationStudio() {
   const chooseAI = () => {
     setTransitionDirection(1);
     setMode("ai");
+  };
+
+  const chooseDirectory = () => {
+    setSourceTemplate(null);
+    setDraft((current) => ({
+      ...EMPTY_DRAFT,
+      runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
+    }));
+    setTransitionDirection(1);
+    setMode("directory");
   };
 
   const applyTemplate = () => {
@@ -856,7 +872,12 @@ export function AgentCreationStudio() {
         {mode !== "choose" && mode !== "templates" && (
           <div className="ml-auto hidden items-center gap-2 text-caption text-muted-foreground sm:flex">
             <span className="rounded-full bg-muted px-2 py-1">
-              {sourceTemplate?.name ?? (mode === "ai" ? t(($) => $.creation_studio.modes.ai.title) : t(($) => $.creation_studio.modes.blank.title))}
+              {sourceTemplate?.name ??
+                (mode === "ai"
+                  ? t(($) => $.creation_studio.modes.ai.title)
+                  : mode === "directory"
+                    ? t(($) => $.creation_studio.modes.directory.title)
+                    : t(($) => $.creation_studio.modes.blank.title))}
             </span>
             {selectedRuntime && (
               <span className="rounded-full bg-muted px-2 py-1">
@@ -885,6 +906,7 @@ export function AgentCreationStudio() {
         <ModeChooser
           onBlank={chooseBlank}
           onAI={chooseAI}
+          onDirectory={chooseDirectory}
         />
       )}
 
@@ -902,7 +924,7 @@ export function AgentCreationStudio() {
         />
       )}
 
-      {(mode === "blank" || mode === "template") && (
+      {(mode === "blank" || mode === "template" || mode === "directory") && (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-8">
             {duplicateAgent && (
@@ -924,6 +946,7 @@ export function AgentCreationStudio() {
               currentUserId={currentUser?.id ?? null}
               nameError={nameError}
               onNameChange={updateAgentName}
+              directoryMode={mode === "directory"}
             />
           </div>
           <StudioFooter
@@ -1018,9 +1041,11 @@ export function AgentCreationStudio() {
 export function ModeChooser({
   onBlank,
   onAI,
+  onDirectory,
 }: {
   onBlank: () => void;
   onAI: () => void;
+  onDirectory: () => void;
 }) {
   const { t } = useT("agents");
   const modes = [
@@ -1036,6 +1061,12 @@ export function ModeChooser({
       description: t(($) => $.creation_studio.modes.ai.description),
       action: onAI,
       recommended: true,
+    },
+    {
+      icon: Folder,
+      title: t(($) => $.creation_studio.modes.directory.title),
+      description: t(($) => $.creation_studio.modes.directory.description),
+      action: onDirectory,
     },
   ];
   return (
@@ -1195,6 +1226,7 @@ function ConfigurationPanel({
   onRuntimeSelect,
   runtimeSwitchPending = false,
   runtimeSwitchInFlight = false,
+  directoryMode = false,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -1213,6 +1245,10 @@ function ConfigurationPanel({
   runtimeSwitchPending?: boolean;
   /** A rebind request is in flight. */
   runtimeSwitchInFlight?: boolean;
+  /** Directory-based agent: the Behavior section becomes a local-directory
+   *  picker instead of instructions + skill selection (the directory IS the
+   *  agent's behavior). */
+  directoryMode?: boolean;
 }) {
   const { t } = useT("agents");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
@@ -1293,32 +1329,45 @@ function ConfigurationPanel({
 
       <SettingsSection
         title={t(($) => $.creation_studio.sections.behavior)}
-        description={t(($) => $.creation_studio.sections.behavior_hint)}
+        description={
+          directoryMode
+            ? t(($) => $.creation_studio.sections.directory_hint)
+            : t(($) => $.creation_studio.sections.behavior_hint)
+        }
       >
         <SettingsCard>
-          <DraftFieldRow
-            compact
-            label={t(($) => $.create_dialog.instructions.label)}
-            htmlFor="agent-create-instructions"
-          >
-            <Textarea
-              id="agent-create-instructions"
-              name="agent-instructions"
-              autoComplete="off"
-              aria-label={t(($) => $.create_dialog.instructions.label)}
-              value={draft.instructions}
-              onChange={(event) => set("instructions", event.target.value)}
-              placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
-              rows={compact ? 9 : 12}
-              className="min-h-44 resize-y font-mono text-label leading-6"
+          {directoryMode ? (
+            <LocalDirectoryPicker
+              value={draft.localDirectory}
+              onChange={(dir) => set("localDirectory", dir)}
             />
-          </DraftFieldRow>
-          <div className="px-4 py-4">
-            <SkillMultiSelect
-              selectedIds={draft.skillIds}
-              onChange={(ids) => set("skillIds", ids)}
-            />
-          </div>
+          ) : (
+            <>
+              <DraftFieldRow
+                compact
+                label={t(($) => $.create_dialog.instructions.label)}
+                htmlFor="agent-create-instructions"
+              >
+                <Textarea
+                  id="agent-create-instructions"
+                  name="agent-instructions"
+                  autoComplete="off"
+                  aria-label={t(($) => $.create_dialog.instructions.label)}
+                  value={draft.instructions}
+                  onChange={(event) => set("instructions", event.target.value)}
+                  placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
+                  rows={compact ? 9 : 12}
+                  className="min-h-44 resize-y font-mono text-label leading-6"
+                />
+              </DraftFieldRow>
+              <div className="px-4 py-4">
+                <SkillMultiSelect
+                  selectedIds={draft.skillIds}
+                  onChange={(ids) => set("skillIds", ids)}
+                />
+              </div>
+            </>
+          )}
         </SettingsCard>
       </SettingsSection>
 
@@ -1938,6 +1987,7 @@ export function buildCreateAgentRequest(options: {
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,
     service_tier: draft.serviceTier.trim() || undefined,
+    local_directory: draft.localDirectory.trim() || undefined,
     permission_mode:
       draft.permissionScope === "private" ? "private" : "public_to",
     invocation_targets: buildInvocationTargets(draft),

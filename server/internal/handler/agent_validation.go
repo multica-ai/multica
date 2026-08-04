@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/multica-ai/multica/server/internal/agentconfig"
 )
@@ -22,4 +23,18 @@ func defaultAndValidateAgentMaxConcurrentTasks(rawFields map[string]json.RawMess
 		return nil
 	}
 	return validateAgentMaxConcurrentTasks(*value)
+}
+
+// validateLocalDirectory checks a directory-based agent's local_directory:
+// empty is valid (a normal agent), non-empty must be an absolute path. The
+// path's existence / readability is validated by the daemon at claim time,
+// not here — the browser cannot see the daemon machine's filesystem.
+func validateLocalDirectory(path string) error {
+	if path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("local_directory must be an absolute path")
+	}
+	return nil
 }

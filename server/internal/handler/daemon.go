@@ -1694,6 +1694,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			Model:                 agent.Model.String,
 			ThinkingLevel:         agent.ThinkingLevel.String,
 			ServiceTier:           agent.ServiceTier.String,
+			LocalDirectory:        agent.LocalDirectory.String,
 			RuntimeConfig:         runtimeConfig,
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}

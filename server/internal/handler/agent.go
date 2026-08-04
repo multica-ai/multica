@@ -85,6 +85,10 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
+	// LocalDirectory is the absolute path of the directory this agent's tasks
+	// run in (directory-based agent). Empty means the agent uses the standard
+	// per-task workdir (or a project-level local_directory when attached).
+	LocalDirectory string `json:"local_directory"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -187,6 +191,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
+		LocalDirectory:           a.LocalDirectory.String,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -589,6 +594,7 @@ type TaskAgentData struct {
 	Model                 string                      `json:"model,omitempty"`
 	ThinkingLevel         string                      `json:"thinking_level,omitempty"`
 	ServiceTier           string                      `json:"service_tier,omitempty"`
+	LocalDirectory        string                      `json:"local_directory,omitempty"`
 	DisabledRuntimeSkills []DisabledRuntimeSkill      `json:"disabled_runtime_skills,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
@@ -962,6 +968,9 @@ type CreateAgentRequest struct {
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
 	ServiceTier        string                     `json:"service_tier"`
+	// LocalDirectory is the absolute path the agent's tasks run in
+	// (directory-based agent). Empty creates a normal agent.
+	LocalDirectory string `json:"local_directory"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -1074,6 +1083,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateLocalDirectory(req.LocalDirectory); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
@@ -1178,6 +1192,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
+		LocalDirectory:           pgtype.Text{String: req.LocalDirectory, Valid: req.LocalDirectory != ""},
 		ComposioToolkitAllowlist: allowlist,
 	})
 	if err != nil {
@@ -1337,6 +1352,10 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
+	// LocalDirectory follows the tri-state contract: omitted preserves,
+	// empty string clears (agent reverts to the standard per-task workdir),
+	// non-empty absolute path sets the directory-based run root.
+	LocalDirectory *string `json:"local_directory"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -1793,6 +1812,30 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// local_directory handling. Tri-state semantics, mirroring mcp_config:
+	//   - field omitted → preserve (COALESCE narg)
+	//   - field present as JSON null → explicit clear (ClearAgentLocalDirectory)
+	//   - field present as "" → explicit clear
+	//   - field present as an absolute path → set (directory-based agent)
+	// A nil *string is the same wire shape as omitted, so the decode-time raw
+	// fields map disambiguates "sent as null" from "not sent at all".
+	shouldClearLocalDirectory := false
+	rawLocalDirectory, hasLocalDirectory := rawFields["local_directory"]
+	if hasLocalDirectory && bytes.Equal(bytes.TrimSpace(rawLocalDirectory), []byte("null")) {
+		shouldClearLocalDirectory = true
+	} else if hasLocalDirectory && req.LocalDirectory != nil {
+		value := *req.LocalDirectory
+		if value == "" {
+			shouldClearLocalDirectory = true
+		} else {
+			if err := validateLocalDirectory(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			params.LocalDirectory = pgtype.Text{String: value, Valid: true}
+		}
+	}
+
 	// composio_toolkit_allowlist handling (MUL-3869). Tri-state semantics
 	// mirror thinking_level (see above): omitted → no change, null →
 	// ClearAgentComposioToolkitAllowlist, slice → wholesale replace.
@@ -1884,6 +1927,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
+			return
+		}
+	}
+	if shouldClearLocalDirectory {
+		updated, err = h.Queries.ClearAgentLocalDirectory(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent local_directory failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear local_directory: "+err.Error())
 			return
 		}
 	}

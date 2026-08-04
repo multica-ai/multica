@@ -759,6 +759,10 @@
       "ai": {
         "title": "AI로 만들기",
         "description": "원하는 결과를 설명하면 Agent Builder가 핵심 질문을 하고 실시간 초안을 준비합니다."
+      },
+      "directory": {
+        "title": "로컬 디렉터리에서 생성",
+        "description": "디렉터리가 곧 에이전트입니다. CLAUDE.md·스킬·MCP 설정을 이미 담은 디렉터리에서 실행합니다."
       }
     },
     "templates": {
@@ -778,7 +782,8 @@
       "execution": "실행",
       "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델, 추론 수준, 속도를 변경하세요.",
       "access": "접근 권한",
-      "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."
+      "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다.",
+      "directory_hint": "에이전트가 실행될 로컬 디렉터리를 선택합니다. 그 안의 CLAUDE.md / skills / MCP 설정이 곧 동작 방식입니다."
     },
     "thinking_label": "추론",
     "speed_label": "속도",
@@ -830,7 +835,16 @@
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
     "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
-    "created": "{{name}}을(를) 만들었습니다"
+    "created": "{{name}}을(를) 만들었습니다",
+    "directory_label": "로컬 디렉터리",
+    "directory_placeholder": "/절대/경로/에이전트-디렉터리",
+    "directory_browse": "찾아보기",
+    "directory_validate": "검증",
+    "directory_web_hint": "절대 경로를 입력하세요. 작업 실행 시 에이전트를 실행하는 머신에서 검증됩니다.",
+    "directory_required": "절대 디렉터리 경로를 입력하세요.",
+    "directory_invalid": "이 경로는 에이전트 머신에서 유효한 읽기/쓰기 가능 디렉터리가 아닙니다.",
+    "directory_unsupported": "이 화면에서는 검증할 수 없습니다. 작업 실행 시 확인됩니다.",
+    "directory_valid": "디렉터리 검증됨."
   },
   "actions": {
     "selected_other": "{{count}}개 선택됨",

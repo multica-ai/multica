@@ -38,6 +38,7 @@ vi.mock("../../i18n", () => ({
           modes: {
             blank: { title: string; description: string };
             ai: { title: string; description: string };
+            directory: { title: string; description: string };
           };
           create_and_open: string;
           create_and_add: string;
@@ -65,6 +66,10 @@ vi.mock("../../i18n", () => ({
             ai: {
               title: "Build with AI",
               description: "Describe the outcome you want.",
+            },
+            directory: {
+              title: "From a local directory",
+              description: "The directory is the agent.",
             },
           },
           create_and_open: "Create and open",
@@ -195,6 +200,7 @@ const draft = (): AgentDraft => ({
   model: "model-1",
   thinkingLevel: "",
   serviceTier: "",
+  localDirectory: "",
   skillIds: new Set(["skill-1"]),
   permissionScope: "private",
   memberIds: new Set(),
@@ -207,11 +213,13 @@ describe("Agent creation studio mode chooser", () => {
       createElement(ModeChooser, {
         onBlank: vi.fn(),
         onAI: vi.fn(),
+        onDirectory: vi.fn(),
       }),
     );
 
     expect(screen.getByText("Start blank")).toBeInTheDocument();
     expect(screen.getByText("Build with AI")).toBeInTheDocument();
+    expect(screen.getByText("From a local directory")).toBeInTheDocument();
   });
 });
 

@@ -1613,3 +1613,90 @@ func insertHandlerTestTask(t *testing.T, agentID string) string {
 // Defence-in-depth: spot-check that the package compiles a small
 // fmt.Sprintf so accidental imports stay tidy.
 var _ = fmt.Sprintf
+
+func TestCreateAgent_StoresLocalDirectory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			testWorkspaceID, "local-dir-agent")
+	})
+
+	body := map[string]any{
+		"name":            "local-dir-agent",
+		"runtime_id":      testRuntimeID,
+		"visibility":      "private",
+		"local_directory": "/abs/path/agent-dir",
+	}
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["local_directory"].(string); got != "/abs/path/agent-dir" {
+		t.Fatalf("expected local_directory in response, got %q", got)
+	}
+}
+
+func TestCreateAgent_RejectsRelativeLocalDirectory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	body := map[string]any{
+		"name":            "local-dir-relative",
+		"runtime_id":      testRuntimeID,
+		"visibility":      "private",
+		"local_directory": "relative/path",
+	}
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for relative local_directory, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAgent_LocalDirectoryTriState(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	id := createHandlerTestAgent(t, "local-dir-update", nil)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, id)
+	})
+
+	// Set an absolute path.
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(
+		newRequest(http.MethodPatch, "/api/agents/"+id, map[string]any{"local_directory": "/abs/update"}), "id", id))
+	if w.Code != http.StatusOK {
+		t.Fatalf("set local_directory: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["local_directory"].(string); got != "/abs/update" {
+		t.Fatalf("expected local_directory after set, got %q", got)
+	}
+
+	// Clear via JSON null.
+	w2 := httptest.NewRecorder()
+	testHandler.UpdateAgent(w2, withURLParam(
+		newRequest(http.MethodPatch, "/api/agents/"+id, map[string]any{"local_directory": nil}), "id", id))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("clear local_directory: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	var resp2 map[string]any
+	if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("decode clear response: %v", err)
+	}
+	if got, _ := resp2["local_directory"].(string); got != "" {
+		t.Fatalf("expected empty local_directory after clear, got %q", got)
+	}
+}

@@ -184,14 +184,23 @@ export function AgentOverviewPane({
       !!currentUserId &&
       !!agent.owner_id &&
       agent.owner_id === currentUserId;
+    // Directory-based agent: behavior & capabilities come from the bound
+    // directory (its CLAUDE.md / skills / MCP config), so instructions and
+    // skills are hidden — editing them here would be meaningless. Other
+    // capability tabs (MCP config, integrations) stay visible.
+    const isDirectoryBased = !!agent.local_directory;
 
     return CAPABILITY_TABS.filter((tab) => {
+      if (isDirectoryBased && (tab.id === "instructions" || tab.id === "skills")) {
+        return false;
+      }
       if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "composio_mcp") return showComposioMcp;
       if (tab.id === "integrations") return integrationsConfigured;
       return true;
     });
   }, [
+    agent.local_directory,
     agent.owner_id,
     composioMCPAppsEnabled,
     currentUserId,

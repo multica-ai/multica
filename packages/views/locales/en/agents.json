@@ -300,6 +300,10 @@
       "ai": {
         "title": "Build with AI",
         "description": "Describe the outcome you want. An Agent Builder will ask focused questions and prepare a live draft."
+      },
+      "directory": {
+        "title": "From a local directory",
+        "description": "The directory is the agent: it already holds the skills, MCP config and instructions (CLAUDE.md) the agent runs with."
       }
     },
     "templates": {
@@ -319,7 +323,8 @@
       "execution": "Execution",
       "execution_hint": "Choose where the agent runs, and optionally override the runtime's default model, thinking level and speed.",
       "access": "Access",
-      "access_hint": "Control who can start runs with this agent. You can change this later."
+      "access_hint": "Control who can start runs with this agent. You can change this later.",
+      "directory_hint": "Pick the local directory the agent runs in. Its CLAUDE.md / skills / MCP config are the agent's whole behavior."
     },
     "thinking_label": "Thinking",
     "speed_label": "Speed",
@@ -371,7 +376,16 @@
     "creating": "Creating agent…",
     "create_failed": "Could not create the agent.",
     "name_conflict": "An agent with this name already exists.",
-    "created": "{{name}} was created"
+    "created": "{{name}} was created",
+    "directory_label": "Local directory",
+    "directory_placeholder": "/absolute/path/to/your-agent-directory",
+    "directory_browse": "Browse",
+    "directory_validate": "Validate",
+    "directory_web_hint": "Enter the absolute path. It is validated on the machine that runs your agents.",
+    "directory_required": "Please enter an absolute directory path.",
+    "directory_invalid": "This path is not a valid readable/writable directory on the agent machine.",
+    "directory_unsupported": "Validation isn't available in this view; the path is checked when a task runs.",
+    "directory_valid": "Directory verified."
   },
   "create_dialog": {
     "title_create": "Create Agent",

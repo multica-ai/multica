@@ -759,6 +759,10 @@
       "ai": {
         "title": "AI で作成",
         "description": "期待する成果を説明すると、Agent Builder が重要な質問を行い、下書きをリアルタイムで作成します。"
+      },
+      "directory": {
+        "title": "ローカルディレクトリから作成",
+        "description": "ディレクトリがそのままエージェントです。CLAUDE.md・スキル・MCP 設定を既に含むディレクトリで実行します。"
       }
     },
     "templates": {
@@ -778,7 +782,8 @@
       "execution": "実行環境",
       "execution_hint": "エージェントを実行する場所を選び、必要に応じてランタイムの既定モデル・思考レベル・速度を変更します。",
       "access": "アクセス",
-      "access_hint": "このエージェントを実行できるユーザーを設定します。後から変更できます。"
+      "access_hint": "このエージェントを実行できるユーザーを設定します。後から変更できます。",
+      "directory_hint": "エージェントが実行するローカルディレクトリを選びます。CLAUDE.md / skills / MCP 設定がそのまま動作になります。"
     },
     "thinking_label": "思考",
     "speed_label": "速度",
@@ -830,7 +835,16 @@
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
     "name_conflict": "同じ名前のエージェントがすでに存在します。",
-    "created": "{{name}} を作成しました"
+    "created": "{{name}} を作成しました",
+    "directory_label": "ローカルディレクトリ",
+    "directory_placeholder": "/絶対/パス/エージェント用ディレクトリ",
+    "directory_browse": "参照",
+    "directory_validate": "検証",
+    "directory_web_hint": "絶対パスを入力してください。実行時にエージェントを動かすマシンで検証されます。",
+    "directory_required": "絶対ディレクトリパスを入力してください。",
+    "directory_invalid": "このパスはエージェントマシン上で有効な読み書き可能なディレクトリではありません。",
+    "directory_unsupported": "この画面では検証できません。タスク実行時にチェックされます。",
+    "directory_valid": "ディレクトリ検証済み。"
   },
   "actions": {
     "selected_other": "{{count}} 件選択中",

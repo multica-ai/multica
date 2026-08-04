@@ -291,6 +291,10 @@
       "ai": {
         "title": "通过 AI 创建",
         "description": "描述你想要的结果。Agent Builder 会提出关键问题并实时生成草稿。"
+      },
+      "directory": {
+        "title": "从本地目录新建",
+        "description": "目录就是智能体本身：其中已有的 CLAUDE.md、skills、MCP 配置就是该智能体的全部能力，无需在平台内重复配置。"
       }
     },
     "templates": {
@@ -310,7 +314,8 @@
       "execution": "运行方式",
       "execution_hint": "选择智能体使用的运行时，也可以覆盖运行时的默认模型、思考等级和速度。",
       "access": "访问权限",
-      "access_hint": "控制谁可以运行此智能体，创建后仍可修改。"
+      "access_hint": "控制谁可以运行此智能体，创建后仍可修改。",
+      "directory_hint": "选择智能体运行时的本地目录。目录里的 CLAUDE.md / skills / MCP 配置就是它的全部行为。"
     },
     "thinking_label": "思考",
     "speed_label": "速度",
@@ -362,7 +367,16 @@
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
     "name_conflict": "工作区中已存在同名智能体。",
-    "created": "已创建 {{name}}"
+    "created": "已创建 {{name}}",
+    "directory_label": "本地目录",
+    "directory_placeholder": "/绝对/路径/你的智能体目录",
+    "directory_browse": "浏览",
+    "directory_validate": "校验",
+    "directory_web_hint": "输入绝对路径，任务运行时会在运行 agent 的机器上校验该路径。",
+    "directory_required": "请输入绝对目录路径。",
+    "directory_invalid": "该路径在 agent 机器上不是有效的可读/可写目录。",
+    "directory_unsupported": "当前视图无法校验，路径将在任务运行时检查。",
+    "directory_valid": "目录校验通过。"
   },
   "create_dialog": {
     "title_create": "创建智能体",

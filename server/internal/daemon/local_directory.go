@@ -45,6 +45,25 @@ type localDirectoryAssignment struct {
 // child issues or comments, but should not bind to the user's repo worktree or
 // hold the path mutex while downstream workers are ready to write.
 func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
+	// Directory-based agent: the agent's own local_directory wins over any
+	// project-level local_directory resource. The path is bound to this daemon
+	// through the agent's runtime — claim routing guarantees the daemon owns
+	// that runtime — so no daemon_id match is needed here.
+	if task.Agent != nil && strings.TrimSpace(task.Agent.LocalDirectory) != "" {
+		absPath, err := normalizeLocalPath(task.Agent.LocalDirectory)
+		if err != nil {
+			return nil, err
+		}
+		realPath, err := resolveRealPath(absPath)
+		if err != nil {
+			return nil, err
+		}
+		return &localDirectoryAssignment{
+			Ref:      localDirectoryRef{LocalPath: absPath, DaemonID: daemonID, Label: "agent"},
+			AbsPath:  absPath,
+			RealPath: realPath,
+		}, nil
+	}
 	if task.IsLeaderTask {
 		return nil, nil
 	}

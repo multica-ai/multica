@@ -480,6 +480,13 @@ export interface Agent {
    * account defaults remain authoritative.
    */
   service_tier?: string;
+  /**
+   * Absolute path of the directory this directory-based agent's tasks run in
+   * (the directory is the whole agent — its CLAUDE.md / skills / MCP config
+   * come from there). Empty/undefined means a normal agent using the standard
+   * per-task workdir (or a project-level local_directory when attached).
+   */
+  local_directory?: string | null;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -549,6 +556,10 @@ export interface CreateAgentRequest {
   thinking_level?: string;
   /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
   service_tier?: string;
+  /** Absolute path for a directory-based agent: the agent's tasks run in this
+   *  directory instead of a per-task workdir. Empty/omitted creates a normal
+   *  agent. */
+  local_directory?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
