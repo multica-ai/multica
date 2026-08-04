@@ -10,17 +10,13 @@
  * Same shape as web's `chatKeys` in packages/core/chat/queries.ts (mobile
  * owns its own copy per the "mirror, don't import" rule in apps/mobile/CLAUDE.md).
  *
- * Sessions stay event-driven, but messages and a pending task use a bounded
- * stale time. A dropped realtime event must not leave an open conversation
- * permanently stuck until the app is killed; the chat tab adds a focused,
- * task-only pull fallback on top of these options.
+ * `staleTime: Infinity` everywhere — caches are kept fresh by WS event
+ * handlers, not by background refetch. Foreground / reconnect invalidates
+ * are scoped to each owning hook (see use-chat-sessions-realtime.ts and
+ * use-chat-session-realtime.ts).
  */
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "@/data/api";
-
-/** Idle chat data may be up to this old before a normal focus refetch. Active
- * tasks are refreshed much faster by the focused polling fallback. */
-export const CHAT_CACHE_STALE_MS = 30_000;
 
 export const chatKeys = {
   all: (wsId: string | null) => ["chat", wsId] as const,
@@ -65,7 +61,7 @@ export const chatMessagesOptions = (sessionId: string | null) =>
     queryKey: chatKeys.messages(sessionId ?? ""),
     queryFn: ({ signal }) => api.listChatMessages(sessionId!, { signal }),
     enabled: !!sessionId,
-    staleTime: CHAT_CACHE_STALE_MS,
+    staleTime: Infinity,
   });
 
 export const pendingChatTaskOptions = (sessionId: string | null) =>
@@ -73,7 +69,7 @@ export const pendingChatTaskOptions = (sessionId: string | null) =>
     queryKey: chatKeys.pendingTask(sessionId ?? ""),
     queryFn: ({ signal }) => api.getPendingChatTask(sessionId!, { signal }),
     enabled: !!sessionId,
-    staleTime: CHAT_CACHE_STALE_MS,
+    staleTime: Infinity,
   });
 
 export const taskMessagesOptions = (taskId: string | null | undefined) =>
