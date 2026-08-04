@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // kimiBlockedArgs are flags hardcoded by the daemon that must not be
@@ -405,6 +407,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// deliverable, so a give-up turn that lands before a tool call
 		// stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
+		finalError = enrichKimiContextOverflowError(finalStatus, finalError, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage
@@ -431,6 +434,27 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// enrichKimiContextOverflowError repairs one narrow ACP information-loss
+// path. Kimi Code can turn a provider context-window 401 into the opaque
+// "Authentication required" JSON-RPC error while leaving the actionable
+// provider detail on stderr. Only replace that opaque failure when the
+// bounded stderr summary contains an unambiguous context-limit witness;
+// unrelated auth failures and successful turns keep their original result.
+func enrichKimiContextOverflowError(finalStatus, finalError string, sniffer *acpProviderErrorSniffer) string {
+	if finalStatus != "failed" || !strings.Contains(strings.ToLower(finalError), "authentication required") {
+		return finalError
+	}
+
+	providerError := sniffer.message()
+	if !taskfailure.HasProviderContextLimitWitness(providerError) {
+		return finalError
+	}
+
+	detail := strings.TrimSpace(strings.TrimPrefix(providerError, "kimi provider error:"))
+	detail = strings.TrimSuffix(detail, ".")
+	return fmt.Sprintf("kimi context overflow: %s. Choose a larger-context model or start a new session.", detail)
 }
 
 // kimiToolNameFromTitle normalises tool names emitted by Kimi's ACP

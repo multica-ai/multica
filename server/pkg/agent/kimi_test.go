@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 func TestNewReturnsKimiBackend(t *testing.T) {
@@ -146,6 +148,121 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func fakeKimiACPContextOverflowScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"synthetic-session"}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' 'KimiError: 401 synthetic-256k supports only 256K context.' >&2
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"Authentication required"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestKimiBackendSurfacesContextOverflowHiddenByAuthError(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPContextOverflowScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "synthetic prompt", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "synthetic-session",
+		Model:           "kimi-code/synthetic-256k",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "supports only 256K context") {
+		t.Fatalf("error did not preserve the provider context detail: %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "larger-context model or start a new session") {
+		t.Fatalf("error did not provide an actionable remedy: %q", result.Error)
+	}
+	if strings.Contains(result.Error, "Authentication required") {
+		t.Fatalf("error retained the misleading auth diagnosis: %q", result.Error)
+	}
+	if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentContextOverflow {
+		t.Fatalf("classified reason = %q, want %q", got, taskfailure.ReasonAgentContextOverflow)
+	}
+}
+
+func TestEnrichKimiContextOverflowErrorIsNarrow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		status     string
+		finalError string
+		stderr     string
+		want       string
+	}{
+		{
+			name:       "bare auth error is unchanged",
+			status:     "failed",
+			finalError: "kimi session/prompt failed: Authentication required",
+			want:       "kimi session/prompt failed: Authentication required",
+		},
+		{
+			name:       "unrelated provider detail is unchanged",
+			status:     "failed",
+			finalError: "kimi session/prompt failed: Authentication required",
+			stderr:     "KimiError: 401 token expired",
+			want:       "kimi session/prompt failed: Authentication required",
+		},
+		{
+			name:       "successful turn is unchanged",
+			status:     "completed",
+			finalError: "",
+			stderr:     "KimiError: 401 synthetic-256k supports only 256K context.",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sniffer := newACPProviderErrorSniffer("kimi")
+			if tt.stderr != "" {
+				if _, err := sniffer.Write([]byte(tt.stderr + "\n")); err != nil {
+					t.Fatalf("write stderr fixture: %v", err)
+				}
+			}
+			if got := enrichKimiContextOverflowError(tt.status, tt.finalError, sniffer); got != tt.want {
+				t.Errorf("enrichKimiContextOverflowError() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -35,6 +35,19 @@ var (
 	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9])(429|529)([^0-9]|$)`)
 )
 
+var providerContextLimitRe = regexp.MustCompile(`supports only [0-9][0-9.,]*\s*[kmgt]?\s+context`)
+
+// HasProviderContextLimitWitness reports whether rawError carries the
+// provider wording "supports only <size> context". Some providers return
+// this capability error with HTTP 401 even though the credential is valid, so
+// the wording must outrank the generic HTTP auth classification.
+//
+// Requiring a numeric size between the two phrases keeps ordinary prose that
+// happens to mention both "supports only" and "context" from being relabelled.
+func HasProviderContextLimitWitness(rawError string) bool {
+	return providerContextLimitRe.MatchString(strings.ToLower(rawError))
+}
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -82,6 +95,7 @@ func Classify(rawError string) Reason {
 		"context size has been exceeded",
 	),
 		containsAny(lower, contextWindowExceededWitnesses...),
+		HasProviderContextLimitWitness(lower),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
 		// approximate with both substrings present, which catches
 		// "token limit", "tokens per minute limit", etc., without the
@@ -299,6 +313,9 @@ var legacySkillBundleReasons = map[string]bool{
 // classifier (its rule 1 predates contextWindowExceededWitnesses) and the
 // pre-MUL-1949 coarse agent_error.
 //
+// A provider-specific 401 misclassification is handled separately in
+// NormalizeDaemonReason below.
+//
 // Deliberately narrower than legacySkillBundleReasons. A refined reason means
 // the old daemon matched an earlier rule on the same text — process_failure on
 // a crash marker, provider_network on a stream cut — and that says more about
@@ -338,8 +355,17 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// overflow. One un-upgraded host means a permanently stuck (agent, issue)
 	// pair, not just a missing label; upgrading here retires the session the
 	// moment the server deploys.
+	lowerRawError := strings.ToLower(rawError)
 	if legacyContextOverflowReasons[reason] &&
-		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
+		containsAny(lowerRawError, contextWindowExceededWitnesses...) {
+		return ReasonAgentContextOverflow
+	}
+	// Some providers deliberately use HTTP 401 for a model capability limit.
+	// An older daemon sees the status code first and reports auth_or_access;
+	// the numeric "supports only <size> context" witness is strong enough to
+	// correct that refined-but-wrong guess as well as the legacy catchalls.
+	if (legacyContextOverflowReasons[reason] || reason == string(ReasonAgentProviderAuthOrAccess)) &&
+		HasProviderContextLimitWitness(rawError) {
 		return ReasonAgentContextOverflow
 	}
 	return Reason(reason)

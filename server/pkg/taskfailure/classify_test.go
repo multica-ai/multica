@@ -40,6 +40,7 @@ func TestClassifyRules(t *testing.T) {
 		{"prompt is too long", "API Error: prompt is too long: 250000 tokens > 200000 maximum", ReasonAgentContextOverflow},
 		{"context size has been exceeded", "context size has been exceeded; consider /compact", ReasonAgentContextOverflow},
 		{"token limit", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+		{"provider context capability limit", "KimiError: 401 synthetic-256k supports only 256K context.", ReasonAgentContextOverflow},
 		// GH #6360, verbatim from Claude Code 2.1.x. The turn is not
 		// rejected with a 400 — the response comes back with stop_reason
 		// "model_context_window_exceeded" and the CLI prints this line.
@@ -192,6 +193,7 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// quota-limit rule's "limit" trigger would otherwise swallow
 		// it.
 		{"token limit beats quota", "you exceeded the token limit", ReasonAgentContextOverflow},
+		{"provider context witness beats 401 auth", "KimiError: 401 synthetic-256k supports only 256K context.", ReasonAgentContextOverflow},
 
 		// 401 + missing api_key: the missing_config rule runs before
 		// auth precisely so we don't classify a config error as an
@@ -375,6 +377,18 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			want:   ReasonAgentContextOverflow,
 		},
 		{
+			name:   "old daemon catchall on a provider context capability limit is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "kimi provider error: 401 synthetic-256k supports only 256K context.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			name:   "old daemon auth guess on a provider context capability limit is upgraded",
+			reason: string(ReasonAgentProviderAuthOrAccess),
+			raw:    "kimi provider error: 401 synthetic-256k supports only 256K context.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
 			name:   "pre-MUL-1949 coarse reason on the overflow is upgraded",
 			reason: "agent_error",
 			raw:    "API Error: The model has reached its context window limit.",
@@ -415,6 +429,30 @@ func TestNormalizeDaemonReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := NormalizeDaemonReason(tc.reason, tc.raw); got != tc.want {
 				t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", tc.reason, tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasProviderContextLimitWitness(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"kimi wording", "KimiError: 401 synthetic-256k supports only 256K context.", true},
+		{"case insensitive", "MODEL SUPPORTS ONLY 1M CONTEXT", true},
+		{"requires a numeric size", "the adapter supports only text context", false},
+		{"requires context after size", "supports only 256K tokens per minute", false},
+		{"unrelated context prose", "this context supports only text", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasProviderContextLimitWitness(tc.raw); got != tc.want {
+				t.Errorf("HasProviderContextLimitWitness(%q) = %v, want %v", tc.raw, got, tc.want)
 			}
 		})
 	}
