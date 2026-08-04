@@ -257,6 +257,7 @@ func discoveryCacheKey(providerType, executablePath string) string {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-5", Label: "Claude Opus 5", Provider: "anthropic"},     // CEREBRO-PATCH(agent-models-opus-5): FIR-4492 expose Claude Opus 5 in the daemon model picker.
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"}, // CEREBRO-PATCH(agent-models-sonnet-5): FIR-2661 expose Claude Sonnet 5 in the daemon model picker.
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},   // CEREBRO-PATCH(agent-models-fable): expose Claude Fable 5 in the daemon model picker.
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
