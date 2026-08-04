@@ -26,6 +26,8 @@ import {
 } from "@multica/core/inbox/mutations";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(inbox-chat-placement): FIR-4350 — Chat placement hides conversation rows here.
+import { isConversationHidden, useHiddenConversationKinds } from "@multica/cerebro-feature-flags";
 import { useInboxFailedRunStates } from "@multica/cerebro-runtime/views"; // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
 // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — useUnarchiveInbox for archived view
@@ -920,13 +922,15 @@ export function InboxPage() {
     );
   }, [chatSessions, items, channels, channelMap, knownChannelIds, selectedKey, sortPref, userId]); // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — refold when a new channel id is learned; CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change; CEREBRO-PATCH(inbox-sort-method): re-sort on pref change
 
+  const hiddenConversationKinds = useHiddenConversationKinds(); // CEREBRO-PATCH(inbox-chat-placement): FIR-4350 — conversation types the user shows in Chat only.
   const filteredEntries = useMemo<MergedEntry[]>(
     () =>
       // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — "Pinned" needs pin/parent context.
-      view === "pinned"
+      (view === "pinned"
         ? mergedEntries.filter(matchesPinnedView)
-        : mergedEntries.filter((entry) => matchesView(entry, view)),
-    [mergedEntries, view, matchesPinnedView],
+        : mergedEntries.filter((entry) => matchesView(entry, view))
+      ).filter((entry) => !isConversationHidden(hiddenConversationKinds, entry)), // CEREBRO-PATCH(inbox-chat-placement): FIR-4350 — hide, never delete.
+    [mergedEntries, view, matchesPinnedView, hiddenConversationKinds],
   );
 
   const renderEntry = (entry: MergedEntry) => {

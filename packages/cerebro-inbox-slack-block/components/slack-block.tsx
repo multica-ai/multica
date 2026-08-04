@@ -31,7 +31,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { conversationKindOfChannel } from "@multica/cerebro-feature-flags";
 import {
   useChannelFavoritesStore,
   actorKey,
@@ -75,11 +75,20 @@ export interface SlackBlockProps {
   onSetGroupBy: (g: TeamGroupBy) => void;
   /** TECH-3494 — also list the workspace's agents (opt-in). Default off. */
   showAgents?: boolean;
+  /** FIR-4350 — list channels. Default on; the Chat page turns it off when the
+   *  user has not placed channels there. */
+  showChannels?: boolean;
+  /** FIR-4350 — list people (DMs). Default on; see showChannels. */
+  showPeople?: boolean;
   onSetShowAgents: (v: boolean) => void;
   /** TECH-3769 — show the search field by default instead of behind the header
    *  search button. Default off (search revealed via the button). */
   searchDefaultOpen?: boolean;
   onSetSearchDefaultOpen: (v: boolean) => void;
+  /** FIR-4350 — show the settings dropdown and the Remove-block button. Default
+   *  on for the dynamic inbox; the Chat page turns it off because it fixes the
+   *  display options and has no block to remove. */
+  showSectionControls?: boolean;
   /** Opens an agent chat in the parent's detail panel (no DM channel). */
   onOpenAgentChat: (agentId: string) => void;
   /** TECH-3664 — opens an EXISTING (unread) agent chat session so clicking an
@@ -165,17 +174,16 @@ export function SlackBlock({
   groupBy = "type",
   onSetGroupBy,
   showAgents = false,
+  showChannels = true,
+  showPeople = true,
   onSetShowAgents,
   searchDefaultOpen = false,
   onSetSearchDefaultOpen,
+  showSectionControls = true,
   onOpenAgentChat,
   onOpenAgentSession,
   onRemove,
 }: SlackBlockProps) {
-  // Gate the whole block behind its cerebro feature flag. Reading it keeps the
-  // flag wired even though the parent also gates the "Add section" entry point.
-  const enabled = useFeatureFlag("cerebro_inbox_slack_block");
-
   const selfUserId = useAuthStore((s) => s.user?.id);
   // `channels` (non-archived) backs DM↔member matching so inbox-archived DMs
   // stay hidden from People. `rosterChannels` (include-archived) backs the
@@ -263,11 +271,19 @@ export function SlackBlock({
     const items: ChatItem[] = [];
 
     for (const c of rosterChannels) {
-      if (c.kind !== "channel") continue;
+      if (c.kind !== "channel" && c.kind !== "group") continue;
+      // FIR-4350 — one shared rule with the Inbox's hide logic: a channel is
+      // gated by the channel placement, a group by the DM placement, exactly as
+      // conversationKindOfChannel maps them for inbox hiding. Without listing
+      // groups here a group could leave the Inbox (DM off) yet appear on neither
+      // surface while its unread still counts.
+      const show =
+        conversationKindOfChannel(c.kind) === "channel" ? showChannels : showPeople;
+      if (!show) continue;
       items.push({
         key: `channel:${c.id}`,
         kind: "channel",
-        name: c.title,
+        name: c.title || "Group",
         recency: channelRecency(c),
         unread: c.unread_count ?? 0,
         starred: favorites.includes(channelKey(c.id)),
@@ -277,6 +293,7 @@ export function SlackBlock({
     }
 
     for (const m of members) {
+      if (!showPeople) break;
       if (m.user_id === selfUserId) continue;
       const dm = dmWithMember(channels, selfUserId, m.user_id);
       items.push({
@@ -318,6 +335,8 @@ export function SlackBlock({
     members,
     agents,
     showAgents,
+    showChannels,
+    showPeople,
     agentActivity,
     agentPresence,
     favorites,
@@ -368,8 +387,6 @@ export function SlackBlock({
       ).length,
     [members, selfUserId, onlineUserIds],
   );
-
-  if (!enabled) return null;
 
   const openMember = async (memberUserId: string): Promise<void> => {
     const existing = dmWithMember(channels, selfUserId, memberUserId);
@@ -511,6 +528,8 @@ export function SlackBlock({
           >
             <Search className="size-3.5" />
           </button>
+          {showSectionControls && (
+          <>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -578,6 +597,8 @@ export function SlackBlock({
           >
             <X className="size-3.5" />
           </button>
+          </>
+          )}
         </div>
       </header>
 

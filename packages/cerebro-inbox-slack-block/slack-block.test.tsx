@@ -22,6 +22,12 @@ const chatState = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unkno
 // TECH-3664 — member user IDs the mocked useChannelTyping reports as typing.
 const typingState = vi.hoisted(() => ({ ids: new Set<string>() }));
 
+// FIR-4350 — extra roster channels a single test seeds (e.g. a group channel)
+// on top of the base fixtures. Empty by default so existing tests are untouched.
+const extraChannelsState = vi.hoisted(
+  () => ({ list: [] as Array<Record<string, unknown>> }),
+);
+
 // Mutable favorites set + spy for the starring tests.
 const favState = vi.hoisted(() => ({
   keys: [] as string[],
@@ -134,7 +140,8 @@ vi.mock("@tanstack/react-query", async () => {
     useQuery: (options: { queryKey: readonly unknown[] }) => {
       const key = (options.queryKey?.[2] ?? options.queryKey?.[1]) as string;
       if (key === "members") return { data: members };
-      if (key === "channels") return { data: channels };
+      if (key === "channels")
+        return { data: [...channels, ...extraChannelsState.list] };
       if (key === "agents") return { data: agents };
       if (key === "chat-sessions") return { data: chatState.sessions };
       return { data: [] };
@@ -183,8 +190,12 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
+// FIR-4350 — SlackBlock no longer self-gates on a flag (the mount gates it), so
+// there is no useFeatureFlag here. It reads conversationKindOfChannel to decide
+// which placement gate (channel vs DM) a roster row obeys.
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: () => true,
+  conversationKindOfChannel: (k: string | undefined) =>
+    k === "dm" || k === "group" ? "dm" : "channel",
 }));
 
 // Favorites store: selector over the mutable favState. Starred tests seed
@@ -294,6 +305,75 @@ describe("SlackBlock", () => {
     favState.toggle.mockClear();
     wsHandlers.clear();
     typingState.ids = new Set();
+    extraChannelsState.list = [];
+  });
+
+  // FIR-4350 — the block no longer self-gates on cerebro_inbox_slack_block (the
+  // mount does), so it renders its rows without any feature-flag mock. This
+  // locks the gate out so it cannot be reintroduced silently and blank the Chat
+  // page.
+  it("renders rows without a feature flag gating the block", async () => {
+    await act(async () => {
+      renderBlock();
+    });
+    expect(screen.getByText("general")).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+  });
+
+  // FIR-4350 — a group channel is placed with DMs (conversationKindOfChannel),
+  // so the Inbox hides it when DM is turned off. It must therefore have a row on
+  // the Chat rail (gated by showPeople), or it would be reachable from neither
+  // surface while its unread still counted.
+  it("lists a group channel when people/DMs are shown", async () => {
+    extraChannelsState.list = [
+      { ...baseChannel({ id: "grp-1", kind: "group", title: "Weekend Trip" }) },
+    ];
+    await act(async () => {
+      renderBlock({ showChannels: true, showPeople: true });
+    });
+    expect(screen.getByText("Weekend Trip")).toBeInTheDocument();
+  });
+
+  it("hides a group channel when people/DMs are turned off in Chat", async () => {
+    extraChannelsState.list = [
+      { ...baseChannel({ id: "grp-1", kind: "group", title: "Weekend Trip" }) },
+    ];
+    await act(async () => {
+      // Channels on, People/DMs off: a plain channel still shows, the group does
+      // not — it follows the DM placement, not the channel placement.
+      renderBlock({ showChannels: true, showPeople: false });
+    });
+    expect(screen.getByText("general")).toBeInTheDocument();
+    expect(screen.queryByText("Weekend Trip")).not.toBeInTheDocument();
+  });
+
+  it("opens a group channel row via onOpenChannel", async () => {
+    extraChannelsState.list = [
+      { ...baseChannel({ id: "grp-1", kind: "group", title: "Weekend Trip" }) },
+    ];
+    const onOpenChannel = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ onOpenChannel });
+    });
+    await user.click(screen.getByText("Weekend Trip"));
+    expect(onOpenChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "grp-1", kind: "group" }),
+    );
+  });
+
+  // FIR-4350 — the Chat page passes showSectionControls={false} so the no-op
+  // display menu and the Remove-block button are not shown there.
+  it("hides the settings menu and remove button when showSectionControls is off", async () => {
+    await act(async () => {
+      renderBlock({ showSectionControls: false });
+    });
+    expect(screen.queryByTitle("Settings")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Remove block")).not.toBeInTheDocument();
+    // The search control stays.
+    expect(screen.getByTitle("Search")).toBeInTheDocument();
+    // Rows still render.
+    expect(screen.getByText("general")).toBeInTheDocument();
   });
 
   it("renders a green online dot for a member in the online set, red otherwise", async () => {

@@ -54,6 +54,7 @@
     "@multica/cerebro-autopilot-pages": "workspace:*",
     "@multica/cerebro-budgets": "workspace:*",
     "@multica/cerebro-chat": "workspace:*",
+    "@multica/cerebro-chat-page": "workspace:*",
     "@multica/cerebro-collections": "workspace:*",
     "@multica/cerebro-cost-optimization": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
