@@ -226,6 +226,94 @@ mkdir -p "${HOME}/.agents/skills"
 cp -r "${HOME}/ai-enhancement-hub/skills/." "${HOME}/.agents/skills/"
 rm -rf "${HOME}/ai-enhancement-hub"
 
+# ── Fan out ~/.agents/skills into each runtime's user-level skill root ─────────
+# ~/.agents/skills is a Multica *import* source, not an execution path: the
+# daemon lists it as localSkillRootUniversal (server/internal/daemon/
+# local_skills.go) so the UI can import a runtime-local skill into the
+# workspace registry, but no CLI reads it at task time. Registry skills reach a
+# task only once they are bound to an agent, which freezes them at import and
+# drops the `git pull` freshness the seed above exists to provide.
+#
+# So the seeded skills are copied into each installed runtime's own user-level
+# root, which every CLI reads natively:
+#   claude → ~/.claude/skills        pi     → ~/.pi/agent/skills
+#   codex  → ~/.codex/skills         hermes → ~/.hermes/skills
+# Codex and Hermes redirect HOME per task, but the daemon already replays these
+# shared roots into the per-task home — seedUserCodexSkills copies
+# ~/.codex/skills into CODEX_HOME, and hermesExternalSkillRoots references
+# ~/.hermes/skills last (both in server/internal/daemon/execenv/). In both the
+# shared root yields to workspace-bound skills on a name collision, so fanning
+# out here cannot shadow a skill an agent is explicitly bound to.
+#
+# opencode is installed too but is deliberately NOT in the list: it is the one
+# runtime that already reads ~/.agents/skills itself. It scans
+# ~/.claude/skills/**/SKILL.md and ~/.agents/skills/**/SKILL.md as "external
+# skills", globstarred, so it picks the seeded tree up at its native
+# <category>/<skill> depth with no flattening. Verified with
+# `opencode debug skill`: 37 skills resolved from ~/.agents/skills before this
+# fan-out existed. Adding ~/.config/opencode/skills would copy 37 directories
+# per boot to surface skills opencode can already see. opencode dedupes by skill
+# name, so the ~/.claude/skills copy below does not double-list them either.
+# (Its scan of ~/.claude/ and ~/.agents/ is disabled by
+# OPENCODE_DISABLE_EXTERNAL_SKILLS=1 / OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 —
+# if either is ever set for opencode tasks, add its root here.)
+#
+# Two shape mismatches to reconcile:
+#   - ai-enhancement-hub nests one level deeper than any runtime expects
+#     (<category>/<skill>/SKILL.md vs <root>/<skill>/SKILL.md), so the category
+#     level is dropped. The daemon's own discovery handles nesting to
+#     maxLocalSkillDirDepth and is unaffected either way.
+#   - gitops/base/agent-runtime/storage.yaml mounts an EFS PVC over all of
+#     /home/agent, so these roots persist across boots. The fan-out must be
+#     rebuilt each boot, not appended to, or a skill deleted upstream lingers
+#     forever.
+if [ "${AGENTRUNNER_SKILL_FANOUT:-1}" != "0" ]; then
+  echo "agentrunner: fanning out skills to runtime discovery paths..."
+  skill_roots="${HOME}/.claude/skills ${HOME}/.codex/skills ${HOME}/.pi/agent/skills ${HOME}/.hermes/skills"
+  # Marker file identifying a directory this fan-out owns. Only marked
+  # directories are cleared, so hand-installed skills and a runtime's own
+  # built-ins (e.g. ~/.codex/skills/.system) survive.
+  fanout_marker=".agentrunner-fanout"
+
+  for root in ${skill_roots}; do
+    mkdir -p "${root}"
+    find "${root}" -mindepth 1 -maxdepth 1 -type d \
+      -exec test -f "{}/${fanout_marker}" \; -print0 2>/dev/null |
+      xargs -0 -r rm -rf
+  done
+
+  fanout_total=0
+  fanout_skipped=0
+  # -mindepth 2 skips a stray SKILL.md at the root of the tree; -maxdepth 4
+  # allows a category level or two below that without descending arbitrarily.
+  while IFS= read -r skill_md; do
+    # Guard the empty line: with no matches `find` yields nothing, and an
+    # unguarded read would still enter the loop once with an empty value,
+    # resolving to dirname "" = "." and reporting a phantom skill.
+    [ -n "${skill_md}" ] || continue
+    skill_dir="$(dirname "${skill_md}")"
+    skill_name="$(basename "${skill_dir}")"
+    for root in ${skill_roots}; do
+      dest="${root}/${skill_name}"
+      if [ -e "${dest}" ]; then
+        # Either two categories carry the same skill name, or the name is
+        # already taken by a hand-installed skill. Both are the operator's
+        # call to resolve upstream; first writer wins and we say so loudly.
+        echo "agentrunner: skill name collision, keeping existing ${dest}" >&2
+        fanout_skipped=$((fanout_skipped + 1))
+        continue
+      fi
+      cp -r "${skill_dir}" "${dest}"
+      touch "${dest}/${fanout_marker}"
+    done
+    fanout_total=$((fanout_total + 1))
+  done <<EOF
+$(find "${HOME}/.agents/skills" -mindepth 2 -maxdepth 4 -name SKILL.md | sort)
+EOF
+
+  echo "agentrunner: fanned out ${fanout_total} skills to 4 runtime roots (${fanout_skipped} collisions skipped)"
+fi
+
 # ── Codex LLM proxy config ────────────────────────────────────────────────────
 # Codex has no env-var override for its built-in OpenAI provider — only a
 # config.toml one (see agent-runtime-base/README.md's "LLM proxy routing").
