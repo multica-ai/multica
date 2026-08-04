@@ -177,6 +177,8 @@ type Task struct {
 	MemoryContext string `json:"memory_context,omitempty"`
 	// CEREBRO-PATCH(daemon-task-workpad-brief): FIR-3659 — true when the workspace's cerebro_workpad flag is on, so the brief includes the Workpad protocol section.
 	WorkpadBriefEnabled bool `json:"workpad_brief_enabled,omitempty"`
+	// CEREBRO-PATCH(daemon-task-tools-brief): FIR-4500 — true when the workspace's cerebro_tools_brief flag is off, so the brief drops the Connections & MCP tools section.
+	ToolsBriefDisabled bool `json:"tools_brief_disabled,omitempty"`
 	// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — no Round-only daemon task flag; Round replies use the standard task shape.
 	// CEREBRO-PATCH(daemon-task-presentation-mode): receive runtime
 	// presentation_mode from claim response. "interactive" tells the daemon

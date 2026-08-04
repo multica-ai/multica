@@ -55,11 +55,14 @@ export type WorkspaceBriefMode = "" | "off";
  * - `""` — list every resolved tool individually, as today (default).
  * - `"summary"` — fold each connection's generated endpoint tools to one line
  *   (name, count, ask-count, discovery pointer); platform MCP tools stay listed.
+ * - `"off"` — drop the section entirely (FIR-4500). Documentation only: a tool
+ *   stays callable through the runtime's own tool schemas. This is also the
+ *   value the workspace `cerebro_tools_brief` flag forces when turned off.
  *
  * `"full"` is also accepted on write as the explicit default spelling and is
  * normalised to `""` by the server.
  */
-export type ToolsBriefMode = "" | "summary";
+export type ToolsBriefMode = "" | "summary" | "off";
 
 export type AgentSpeedMode = "" | "standard" | "fast";
 

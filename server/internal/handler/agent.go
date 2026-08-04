@@ -251,6 +251,7 @@ type AgentTaskResponse struct {
 	GraphifyNudge       string `json:"graphify_nudge,omitempty"`        // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
 	MemoryContext       string `json:"memory_context,omitempty"`        // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
 	WorkpadBriefEnabled bool   `json:"workpad_brief_enabled,omitempty"` // CEREBRO-PATCH(agent-task-workpad-brief): FIR-3659 — carries the workspace cerebro_workpad verdict so the daemon brief includes the Workpad protocol
+	ToolsBriefDisabled  bool   `json:"tools_brief_disabled,omitempty"`  // CEREBRO-PATCH(agent-task-tools-brief): FIR-4500 — true when cerebro_tools_brief is off, so the daemon brief drops the Connections & MCP tools section
 
 	NewCommentCount          int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince         string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it

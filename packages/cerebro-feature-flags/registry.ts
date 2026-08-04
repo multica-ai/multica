@@ -446,6 +446,11 @@ export type CerebroFlagKey =
   // agents create and keep the checklist updated. Default OFF until QA'd on
   // staging; enforcement (the status-change gate) is a separate hook policy.
   | "cerebro_workpad"
+  // FIR-4500: the generated "Connections & MCP tools" section of the runtime
+  // brief. ON is today's behaviour (every resolved tool listed). OFF drops the
+  // section entirely — the tools stay callable, because callability comes from
+  // the runtime's own tool schemas, never from this prose list.
+  | "cerebro_tools_brief"
   // FIR-3608: scoped, non-personal, workspace-bound service tokens (`msv_`)
   // managed from Settings → Tokens.
   | "cerebro_service_tokens";
@@ -890,6 +895,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_embedded_chat: false,
   // FIR-3659: default OFF. Enabling injects the Workpad protocol into agent briefs.
   cerebro_workpad: false,
+  // FIR-4500: default ON — the section every agent gets today. Turning it OFF
+  // is the token-saving choice, so it stays an explicit decision.
+  cerebro_tools_brief: true,
   cerebro_service_tokens: true,
 };
 
@@ -2011,6 +2019,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Ask agents to keep a Workpad — a plan checklist at the top of the issue description, created before they start and kept updated as they work, so you can follow the plan from the issue. On injects the Workpad protocol into every agent's runtime brief. Off by default; the existing checklist rendering is unchanged and enforcement (blocking an agent from starting without a Workpad) is a separate hook policy. FIR-3659.",
+  },
+  {
+    key: "cerebro_tools_brief",
+    label: "List connections and MCP tools in the agent brief",
+    group: "agents",
+    description:
+      "Write the resolved Connections & MCP tools list into every agent's runtime brief. On by default — that is the section agents get today. Turning it off removes the section and roughly 7,500 tokens from every single run; agents keep every tool, because a tool is callable through the runtime's own tool schemas and the live `multica_connection_tools_status` lookup, never through this prose list. Per-agent `tools_brief_mode` still applies when the flag is on: `summary` folds each connection to one line. FIR-4500.",
   },
 ];
 
