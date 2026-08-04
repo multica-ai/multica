@@ -35,6 +35,8 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   "zh-Hans": "zh",
   ko: "ko",
   ja: "ja",
+  // No dedicated pt onboarding content variant yet — fall back to English.
+  "pt-BR": "en",
 };
 
 /**
