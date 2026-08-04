@@ -85,8 +85,13 @@ func TestCreateRejectsUnknownModel(t *testing.T) {
 // looked at the runtime), and the woken run then died on a 400 from the Codex
 // CLI — with the wakeup being the only thing that would have retried it.
 //
-// Create must now reject it against the runtime that would run it.
-func TestCreateRejectsModelFromAnotherProvider(t *testing.T) {
+// FIR-4492 finishes it. Rejecting that pin stopped the dead runs but left the
+// agent unable to name a cheap model at all, so the cheap run it asked for never
+// happened. A CHEAP model named for the wrong provider is now substituted with
+// this provider's cheap model — the intent was "run this cheaply", not "run this
+// on Anthropic". A model that is not any provider's cheap model is still
+// rejected: that caller asked for a capability this runtime does not have.
+func TestCreateSubstitutesCheapModelFromAnotherProvider(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")
 	}
@@ -114,7 +119,13 @@ func TestCreateRejectsModelFromAnotherProvider(t *testing.T) {
 		wkPool.Exec(bg, `DELETE FROM agent_runtime WHERE id = $1`, codexRuntime)
 	})
 
-	_, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+	codexCheap, ok := autopilotmodel.CheapForProvider("codex")
+	if !ok {
+		t.Fatal("no cheap model curated for codex")
+	}
+
+	// The exact pair that produced 28 consecutive failed runs in prod.
+	row, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
 		AgentID:       codexAgent,
 		IssueID:       wkIssueID,
 		Prompt:        "is CI green?",
@@ -122,16 +133,56 @@ func TestCreateRejectsModelFromAnotherProvider(t *testing.T) {
 		FireAt:        pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
 		ModelOverride: autopilotmodel.ModelHaiku,
 	})
+	if err != nil {
+		t.Fatalf("create anthropic cheap model on codex runtime: %v", err)
+	}
+	if row.ModelOverride != codexCheap {
+		t.Fatalf("model_override = %q, want %q", row.ModelOverride, codexCheap)
+	}
+
+	// Clear the first pending row so the agent+issue min-interval does not
+	// block the second Create in the same test (default is 5 minutes).
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1`, codexAgent); err != nil {
+		t.Fatalf("clear first wakeup: %v", err)
+	}
+
+	// "cheap" asks for the same thing without naming any ID.
+	row, err = svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:       codexAgent,
+		IssueID:       wkIssueID,
+		Prompt:        "is CI green?",
+		TriggerType:   TriggerTime,
+		FireAt:        pgtype.Timestamptz{Time: time.Now().Add(2 * time.Hour), Valid: true},
+		ModelOverride: autopilotmodel.TierCheap,
+	})
+	if err != nil {
+		t.Fatalf("create with cheap tier on codex runtime: %v", err)
+	}
+	if row.ModelOverride != codexCheap {
+		t.Fatalf("cheap tier resolved to %q, want %q", row.ModelOverride, codexCheap)
+	}
+
+	// A specific non-cheap model for the wrong provider is still a hard error.
+	_, err = svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:       codexAgent,
+		IssueID:       wkIssueID,
+		Prompt:        "run the big model",
+		TriggerType:   TriggerTime,
+		FireAt:        pgtype.Timestamptz{Time: time.Now().Add(3 * time.Hour), Valid: true},
+		ModelOverride: "claude-opus-5",
+	})
 	if !errors.Is(err, autopilotmodel.ErrModelNotOnProvider) {
-		t.Fatalf("create anthropic model on codex runtime: err = %v, want ErrModelNotOnProvider", err)
+		t.Fatalf("create anthropic opus on codex runtime: err = %v, want ErrModelNotOnProvider", err)
 	}
 }
 
 // FIR-3287 second half: Create validated against the runtime the agent had at
 // the time, but an agent can be re-pointed at another provider before the wakeup
-// fires. Dispatch must not stamp a model that runtime cannot run — the override
-// is only a cost optimisation, so the run proceeds on the agent's own model.
-func TestDispatchDropsModelOverrideForeignToRuntime(t *testing.T) {
+// fires. FIR-4492: dispatch resolves against the runtime that actually runs it,
+// so a cheap pin follows the agent to the new provider instead of being dropped.
+// An unresolvable pin is still dropped — the override is only a cost
+// optimisation, so the run proceeds on the agent's own model.
+func TestDispatchSubstitutesCheapModelForRepointedRuntime(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")
 	}
@@ -186,8 +237,42 @@ func TestDispatchDropsModelOverrideForeignToRuntime(t *testing.T) {
 	`, wkAgentID, wkIssueID).Scan(&taskModel); err != nil {
 		t.Fatalf("load task: %v", err)
 	}
+	codexCheap, ok := autopilotmodel.CheapForProvider("codex")
+	if !ok {
+		t.Fatal("no cheap model curated for codex")
+	}
+	if taskModel.String != codexCheap {
+		t.Fatalf("task model_override = %q, want %q (the cheap pin follows the agent to the codex runtime)", taskModel.String, codexCheap)
+	}
+
+	// An unresolvable pin — a specific model only the old provider had — is still
+	// dropped, so the run happens on the agent's own model instead of failing.
+	if _, err := wkPool.Exec(ctx, `UPDATE cerebro_agent_wakeup SET state = 'pending', model_override = 'claude-opus-5' WHERE id = $1`, row.ID); err != nil {
+		t.Fatalf("re-arm wakeup with a foreign specific model: %v", err)
+	}
+	// The two dispatches land in the same created_at tick, so the first task has to
+	// go before the second can be read back unambiguously.
+	if _, err := wkPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1 AND issue_id = $2`, wkAgentID, wkIssueID); err != nil {
+		t.Fatalf("clear tasks: %v", err)
+	}
+	reloaded, err := svc.Cerebro.GetCerebroAgentWakeup(ctx, row.ID)
+	if err != nil {
+		t.Fatalf("reload wakeup: %v", err)
+	}
+	if err := svc.dispatch(ctx, reloaded); err != nil {
+		t.Fatalf("dispatch after re-arm: %v", err)
+	}
+	if err := wkPool.QueryRow(ctx, `
+		SELECT model_override
+		FROM agent_task_queue
+		WHERE agent_id = $1 AND issue_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, wkAgentID, wkIssueID).Scan(&taskModel); err != nil {
+		t.Fatalf("load task: %v", err)
+	}
 	if taskModel.Valid && taskModel.String != "" {
-		t.Fatalf("task model_override = %q, want empty (the codex runtime cannot run %q)", taskModel.String, autopilotmodel.ModelHaiku)
+		t.Fatalf("task model_override = %q, want empty (the codex runtime cannot run claude-opus-5)", taskModel.String)
 	}
 }
 

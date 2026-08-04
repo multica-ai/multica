@@ -43,7 +43,7 @@ func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 				"fire_at":        map[string]any{"type": "string", "description": "RFC3339 timestamp (required for trigger_type=time)."},
 				"watch_issue_id": map[string]any{"type": "string", "description": "Issue UUID watched by issue_status/github_ci."},
 				"watch_status":   map[string]any{"type": "string", "description": "Status for trigger_type=issue_status."},
-				"model":          map[string]any{"type": "string", "description": "Optional cheaper model for the woken run (e.g. claude-haiku-4-5-20251001) so a pure check like 'is CI green?' never fires Opus. Empty = the agent's own model."},
+				"model":          map[string]any{"type": "string", "description": "Model for the woken run. Pass \"cheap\" so a pure check like 'is CI green?' never fires Opus — the server resolves it to the cheap model of the runtime that runs the wakeup, so you never have to know which models your runtime accepts. An exact model ID also works but is rejected when your runtime cannot run it. Empty = the agent's own model."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {

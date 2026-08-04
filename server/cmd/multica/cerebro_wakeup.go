@@ -53,7 +53,7 @@ func init() {
 	wakeupCreateCmd.Flags().String("on-issue-status", "", "Wake when this issue reaches --watch-status")
 	wakeupCreateCmd.Flags().String("watch-status", "", "Status for --on-issue-status")
 	wakeupCreateCmd.Flags().String("on-github-ci", "", "Wake when linked GitHub CI updates for this issue")
-	wakeupCreateCmd.Flags().String("model", "", "Optional cheaper model for the woken run (e.g. claude-haiku-4-5-20251001) so a pure check never fires Opus")
+	wakeupCreateCmd.Flags().String("model", "", "Model for the woken run: pass cheap so a pure check never fires Opus (resolved to the cheap model of the runtime that runs it), or an exact model ID that runtime accepts")
 	wakeupCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	wakeupListCmd.Flags().String("agent", "", "Filter by agent ID")

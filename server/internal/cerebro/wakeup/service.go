@@ -125,12 +125,23 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	// only thing that would have retried it. Without a runtime yet, the union is
 	// the best available check — it still catches a typo, and dispatch re-checks
 	// against the real provider once one is bound.
+	//
+	// FIR-4492: resolve before validating, so the provider-independent "cheap"
+	// tier becomes the ID this runtime actually accepts and a cheap model named
+	// for the wrong provider is substituted instead of rejected. The column then
+	// always holds a real model ID, so every reader (list, UI) shows what will
+	// run. With no runtime bound yet, "cheap" is stored as-is and dispatch
+	// resolves it against the provider that turns out to run it.
 	if provider, ok := s.agentRuntimeProvider(ctx, req.AgentID); ok {
-		if err := autopilotmodel.ValidateForProvider(provider, req.ModelOverride); err != nil {
+		model, err := autopilotmodel.ResolveForProvider(provider, req.ModelOverride)
+		if err != nil {
 			return cerebrodb.CerebroAgentWakeup{}, err
 		}
-	} else if err := autopilotmodel.Validate(req.ModelOverride); err != nil {
-		return cerebrodb.CerebroAgentWakeup{}, err
+		req.ModelOverride = model
+	} else if req.ModelOverride != autopilotmodel.TierCheap {
+		if err := autopilotmodel.Validate(req.ModelOverride); err != nil {
+			return cerebrodb.CerebroAgentWakeup{}, err
+		}
 	}
 	switch req.TriggerType {
 	case TriggerTime:
@@ -384,8 +395,22 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	//
 	// FIR-3287: check against the runtime that will actually run it, not the one
 	// Create saw — an agent can be re-pointed at a different provider in between.
-	if row.ModelOverride != "" {
-		if err := autopilotmodel.SetOnTaskForProvider(ctx, s.Queries, task.ID, rt.Provider, row.ModelOverride); err != nil {
+	//
+	// FIR-4492: resolve against the real provider first. Dropping the override was
+	// the safe half of the answer but not the useful one — the wakeup asked for a
+	// cheap run and got the agent's own model. Resolving turns "cheap" into this
+	// provider's cheap model and swaps another provider's cheap model for it, so
+	// the wakeup runs cheaply on whatever runtime it lands on.
+	if model, err := autopilotmodel.ResolveForProvider(rt.Provider, row.ModelOverride); err != nil {
+		slog.Warn("cerebro wakeup: running on the agent's own model, override not resolvable",
+			"wakeup_id", util.UUIDToString(row.ID),
+			"task_id", util.UUIDToString(task.ID),
+			"provider", rt.Provider,
+			"model", row.ModelOverride,
+			"error", err,
+		)
+	} else if model != "" {
+		if err := autopilotmodel.SetOnTaskForProvider(ctx, s.Queries, task.ID, rt.Provider, model); err != nil {
 			// Leaving the override unset runs the task on the agent's own model,
 			// which is the right outcome for every error here: the override is
 			// only ever a cost optimisation, so a wakeup that fires on the
