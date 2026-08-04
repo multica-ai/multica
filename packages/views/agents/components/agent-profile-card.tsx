@@ -100,7 +100,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         {!isArchived && (
           <AppLink
             href={p.agentDetail(agent.id)}
-            className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
+            className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-100" // CEREBRO-PATCH(actor-hover-touch): FIR-4507 Detail always visible (touch has no group-hover).
           >
             {t(($) => $.profile_card.detail_link)}
           </AppLink>

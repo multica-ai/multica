@@ -2123,3 +2123,8 @@ values above and nothing else.
 
 - **Why:** FIR-4196 requires every agent mutation under the existing Workflows, Commands, and Evals route families to enforce the `manage_workflows` decision through the shared Task Mandate and `PlatformActionGate` boundary.
 - **Where:** `server/cmd/server/router.go` mounts `Handler.RequireManageWorkflows` around `/api/cerebro/workflows`, `/api/cerebro/commands`, and `/api/cerebro/evals`. The implementation remains in the Cerebro carve-out `server/internal/handler/workflow_permission_cerebro.go`.
+
+# `actor-hover-touch`
+
+- **Why:** FIR-4507 — agent/member/squad profile peeks only opened on hover. Touch devices have no hover, so the card never appeared. Tap must open the same content; Detail must be visible without group-hover; avatar tap must not navigate away before the peek opens.
+- **Where:** Net-new shell in `packages/cerebro-agent-avatar/{hover-shell,use-coarse-pointer}.tsx` (coarse → bottom Sheet on phone / Popover on tablet; fine → HoverCard). Thin upstream wiring in `packages/views/common/actor-avatar.tsx` (import shell, skip profile-link on coarse+hover). Detail always-visible class on `agent-profile-card.tsx` and `squad-profile-card.tsx`; member Detail link added in `member-profile-card.tsx`.

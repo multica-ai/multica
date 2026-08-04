@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
-import {
-  HoverCard,
-  HoverCardTrigger,
-  HoverCardContent,
-} from "@multica/ui/components/ui/hover-card";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useMemberOnline } from "@multica/core/presence";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+// CEREBRO-PATCH(actor-hover-touch): FIR-4507 touch open path lives in cerebro zone.
+import {
+  ActorAvatarHoverCardShell,
+  useIsCoarsePointer,
+} from "@multica/cerebro-agent-avatar";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
@@ -64,8 +63,7 @@ interface ActorAvatarProps {
   profileLink?: boolean;
 }
 
-const FOCUSABLE_ANCESTOR_SELECTOR =
-  'a[href], button:not([disabled]), [role="button"]:not([aria-disabled="true"]), [tabindex]:not([tabindex="-1"])';
+// CEREBRO-PATCH(actor-hover-touch): FIR-4507 FOCUSABLE_ANCESTOR_SELECTOR moved into cerebro hover-shell.
 const PROFILE_LINK_CONTROL_SELECTOR =
   'button, [role^="menuitem"], [role="option"], [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="popover-trigger"]';
 
@@ -81,6 +79,8 @@ export function ActorAvatar({
 }: ActorAvatarProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const paths = useWorkspacePaths();
+  // CEREBRO-PATCH(actor-hover-touch): FIR-4507 — on touch, peek opens on tap; Detail navigates.
+  const isCoarsePointer = useIsCoarsePointer();
   const avatar = (
     <ActorAvatarBase
       name={getActorName(actorType, actorId)}
@@ -123,15 +123,17 @@ export function ActorAvatar({
   const shouldLinkToProfile =
     profileLink ??
     (actorType === "member" || actorType === "agent" || actorType === "squad");
-  const profileHref = shouldLinkToProfile
-    ? actorType === "member"
-      ? paths.memberDetail(actorId)
-      : actorType === "agent"
-        ? paths.agentDetail(actorId)
-        : actorType === "squad"
-          ? paths.squadDetail(actorId)
-          : null
-    : null;
+  // CEREBRO-PATCH(actor-hover-touch): FIR-4507 skip profile nav when coarse + hover card (tap opens peek).
+  const profileHref =
+    shouldLinkToProfile && !(enableHoverCard && isCoarsePointer)
+      ? actorType === "member"
+        ? paths.memberDetail(actorId)
+        : actorType === "agent"
+          ? paths.agentDetail(actorId)
+          : actorType === "squad"
+            ? paths.squadDetail(actorId)
+            : null
+      : null;
   const content = profileHref ? (
     <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
   ) : (
@@ -276,6 +278,7 @@ function AgentAvatarHoverCard({
     ) : (
       <AgentProfileCard agentId={agentId} />
     );
+  // CEREBRO-PATCH(actor-hover-touch): FIR-4507 shell imported from cerebro zone.
   return (
     <ActorAvatarHoverCardShell content={content}>
       {children}
@@ -290,6 +293,7 @@ function MemberAvatarHoverCard({
   userId: string;
   children: React.ReactNode;
 }) {
+  // CEREBRO-PATCH(actor-hover-touch): FIR-4507 shell imported from cerebro zone.
   return (
     <ActorAvatarHoverCardShell content={<MemberProfileCard userId={userId} />}>
       {children}
@@ -304,6 +308,7 @@ function SquadAvatarHoverCard({
   squadId: string;
   children: React.ReactNode;
 }) {
+  // CEREBRO-PATCH(actor-hover-touch): FIR-4507 shell imported from cerebro zone.
   return (
     <ActorAvatarHoverCardShell content={<SquadProfileCard squadId={squadId} />}>
       {children}
@@ -311,42 +316,4 @@ function SquadAvatarHoverCard({
   );
 }
 
-// Common chrome shared between agent and member hover cards. Keeps focus
-// behaviour and width consistent so the two surfaces feel structurally
-// parallel — content varies, frame doesn't.
-function ActorAvatarHoverCardShell({
-  content,
-  children,
-}: {
-  content: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const triggerRef = useRef<HTMLSpanElement>(null);
-  const [standalone, setStandalone] = useState(false);
-
-  useEffect(() => {
-    const el = triggerRef.current;
-    if (!el) return;
-    const ancestor = el.parentElement?.closest(FOCUSABLE_ANCESTOR_SELECTOR);
-    setStandalone(!ancestor);
-  }, []);
-
-  return (
-    <HoverCard>
-      <HoverCardTrigger
-        render={<span ref={triggerRef} />}
-        tabIndex={standalone ? 0 : -1}
-        className={
-          standalone
-            ? "inline-flex cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            : "inline-flex cursor-pointer"
-        }
-      >
-        {children}
-      </HoverCardTrigger>
-      <HoverCardContent align="start" className="w-72">
-        {content}
-      </HoverCardContent>
-    </HoverCard>
-  );
-}
+// CEREBRO-PATCH(actor-hover-touch): FIR-4507 former local HoverCard shell moved to @multica/cerebro-agent-avatar.
