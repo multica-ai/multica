@@ -31,7 +31,8 @@ import { deriveRuntimeHealth, runtimeDisplayName } from "@multica/core/runtimes"
 // CEREBRO-PATCH(runtime-detail-pause): pause/resume controls live in cerebro-runtime.
 // CEREBRO-PATCH(runtime-detail-tools-card-import): runtime-level unified tools card (JEH-1710). Replaces the prior MCP servers JSON card.
 // CEREBRO-PATCH(runtime-detail-sandbox-card-import): FIR-2284 consolidated sandbox surface (extracted to cerebro zone).
-import { PauseRuntimeButton, PauseBanner, RuntimeToolsCard, SandboxCard } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(runtime-detail-cheap-model-card-import): FIR-4492 per-runtime cheap model.
+import { CheapModelCard, PauseRuntimeButton, PauseBanner, RuntimeToolsCard, SandboxCard } from "@multica/cerebro-runtime/views";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -586,6 +587,13 @@ function DiagnosticsCard({
             />
           </div>
         )}
+
+        {/* CEREBRO-PATCH(runtime-detail-cheap-model-card): FIR-4492 — what this
+            runtime runs when a caller asks for the cheap tier. Sits next to the
+            model list it is picked from. */}
+        <div className="border-t pt-3">
+          <CheapModelCard runtime={runtime} wsId={wsId} canEdit={isAdmin} />
+        </div>
 
         {/* CEREBRO-PATCH(runtime-detail-presentation-mode): mount interactive-terminal toggle — open to every workspace member (server enforces membership on the PUT). */}
         <div className="border-t pt-3">

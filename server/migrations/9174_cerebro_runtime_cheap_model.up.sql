@@ -1,0 +1,16 @@
+-- 9174_cerebro_runtime_cheap_model: per-runtime cheap model (FIR-4492).
+--
+-- agent_runtime.cheap_model holds the model ID this runtime should use when a
+-- caller asks for the provider-independent "cheap" tier.
+--
+-- It exists because the server only has an authoritative model catalog for
+-- claude, codex, openai-eu and firtal-local. For hermes, opencode, cursor,
+-- kimi, kiro, pi, openclaw, antigravity and firtal-gateway the model list lives
+-- on the machine, so autopilotmodel.cheapModels cannot name a cheap model and
+-- "cheap" resolved to no override at all — the wakeup asked for a cheap run and
+-- got the agent's own model. The runtime page can enumerate that machine's own
+-- models (POST /api/runtimes/{id}/models), so the answer is picked there from
+-- the real list instead of guessed here.
+--
+-- '' means unset: unchanged behaviour, the run uses the agent's own model.
+ALTER TABLE agent_runtime ADD COLUMN IF NOT EXISTS cheap_model TEXT NOT NULL DEFAULT '';
