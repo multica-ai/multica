@@ -352,6 +352,7 @@ function credentialTitle(c: AgentCapabilityCredential): string {
 
 function toolTitle(t: AgentCapabilityTool): string {
   const parts = [t.permission || "unknown"];
+  if (t.delivery_channel) parts.push(`delivery: ${t.delivery_channel}`);
   if (t.decided_by) parts.push(`via ${t.decided_by}`);
   if (t.reason) parts.push(t.reason);
   if (t.managed_externally)

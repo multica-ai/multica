@@ -111,6 +111,7 @@ type AgentCapabilityTool struct {
 	Title                 string `json:"title,omitempty"`
 	Source                string `json:"source,omitempty"`
 	Category              string `json:"category,omitempty"`
+	DeliveryChannel       string `json:"delivery_channel,omitempty"`
 	Permission            string `json:"permission"`           // allow | ask | deny
 	DecidedBy             string `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
 	Reason                string `json:"reason,omitempty"`
@@ -708,12 +709,18 @@ func mergeCanonicalCapabilityTools(tools []AgentCapabilityTool, provider string)
 			if (tool.Title == "" || tool.Title == tool.Key) && current.Title != "" {
 				tool.Title = current.Title
 			}
+			if tool.DeliveryChannel == "" {
+				tool.DeliveryChannel = current.DeliveryChannel
+			}
 			tool.ManagedExternally = tool.ManagedExternally || current.ManagedExternally
 			out[at] = tool
 			continue
 		}
 		if (current.Title == "" || current.Title == current.Key) && tool.Title != "" {
 			current.Title = tool.Title
+		}
+		if current.DeliveryChannel == "" {
+			current.DeliveryChannel = tool.DeliveryChannel
 		}
 		current.ManagedExternally = current.ManagedExternally || tool.ManagedExternally
 		out[at] = current
@@ -812,6 +819,9 @@ func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 	if row.Source == platformcatalog.Source {
 		t.Available = true
 		t.Enforced = platformcatalog.Enforced(row.ToolKey)
+		if !row.ManagedExternally {
+			t.DeliveryChannel = "multica"
+		}
 	}
 	t.Callable = t.Allowed && t.Available && t.Enforced
 	setCapabilityBlockExplanation(&t)

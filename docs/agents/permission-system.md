@@ -118,6 +118,13 @@ surfaces must project the same effective decision:
   read-only, externally managed permission also names the concrete security
   owner that admits or rejects it. The Task Mandate overlay is applied only
   while `cerebro_task_mandate_enforcement` is on, matching both call-time gates.
+  The response keeps `permission`, `available`, `enforced`, and `callable`
+  independent: runtime inventory never rewrites the effective policy in
+  `permission`. Platform actions delivered through the authenticated `multica`
+  command/API path report `delivery_channel: "multica"`; they do not require a
+  same-named direct provider tool to be available. A successful exact call is
+  stronger execution evidence than stale direct-runtime inventory, without
+  changing the policy decision or its history.
 - The task transcript and `multica permissions task <id>` show the immutable
   Task Mandate captured for the run: `claim_generation`, `lifecycle_state`,
   producer/finalizer, inventory/discovery versions, offered/authorized counts,

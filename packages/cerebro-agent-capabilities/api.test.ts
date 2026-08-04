@@ -158,6 +158,7 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
       tools: [
         {
           key: "hooks:write",
+          delivery_channel: "multica",
           permission: "deny",
           allowed: false,
           available: true,
@@ -179,6 +180,7 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
     });
 
     expect(parsed.tools[0]).toMatchObject({
+      delivery_channel: "multica",
       allowed: false,
       available: true,
       enforced: true,

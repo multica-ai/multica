@@ -206,7 +206,7 @@ test("Settings Permissions writes the canonical policy and persists after reload
   }
 });
 
-test("Settings identifies externally enforced permissions without offering an advisory change", async ({
+test("Settings identifies workspace-governed machine intake and keeps its off-switch authorable", async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -222,19 +222,17 @@ test("Settings identifies externally enforced permissions without offering an ad
     await dismissAttributionSurvey(page);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const row = page.getByTestId("tool-card-rerun_issue");
+    const row = page.getByTestId("tool-card-autopilot_webhook");
     await expect(row).toBeVisible();
-    await expect(row.getByText("Managed externally", { exact: true })).toBeVisible();
-    const owner = row.getByText(
-      "Issue visibility, private-agent access, and task-to-issue integrity",
-      { exact: true },
-    );
+    await expect(row.getByText("Governed by", { exact: true })).toBeVisible();
+    const owner = row.getByText("Autopilot webhook secret", { exact: true });
     await expect(owner).toBeVisible();
+    await expect(row.getByText("Workspace off-switch", { exact: true })).toBeVisible();
     const [ownerBox, rowBox] = await Promise.all([owner.boundingBox(), row.boundingBox()]);
     expect(ownerBox).not.toBeNull();
     expect(rowBox).not.toBeNull();
     expect(ownerBox!.x + ownerBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
-    await expect(row.getByRole("button", { name: /^Decision:/ })).toBeDisabled();
+    await expect(row.getByRole("button", { name: /^Decision:/ })).toBeEnabled();
   } finally {
     await api.cleanup();
   }

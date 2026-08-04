@@ -102,6 +102,7 @@ export class TestApiClient {
   async getAgentCapabilities(agentId: string): Promise<{
     tools: Array<{
       key: string;
+      delivery_channel?: string;
       permission: string;
       allowed?: boolean;
       available?: boolean;

@@ -97,7 +97,10 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
       .filter({ hasText: /^Delete issue\s*·\s*blocked$/ });
     await expect(allowed).toHaveCount(1);
     await expect(denied).toHaveCount(1);
-    await expect(allowed).toHaveAttribute("title", /^allow(?:\s|·)/);
+    await expect(allowed).toHaveAttribute(
+      "title",
+      /^allow\s*·\s*delivery: multica(?:\s|·)/,
+    );
     await expect(denied).toHaveAttribute("title", /^deny(?:\s|·)/);
     await expect(allowed).toBeVisible();
     await expect(denied).toBeVisible();
@@ -107,6 +110,7 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
       expect(
         capabilities.tools.find((tool) => tool.key === "create_issue"),
       ).toMatchObject({
+        delivery_channel: "multica",
         permission: "allow",
         allowed: true,
         callable: true,

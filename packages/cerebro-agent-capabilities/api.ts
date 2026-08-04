@@ -44,6 +44,7 @@ const AgentCapabilityToolSchema = z
     title: z.string().default(""),
     source: z.string().default(""),
     category: z.string().default(""),
+    delivery_channel: z.string().default(""),
     // permission is a server enum (allow|ask|deny); unknown values downgrade to
     // an "unknown" badge rather than crashing — see the tab's switch default.
     permission: z.string().default(""),

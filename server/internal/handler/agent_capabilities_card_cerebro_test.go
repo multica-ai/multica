@@ -215,7 +215,7 @@ func TestMergeCanonicalCapabilityToolsCollapsesLiveBridgeAndPlatformRow(t *testi
 
 	tools := []AgentCapabilityTool{
 		{Key: "add_comment", Title: "add_comment", Source: capSourceScan, Permission: "allow", Allowed: true, Enforced: true},
-		{Key: "add_comment", Title: "Add comment", Source: platformcatalog.Source, Permission: "allow", Allowed: true, Available: true, Enforced: true},
+		{Key: "add_comment", Title: "Add comment", Source: platformcatalog.Source, DeliveryChannel: "multica", Permission: "allow", Allowed: true, Available: true, Enforced: true},
 	}
 	got := mergeCanonicalCapabilityTools(tools, "codex")
 	if len(got) != 1 {
@@ -223,6 +223,9 @@ func TestMergeCanonicalCapabilityToolsCollapsesLiveBridgeAndPlatformRow(t *testi
 	}
 	if got[0].Source != capSourceScan {
 		t.Fatalf("merged source = %q, want live scan source", got[0].Source)
+	}
+	if got[0].DeliveryChannel != "multica" {
+		t.Fatalf("merged delivery_channel = %q, want multica", got[0].DeliveryChannel)
 	}
 }
 
