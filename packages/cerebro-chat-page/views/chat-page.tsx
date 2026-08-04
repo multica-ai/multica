@@ -28,10 +28,12 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import { ChannelDetail } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
+import { PageHeader, MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import {
   ChatPlacementSettings,
   showsInChat,
   useChatPlacement,
+  useChatPageSettings,
   useFeatureFlag,
 } from "@multica/cerebro-feature-flags";
 
@@ -47,6 +49,10 @@ export function ChatPage() {
   const wsId = useWorkspaceId();
   const isMobile = useIsMobile();
   const { placement } = useChatPlacement();
+  // FIR-4350 — the Chat page's own display options (rows per box, grouping,
+  // sort, unread-first, search-by-default), persisted per user. Same controls
+  // the Inbox's Chat box has; the Chat page keeps its own copy.
+  const { settings, setSettings } = useChatPageSettings();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -82,21 +88,25 @@ export function ChatPage() {
       onOpenChannel={openChannel}
       onOpenAgentChat={openAgentChat}
       onOpenAgentSession={openAgentSession}
-      limit={0}
-      onSetLimit={NOOP_NUMBER}
-      sort="recent"
-      onSetSort={NOOP}
-      unreadFirst
-      onSetUnreadFirst={NOOP}
-      groupBy="type"
-      onSetGroupBy={NOOP}
+      limit={settings.limit}
+      onSetLimit={(limit) => setSettings({ limit })}
+      sort={settings.sort}
+      onSetSort={(sort) => setSettings({ sort })}
+      unreadFirst={settings.unreadFirst}
+      onSetUnreadFirst={(unreadFirst) => setSettings({ unreadFirst })}
+      groupBy={settings.groupBy}
+      onSetGroupBy={(groupBy) => setSettings({ groupBy })}
       showChannels={showChannels}
       showPeople={showPeople}
       showAgents={showAgents}
       onSetShowAgents={NOOP}
-      searchDefaultOpen
-      onSetSearchDefaultOpen={NOOP}
-      showSectionControls={false}
+      searchDefaultOpen={settings.searchDefaultOpen}
+      onSetSearchDefaultOpen={(searchDefaultOpen) => setSettings({ searchDefaultOpen })}
+      // Display settings on; but no removable block here, and agents are
+      // inbox-only so their toggle is hidden.
+      showSectionControls
+      showRemove={false}
+      showAgentsToggle={false}
       onCreate={openCreate}
       onOpenSettings={() => setSettingsOpen(true)}
       onRemove={NOOP}
@@ -122,22 +132,33 @@ export function ChatPage() {
 
   if (isMobile) {
     // Single column: the rail until something is picked, then the conversation.
+    // Both views carry the Multica mobile chrome — the top bar with the
+    // hamburger that opens the sidebar menu — so Chat is not a dead end (the
+    // inbox does the same via PageHeader / SidebarTrigger). FIR-4350.
     return (
       <div className="flex h-full min-h-0 flex-col">
         {settingsDialog}
         {selection ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="flex shrink-0 items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
-            >
-              Back
-            </button>
+            <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
+              <MobileSidebarTrigger />
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="flex items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+              >
+                Back
+              </button>
+            </div>
             <div className="flex min-h-0 flex-1 flex-col">{detail}</div>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">{rail}</div>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <PageHeader>
+              <h1 className="truncate text-sm font-semibold">Chat</h1>
+            </PageHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto">{rail}</div>
+          </div>
         )}
       </div>
     );
@@ -217,7 +238,6 @@ function EmptyDetail() {
   );
 }
 
-// SlackBlock takes its display options as controlled props. The Chat page fixes
-// them instead of persisting a second layout, so the setters are inert.
+// The Chat page has no removable block and keeps agents inbox-only, so the
+// remove / show-agents setters stay inert.
 const NOOP = () => {};
-const NOOP_NUMBER = (_n: number) => {};
