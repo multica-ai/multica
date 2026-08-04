@@ -92,7 +92,11 @@ return `{ ok: true }` on success.
 credential key. It never accepts or returns plaintext. It requires both the
 personal-browser host grant and an explicit `credential.reveal` Allow for that
 exact vault on the `browser-testers` group. Vaults outside
-`Shared/browser-login/<app>` are rejected.
+`Shared/browser-login/<app>` are rejected with a `400` naming that format.
+
+Pass the logical path `Shared/browser-login/<app>` — never Agent Vault's own
+flattened box name `shared-browser-login-<app>`, which is what its vault listing
+and the Permissions screen display. The server does that translation itself.
 
 ## Sessions — isolated logins
 

@@ -49,6 +49,17 @@ func (h *Handler) ProvisionAgentBrowserAuth(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "vault and credential keys are required")
 		return
 	}
+	// FIR-4447: reject a malformed vault path HERE, before the group gate. The
+	// same value is checked again deep inside RevealCredential, where a failure
+	// can only surface as 502 "credential unavailable" — which Cloudflare then
+	// replaces with its own error page, hiding the real cause entirely. Callers
+	// that pass Agent Vault's flattened box name (shared-browser-login-<app>)
+	// used to get either that opaque 502 or a misleading 403; they now get a 400
+	// naming the format they must use.
+	if _, ok := agentvault.BrowserLoginApp(req.Vault); !ok {
+		writeError(w, http.StatusBadRequest, agentvault.BrowserLoginVaultFormatHint)
+		return
+	}
 
 	agent, err := h.Queries.GetAgent(r.Context(), agentID)
 	if err != nil || agent.WorkspaceID != wsID {
