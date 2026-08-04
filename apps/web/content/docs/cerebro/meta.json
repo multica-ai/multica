@@ -15,6 +15,7 @@
     "channels-and-dms",
     "dashboard",
     "autopilots",
+    "agent-profile-hover-card",
     "agent-capabilities",
     "service-tokens",
     "permissions-ui",
