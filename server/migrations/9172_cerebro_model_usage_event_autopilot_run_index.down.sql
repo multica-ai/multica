@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_model_usage_event_autopilot_run;
