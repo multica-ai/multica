@@ -15,11 +15,19 @@
 // count — exactly mirroring the server's per-channel exclusion. We therefore
 // drop thread replies before deduplicating, but only when the same flag that
 // drives the server-side exclusion is on, so badge and channel row always agree.
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { deduplicateInboxItems, inboxListOptions } from "@multica/core/inbox/queries";
-import type { InboxItem } from "@multica/core/types";
+import type { Channel, InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { roundExcludedIssueIds, useRoundStatuses } from "@multica/cerebro-rounds";
+// FIR-4350 — a conversation the user has taken out of the Inbox must not be
+// counted here either, or the badge exceeds the rows the Inbox can show.
+import { channelListOptions } from "@multica/core/channels";
+import {
+  conversationKindOfChannel,
+  useHiddenConversationKinds,
+} from "@multica/cerebro-feature-flags";
 
 /**
  * Count unread inbox conversations the way the inbox list surfaces them.
@@ -56,7 +64,22 @@ export function useCerebroInboxUnreadCount(
   const threadSplit = useFeatureFlag("cerebro_inbox_thread_split");
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const { data: roundStatuses = [] } = useRoundStatuses(wsId ?? "", roundsEnabled && !!wsId);
-  const excludeIssueIds = roundExcludedIssueIds(roundStatuses);
+  const roundExcluded = roundExcludedIssueIds(roundStatuses);
+  // FIR-4350 — channels/DMs of a hidden type. Their rows are filtered out of
+  // the list, so their unread must leave the badge with them.
+  const hiddenKinds = useHiddenConversationKinds();
+  const { data: channels = EMPTY_CHANNELS } = useQuery({
+    ...channelListOptions(wsId ?? ""),
+    enabled: !!wsId && hiddenKinds.size > 0,
+  });
+  const excludeIssueIds = useMemo(() => {
+    if (hiddenKinds.size === 0) return roundExcluded;
+    const next = new Set(roundExcluded);
+    for (const c of channels) {
+      if (hiddenKinds.has(conversationKindOfChannel(c.kind))) next.add(c.id);
+    }
+    return next;
+  }, [roundExcluded, hiddenKinds, channels]);
   const { data } = useQuery({
     ...inboxListOptions(wsId ?? ""),
     enabled: !!wsId,
@@ -65,3 +88,6 @@ export function useCerebroInboxUnreadCount(
   });
   return data ?? 0;
 }
+
+// Stable empty array — an inline default would change reference each render.
+const EMPTY_CHANNELS: Channel[] = [];

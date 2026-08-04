@@ -92,6 +92,8 @@ import { AppsNavItem } from "@multica/cerebro-apps/views"; // CEREBRO-PATCH(cere
 // CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 sidebar entry for cerebro approval inbox
 import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav-item";
 // CEREBRO-PATCH(cerebro-access-sidebar): FIR-2284 Bite 3 — removed; the old grant-based Access page was retired so per-tool Permissions (Settings) is the single access surface.
+// CEREBRO-PATCH(cerebro-chat-page-sidebar): FIR-4350 sidebar entry for the Chat page
+import { ChatNavItem } from "./cerebro-chat-nav-item";
 // CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 sidebar entry for the Notes page
 import { NotesNavItem } from "@multica/cerebro-notes/views/notes-nav-item";
 // CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 sidebar entry for the Reminders overview
@@ -866,6 +868,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </React.Fragment>
                   );
                 })}
+                {/* CEREBRO-PATCH(cerebro-chat-page-sidebar): FIR-4350 Chat entry in workspace group */}
+                <ChatNavItem workspaceSlug={workspace?.slug ?? ""} wsId={wsId} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 Notes entry in workspace group */}
                 <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 Reminders entry in workspace group */}

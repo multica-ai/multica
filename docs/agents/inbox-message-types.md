@@ -43,6 +43,33 @@ Chat** — are really **3 row kinds**, where `channel` splits into Channels vs D
 by its `kind` field. The view filter lives in `matchesView()` in
 `inbox-page.tsx`.
 
+### Chat placement — a row can be moved out of the inbox (FIR-4350)
+
+A row kind is not automatically *in* the inbox. Each user has a **placement**
+setting per conversation type — Channels, DM, Agent chat — deciding whether that
+type is shown on the **Chat page**, in the **Inbox**, or both. It is stored per
+user in the `cerebro_chat_placement` preferences key (no table, no endpoint —
+the same blob favourites and the inbox layout use) and gated by the
+`cerebro_chat_page` flag, default OFF.
+
+- **Hidden, never deleted.** A type whose Inbox place is off has its rows
+  filtered out of the list only. Nothing is archived, marked read or removed
+  server-side, and turning the place back on shows every row again with its read
+  state, archive state and unread count unchanged.
+- **One predicate, three consumers.** `useHiddenConversationKinds()` +
+  `isConversationHidden()` (`packages/cerebro-feature-flags/chat-inbox-hiding.ts`)
+  are read by the classic inbox (`inbox-page.tsx`, via
+  `CEREBRO-PATCH(inbox-chat-placement)`), the dynamic inbox
+  (`use-dynamic-inbox-data.ts`) and the Inbox unread badge
+  (`packages/cerebro-inbox/use-inbox-unread-count.ts`) — so the badge can never
+  count a row the list does not show.
+- **`notif` rows are never hidden by placement.** They are issue notifications,
+  not conversation. A `thread` row is placed with its channel.
+- **Groups are placed with DMs**, matching how they render everywhere else
+  (FIR-2159). See `conversationKindOfChannel`.
+- The flag off means an empty hidden set, so a user who never enables Chat sees
+  the inbox exactly as this document describes elsewhere.
+
 ### Per-row actions and cross-type parity (TECH-3352)
 
 Every row kind exposes the same action affordance so the inbox feels uniform:

@@ -43,6 +43,8 @@ import {
 import { SecretaryCriteriaSettings } from "./secretary-criteria-settings";
 import { RemindersSettings } from "./reminders-settings";
 import { DictationSettings } from "./dictation-settings-tab";
+// FIR-4350 — the Chat placement matrix renders under the cerebro_chat_page toggle.
+import { ChatPlacementSettings } from "./chat-placement-settings";
 import {
   useFeatureFlag,
   useFeatureFlagsQuery,
@@ -66,6 +68,7 @@ const FLAG_SETTINGS: Partial<Record<CerebroFlagKey, ComponentType>> = {
   cerebro_inbox_secretary: SecretaryCriteriaSettings,
   cerebro_reminders: RemindersSettings,
   cerebro_voice_dictation_enabled: DictationSettings,
+  cerebro_chat_page: ChatPlacementSettings,
 };
 
 const DOT_TONE: Record<"on" | "off" | "forced", string> = {

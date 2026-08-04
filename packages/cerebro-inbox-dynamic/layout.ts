@@ -444,3 +444,32 @@ export function upsertUserInboxPreset(
 export function deleteUserInboxPreset(existing: UserInboxPreset[], presetId: string): UserInboxPreset[] {
   return existing.filter((preset) => preset.id !== presetId);
 }
+
+/** Feature flags that decide whether a persisted section may still render. */
+export interface SectionFlagContext {
+  slackBlock: boolean;
+  secretary: boolean;
+  favorites: boolean;
+}
+
+/**
+ * FIR-4350 — a section kind whose feature flag is off must be hidden, not
+ * rendered as a generic box. `team` was gated only at its own render branch, so
+ * a persisted Chat box fell through to the default branch and stayed on screen
+ * as an empty generic section when `cerebro_inbox_slack_block` was off.
+ */
+export function isSectionKindEnabled(
+  kind: SectionKind,
+  flags: SectionFlagContext,
+): boolean {
+  switch (kind) {
+    case "team":
+      return flags.slackBlock;
+    case "secretary":
+      return flags.secretary;
+    case "favorites":
+      return flags.favorites;
+    default:
+      return true;
+  }
+}
