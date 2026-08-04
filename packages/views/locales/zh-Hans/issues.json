@@ -315,6 +315,7 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "thread_nav_label": "快速跳转到讨论",
+    "scroll_to_latest": "滚动到最新动态",
     "thread_nav_resolved_label": "{{title}}（已解决）",
     "sidebar_tooltip": "切换侧边栏",
     "find": {

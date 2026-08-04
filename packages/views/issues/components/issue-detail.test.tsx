@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -419,18 +419,31 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // background instead, which is mechanism-independent and observable without
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
+const mockVirtuoso = vi.hoisted(() => ({
+  atBottomStateChange: undefined as ((atBottom: boolean) => void) | undefined,
+  scrollToIndex: vi.fn(),
+}));
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown },
+    {
+      data,
+      itemContent,
+      atBottomStateChange,
+    }: {
+      data: unknown[];
+      itemContent: (i: number, item: unknown) => unknown;
+      atBottomStateChange?: (atBottom: boolean) => void;
+    },
     ref: any,
   ) {
+    mockVirtuoso.atBottomStateChange = atBottomStateChange;
     useImperativeHandle(ref, () => ({
       // Real Virtuoso ref methods are not exercised by tests in this file
       // since the deep-link cold-path drives the container's scrollTop on the
       // real DOM node, not Virtuoso's imperative API.
       scrollIntoView: vi.fn(),
-      scrollToIndex: vi.fn(),
+      scrollToIndex: mockVirtuoso.scrollToIndex,
     }));
     return (
       <div data-testid="virtuoso-mock">
@@ -446,6 +459,8 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   scrollIntoViewSpy.mockClear();
+  mockVirtuoso.atBottomStateChange = undefined;
+  mockVirtuoso.scrollToIndex.mockClear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,
@@ -844,6 +859,31 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("offers a mobile-only return to the latest issue activity", async () => {
+    mockViewport.isMobile = true;
+
+    renderIssueDetail();
+
+    await screen.findByText("Started working on this");
+    expect(
+      screen.queryByRole("button", { name: enIssues.detail.scroll_to_latest }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      mockVirtuoso.atBottomStateChange?.(false);
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: enIssues.detail.scroll_to_latest }),
+    );
+
+    expect(mockVirtuoso.scrollToIndex).toHaveBeenCalledWith({
+      index: 1,
+      align: "end",
+      behavior: "smooth",
+    });
   });
 
   it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {

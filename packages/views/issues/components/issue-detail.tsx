@@ -6,6 +6,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
 import {
   Archive,
+  ArrowDown,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -1425,6 +1426,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = !!highlightCommentId || find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Mobile has no minimap rail. Track Virtuoso's current issue together with
+  // its bottom state so a route-level issue switch cannot flash the previous
+  // issue's affordance before the remounted list reports its position.
+  const [timelineBottom, setTimelineBottom] = useState({ issueId: id, isNear: true });
+  const isNearTimelineEnd = timelineBottom.issueId !== id || timelineBottom.isNear;
+  const handleTimelineBottomChange = useCallback(
+    (isNear: boolean) => setTimelineBottom({ issueId: id, isNear }),
+    [id],
+  );
+  const jumpToLatestActivity = useCallback(() => {
+    const index = items.length - 1;
+    if (index < 0) return;
+    virtuosoRef.current?.scrollToIndex({ index, align: "end", behavior: "smooth" });
+  }, [items.length]);
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -2758,6 +2773,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       data={items}
                       initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
+                      atBottomThreshold={120}
+                      atBottomStateChange={handleTimelineBottomChange}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
                       skipAnimationFrameInResizeObserver
                       // followOutput intentionally NOT set. Virtuoso treats
@@ -2810,6 +2827,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+
+        {isMobile && !isFlatTimeline && !isNearTimelineEnd && items.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label={t(($) => $.detail.scroll_to_latest)}
+                  onClick={jumpToLatestActivity}
+                  className="absolute bottom-24 left-1/2 z-20 size-11 -translate-x-1/2 rounded-full bg-background shadow-md"
+                />
+              }
+            >
+              <ArrowDown />
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {t(($) => $.detail.scroll_to_latest)}
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Thread quick-jump rail — rides the scroll container's right edge,
             next to the scrollbar, where the pointer already is while
