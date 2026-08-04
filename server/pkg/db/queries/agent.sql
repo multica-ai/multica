@@ -304,11 +304,15 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
 -- whose completion lookup would race over "most recent issue by this agent".
+-- CEREBRO-PATCH(claim-agent-pause-sql): FIR-4508 — refuse claim while agent.paused_at
+-- is set (closes the race between GetAgent pause check and this UPDATE).
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id -- CEREBRO-PATCH(claim-agent-pause-sql)
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND a.paused_at IS NULL -- CEREBRO-PATCH(claim-agent-pause-sql)
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -328,7 +332,7 @@ WHERE id = (
       )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF atq SKIP LOCKED -- CEREBRO-PATCH(claim-agent-pause-sql): JOIN requires OF atq
 )
 RETURNING *;
 
@@ -338,17 +342,20 @@ RETURNING *;
 -- with no `started_at`, so the daemon has not acknowledged it via StartTask.
 -- Refresh dispatched_at so the server-side dispatch timeout measures from the
 -- recovered delivery attempt.
+-- CEREBRO-PATCH(reclaim-agent-pause-sql): FIR-4508 — do not redeliver to a paused agent.
 UPDATE agent_task_queue
 SET dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id -- CEREBRO-PATCH(reclaim-agent-pause-sql)
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
+      AND a.paused_at IS NULL -- CEREBRO-PATCH(reclaim-agent-pause-sql)
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
     LIMIT 1
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF atq SKIP LOCKED -- CEREBRO-PATCH(reclaim-agent-pause-sql): JOIN requires OF atq
 )
 RETURNING *;
 
@@ -542,6 +549,13 @@ WITH victims AS (
           WHERE rt.id = atq.runtime_id
             AND rt.paused_at IS NOT NULL
       )
+      -- CEREBRO-PATCH(paused-agent-queued-ttl): FIR-4508 — protect agent-scoped
+      -- pause queues the same way as runtime pause.
+      AND NOT EXISTS ( -- CEREBRO-PATCH(paused-agent-queued-ttl)
+          SELECT 1 FROM agent a -- CEREBRO-PATCH(paused-agent-queued-ttl)
+          WHERE a.id = atq.agent_id -- CEREBRO-PATCH(paused-agent-queued-ttl)
+            AND a.paused_at IS NOT NULL -- CEREBRO-PATCH(paused-agent-queued-ttl)
+      ) -- CEREBRO-PATCH(paused-agent-queued-ttl)
       -- CEREBRO-PATCH(offline-parked-queued-grace): FIR-1722 — spare a parked queued
       -- task on a runtime that is only temporarily offline (the runtime row still
       -- exists, so it is expected to reconnect and claim it on the same runtime_id)
@@ -573,6 +587,12 @@ WHERE t.id = v.id
       WHERE rt.id = t.runtime_id
         AND rt.paused_at IS NOT NULL
   )
+  -- CEREBRO-PATCH(paused-agent-queued-ttl): FIR-4508 — mirror agent-pause exemption.
+  AND NOT EXISTS ( -- CEREBRO-PATCH(paused-agent-queued-ttl)
+      SELECT 1 FROM agent a -- CEREBRO-PATCH(paused-agent-queued-ttl)
+      WHERE a.id = t.agent_id -- CEREBRO-PATCH(paused-agent-queued-ttl)
+        AND a.paused_at IS NOT NULL -- CEREBRO-PATCH(paused-agent-queued-ttl)
+  ) -- CEREBRO-PATCH(paused-agent-queued-ttl)
   -- CEREBRO-PATCH(offline-parked-queued-grace): mirror the CTE offline-grace exemption
   -- in the apply-time re-check so a runtime that went offline between selection and
   -- update still has its parked task spared (FIR-1722).
@@ -650,9 +670,12 @@ ORDER BY priority DESC, created_at ASC;
 -- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 -- runtime is busy on a long-running task. Backed by the partial index
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+-- CEREBRO-PATCH(claim-candidates-skip-paused-agent): FIR-4508 — skip paused agents.
+SELECT atq.* FROM agent_task_queue atq -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+JOIN agent a ON a.id = atq.agent_id -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+WHERE atq.runtime_id = $1 AND atq.status = 'queued' -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+  AND a.paused_at IS NULL -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
+ORDER BY atq.priority DESC, atq.created_at ASC; -- CEREBRO-PATCH(claim-candidates-skip-paused-agent)
 
 -- name: ListActiveTasksByIssue :many
 -- Backs the issue-detail "agent live" banner. Includes 'queued' so the
