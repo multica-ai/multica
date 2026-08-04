@@ -155,3 +155,66 @@ func TestStoreAppendObservationIsWorkspaceScopedAndAppendOnly(t *testing.T) {
 		t.Fatalf("other workspace received %d observations, want none", len(otherWorkspaceObservations))
 	}
 }
+
+// needs_solved was scanned as a hardcoded nil, so the People outcome tile stayed
+// blank even for a person whose issues had all reached a terminal status.
+func TestStoreListPeopleImpactReportsSolvedNeedsFromTerminalIssues(t *testing.T) {
+	if storeTestPool == nil {
+		t.Skip("no test database")
+	}
+
+	ctx := context.Background()
+	store := NewStore(storeTestPool)
+
+	var workspaceID, userID uuid.UUID
+	if err := storeTestPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, issue_prefix)
+		VALUES ('AI Impact People', 'ai-impact-people-' || gen_random_uuid(), 'AIP')
+		RETURNING id`).Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = storeTestPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+	if err := storeTestPool.QueryRow(ctx, `
+		INSERT INTO "user" (email, name)
+		VALUES ('ai-impact-people-' || gen_random_uuid() || '@example.com', 'Maya')
+		RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = storeTestPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	if _, err := storeTestPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		workspaceID, userID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	for number, status := range []string{"done", "done", "cancelled", "in_progress"} {
+		if _, err := storeTestPool.Exec(ctx, `
+			INSERT INTO issue (workspace_id, title, creator_type, creator_id, status, number)
+			VALUES ($1, 'People probe', 'member', $2, $3, $4)`,
+			workspaceID, userID, status, number+1); err != nil {
+			t.Fatalf("create %s issue: %v", status, err)
+		}
+	}
+
+	people, err := store.ListPeopleImpact(ctx, workspaceID, PeoplePeriodMonth, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list people impact: %v", err)
+	}
+	if len(people) != 1 {
+		t.Fatalf("people count = %d, want the single workspace member", len(people))
+	}
+	needs := people[0].Outcomes.NeedsSolved
+	if needs == nil {
+		t.Fatalf("needs_solved is nil, want the terminal issues reported")
+	}
+	if needs.Solved != 2 || needs.Measurable != 3 {
+		t.Fatalf("needs_solved = %d/%d, want 2/3 (two done, one cancelled, one still open)",
+			needs.Solved, needs.Measurable)
+	}
+	if people[0].Usage.Issues != 4 {
+		t.Fatalf("issues = %d, want every issue the member created", people[0].Usage.Issues)
+	}
+}

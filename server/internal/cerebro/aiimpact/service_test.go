@@ -22,6 +22,17 @@ type recordingObservationStore struct {
 	listMetricsWorkspaceID               uuid.UUID
 	listWorkspaceObservationsWorkspaceID uuid.UUID
 	people                               []PersonImpact
+	derivedEvidence                      []EvidenceReadModel
+	listDerivedWorkspaceID               uuid.UUID
+}
+
+func (s *recordingObservationStore) ListDerivedEvidence(
+	_ context.Context,
+	workspaceID uuid.UUID,
+	_ time.Time,
+) ([]EvidenceReadModel, error) {
+	s.listDerivedWorkspaceID = workspaceID
+	return append([]EvidenceReadModel(nil), s.derivedEvidence...), nil
 }
 
 func (s *recordingObservationStore) ListPeopleImpact(

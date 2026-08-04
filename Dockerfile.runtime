@@ -34,8 +34,10 @@ COPY server/ ./server/
 # When no build-arg is passed (e.g. Sliplane auto-deploy, which does not pass one),
 # this default is what the runtime reports in `multica runtime list`, so keep it
 # bumped to the current release line (homebrew-tap latest) instead of letting it
-# drift back to a stale baseline.
-ARG VERSION=v1.21.0
+# drift back to a stale baseline. Letting it drift is not cosmetic: the server
+# schedules a CLI update for every runtime reporting an older version, which is
+# what produced the FIR-4369 update loop on multica-runtime-jesper.
+ARG VERSION=v1.23.0
 ARG COMMIT=unknown
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 
