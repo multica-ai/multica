@@ -172,70 +172,87 @@ func TestHermesExplicitHomeBypassesInheritedGuard(t *testing.T) {
 	}
 }
 
-func TestCodexInheritedHomeWithProviderlessConfigFailsClosed(t *testing.T) {
+func TestCodexInheritedProviderlessHomeCanUseNativeDefaultProvider(t *testing.T) {
 	sharedHome := t.TempDir()
 	mustWrite(t, filepath.Join(sharedHome, "config.toml"), "model = \"gpt-5-codex\"\napproval_policy = \"never\"\n")
 	t.Setenv("CODEX_HOME", sharedHome)
+	t.Setenv("OPENAI_API_KEY", "test-key")
 
-	_, err := Prepare(PrepareParams{
+	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: t.TempDir(),
 		WorkspaceID:    "ws-providerless-codex",
 		TaskID:         "11111111-2222-3333-4444-555555555555",
 		Provider:       "codex",
 		Task:           TaskContextForEnv{IssueID: "providerless-codex"},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err == nil {
-		t.Fatal("Prepare succeeded with providerless inherited CODEX_HOME; expected fail closed")
+	if err != nil {
+		t.Fatalf("Prepare failed for providerless inherited CODEX_HOME that can use Codex's native default provider: %v", err)
 	}
-	if !strings.Contains(err.Error(), "model_provider") {
-		t.Fatalf("error = %v, want model_provider detail", err)
+	defer env.Cleanup(true)
+	if env.CodexHome == "" {
+		t.Fatal("Prepare did not set CodexHome")
 	}
 }
 
-func TestCodexDefaultHomeWithProviderlessConfigFailsClosed(t *testing.T) {
+func TestCodexDefaultProviderlessHomeCanUseNativeDefaultProvider(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	mustWrite(t, filepath.Join(home, ".codex", "config.toml"), "model = \"gpt-5-codex\"\napproval_policy = \"never\"\n")
 
-	_, err := Prepare(PrepareParams{
+	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: t.TempDir(),
 		WorkspaceID:    "ws-default-providerless-codex",
 		TaskID:         "21111111-2222-3333-4444-555555555555",
 		Provider:       "codex",
 		Task:           TaskContextForEnv{IssueID: "default-providerless-codex"},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Prepare failed for providerless default ~/.codex that can use Codex's native default provider: %v", err)
+	}
+	defer env.Cleanup(true)
+	if env.CodexHome == "" {
+		t.Fatal("Prepare did not set CodexHome")
+	}
+}
+
+func TestCodexProviderModelProviderLostDuringSeedingFailsClosed(t *testing.T) {
+	sharedHome := t.TempDir()
+	codexHome := t.TempDir()
+	writeCodexTestProviderConfig(t, sharedHome, "")
+	mustWrite(t, filepath.Join(codexHome, "config.toml"), "model = \"gpt-5-codex\"\napproval_policy = \"never\"\n")
+
+	err := ensureCodexProviderSeedingPreserved(codexHome, sharedHome, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
-		t.Fatal("Prepare succeeded with providerless default ~/.codex; expected fail closed")
+		t.Fatal("provider seeding check succeeded after model_provider was lost; expected fail closed")
 	}
 	if !strings.Contains(err.Error(), "model_provider") {
 		t.Fatalf("error = %v, want model_provider detail", err)
 	}
 }
 
-func TestHermesInheritedHomeProviderlessConfigFailsClosed(t *testing.T) {
+func TestHermesInheritedProviderlessHomeCanUseNativeDefaults(t *testing.T) {
 	sharedHome := t.TempDir()
 	workspacesRoot := t.TempDir()
 	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "skills: {}\n")
 	t.Setenv("HERMES_HOME", sharedHome)
 
 	res := ResolveHermesProfileWithWorkspacesRoot("", "", false, false, workspacesRoot)
-	if res.Err == nil {
-		t.Fatal("ResolveHermesProfile succeeded with providerless inherited HERMES_HOME; expected fail closed")
+	if res.Err != nil {
+		t.Fatalf("ResolveHermesProfile failed for providerless inherited HERMES_HOME that can use Hermes defaults: %v", res.Err)
 	}
-	if !strings.Contains(res.Err.Error(), "model/provider") {
-		t.Fatalf("error = %v, want model/provider detail", res.Err)
-	}
-	if strings.Contains(res.Err.Error(), "workspaces root") {
-		t.Fatalf("error = %v, hermes provider check test should not be satisfied by containment", res.Err)
+	if res.SourceHome != sharedHome {
+		t.Fatalf("SourceHome = %q, want %q", res.SourceHome, sharedHome)
 	}
 }
 
-func TestReuseCodexProviderConfigFailureForcesFreshPrepare(t *testing.T) {
+func TestReuseCodexProviderlessConfigCanUseNativeDefaultProvider(t *testing.T) {
 	sharedHome := t.TempDir()
 	writeCodexTestProviderConfig(t, sharedHome, "")
 	t.Setenv("CODEX_HOME", sharedHome)
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	workspacesRoot := t.TempDir()
 
 	env, err := Prepare(PrepareParams{
@@ -258,7 +275,7 @@ func TestReuseCodexProviderConfigFailureForcesFreshPrepare(t *testing.T) {
 		Provider:       "codex",
 		Task:           TaskContextForEnv{IssueID: "reuse-provider-fail"},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if reused != nil {
-		t.Fatal("Reuse succeeded with unusable codex provider config; expected nil to force fresh Prepare")
+	if reused == nil {
+		t.Fatal("Reuse returned nil for providerless Codex config that can use Codex's native default provider")
 	}
 }

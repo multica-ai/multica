@@ -41,6 +41,24 @@ func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	return c, fs, messages
 }
 
+func TestCodexProviderlessDefaultFailureAnnotation(t *testing.T) {
+	codexHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("model = \"gpt-5-codex\"\n"), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+	backend := &codexBackend{cfg: Config{Env: map[string]string{"CODEX_HOME": codexHome}}}
+
+	result := backend.annotateCodexProviderlessDefaultFailure(Result{Status: "failed", Error: "missing api key"})
+	if !strings.Contains(result.Error, "Codex config note: CODEX_HOME/config.toml has no model_provider") {
+		t.Fatalf("annotated error = %q, want providerless config note", result.Error)
+	}
+
+	completed := backend.annotateCodexProviderlessDefaultFailure(Result{Status: "completed", Error: "ignored"})
+	if strings.Contains(completed.Error, "Codex config note:") {
+		t.Fatalf("completed result should not be annotated: %q", completed.Error)
+	}
+}
+
 type fakeStdin struct {
 	mu   sync.Mutex
 	data []byte

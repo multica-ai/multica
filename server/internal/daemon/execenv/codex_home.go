@@ -318,6 +318,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home ensure memory config failed", "error", err)
 	}
 
+	if err := ensureCodexProviderSeedingPreserved(codexHome, sharedHome, logger); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -336,42 +340,42 @@ func resolveSharedCodexHome(workspacesRoot string) (string, error) {
 	return filepath.Join(home, ".codex"), nil
 }
 
-func ensureCodexProviderConfigUsable(codexHome string) error {
-	configPath := filepath.Join(codexHome, "config.toml")
-	data, err := os.ReadFile(configPath)
+func ensureCodexProviderSeedingPreserved(codexHome, sharedHome string, logger *slog.Logger) error {
+	sharedProvider, err := codexConfigModelProvider(sharedHome)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("config.toml is missing model_provider")
-		}
-		return fmt.Errorf("read config.toml: %w", err)
+		return fmt.Errorf("inspect shared codex provider config: %w", err)
 	}
-	var cfg struct {
-		ModelProvider  string                    `toml:"model_provider"`
-		ModelProviders map[string]map[string]any `toml:"model_providers"`
+	taskProvider, err := codexConfigModelProvider(codexHome)
+	if err != nil {
+		return fmt.Errorf("inspect task codex provider config: %w", err)
 	}
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config.toml: %w", err)
+	if sharedProvider != "" && taskProvider == "" {
+		return fmt.Errorf("codex config lost model_provider %q while seeding from shared home %s", sharedProvider, sharedHome)
 	}
-	provider := strings.TrimSpace(cfg.ModelProvider)
-	if provider == "" {
-		return fmt.Errorf("config.toml is missing model_provider")
+	if sharedProvider != "" && taskProvider != sharedProvider {
+		return fmt.Errorf("codex config changed model_provider from %q to %q while seeding from shared home %s", sharedProvider, taskProvider, sharedHome)
 	}
-	if _, ok := cfg.ModelProviders[provider]; ok {
-		return nil
+	if sharedProvider == "" && taskProvider == "" && logger != nil {
+		logger.Warn("execenv: codex config has no model_provider; allowing Codex native default provider", "shared_home", sharedHome, "codex_home", codexHome)
 	}
-	if isBuiltInCodexModelProvider(provider) {
-		if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err == nil {
-			return nil
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat auth.json for built-in provider %q: %w", provider, err)
-		}
-		return fmt.Errorf("config.toml selects built-in model_provider %q but auth.json is missing", provider)
-	}
-	return fmt.Errorf("config.toml selects model_provider %q but [model_providers.%s] is missing", provider, provider)
+	return nil
 }
 
-func isBuiltInCodexModelProvider(provider string) bool {
-	return provider == "openai"
+func codexConfigModelProvider(home string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read config.toml: %w", err)
+	}
+	var cfg struct {
+		ModelProvider string `toml:"model_provider"`
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return "", fmt.Errorf("parse config.toml: %w", err)
+	}
+	return strings.TrimSpace(cfg.ModelProvider), nil
 }
 
 // codexSessionStateGlobs are the session-derived SQLite state Codex builds

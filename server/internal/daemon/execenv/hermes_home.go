@@ -256,46 +256,7 @@ func guardInheritedHermesHome(res HermesProfileResolution, inherited bool, works
 		res.Err = err
 		return res
 	}
-	if err := hermesSourceHomeProviderConfig(res.SourceHome); err != nil {
-		res.Err = fmt.Errorf("hermes: inherited HERMES_HOME is not usable (%s): %w", res.SourceHome, err)
-	}
 	return res
-}
-
-func hermesSourceHomeProviderConfig(home string) error {
-	data, err := os.ReadFile(filepath.Join(home, "config.yaml"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read config.yaml: %w", err)
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("parse config.yaml: %w", err)
-	}
-	if yamlDocumentHasAnyTopLevelKey(&doc, "model", "provider", "providers", "api_key") {
-		return nil
-	}
-	return fmt.Errorf("config.yaml has no model/provider settings")
-}
-
-func yamlDocumentHasAnyTopLevelKey(doc *yaml.Node, keys ...string) bool {
-	if doc == nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return false
-	}
-	root := doc.Content[0]
-	if root.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		for _, key := range keys {
-			if root.Content[i].Value == key {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // hermesRootFromHome reproduces hermes_constants.get_default_hermes_root: the

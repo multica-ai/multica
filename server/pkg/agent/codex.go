@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -748,6 +749,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	go func() {
 		defer close(msgCh)
 		defer close(resCh)
+		sendResult := func(result Result) {
+			resCh <- b.annotateCodexProviderlessDefaultFailure(result)
+		}
 		session := firstSession
 		attemptOpts := opts
 		for attempt := 1; attempt <= 2; attempt++ {
@@ -755,7 +759,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				var err error
 				session, err = b.executeOnce(ctx, prompt, attemptOpts, attempt)
 				if err != nil {
-					resCh <- Result{Status: "failed", Error: err.Error()}
+					sendResult(Result{Status: "failed", Error: err.Error()})
 					return
 				}
 			}
@@ -788,7 +792,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			result, ok := <-session.Result
 			if !ok {
 				flushHeldPins()
-				resCh <- Result{Status: "failed", Error: "codex attempt closed without result"}
+				sendResult(Result{Status: "failed", Error: "codex attempt closed without result"})
 				return
 			}
 			retryReason := ""
@@ -800,7 +804,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			}
 			if retryReason == "" || attempt == 2 {
 				flushHeldPins()
-				resCh <- result
+				sendResult(result)
 				return
 			}
 			// The model catalog refresh reaches the network, so give the
@@ -827,7 +831,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			select {
 			case <-ctx.Done():
 				flushHeldPins()
-				resCh <- result
+				sendResult(result)
 				return
 			case <-time.After(backoff):
 			}
@@ -835,6 +839,36 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func (b *codexBackend) annotateCodexProviderlessDefaultFailure(result Result) Result {
+	if result.Status == "completed" || strings.TrimSpace(result.Error) == "" {
+		return result
+	}
+	codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+	if codexHome == "" || strings.Contains(result.Error, "Codex config note:") {
+		return result
+	}
+	provider, ok := codexConfigModelProviderForDiagnostic(filepath.Join(codexHome, "config.toml"))
+	if !ok || provider != "" {
+		return result
+	}
+	result.Error += "\n\nCodex config note: CODEX_HOME/config.toml has no model_provider; this task was allowed to use Codex's native default provider/environment credentials."
+	return result
+}
+
+func codexConfigModelProviderForDiagnostic(configPath string) (string, bool) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", false
+	}
+	var cfg struct {
+		ModelProvider string `toml:"model_provider"`
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(cfg.ModelProvider), true
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
