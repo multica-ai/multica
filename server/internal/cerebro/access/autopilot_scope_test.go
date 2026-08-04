@@ -96,11 +96,22 @@ func TestCanEdit(t *testing.T) {
 	group := uuid(3)
 
 	wsAuto := AutopilotView{Scope: ScopeWorkspace}
+	wsCreator := AutopilotView{
+		Scope:         ScopeWorkspace,
+		CreatedByType: "member",
+		CreatedByID:   owner,
+	}
 	personal := AutopilotView{Scope: ScopePersonal, OwnerUserID: owner}
 	groupAuto := AutopilotView{Scope: ScopeGroup, GroupID: group}
 
 	if CanEdit(wsAuto, Viewer{UserID: other}) {
-		t.Fatal("workspace: regular member must NOT edit")
+		t.Fatal("workspace: regular non-creator member must NOT edit")
+	}
+	if !CanEdit(wsCreator, Viewer{UserID: owner}) {
+		t.Fatal("workspace: creator must edit (FIR-4359)")
+	}
+	if CanEdit(wsCreator, Viewer{UserID: other}) {
+		t.Fatal("workspace: non-creator member must NOT edit (FIR-4359)")
 	}
 	if !CanEdit(wsAuto, Viewer{UserID: other, IsAdmin: true}) {
 		t.Fatal("workspace: admin must edit")
