@@ -32,13 +32,25 @@ func TestRedisClientName(t *testing.T) {
 	}
 }
 
+// namedClientOptions builds a single-node client through the factory and
+// returns its resolved options. Cluster mode is off (REDIS_CLUSTER unset), so
+// newNamedClient yields a *redis.Client whose ClientName reflects the naming
+// logic under test.
+func namedClientOptions(t *testing.T, base *redis.Options, suffix string) *redis.Options {
+	t.Helper()
+	client := newRedisClientFactory(base).newNamedClient(suffix)
+	t.Cleanup(func() { _ = client.Close() })
+	c, ok := client.(*redis.Client)
+	if !ok {
+		t.Fatalf("expected *redis.Client in single-node mode, got %T", client)
+	}
+	return c.Options()
+}
+
 func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "")
 	base := &redis.Options{Addr: "localhost:6379"}
-	client := newNamedRedisClient(base, "store")
-	defer client.Close()
-
-	opts := client.Options()
+	opts := namedClientOptions(t, base, "store")
 	if opts.ClientName != "multica-api:store" {
 		t.Errorf("ClientName = %q, want %q", opts.ClientName, "multica-api:store")
 	}
@@ -47,10 +59,7 @@ func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 func TestNewNamedRedisClient_DisableClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "true")
 	base := &redis.Options{Addr: "localhost:6379"}
-	client := newNamedRedisClient(base, "store")
-	defer client.Close()
-
-	opts := client.Options()
+	opts := namedClientOptions(t, base, "store")
 	if opts.ClientName != "" {
 		t.Errorf("ClientName = %q, want empty when REDIS_DISABLE_CLIENT_NAME=true", opts.ClientName)
 	}
@@ -60,10 +69,7 @@ func TestNewNamedRedisClient_DisableClientName_ClearsPreExistingName(t *testing.
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "true")
 	// Simulate REDIS_URL with ?client_name=foo — ParseURL sets ClientName.
 	base := &redis.Options{Addr: "localhost:6379", ClientName: "foo"}
-	client := newNamedRedisClient(base, "store")
-	defer client.Close()
-
-	opts := client.Options()
+	opts := namedClientOptions(t, base, "store")
 	if opts.ClientName != "" {
 		t.Errorf("ClientName = %q, want empty: REDIS_DISABLE_CLIENT_NAME must clear pre-existing name from URL", opts.ClientName)
 	}
@@ -72,13 +78,48 @@ func TestNewNamedRedisClient_DisableClientName_ClearsPreExistingName(t *testing.
 func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "not-a-bool")
 	base := &redis.Options{Addr: "localhost:6379"}
-	client := newNamedRedisClient(base, "store")
-	defer client.Close()
-
-	opts := client.Options()
+	opts := namedClientOptions(t, base, "store")
 	// Invalid value falls back to default (false), so ClientName IS set
 	if opts.ClientName != "multica-api:store" {
 		t.Errorf("ClientName = %q, want %q (invalid env should fall back to naming enabled)", opts.ClientName, "multica-api:store")
+	}
+}
+
+// TestRedisClientFactory_ClusterMode verifies REDIS_CLUSTER=true makes the
+// factory produce a *redis.ClusterClient, and that REDIS_ADDRS seeds are
+// merged with the base Addr. Single-node mode (the default) is covered by the
+// naming tests above, which assert a *redis.Client comes back.
+func TestRedisClientFactory_ClusterMode(t *testing.T) {
+	t.Setenv("REDIS_CLUSTER", "true")
+	t.Setenv("REDIS_ADDRS", "seed-2:6379, seed-3:6379")
+	base := &redis.Options{Addr: "seed-1:6379"}
+
+	factory := newRedisClientFactory(base)
+	if !factory.cluster {
+		t.Fatal("factory.cluster = false, want true when REDIS_CLUSTER=true")
+	}
+	if len(factory.extraAddrs) != 2 || factory.extraAddrs[0] != "seed-2:6379" || factory.extraAddrs[1] != "seed-3:6379" {
+		t.Fatalf("extraAddrs = %v, want [seed-2:6379 seed-3:6379]", factory.extraAddrs)
+	}
+
+	client := factory.newNamedClient("store")
+	t.Cleanup(func() { _ = client.Close() })
+	if _, ok := client.(*redis.ClusterClient); !ok {
+		t.Fatalf("expected *redis.ClusterClient in cluster mode, got %T", client)
+	}
+}
+
+func TestRedisClientFactory_SingleNodeByDefault(t *testing.T) {
+	t.Setenv("REDIS_CLUSTER", "")
+	base := &redis.Options{Addr: "localhost:6379"}
+	factory := newRedisClientFactory(base)
+	if factory.cluster {
+		t.Fatal("factory.cluster = true, want false when REDIS_CLUSTER is unset")
+	}
+	client := factory.newNamedClient("store")
+	t.Cleanup(func() { _ = client.Close() })
+	if _, ok := client.(*redis.Client); !ok {
+		t.Fatalf("expected *redis.Client in single-node mode, got %T", client)
 	}
 }
 

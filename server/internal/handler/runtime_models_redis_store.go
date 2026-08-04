@@ -42,10 +42,10 @@ func modelListPendingKey(runtimeID string) string { return modelListPendingPrefi
 // RedisModelListStore stores model list requests in Redis so every API node
 // agrees on the same pending / running / terminal state.
 type RedisModelListStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisModelListStore(rdb *redis.Client) *RedisModelListStore {
+func NewRedisModelListStore(rdb redis.UniversalClient) *RedisModelListStore {
 	return &RedisModelListStore{rdb: rdb}
 }
 
@@ -64,7 +64,11 @@ func (s *RedisModelListStore) Create(ctx context.Context, runtimeID string) (*Mo
 		return nil, err
 	}
 
-	pipe := s.rdb.TxPipeline()
+	// Plain Pipeline, not TxPipeline: managed Redis Cluster deployments may
+	// disable MULTI (NOPERM), which TxPipeline emits. Both keys carry the
+	// shared {runtime_pending} hash tag so they land on one slot and pipeline
+	// in a single round-trip; PopPending tolerates a partially-applied pair.
+	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, modelListKey(req.ID), data, modelListStoreRetention)
 	pipe.ZAdd(ctx, modelListPendingKey(runtimeID), redis.Z{
 		Score:  float64(now.UnixNano()),

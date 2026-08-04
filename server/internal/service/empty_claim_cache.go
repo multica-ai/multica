@@ -69,21 +69,26 @@ const emptyClaimRedisTimeout = 250 * time.Millisecond
 // single-node dev / tests with no REDIS_URL degrade cleanly to direct
 // DB lookups.
 type EmptyClaimCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewEmptyClaimCache returns a cache backed by rdb. Pass nil to
 // disable caching; the returned *EmptyClaimCache is safe to call but
 // never hits Redis.
-func NewEmptyClaimCache(rdb *redis.Client) *EmptyClaimCache {
+func NewEmptyClaimCache(rdb redis.UniversalClient) *EmptyClaimCache {
 	if rdb == nil {
 		return nil
 	}
 	return &EmptyClaimCache{rdb: rdb}
 }
 
-func emptyClaimKey(runtimeID string) string   { return emptyClaimCachePrefix + runtimeID }
-func emptyClaimVersion(runtimeID string) string { return emptyClaimVersionPrefix + runtimeID }
+// Both keys embed the runtimeID inside a {..} Redis Cluster hash tag so the
+// verdict key and its version key hash to the SAME slot. IsEmpty reads both in
+// one MGET, which returns CROSSSLOT on Cluster if the keys span slots; the
+// shared tag keeps that MGET valid. On single-node Redis the braces are
+// ordinary key characters.
+func emptyClaimKey(runtimeID string) string     { return emptyClaimCachePrefix + "{" + runtimeID + "}" }
+func emptyClaimVersion(runtimeID string) string { return emptyClaimVersionPrefix + "{" + runtimeID + "}" }
 
 func (c *EmptyClaimCache) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, emptyClaimRedisTimeout)

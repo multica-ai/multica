@@ -32,13 +32,13 @@ const MembershipCacheTTL = 5 * time.Minute
 // A nil *MembershipCache is safe to use — every method becomes a no-op or
 // reports a cache miss, and the caller degrades to direct DB lookups.
 type MembershipCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewMembershipCache returns a cache backed by rdb. Pass nil to disable
 // caching; the returned *MembershipCache is safe to call but never hits
 // Redis.
-func NewMembershipCache(rdb *redis.Client) *MembershipCache {
+func NewMembershipCache(rdb redis.UniversalClient) *MembershipCache {
 	if rdb == nil {
 		return nil
 	}
