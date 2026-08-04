@@ -2868,13 +2868,13 @@ WITH retired_sessions AS (
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
       AND t.session_id IS NOT NULL
-      AND t.status IN ('completed', 'failed')
+      AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
 SELECT session_id, work_dir, runtime_id FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
-    status = 'completed'
+    status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
       AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
@@ -2901,13 +2901,21 @@ type GetLastTaskSessionRow struct {
 
 // Returns the session_id and work_dir from the most recent task for a given
 // (agent_id, issue_id) pair, used for session resumption on the auto-retry
-// path. We accept both 'completed' and 'failed' tasks: a failed task may
-// have established a real agent session before crashing (orphaned by a
+// path. We accept 'completed', 'failed' AND 'cancelled' tasks: a failed task
+// may have established a real agent session before crashing (orphaned by a
 // daemon restart, runtime offline, or sweeper timeout), and the daemon pins
 // the resume pointer mid-flight via UpdateAgentTaskSession. Without this,
 // an auto-retry of a mid-run failure would silently start a fresh
 // conversation and lose the in-flight context — exactly what MUL-1128's B
 // branch is meant to fix.
+//
+// A cancelled task is in exactly the same position, and excluding it was the
+// issue-side half of GH #6340: the pinned session is real (the provider emitted
+// it), the user stopped the run rather than the provider rejecting it, and
+// cancellation records no failure_reason/error for the poison filters below to
+// match on. So a stop-then-comment-again sequence keeps its context instead of
+// silently starting cold. A user who wants a clean slate has manual rerun,
+// which never takes this path (see below).
 //
 // Manual rerun (TaskService.RerunIssue) does NOT take this path. The claim
 // handler branches on rerun_of_task_id FIRST and resolves the session/workdir
@@ -6055,7 +6063,11 @@ const updateAgentTaskSession = `-- name: UpdateAgentTaskSession :exec
 UPDATE agent_task_queue
 SET session_id = COALESCE($2, session_id),
     work_dir  = COALESCE($3, work_dir)
-WHERE id = $1 AND status IN ('dispatched', 'running')
+WHERE id = $1
+  AND (
+    status IN ('dispatched', 'running')
+    OR (status = 'cancelled' AND session_id IS NULL)
+  )
 `
 
 type UpdateAgentTaskSessionParams struct {
@@ -6068,6 +6080,15 @@ type UpdateAgentTaskSessionParams struct {
 // session_id/work_dir on the task row. No-op if the task is no longer
 // in dispatched/running. waiting_local_directory tasks have no session yet
 // so this query intentionally skips them.
+//
+// A row the user just cancelled accepts the pin too, but only while its
+// session slot is still empty (GH #6340). The pin is asynchronous — for Codex
+// it waits for the rollout to reach the store — so a cancel landing in that
+// window used to drop the session id for good, and the cancelled turn's
+// context with it. Filling an EMPTY slot on the run's own row is exactly what
+// the mid-flight pin is for; the `session_id IS NULL` guard is what keeps this
+// from being an overwrite, and completed/failed rows stay untouchable so a
+// straggler goroutine can never contradict a terminal report.
 func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTaskSessionParams) error {
 	_, err := q.db.Exec(ctx, updateAgentTaskSession, arg.ID, arg.SessionID, arg.WorkDir)
 	return err

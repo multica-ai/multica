@@ -584,7 +584,7 @@
   "pickers": {
     "custom_property": {
       "empty": "Empty",
-      "clear_action": "Clear",
+      "none": "No value",
       "true_label": "Yes",
       "false_label": "No",
       "value_placeholder": "Enter value…",
@@ -606,11 +606,11 @@
     },
     "start_date": {
       "trigger_label": "Start date",
-      "clear_action": "Clear date"
+      "none": "No start date"
     },
     "due_date": {
       "trigger_label": "Due date",
-      "clear_action": "Clear date"
+      "none": "No due date"
     },
     "label": {
       "trigger_label": "Add label",

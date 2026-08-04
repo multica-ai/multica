@@ -194,6 +194,7 @@
       "add_file": "새 파일",
       "mode_aria": "파일 보기",
       "mode_preview": "미리보기",
+      "mode_edit": "편집",
       "mode_raw": "일반 텍스트"
     }
   },
@@ -315,6 +316,7 @@
     "no_files": "파일 없음",
     "actions": {
       "label": "{{path}} 작업",
+      "edit": "편집",
       "rename": "이름 변경",
       "delete": "삭제"
     }

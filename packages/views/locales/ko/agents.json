@@ -740,11 +740,10 @@
     "back": "뒤로",
     "eyebrow": "에이전트 만들기",
     "choose_title": "어떻게 시작하시겠어요?",
-    "choose_description": "모든 항목을 직접 설정하거나, 검증된 템플릿을 수정하거나, 필요한 내용을 설명하고 대화로 만들 수 있습니다.",
+    "choose_description": "모든 항목을 직접 설정하거나, 필요한 내용을 설명하고 대화로 만들 수 있습니다.",
     "recommended": "추천",
     "continue": "계속",
     "step_choose": "시작 방법 선택",
-    "step_template": "템플릿 선택",
     "step_configure": "검토 및 설정",
     "step_ai": "대화로 만들기",
     "modes": {
@@ -760,15 +759,6 @@
         "title": "AI로 만들기",
         "description": "원하는 결과를 설명하면 Agent Builder가 핵심 질문을 하고 실시간 초안을 준비합니다."
       }
-    },
-    "templates": {
-      "search": "템플릿 검색…",
-      "search_label": "에이전트 템플릿 검색",
-      "empty": "검색과 일치하는 템플릿이 없습니다.",
-      "select_hint": "템플릿을 선택하여 지침과 스킬을 미리 확인하세요.",
-      "skills": "포함된 스킬",
-      "instructions": "지침",
-      "use": "이 템플릿 사용"
     },
     "sections": {
       "identity": "기본 정보",
@@ -830,7 +820,17 @@
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
     "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
-    "created": "{{name}}을(를) 만들었습니다"
+    "created": "{{name}}을(를) 만들었습니다",
+    "drafts": {
+      "title": "초안",
+      "untitled": "제목 없는 초안",
+      "discard": "생성 취소",
+      "discard_confirm": "대화와 오른쪽 설정이 영구적으로 삭제됩니다.",
+      "discard_title": "이 생성을 취소할까요?",
+      "discard_cancel": "계속 편집",
+      "banner": "미완료 초안이 {{count}}개 있습니다",
+      "pick_hint": "이어서 진행할 항목을 선택하세요."
+    }
   },
   "actions": {
     "selected_other": "{{count}}개 선택됨",

@@ -104,7 +104,7 @@ func buildPromptBody(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. Your runtime workflow file documents the rest of the read surface, including pagination and `--since` for incremental polling.\n", task.IssueID)
+	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -200,7 +200,7 @@ func buildQuickCreatePrompt(task Task) string {
 		}
 	}
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
-	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
+	b.WriteString("- **attachments**: `--attachment` takes LOCAL file paths, never URLs. Image URLs in the user input are already markdown — keep them inline. Files you produced: see `## Output`.\n\n")
 
 	// output format
 	b.WriteString("Output format:\n")
@@ -275,8 +275,40 @@ func buildCommentPrompt(task Task, provider string) string {
 			}
 			fmt.Fprintf(&b, "\nIf you need the surrounding discussion for any of them, fetch its thread with `multica issue comment list %s --thread <thread-id> --tail 30 --output json` using the thread id shown above.\n\n", task.IssueID)
 		} else if len(task.CoalescedCommentIDs) > 0 {
-			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above: %s. These may be in DIFFERENT threads, so do not assume they share the triggering thread; fetch each by pulling the issue-wide discussion with `multica issue comment list %s --recent 30 --output json` (expand with `--full` if a thread is folded) and locate the ids above.\n\n",
-				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "), task.IssueID)
+			// MUL-5442: this fallback used to send the agent at `--recent 30`.
+			// That flag caps THREADS, not comments, and every returned thread
+			// carries all of its descendants — so on an issue with fewer than 30
+			// root threads it returned the entire comment history to locate a
+			// handful of ids. It also contradicted the brief's own catch-up step,
+			// which tells the agent to read in two bounded steps and never make
+			// one bulk pull (MUL-5372): the platform was recommending exactly the
+			// shape it forbids elsewhere.
+			//
+			// The replacement is a per-id lookup, which is what makes it
+			// deterministic: `--thread` accepts ANY comment id, reply or root, and
+			// the server resolves it to the containing thread. So each id can be
+			// fetched directly and bounded, without knowing its thread and without
+			// guessing which threads look recent.
+			//
+			// `--since` is only a prefetch, never the guarantee. Two ways it can
+			// miss an id, so the per-id pass below is unconditional:
+			//   - A retry inherits the previous attempt's coalesced_comment_ids
+			//     verbatim (queries/agent.sql RetryTask), while the anchor is
+			//     recomputed from the last STARTED task's started_at
+			//     (GetLastTaskStartedAtForIssueAndAgent). An inherited id can
+			//     therefore predate the anchor.
+			//   - The anchor is only populated when some comment landed after it,
+			//     which is independent of where these ids sit.
+			// It is also not a precise fetch in the other direction: the window
+			// carries the trigger comment and unrelated comments too.
+			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address every one of them, not just the one above: %s. They may be in DIFFERENT threads, so do not assume they share the triggering thread.\n\n",
+				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "))
+			if task.NewCommentsSince != "" {
+				fmt.Fprintf(&b, "Start with `multica issue comment list %s --since %s --output json`. Treat that as a candidate window, not a guarantee — it also carries unrelated comments, and a retried run can carry ids older than the window. Check every id above against the result.\n\n",
+					task.IssueID, task.NewCommentsSince)
+			}
+			fmt.Fprintf(&b, "Fetch each id you still need directly: `multica issue comment list %s --thread <comment-id> --tail 30 --output json`. `--thread` accepts a reply id, not just a thread root, so you do not need to know which thread the comment lives in. If it is older than those 30 replies, page back with the `Next reply cursor` values (`--before` / `--before-id`) until it appears. Do not finish this turn until every id above is accounted for.\n\n",
+				task.IssueID)
 		}
 		if task.TriggerAuthorType == "agent" {
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
@@ -538,6 +570,9 @@ func buildAutopilotPrompt(task Task) string {
 	} else {
 		b.WriteString("Complete the instructions above.\n")
 	}
-	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
+	// The issue-command boundary (execenv.AutopilotIssueCommandsGuard) is NOT
+	// restated here: the brief's autopilot workflow section is its single
+	// emission point, and a second hand-maintained per-turn copy is exactly
+	// how the two surfaces drifted into conflict before (MUL-5696).
 	return b.String()
 }

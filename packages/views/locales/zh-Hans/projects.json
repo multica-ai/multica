@@ -69,7 +69,8 @@
     "section_description": "描述",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
-    "clear_date": "清除日期",
+    "no_start_date": "无开始日期",
+    "no_due_date": "无截止日期",
     "description_placeholder": "添加描述...",
     "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个任务。",
     "empty_issues_title": "还没有关联的 issue",
@@ -125,7 +126,6 @@
   },
   "picker": {
     "no_project": "无项目",
-    "remove": "从项目移除",
     "empty": "还没有项目",
     "search_placeholder": "搜索项目..."
   },

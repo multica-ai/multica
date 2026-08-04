@@ -310,6 +310,8 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
+    "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
+    "schedule_add": "Add schedule",
     "error_title_required": "Enter a name for this autopilot.",
     "error_assignee_required": "Choose the agent or squad that will run this autopilot.",
     "output_modes": {

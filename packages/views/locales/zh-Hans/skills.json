@@ -194,6 +194,7 @@
       "add_file": "新建文件",
       "mode_aria": "文件视图",
       "mode_preview": "预览",
+      "mode_edit": "编辑",
       "mode_raw": "纯文本"
     }
   },
@@ -315,6 +316,7 @@
     "no_files": "无文件",
     "actions": {
       "label": "{{path}} 的操作",
+      "edit": "编辑",
       "rename": "重命名",
       "delete": "删除"
     }

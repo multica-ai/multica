@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
@@ -272,6 +272,7 @@ const mockApiObj = vi.hoisted(() => ({
   listIssueSubscribers: vi.fn().mockResolvedValue([]),
   subscribeToIssue: vi.fn().mockResolvedValue(undefined),
   unsubscribeFromIssue: vi.fn().mockResolvedValue(undefined),
+  unsubscribeFromIssueSubtree: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   rerunIssue: vi.fn(),
@@ -316,6 +317,7 @@ vi.mock("@multica/core/issues/config", () => ({
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive", badgeBg: "bg-destructive/10", badgeText: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning", badgeBg: "bg-warning/10", badgeText: "text-warning" },
@@ -1674,6 +1676,75 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");
+    });
+  });
+
+  // Deliberately drives the real Base UI DropdownMenu rather than a stub: the
+  // bug these tests pin (MUL-5710) was a handler wired to `onSelect`, which
+  // typechecks because Menu.Item's props extend the whole div attribute set,
+  // then lands on the DOM as the native text-selection event and never fires.
+  // Only the real menu reproduces that; any hand-rolled mock hides it.
+  describe("unsubscribe menu", () => {
+    const subscribedAsMember = [
+      {
+        issue_id: "issue-1",
+        user_type: "member" as const,
+        user_id: "user-1",
+        reason: "manual" as const,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue(subscribedAsMember);
+    });
+
+    // Base UI portals the popup onto document.body; RTL unmounts it, but wipe
+    // the body too so a leftover portal can't duplicate menu item names.
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    async function openUnsubscribeMenu() {
+      renderIssueDetail();
+      fireEvent.click(await screen.findByText("Unsubscribe"));
+      return screen.findByRole("menu");
+    }
+
+    it("unsubscribes the current member when the single-issue item is clicked", async () => {
+      await openUnsubscribeMenu();
+
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Unsubscribe from this issue" }),
+      );
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+
+    it("unsubscribes from the whole subtree when the subtree item is clicked", async () => {
+      await openUnsubscribeMenu();
+
+      fireEvent.click(
+        screen.getByRole("menuitem", {
+          name: "Unsubscribe from this issue and its sub-issues",
+        }),
+      );
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssueSubtree).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
     });
   });
 });

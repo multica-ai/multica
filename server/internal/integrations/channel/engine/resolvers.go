@@ -58,6 +58,9 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// runScheduled reports whether this ingest scheduled a normal chat run.
+	// It is Router-internal state: repliers must continue to use Outcome.
+	runScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router

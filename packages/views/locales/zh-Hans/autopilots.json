@@ -310,6 +310,8 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "只处理匹配这些事件的 webhook。留空则接受所有事件。",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
+    "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
+    "schedule_add": "添加时间表",
     "error_title_required": "请填写自动化名称。",
     "error_assignee_required": "请选择运行该自动化的智能体或小队。",
     "output_modes": {

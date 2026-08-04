@@ -310,6 +310,8 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
     "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
+    "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
+    "schedule_add": "スケジュールを追加",
     "error_title_required": "オートパイロット名を入力してください。",
     "error_assignee_required": "実行するエージェントまたはスクワッドを選択してください。",
     "output_modes": {

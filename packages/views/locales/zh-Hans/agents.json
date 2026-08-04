@@ -272,11 +272,10 @@
     "back": "返回",
     "eyebrow": "创建智能体",
     "choose_title": "你想从哪里开始？",
-    "choose_description": "从空白配置、基于成熟模板修改，或者直接描述需求，通过对话完成创建。",
+    "choose_description": "从空白配置开始，或者直接描述需求，通过对话完成创建。",
     "recommended": "推荐",
     "continue": "继续",
     "step_choose": "选择起点",
-    "step_template": "选择模板",
     "step_configure": "检查并配置",
     "step_ai": "通过对话创建",
     "modes": {
@@ -292,15 +291,6 @@
         "title": "通过 AI 创建",
         "description": "描述你想要的结果。Agent Builder 会提出关键问题并实时生成草稿。"
       }
-    },
-    "templates": {
-      "search": "搜索模板…",
-      "search_label": "搜索智能体模板",
-      "empty": "没有匹配的模板。",
-      "select_hint": "选择一个模板，预览它的指令和 skill。",
-      "skills": "包含的 skill",
-      "instructions": "指令",
-      "use": "使用此模板"
     },
     "sections": {
       "identity": "身份",
@@ -362,7 +352,17 @@
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
     "name_conflict": "工作区中已存在同名智能体。",
-    "created": "已创建 {{name}}"
+    "created": "已创建 {{name}}",
+    "drafts": {
+      "title": "创建草稿",
+      "untitled": "未命名草稿",
+      "discard": "放弃创建",
+      "discard_confirm": "对话和右侧配置都会被永久删除。",
+      "discard_title": "放弃这次创建？",
+      "discard_cancel": "继续编辑",
+      "banner": "您有 {{count}} 条未完成的创建",
+      "pick_hint": "选一条继续。"
+    }
   },
   "create_dialog": {
     "title_create": "创建智能体",

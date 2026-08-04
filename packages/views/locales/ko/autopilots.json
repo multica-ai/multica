@@ -310,6 +310,8 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
     "schedule_disabled_reason": "이 오토파일럿에는 여러 일정이 있습니다. 상세 페이지에서 수정하세요.",
+    "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
+    "schedule_add": "일정 추가",
     "error_title_required": "오토파일럿 이름을 입력하세요.",
     "error_assignee_required": "실행할 에이전트 또는 스쿼드를 선택하세요.",
     "output_modes": {

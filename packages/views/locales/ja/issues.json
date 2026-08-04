@@ -559,7 +559,7 @@
   "pickers": {
     "custom_property": {
       "empty": "空",
-      "clear_action": "クリア",
+      "none": "値なし",
       "true_label": "はい",
       "false_label": "いいえ",
       "value_placeholder": "値を入力…",
@@ -581,11 +581,11 @@
     },
     "start_date": {
       "trigger_label": "開始日",
-      "clear_action": "日付をクリア"
+      "none": "開始日なし"
     },
     "due_date": {
       "trigger_label": "期限",
-      "clear_action": "日付をクリア"
+      "none": "期限なし"
     },
     "label": {
       "trigger_label": "ラベルを追加",

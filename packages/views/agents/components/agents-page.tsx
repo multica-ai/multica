@@ -969,8 +969,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     overscan: 10,
   });
 
+  // Straight to the manual form: a duplicate already has every field decided,
+  // so the method chooser would be a step with nothing to choose.
   const handleDuplicate = useCallback((agent: Agent) => {
-    navigation.push(`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`);
+    navigation.push(
+      `${paths.newAgentManual()}?duplicate=${encodeURIComponent(agent.id)}`,
+    );
   }, [navigation, paths]);
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));

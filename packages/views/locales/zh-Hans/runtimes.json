@@ -243,6 +243,8 @@
     "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理 —— 升级桌面端即可升级 CLI。",
     "read_only": "只读",
     "read_only_title": "只有运行时所有者和工作区管理员可以更新 CLI。",
+    "local_build": "本地构建",
+    "local_build_title": "该运行时报告的不是发布版本，Multica 无法判断是否有可升级的版本。请在这台机器上自行更新。",
     "latest": "最新",
     "available": "可用",
     "action": "更新",

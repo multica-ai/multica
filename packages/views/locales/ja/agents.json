@@ -740,11 +740,10 @@
     "back": "戻る",
     "eyebrow": "エージェント作成",
     "choose_title": "どの方法で始めますか？",
-    "choose_description": "すべて自分で設定するか、実績のあるテンプレートを調整するか、必要なものを説明して会話から作成できます。",
+    "choose_description": "すべて自分で設定するか、必要なものを説明して会話から作成できます。",
     "recommended": "おすすめ",
     "continue": "続ける",
     "step_choose": "開始方法を選択",
-    "step_template": "テンプレートを選択",
     "step_configure": "確認して設定",
     "step_ai": "会話で作成",
     "modes": {
@@ -760,15 +759,6 @@
         "title": "AI で作成",
         "description": "期待する成果を説明すると、Agent Builder が重要な質問を行い、下書きをリアルタイムで作成します。"
       }
-    },
-    "templates": {
-      "search": "テンプレートを検索…",
-      "search_label": "エージェントテンプレートを検索",
-      "empty": "検索に一致するテンプレートはありません。",
-      "select_hint": "テンプレートを選択して、指示とスキルをプレビューします。",
-      "skills": "含まれるスキル",
-      "instructions": "指示",
-      "use": "このテンプレートを使用"
     },
     "sections": {
       "identity": "基本情報",
@@ -830,7 +820,17 @@
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
     "name_conflict": "同じ名前のエージェントがすでに存在します。",
-    "created": "{{name}} を作成しました"
+    "created": "{{name}} を作成しました",
+    "drafts": {
+      "title": "下書き",
+      "untitled": "無題の下書き",
+      "discard": "作成を破棄",
+      "discard_confirm": "会話と右側の設定は完全に削除されます。",
+      "discard_title": "この作成を破棄しますか？",
+      "discard_cancel": "編集を続ける",
+      "banner": "未完了の下書きが {{count}} 件あります",
+      "pick_hint": "続きを選んでください。"
+    }
   },
   "actions": {
     "selected_other": "{{count}} 件選択中",

@@ -324,3 +324,40 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 		t.Errorf("a skill-bundle failure reported by a current daemon must be retried; got reason %q", current)
 	}
 }
+
+// TestContextOverflowFromLegacyDaemonRetiresSession is the mixed-version
+// regression for GH #6360. It walks the chain FailTask runs for a task an
+// un-upgraded daemon just failed on a response-side context overflow, and
+// asserts the user-visible outcome: the conversation is retired, so the next
+// comment on that issue starts from a fresh session.
+//
+// Higher stakes than the skill-bundle case above. There, a stale label costs
+// one missed retry; here the catchall is on no resume blacklist, so the
+// over-full session stays pinned as the (agent, issue) resume pointer and
+// EVERY later comment replays the same overflow — one un-upgraded host means a
+// permanently stuck issue until it updates.
+func TestContextOverflowFromLegacyDaemonRetiresSession(t *testing.T) {
+	// Verbatim from Claude Code 2.1.x: the turn is not rejected with a 400,
+	// the response comes back with stop_reason model_context_window_exceeded.
+	const overflowErr = "API Error: The model has reached its context window limit."
+
+	legacyReason := taskfailure.ReasonAgentUnknown.String()
+	if ResumeUnsafeFailure(legacyReason, overflowErr) {
+		t.Fatal("precondition: the raw catchall must be resume-safe, or this test proves nothing")
+	}
+
+	normalized := taskfailure.NormalizeDaemonReason(legacyReason, overflowErr).String()
+	if normalized != taskfailure.ReasonAgentContextOverflow.String() {
+		t.Fatalf("normalized reason = %q, want %q", normalized, taskfailure.ReasonAgentContextOverflow)
+	}
+	if !ResumeUnsafeFailure(normalized, overflowErr) {
+		t.Errorf("an overflow reported by an old daemon must retire the session; got reason %q", normalized)
+	}
+
+	// A current daemon supplies the reason itself and must reach the same
+	// outcome — the two versions converge rather than diverging by client.
+	current := taskfailure.NormalizeDaemonReason(taskfailure.ReasonAgentContextOverflow.String(), overflowErr).String()
+	if !ResumeUnsafeFailure(current, overflowErr) {
+		t.Errorf("an overflow reported by a current daemon must retire the session; got reason %q", current)
+	}
+}

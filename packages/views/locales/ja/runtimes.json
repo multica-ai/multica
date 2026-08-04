@@ -243,6 +243,8 @@
     "managed_by_desktop_title": "CLI バイナリは Multica Desktop で管理されています。CLI をアップグレードするには Desktop を更新してください。",
     "read_only": "読み取り専用",
     "read_only_title": "CLI を更新できるのは、ランタイムの所有者とワークスペース管理者のみです。",
+    "local_build": "ローカルビルド",
+    "local_build_title": "このランタイムはリリース版ではないバージョンを報告しているため、Multica はアップグレードの有無を判断できません。マシン上で直接更新してください。",
     "latest": "最新",
     "available": "利用可能",
     "action": "更新",

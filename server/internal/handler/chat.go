@@ -626,6 +626,13 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same no-FK chore, for the agent configuration a builder conversation was
+	// editing. A no-op for ordinary chats, which never have one.
+	if err := qtx.DeleteAgentBuilderDraft(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
+		return
+	}
+
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -1264,7 +1271,12 @@ func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries
 	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}
-	return q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID)
+	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	// Builder drafts only ever hang off a system carrier, so they are pruned
+	// here and nowhere else — the archived-agent sweep above has none to find.
+	return q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID)
 }
 
 // PendingChatTasksResponse is the aggregate view consumed by the FAB.
