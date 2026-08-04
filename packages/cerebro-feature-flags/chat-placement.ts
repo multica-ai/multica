@@ -27,6 +27,13 @@ export type ChatPlacement = Record<ConversationKind, PlacementEntry>;
 export const CHAT_PLACEMENT_KEY = "cerebro_chat_placement";
 
 /**
+ * FIR-4350 — agent chats live ONLY in the Inbox (Jesper, 2026-08-04). Their
+ * placement is fixed inbox-only, not user-configurable: the settings matrix
+ * omits the row and readPlacement ignores any stored legacy value.
+ */
+const AGENT_PLACEMENT: PlacementEntry = { chat: false, inbox: true };
+
+/**
  * When the feature is turned on, conversations move to Chat and leave the Inbox
  * — that is the whole point of the feature (FIR-4350). Placement only takes
  * effect while cerebro_chat_page is on (see chat-inbox-hiding.ts), so a user who
@@ -36,7 +43,7 @@ export const CHAT_PLACEMENT_KEY = "cerebro_chat_placement";
 export const DEFAULT_PLACEMENT: ChatPlacement = {
   channel: { chat: true, inbox: false },
   dm: { chat: true, inbox: false },
-  agent_chat: { chat: true, inbox: false },
+  agent_chat: AGENT_PLACEMENT,
 };
 
 function readEntry(value: unknown, fallback: PlacementEntry): PlacementEntry {
@@ -62,7 +69,8 @@ export function readPlacement(value: unknown): ChatPlacement {
   return {
     channel: readEntry(raw.channel, DEFAULT_PLACEMENT.channel),
     dm: readEntry(raw.dm, DEFAULT_PLACEMENT.dm),
-    agent_chat: readEntry(raw.agent_chat, DEFAULT_PLACEMENT.agent_chat),
+    // Agents are inbox-only and not configurable — any stored value is ignored.
+    agent_chat: AGENT_PLACEMENT,
   };
 }
 

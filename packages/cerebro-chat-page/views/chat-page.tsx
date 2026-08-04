@@ -11,17 +11,29 @@
 import { useCallback, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
 import type { Channel } from "@multica/core/types";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@multica/ui/components/ui/resizable";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import { ChannelDetail } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
-import { showsInChat, useChatPlacement, useFeatureFlag } from "@multica/cerebro-feature-flags";
+import {
+  ChatPlacementSettings,
+  showsInChat,
+  useChatPlacement,
+  useFeatureFlag,
+} from "@multica/cerebro-feature-flags";
 
 /** What the detail pane is currently showing. */
 type Selection =
@@ -36,6 +48,11 @@ export function ChatPage() {
   const isMobile = useIsMobile();
   const { placement } = useChatPlacement();
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // FIR-4350 — reuse the sidebar's new-conversation modal so the "+" on the
+  // Chat page starts a channel/DM/agent chat exactly like "New message" does.
+  const openCreate = useCallback(() => useModalStore.getState().open("new-message"), []);
 
   const clearSelection = useCallback(() => setSelection(null), []);
 
@@ -57,7 +74,7 @@ export function ChatPage() {
   const nothingInChat = !showChannels && !showPeople && !showAgents;
 
   const rail = nothingInChat ? (
-    <EmptyRail />
+    <EmptyRail onOpenSettings={() => setSettingsOpen(true)} />
   ) : (
     <SlackBlock
       wsId={wsId}
@@ -80,6 +97,8 @@ export function ChatPage() {
       searchDefaultOpen
       onSetSearchDefaultOpen={NOOP}
       showSectionControls={false}
+      onCreate={openCreate}
+      onOpenSettings={() => setSettingsOpen(true)}
       onRemove={NOOP}
     />
   );
@@ -88,10 +107,24 @@ export function ChatPage() {
 
   if (!enabled) return null;
 
+  // FIR-4350 — the placement matrix on the page itself, so a user can move a
+  // conversation type into or out of Chat without leaving for the Settings tab.
+  const settingsDialog = (
+    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Chat settings</DialogTitle>
+        </DialogHeader>
+        <ChatPlacementSettings />
+      </DialogContent>
+    </Dialog>
+  );
+
   if (isMobile) {
     // Single column: the rail until something is picked, then the conversation.
     return (
       <div className="flex h-full min-h-0 flex-col">
+        {settingsDialog}
         {selection ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <button
@@ -111,15 +144,18 @@ export function ChatPage() {
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal">
-      <ResizablePanel id="chat-rail" defaultSize={340} minSize={260} className="flex flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto">{rail}</div>
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel id="chat-detail" minSize="40%" className="flex flex-col">
-        {detail ?? <EmptyDetail />}
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    <>
+      {settingsDialog}
+      <ResizablePanelGroup orientation="horizontal">
+        <ResizablePanel id="chat-rail" defaultSize={340} minSize={260} className="flex flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">{rail}</div>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel id="chat-detail" minSize="40%" className="flex flex-col">
+          {detail ?? <EmptyDetail />}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </>
   );
 }
 
@@ -152,18 +188,22 @@ function renderDetail(
   );
 }
 
-function EmptyRail() {
+function EmptyRail({ onOpenSettings }: { onOpenSettings: () => void }) {
   // Reached only when the user has moved every conversation type to Inbox-only,
-  // so nothing is placed in Chat. Name the exact settings path rather than
-  // showing a blank column.
+  // so nothing is placed in Chat. Offer the placement settings right here rather
+  // than showing a blank column or sending the user hunting in the Settings tab.
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center text-muted-foreground">
       <MessageSquare className="mb-3 h-10 w-10 text-muted-foreground/30" />
       <p className="text-sm">Nothing is placed in Chat yet.</p>
-      <p className="mt-1 text-xs">
-        Choose which conversations live here under Settings → Cerebro features →
-        DM &amp; Channel → Chat page.
-      </p>
+      <p className="mt-1 text-xs">Choose which conversations live here.</p>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+      >
+        Chat settings
+      </button>
     </div>
   );
 }

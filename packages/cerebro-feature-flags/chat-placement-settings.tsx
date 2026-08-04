@@ -7,12 +7,15 @@
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Label } from "@multica/ui/components/ui/label";
 import {
-  CONVERSATION_KINDS,
   canTurnOff,
   type ConversationKind,
   type PlacementEntry,
 } from "./chat-placement";
 import { useChatPlacement } from "./use-chat-placement";
+
+// FIR-4350 — agent chats are inbox-only (not configurable), so only Channels
+// and DM appear in the matrix. See AGENT_PLACEMENT in chat-placement.ts.
+const CONFIGURABLE_KINDS: readonly ConversationKind[] = ["channel", "dm"];
 
 const KIND_LABEL: Record<ConversationKind, string> = {
   channel: "Channels",
@@ -45,7 +48,7 @@ export function ChatPlacementSettings() {
             {place.label}
           </span>
         ))}
-        {CONVERSATION_KINDS.map((kind) => (
+        {CONFIGURABLE_KINDS.map((kind) => (
           <PlacementRow
             key={kind}
             kind={kind}
@@ -55,6 +58,7 @@ export function ChatPlacementSettings() {
           />
         ))}
       </div>
+      <p className="text-xs text-muted-foreground">Agent chats always stay in the Inbox.</p>
     </div>
   );
 }
