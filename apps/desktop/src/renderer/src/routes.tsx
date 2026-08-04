@@ -55,6 +55,7 @@ import { CyclesPage } from "@multica/cerebro-notes/views";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { AppBuilderPage, AppDetailPage, AppEditorPage, AppsPage } from "@multica/cerebro-apps";
 import { api } from "@multica/core/api";
+import { ChatPage } from "@multica/cerebro-chat-page/views"; // FIR-4350
 import { NotesPage } from "@multica/cerebro-notes/views";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
 import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-references";
@@ -147,7 +148,7 @@ function SettingsRoute() {
           content: <UpdatesSettingsTab />,
         },
         ...cerebroCostOptimizationTabs,
-        ...cerebroNotesSettingsTabs,
+              ...cerebroNotesSettingsTabs,
         ...cerebroFeatureFlagTabs,
         ...toolPolicyTabs,
         ...collectionsTabs,
@@ -373,6 +374,12 @@ export const appRoutes: RouteObject[] = [
             path: "approvals",
             element: <ApprovalsPage />,
             handle: { title: "Approvals" },
+          },
+          {
+            // FIR-4350 — Chat as its own surface, twin of the web route.
+            path: "chat",
+            element: <ChatPage />,
+            handle: { title: "Chat" },
           },
           {
             path: "notes",

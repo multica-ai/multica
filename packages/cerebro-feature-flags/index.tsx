@@ -49,3 +49,27 @@ export {
   DICTATION_SETTINGS_KEY,
 } from "./dictation-settings";
 export type { DictationSettings } from "./dictation-settings";
+
+// FIR-4350 — Chat placement: where each conversation type is shown. Lives here
+// because both the inbox packages and views need the hiding predicate, and both
+// already depend on this package (a home in cerebro-chat-page would close a
+// package cycle through views).
+export {
+  CHAT_PLACEMENT_KEY,
+  CONVERSATION_KINDS,
+  DEFAULT_PLACEMENT,
+  canTurnOff,
+  conversationKindOfChannel,
+  hiddenFromInbox,
+  readPlacement,
+  setPlace,
+  showsInChat,
+  showsInInbox,
+  type ChatPlacement,
+  type ConversationKind,
+  type PlacementEntry,
+} from "./chat-placement";
+export { useChatPlacement } from "./use-chat-placement";
+export { isConversationHidden, useHiddenConversationKinds } from "./chat-inbox-hiding";
+export { countUnreadConversations, useChatUnreadCount } from "./use-chat-unread-count";
+export { ChatPlacementSettings } from "./chat-placement-settings";

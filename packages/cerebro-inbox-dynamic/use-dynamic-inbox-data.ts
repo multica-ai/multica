@@ -5,6 +5,11 @@
 "use client";
 
 import { useMemo } from "react";
+// FIR-4350 — hide conversation types the user has placed in Chat only.
+import {
+  isConversationHidden,
+  useHiddenConversationKinds,
+} from "@multica/cerebro-feature-flags";
 import { useQuery } from "@tanstack/react-query";
 import {
   inboxListOptions,
@@ -158,6 +163,10 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
   const matchesPins = useInboxPinnedMatcher(wsId, userId);
   const { isFavorite, toggleFavorite } = useInboxFavorites();
 
+  // FIR-4350 — conversation types the user has taken out of the Inbox. Hidden
+  // from the list only; read state and everything else is untouched.
+  const hiddenKinds = useHiddenConversationKinds();
+
   // Build the merged entry list — channels swallow their own notifications
   // (a notif whose issue_id is a channel is folded into the channel row).
   const entries = useMemo<DynInboxEntry[]>(() => {
@@ -182,8 +191,9 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
     if (threadSplitEnabled) {
       for (const entry of buildChannelThreadEntries(rawItems, channelMap)) out.push(entry);
     }
-    return out;
-  }, [channels, chatSessions, items, channelMap, knownChannelIds, threadSplitEnabled, rawItems]);
+    // FIR-4350 — applied last so every fold/split rule above runs unchanged.
+    return out.filter((entry) => !isConversationHidden(hiddenKinds, entry));
+  }, [channels, chatSessions, items, channelMap, knownChannelIds, threadSplitEnabled, rawItems, hiddenKinds]);
 
   const filterContext = useMemo<SectionFilterContext>(() => {
     const action: InboxActionContext = {

@@ -4,10 +4,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, featureFlags, modalOpen, pins, sidebarState, workspaces } = vi.hoisted(() => ({
+const {
+  chatUnreadCount,
+  detail,
+  deletePin,
+  featureFlags,
+  hiddenConversationKinds,
+  modalOpen,
+  pins,
+  sidebarState,
+  workspaces,
+} = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
+  chatUnreadCount: { current: 0 },
   deletePin: vi.fn(),
   featureFlags: { current: false },
+  hiddenConversationKinds: { current: new Set<string>() },
   modalOpen: vi.fn(),
   pins: {
     current: [
@@ -69,9 +81,14 @@ vi.mock("@multica/ui/components/ui/popover", () => ({
   PopoverContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-// CEREBRO-PATCH(channels-flag-gate) — sidebar imports cerebro feature flags
+// CEREBRO-PATCH(channels-flag-gate) — sidebar imports cerebro feature flags.
+// FIR-4350 added two more: the inbox badge reads useHiddenConversationKinds and
+// the Chat entry reads useChatUnreadCount. Stubbed rather than partially mocked
+// because the real hooks need the user-preferences providers this test omits.
 vi.mock("@multica/cerebro-feature-flags", () => ({
   useFeatureFlag: () => featureFlags.current,
+  useHiddenConversationKinds: () => hiddenConversationKinds.current,
+  useChatUnreadCount: () => chatUnreadCount.current,
 }));
 vi.mock("@multica/cerebro-notifications/core/queries", () => ({
   notificationsListOptions: () => ({ queryKey: ["notifications"] }),

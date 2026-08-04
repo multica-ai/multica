@@ -11,6 +11,10 @@ export type CerebroFlagKey =
   // Memory: admin master switch for the Cognee-backed agent/member memory.
   // Default OFF — an admin enables it for the workspace before anyone can use it.
   | "cerebro_memory"
+  // FIR-4350: Chat as its own surface — sidebar entry with unread badge, a
+  // full Chat page, and the per-user placement matrix that decides where each
+  // conversation type is shown. OFF by default; each user opts in.
+  | "cerebro_chat_page"
   | "cerebro_chat_message_cost"
   // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
   // per-reply badge from FIR-31). One run can post multiple comments; cost is
@@ -465,6 +469,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_channels: true,
   cerebro_memory: false, // Off by default; admin enables memory per workspace.
   cerebro_channel_permissions: true, // TECH-3698
+  cerebro_chat_page: false, // FIR-4350 — opt-in per user.
   cerebro_chat_message_cost: true,
   cerebro_comment_cost: true,
   cerebro_web_push: true,
@@ -1090,6 +1095,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "dm_channel",
     description:
       "Enable channel-style conversations (kind=channel issues, /channels/{id} route, channel list in inbox).",
+  },
+  {
+    key: "cerebro_chat_page",
+    label: "Chat page",
+    group: "dm_channel",
+    description:
+      "Give conversation its own home: a Chat entry in the sidebar with its own unread badge, and a full Chat page with the conversation list on the left and the open conversation on the right. Under this toggle you decide, per conversation type (Channels, DM, Agent chat), whether it is shown in Chat, in the Inbox, or both. Turning a type off in the Inbox HIDES its rows there — nothing is deleted, archived or marked read, and they return unchanged when you turn it back on. Off hides the Chat entry, the page and these settings, and leaves the Inbox exactly as it is today.",
   },
   {
     key: "cerebro_chat_message_cost",
@@ -2118,6 +2130,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   // Channels — the channels feature and its settings (e.g. membership-aware
   // mentions), so the setting reads as living under Channels. FIR-2680.
   cerebro_channels: "channels",
+  cerebro_chat_page: "channels",
   cerebro_channel_mention_members_only: "channels",
   cerebro_scheduled_messages: "channels",
   // Tool permissions — the tool-policy chain and everything that feeds it.

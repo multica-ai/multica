@@ -87,6 +87,7 @@ import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEnt
 import { useInboxLayout } from "../use-inbox-layout";
 import {
   SECTION_CATALOG,
+  isSectionKindEnabled,
   makeId,
   type InboxLayout,
   type InboxSectionConfig,
@@ -231,16 +232,19 @@ export function DynamicInbox() {
   const activeTab =
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
+  // TECH-3579 / FIR-4350 — hide a persisted Secretary, Favorites or Chat box
+  // when its flag is off. Chat used to be gated only at its render branch, so a
+  // stored box fell through to the generic renderer and stayed on screen empty.
   const activeSections = useMemo(
     () =>
-      activeTab.sections.filter(
-        (section) =>
-          (section.kind !== "secretary" || secretaryEnabled) &&
-          // TECH-3579 — hide a persisted standalone Favorites box when the flag
-          // is off, mirroring how Secretary/Chat boxes are gated.
-          (section.kind !== "favorites" || favoritesEnabled),
+      activeTab.sections.filter((section) =>
+        isSectionKindEnabled(section.kind, {
+          slackBlock: slackBlockEnabled,
+          secretary: secretaryEnabled,
+          favorites: favoritesEnabled,
+        }),
       ),
-    [activeTab.sections, secretaryEnabled, favoritesEnabled],
+    [activeTab.sections, slackBlockEnabled, secretaryEnabled, favoritesEnabled],
   );
 
   // TECH-3502 #2 — inline rename of the active tab (also reachable from ⋯).
@@ -1260,7 +1264,7 @@ export function DynamicInbox() {
                             changeSection({ ...section, defaultCollapsed: v })
                           }
                         />
-                      ) : section.kind === "team" ? (
+                      ) : section.kind === "team" && slackBlockEnabled ? (
                         <div className="relative">
                           <div className="absolute left-2 top-2.5 z-10">{handle}</div>
                           <SlackBlock
