@@ -80,6 +80,20 @@ func Classify(rawError string) Reason {
 		"maximum context",
 		"prompt is too long",
 		"context size has been exceeded",
+		// Overflow reported on the RESPONSE rather than as a 400 on the
+		// request: the provider accepts the call and ends the turn with
+		// stop_reason "model_context_window_exceeded", which Claude Code
+		// 2.1.x surfaces verbatim as "API Error: The model has reached its
+		// context window limit." (GH #6360). It carries neither "token" nor
+		// any of the phrases above, so it used to land in
+		// agent_error.unknown — a reason the resume blacklists do not cover,
+		// which left the over-full session pinned as the resume pointer and
+		// made every later comment on that issue replay the same overflow.
+		// Both wordings are matched so a backend forwarding the raw stop
+		// reason classifies the same way as one forwarding the CLI's copy.
+		"context window limit",
+		"model_context_window_exceeded",
+		// Mirror these substrings into the MUL-1949 offline backfill SQL.
 	),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
 		// approximate with both substrings present, which catches

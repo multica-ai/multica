@@ -40,6 +40,11 @@ func TestClassifyRules(t *testing.T) {
 		{"prompt is too long", "API Error: prompt is too long: 250000 tokens > 200000 maximum", ReasonAgentContextOverflow},
 		{"context size has been exceeded", "context size has been exceeded; consider /compact", ReasonAgentContextOverflow},
 		{"token limit", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+		// GH #6360, verbatim from Claude Code 2.1.x. The turn is not
+		// rejected with a 400 — the response comes back with stop_reason
+		// "model_context_window_exceeded" and the CLI prints this line.
+		{"claude code context window limit", "API Error: The model has reached its context window limit.", ReasonAgentContextOverflow},
+		{"raw stop reason", `{"stop_reason":"model_context_window_exceeded"}`, ReasonAgentContextOverflow},
 
 		// 2. Missing config.
 		{"missing env var", "Missing environment variable: `MIFY_API_KEY`.", ReasonAgentMissingConfig},
