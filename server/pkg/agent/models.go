@@ -207,10 +207,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		return Catalog{Models: []Model{}}, nil
 	case "qwenpaw":
 		// QwenPaw is ACP-native (`qwenpaw acp`); model catalog comes from
-		// session/new. QwenPaw v2.0.1+ includes the `models` field
+		// session/new. QwenPaw v2.1.0-beta.1+ includes the `models` field
 		// (SessionModelState) in the session/new response, added by
-		// agentscope-ai/QwenPaw#6531. On older versions or auth failure,
-		// the empty fallback keeps manual model entry available.
+		// agentscope-ai/QwenPaw#6531 (first included in v2.1.0-beta.1).
+		// On older versions or auth failure, the empty fallback keeps
+		// manual model entry available.
 		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discovered(discoverQwenpawModels(ctx, executablePath))
 		})
@@ -235,11 +236,22 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 // 1.0.6 — MUL-3125).
 //
 // The hook is retained — rather than inlining `true` at the call sites — so
-// a future model-less runtime can opt out in one place, which makes the UI
+// a model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	return true
+	switch providerType {
+	case "qwenpaw":
+		// QwenPaw's `session/set_model` persists to agent.json at the agent
+		// scope, not the session scope. Calling it would mutate the user's
+		// shared, persistent agent config. Model override is therefore
+		// unsupported — the runtime uses whatever model is configured in
+		// the agent profile. If QwenPaw makes model selection session-scoped
+		// upstream, this can be reverted to `true`.
+		return false
+	default:
+		return true
+	}
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known
@@ -437,10 +449,11 @@ func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model,
 }
 
 // discoverQwenpawModels spins up `qwenpaw acp` and parses the model
-// catalog from the session/new response. QwenPaw v2.0.1+ populates
-// the `models` field (SessionModelState) via _build_model_state()
-// (agentscope-ai/QwenPaw#6531). Requires a configured QwenPaw agent;
-// falls back to manual entry on any failure.
+// catalog from the session/new response. QwenPaw v2.1.0-beta.1+
+// populates the `models` field (SessionModelState) via
+// _build_model_state() (agentscope-ai/QwenPaw#6531, first included in
+// v2.1.0-beta.1). Requires a configured QwenPaw agent; falls back to
+// manual entry on any failure.
 func discoverQwenpawModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "qwenpaw",

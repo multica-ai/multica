@@ -29,16 +29,16 @@ var qwenpawBlockedArgs = map[string]blockedArgMode{
 // Hermes/Kimi/Kiro/Traecli use, so we reuse the hermesClient ACP
 // transport — only the binary, env, and tool-name extraction differ.
 //
-// Supported QwenPaw version: v2.0.1 (validated via
+// Supported QwenPaw version: v2.1.0-beta.1 (validated via
 // TestQwenpawRealACPSmoke integration test). The code is designed for
 // the v2.0 ACP API surface; earlier versions (v1.x) have a different
 // protocol and are not supported.
 //
-// Notable contract with QwenPaw v2.0.1:
+// Notable contract with QwenPaw v2.1.0-beta.1:
 //   - `session/new` and `session/load` accept `_meta["qwenpaw.coding_project_dir"]`
 //     to enable Coding Mode (qwenpaw.coding_project_dir meta key).
 //   - `session/new` response includes a `models` field (SessionModelState)
-//     for model discovery (QwenPaw v2.0.1+, agentscope-ai/QwenPaw#6531).
+//     for model discovery (QwenPaw v2.1.0-beta.1+, agentscope-ai/QwenPaw#6531).
 //     ListModels uses this to populate the model picker. However,
 //     `session/set_model` is NOT called — it persists to agent.json at the
 //     agent scope (not session-scoped), so calling it would mutate the

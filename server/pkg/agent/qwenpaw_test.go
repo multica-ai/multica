@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+func TestQwenpawModelSelectionUnsupported(t *testing.T) {
+	t.Parallel()
+	if ModelSelectionSupported("qwenpaw") {
+		t.Fatal("ModelSelectionSupported(qwenpaw) should return false — session/set_model persists to agent scope, not session scope")
+	}
+	// Other providers should remain supported
+	if !ModelSelectionSupported("claude") {
+		t.Fatal("ModelSelectionSupported(claude) should remain true")
+	}
+}
+
 func TestNewReturnsQwenpawBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("qwenpaw", Config{ExecutablePath: "/nonexistent/qwenpaw"})
