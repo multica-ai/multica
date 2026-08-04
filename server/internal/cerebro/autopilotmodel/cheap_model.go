@@ -63,10 +63,43 @@ func CheapForProvider(provider string) (model string, ok bool) {
 //     for the wrong provider asked for a capability this runtime does not have,
 //     and silently swapping it would hide that.
 func ResolveForProvider(provider, model string) (string, error) {
+	cheap, hasCheap := CheapForProvider(provider)
+	return resolve(provider, model, cheap, hasCheap)
+}
+
+// ResolveForRuntime is ResolveForProvider plus the cheap model configured on the
+// runtime itself (FIR-4492).
+//
+// cheapModels above can only cover the four providers whose model list is the
+// same on every machine. For hermes, opencode, cursor, kimi, kiro, pi, openclaw,
+// antigravity and firtal-gateway the list lives in a file on the machine, so
+// TierCheap resolved to no override at all: the wakeup asked for a cheap run and
+// got the agent's own model, which is the expensive one it was trying to avoid.
+//
+// The missing answer is not something the server can derive — agent.Model carries
+// no price, so even the discovered list cannot be ranked by cost. It has to be
+// chosen. The runtime page is where it gets chosen, because that page can ask the
+// machine for its real model list (POST /api/runtimes/{id}/models); runtimeCheap
+// is what an operator picked from that list.
+//
+// A curated cheapModels entry still wins: it is asserted against the provider's
+// static catalog by TestCheapModelsAreInProviderCatalog, so a hand-typed runtime
+// value must not override it. runtimeCheap == "" leaves behaviour unchanged, and
+// a value that has gone stale since it was picked still cannot fail the run — the
+// daemon checks every model against the runtime's live list before spawning and
+// degrades to the agent's own model (see daemon.runnableTaskModel).
+func ResolveForRuntime(provider, model, runtimeCheap string) (string, error) {
+	cheap, hasCheap := CheapForProvider(provider)
+	if !hasCheap && runtimeCheap != "" {
+		cheap, hasCheap = runtimeCheap, true
+	}
+	return resolve(provider, model, cheap, hasCheap)
+}
+
+func resolve(provider, model, cheap string, hasCheap bool) (string, error) {
 	if model == "" {
 		return "", nil
 	}
-	cheap, hasCheap := CheapForProvider(provider)
 	if model == TierCheap {
 		if !hasCheap {
 			return "", nil

@@ -132,8 +132,8 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	// always holds a real model ID, so every reader (list, UI) shows what will
 	// run. With no runtime bound yet, "cheap" is stored as-is and dispatch
 	// resolves it against the provider that turns out to run it.
-	if provider, ok := s.agentRuntimeProvider(ctx, req.AgentID); ok {
-		model, err := autopilotmodel.ResolveForProvider(provider, req.ModelOverride)
+	if provider, runtimeCheap, ok := s.agentRuntimeProvider(ctx, req.AgentID); ok {
+		model, err := autopilotmodel.ResolveForRuntime(provider, req.ModelOverride, runtimeCheap)
 		if err != nil {
 			return cerebrodb.CerebroAgentWakeup{}, err
 		}
@@ -401,7 +401,7 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	// cheap run and got the agent's own model. Resolving turns "cheap" into this
 	// provider's cheap model and swaps another provider's cheap model for it, so
 	// the wakeup runs cheaply on whatever runtime it lands on.
-	if model, err := autopilotmodel.ResolveForProvider(rt.Provider, row.ModelOverride); err != nil {
+	if model, err := autopilotmodel.ResolveForRuntime(rt.Provider, row.ModelOverride, rt.CheapModel); err != nil {
 		slog.Warn("cerebro wakeup: running on the agent's own model, override not resolvable",
 			"wakeup_id", util.UUIDToString(row.ID),
 			"task_id", util.UUIDToString(task.ID),
@@ -775,16 +775,19 @@ func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.Ce
 // are normal — an agent can be created before its runtime is attached — so the
 // caller skips the provider check rather than failing. dispatch re-checks once
 // the runtime is known and online.
-func (s *Service) agentRuntimeProvider(ctx context.Context, agentID pgtype.UUID) (provider string, ok bool) {
+//
+// FIR-4492: it also returns that runtime's configured cheap model, so TierCheap
+// can resolve on a provider the server has no catalog for.
+func (s *Service) agentRuntimeProvider(ctx context.Context, agentID pgtype.UUID) (provider, cheapModel string, ok bool) {
 	row, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil || !row.RuntimeID.Valid {
-		return "", false
+		return "", "", false
 	}
 	rt, err := s.Queries.GetAgentRuntime(ctx, row.RuntimeID)
 	if err != nil || rt.Provider == "" {
-		return "", false
+		return "", "", false
 	}
-	return rt.Provider, true
+	return rt.Provider, rt.CheapModel, true
 }
 
 func (s *Service) validateIssueAndAgent(ctx context.Context, workspaceID, issueID, agentID pgtype.UUID) error {

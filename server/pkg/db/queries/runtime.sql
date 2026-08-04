@@ -277,6 +277,16 @@ SET sandbox_policy = COALESCE($2, '{}'::jsonb), updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- CEREBRO-PATCH(runtime-cheap-model-query): FIR-4492 per-runtime cheap model.
+-- name: UpdateAgentRuntimeCheapModel :one
+-- Sets the model this runtime uses for the provider-independent "cheap" tier
+-- (FIR-4492). '' clears it, which restores the pre-patch behaviour: "cheap"
+-- resolves to no override and the run uses the agent's own model.
+UPDATE agent_runtime
+SET cheap_model = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 

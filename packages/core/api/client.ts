@@ -2256,6 +2256,18 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/unpause`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(api-client-runtime-cheap-model): FIR-4492 per-runtime cheap model.
+  // Pass "" to clear, which restores "cheap" resolving to no override.
+  async updateRuntimeCheapModel(
+    runtimeId: string,
+    cheapModel: string,
+  ): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/cheap-model`, {
+      method: "PATCH",
+      body: JSON.stringify({ cheap_model: cheapModel }),
+    });
+  }
+
   // CEREBRO-PATCH(api-client-runtime-tools-config): runtime-level MCP defaults (9031).
   async updateRuntimeToolsConfig(
     runtimeId: string,

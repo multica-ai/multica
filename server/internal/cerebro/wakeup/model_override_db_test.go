@@ -346,3 +346,64 @@ func TestDispatchAppliesModelOverrideToTask(t *testing.T) {
 		t.Fatalf("task model_override = %v, want %q", taskModel, autopilotmodel.ModelHaiku)
 	}
 }
+
+// FIR-4492: on a provider the server has no catalog for, "cheap" used to resolve
+// to no override at all — the wakeup asked for a cheap run and got the agent's own
+// model, which is the expensive one it was avoiding. The runtime's own cheap
+// model, picked from the list that machine reports, is what makes it mean
+// something. Unset, the old behaviour stands.
+func TestCreateUsesRuntimeCheapModelOnUncataloguedProvider(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+
+	var hermesRuntime, hermesAgent pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, cheap_model)
+		 VALUES ($1, 'Hermes Runtime', 'local', 'hermes', 'online', '') RETURNING id`,
+		wkWorkspaceID).Scan(&hermesRuntime); err != nil {
+		t.Fatalf("create hermes runtime: %v", err)
+	}
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+		 VALUES ($1, 'Hermes Agent', 'local', $2) RETURNING id`,
+		wkWorkspaceID, hermesRuntime).Scan(&hermesAgent); err != nil {
+		t.Fatalf("create hermes agent: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		wkPool.Exec(bg, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1`, hermesAgent)
+		wkPool.Exec(bg, `DELETE FROM agent WHERE id = $1`, hermesAgent)
+		wkPool.Exec(bg, `DELETE FROM agent_runtime WHERE id = $1`, hermesRuntime)
+	})
+
+	create := func(t *testing.T, at time.Duration) string {
+		t.Helper()
+		row, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+			AgentID:       hermesAgent,
+			IssueID:       wkIssueID,
+			Prompt:        "is CI green?",
+			TriggerType:   TriggerTime,
+			FireAt:        pgtype.Timestamptz{Time: time.Now().Add(at), Valid: true},
+			ModelOverride: autopilotmodel.TierCheap,
+		})
+		if err != nil {
+			t.Fatalf("create cheap wakeup on hermes runtime: %v", err)
+		}
+		return row.ModelOverride
+	}
+
+	if got := create(t, time.Hour); got != "" {
+		t.Fatalf("cheap model unset: model_override = %q, want %q", got, "")
+	}
+
+	if _, err := wkPool.Exec(ctx,
+		`UPDATE agent_runtime SET cheap_model = 'gemini-3.6-flash' WHERE id = $1`, hermesRuntime); err != nil {
+		t.Fatalf("set runtime cheap model: %v", err)
+	}
+	if got := create(t, 2*time.Hour); got != "gemini-3.6-flash" {
+		t.Fatalf("cheap model set: model_override = %q, want %q", got, "gemini-3.6-flash")
+	}
+}
