@@ -733,18 +733,25 @@ describe("SlackBlock", () => {
     expect(screen.getByText("People")).toBeInTheDocument();
   });
 
-  it("places an unread row above a starred-but-read row", async () => {
+  // FIR-4350 — a starred conversation sits in its OWN Favorites section at the
+  // very top, above even the unread block. Bob (starred, read) comes before
+  // Alice (unread, not starred).
+  it("places a starred row in the Favorites section above the unread block", async () => {
     favState.keys = ["member:bob"]; // Bob starred + read; Alice unread
     await act(async () => {
       renderBlock({ unreadFirst: true, groupBy: "none" });
     });
 
+    const favorites = screen.getByTestId("favorites-group");
+    expect(within(favorites).getByTestId("presence-dot-bob")).toBeInTheDocument();
+    expect(within(favorites).queryByTestId("presence-dot-alice")).not.toBeInTheDocument();
+
     const order = screen
       .getAllByTestId(/^presence-dot-/)
       .map((d) => d.getAttribute("data-testid"));
-    // Alice (unread) comes before Bob (starred but read).
-    expect(order.indexOf("presence-dot-alice")).toBeLessThan(
-      order.indexOf("presence-dot-bob"),
+    // Bob (starred, in Favorites) comes before Alice (unread).
+    expect(order.indexOf("presence-dot-bob")).toBeLessThan(
+      order.indexOf("presence-dot-alice"),
     );
   });
 

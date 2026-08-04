@@ -47,6 +47,19 @@ describe("readPlacement", () => {
   });
 });
 
+describe("agents are inbox-only (FIR-4350)", () => {
+  it("defaults agent_chat to inbox-only", () => {
+    expect(DEFAULT_PLACEMENT.agent_chat).toEqual({ chat: false, inbox: true });
+  });
+
+  it("ignores a stored agent_chat value that tries to put agents in Chat", () => {
+    const parsed = readPlacement({ agent_chat: { chat: true, inbox: false } });
+    expect(parsed.agent_chat).toEqual({ chat: false, inbox: true });
+    expect(showsInChat(parsed, "agent_chat")).toBe(false);
+    expect(showsInInbox(parsed, "agent_chat")).toBe(true);
+  });
+});
+
 describe("showsInChat / showsInInbox", () => {
   it("reads the default as chat-only", () => {
     // FIR-4350 — turning the feature on moves conversations to Chat and out of
@@ -62,12 +75,14 @@ describe("showsInChat / showsInInbox", () => {
 });
 
 describe("hiddenFromInbox", () => {
-  it("hides every conversation type by default (all placed in Chat)", () => {
+  it("hides channels and DMs by default, but never agent chats", () => {
+    // FIR-4350 — agents are inbox-only, so agent_chat is never hidden even in
+    // the default (channels/DMs → Chat).
     const hidden = hiddenFromInbox(DEFAULT_PLACEMENT);
-    expect(hidden.size).toBe(3);
+    expect(hidden.size).toBe(2);
     expect(hidden.has("channel")).toBe(true);
     expect(hidden.has("dm")).toBe(true);
-    expect(hidden.has("agent_chat")).toBe(true);
+    expect(hidden.has("agent_chat")).toBe(false);
   });
 
   it("hides exactly the types whose inbox place is off", () => {

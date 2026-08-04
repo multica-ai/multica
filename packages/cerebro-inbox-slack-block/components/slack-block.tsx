@@ -17,7 +17,7 @@
 // text-muted-foreground, bg-success for the online dot, etc.). No hardcoded
 // colors — see CLAUDE.md CSS Architecture.
 import { useMemo, useState } from "react";
-import { Hash, Star, Settings2, X, Search } from "lucide-react";
+import { Hash, Star, Settings2, X, Search, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   channelListOptions,
@@ -89,6 +89,14 @@ export interface SlackBlockProps {
    *  on for the dynamic inbox; the Chat page turns it off because it fixes the
    *  display options and has no block to remove. */
   showSectionControls?: boolean;
+  /** FIR-4350 — when set, render a "+" button in the header that opens the
+   *  new-conversation flow. The Chat page passes it; the inbox does not (it has
+   *  the sidebar "New message" button). */
+  onCreate?: () => void;
+  /** FIR-4350 — when set, render a settings gear in the header that calls it.
+   *  The Chat page passes it to open the placement matrix on the page instead
+   *  of sending the user to the global Settings tab. */
+  onOpenSettings?: () => void;
   /** Opens an agent chat in the parent's detail panel (no DM channel). */
   onOpenAgentChat: (agentId: string) => void;
   /** TECH-3664 — opens an EXISTING (unread) agent chat session so clicking an
@@ -180,6 +188,8 @@ export function SlackBlock({
   searchDefaultOpen = false,
   onSetSearchDefaultOpen,
   showSectionControls = true,
+  onCreate,
+  onOpenSettings,
   onOpenAgentChat,
   onOpenAgentSession,
   onRemove,
@@ -485,13 +495,19 @@ export function SlackBlock({
     );
   };
 
+  // FIR-4350 — starred conversations get their OWN "Favorites" section at the
+  // very top, across all kinds, instead of floating to the top of their type
+  // group. Everything below is the non-starred set.
+  const favoriteItems = shownItems.filter((i) => i.starred);
+  const nonFavorite = shownItems.filter((i) => !i.starred);
+
   // TECH-3664 — when "Unread first" is on, every unread conversation (channel,
-  // person OR agent) floats into ONE block at the very top, with a thin
+  // person OR agent) floats into ONE block below Favorites, with a thin
   // horizontal divider under it; the rest are grouped/flat below as chosen.
   // shownItems is already sorted (starred → unread → recency/name), so the
   // partition preserves order within each block.
-  const unreadItems = unreadFirst ? shownItems.filter((i) => i.unread > 0) : [];
-  const restItems = unreadFirst ? shownItems.filter((i) => i.unread === 0) : shownItems;
+  const unreadItems = unreadFirst ? nonFavorite.filter((i) => i.unread > 0) : [];
+  const restItems = unreadFirst ? nonFavorite.filter((i) => i.unread === 0) : nonFavorite;
 
   let groups: Array<{ label: string; items: ChatItem[] }>;
   if (groupBy === "type") {
@@ -514,6 +530,17 @@ export function SlackBlock({
         </span>
         <span className="text-xs text-muted-foreground">{onlineCount} online</span>
         <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
+          {onCreate && (
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-muted"
+              onClick={onCreate}
+              aria-label="New conversation"
+              title="New conversation"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          )}
           <button
             type="button"
             className={`rounded p-1 hover:bg-muted ${
@@ -599,6 +626,17 @@ export function SlackBlock({
           </button>
           </>
           )}
+          {onOpenSettings && (
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-muted"
+              onClick={onOpenSettings}
+              aria-label="Chat settings"
+              title="Chat settings"
+            >
+              <Settings2 className="size-3.5" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -639,6 +677,19 @@ export function SlackBlock({
           </p>
         ) : (
           <div className="flex flex-col gap-3" data-testid="chat-list">
+            {/* FIR-4350 — Favorites block across all kinds, above everything
+                else, with a divider when anything follows. */}
+            {favoriteItems.length > 0 && (
+              <div className="flex flex-col gap-1" data-testid="favorites-group">
+                <h3 className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Favorites
+                </h3>
+                {favoriteItems.map(renderRow)}
+                {(unreadItems.length > 0 || groups.length > 0) && (
+                  <hr className="mt-2 border-t border-border" />
+                )}
+              </div>
+            )}
             {/* TECH-3664 — unread block across all kinds, with a thin divider
                 under it, kept above the grouped/flat read rows. */}
             {unreadItems.length > 0 && (

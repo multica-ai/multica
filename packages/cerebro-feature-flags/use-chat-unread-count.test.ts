@@ -64,15 +64,15 @@ describe("countUnreadConversations", () => {
     expect(count).toBe(0);
   });
 
-  it("counts everything under the chat-only default", () => {
-    // FIR-4350 — the default now places all three types in Chat, so the badge
-    // counts them straight away.
+  it("counts channels/DMs but not agents under the default", () => {
+    // FIR-4350 — the default places channels and DMs in Chat, but agents are
+    // inbox-only, so an unread agent chat is NOT counted in the Chat badge.
     const count = countUnreadConversations(
       [channel({ unread_count: 3 })],
       [session({ has_unread: true })],
       DEFAULT_PLACEMENT,
     );
-    expect(count).toBe(2);
+    expect(count).toBe(1);
   });
 
   it("counts an unread channel once, however many messages are unread", () => {

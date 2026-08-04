@@ -793,6 +793,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
+            {/* CEREBRO-PATCH(cerebro-chat-page-sidebar): FIR-4350 Chat entry directly under Inbox in the header */}
+            <ChatNavItem workspaceSlug={workspace?.slug ?? ""} wsId={wsId} onClick={handleNavClick} />
           </SidebarMenu>
         </SidebarHeader>
 
@@ -868,8 +870,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </React.Fragment>
                   );
                 })}
-                {/* CEREBRO-PATCH(cerebro-chat-page-sidebar): FIR-4350 Chat entry in workspace group */}
-                <ChatNavItem workspaceSlug={workspace?.slug ?? ""} wsId={wsId} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 Notes entry in workspace group */}
                 <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 Reminders entry in workspace group */}

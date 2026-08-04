@@ -13,8 +13,14 @@ const placementState = vi.hoisted(() => ({
   } as ChatPlacement,
 }));
 
-// Captures the last showSectionControls the rail was rendered with.
-const railProps = vi.hoisted(() => ({ showSectionControls: undefined as unknown }));
+// Captures the last showSectionControls the rail was rendered with, plus the
+// FIR-4350 create/settings handlers.
+const railProps = vi.hoisted(() => ({
+  showSectionControls: undefined as unknown,
+  onCreate: undefined as undefined | (() => void),
+  onOpenSettings: undefined as undefined | (() => void),
+}));
+const openModal = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => false }));
@@ -31,20 +37,37 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
   showsInChat: (placement: ChatPlacement, kind: keyof ChatPlacement) =>
     placement[kind].chat,
   useChatPlacement: () => ({ placement: placementState.value, setPlacement: () => {} }),
+  ChatPlacementSettings: () => <div data-testid="placement-settings" />,
 }));
 
-// The rail exposes two actions the tests need: open a NEW agent chat, and
-// capture the showSectionControls prop.
+vi.mock("@multica/core/modals", () => ({
+  useModalStore: Object.assign(() => undefined, {
+    getState: () => ({ open: openModal }),
+  }),
+}));
+
+// The rail exposes the actions the tests need: open a NEW agent chat, and
+// capture the showSectionControls / create / settings props.
 vi.mock("@multica/cerebro-inbox-slack-block", () => ({
   SlackBlock: (props: {
     showSectionControls?: boolean;
+    onCreate?: () => void;
+    onOpenSettings?: () => void;
     onOpenAgentChat: (id: string) => void;
   }) => {
     railProps.showSectionControls = props.showSectionControls;
+    railProps.onCreate = props.onCreate;
+    railProps.onOpenSettings = props.onOpenSettings;
     return (
       <div data-testid="rail">
         <button type="button" onClick={() => props.onOpenAgentChat("agent-1")}>
           open-new-chat
+        </button>
+        <button type="button" onClick={() => props.onCreate?.()}>
+          rail-create
+        </button>
+        <button type="button" onClick={() => props.onOpenSettings?.()}>
+          rail-settings
         </button>
       </div>
     );
@@ -112,14 +135,16 @@ describe("ChatPage", () => {
     expect(screen.getByTestId("panel-session")).toHaveTextContent("sess-99");
   });
 
-  it("shows an empty-rail hint naming the settings path when nothing is in Chat", async () => {
+  it("shows an empty-rail hint with a settings button when nothing is in Chat", async () => {
     placementState.value = NONE_IN_CHAT;
     await act(async () => {
       render(<ChatPage />);
     });
     expect(screen.queryByTestId("rail")).not.toBeInTheDocument();
     expect(screen.getByText(/Nothing is placed in Chat yet/)).toBeInTheDocument();
-    expect(screen.getByText(/Chat page/)).toBeInTheDocument();
+    // FIR-4350 — the empty rail opens the placement settings on the page.
+    await userEvent.setup().click(screen.getByText("Chat settings"));
+    expect(screen.getByTestId("placement-settings")).toBeInTheDocument();
   });
 
   it("hides the rail's section controls", async () => {
@@ -127,5 +152,25 @@ describe("ChatPage", () => {
       render(<ChatPage />);
     });
     expect(railProps.showSectionControls).toBe(false);
+  });
+
+  // FIR-4350 — the "+" on the rail opens the new-conversation modal.
+  it("opens the new-conversation modal from the rail create button", async () => {
+    const user = userEvent.setup();
+    await act(async () => {
+      render(<ChatPage />);
+    });
+    await user.click(screen.getByText("rail-create"));
+    expect(openModal).toHaveBeenCalledWith("new-message");
+  });
+
+  // FIR-4350 — the rail settings gear opens the placement matrix on the page.
+  it("opens the placement settings from the rail settings button", async () => {
+    const user = userEvent.setup();
+    await act(async () => {
+      render(<ChatPage />);
+    });
+    await user.click(screen.getByText("rail-settings"));
+    expect(screen.getByTestId("placement-settings")).toBeInTheDocument();
   });
 });
