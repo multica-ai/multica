@@ -221,6 +221,58 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktr
 
 An iOS mobile client lives in [`apps/mobile/`](apps/mobile/) — see its [README](apps/mobile/README.md) for how to build it onto your own iPhone.
 
+## Self-Host Setup Verification
+
+### Docker Compose Deployment
+
+Successfully configured and verified Multica self-host deployment using Docker Compose.
+
+### Services Running
+
+The following services were successfully deployed:
+
+* PostgreSQL with pgvector (`pgvector/pgvector:pg17`) — Healthy
+* Multica Backend (`ghcr.io/multica-ai/multica-backend:latest`) — Running
+* Multica Frontend (`ghcr.io/multica-ai/multica-web:latest`) — Running
+
+### Start Command
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+### Verification
+
+Docker containers status:
+
+```text
+multica-postgres-1   Healthy
+multica-backend-1    Running
+multica-frontend-1   Running
+```
+
+Backend health check:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+Access URLs:
+
+Frontend:
+
+```
+http://localhost:3000
+```
+
+Backend Health:
+
+```
+http://localhost:8080/health
+```
+
 
 ## License
 
