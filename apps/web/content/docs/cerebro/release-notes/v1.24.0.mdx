@@ -1,0 +1,90 @@
+---
+title: "Multica v1.24.0"
+description: "69 release bullets: 24 new, 29 fixed, 3 improved, plus 13 more."
+date: 2026-08-04
+---
+
+**Release summary:** 69 release bullets: 24 new, 29 fixed, 3 improved, plus 13 more.
+
+Changes since [v1.23.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.23.0...v1.24.0) — bump: **minor**
+
+## New
+
+- Open agent profile peek on touch (FIR-4507) [#2897](https://github.com/firtal-group/firtal-cerebro/pull/2897)
+- Add cerebro_tools_brief flag to drop the tools brief section [#2893](https://github.com/firtal-group/firtal-cerebro/pull/2893)
+- Add multica-permissions production QA target [#2884](https://github.com/firtal-group/firtal-cerebro/pull/2884)
+- Show settings and account status in hover card (FIR-3660)
+- Bake chromium + agent-browser into the cloud runtime image [#2866](https://github.com/firtal-group/firtal-cerebro/pull/2866)
+- Show pending changes in sidebar [#2833](https://github.com/firtal-group/firtal-cerebro/pull/2833)
+- Add task scope enforcement flag (FIR-4076)
+- Add live runtime release gates
+- Unify task mandate admission contract
+- Add normalized contract input
+- Add claim generation metadata
+- Refresh MCP tool list on save and nightly [#2848](https://github.com/firtal-group/firtal-cerebro/pull/2848)
+- Clarify shared Permission profiles (FIR-4269)
+- Enforce platform capabilities via tool-policy engine (FIR-4220)
+- Add approved Company Brain parity population
+- Prepare Company Brain parity inputs (FIR-3924)
+- Gate Company Brain parity population (FIR-3924)
+- Load Company Brain parity evidence (FIR-3924)
+- Coordinate Company Brain parity population (FIR-3924)
+- Persist Company Brain parity proofs (FIR-3924)
+- Evaluate Company Brain parity (FIR-3924)
+- Gate Company Brain cutover on parity (FIR-3924)
+- Record Company Brain migration decisions (FIR-3924)
+- Protect Company Brain rollback state (FIR-3924)
+
+## Fixed
+
+- Mobile chrome, display settings, and a truthful badge (FIR-4350) [#2904](https://github.com/firtal-group/firtal-cerebro/pull/2904)
+- Keep closed threads out of the snapshot start prompt (FIR-4500) [#2896](https://github.com/firtal-group/firtal-cerebro/pull/2896)
+- Simplify profile editor (FIR-4269) [#2886](https://github.com/firtal-group/firtal-cerebro/pull/2886)
+- Resolve the model against the runtime that runs it [#2890](https://github.com/firtal-group/firtal-cerebro/pull/2890)
+- Port collision-safe 9167 migration to main [#2882](https://github.com/firtal-group/firtal-cerebro/pull/2882)
+- Report Multica permission delivery correctly (FIR-4362)
+- Reject a malformed browser-login vault with 400, not 502 [#2881](https://github.com/firtal-group/firtal-cerebro/pull/2881)
+- Fill AI Impact and People dashboards from real run data (FIR-3411) [#2868](https://github.com/firtal-group/firtal-cerebro/pull/2868)
+- Make Rock saves atomic (FIR-3589) [#2876](https://github.com/firtal-group/firtal-cerebro/pull/2876)
+- Stop the self-inflicted CLI update loop (FIR-4369) [#2877](https://github.com/firtal-group/firtal-cerebro/pull/2877)
+- Allow capability_digest as an issue origin_type [#2878](https://github.com/firtal-group/firtal-cerebro/pull/2878)
+- Match current Atlas /permissions tab labels [#2867](https://github.com/firtal-group/firtal-cerebro/pull/2867)
+- Harden access diagnostics acceptance
+- Regenerate Task Mandate feature catalog
+- Complete FIR-4293 release gates
+- Complete task callable coverage
+- Align task mandate diagnostics
+- Renew identical reclaimed claims
+- Finish claim lifecycle compatibility
+- Align capabilities with mandate flag [#2853](https://github.com/firtal-group/firtal-cerebro/pull/2853)
+- Apply task mandate to runtime capabilities
+- Make claim finalization immutable
+- Verify Cerebro permission profiles (FIR-4269) [#2852](https://github.com/firtal-group/firtal-cerebro/pull/2852)
+- Align local claim callables
+- Accept retired session mode eval skills (FIR-4076) [#2845](https://github.com/firtal-group/firtal-cerebro/pull/2845)
+- Complete Company Brain rollback dependency cleanup
+- Make company brain migrations idempotent
+- Satisfy parity integration gates (FIR-3924)
+- Reject unsupported Codex mini model
+
+## Improved
+
+- Release notes v1.16.0 [#2256](https://github.com/firtal-group/firtal-cerebro/pull/2256)
+- Align Task Mandate flag contract (FIR-4289)
+- Give every agent instruction one canonical home (FIR-4282) [#2851](https://github.com/firtal-group/firtal-cerebro/pull/2851)
+
+## Other changes
+
+- FIR-4508: Hermes multi-provider — pause agent, not runtime [#2899](https://github.com/firtal-group/firtal-cerebro/pull/2899)
+- FIR-4510: peel Hermes provider:model prefixes in cost lookup [#2898](https://github.com/firtal-group/firtal-cerebro/pull/2898)
+- Chat review fixes: favorites section, on-page settings, create button, sidebar order (FIR-4350) [#2891](https://github.com/firtal-group/firtal-cerebro/pull/2891)
+- Chat som eget menu punkt: Chat-side, unread badge og placerings-settings (FIR-4350) [#2863](https://github.com/firtal-group/firtal-cerebro/pull/2863)
+- FIR-4359: enforce Autopilot controls through existing Permissions [#2872](https://github.com/firtal-group/firtal-cerebro/pull/2872)
+- FIR-3692: move agent lifecycle gates into Workflow [#2792](https://github.com/firtal-group/firtal-cerebro/pull/2792)
+- Preserve FIR-4293 operator surfaces
+- Fix task mandate finalization for gateway tools
+- FIR-4076: keep platform capabilities callable after rollback
+- Fix Company Brain rollback dependencies
+- FIR-3924: add source-scoped Company Brain permissions
+- FIR-3924: add logical Company Brain connection schema
+- Mark Codex model guard patch
