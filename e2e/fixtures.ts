@@ -31,6 +31,7 @@ export class TestApiClient {
   private createdArtifactIds: string[] = [];
   private createdAgentIds: string[] = [];
   private createdRuntimeIds: string[] = [];
+  private createdAccountIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -416,9 +417,73 @@ export class TestApiClient {
     }
   }
 
+  /** FIR-3660 — seed an agent, runtime, and account for the hover-card contract. */
+  async createAgentProfileFixture() {
+    if (!this.workspaceId || !this.userId) {
+      throw new Error("createAgentProfileFixture: call login() and ensureWorkspace() first");
+    }
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const identity = `fir-3660-${Date.now()}@example.com`;
+      const account = await client.query(
+        `INSERT INTO cerebro_account (
+           workspace_id, provider, login_identity, usage_5h_pct,
+           usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at
+         ) VALUES ($1, 'claude', $2, 27, now() + interval '2 hours 15 minutes', 59, now() + interval '3 days 4 hours')
+         RETURNING id`,
+        [this.workspaceId, identity],
+      );
+      this.createdAccountIds.push(account.rows[0].id);
+
+      await client.query(
+        `INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens, created_at)
+         VALUES ($1, $2, 12400, now()), ($1, $2, 1787600, now() - interval '2 days')`,
+        [account.rows[0].id, this.workspaceId],
+      );
+
+      const runtime = await client.query(
+        `INSERT INTO agent_runtime (
+           workspace_id, daemon_id, name, runtime_mode, provider, status,
+           device_info, metadata, last_seen_at, current_account_id
+         ) VALUES ($1, NULL, 'FIR-3660 Runtime', 'local', 'claude', 'online',
+                   'fir-3660.local', '{}'::jsonb, now(), $2)
+         RETURNING id`,
+        [this.workspaceId, account.rows[0].id],
+      );
+      this.createdRuntimeIds.push(runtime.rows[0].id);
+
+      const agent = await client.query(
+        `INSERT INTO agent (
+           workspace_id, name, description, runtime_mode, runtime_config,
+           runtime_id, visibility, max_concurrent_tasks, owner_id, model, thinking_level
+         ) VALUES ($1, 'FIR-3660 Agent', 'Tooltip verification agent', 'local',
+                   '{}'::jsonb, $2, 'workspace', 3, $3, 'claude-opus-5', 'high')
+         RETURNING id`,
+        [this.workspaceId, runtime.rows[0].id, this.userId],
+      );
+      this.createdAgentIds.push(agent.rows[0].id);
+
+      return {
+        agentId: agent.rows[0].id as string,
+        agentName: "FIR-3660 Agent",
+        runtimeId: runtime.rows[0].id as string,
+        runtimeName: "FIR-3660 Runtime",
+        identity,
+      };
+    } finally {
+      await client.end();
+    }
+  }
+
   /** Clean up all issues + inbox items created during this test. */
   async cleanup() {
-    if (this.createdArtifactIds.length || this.createdAgentIds.length || this.createdRuntimeIds.length) {
+    if (
+      this.createdArtifactIds.length ||
+      this.createdAgentIds.length ||
+      this.createdRuntimeIds.length ||
+      this.createdAccountIds.length
+    ) {
       const client = new pg.Client(DATABASE_URL);
       await client.connect();
       try {
@@ -431,6 +496,9 @@ export class TestApiClient {
         for (const id of this.createdRuntimeIds) {
           await client.query("DELETE FROM agent_runtime WHERE id = $1", [id]);
         }
+        for (const id of this.createdAccountIds) {
+          await client.query("DELETE FROM cerebro_account WHERE id = $1", [id]);
+        }
       } catch {
         /* ignore — best-effort cleanup */
       } finally {
@@ -439,6 +507,7 @@ export class TestApiClient {
       this.createdArtifactIds = [];
       this.createdAgentIds = [];
       this.createdRuntimeIds = [];
+      this.createdAccountIds = [];
     }
 
     for (const id of this.createdIssueIds) {

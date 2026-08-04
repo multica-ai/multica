@@ -4141,6 +4141,9 @@ importers:
       '@multica/cerebro-agent-tools':
         specifier: workspace:*
         version: link:../cerebro-agent-tools
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/cerebro-groups':
         specifier: workspace:*
         version: link:../cerebro-groups
