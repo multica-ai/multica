@@ -353,6 +353,9 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	var freshComment db.Comment
 	var freshTask db.AgentTaskQueue
 	if req.StartNew {
+		// The brief travels in the kickoff itself: the daemon inlines the triggering
+		// comment into the fresh run's start prompt, so it arrives without a lookup.
+		kickoff = kickoffWithBrief(kickoff, handoff)
 		freshComment, err = h.upstream.WithTx(tx).CreateComment(r.Context(), db.CreateCommentParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
@@ -504,10 +507,11 @@ func (h *Handler) publishCommentCreated(issue db.Issue, comment db.Comment) {
 }
 
 // defaultHandoffKickoff is the opening message of a handed-off fresh session when
-// the caller supplies no custom prompt. It tells the fresh run (which has no
-// memory of the prior thread) where to find the carry-over brief.
+// the caller supplies no custom prompt. kickoffWithBrief appends the carry-over
+// brief below it, so the fresh run (which has no memory of the prior thread) gets
+// it in the start prompt instead of spending a tool call to look it up.
 const defaultHandoffKickoff = "🔄 Fresh session (handoff). This is a brand-new run with no memory of the previous thread.\n\n" +
-	"Read the carry-over brief from the handed-off session — run `multica issue session list <issue>` and look at the `handoff` field on the most recently closed thread (summary / done / remaining) — then continue from the `remaining` items."
+	"The carry-over brief from the closed session follows below — continue from its `remaining` items. If no brief follows, run `multica issue session list <issue>` and read the `handoff` field on the most recently closed thread."
 
 // generateHandoff auto-summarises a THREAD (its root comment + replies) when no
 // agent brief is supplied. Deterministic, no LLM: it captures how many comments
