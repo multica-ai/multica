@@ -940,10 +940,10 @@ func TestRunTaskPassesTaskModelOverrideToCLI(t *testing.T) {
 		WorkspaceID:   "ws-1",
 		IssueID:       "issue-1",
 		AuthToken:     "mat_test",
-		ModelOverride: "task-model",
+		ModelOverride: "claude-opus-5", // CEREBRO-PATCH(daemon-run-task-override-tests): FIR-4492 real catalog IDs — runnableTaskModel drops a model the runtime cannot run.
 		Agent: &AgentData{
 			Name:  "test-agent",
-			Model: "agent-model",
+			Model: "claude-sonnet-4-6",
 		},
 	}, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -958,10 +958,11 @@ func TestRunTaskPassesTaskModelOverrideToCLI(t *testing.T) {
 		t.Fatalf("read fake claude args: %v", err)
 	}
 	args := strings.Fields(string(argsBytes))
-	if !containsAdjacent(args, "--model", "task-model") {
+	// CEREBRO-PATCH(daemon-run-task-override-tests): FIR-4492 assert on the real IDs the fixture now pins.
+	if !containsAdjacent(args, "--model", "claude-opus-5") {
 		t.Fatalf("expected task model override to reach CLI args, got %v", args)
 	}
-	if containsAdjacent(args, "--model", "agent-model") {
+	if containsAdjacent(args, "--model", "claude-sonnet-4-6") {
 		t.Fatalf("agent model leaked past task override: %v", args)
 	}
 }

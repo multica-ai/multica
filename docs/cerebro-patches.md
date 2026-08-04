@@ -1194,6 +1194,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-task-model-override-tier` | server/internal/daemon/daemon.go | 4 | JEH-1310 — task-level override is the first tier in model resolution; wins over `agent.Model` and the daemon env var. |
 | `daemon-task-thinking-override` | server/internal/daemon/types.go | 1 | FIR-2927 — `ThinkingOverride` field on the daemon-side `Task` struct, populated from `agent_task_queue.thinking_override` by the claim endpoint. |
 | `daemon-run-task-model-override` | server/internal/daemon/daemon.go | 1 | FIR-2927 — keep task-level `model_override` as the first tier in model resolution for issue workflow role/phase runs. |
+| `daemon-run-task-model-runnable` | server/internal/daemon/daemon.go | 2 | FIR-4492 — last-word guard: a resolved model this runtime's live catalog does not contain degrades to the agent default instead of failing the spawn. Logic in `cerebro_model_guard.go`. |
 | `daemon-run-task-thinking-override` | server/internal/daemon/daemon.go | 4 | FIR-2927 — task-level `thinking_override` is the first tier in thinking-level resolution; wins over `agent.ThinkingLevel`. |
 | `daemon-run-task-override-tests` | server/internal/daemon/daemon_test.go | 1 | FIR-2927 — targeted daemon tests prove task-level model/thinking overrides reach CLI arguments and win over agent defaults. |
 | `daemon-current-model-env` | server/internal/daemon/daemon.go | 4 | JEH-1310 Phase 2(a) — expose the resolved model to the spawned agent as `MULTICA_CURRENT_MODEL` so it can self-report. |

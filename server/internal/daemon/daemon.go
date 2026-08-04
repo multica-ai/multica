@@ -4076,6 +4076,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.ModelOverride == "" && modeProfile.Model != "" {
 		model = modeProfile.Model
 	} // CEREBRO-PATCH(session-mode-config): published Mode model precedes the agent default.
+	// CEREBRO-PATCH(daemon-run-task-model-runnable): FIR-4492 a pinned model this runtime cannot run degrades instead of failing the run.
+	model = runnableTaskModel(ctx, provider, entry, task, model, taskLog)
 	if task.Agent != nil {
 		if thinkingLevel == "" {
 			thinkingLevel = task.Agent.ThinkingLevel
