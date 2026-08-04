@@ -55,6 +55,14 @@ const ARCHIVED_UNREAD: Channel = {
   updated_at: "2026-01-01T00:00:00Z",
 } as unknown as Channel;
 
+const ARCHIVED_DM_UNREAD: Channel = {
+  ...ARCHIVED_UNREAD,
+  id: "dm-archived",
+  identifier: "C-2",
+  kind: "dm",
+  title: "archived-dm",
+} as unknown as Channel;
+
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -78,5 +86,30 @@ describe("useChatUnreadCount", () => {
 
     await waitFor(() => expect(result.current).toBe(1));
     expect(listChannels).toHaveBeenCalledWith({ include_archived: true });
+  });
+
+  it("does NOT count an unread DM that is archived out of the inbox feed", async () => {
+    // FIR-4350 — the Chat rail's People section matches DMs from the
+    // non-archived list, so an inbox-archived DM (e.g. snoozed as a reminder) is
+    // hidden from Chat. It sits only in the include-archived roster; counting it
+    // there made the badge claim an unread the user found nowhere in Chat.
+    listChannels.mockImplementation(async (params?: { include_archived?: boolean }) =>
+      params?.include_archived === true ? [ARCHIVED_DM_UNREAD] : [],
+    );
+
+    const { result } = renderHook(() => useChatUnreadCount("w"), { wrapper });
+
+    // Give both queries time to settle before asserting the count stays 0.
+    await waitFor(() => expect(listChannels).toHaveBeenCalledWith({ include_archived: true }));
+    await waitFor(() => expect(listChannels).toHaveBeenCalledWith());
+    expect(result.current).toBe(0);
+  });
+
+  it("counts a non-archived unread DM", async () => {
+    listChannels.mockImplementation(async () => [ARCHIVED_DM_UNREAD]);
+
+    const { result } = renderHook(() => useChatUnreadCount("w"), { wrapper });
+
+    await waitFor(() => expect(result.current).toBe(1));
   });
 });
