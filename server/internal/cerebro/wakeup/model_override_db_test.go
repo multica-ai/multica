@@ -140,6 +140,12 @@ func TestCreateSubstitutesCheapModelFromAnotherProvider(t *testing.T) {
 		t.Fatalf("model_override = %q, want %q", row.ModelOverride, codexCheap)
 	}
 
+	// Clear the first pending row so the agent+issue min-interval does not
+	// block the second Create in the same test (default is 5 minutes).
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1`, codexAgent); err != nil {
+		t.Fatalf("clear first wakeup: %v", err)
+	}
+
 	// "cheap" asks for the same thing without naming any ID.
 	row, err = svc.Create(ctx, wkWorkspaceID, CreateRequest{
 		AgentID:       codexAgent,
