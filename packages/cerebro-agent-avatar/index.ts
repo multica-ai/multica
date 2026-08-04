@@ -10,3 +10,5 @@ import "./i18n-types";
 
 export { CerebroAvatarPicker } from "./avatar-picker";
 export { CerebroInspectorAvatar } from "./inspector-avatar";
+export { ActorAvatarHoverCardShell } from "./hover-shell";
+export { useIsCoarsePointer, readCoarsePointer } from "./use-coarse-pointer";

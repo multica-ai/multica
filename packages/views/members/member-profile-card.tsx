@@ -28,6 +28,8 @@ interface MemberProfileCardProps {
 export function MemberProfileCard({ userId }: MemberProfileCardProps) {
   const { t } = useT("members");
   const wsId = useWorkspaceId();
+  // CEREBRO-PATCH(actor-hover-touch): FIR-4507 paths for member Detail link.
+  const p = useWorkspacePaths();
   const { data: members = [], isLoading: membersLoading } = useQuery(
     memberListOptions(wsId),
   );
@@ -94,6 +96,13 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
             {member.email}
           </p>
         </div>
+        {/* CEREBRO-PATCH(actor-hover-touch): FIR-4507 member Detail link for touch peek parity. */}
+        <AppLink
+          href={p.memberDetail(userId)}
+          className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-100"
+        >
+          {t(($) => $.card.detail_link)}
+        </AppLink>
       </div>
 
       {/* Owned agents */}

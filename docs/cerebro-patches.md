@@ -2409,3 +2409,8 @@ The brief-rendering block moved out of `execenv/context.go` into a sibling
 
 - **Why:** FIR-4289 requires `get_agent_capabilities` and the HTTP Capabilities card to match call-time behavior. With `cerebro_task_mandate_enforcement` off, Task Mandate cannot turn an otherwise allowed capability into Deny; Tool Policy, credentials, sandbox, repository, and approval ceilings remain unchanged.
 - **Where:** `server/internal/handler/agent_capabilities_card_cerebro.go` threads the existing workspace flag into `ApplyTaskMandate`. Gateway wiring stays in `server/internal/cerebro/runtime`, so both capability surfaces use the same circuit breaker as dispatch.
+
+# `actor-hover-touch`
+
+- **Why:** FIR-4507 — agent/member/squad profile peeks only opened on hover. Touch devices have no hover, so the card never appeared. Tap must open the same content; Detail must be visible without group-hover; avatar tap must not navigate away before the peek opens.
+- **Where:** Net-new shell in `packages/cerebro-agent-avatar/{hover-shell,use-coarse-pointer}.tsx` (coarse → bottom Sheet on phone / Popover on tablet; fine → HoverCard). Thin upstream wiring in `packages/views/common/actor-avatar.tsx` (import shell, skip profile-link on coarse+hover). Detail always-visible class on `agent-profile-card.tsx` and `squad-profile-card.tsx`; member Detail link added in `member-profile-card.tsx`.
