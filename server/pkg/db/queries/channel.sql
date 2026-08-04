@@ -367,6 +367,42 @@ RETURNING *;
 SELECT * FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2;
 
+-- name: ListFeishuNotificationTargetsForUser :many
+-- Outbound notification bridge: find active Feishu user bindings for a Multica
+-- member in this workspace. The bridge sends personal inbox notifications to
+-- the bound open_id using the installation's bot credentials. Keep this scoped
+-- to active Feishu installations and current workspace membership at the call
+-- site; channel_user_binding alone is only an account link, not delivery proof.
+SELECT
+    b.id AS binding_id,
+    b.workspace_id AS binding_workspace_id,
+    b.multica_user_id,
+    b.installation_id AS binding_installation_id,
+    b.channel_type AS binding_channel_type,
+    b.channel_user_id,
+    b.config AS binding_config,
+    b.bound_at,
+    ci.id AS installation_id,
+    ci.workspace_id AS installation_workspace_id,
+    ci.agent_id,
+    ci.channel_type AS installation_channel_type,
+    ci.config AS installation_config,
+    ci.status AS installation_status,
+    ci.ws_lease_token,
+    ci.ws_lease_expires_at,
+    ci.installer_user_id,
+    ci.installed_at,
+    ci.created_at,
+    ci.updated_at
+FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = 'feishu'
+  AND ci.channel_type = 'feishu'
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC;
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already

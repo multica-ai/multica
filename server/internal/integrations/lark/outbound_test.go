@@ -131,6 +131,9 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	}
 	return f.textSendReturn, f.textSendErr
 }
+func (f *fakeAPIClient) SendTextToOpenID(ctx context.Context, p SendOpenIDTextParams) (string, error) {
+	return f.textSendReturn, f.textSendErr
+}
 func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
