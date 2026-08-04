@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-07-31
+// Snapshot: 2026-08-04
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -77,6 +77,9 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-flash-lite-latest": { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
   "gemini-omni-flash-preview": { input: 1.5, output: 17.5, cacheRead: 1.5, cacheWrite: 1.5 },
   "gemini-robotics-er-1.6-preview": { input: 1, output: 5, cacheRead: 1, cacheWrite: 1 },
+  "github-copilot/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
+  "github-copilot/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+  "github-copilot/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "glm-4.5": { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0 },
   "glm-4.5-air": { input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite: 0 },
   "glm-4.5-flash": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -193,6 +196,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "qwen3.6-plus": { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.625 },
   "qwen3.7-max": { input: 2.5, output: 7.5, cacheRead: 0.5, cacheWrite: 3.125 },
   "qwen3.7-plus": { input: 0.4, output: 1.6, cacheRead: 0.04, cacheWrite: 0.5 },
+  "qwen3.8-max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
   "text-embedding-3-large": { input: 0.13, output: 0, cacheRead: 0.13, cacheWrite: 0.13 },
   "text-embedding-3-small": { input: 0.02, output: 0, cacheRead: 0.02, cacheWrite: 0.02 },
   "text-embedding-ada-002": { input: 0.1, output: 0, cacheRead: 0.1, cacheWrite: 0.1 },
