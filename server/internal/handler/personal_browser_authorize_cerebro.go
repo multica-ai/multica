@@ -72,6 +72,13 @@ func (h *Handler) SecureFillPersonalBrowser(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid action")
 		return
 	}
+	// FIR-4447: same early format gate as provision-auth — secure-fill reaches
+	// the identical RevealCredential, so without this a flattened Agent Vault box
+	// name fails late and opaquely (502) instead of at the boundary.
+	if _, ok := agentvault.BrowserLoginApp(req.Vault); !ok {
+		writeError(w, http.StatusBadRequest, agentvault.BrowserLoginVaultFormatHint)
+		return
+	}
 	if !strings.HasPrefix(req.AgentToken, "mat_") {
 		writeError(w, http.StatusForbidden, "invalid agent token")
 		return

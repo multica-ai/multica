@@ -91,12 +91,10 @@ func (c *Client) ListVaults(ctx context.Context, workspaceID pgtype.UUID) ([]Vau
 // value is returned only to the trusted server caller; handlers must never
 // serialize it to an agent-facing response or log it.
 func (c *Client) RevealCredential(ctx context.Context, workspaceID pgtype.UUID, vault, key string) (string, error) {
-	vault = strings.TrimSpace(vault)
 	key = strings.TrimSpace(key)
-	const prefix = "Shared/browser-login/"
-	app := strings.TrimPrefix(vault, prefix)
-	if app == vault || app == "" || strings.Contains(app, "/") {
-		return "", fmt.Errorf("agentvault: vault must be Shared/browser-login/<app>")
+	app, ok := BrowserLoginApp(vault)
+	if !ok {
+		return "", fmt.Errorf("agentvault: %s", BrowserLoginVaultFormatHint)
 	}
 	if !browserLoginCredentialKey.MatchString(key) {
 		return "", fmt.Errorf("agentvault: invalid credential key")
