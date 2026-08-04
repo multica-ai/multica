@@ -94,6 +94,10 @@ export interface SlackBlockProps {
   /** FIR-4350 — show the "Show agents" item in the settings dropdown. Default
    *  on; the Chat page turns it off because agents are inbox-only there. */
   showAgentsToggle?: boolean;
+  /** FIR-4350 — render as a full-height page column instead of an inbox card:
+   *  no rounded border, no drag-handle inset on the header, and the header stays
+   *  pinned while the list scrolls. Default off (the dynamic inbox card). */
+  flush?: boolean;
   /** FIR-4350 — when set, render a "+" button in the header that opens the
    *  new-conversation flow. The Chat page passes it; the inbox does not (it has
    *  the sidebar "New message" button). */
@@ -195,6 +199,7 @@ export function SlackBlock({
   showSectionControls = true,
   showRemove = true,
   showAgentsToggle = true,
+  flush = false,
   onCreate,
   onOpenSettings,
   onOpenAgentChat,
@@ -489,10 +494,13 @@ export function SlackBlock({
             aria-label={it.starred ? "Unstar" : "Star"}
             aria-pressed={it.starred}
             onClick={() => toggleFavorite(it.favKey!)}
+            // FIR-4350 — a touch screen has no hover, so an unstarred row's
+            // star was invisible and favouriting was unreachable on a phone.
+            // Always visible below sm; hover-revealed from sm up as before.
             className={`shrink-0 rounded p-0.5 transition-opacity ${
               it.starred
                 ? "text-warning opacity-100"
-                : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                : "text-muted-foreground opacity-100 hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100"
             }`}
           >
             <Star className="size-3.5" fill={it.starred ? "currentColor" : "none"} />
@@ -528,10 +536,23 @@ export function SlackBlock({
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card text-sm">
+    <section
+      data-testid="slack-block"
+      className={`bg-card text-sm ${
+        flush
+          ? "flex h-full min-h-0 flex-col"
+          : "overflow-hidden rounded-xl border border-border"
+      }`}
+    >
       {/* Control box — matches the other dynamic-inbox sections. TECH-3494:
-          pl-8 clears the drag handle the parent overlays at left-2. */}
-      <header className="flex items-center gap-2 border-b border-border py-2 pl-8 pr-3">
+          pl-8 clears the drag handle the parent overlays at left-2. FIR-4350:
+          the flush (page) variant has no drag handle, so that 32px of dead left
+          padding would just push the header out of line with the rows below. */}
+      <header
+        className={`flex items-center gap-2 border-b border-border py-2 pr-3 ${
+          flush ? "shrink-0 pl-3" : "pl-8"
+        }`}
+      >
         <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
           Chat
         </span>
@@ -570,7 +591,8 @@ export function SlackBlock({
                 <button
                   type="button"
                   className="rounded p-1 hover:bg-muted"
-                  title="Settings"
+                  aria-label="Display settings"
+                  title="Display settings"
                 />
               }
             >
@@ -663,7 +685,11 @@ export function SlackBlock({
         </div>
       </header>
 
-      <div className="flex flex-col gap-3 p-3">
+      <div
+        className={`flex flex-col gap-3 p-3 ${
+          flush ? "min-h-0 flex-1 overflow-y-auto" : ""
+        }`}
+      >
         {searchOpen && (
           // TECH-3769 — same design as the "All messages" box search bar.
           <div className="mx-1 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
