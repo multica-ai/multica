@@ -59,6 +59,9 @@ type OpenclawConfigPrep struct {
 	// OpenclawBin is the openclaw CLI binary to invoke for config introspection.
 	// Empty means resolve "openclaw" from PATH at exec time.
 	OpenclawBin string
+	// WorkspacesRoot is the daemon-owned root for task envs. Active OpenClaw
+	// config paths under it are rejected as inherited per-task pollution.
+	WorkspacesRoot string
 	// Timeout sets the context deadline for each CLI invocation — not a
 	// guaranteed cap on how long the call takes; see openclawCLITimeout. Zero
 	// falls back to openclawCLITimeout.
@@ -209,6 +212,12 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	activePath, exists, err := openclawActiveConfigPath(bin, timeout)
 	if err != nil {
 		return OpenclawConfigResult{}, fmt.Errorf("locate openclaw active config: %w", err)
+	}
+	if activePath != "" {
+		activePath, err = resolveAndGuardProviderConfigPath("openclaw", "active config path", activePath, opts.WorkspacesRoot, nil)
+		if err != nil {
+			return OpenclawConfigResult{}, err
+		}
 	}
 
 	var resolvedList []any

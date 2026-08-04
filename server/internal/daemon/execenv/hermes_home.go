@@ -203,9 +203,15 @@ type HermesProfileResolution struct {
 // a value matched; inline distinguishes the `--profile=<value>` form, whose empty
 // value must hard-fail rather than fall back to the default.
 func ResolveHermesProfile(customEnvHome, name string, found, inline bool) HermesProfileResolution {
+	return ResolveHermesProfileWithWorkspacesRoot(customEnvHome, name, found, inline, "")
+}
+
+func ResolveHermesProfileWithWorkspacesRoot(customEnvHome, name string, found, inline bool, workspacesRoot string) HermesProfileResolution {
 	base := strings.TrimSpace(customEnvHome)
+	inheritedHome := false
 	if base == "" {
 		base = strings.TrimSpace(os.Getenv("HERMES_HOME"))
+		inheritedHome = base != ""
 	}
 	if base == "" {
 		base = platformDefaultHermesHome()
@@ -220,7 +226,7 @@ func ResolveHermesProfile(customEnvHome, name string, found, inline bool) Hermes
 		// Step 1.5: trust an already-profile-scoped HERMES_HOME (immediate parent
 		// dir named "profiles") without consulting active_profile.
 		if base != "" && filepath.Base(filepath.Dir(base)) == "profiles" {
-			return HermesProfileResolution{SourceHome: base, MustExist: true}
+			return guardInheritedHermesHome(HermesProfileResolution{SourceHome: base, MustExist: true}, inheritedHome, workspacesRoot)
 		}
 		// Step 2: honor the sticky <root>/active_profile. (The container-only
 		// HERMES_S6_SUPERVISED_CHILD exception in Hermes does not apply to a
@@ -228,7 +234,7 @@ func ResolveHermesProfile(customEnvHome, name string, found, inline bool) Hermes
 		// root/default) is the source.
 		profile = readHermesActiveProfile(root)
 		if profile == "" {
-			return HermesProfileResolution{SourceHome: base}
+			return guardInheritedHermesHome(HermesProfileResolution{SourceHome: base}, inheritedHome, workspacesRoot)
 		}
 	}
 
@@ -239,7 +245,53 @@ func ResolveHermesProfile(customEnvHome, name string, found, inline bool) Hermes
 	if err != nil {
 		return HermesProfileResolution{Err: err}
 	}
-	return HermesProfileResolution{SourceHome: home, MustExist: mustExist}
+	return guardInheritedHermesHome(HermesProfileResolution{SourceHome: home, MustExist: mustExist}, inheritedHome, workspacesRoot)
+}
+
+func guardInheritedHermesHome(res HermesProfileResolution, inherited bool, workspacesRoot string) HermesProfileResolution {
+	if !inherited || res.Err != nil {
+		return res
+	}
+	if _, err := resolveAndGuardProviderConfigPath("hermes", "HERMES_HOME", res.SourceHome, workspacesRoot, hermesSourceHomeProviderConfig); err != nil {
+		res.Err = err
+	}
+	return res
+}
+
+func hermesSourceHomeProviderConfig(home string) error {
+	data, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read config.yaml: %w", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse config.yaml: %w", err)
+	}
+	if yamlDocumentHasAnyTopLevelKey(&doc, "model", "provider", "providers", "api_key") {
+		return nil
+	}
+	return fmt.Errorf("config.yaml has no model/provider settings")
+}
+
+func yamlDocumentHasAnyTopLevelKey(doc *yaml.Node, keys ...string) bool {
+	if doc == nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return false
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		for _, key := range keys {
+			if root.Content[i].Value == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // hermesRootFromHome reproduces hermes_constants.get_default_hermes_root: the

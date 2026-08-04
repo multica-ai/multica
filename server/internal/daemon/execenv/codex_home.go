@@ -46,6 +46,11 @@ var codexModelsCacheConfigFiles = []string{
 // CodexHomeOptions carries optional inputs for prepareCodexHomeWithOpts that
 // affect the generated per-task config.toml.
 type CodexHomeOptions struct {
+	// WorkspacesRoot is the daemon-owned root for task envs. When the daemon
+	// process inherited CODEX_HOME from a prior task and that path points under
+	// this root, the shared-home resolver fails closed instead of seeding every
+	// task from another task's isolated home.
+	WorkspacesRoot string
 	// CodexVersion is the detected Codex CLI version (e.g. "0.121.0"). Empty
 	// means unknown; on macOS, unknown is treated as "probably broken" so the
 	// daemon falls back to danger-full-access for network access. See
@@ -189,7 +194,10 @@ func classifyPerTaskWindowsSandbox(configFile string, configSyncErr error, share
 // config files are copied (isolated). The per-task config.toml gets a
 // daemon-managed sandbox block picked by codexSandboxPolicyFor.
 func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
-	sharedHome := resolveSharedCodexHome()
+	sharedHome, err := resolveSharedCodexHome(opts.WorkspacesRoot)
+	if err != nil {
+		return err
+	}
 	freshHome := false
 	if _, err := os.Lstat(codexHome); os.IsNotExist(err) {
 		freshHome = true
@@ -229,11 +237,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
-		if err := syncCopiedFile(src, dst); err != nil {
+		srcMissing, err := syncCopiedFile(src, dst)
+		if err != nil {
 			logger.Warn("execenv: codex-home sync failed", "file", name, "error", err)
 			if name == "config.toml" {
 				configSyncErr = err
 			}
+		} else if srcMissing && name == "config.toml" && strings.TrimSpace(os.Getenv("CODEX_HOME")) != "" {
+			logger.Warn("execenv: inherited CODEX_HOME has no config.toml; Codex may fall back to its native default provider", "shared_home", sharedHome)
 		}
 	}
 	// Drop `[[skills.config]]` entries inherited from the user's
@@ -310,20 +321,46 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	return nil
 }
 
-// resolveSharedCodexHome returns the path to the user's shared Codex home.
-// Checks $CODEX_HOME first, falls back to ~/.codex.
-func resolveSharedCodexHome() string {
-	if v := os.Getenv("CODEX_HOME"); v != "" {
-		abs, err := filepath.Abs(v)
-		if err == nil {
-			return abs
-		}
+// resolveSharedCodexHome returns the path to the user's shared Codex home. It
+// checks inherited $CODEX_HOME first, then falls back to ~/.codex. Inherited
+// CODEX_HOME is guarded because a daemon launched from a task shell must not
+// seed every task from that task-scoped home.
+func resolveSharedCodexHome(workspacesRoot string) (string, error) {
+	if v := os.Getenv("CODEX_HOME"); strings.TrimSpace(v) != "" {
+		return resolveAndGuardProviderConfigPath("codex", "CODEX_HOME", v, workspacesRoot, codexSharedHomeProviderConfig)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
+		return filepath.Join(os.TempDir(), ".codex"), nil // last resort fallback
 	}
-	return filepath.Join(home, ".codex")
+	return filepath.Join(home, ".codex"), nil
+}
+
+func codexSharedHomeProviderConfig(home string) error {
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read config.toml: %w", err)
+	}
+	cfg := map[string]any{}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse config.toml: %w", err)
+	}
+	for _, key := range []string{
+		"sandbox_mode",
+		"sandbox_workspace_write",
+		"shell_environment_policy",
+		"features",
+		"memories",
+	} {
+		delete(cfg, key)
+	}
+	if len(cfg) == 0 {
+		return fmt.Errorf("config.toml has no user provider/config settings beyond daemon-managed defaults")
+	}
+	return nil
 }
 
 // codexSessionStateGlobs are the session-derived SQLite state Codex builds
@@ -446,11 +483,18 @@ func sanitizeCodexPathSegment(s string) string {
 // the remove are effectively atomic, closing the stat->remove race a plain
 // point-in-time active check leaves open. nil disables the guard (tests): every
 // idle store is removed.
-func PruneCodexSessionStores(profile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+func PruneCodexSessionStores(profile, workspacesRoot string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
-	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, codexSessionStoreNamespace(profile))
+	sharedHome, err := resolveSharedCodexHome(workspacesRoot)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("execenv: skip codex session store prune; shared CODEX_HOME is unusable", "error", err)
+		}
+		return 0, 0
+	}
+	root := filepath.Join(sharedHome, codexSessionStoreRoot, codexSessionStoreNamespace(profile))
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune
@@ -670,12 +714,16 @@ func touchCodexSessionStore(storeDir string, logger *slog.Logger) {
 // key. The daemon marks this path in-use for the duration of a task so
 // PruneCodexSessionStores never reclaims a store mid-mount, closing the
 // stat→remove race the mtime refresh alone cannot (MUL-4424).
-func CodexSessionStorePath(profile, agentID, issueID string) string {
+func CodexSessionStorePath(profile, agentID, issueID, workspacesRoot string) (string, error) {
 	key := codexSessionStoreKey(profile, agentID, issueID)
 	if key == "" {
-		return ""
+		return "", nil
 	}
-	return codexSessionStoreDir(resolveSharedCodexHome(), key)
+	sharedHome, err := resolveSharedCodexHome(workspacesRoot)
+	if err != nil {
+		return "", err
+	}
+	return codexSessionStoreDir(sharedHome, key), nil
 }
 
 // sameCodexPath reports whether two filesystem paths refer to the same location,
@@ -1338,23 +1386,23 @@ func logCodexAuthState(authPath string, logger *slog.Logger) {
 // exists in the shared config. For config.json / instructions.md there is
 // no daemon-managed default, so they simply disappear in lockstep with the
 // shared source.
-func syncCopiedFile(src, dst string) error {
+func syncCopiedFile(src, dst string) (bool, error) {
 	_, srcErr := os.Stat(src)
 	srcMissing := os.IsNotExist(srcErr)
 	if srcErr != nil && !srcMissing {
-		return fmt.Errorf("stat src %s: %w", src, srcErr)
+		return false, fmt.Errorf("stat src %s: %w", src, srcErr)
 	}
 
 	if _, err := os.Lstat(dst); err == nil {
 		if err := os.Remove(dst); err != nil {
-			return fmt.Errorf("remove stale dst %s: %w", dst, err)
+			return false, fmt.Errorf("remove stale dst %s: %w", dst, err)
 		}
 	}
 
 	if srcMissing {
-		return nil
+		return true, nil
 	}
-	return copyFile(src, dst)
+	return false, copyFile(src, dst)
 }
 
 // seedCopiedFile copies src only when dst has no task-local regular file.

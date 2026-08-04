@@ -336,10 +336,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{WorkspacesRoot: params.WorkspacesRoot, CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+		if err := hydrateCodexSkills(codexHome, params.WorkspacesRoot, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
@@ -392,9 +392,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// OpenClaw without the agents / providers / API keys it expects.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-			OpenclawBin: params.OpenclawBin,
-			McpConfig:   params.McpConfig,
-			Gateway:     params.OpenclawGateway,
+			OpenclawBin:    params.OpenclawBin,
+			WorkspacesRoot: params.WorkspacesRoot,
+			McpConfig:      params.McpConfig,
+			Gateway:        params.OpenclawGateway,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
@@ -552,11 +553,11 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{WorkspacesRoot: params.WorkspacesRoot, CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+			if err := hydrateCodexSkills(codexHome, params.WorkspacesRoot, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
 			}
 		}
@@ -623,9 +624,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// without the registered agents.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
-			OpenclawBin: params.OpenclawBin,
-			McpConfig:   params.McpConfig,
-			Gateway:     params.OpenclawGateway,
+			OpenclawBin:    params.OpenclawBin,
+			WorkspacesRoot: params.WorkspacesRoot,
+			McpConfig:      params.McpConfig,
+			Gateway:        params.OpenclawGateway,
 		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)
@@ -659,12 +661,12 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 // user's real ~/.codex/. Other runtimes leave HOME untouched and discover
 // user-level skills natively (see context.go for the workdir-local paths
 // they use for workspace skills).
-func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, disabledRuntimeSkills []RuntimeSkillRefForEnv, logger *slog.Logger) error {
+func hydrateCodexSkills(codexHome, workspacesRoot string, workspaceSkills []SkillContextForEnv, disabledRuntimeSkills []RuntimeSkillRefForEnv, logger *slog.Logger) error {
 	skillsDir := filepath.Join(codexHome, "skills")
 	if err := os.RemoveAll(skillsDir); err != nil {
 		return fmt.Errorf("clear codex skills dir: %w", err)
 	}
-	if err := seedUserCodexSkills(codexHome, workspaceSkills, logger); err != nil {
+	if err := seedUserCodexSkills(codexHome, workspacesRoot, workspaceSkills, logger); err != nil {
 		logger.Warn("execenv: seed user codex skills failed", "error", err)
 	}
 	if len(workspaceSkills) > 0 {

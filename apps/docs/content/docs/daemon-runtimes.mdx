@@ -48,6 +48,17 @@ On startup, the daemon detects supported AI coding tools on `PATH` and registers
 
 The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).
 
+### Launch environment hygiene
+
+If you start the daemon from a shell or service runbook, clear only provider home selectors that can pin every task to stale task-local state:
+
+```bash
+test -n "${MLAMP_API_KEY:-}" || { echo "MLAMP_API_KEY is missing"; exit 1; }
+env -u CODEX_HOME -u HERMES_HOME -u OPENCLAW_HOME -u OPENCLAW_CONFIG_PATH multica daemon start
+```
+
+Do not start from a broadly scrubbed environment unless you explicitly re-inject required credentials and gateway variables. Scrubbing `*_HOME` should not remove `MLAMP_API_KEY` or other deployment-specific variables the detected tools need.
+
 ## Dispatch and online status
 
 Once registered, a runtime keeps a persistent connection. When a new task enters the queue, the server notifies the matching daemon; the daemon also polls periodically as a backstop after connection interruptions. So when a runtime is online with spare capacity, tasks usually start immediately.

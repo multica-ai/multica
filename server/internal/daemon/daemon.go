@@ -4994,7 +4994,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var hermesEnv map[string]string
 	if provider == "hermes" {
 		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
-		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
+		res := execenv.ResolveHermesProfileWithWorkspacesRoot(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline, d.cfg.WorkspacesRoot)
 		if res.Err != nil {
 			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
 		}
@@ -5011,7 +5011,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
+		store, err := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID, d.cfg.WorkspacesRoot)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("resolve codex session store: %w", err)
+		}
+		if store != "" {
 			d.markActiveCodexStore(store)
 			defer d.unmarkActiveCodexStore(store)
 		}
