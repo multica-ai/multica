@@ -32,11 +32,22 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
   ResizableHandle: () => null,
 }));
 
+const setSettings = vi.hoisted(() => vi.fn());
 vi.mock("@multica/cerebro-feature-flags", () => ({
   useFeatureFlag: () => flagState.enabled,
   showsInChat: (placement: ChatPlacement, kind: keyof ChatPlacement) =>
     placement[kind].chat,
   useChatPlacement: () => ({ placement: placementState.value, setPlacement: () => {} }),
+  useChatPageSettings: () => ({
+    settings: {
+      limit: 10,
+      sort: "recent",
+      unreadFirst: true,
+      groupBy: "type",
+      searchDefaultOpen: false,
+    },
+    setSettings,
+  }),
   ChatPlacementSettings: () => <div data-testid="placement-settings" />,
 }));
 
@@ -147,11 +158,13 @@ describe("ChatPage", () => {
     expect(screen.getByTestId("placement-settings")).toBeInTheDocument();
   });
 
-  it("hides the rail's section controls", async () => {
+  it("shows the rail's display-settings controls", async () => {
     await act(async () => {
       render(<ChatPage />);
     });
-    expect(railProps.showSectionControls).toBe(false);
+    // FIR-4350 — the Chat page carries the same Sort/Group/Show/Search controls
+    // the Inbox's Chat box has.
+    expect(railProps.showSectionControls).toBe(true);
   });
 
   // FIR-4350 — the "+" on the rail opens the new-conversation modal.

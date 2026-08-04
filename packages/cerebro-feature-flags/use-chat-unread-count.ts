@@ -2,9 +2,9 @@
 // types placed in Chat. Counted client-side over the two queries the rail and
 // both inbox implementations already fetch, so it adds no request.
 //
-// Deliberately counted from Channel.unread_count / has_unread_activity and
-// ChatSession.has_unread rather than through the Slack block, so the badge is
-// right independently of FIR-2636 (the block not rendering channel unread).
+// Counted from Channel.unread_count and ChatSession.has_unread — the same
+// signals the rail rows badge on — so the badge can never claim an unread the
+// user cannot find on the Chat page.
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
@@ -30,7 +30,11 @@ export function countUnreadConversations(
 ): number {
   const channelCount = channels.filter((c) => {
     if (!showsInChat(placement, conversationKindOfChannel(c.kind))) return false;
-    return c.unread_count > 0 || c.has_unread_activity === true;
+    // FIR-4350 — count exactly what the Chat rail shows as unread. The rail's
+    // rows badge on `unread_count` only; it renders no indicator for
+    // `has_unread_activity` (mention-only smart-unread). Counting that here made
+    // the sidebar badge promise an unread the user then found nowhere in Chat.
+    return c.unread_count > 0;
   }).length;
   const sessionCount = showsInChat(placement, "agent_chat")
     ? sessions.filter((s) => s.status !== "archived" && s.has_unread === true).length
