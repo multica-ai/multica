@@ -437,6 +437,15 @@ describe("isModelPriced", () => {
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });
 
+  // CEREBRO-PATCH(pricing-hermes-routing-prefix-test): Hermes emits provider:model
+  // and nested openrouter/x-ai/… paths; peel until the bare registry SKU hits.
+  it("recognises Hermes colon-prefixed and nested slash routing IDs", () => {
+    expect(isModelPriced("opencode-go:kimi-k2.6")).toBe(true);
+    expect(isModelPriced("nous:moonshotai/kimi-k2.6")).toBe(true);
+    expect(isModelPriced("xai:claude-opus-4-7")).toBe(true); // peels to bare known SKU
+    expect(isModelPriced("google:totally-unknown-model")).toBe(false);
+  });
+
   it("still rejects OpenAI dotted variants that don't have their own row", () => {
     // The Anthropic dot→dash normalization is scoped to `claude-*` IDs.
     // For OpenAI the separator is semantic — `gpt-5.4` is a different SKU
