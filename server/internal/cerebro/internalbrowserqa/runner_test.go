@@ -1260,6 +1260,36 @@ func TestTargetForCerebroPermissionProfilesUsesTheFirtalSettingsRoute(t *testing
 	}
 }
 
+// FIR-4480: the production Permissions target must stay on the internal route
+// with a server-minted session. Turning it into a public multica.firtal.com
+// target would need a Cloudflare Access token no runtime should have to hold,
+// and the app login would still be in the way.
+func TestTargetForMulticaPermissionsStaysInternalAndOpensTheSettingsRoute(t *testing.T) {
+	target, err := TargetFor("multica-permissions")
+	if err != nil {
+		t.Fatalf("TargetFor(multica-permissions) failed: %v", err)
+	}
+	if target.URL != "http://multica.internal:3000/login" {
+		t.Fatalf("url = %q, want http://multica.internal:3000/login", target.URL)
+	}
+	if !target.SessionCookie {
+		t.Fatal("session cookie = false, want true: the runtime cannot mint a production app session itself")
+	}
+	if target.AccessHeaders {
+		t.Fatal("access headers = true, want false: the internal route needs no Cloudflare Access token")
+	}
+	if target.NavigatePath != "/firtal-tech/settings?tab=permissions" {
+		t.Fatalf("navigate path = %q, want /firtal-tech/settings?tab=permissions", target.NavigatePath)
+	}
+	if target.ExpectedPathSuffix != "/firtal-tech/settings" {
+		t.Fatalf("expected path suffix = %q, want /firtal-tech/settings", target.ExpectedPathSuffix)
+	}
+	wantMarkers := []string{"Permissions", "Access rules", "Permission profiles", "Security controls", "How access is decided"}
+	if strings.Join(target.ExpectedText, "|") != strings.Join(wantMarkers, "|") {
+		t.Fatalf("markers = %v, want %v", target.ExpectedText, wantMarkers)
+	}
+}
+
 // Only a target that carries Access headers may leave the internal network. A
 // public URL without them would put an unguarded host on the allowlist.
 func TestTargetForRejectsAPublicURLWithoutAccessHeaders(t *testing.T) {
