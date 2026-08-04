@@ -786,7 +786,7 @@ func TestRefreshAgentVersions_RevisitsWorkspaceRegisteredByAnOlderConcurrentRoun
 	if err != nil {
 		t.Fatalf("late register: %v", err)
 	}
-	if _, ok := d.mergeBuiltinRegisterResponse("ws-2", resp); !ok {
+	if _, _, ok := d.mergeBuiltinRegisterResponse("ws-2", resp); !ok {
 		t.Fatal("merge of the late register response failed")
 	}
 	if got := fx.registeredVersionFor("ws-2", "codex"); got != "9.9.9" {
@@ -1054,4 +1054,164 @@ func trackRestarts(t *testing.T, d *Daemon) *atomic.Int32 {
 	t.Cleanup(func() { d.cancelFunc = prev })
 	d.cancelFunc = func() { calls.Add(1) }
 	return &calls
+}
+
+// stubBelowMinimumAt makes checkAgentMinVersion reject exactly one version, so a
+// test can move the probe onto it and produce a CONFIRMED below-minimum verdict.
+func stubBelowMinimumAt(t *testing.T, rejected string) {
+	t.Helper()
+	orig := checkAgentMinVersion
+	t.Cleanup(func() { checkAgentMinVersion = orig })
+	checkAgentMinVersion = func(_, version string) error {
+		if version == rejected {
+			return &agent.BelowMinimumError{AgentType: "codex", Detected: version, Minimum: "1.0.0"}
+		}
+		return nil
+	}
+}
+
+// TestDemoteBelowMinimumRuntimes_LateRegisterResponseCannotReviveTheProvider
+// pins the interleave that deleting the rows does not survive on its own.
+//
+// Registration entry points are not serialized against the refresh loop, so a
+// register whose payload was built while the CLI was still acceptable can still
+// be in flight when the downgrade is confirmed and the provider demoted. Its
+// response lands afterwards describing the provider as healthy, and every apply
+// path treats a response as fresh truth — so the runtime goes back into
+// runtimeIndex while the server's upsert puts the row back online. The demotion
+// is undone by the answer to a question asked before it, and the too-old CLI
+// keeps taking work until the next refresh tick notices.
+//
+// Both sides now run under d.mu, which gives them a total order: either the
+// demotion wins and the late response is rejected, or the apply wins and the
+// demotion removes the row it just added. This drives the first ordering.
+func TestDemoteBelowMinimumRuntimes_LateRegisterResponseCannotReviveTheProvider(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	// A register sent while codex was still acceptable. Its response is held
+	// here and applied after the demotion, which is what "in flight across the
+	// verdict" means for a deterministic test.
+	inFlight := []map[string]string{{"name": "Codex", "type": "codex", "version": "9.9.9", "status": "online"}}
+	staleResp, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-1", inFlight)
+	if err != nil {
+		t.Fatalf("in-flight register: %v", err)
+	}
+
+	stubBelowMinimumAt(t, "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	d.refreshAgentVersions(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Fatalf("providers after downgrade = %v, want none (demotion precondition)", got)
+	}
+	deregsBefore := fx.deregisteredCount()
+
+	// The older register's response finally lands.
+	newIDs, rejectedIDs, ok := d.mergeBuiltinRegisterResponse("ws-1", staleResp)
+	if !ok {
+		t.Fatal("merge of the late register response failed")
+	}
+	if len(newIDs) != 0 {
+		t.Errorf("late response added runtimes %v; a provider confirmed below the minimum must not come "+
+			"back through a reply to a register sent before the verdict", newIDs)
+	}
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Errorf("providers after the late response = %v, want none", got)
+	}
+	// Local rejection is only half the fix: the server upserted that row back to
+	// online, so it would keep listing the runtime and routing work to a daemon
+	// that no longer tracks it — those tasks sit unclaimed until the stale sweep.
+	if len(rejectedIDs) == 0 {
+		t.Fatal("late response was rejected locally but reported no runtime ID to deregister, so the " +
+			"server would still believe the runtime is online")
+	}
+	d.deregisterRevivedRuntimes(context.Background(), "ws-1", rejectedIDs)
+	if got := fx.deregisteredCount(); got <= deregsBefore {
+		t.Errorf("deregister calls %d -> %d; the revived server row was never taken offline", deregsBefore, got)
+	}
+
+	// The provider must still look missing so converge can restore it once the
+	// CLI is upgraded again — the demotion is a hold, not a tombstone.
+	if missing := d.providersMissingRuntimes(); len(missing) != 1 || missing[0] != "codex" {
+		t.Errorf("providersMissingRuntimes = %v, want [codex]", missing)
+	}
+}
+
+// TestDemoteBelowMinimumRuntimes_LateAuthoritativeResponseCannotReviveTheProvider
+// is the same interleave through the other apply flavor. The drift and
+// runtime-gone paths use applyRegisterResponseInPlace, which treats the response
+// as authoritative for the whole workspace, so it has to reject a demoted
+// provider too — and hand back its ID, because those callers deregister
+// droppedIDs.
+func TestDemoteBelowMinimumRuntimes_LateAuthoritativeResponseCannotReviveTheProvider(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	inFlight := []map[string]string{{"name": "Codex", "type": "codex", "version": "9.9.9", "status": "online"}}
+	staleResp, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-1", inFlight)
+	if err != nil {
+		t.Fatalf("in-flight register: %v", err)
+	}
+
+	stubBelowMinimumAt(t, "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	d.refreshAgentVersions(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Fatalf("providers after downgrade = %v, want none (demotion precondition)", got)
+	}
+
+	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace("ws-1", staleResp, "", nil)
+	if !ok {
+		t.Fatal("apply of the late register response failed")
+	}
+	if len(newIDs) != 0 {
+		t.Errorf("late authoritative response added runtimes %v, want none", newIDs)
+	}
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Errorf("providers after the late authoritative response = %v, want none", got)
+	}
+	if len(droppedIDs) == 0 {
+		t.Error("demoted runtime was rejected but not reported in droppedIDs, so the caller would never " +
+			"deregister the row the server brought back online")
+	}
+	// The version record must not claim the server holds a version for a
+	// provider whose rows are on their way offline — that is exactly what makes
+	// a later refresh round think this workspace is already up to date.
+	d.mu.Lock()
+	recorded, hasRecord := d.workspaces["ws-1"].builtinVersions["codex"]
+	d.mu.Unlock()
+	if hasRecord {
+		t.Errorf("builtinVersions still records codex=%q after demotion; a later refresh round would "+
+			"read that as the workspace being current", recorded)
+	}
+}
+
+// TestDemoteBelowMinimumRuntimes_UpgradeClearsTheHold proves the demotion is
+// released by the probe round that finds the CLI acceptable again. Without that,
+// the guard protecting the demotion would reject the very register converge
+// makes to bring the provider back, and the runtime would never return.
+func TestDemoteBelowMinimumRuntimes_UpgradeClearsTheHold(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	stubBelowMinimumAt(t, "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	d.refreshAgentVersions(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 0 {
+		t.Fatalf("providers after downgrade = %v, want none (demotion precondition)", got)
+	}
+
+	// The user upgrades again; converge re-probes and registers.
+	fx.setProbeVersion("10.0.0")
+	d.convergeRuntimeRegistrations(context.Background())
+
+	for _, workspaceID := range []string{"ws-1", "ws-2"} {
+		if got := registeredProviders(t, d, workspaceID); len(got) != 1 || got[0] != "codex" {
+			t.Errorf("%s providers after upgrade = %v, want [codex] — the demotion hold outlived the "+
+				"downgrade and blocked recovery", workspaceID, got)
+		}
+	}
+	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
+		t.Errorf("ws-1 registered codex version = %q, want 10.0.0", got)
+	}
 }

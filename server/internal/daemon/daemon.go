@@ -310,6 +310,29 @@ type Daemon struct {
 	skippedAgentsMu sync.RWMutex
 	skippedAgents   map[string]string // provider -> human-readable reason
 
+	// demotedProviders remembers the built-in providers whose version was
+	// CONFIRMED below the minimum supported one and whose runtimes
+	// demoteBelowMinimumRuntimes has already taken offline.
+	//
+	// Removing the rows is not enough on its own: a register call that was
+	// already in flight when the demotion landed still carries the pre-demotion
+	// payload, and its response arrives afterwards. Every apply path treats a
+	// response as fresh truth, so it re-indexes the provider locally while the
+	// server's upsert puts the row back online — reviving a CLI the daemon has
+	// already proven it cannot run, until the next refresh tick notices.
+	// Remembering the verdict lets the apply paths reject that late response.
+	//
+	// Machine-level, because the verdict is a property of the binary on this
+	// host rather than of any one workspace: a stale register for workspace A
+	// must not revive the provider for workspace B either. Cleared by the next
+	// probe round that finds the provider acceptable again, which is also the
+	// round that lets converge register it.
+	//
+	// Guarded by demotedMu, which is always taken innermost and never held
+	// across another lock.
+	demotedMu        sync.RWMutex
+	demotedProviders map[string]string // provider -> the version that was rejected
+
 	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
 	// The daemon pins each agent's absolute path at startup so a later PATH
 	// change can't redirect a task launch. When that pinned path later vanishes
@@ -619,6 +642,13 @@ func (d *Daemon) recordBuiltinVersionsSent(workspaceID string, runtimes []map[st
 		ws.builtinVersions = make(map[string]string, len(sent))
 	}
 	for provider, version := range sent {
+		// Demoted while this register was in flight: its rows are being
+		// deregistered, so recording what the payload carried would tell the
+		// refresh path the server holds a version for a provider that is on its
+		// way offline — and demoteBelowMinimumRuntimes just deleted that entry.
+		if d.providerDemotedLocked(provider) {
+			continue
+		}
 		ws.builtinVersions[provider] = version
 	}
 }
@@ -1110,18 +1140,31 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 // set — that verdict is confirmed, and dropping its rows here matches what
 // demoteBelowMinimumRuntimes does on the refresh path.
 func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs, droppedIDs []string, ok bool) {
-	newIDs = make([]string, 0, len(resp.Runtimes))
-	newIDSet := make(map[string]struct{}, len(resp.Runtimes))
-	for _, rt := range resp.Runtimes {
-		newIDs = append(newIDs, rt.ID)
-		newIDSet[rt.ID] = struct{}{}
-	}
-
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, exists := d.workspaces[workspaceID]
 	if !exists {
 		return nil, nil, false
+	}
+	// Reject entries for providers demoted since this register was sent. The
+	// payload predates the verdict, so the response carries the provider as if
+	// it were healthy; indexing it here would undo demoteBelowMinimumRuntimes.
+	// Both sides do this under d.mu, which gives the two a total order: either
+	// the demotion runs first and this rejects the late response, or the apply
+	// runs first and the demotion removes the row it just added. Either way the
+	// provider ends up offline. Rejected IDs join droppedIDs so the caller
+	// deregisters the row the server upserted back into existence.
+	newIDs = make([]string, 0, len(resp.Runtimes))
+	newIDSet := make(map[string]struct{}, len(resp.Runtimes))
+	rejected := make(map[string]struct{})
+	for _, rt := range resp.Runtimes {
+		if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+			rejected[rt.ID] = struct{}{}
+			droppedIDs = append(droppedIDs, rt.ID)
+			continue
+		}
+		newIDs = append(newIDs, rt.ID)
+		newIDSet[rt.ID] = struct{}{}
 	}
 	// Drop runtimeIndex entries for prior runtime IDs that the server did not
 	// return — typically there are none for upsert-on-existing-provider, but
@@ -1130,6 +1173,13 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 	kept := newIDs
 	for _, oldID := range ws.runtimeIDs {
 		if _, stillThere := newIDSet[oldID]; stillThere {
+			continue
+		}
+		if _, alreadyRejected := rejected[oldID]; alreadyRejected {
+			// The server returned this ID for a demoted provider and it is
+			// already in droppedIDs; drop the index entry without recording it
+			// a second time.
+			delete(d.runtimeIndex, oldID)
 			continue
 		}
 		if rt, tracked := d.runtimeIndex[oldID]; tracked && rt.ProfileID == "" {
@@ -1142,6 +1192,9 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 		droppedIDs = append(droppedIDs, oldID)
 	}
 	for _, rt := range resp.Runtimes {
+		if _, skip := rejected[rt.ID]; skip {
+			continue
+		}
 		d.runtimeIndex[rt.ID] = rt
 	}
 	// Response is authoritative — replace, do not append. Replacing also
@@ -1192,12 +1245,12 @@ func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *Register
 // ID rotation is still handled: when the response returns a different ID for a
 // built-in provider the workspace already had, that specific old ID is replaced
 // rather than accumulating a duplicate heartbeat.
-func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *RegisterResponse) (newIDs []string, ok bool) {
+func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *RegisterResponse) (newIDs, rejectedIDs []string, ok bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, exists := d.workspaces[workspaceID]
 	if !exists {
-		return nil, false
+		return nil, nil, false
 	}
 
 	// Index the workspace's current built-in runtimes by provider so a rotated
@@ -1216,6 +1269,15 @@ func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *Register
 	for _, rt := range resp.Runtimes {
 		if rt.ProfileID != "" {
 			// Not ours to manage; the drift path owns custom profiles.
+			continue
+		}
+		// Demoted since this register was sent: the response predates the
+		// verdict, so bringing the provider back here would undo the demotion.
+		// Both run under d.mu, so the two are totally ordered — see the same
+		// guard in applyRegisterResponseInPlace. The caller deregisters the row
+		// the server upserted back.
+		if d.providerDemotedLocked(rt.Provider) {
+			rejectedIDs = append(rejectedIDs, rt.ID)
 			continue
 		}
 		d.runtimeIndex[rt.ID] = rt
@@ -1248,7 +1310,52 @@ func (d *Daemon) mergeBuiltinRegisterResponse(workspaceID string, resp *Register
 	if len(resp.Settings) > 0 {
 		ws.settings = resp.Settings
 	}
-	return newIDs, true
+	return newIDs, rejectedIDs, true
+}
+
+// providerDemotedLocked reports whether provider is currently held below the
+// minimum supported version. Callers must hold d.mu — the demotion record and
+// every register-response apply share that lock precisely so a late response
+// can never slip between the two.
+func (d *Daemon) providerDemotedLocked(provider string) bool {
+	_, demoted := d.demotedProviders[provider]
+	return demoted
+}
+
+// markProvidersDemoted records a CONFIRMED below-minimum verdict so a register
+// response still in flight cannot revive the provider. Callers must hold d.mu.
+func (d *Daemon) markProvidersDemotedLocked(providers map[string]string) {
+	if len(providers) == 0 {
+		return
+	}
+	if d.demotedProviders == nil {
+		d.demotedProviders = make(map[string]string, len(providers))
+	}
+	for provider, version := range providers {
+		d.demotedProviders[provider] = version
+	}
+}
+
+// clearProviderDemotions drops the verdict for providers whose version probed
+// acceptable again, which is what lets converge register them back. Called once
+// per probe round rather than per apply: the round that produced an OK verdict
+// is the authority on the binary now on disk.
+func (d *Daemon) clearProviderDemotions(providers []string) {
+	if len(providers) == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.demotedProviders) == 0 {
+		return
+	}
+	for _, provider := range providers {
+		if version, was := d.demotedProviders[provider]; was {
+			delete(d.demotedProviders, provider)
+			d.logger.Info("agent CLI is back at or above the minimum supported version",
+				"provider", provider, "rejected_version", version)
+		}
+	}
 }
 
 func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
@@ -1883,6 +1990,15 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	// nondeterministic; sort by provider so the registration payload is stable
 	// across runs and order-sensitive tests stay deterministic.
 	sort.Slice(results, func(i, j int) bool { return results[i].name < results[j].name })
+
+	// A provider that probes OK is no longer below the minimum, so release any
+	// demotion held against it — otherwise the register that converge is about
+	// to make would be rejected by the very guard that protects the demotion.
+	recovered := make([]string, 0, len(results))
+	for _, r := range results {
+		recovered = append(recovered, r.name)
+	}
+	d.clearProviderDemotions(recovered)
 
 	runtimes := make([]map[string]string, 0, len(results))
 	for _, r := range results {
