@@ -243,6 +243,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { myInvitations: () => ["invitations"] },
   workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
+  skillListOptions: () => ({ queryKey: ["skills"] }),
   // CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 dialog host (rendered in the sidebar) calls agentListOptions; mock it so the sidebar renders.
   agentListOptions: () => ({ queryKey: ["agents"] }),
 }));

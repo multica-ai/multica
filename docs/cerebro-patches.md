@@ -3,6 +3,15 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-4029 — Skills sidebar review count
+
+- `packages/views/layout/app-sidebar.tsx` mounts the Cerebro-owned
+  `SkillChangesNavBadge` beside the existing `Skills` navigation label.
+- **Why:** skill owners and approvers need to see their pending review count
+  before opening the Skills page. The query and badge remain in
+  `packages/cerebro-skill-ownership`; the upstream sidebar keeps only the
+  smallest marked integration seam.
+
 ## FIR-3876 — ACP tool-policy seam (hermes, kimi, kiro)
 
 - `server/pkg/agent/cerebro_acp_tool_policy.go` (fork-owned) resolves every ACP
