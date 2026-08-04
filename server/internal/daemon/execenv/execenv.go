@@ -231,6 +231,13 @@ type Environment struct {
 	// .agent_context/skills/ fallback was never read (issue #5242). See
 	// hermes_home.go.
 	HermesHome string
+	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
+	// (set only for the qwenpaw provider). It is populated with the bound skills
+	// and their skill.json manifest with enabled: true, so the skills are
+	// immediately effective. The daemon passes --workspace <dir> to
+	// `qwenpaw acp` so the QwenPaw agent discovers the skills natively.
+	// See qwenpaw_workspace.go.
+	QwenpawWorkspace string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -365,6 +372,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
 		env.HermesHome = hermesHome
+	}
+	if params.Provider == "qwenpaw" {
+		qwenpawWorkspace := filepath.Join(envRoot, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare qwenpaw workspace: %w", err)
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
 	// For Cursor, materialize managed MCP into project-local config and use
@@ -569,6 +583,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		} else {
 			env.ClaudeSettingsPath = settingsPath
 		}
+	}
+
+	// Refresh (or tear down) the per-task QwenPaw workspace on reuse.
+	// Rebuild the workspace so an added/removed/edited skill is reflected.
+	if params.Provider == "qwenpaw" && env.RootDir != "" {
+		qwenpawWorkspace := filepath.Join(env.RootDir, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			logger.Warn("execenv: refresh qwenpaw workspace failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
 	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills

@@ -2651,11 +2651,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     <DropdownMenuTrigger className="text-caption text-muted-foreground hover:text-foreground transition-colors">
                       {t(($) => $.detail.unsubscribe)}
                     </DropdownMenuTrigger>
+                    {/* onClick, not onSelect: Base UI's Menu.Item exposes no
+                        onSelect (that is the Radix spelling), and because its
+                        props extend the full div attribute set, an onSelect
+                        typechecks and silently lands on the DOM node as the
+                        native text-selection event — the handler never runs
+                        (MUL-5710). */}
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={handleToggleSubscribe}>
+                      <DropdownMenuItem onClick={handleToggleSubscribe}>
                         {t(($) => $.detail.unsubscribe_this)}
                       </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={handleUnsubscribeSubtree}>
+                      <DropdownMenuItem onClick={handleUnsubscribeSubtree}>
                         {t(($) => $.detail.unsubscribe_subtree)}
                       </DropdownMenuItem>
                     </DropdownMenuContent>

@@ -146,7 +146,9 @@ export function BuilderConversation({
     | { task_id?: string; status?: string; created_at?: string }
     | undefined;
   runtimeOnline: boolean;
-  onSend: (content: string) => Promise<boolean>;
+  /** `commitInput` is the composer's clear; the owner runs it as soon as the
+   *  server accepts the message. The prompt buttons below send without one. */
+  onSend: (content: string, commitInput?: () => void) => Promise<boolean>;
   onStop: () => void;
   restoreDraftRequest: BuilderRestore | null;
   onRestoreDraftApplied: () => void;
@@ -235,7 +237,9 @@ export function BuilderConversation({
       ) : null}
 
       <ChatInput
-        onSend={(content) => onSend(content)}
+        onSend={(content, _attachmentIds, commitInput) =>
+          onSend(content, commitInput)
+        }
         onStop={onStop}
         isRunning={pending}
         disabled={!runtimeOnline}

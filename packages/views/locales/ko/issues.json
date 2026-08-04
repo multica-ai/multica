@@ -559,7 +559,7 @@
   "pickers": {
     "custom_property": {
       "empty": "비어 있음",
-      "clear_action": "지우기",
+      "none": "값 없음",
       "true_label": "예",
       "false_label": "아니요",
       "value_placeholder": "값 입력…",
@@ -581,11 +581,11 @@
     },
     "start_date": {
       "trigger_label": "시작일",
-      "clear_action": "날짜 지우기"
+      "none": "시작일 없음"
     },
     "due_date": {
       "trigger_label": "마감일",
-      "clear_action": "날짜 지우기"
+      "none": "마감일 없음"
     },
     "label": {
       "trigger_label": "라벨 추가",

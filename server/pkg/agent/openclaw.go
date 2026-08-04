@@ -175,6 +175,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			// Not folded into the cutShort case above: that path cancels on
 			// purpose, and a Cancel call makes Wait report the kill instead of
 			// ErrWaitDelay. This case is specifically the clean-exit one.
+			//
+			// Reword with care: this warning is the only observable proof that
+			// this branch ran, so TestOpenclawExecuteToleratesLingeringStderrHolder
+			// asserts on the "held a pipe past WaitDelay" fragment. That fragment
+			// straddles the concatenation below, so grepping the source for it
+			// finds nothing — hence this note.
 			b.cfg.Logger.Warn("openclaw exited cleanly but a descendant held a "+
 				"pipe past WaitDelay; delivering the parsed result and dropping "+
 				"the stderr tail", "pid", cmd.Process.Pid)

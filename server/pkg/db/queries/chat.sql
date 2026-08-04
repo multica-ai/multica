@@ -219,6 +219,49 @@ WHERE id = sqlc.arg('id')
   AND session_id = sqlc.arg('session_id')
   AND runtime_id = sqlc.arg('runtime_id');
 
+-- name: AdvanceCancelledChatSessionPointer :exec
+-- Moves a chat's resume pointer onto the session a CANCELLED task recorded
+-- (GH #6340).
+--
+-- Cancellation is the one terminal state that never reports back: the daemon
+-- discards its result and only sends a cancel-ack, so neither CompleteTask nor
+-- FailTask — the only other writers of chat_session.session_id — ever runs. The
+-- claim handler reads this pointer BEFORE falling back to
+-- GetLastChatTaskSession, so on a chat that already has history a pointer left
+-- on the previous turn shadows the cancelled turn's session no matter what the
+-- fallback would have found.
+--
+-- Two callers, one statement, because both are races the other cannot cover:
+-- the cancel path runs it inside the status-flip transaction (so no follow-up
+-- can observe `cancelled` while the pointer still names the older session), and
+-- the pin path runs it after a mid-flight pin lands on an already-cancelled row
+-- (Codex waits for its rollout, so the pin routinely arrives after the cancel —
+-- at which point the cancel path saw no session to publish).
+--
+-- Everything it decides on is read from the task row inside the statement, so
+-- neither caller can act on a stale in-memory copy. The NOT EXISTS guard is what
+-- makes the late pin safe: a NEWER task on this chat that already recorded a
+-- session owns the pointer, and a straggler must not drag the conversation
+-- backwards onto the turn the user interrupted.
+UPDATE chat_session cs
+SET session_id = t.session_id,
+    runtime_id = t.runtime_id,
+    work_dir   = COALESCE(t.work_dir, cs.work_dir),
+    updated_at = now()
+FROM agent_task_queue t
+WHERE t.id = sqlc.arg('task_id')
+  AND t.chat_session_id = cs.id
+  AND t.status = 'cancelled'
+  AND t.session_id IS NOT NULL
+  AND t.runtime_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue newer
+      WHERE newer.chat_session_id = t.chat_session_id
+        AND newer.id <> t.id
+        AND newer.session_id IS NOT NULL
+        AND newer.created_at > t.created_at
+  );
+
 -- name: LockChatSessionForDelete :one
 -- Acquires an exclusive (FOR UPDATE) row lock on chat_session(id). Used by
 -- the delete path so that a concurrent SendChatMessage cannot enqueue a new
@@ -249,6 +292,31 @@ FOR UPDATE;
 -- Same row and same lock mode as LockChatSessionForDelete, and both take it as
 -- their first statement, so the delete path and this one cannot deadlock.
 SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE;
+
+-- name: LockChatSessionForDraftWrite :one
+-- The autosave half of the agent_builder_draft protocol, and the writer's
+-- answer to LockChatSessionForDelete.
+--
+-- agent_builder_draft carries no chat_session FK (repo rule), so an INSERT into
+-- it takes no lock on the parent row and nothing stops a draft from landing
+-- after its conversation is gone: the save path read the session, the delete
+-- transaction then committed, and the upsert still succeeded — leaving a row
+-- the user explicitly discarded, invisible to the UI and unreachable by every
+-- prune except the workspace teardown. The FK that would have rejected that
+-- INSERT is the one we are not allowed to have, so the lock replaces it.
+--
+-- Returns the whole row, not just the id: the caller must re-check creator and
+-- status INSIDE the transaction, because a save blocked here resumes holding
+-- values it read before blocking (the same reason the runtime-bind path re-reads
+-- the agent under its lock).
+--
+-- Same row and same lock mode as LockChatSessionForDelete and
+-- LockChatSessionForRuntimeBind, taken as the transaction's first statement, so
+-- no ordering against the repo-wide chat_session -> agent_task_queue sequence is
+-- introduced and none of the three can deadlock against each other.
+SELECT * FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
@@ -464,13 +532,25 @@ RETURNING *;
 
 -- name: GetLastChatTaskSession :one
 -- Returns the most recent task in this chat session that managed to record a
--- session_id. Includes both completed and failed tasks: even a failed task
--- may have established a real agent session before failing, and we'd rather
--- resume there than start over and lose conversation memory. Used as a
--- fallback when chat_session.session_id is NULL. Resume-unsafe failures are
--- excluded because replaying those sessions deterministically reproduces the
--- same terminal state. Keep this list in sync with resumeUnsafeFailureReason
--- and GetLastTaskSession.
+-- session_id. Includes completed, failed AND cancelled tasks: each of them may
+-- have established a real agent session, and we'd rather resume there than
+-- start over and lose conversation memory. Used as a fallback when
+-- chat_session.session_id is NULL. Resume-unsafe failures are excluded because
+-- replaying those sessions deterministically reproduces the same terminal
+-- state. Keep this list in sync with resumeUnsafeFailureReason and
+-- GetLastTaskSession.
+--
+-- 'cancelled' is resumable and its absence was GH #6340: the user stops a turn
+-- the agent had already started answering, and the next message starts from
+-- nothing. A cancelled row only carries a session_id because the daemon pinned
+-- one mid-flight (UpdateAgentTaskSession), which means the provider really did
+-- emit that session — either the resume loaded or it opened a fresh one. The
+-- user interrupted it; the provider did not reject it, so it is no more
+-- suspect than a completed one. Cancellation records no failure_reason/error,
+-- so the poison filters below have nothing to match and cancelled rows pass
+-- them the way completed rows do. The remaining risk — a transcript killed
+-- mid-tool-call that the provider later refuses — is caught downstream by
+-- taskfailure.UnresumableHistory and retires the session on the next turn.
 --
 -- The regex pair mirrors GetLastTaskSession's provider-agnostic guard for an
 -- empty message baked into the conversation history: both must match, and
@@ -496,13 +576,13 @@ WITH retired_sessions AS (
     FROM agent_task_queue t
     WHERE t.chat_session_id = $1
       AND t.session_id IS NOT NULL
-      AND t.status IN ('completed', 'failed')
+      AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, t.completed_at DESC
 )
 SELECT session_id, work_dir, runtime_id FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
-    status = 'completed'
+    status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
       AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')

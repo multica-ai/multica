@@ -800,6 +800,35 @@ func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, arg
 	return i, err
 }
 
+const getChannelChatSessionBindingBySessionAny = `-- name: GetChannelChatSessionBindingBySessionAny :one
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
+WHERE chat_session_id = $1
+`
+
+// Channel-agnostic reverse lookup: which channel, if any, is behind this
+// chat_session? UNIQUE (chat_session_id) guarantees at most one row, so a
+// caller that only needs to READ the binding never has to name the channel it
+// is hoping for — and therefore cannot go blind on a channel added later.
+// The channel_type-scoped variant above stays for the outbound senders, which
+// are per-platform by construction and must not deliver into a foreign one.
+func (q *Queries) GetChannelChatSessionBindingBySessionAny(ctx context.Context, chatSessionID pgtype.UUID) (ChannelChatSessionBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySessionAny, chatSessionID)
+	var i ChannelChatSessionBinding
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChatType,
+		&i.LastMessageID,
+		&i.LastThreadID,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getChannelInstallation = `-- name: GetChannelInstallation :one
 SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
 WHERE id = $1 AND channel_type = $2

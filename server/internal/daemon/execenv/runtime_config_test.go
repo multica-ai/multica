@@ -47,18 +47,16 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
 			}
 			for _, want := range []string{
-				"**Choosing `--status` when creating sub-issues.**",
-				"`--status todo` = **start now**",
-				"`--status backlog` = **wait**",
-				"`multica issue status <child-id> todo`",
-				"all `--status todo`",
-				"`--status backlog` from the start",
-				// Stage guidance must reach the always-on brief so agents
-				// reach for stages instead of only the manual backlog chain
-				// (MUL-3508 follow-up).
-				"**Ordering with stages.**",
-				"`--stage <N>`",
-				"`multica issue children <id>`",
+				// MUL-5442 demotes the full todo/backlog/stage playbook to the
+				// multica-working-on-issues skill. The brief keeps a one-line
+				// map (all three flags stay discoverable, MUL-3508 follow-up)
+				// plus the skill pointer; the skill side of the contract is
+				// asserted in internal/service
+				// (TestWorkingOnIssuesSkillCoversIssueLoopContracts).
+				"`--status todo` starts an agent-assigned child immediately",
+				"`--status backlog` parks it",
+				"`--stage <N>` groups children into ordered stages",
+				"read the `multica-working-on-issues` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -333,13 +331,16 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		// type Agent Identity can forbid. This and workflow step 4 each used to
 		// carry their own list and the two disagreed (MUL-5442).
 		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
-		"Before step 4, run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip it.",
+		// MUL-5442: the forbids-clause is stated once on the Ownership-mode
+		// header instead of once per status bullet.
+		"skip any status call below that your Agent Identity forbids",
+		"Before step 4, run `multica issue status " + issueID + " in_progress`.",
 		"Complete the task within your Agent Identity boundaries",
 		// Step 4 keeps only what the enumeration cannot express: a
 		// delegation-only role stops once the delegation is delivered.
 		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
-		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip it.",
-		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+		"When done, run `multica issue status " + issueID + " in_review`.",
+		"If blocked, run `multica issue status " + issueID + " blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue brief missing identity-bound workflow text %q\n---\n%s", want, out)
@@ -368,7 +369,7 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Before step 4, run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip it.",
+		"Before step 4, run `multica issue status " + issueID + " in_progress`.",
 		"After this initial dispatch, leave the parent issue `in_progress`",
 		"do NOT run `multica issue status " + issueID + " in_review` or `done` on this turn",
 		"only then, if the overall goal is met, move the parent to `in_review`",

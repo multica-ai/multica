@@ -559,7 +559,7 @@
   "pickers": {
     "custom_property": {
       "empty": "空",
-      "clear_action": "清除",
+      "none": "无值",
       "true_label": "是",
       "false_label": "否",
       "value_placeholder": "输入值…",
@@ -581,11 +581,11 @@
     },
     "start_date": {
       "trigger_label": "开始日期",
-      "clear_action": "清除日期"
+      "none": "无开始日期"
     },
     "due_date": {
       "trigger_label": "截止日期",
-      "clear_action": "清除日期"
+      "none": "无截止日期"
     },
     "label": {
       "trigger_label": "添加标签",

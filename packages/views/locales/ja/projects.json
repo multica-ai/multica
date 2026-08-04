@@ -69,7 +69,8 @@
     "section_description": "説明",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
-    "clear_date": "日付をクリア",
+    "no_start_date": "開始日なし",
+    "no_due_date": "期限なし",
     "description_placeholder": "説明を追加...",
     "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
     "empty_issues_title": "リンクされたイシューはありません",
@@ -125,7 +126,6 @@
   },
   "picker": {
     "no_project": "プロジェクトなし",
-    "remove": "プロジェクトから削除",
     "empty": "プロジェクトはまだありません",
     "search_placeholder": "プロジェクトを検索..."
   },

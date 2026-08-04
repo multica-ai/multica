@@ -21,7 +21,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -2123,35 +2122,30 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// is operating inside an IM conversation and not the Multica web app
 			// (MUL-3871). Empty for a web-only chat session.
 			//
-			// Every registered channel type is probed, not just Slack: a Feishu
-			// session writes the same channel_chat_session_binding row under
-			// channel_type='feishu' (lark/channel_store.go), so the Slack-only
-			// lookup used to report a Feishu chat as web-backed. Downstream that
-			// mis-flag made the brief inject `multica attachment upload` guidance
-			// into a conversation that cannot carry attachments at all (MUL-4899).
+			// The binding is read WITHOUT naming a channel. Every channel writes
+			// the same channel_chat_session_binding row and differs only in
+			// channel_type, and UNIQUE (chat_session_id) allows at most one, so
+			// the row itself is the answer. Enumerating candidate channels here
+			// was the bug twice over: the Slack-only lookup reported a Feishu
+			// chat as web-backed (MUL-4899), and the {slack, feishu} list that
+			// replaced it did the same to WeCom. Downstream that mis-flag makes
+			// the brief inject `multica attachment upload` guidance into a
+			// conversation that cannot carry attachments at all.
 			//
 			// ChatInThread stays Slack-only on purpose. It selects between
 			// `multica chat history` and `multica chat thread`, and those two
 			// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
-			// is no Feishu history reader, so the flag has nothing to select
-			// between on any other channel and must not imply one exists.
-			for _, channelType := range []channel.Type{slack.TypeSlack, channel.TypeFeishu} {
-				binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
-					ChatSessionID: cs.ID,
-					ChannelType:   string(channelType),
-				})
-				if berr != nil {
-					continue
-				}
-				resp.ChatChannelType = string(channelType)
-				if channelType == slack.TypeSlack {
+			// is no history reader on any other channel, so the flag has nothing
+			// to select between there and must not imply one exists.
+			if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
+				resp.ChatChannelType = binding.ChannelType
+				if binding.ChannelType == string(slack.TypeSlack) {
 					// The latest trigger was a thread reply iff its reply-target
 					// thread (last_thread_id) differs from its own message id (a
 					// top-level @mention records its own ts as both).
 					resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
 						binding.LastThreadID.String != binding.LastMessageID.String
 				}
-				break
 			}
 			// A web chat can opt into the same durable project context as an
 			// issue-bound task. Revalidate the soft reference in this workspace at

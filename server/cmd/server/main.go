@@ -198,7 +198,7 @@ func main() {
 
 	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
 	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
-	// See docs/feature-flags.md for the schema and lifecycle rules.
+	// See server/pkg/featureflag for the schema and lifecycle rules.
 	//
 	// Booting the server without any flag config is intentional: when the
 	// env var is unset, every IsEnabled call falls through to the caller's
@@ -211,7 +211,7 @@ func main() {
 		slog.Error("feature flag configuration failed to load", "error", err)
 		os.Exit(1)
 	}
-	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see docs/feature-flags.md
+	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see server/pkg/featureflag
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {

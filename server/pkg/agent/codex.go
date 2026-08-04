@@ -108,6 +108,9 @@ func codexProcessWaitDelay() time.Duration {
 }
 
 type codexStderrClassification struct {
+	// modelRefreshFailure is the broad catalog failure bucket. It includes the
+	// narrower modelRefreshTimeout bucket, so the two counts are not additive.
+	modelRefreshFailure int
 	modelRefreshTimeout int
 	mcpInitTransport    int
 	bareTimeout         int
@@ -119,6 +122,7 @@ type codexStderrClassification struct {
 func classifyCodexStartupStderr(stderr string, timedOut bool) codexStderrClassification {
 	lower := strings.ToLower(sanitizeCodexDiagnostic(stderr))
 	classification := codexStderrClassification{
+		modelRefreshFailure: strings.Count(lower, codexModelCatalogRefreshFailureSignal),
 		modelRefreshTimeout: strings.Count(lower, codexModelCatalogRefreshTimeoutSignal),
 	}
 	for _, line := range strings.Split(lower, "\n") {
@@ -127,7 +131,10 @@ func classifyCodexStartupStderr(stderr string, timedOut bool) codexStderrClassif
 			classification.mcpInitTransport++
 		}
 	}
-	if timedOut && classification.modelRefreshTimeout == 0 && classification.mcpInitTransport == 0 {
+	// Any catalog refresh failure now owns the timeout classification, not only
+	// the narrower child-process timeout signal. This intentionally makes the
+	// existing bare-timeout bucket stricter across daemon versions.
+	if timedOut && classification.modelRefreshFailure == 0 && classification.mcpInitTransport == 0 {
 		classification.bareTimeout = 1
 	}
 	return classification
@@ -172,6 +179,47 @@ type codexTimeoutDiagnostic struct {
 	TurnID       string
 	Model        string
 	CodexVersion string
+}
+
+// codexFirstItemWaitObservation records the interval from turn/started to the
+// first semantic progress or terminal outcome. start is called by the stdout
+// reader before it publishes status:running, while finish is called by the
+// lifecycle goroutine; the mutex keeps the cross-goroutine timestamp precise
+// without changing the watchdog's existing channel-driven semantics.
+type codexFirstItemWaitObservation struct {
+	mu         sync.Mutex
+	startedAt  time.Time
+	finishedAt time.Time
+	outcome    string
+	stderr     codexStderrClassification
+}
+
+func (o *codexFirstItemWaitObservation) start(now time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.startedAt.IsZero() {
+		o.startedAt = now
+	}
+}
+
+func (o *codexFirstItemWaitObservation) finish(now time.Time, outcome string, stderr codexStderrClassification) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.startedAt.IsZero() || o.outcome != "" {
+		return
+	}
+	o.finishedAt = now
+	o.outcome = outcome
+	o.stderr = stderr
+}
+
+func (o *codexFirstItemWaitObservation) snapshot() (time.Duration, string, codexStderrClassification, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.startedAt.IsZero() || o.finishedAt.IsZero() || o.outcome == "" {
+		return 0, "", codexStderrClassification{}, false
+	}
+	return o.finishedAt.Sub(o.startedAt), o.outcome, o.stderr, true
 }
 
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
@@ -975,6 +1023,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	var finalAnswer, lastAgentMessage string
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
+	firstItemWait := &codexFirstItemWaitObservation{}
 
 	// turnDone is set before starting the reader goroutine so there is no
 	// race between the lifecycle goroutine writing and the reader reading.
@@ -1004,9 +1053,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				lastAgentMessage = msg.Content
 				outputMu.Unlock()
 			}
+			activity := describeCodexSemanticActivity(msg)
+			if activity == "status:running" {
+				firstItemWait.start(time.Now())
+			}
 			trySend(msgCh, msg)
-			trySendString(semanticActivityCh, describeCodexSemanticActivity(msg))
-			if describeCodexSemanticActivity(msg) != "" {
+			trySendString(semanticActivityCh, activity)
+			if activity != "" {
 				semanticObserved.Store(true)
 			}
 		},
@@ -1284,6 +1337,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"reaped", cleanupConfirmed,
 					"retry_safe", false,
 					"retry_attempted", false,
+					"stderr_model_refresh_failure_count", classification.modelRefreshFailure,
 					"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,
 					"stderr_mcp_init_transport_count", classification.mcpInitTransport,
 					"stderr_bare_timeout_count", classification.bareTimeout,
@@ -1320,10 +1374,18 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		waitingForTurn := true
 		var timeoutDiagnostic codexTimeoutDiagnostic
 		var processExitErr error
+		finishFirstItemWait := func(outcome string) {
+			firstItemWait.finish(
+				time.Now(),
+				outcome,
+				classifyCodexStartupStderr(stderrBuf.Tail(), strings.HasSuffix(outcome, "_timeout")),
+			)
+		}
 		finishTurn := func(aborted bool) {
 			waitingForTurn = false
 			switch {
 			case aborted:
+				finishFirstItemWait("turn_aborted")
 				finalStatus = "aborted"
 				if errMsg := c.getTurnError(); errMsg != "" {
 					finalError = errMsg
@@ -1332,8 +1394,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				}
 			default:
 				if errMsg := c.getTurnError(); errMsg != "" {
+					finishFirstItemWait("turn_failed")
 					finalStatus = "failed"
 					finalError = errMsg
+				} else {
+					finishFirstItemWait("turn_completed")
 				}
 			}
 		}
@@ -1374,9 +1439,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		finishRunContextDone := func() {
 			waitingForTurn = false
 			if runCtx.Err() == context.DeadlineExceeded {
+				finishFirstItemWait("execution_timeout")
 				finalStatus = "timeout"
 				finalError = fmt.Sprintf("codex timed out after %s", timeout)
 			} else {
+				finishFirstItemWait("cancelled")
 				finalStatus = "aborted"
 				finalError = "execution cancelled"
 			}
@@ -1391,14 +1458,21 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				resetTimer(semanticTimer, semanticInactivityTimeout)
 				if activity == "status:running" && !firstTurnStarted {
 					firstTurnStarted = true
+					firstItemWait.start(time.Now())
 					firstTurnNoProgressTimer = time.NewTimer(firstTurnNoProgressTimeout)
 					firstTurnNoProgressTimerC = firstTurnNoProgressTimer.C
 				} else if firstTurnStarted && !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
 					firstTurnProgressObserved = true
+					if activity == "error:terminal" {
+						finishFirstItemWait("turn_failed")
+					} else {
+						finishFirstItemWait("progress")
+					}
 					stopFirstTurnNoProgressTimer()
 				}
 			case <-firstTurnNoProgressTimerC:
 				waitingForTurn = false
+				finishFirstItemWait("no_progress_timeout")
 				finalStatus = "timeout"
 				timeoutDiagnostic = codexTimeoutDiagnostic{
 					Kind:         codexTimeoutFirstTurnNoProgress,
@@ -1417,6 +1491,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				)
 			case <-semanticTimer.C:
 				waitingForTurn = false
+				finishFirstItemWait("semantic_inactivity_timeout")
 				finalStatus = "timeout"
 				timeoutDiagnostic = codexTimeoutDiagnostic{
 					Kind:         codexTimeoutSemanticInactivity,
@@ -1445,6 +1520,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 						finishRunContextDone()
 					} else {
 						waitingForTurn = false
+						finishFirstItemWait("process_exit")
 						finalStatus = "failed"
 						processExitErr = c.getProcessErr()
 						if processExitErr == nil {
@@ -1492,6 +1568,53 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				"thread_id", threadID,
 				"attempt", attempt,
 			)
+		}
+
+		if waitLatency, outcome, classification, ok := firstItemWait.snapshot(); ok {
+			if waitLatency < 0 {
+				waitLatency = 0
+			}
+			// On timeout, cmd.Wait is the synchronization point that guarantees
+			// the stderr copy goroutine has drained. Reclassify from the complete
+			// bounded tail so a last-moment catalog/MCP signal is not reported as
+			// a bare timeout. Successful waits keep the snapshot taken at first
+			// progress so later turn stderr cannot pollute first-item telemetry.
+			if strings.HasSuffix(outcome, "_timeout") {
+				classification = classifyCodexStartupStderr(stderrTail, true)
+			}
+			fields := []any{
+				"phase", "first_item_wait",
+				"task_id", b.cfg.TaskID,
+				"runtime_id", b.cfg.RuntimeID,
+				"pid", cmd.Process.Pid,
+				"attempt", attempt,
+				"active_launches", activeLaunches,
+				"method", "turn/start",
+				"thread_id", threadID,
+				"turn_id", c.turnID,
+				"outcome", outcome,
+				"latency", waitLatency.Round(time.Millisecond).String(),
+				"latency_ms", waitLatency.Milliseconds(),
+				"timeout", firstTurnNoProgressTimeout.String(),
+				"semantic_inactivity_timeout", semanticInactivityTimeout.String(),
+				"codex_version", codexVersion,
+				"daemon_version", b.cfg.DaemonVersion,
+				"cleanup_confirmed", cleanupConfirmed,
+				"reaped", cleanupConfirmed,
+				// retry_safe describes the terminal attempt, not the measured wait
+				// interval. Successful samples therefore report false by design.
+				"retry_safe", startupRefreshRetrySafe,
+				"stderr_model_refresh_failure_count", classification.modelRefreshFailure,
+				"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,
+				"stderr_mcp_init_transport_count", classification.mcpInitTransport,
+				"stderr_bare_timeout_count", classification.bareTimeout,
+			}
+			switch outcome {
+			case "progress", "turn_completed":
+				b.cfg.Logger.Info("codex lifecycle", fields...)
+			default:
+				b.cfg.Logger.Warn("codex lifecycle", fields...)
+			}
 		}
 
 		outputMu.Lock()

@@ -446,6 +446,16 @@ SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = sqlc.arg('chat_session_id')
   AND channel_type = sqlc.arg('channel_type');
 
+-- name: GetChannelChatSessionBindingBySessionAny :one
+-- Channel-agnostic reverse lookup: which channel, if any, is behind this
+-- chat_session? UNIQUE (chat_session_id) guarantees at most one row, so a
+-- caller that only needs to READ the binding never has to name the channel it
+-- is hoping for — and therefore cannot go blind on a channel added later.
+-- The channel_type-scoped variant above stays for the outbound senders, which
+-- are per-platform by construction and must not deliver into a foreign one.
+SELECT * FROM channel_chat_session_binding
+WHERE chat_session_id = $1;
+
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
 -- Records the most recent inbound trigger message + thread so the decoupled
 -- outbound patcher can thread its reply back into the originating topic.
