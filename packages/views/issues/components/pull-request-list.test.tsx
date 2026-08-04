@@ -78,6 +78,37 @@ async function waitForRender() {
 }
 
 describe("PullRequestList sidebar rows", () => {
+  it("renders a Code platform MR without pretending its live status is known", async () => {
+    mockPRs = [
+      makePR({
+        provider: "code",
+        state: "unknown",
+        repo_owner: "base-biz",
+        repo_name: "agentworks-python",
+        number: 28981841,
+        title: "Code review",
+        html_url: "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841",
+        branch: null,
+        author_login: null,
+      }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText(/base-biz\/agentworks-python!28981841 · Code/)).toBeInTheDocument();
+    expect(screen.getByText("External MR · status not synced")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Code review/ })).toHaveAttribute(
+      "href",
+      "https://code.alibaba-inc.com/base-biz/agentworks-python/codereview/28981841",
+    );
+  });
+
+  it("explains automatic MR linking when no pull request is linked", async () => {
+    mockPRs = [];
+    renderList();
+    expect(await screen.findByText(/automatically linked/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add MR" })).not.toBeInTheDocument();
+  });
+
   it("uses the sidebar list-row surface instead of a card surface", async () => {
     mockPRs = [makePR({ title: "Visual row" })];
     renderList();

@@ -1,4 +1,5 @@
-export type GitHubPullRequestState = "open" | "closed" | "merged" | "draft";
+export type GitHubPullRequestState = "open" | "closed" | "merged" | "draft" | "unknown";
+export type PullRequestProvider = "github" | "forgejo" | "gitea" | "gitlab" | "code";
 
 /** Aggregated CI status for a PR's current head SHA, computed server-side from
  * the latest check_suite per app. `null` when no completed suite has been seen
@@ -59,8 +60,8 @@ export interface GitHubInstallation {
 
 export interface GitHubPullRequest {
   id: string;
-  /** Source provider. Older GitHub-only backends omit it. */
-  provider?: "github" | "forgejo" | "gitea" | "gitlab";
+  /** Source provider. Older GitHub-only backends omit it and default to GitHub. */
+  provider?: PullRequestProvider;
   workspace_id: string;
   repo_owner: string;
   repo_name: string;

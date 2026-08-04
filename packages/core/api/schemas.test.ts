@@ -34,6 +34,9 @@ import {
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
+  IssuePullRequestsResponseSchema,
+  EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
+  GitHubPullRequestSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   RuntimeModelListRequestSchema,
@@ -73,6 +76,55 @@ const baseIssue = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+describe("GitHubPullRequestSchema", () => {
+  const githubPullRequest = {
+    id: "pr-1",
+    workspace_id: "ws-1",
+    repo_owner: "acme",
+    repo_name: "widget",
+    number: 7,
+    title: "Fix MUL-7",
+    state: "open",
+    html_url: "https://github.com/acme/widget/pull/7",
+    branch: "mul-7",
+    author_login: "octocat",
+    author_avatar_url: null,
+    merged_at: null,
+    closed_at: null,
+    pr_created_at: "2026-08-04T00:00:00Z",
+    pr_updated_at: "2026-08-04T00:00:00Z",
+  };
+
+  it("defaults an older backend row without provider to github", () => {
+    const parsed = GitHubPullRequestSchema.parse(githubPullRequest);
+    expect(parsed.provider).toBe("github");
+    expect(parsed.checks_passed).toBe(0);
+  });
+
+  it("parses a manually linked Code MR with unknown live status", () => {
+    const parsed = GitHubPullRequestSchema.parse({
+      ...githubPullRequest,
+      provider: "code",
+      state: "unknown",
+      html_url: "https://code.alibaba-inc.com/acme/widget/codereview/7",
+      branch: null,
+      author_login: null,
+    });
+    expect(parsed.provider).toBe("code");
+    expect(parsed.state).toBe("unknown");
+  });
+
+  it("degrades a malformed list response to an empty list", () => {
+    const parsed = parseWithFallback(
+      { pull_requests: "not-an-array" },
+      IssuePullRequestsResponseSchema,
+      EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
+      { endpoint: "GET /api/issues/:id/pull-requests" },
+    );
+    expect(parsed).toBe(EMPTY_ISSUE_PULL_REQUESTS_RESPONSE);
+  });
+});
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
   it("accepts a primitive metadata KV map", () => {

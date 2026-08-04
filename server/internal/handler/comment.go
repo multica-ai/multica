@@ -1876,6 +1876,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
 	}
+	if err := h.autoLinkCodePullRequestsFromText(r.Context(), issue, authorType, authorID, comment.Content); err != nil {
+		slog.Warn("code: failed to auto-link pull request from comment", append(logger.RequestAttrs(r),
+			"error", err,
+			"issue_id", issueID,
+			"comment_id", uuidToString(comment.ID),
+		)...)
+	}
 
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {

@@ -41,6 +41,7 @@ const STATE_ICON: Record<
   draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
   merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
+  unknown: { icon: GitPullRequest, className: "text-muted-foreground" },
 };
 
 export function PullRequestList({ issueId }: { issueId: string }) {
@@ -117,7 +118,9 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
           {pr.title}
         </p>
         <p className="text-micro text-muted-foreground truncate">
-          {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
+          {pr.repo_owner}/{pr.repo_name}
+          {pr.provider === "code" ? "!" : "#"}
+          {pr.number} · {pr.provider === "code" ? "Code" : stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
         <PullRequestRowDetails pr={pr} />
@@ -129,6 +132,14 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
 function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
+
+  if (pr.provider === "code") {
+    return (
+      <p className="mt-1 text-micro text-muted-foreground">
+        {t(($) => $.detail.pull_request_external_status_unknown)}
+      </p>
+    );
+  }
 
   const showStats = shouldShowPullRequestStats({
     additions: pr.additions,
@@ -323,5 +334,5 @@ function getStateLabel(state: GitHubPullRequestState, t: IssuesT): string {
         ? t(($) => $.detail.pull_request_state_merged)
         : state === "closed"
           ? t(($) => $.detail.pull_request_state_closed)
-          : state;
+          : t(($) => $.detail.pull_request_state_unknown);
 }

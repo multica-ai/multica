@@ -1,0 +1,1 @@
+ALTER TABLE external_pull_request ADD CONSTRAINT external_pull_request_pkey PRIMARY KEY USING INDEX external_pull_request_id_idx;
