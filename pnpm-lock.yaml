@@ -4205,6 +4205,9 @@ importers:
       '@multica/cerebro-agent-tools':
         specifier: workspace:*
         version: link:../cerebro-agent-tools
+      '@multica/cerebro-display-currency':
+        specifier: workspace:*
+        version: link:../cerebro-display-currency
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

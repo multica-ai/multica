@@ -50,7 +50,11 @@ describe("ActorAvatarHoverCardShell", () => {
     expect(trigger).toBeTruthy();
     fireEvent.click(trigger!);
     expect(screen.getByText("card-body")).toBeTruthy();
-    expect(document.querySelector('[data-slot="actor-avatar-touch-sheet"]')).toBeTruthy();
+    const sheet = document.querySelector('[data-slot="actor-avatar-touch-sheet"]');
+    expect(sheet).toBeTruthy();
+    // Content inset must clear the absolute Sheet close button (top-right).
+    const body = sheet!.querySelector(".pr-12");
+    expect(body).toBeTruthy();
   });
 
   it("coarse + wide opens popover on tap", () => {

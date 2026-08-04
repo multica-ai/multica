@@ -19,7 +19,7 @@ import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 import { VisibilityBadge } from "./visibility-badge";
 import { useT } from "../../i18n";
-import { AgentProfileAccount, AgentProfileSettings } from "@multica/cerebro-runtime/views/components/agent-profile-tooltip-details"; // CEREBRO-PATCH(profile-card-details): FIR-3660 fork-owned agent settings + account usage.
+import { AgentProfileAccount, AgentProfileSettings, AgentProfileSpend } from "@multica/cerebro-runtime/views/components/agent-profile-tooltip-details"; // CEREBRO-PATCH(profile-card-details): FIR-3660 fork-owned agent settings + account usage + spend.
 
 interface AgentProfileCardProps {
   agentId: string;
@@ -122,6 +122,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
+        <AgentProfileSpend agentId={agent.id} /> {/* CEREBRO-PATCH(profile-card-details): FIR-4507 spend today */}
         <AgentProfileAccount runtime={runtime} /> {/* CEREBRO-PATCH(profile-card-details): FIR-3660 */}
       </div>
     </div>
@@ -215,7 +216,7 @@ function SkillsRow({ skills }: { skills: string[] }) {
   const overflow = skills.length - visible.length;
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span>
+      <span className="w-20 shrink-0 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span> {/* CEREBRO-PATCH(profile-card-details): FIR-4507 align label width with other meta rows */}
       <div className="flex min-w-0 flex-wrap gap-1">
         {visible.map((s) => (
           <span

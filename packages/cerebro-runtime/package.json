@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@multica/cerebro-agent-tools": "workspace:*",
+    "@multica/cerebro-display-currency": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",
     "@multica/cerebro-runtime-tools": "workspace:*",
