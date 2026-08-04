@@ -1,0 +1,152 @@
+# IRSA identity for agentrunner pods, so AWS calls made from an agent session
+# authenticate without static keys (AIPLAT-169). One consumer: the AWS CLI
+# bundled in the runner image, reading and writing objects under the
+# agent-scratch/ prefix of g2-agentfarm-dev-uploads.
+#
+# The `aws-s3` MCP server (awslabs.s3-tables-mcp-server) was the original
+# consumer and is being retired — S3 Tables is not what this platform wants
+# from S3, and that server cannot read or write ordinary objects at all. No
+# s3tables:* permissions remain here.
+#
+# Why this lives in the development overlay and not in base/agent-runtime:
+# base/agent-runtime is the per-workspace appset source — it is rendered once
+# per workspace Application (namespace agentrunner-<slug>), so a cluster-scoped
+# Crossplane Role placed there would be declared N times under one name and the
+# Applications would fight over it. The development overlay is the only
+# single-instance Application in this repo that targets the dev cluster, which
+# is where every agentrunner pod runs (both the tools-server runner pipeline in
+# environments/development/agent-runtime and the dev-server one in
+# environments/development/agent-runtime-devserver).
+#
+# Not added to base/ + a tools patch (the shape iam-backend.yaml uses) for the
+# same reason inverted: no agentrunner namespace exists on the tools cluster, so
+# a tools-account copy of this role would be unassumable by construction.
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-agentrunner-role
+spec:
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+      - key: Environment
+        value: development
+      - key: Purpose
+        value: "S3 object access for agentrunner agent sessions"
+    # The runner ServiceAccount is named `agentrunner` in every workspace
+    # namespace, and namespaces are generated per workspace slug
+    # (agentrunner-<slug>) by the appset — that set grows as workspaces are
+    # added. StringLike on the namespace segment is therefore required; the
+    # ServiceAccount name segment stays exact so this cannot be assumed by some
+    # other SA that happens to land in a runner namespace.
+    assumeRolePolicyDocument: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::975049976121:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:aud": "sts.amazonaws.com"
+            },
+            "StringLike": {
+              "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:sub": "system:serviceaccount:agentrunner-*:agentrunner"
+            }
+          }
+        }]
+      }
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-agentrunner-policy
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+      - key: Environment
+        value: development
+    description: "agent-scratch object access on g2-agentfarm-dev-uploads for agentrunner sessions"
+    # Read + upload on g2-agentfarm-dev-uploads, confined to the agent-scratch/
+    # key prefix, for the AWS CLI bundled in the runner image.
+    #
+    # The prefix is the whole security boundary here, so it is worth being
+    # explicit about why: every runner pod in every workspace shares one
+    # ServiceAccount and therefore this one role, and the backend writes user
+    # attachments to the same bucket under workspaces/<workspace-id>/... . A
+    # bucket-wide grant would let any agent in any workspace read and overwrite
+    # every other workspace's uploads. Confining agents to agent-scratch/ keeps
+    # those keys unreachable while still giving agents somewhere to put files.
+    #
+    # DeleteObject is deliberately absent — the ask was read and upload.
+    # ListBucket carries an s3:prefix condition because ListObjectsV2 is
+    # authorised against the bucket ARN, not the object ARN; without the
+    # condition an agent could enumerate every attachment key in the bucket
+    # even though it could not read them.
+    #
+    # None of this widens the avatar-upload permissions: those belong to
+    # agentfarm-backend-role in iam-backend.yaml and are untouched.
+    document: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowAgentScratchObjectAccess",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratch/*"
+          },
+          {
+            "Sid": "AllowAgentScratchListing",
+            "Effect": "Allow",
+            "Action": [
+              "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads",
+            "Condition": {
+              "StringLike": {
+                "s3:prefix": [
+                  "agent-scratch/",
+                  "agent-scratch/*"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    name: agentfarm-agentrunner-policy-document
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: RolePolicyAttachment
+metadata:
+  name: agentfarm-agentrunner-policy-attachment
+spec:
+  forProvider:
+    policyArnRef:
+      name: agentfarm-agentrunner-policy
+    roleNameRef:
+      name: agentfarm-agentrunner-role
+  providerConfigRef:
+    name: provider-aws-config

@@ -80,6 +80,12 @@ spec:
           env:
             - name: ATLASSIAN_SITE
               value: https://g2crowd.atlassian.net
+            # The IRSA webhook injects AWS_ROLE_ARN and
+            # AWS_WEB_IDENTITY_TOKEN_FILE but never a region, and neither the
+            # AWS CLI nor boto3 has a default one — without this every call
+            # fails with "You must specify a region" (AIPLAT-169).
+            - name: AWS_REGION
+              value: us-east-1
             - name: DEFAULT_GIT_REPO
               value: "https://github.com/g2crowd/ai-enhancement-hub,https://github.com/g2crowd/ue,https://github.com/g2crowd/companies_service"
             # Enterprise Platform Bot GitHub App — installed in both g2crowd and
