@@ -28,7 +28,19 @@ func decodeToolsBriefMode(raw json.RawMessage) string {
 // (handler/daemon.go), so a transient lookup failure dispatches the task with
 // Agent nil; without this guard the reads would panic the daemon process
 // rather than fail the one task.
+//
+// The workspace-level cerebro_tools_brief flag (FIR-4500) is resolved
+// server-side and arrives as Task.ToolsBriefDisabled. It wins over the agent's
+// own tools_brief_mode, and it applies even when Agent is nil: the workspace
+// said "do not ship this section", which cannot depend on an agent lookup
+// having succeeded.
 func briefLayerModesForTask(task Task) (workspaceBriefMode, toolsBriefMode string) {
+	if task.ToolsBriefDisabled {
+		if task.Agent == nil {
+			return "", agentoffice.ToolsBriefModeOff
+		}
+		return decodeWorkspaceBriefMode(task.Agent.RuntimeConfig), agentoffice.ToolsBriefModeOff
+	}
 	if task.Agent == nil {
 		return "", ""
 	}

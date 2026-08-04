@@ -156,6 +156,14 @@ func TestToolsBriefDefaultModeUnchanged(t *testing.T) {
 	}
 }
 
+// FIR-4500: "off" drops the section entirely — nothing at all, not an empty
+// heading. This is what the workspace cerebro_tools_brief flag forces.
+func TestToolsBriefOffModeRendersNothing(t *testing.T) {
+	if got := cerebroToolsBriefForMode(summaryEntries(), "off"); got != "" {
+		t.Errorf("off mode must render nothing, got:\n%s", got)
+	}
+}
+
 // No connection tools at all: summary mode must fall back to the full
 // rendering, including its zero-connections explanation.
 func TestToolsBriefSummaryNoConnections(t *testing.T) {

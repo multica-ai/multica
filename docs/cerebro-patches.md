@@ -1869,6 +1869,9 @@ listening on `before.issue.status_change` exists.
 | `agent-task-workpad-brief` | `server/internal/handler/agent.go` | `WorkpadBriefEnabled` field on `AgentTaskResponse` so the claim response ships the workspace verdict to the daemon. |
 | `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |
 | `issue-workpad-panel` | `packages/views/issues/components/issue-detail.tsx` | Import + one-line `<WorkpadPanel issueId={issue.id} />` render at the very bottom of the issue, BELOW the bottom composer (moved from above it in the FIR-3765 review), showing the issue's plan (a `kind:"plan"` artifact) as a checklist. Logic lives in `packages/cerebro-artifacts`. |
+| `agent-task-tools-brief` | `server/internal/handler/agent.go` | FIR-4500: `ToolsBriefDisabled` field on `AgentTaskResponse` so the claim response ships the workspace `cerebro_tools_brief` verdict to the daemon. Named for the OFF state so the Go zero value means "render as always". |
+| `daemon-tools-brief` | `server/internal/handler/daemon.go` | FIR-4500: one-line `h.applyToolsBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_tools_brief_cerebro.go`). |
+| `daemon-task-tools-brief` | `server/internal/daemon/types.go` | FIR-4500: `ToolsBriefDisabled` on the daemon `Task` (JSON from the claim response). It reaches the brief through `briefLayerModesForTask` in the cerebro sibling `server/internal/daemon/cerebro_brief_layer_modes.go`, which forces `tools_brief_mode` to `off` — so `daemon.go` needs no further patch. |
 | `one-plan-per-issue` | `server/internal/handler/artifact.go` | One-line `h.rejectSecondIssuePlan(...)` call in CreateArtifact so an issue can hold at most one `plan` artifact (the Workpad's source). Logic lives in `artifact_one_plan_per_issue_cerebro.go`. |
 
 ## FIR-3729 — Cursor tool-policy key normalization

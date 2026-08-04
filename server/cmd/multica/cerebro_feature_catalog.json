@@ -1084,6 +1084,13 @@
       "description": "Ask agents to keep a Workpad — a plan checklist at the top of the issue description, created before they start and kept updated as they work, so you can follow the plan from the issue. On injects the Workpad protocol into every agent's runtime brief. Off by default; the existing checklist rendering is unchanged and enforcement (blocking an agent from starting without a Workpad) is a separate hook policy. FIR-3659.",
       "group": "issues",
       "default": false
+    },
+    {
+      "key": "cerebro_tools_brief",
+      "label": "List connections and MCP tools in the agent brief",
+      "description": "Write the resolved Connections & MCP tools list into every agent's runtime brief. On by default — that is the section agents get today. Turning it off removes the section and roughly 7,500 tokens from every single run; agents keep every tool, because a tool is callable through the runtime's own tool schemas and the live `multica_connection_tools_status` lookup, never through this prose list. Per-agent `tools_brief_mode` still applies when the flag is on: `summary` folds each connection to one line. FIR-4500.",
+      "group": "agents",
+      "default": true
     }
   ]
 }

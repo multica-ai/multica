@@ -117,6 +117,19 @@ func TestWithBriefLayerModesRejectUnknownValues(t *testing.T) {
 	}
 }
 
+// FIR-4500: "off" is a real tools-brief mode, stored as written (not normalised
+// away like "full"), so an agent can drop the section on its own and the
+// workspace flag has a value to force.
+func TestWithToolsBriefModeOffRoundTrips(t *testing.T) {
+	snap, err := WithToolsBriefMode(ContextSnapshot{}, ToolsBriefModeOff)
+	if err != nil {
+		t.Fatalf("WithToolsBriefMode(off): %v", err)
+	}
+	if got := ToolsBriefModeOf(snap); got != ToolsBriefModeOff {
+		t.Errorf("got %q, want %q", got, ToolsBriefModeOff)
+	}
+}
+
 // The chokepoint catches modes smuggled in via proposed_snapshot or a raw
 // runtime_config override — stored-then-silently-dropped is the failure
 // FIR-3212 exists to remove. Non-string values must be rejected, not ignored.
@@ -127,6 +140,7 @@ func TestValidateSnapshotBriefLayerModes(t *testing.T) {
 	}{
 		"absent keys are fine":   {raw: `{"mode":"pro"}`},
 		"valid values are fine":  {raw: `{"workspace_brief_mode":"off","tools_brief_mode":"summary"}`},
+		"tools off is fine":      {raw: `{"tools_brief_mode":"off"}`},
 		"full spelling is fine":  {raw: `{"workspace_brief_mode":"full"}`},
 		"unknown workspace mode": {raw: `{"workspace_brief_mode":"minimal"}`, wantErr: "workspace_brief_mode"},
 		"unknown tools mode":     {raw: `{"tools_brief_mode":"tiny"}`, wantErr: "tools_brief_mode"},

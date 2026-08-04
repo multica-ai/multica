@@ -1616,6 +1616,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applyGraphifyNudge(r.Context(), &resp, issue)
 			// CEREBRO-PATCH(daemon-workpad-brief): include the Workpad protocol section when cerebro_workpad is on (FIR-3659)
 			h.applyWorkpadBrief(r.Context(), &resp, issue)
+			// CEREBRO-PATCH(daemon-tools-brief): drop the Connections & MCP tools brief section when cerebro_tools_brief is off (FIR-4500)
+			h.applyToolsBrief(r.Context(), &resp, issue)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

@@ -21,7 +21,9 @@ import (
 //   - tools_brief_mode — the generated Connections tool list, the single
 //     largest layer (~6.5k tokens of raw machine names on a fully-wired
 //     agent). "summary" folds each connection to one line with a count and a
-//     live discovery pointer instead of a line per generated endpoint tool.
+//     live discovery pointer instead of a line per generated endpoint tool;
+//     "off" drops the section entirely (FIR-4500), which is also what the
+//     workspace-level cerebro_tools_brief flag forces when it is turned off.
 //
 // Both live in the agent's runtime_config JSONB for the same two reasons
 // system_prompt_mode does: precedent (runtime_config is the established home of
@@ -74,6 +76,13 @@ const (
 	// MCP tools stay listed individually — each one is a distinct capability,
 	// not a generated endpoint family.
 	ToolsBriefModeSummary = "summary"
+	// ToolsBriefModeOff drops the Connections & MCP tools section altogether
+	// (FIR-4500). Nothing is lost but documentation: a tool is callable through
+	// the runtime's own tool schemas and the live
+	// multica_connection_tools_status lookup, never through this list. It is
+	// also the value the workspace-level cerebro_tools_brief flag forces when
+	// an admin turns the section off for everyone.
+	ToolsBriefModeOff = "off"
 )
 
 // ValidWorkspaceBriefMode reports whether mode is a workspace-brief mode the
@@ -92,7 +101,7 @@ func ValidWorkspaceBriefMode(mode string) bool {
 // understands.
 func ValidToolsBriefMode(mode string) bool {
 	switch mode {
-	case ToolsBriefModeDefault, ToolsBriefModeFull, ToolsBriefModeSummary:
+	case ToolsBriefModeDefault, ToolsBriefModeFull, ToolsBriefModeSummary, ToolsBriefModeOff:
 		return true
 	}
 	return false
@@ -161,7 +170,7 @@ func WithWorkspaceBriefMode(snap ContextSnapshot, mode string) (ContextSnapshot,
 // under the same key-removal rule as WithWorkspaceBriefMode.
 func WithToolsBriefMode(snap ContextSnapshot, mode string) (ContextSnapshot, error) {
 	if !ValidToolsBriefMode(mode) {
-		return snap, fmt.Errorf("unknown tools_brief_mode %q: want summary, or empty/full for the default", mode)
+		return snap, fmt.Errorf("unknown tools_brief_mode %q: want summary or off, or empty/full for the default", mode)
 	}
 	return withBriefLayerMode(snap, ToolsBriefModeKey, mode, mode == ToolsBriefModeDefault || mode == ToolsBriefModeFull)
 }
@@ -206,7 +215,7 @@ func ValidateSnapshotBriefLayerModes(snap ContextSnapshot) error {
 		return fmt.Errorf("unknown workspace_brief_mode %q: want off, or empty/full for the default", mode)
 	}
 	if mode, ok := rawBriefLayerMode(snap, ToolsBriefModeKey); ok && !ValidToolsBriefMode(mode) {
-		return fmt.Errorf("unknown tools_brief_mode %q: want summary, or empty/full for the default", mode)
+		return fmt.Errorf("unknown tools_brief_mode %q: want summary or off, or empty/full for the default", mode)
 	}
 	return nil
 }

@@ -27,6 +27,32 @@ func TestBriefLayerModesForTaskNilAgentSafe(t *testing.T) {
 	}
 }
 
+// FIR-4500: the workspace-level cerebro_tools_brief verdict arrives as
+// Task.ToolsBriefDisabled and forces the tools section off. It wins over the
+// agent's own tools_brief_mode and leaves the workspace-brief mode untouched.
+func TestBriefLayerModesForTaskWorkspaceFlagForcesToolsOff(t *testing.T) {
+	task := Task{
+		ToolsBriefDisabled: true,
+		Agent: &AgentData{
+			RuntimeConfig: json.RawMessage(`{"workspace_brief_mode":"off","tools_brief_mode":"summary"}`),
+		},
+	}
+	ws, tools := briefLayerModesForTask(task)
+	if ws != "off" || tools != "off" {
+		t.Errorf("got (%q, %q), want (off, off)", ws, tools)
+	}
+}
+
+// The same verdict must survive a task dispatched without agent data — the
+// workspace said "do not ship this section", which cannot depend on an agent
+// lookup having succeeded.
+func TestBriefLayerModesForTaskWorkspaceFlagOffNilAgent(t *testing.T) {
+	ws, tools := briefLayerModesForTask(Task{ToolsBriefDisabled: true})
+	if ws != "" || tools != "off" {
+		t.Errorf("got (%q, %q), want (\"\", off)", ws, tools)
+	}
+}
+
 // Absent, malformed, and unknown values all decode to the full-brief default —
 // an agent is never silently switched to a thinner brief it did not ask for.
 func TestBriefLayerModesForTaskDefaultsOnBadValues(t *testing.T) {

@@ -130,12 +130,21 @@ func buildAgentOnlyBrief(provider string, ctx TaskContextForEnv) string {
 	return b.String()
 }
 
-// cerebroToolsBriefForMode routes between the full and the folded rendering of
-// the Connections & MCP tools section. Any value other than "summary" renders
-// the full list — the vocabulary is validated upstream, so an unexpected value
-// here means "behave as always", never "guess".
+// cerebroToolsBriefForMode routes between the full, the folded, and the dropped
+// rendering of the Connections & MCP tools section. Any value other than
+// "summary" or "off" renders the full list — the vocabulary is validated
+// upstream, so an unexpected value here means "behave as always", never
+// "guess".
+//
+// "off" (FIR-4500) renders nothing at all. It is what the workspace-level
+// cerebro_tools_brief flag forces, and it removes documentation only: a tool is
+// callable through the runtime's own tool schemas and the live
+// multica_connection_tools_status lookup, never through this list.
 func cerebroToolsBriefForMode(entries []ToolBriefEntry, mode string) string {
-	if mode == "summary" {
+	switch mode {
+	case "off":
+		return ""
+	case "summary":
 		return cerebroToolsBriefSummary(entries)
 	}
 	return cerebroToolsBrief(entries)
