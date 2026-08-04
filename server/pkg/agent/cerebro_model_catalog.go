@@ -1,5 +1,7 @@
 package agent
 
+import "context"
+
 // Provider-scoped model catalog resolved without touching a CLI (FIR-3287).
 //
 // ListModels is the discovery path: it shells out, caches, and is meant for the
@@ -59,6 +61,35 @@ func StaticCatalogSupports(providerType, model string) bool {
 	}
 	models, ok := StaticCatalog(providerType)
 	if !ok {
+		return true
+	}
+	for _, m := range models {
+		if m.ID == model {
+			return true
+		}
+	}
+	return false
+}
+
+// ModelRunnable reports whether providerType can actually spawn model on this
+// machine (FIR-4492). It is the live-discovery counterpart to
+// StaticCatalogSupports: where that one has to answer during an HTTP request
+// and therefore stays silent about install- or account-scoped providers, this
+// one runs on the daemon, where ListModels can ask the CLI itself. That covers
+// exactly the providers StaticCatalog excludes — cursor, hermes, kimi, kiro,
+// opencode, pi, openclaw, antigravity, firtal-gateway.
+//
+// It answers false only when discovery succeeded, returned a non-empty catalog,
+// and model is absent from it. An empty model, a discovery error and an empty
+// catalog all answer true, for the same reason StaticCatalogSupports is
+// permissive: absence of proof is not proof of absence, and dropping a model
+// the runtime would have accepted is the worse failure.
+func ModelRunnable(ctx context.Context, providerType, executablePath, model string) bool {
+	if model == "" {
+		return true
+	}
+	models, err := ListModels(ctx, providerType, executablePath)
+	if err != nil || len(models) == 0 {
 		return true
 	}
 	for _, m := range models {
