@@ -166,7 +166,7 @@ test("Settings identifies externally enforced permissions without offering an ad
     await expect(row).toBeVisible();
     await expect(row.getByText("Managed externally", { exact: true })).toBeVisible();
     const owner = row.getByText(
-      "Issue visibility, private-agent access, and task-to-issue integrity",
+      "Issue access and task ownership gates",
       { exact: true },
     );
     await expect(owner).toBeVisible();
@@ -180,7 +180,7 @@ test("Settings identifies externally enforced permissions without offering an ad
   }
 });
 
-test("Roles are created, assigned, explained, and enforced through the same permission decision", async ({
+test("Permission profiles are separated, explained, assigned, and enforced through the same permission decision", async ({
   page,
 }) => {
   test.setTimeout(240_000);
@@ -265,17 +265,32 @@ test("Roles are created, assigned, explained, and enforced through the same perm
     );
 
     await preventAttributionSurvey(page, userId);
-    const workspaceSlug = await loginAsDefault(page);
+    const workspaceSlug = await loginAsDefault(page, { workspaceReadyTimeout: 60_000 });
     await page.goto(`/${workspaceSlug}/settings?tab=permissions`, {
       waitUntil: "domcontentloaded",
     });
     await dismissAttributionSurvey(page);
+    await expect(page.getByRole("tab", { name: "Access rules", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 60_000 },
+    );
+    await expect(page.getByRole("tab", { name: "Permission profiles", exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Security controls", exact: true })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Roles", exact: true }),
+      page.getByRole("heading", { name: "Permission profiles", exact: true }),
+    ).toBeHidden();
+    await page.getByRole("tab", { name: "Permission profiles", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "When should I use a Permission profile?", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Create role", exact: true }).click();
+    await expect(page.getByText("Use the agent's Tools page", { exact: false })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Permission profiles", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Create profile", exact: true }).click();
 
-    const editor = page.getByRole("dialog", { name: "Create role" });
+    const editor = page.getByRole("dialog", { name: "Create profile" });
     await expect(editor).toBeVisible({ timeout: 15_000 });
     await editor.getByLabel("Name", { exact: true }).fill(roleName);
     await editor
@@ -293,7 +308,7 @@ test("Roles are created, assigned, explained, and enforced through the same perm
       page.getByRole("heading", { name: roleName, exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Version 1", { exact: true }).last()).toBeVisible();
-    await page.getByRole("combobox", { name: "Role assignee" }).click();
+    await page.getByRole("combobox", { name: "Profile assignee" }).click();
     await page
       .locator('[data-slot="select-content"]')
       .getByRole("option", { name: agentName, exact: true })
@@ -326,8 +341,9 @@ test("Roles are created, assigned, explained, and enforced through the same perm
     await page.goto(`/${workspaceSlug}/settings?tab=permissions`, {
       waitUntil: "domcontentloaded",
     });
+    await page.getByRole("tab", { name: "Permission profiles", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "Roles", exact: true }),
+      page.getByRole("heading", { name: "Permission profiles", exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -340,20 +356,20 @@ test("Roles are created, assigned, explained, and enforced through the same perm
       { waitUntil: "domcontentloaded" },
     );
     const detailMain = page.locator("main.overflow-y-auto");
-    await expect(detailMain).toHaveCSS("overflow-y", "auto");
-    const rolesTab = page.getByRole("tab", { name: /^Roles\b/ });
+    await expect(detailMain).toHaveCSS("overflow-y", "auto", { timeout: 60_000 });
+    const rolesTab = page.getByRole("tab", { name: /^Profiles\b/ });
     await rolesTab.click();
     await expect(rolesTab).toHaveAttribute("aria-selected", "true");
     await expect(
       page.getByRole("button", {
-        name: /Which Roles and assignments apply\?/,
+        name: /Which Permission profiles and assignments apply\?/,
       }),
     ).toHaveAttribute("aria-pressed", "true");
     await expect(
       page.getByRole("heading", { name: roleName, exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("tabpanel", { name: /^Roles\b/ }).getByText(agentName, { exact: true }),
+      page.getByRole("tabpanel", { name: /^Profiles\b/ }).getByText(agentName, { exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(

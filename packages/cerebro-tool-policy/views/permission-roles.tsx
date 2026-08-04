@@ -62,30 +62,31 @@ export function PermissionRoles({ workspaceId }: { workspaceId: string }) {
         <div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-            <h3 id="permission-roles-heading" className="text-sm font-semibold">Roles</h3>
+            <h3 id="permission-roles-heading" className="text-sm font-semibold">Permission profiles</h3>
           </div>
           <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-            Reusable, versioned permission profiles. Assign a Role to an agent or
-            member and the same Allow, Ask and Deny decisions flow into the live
-            permission engine, Capabilities and Why Access.
+            Reusable, versioned sets of Allow, Ask and Deny decisions. Assign a
+            profile to several agents or members when they should share the same
+            access. For one agent, use that agent&apos;s Tools page instead.
           </p>
         </div>
         {canEdit ? (
           <Button size="sm" onClick={() => setEditorRole("new")}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> Create role
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> Create profile
           </Button>
         ) : null}
       </div>
 
       {roles.isLoading ? (
         <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading roles…
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading profiles…
         </div>
       ) : roles.isError ? (
-        <p className="p-4 text-sm text-destructive">Roles could not be loaded.</p>
+        <p className="p-4 text-sm text-destructive">Permission profiles could not be loaded.</p>
       ) : (roles.data ?? []).length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">
-          No Roles yet. Create one to reuse the same permission profile across agents and members.
+          No Permission profiles yet. Create one when several agents or members
+          should share the same access rules.
         </p>
       ) : (
         <div className="grid min-h-64 md:grid-cols-[16rem_minmax(0,1fr)]">
@@ -217,7 +218,7 @@ function RoleDetails({
               variant="outline"
               disabled={archive.isPending}
               onClick={() => {
-                if (window.confirm(`Archive ${role.name}? New tasks will stop inheriting it.`)) {
+                if (window.confirm(`Archive ${role.name}? Assigned agents and members will stop inheriting this profile on new tasks.`)) {
                   archive.mutate(role.id);
                 }
               }}
@@ -233,7 +234,7 @@ function RoleDetails({
           Permission profile
         </h5>
         {roleKeys.length === 0 ? (
-          <p className="text-sm text-muted-foreground">This Role currently inherits every permission.</p>
+          <p className="text-sm text-muted-foreground">This profile currently inherits every permission.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {presentRolePermissionKeys(roleKeys).map(({ key, label, keys }) => {
@@ -292,14 +293,14 @@ function RoleDetails({
             </div>
           ))}
           {!assignments.isLoading && (assignments.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">This Role is not assigned yet.</p>
+            <p className="text-sm text-muted-foreground">This profile is not assigned yet.</p>
           ) : null}
         </div>
 
         {canEdit ? (
           <div className="mt-3 grid gap-2 md:grid-cols-[minmax(12rem,1fr)_12rem_auto]">
             <Select value={actor} onValueChange={(value) => setActor(value ?? "")}>
-              <SelectTrigger aria-label="Role assignee">
+              <SelectTrigger aria-label="Profile assignee">
                 <SelectValue placeholder="Select an agent or member" />
               </SelectTrigger>
               <SelectContent>
@@ -397,10 +398,10 @@ function RoleEditor({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-3xl flex-col overflow-hidden sm:max-h-[85vh]">
         <DialogHeader>
-          <DialogTitle>{role ? `Edit ${role.name}` : "Create role"}</DialogTitle>
+          <DialogTitle>{role ? `Edit ${role.name}` : "Create profile"}</DialogTitle>
           <DialogDescription>
-            This versioned profile becomes part of the same permission decision
-            shown in Capabilities and enforced at call time.
+            Save one shared set of access rules. Every assigned agent or member
+            receives the same version through the permission engine.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">

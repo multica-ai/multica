@@ -636,8 +636,8 @@ export function PermissionDetailPage({
     {
       tab: "roles",
       icon: ShieldCheck,
-      title: "Which Roles and assignments apply?",
-      body: "See the Roles that include this permission and who receives them.",
+      title: "Which Permission profiles and assignments apply?",
+      body: "See the shared profiles that include this permission and who receives them.",
     },
     {
       tab: "agents",
@@ -648,7 +648,7 @@ export function PermissionDetailPage({
   ] as const;
   const detailTabs = [
     { tab: "audit", label: "Permission audit" },
-    { tab: "roles", label: `Roles ${applicableRoles.length}` },
+    { tab: "roles", label: `Profiles ${applicableRoles.length}` },
     { tab: "agents", label: `Agents ${directory.agents.length}` },
     {
       tab: "changes",
@@ -705,9 +705,9 @@ export function PermissionDetailPage({
       </header>
 
       <div className="mb-4 rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        Roles are evaluated together with Workspace, Runtime, Agent, Group and
-        Member rules. The live result follows this permission&apos;s declared
-        override and safety-floor contract.
+        Permission profiles are evaluated together with Workspace, Runtime,
+        Agent, Group and Member rules. The live result follows this
+        permission&apos;s declared override and safety-floor contract.
       </div>
 
       <section
@@ -720,7 +720,7 @@ export function PermissionDetailPage({
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             This page turns one permission around so you can inspect people,
-            Roles or agents.
+            Permission profiles or agents.
           </p>
         </div>
         <div className="grid gap-px bg-border md:grid-cols-3">
@@ -857,7 +857,7 @@ export function PermissionDetailPage({
         <TabsContent value="roles" className="pt-2">
           <section className="overflow-hidden rounded-xl border bg-card">
             <div className="border-b p-4">
-              <h2 className="font-semibold">Roles</h2>
+              <h2 className="font-semibold">Permission profiles</h2>
               <p className="text-sm text-muted-foreground">
                 Reusable profiles that include this permission and the agents or
                 members currently assigned to them.
@@ -865,10 +865,10 @@ export function PermissionDetailPage({
             </div>
             {rolesQuery.isLoading ||
             roleAssignmentQueries.some((query) => query.isLoading) ? (
-              <p className="p-6 text-sm text-muted-foreground">Loading Roles…</p>
+              <p className="p-6 text-sm text-muted-foreground">Loading profiles…</p>
             ) : applicableRoles.length === 0 ? (
               <p className="p-6 text-sm text-muted-foreground">
-                No Role includes this permission.
+                No Permission profile includes this permission.
               </p>
             ) : (
               <div className="divide-y">

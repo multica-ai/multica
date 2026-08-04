@@ -163,7 +163,7 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
           <AccessGuideItem
             icon={Settings2}
             title="Change access"
-            body="Use Settings → Permissions for defaults and Roles, or the agent's Tools page for its specific rule."
+            body="Use Settings → Permissions for defaults and Permission profiles, or the agent's Tools page for its specific rule."
           />
         </div>
       </section>
