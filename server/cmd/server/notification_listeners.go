@@ -1049,7 +1049,7 @@ func feishuInboxNotificationText(item inboxEventItem, appURL string) string {
 		parts = append(parts, truncateNotificationBody(body, 600))
 	}
 	if appURL != "" && item.IssueID != "" {
-		parts = append(parts, appURL+"/issues/"+item.IssueID)
+		parts = append(parts, strings.TrimRight(appURL, "/")+"/issues/"+item.IssueID)
 	}
 	return strings.Join(parts, "\n")
 }
