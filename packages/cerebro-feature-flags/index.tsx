@@ -73,3 +73,12 @@ export { useChatPlacement } from "./use-chat-placement";
 export { isConversationHidden, useHiddenConversationKinds } from "./chat-inbox-hiding";
 export { countUnreadConversations, useChatUnreadCount } from "./use-chat-unread-count";
 export { ChatPlacementSettings } from "./chat-placement-settings";
+export {
+  CHAT_PAGE_SETTINGS_KEY,
+  DEFAULT_CHAT_PAGE_SETTINGS,
+  readChatPageSettings,
+  type ChatPageSettings,
+  type ChatPageSort,
+  type ChatPageGroupBy,
+} from "./chat-page-settings";
+export { useChatPageSettings } from "./use-chat-page-settings";

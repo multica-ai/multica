@@ -81,14 +81,16 @@ describe("countUnreadConversations", () => {
     ).toBe(1);
   });
 
-  it("counts a channel whose only signal is has_unread_activity", () => {
+  it("ignores a channel whose only signal is has_unread_activity (rail shows no unread for it)", () => {
+    // FIR-4350 — the rail badges rows on unread_count only, so a mention-only
+    // smart-unread channel must NOT inflate the sidebar badge.
     expect(
       countUnreadConversations(
         [channel({ unread_count: 0, has_unread_activity: true })],
         [],
         ALL_IN_CHAT,
       ),
-    ).toBe(1);
+    ).toBe(0);
   });
 
   it("ignores a read channel", () => {

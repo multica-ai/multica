@@ -85,10 +85,15 @@ export interface SlackBlockProps {
    *  search button. Default off (search revealed via the button). */
   searchDefaultOpen?: boolean;
   onSetSearchDefaultOpen: (v: boolean) => void;
-  /** FIR-4350 — show the settings dropdown and the Remove-block button. Default
-   *  on for the dynamic inbox; the Chat page turns it off because it fixes the
-   *  display options and has no block to remove. */
+  /** FIR-4350 — show the display-settings dropdown (Sort / Group / Show /
+   *  Search). On for both the dynamic inbox and the Chat page. */
   showSectionControls?: boolean;
+  /** FIR-4350 — show the Remove-block "X". Default on for the dynamic inbox; the
+   *  Chat page turns it off — it is a surface, not a removable block. */
+  showRemove?: boolean;
+  /** FIR-4350 — show the "Show agents" item in the settings dropdown. Default
+   *  on; the Chat page turns it off because agents are inbox-only there. */
+  showAgentsToggle?: boolean;
   /** FIR-4350 — when set, render a "+" button in the header that opens the
    *  new-conversation flow. The Chat page passes it; the inbox does not (it has
    *  the sidebar "New message" button). */
@@ -188,6 +193,8 @@ export function SlackBlock({
   searchDefaultOpen = false,
   onSetSearchDefaultOpen,
   showSectionControls = true,
+  showRemove = true,
+  showAgentsToggle = true,
   onCreate,
   onOpenSettings,
   onOpenAgentChat,
@@ -605,28 +612,44 @@ export function SlackBlock({
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => onSetShowAgents(!showAgents)}>
-                  Show agents {showAgents ? "✓" : ""}
-                </DropdownMenuItem>
+                {showAgentsToggle && (
+                  <DropdownMenuItem onClick={() => onSetShowAgents(!showAgents)}>
+                    Show agents {showAgents ? "✓" : ""}
+                  </DropdownMenuItem>
+                )}
                 {/* TECH-3769 — choose whether the search field is shown by
                     default or revealed via the header search button. */}
                 <DropdownMenuItem onClick={toggleSearchDefault}>
                   Search shown by default {searchDefaultOpen ? "✓" : ""}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
+              {/* FIR-4350 — on the Chat page the placement matrix lives inside
+                  this one gear instead of a second, identical gear button. */}
+              {onOpenSettings && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onOpenSettings}>
+                    Chat placement…
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted"
-            onClick={onRemove}
-            title="Remove block"
-          >
-            <X className="size-3.5" />
-          </button>
+          {showRemove && (
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-muted"
+              onClick={onRemove}
+              title="Remove block"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
           </>
           )}
-          {onOpenSettings && (
+          {/* The standalone placement gear is only needed when the settings
+              dropdown is hidden; otherwise placement lives inside it. */}
+          {onOpenSettings && !showSectionControls && (
             <button
               type="button"
               className="rounded p-1 hover:bg-muted"
