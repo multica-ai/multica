@@ -86,15 +86,12 @@ func TestReportUpdateResult_AbortsOnContextCancel(t *testing.T) {
 	updateReportBackoffs = []time.Duration{0, 200 * time.Millisecond}
 	t.Cleanup(func() { updateReportBackoffs = prev })
 
+	ctx, cancel := context.WithCancel(context.Background())
 	d, calls := updateReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		cancel() // CEREBRO-PATCH(update-report-cancel-determinism): cancel once the attempt is counted, not on a 30ms timer
 		http.Error(w, "{}", http.StatusInternalServerError)
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		cancel()
-	}()
 	d.reportUpdateResult(ctx, "rt-1", "upd-1", map[string]any{"status": "completed"})
 
 	if got := atomic.LoadInt32(calls); got != 1 {
