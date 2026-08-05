@@ -57,6 +57,8 @@ RETURNING *;
 UPDATE corpus_transfer
 SET state = 'failed',
     failure_code = sqlc.arg('failure_code'),
+    cleanup_pending = true,
+    cleanup_next_attempt_at = now(),
     failed_at = now(),
     updated_at = now()
 WHERE workspace_id = sqlc.arg('workspace_id')
@@ -73,6 +75,7 @@ SET state = 'verifying',
     updated_at = now()
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND id = sqlc.arg('id')
+  AND expires_at > now()
   AND (
       state = 'uploaded'
       OR (state = 'verifying' AND verification_lease_expires_at <= now())
@@ -92,6 +95,7 @@ WHERE workspace_id = sqlc.arg('workspace_id')
   AND id = sqlc.arg('id')
   AND state = 'verifying'
   AND verification_token = sqlc.arg('verification_token')
+  AND expires_at > now()
   AND expected_size_bytes = sqlc.arg('verified_size_bytes')
   AND expected_sha256 = sqlc.arg('verified_sha256')
 RETURNING *;
@@ -102,6 +106,8 @@ SET state = 'failed',
     verification_token = NULL,
     verification_lease_expires_at = NULL,
     failure_code = sqlc.arg('failure_code'),
+    cleanup_pending = true,
+    cleanup_next_attempt_at = now(),
     failed_at = now(),
     updated_at = now()
 WHERE workspace_id = sqlc.arg('workspace_id')
@@ -112,12 +118,95 @@ RETURNING *;
 
 -- name: ExpireCorpusTransfer :one
 UPDATE corpus_transfer
-SET state = 'expired',
+SET state = CASE
+        WHEN state IN ('confirmed', 'acked') THEN 'purged'
+        ELSE 'expired'
+    END,
+    verification_token = NULL,
+    verification_lease_expires_at = NULL,
+    cleanup_pending = true,
+    cleanup_next_attempt_at = now(),
     updated_at = now()
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND id = sqlc.arg('id')
-  AND state IN ('created', 'uploading')
+  AND state IN ('created', 'uploading', 'uploaded', 'verifying', 'confirmed', 'acked')
   AND expires_at <= now()
+RETURNING *;
+
+-- name: ClaimNextCorpusTransferForCleanup :one
+WITH candidate AS (
+    SELECT workspace_id, id
+    FROM corpus_transfer
+    WHERE (
+        cleanup_pending
+        AND cleanup_next_attempt_at <= now()
+        AND (cleanup_lease_expires_at IS NULL OR cleanup_lease_expires_at <= now())
+    ) OR (
+        state IN ('created', 'uploading', 'uploaded', 'verifying', 'confirmed', 'acked')
+        AND expires_at <= now()
+    )
+    ORDER BY cleanup_next_attempt_at NULLS FIRST, created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE corpus_transfer AS transfer
+SET state = CASE
+		WHEN transfer.state IN ('confirmed', 'acked') THEN 'purged'
+		WHEN transfer.state IN ('created', 'uploading', 'uploaded', 'verifying') THEN 'expired'
+		ELSE transfer.state
+    END,
+    verification_token = NULL,
+    verification_lease_expires_at = NULL,
+    cleanup_pending = true,
+    cleanup_lease_token = sqlc.arg('cleanup_lease_token'),
+    cleanup_lease_expires_at = now() + sqlc.arg('cleanup_lease')::interval,
+    cleanup_attempt = transfer.cleanup_attempt + 1,
+    cleanup_next_attempt_at = COALESCE(transfer.cleanup_next_attempt_at, now()),
+    updated_at = now()
+FROM candidate
+WHERE transfer.workspace_id = candidate.workspace_id
+  AND transfer.id = candidate.id
+RETURNING transfer.*;
+
+-- name: RetryCorpusTransferCleanup :one
+UPDATE corpus_transfer
+SET cleanup_lease_token = NULL,
+    cleanup_lease_expires_at = NULL,
+    cleanup_next_attempt_at = now() + sqlc.arg('retry_after')::interval,
+    cleanup_last_error = left(sqlc.arg('cleanup_last_error'), 1024),
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = sqlc.arg('id')
+  AND cleanup_pending
+  AND cleanup_lease_token = sqlc.arg('cleanup_lease_token')
+RETURNING *;
+
+-- name: ScheduleCorpusTransferCleanupPass :one
+UPDATE corpus_transfer
+SET cleanup_lease_token = NULL,
+    cleanup_lease_expires_at = NULL,
+    cleanup_pass = cleanup_pass + 1,
+    cleanup_next_attempt_at = now() + sqlc.arg('retry_after')::interval,
+    cleanup_last_error = NULL,
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = sqlc.arg('id')
+  AND cleanup_pending
+  AND cleanup_lease_token = sqlc.arg('cleanup_lease_token')
+RETURNING *;
+
+-- name: CompleteCorpusTransferCleanup :one
+UPDATE corpus_transfer
+SET cleanup_pending = false,
+    cleanup_lease_token = NULL,
+    cleanup_lease_expires_at = NULL,
+    cleanup_next_attempt_at = NULL,
+    cleanup_last_error = NULL,
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = sqlc.arg('id')
+  AND cleanup_pending
+  AND cleanup_lease_token = sqlc.arg('cleanup_lease_token')
 RETURNING *;
 
 -- name: GetConfirmedCorpusTransferContent :one
@@ -125,7 +214,8 @@ SELECT *
 FROM corpus_transfer
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND id = sqlc.arg('id')
-  AND state IN ('confirmed', 'acked');
+  AND state IN ('confirmed', 'acked')
+  AND expires_at > now();
 
 -- name: CreateCorpusTransferACK :one
 INSERT INTO corpus_transfer_ack (

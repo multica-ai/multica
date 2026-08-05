@@ -20,7 +20,7 @@ WHERE workspace_id = $1
   AND id = $2
   AND state = 'created'
   AND expires_at > now()
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type ClaimCorpusTransferUploadParams struct {
@@ -47,6 +47,13 @@ func (q *Queries) ClaimCorpusTransferUpload(ctx context.Context, arg ClaimCorpus
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -68,11 +75,12 @@ SET state = 'verifying',
     updated_at = now()
 WHERE workspace_id = $3
   AND id = $4
+  AND expires_at > now()
   AND (
       state = 'uploaded'
       OR (state = 'verifying' AND verification_lease_expires_at <= now())
   )
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type ClaimCorpusTransferVerificationParams struct {
@@ -106,6 +114,151 @@ func (q *Queries) ClaimCorpusTransferVerification(ctx context.Context, arg Claim
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
+		&i.ExpiresAt,
+		&i.UploadStartedAt,
+		&i.UploadedAt,
+		&i.VerificationStartedAt,
+		&i.ConfirmedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const claimNextCorpusTransferForCleanup = `-- name: ClaimNextCorpusTransferForCleanup :one
+WITH candidate AS (
+    SELECT workspace_id, id
+    FROM corpus_transfer
+    WHERE (
+        cleanup_pending
+        AND cleanup_next_attempt_at <= now()
+        AND (cleanup_lease_expires_at IS NULL OR cleanup_lease_expires_at <= now())
+    ) OR (
+        state IN ('created', 'uploading', 'uploaded', 'verifying', 'confirmed', 'acked')
+        AND expires_at <= now()
+    )
+    ORDER BY cleanup_next_attempt_at NULLS FIRST, created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE corpus_transfer AS transfer
+SET state = CASE
+		WHEN transfer.state IN ('confirmed', 'acked') THEN 'purged'
+		WHEN transfer.state IN ('created', 'uploading', 'uploaded', 'verifying') THEN 'expired'
+		ELSE transfer.state
+    END,
+    verification_token = NULL,
+    verification_lease_expires_at = NULL,
+    cleanup_pending = true,
+    cleanup_lease_token = $1,
+    cleanup_lease_expires_at = now() + $2::interval,
+    cleanup_attempt = transfer.cleanup_attempt + 1,
+    cleanup_next_attempt_at = COALESCE(transfer.cleanup_next_attempt_at, now()),
+    updated_at = now()
+FROM candidate
+WHERE transfer.workspace_id = candidate.workspace_id
+  AND transfer.id = candidate.id
+RETURNING transfer.id, transfer.workspace_id, transfer.actor_id, transfer.idempotency_key, transfer.object_key, transfer.manifest, transfer.manifest_sha256, transfer.expected_size_bytes, transfer.expected_sha256, transfer.state, transfer.verification_token, transfer.verification_lease_expires_at, transfer.verified_size_bytes, transfer.verified_sha256, transfer.failure_code, transfer.cleanup_pending, transfer.cleanup_lease_token, transfer.cleanup_lease_expires_at, transfer.cleanup_attempt, transfer.cleanup_pass, transfer.cleanup_next_attempt_at, transfer.cleanup_last_error, transfer.expires_at, transfer.upload_started_at, transfer.uploaded_at, transfer.verification_started_at, transfer.confirmed_at, transfer.failed_at, transfer.created_at, transfer.updated_at
+`
+
+type ClaimNextCorpusTransferForCleanupParams struct {
+	CleanupLeaseToken pgtype.UUID     `json:"cleanup_lease_token"`
+	CleanupLease      pgtype.Interval `json:"cleanup_lease"`
+}
+
+func (q *Queries) ClaimNextCorpusTransferForCleanup(ctx context.Context, arg ClaimNextCorpusTransferForCleanupParams) (CorpusTransfer, error) {
+	row := q.db.QueryRow(ctx, claimNextCorpusTransferForCleanup, arg.CleanupLeaseToken, arg.CleanupLease)
+	var i CorpusTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ActorID,
+		&i.IdempotencyKey,
+		&i.ObjectKey,
+		&i.Manifest,
+		&i.ManifestSha256,
+		&i.ExpectedSizeBytes,
+		&i.ExpectedSha256,
+		&i.State,
+		&i.VerificationToken,
+		&i.VerificationLeaseExpiresAt,
+		&i.VerifiedSizeBytes,
+		&i.VerifiedSha256,
+		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
+		&i.ExpiresAt,
+		&i.UploadStartedAt,
+		&i.UploadedAt,
+		&i.VerificationStartedAt,
+		&i.ConfirmedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completeCorpusTransferCleanup = `-- name: CompleteCorpusTransferCleanup :one
+UPDATE corpus_transfer
+SET cleanup_pending = false,
+    cleanup_lease_token = NULL,
+    cleanup_lease_expires_at = NULL,
+    cleanup_next_attempt_at = NULL,
+    cleanup_last_error = NULL,
+    updated_at = now()
+WHERE workspace_id = $1
+  AND id = $2
+  AND cleanup_pending
+  AND cleanup_lease_token = $3
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+`
+
+type CompleteCorpusTransferCleanupParams struct {
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	ID                pgtype.UUID `json:"id"`
+	CleanupLeaseToken pgtype.UUID `json:"cleanup_lease_token"`
+}
+
+func (q *Queries) CompleteCorpusTransferCleanup(ctx context.Context, arg CompleteCorpusTransferCleanupParams) (CorpusTransfer, error) {
+	row := q.db.QueryRow(ctx, completeCorpusTransferCleanup, arg.WorkspaceID, arg.ID, arg.CleanupLeaseToken)
+	var i CorpusTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ActorID,
+		&i.IdempotencyKey,
+		&i.ObjectKey,
+		&i.Manifest,
+		&i.ManifestSha256,
+		&i.ExpectedSizeBytes,
+		&i.ExpectedSha256,
+		&i.State,
+		&i.VerificationToken,
+		&i.VerificationLeaseExpiresAt,
+		&i.VerifiedSizeBytes,
+		&i.VerifiedSha256,
+		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -131,9 +284,10 @@ WHERE workspace_id = $3
   AND id = $4
   AND state = 'verifying'
   AND verification_token = $5
+  AND expires_at > now()
   AND expected_size_bytes = $1
   AND expected_sha256 = $2
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type ConfirmCorpusTransferParams struct {
@@ -169,6 +323,13 @@ func (q *Queries) ConfirmCorpusTransfer(ctx context.Context, arg ConfirmCorpusTr
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -253,7 +414,7 @@ INSERT INTO corpus_transfer (
 )
 ON CONFLICT (workspace_id, actor_id, idempotency_key) DO UPDATE
 SET idempotency_key = EXCLUDED.idempotency_key
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type CreateOrGetCorpusTransferParams struct {
@@ -299,6 +460,13 @@ func (q *Queries) CreateOrGetCorpusTransfer(ctx context.Context, arg CreateOrGet
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -313,13 +481,20 @@ func (q *Queries) CreateOrGetCorpusTransfer(ctx context.Context, arg CreateOrGet
 
 const expireCorpusTransfer = `-- name: ExpireCorpusTransfer :one
 UPDATE corpus_transfer
-SET state = 'expired',
+SET state = CASE
+        WHEN state IN ('confirmed', 'acked') THEN 'purged'
+        ELSE 'expired'
+    END,
+    verification_token = NULL,
+    verification_lease_expires_at = NULL,
+    cleanup_pending = true,
+    cleanup_next_attempt_at = now(),
     updated_at = now()
 WHERE workspace_id = $1
   AND id = $2
-  AND state IN ('created', 'uploading')
+  AND state IN ('created', 'uploading', 'uploaded', 'verifying', 'confirmed', 'acked')
   AND expires_at <= now()
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type ExpireCorpusTransferParams struct {
@@ -346,6 +521,13 @@ func (q *Queries) ExpireCorpusTransfer(ctx context.Context, arg ExpireCorpusTran
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -362,12 +544,14 @@ const failCorpusTransferUpload = `-- name: FailCorpusTransferUpload :one
 UPDATE corpus_transfer
 SET state = 'failed',
     failure_code = $1,
+    cleanup_pending = true,
+    cleanup_next_attempt_at = now(),
     failed_at = now(),
     updated_at = now()
 WHERE workspace_id = $2
   AND id = $3
   AND state = 'uploading'
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type FailCorpusTransferUploadParams struct {
@@ -395,6 +579,13 @@ func (q *Queries) FailCorpusTransferUpload(ctx context.Context, arg FailCorpusTr
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -413,13 +604,15 @@ SET state = 'failed',
     verification_token = NULL,
     verification_lease_expires_at = NULL,
     failure_code = $1,
+    cleanup_pending = true,
+    cleanup_next_attempt_at = now(),
     failed_at = now(),
     updated_at = now()
 WHERE workspace_id = $2
   AND id = $3
   AND state = 'verifying'
   AND verification_token = $4
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type FailCorpusTransferVerificationParams struct {
@@ -453,6 +646,13 @@ func (q *Queries) FailCorpusTransferVerification(ctx context.Context, arg FailCo
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -466,11 +666,12 @@ func (q *Queries) FailCorpusTransferVerification(ctx context.Context, arg FailCo
 }
 
 const getConfirmedCorpusTransferContent = `-- name: GetConfirmedCorpusTransferContent :one
-SELECT id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+SELECT id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 FROM corpus_transfer
 WHERE workspace_id = $1
   AND id = $2
   AND state IN ('confirmed', 'acked')
+  AND expires_at > now()
 `
 
 type GetConfirmedCorpusTransferContentParams struct {
@@ -497,6 +698,13 @@ func (q *Queries) GetConfirmedCorpusTransferContent(ctx context.Context, arg Get
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -510,7 +718,7 @@ func (q *Queries) GetConfirmedCorpusTransferContent(ctx context.Context, arg Get
 }
 
 const getCorpusTransfer = `-- name: GetCorpusTransfer :one
-SELECT id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+SELECT id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 FROM corpus_transfer
 WHERE workspace_id = $1
   AND id = $2
@@ -540,6 +748,13 @@ func (q *Queries) GetCorpusTransfer(ctx context.Context, arg GetCorpusTransferPa
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -588,7 +803,7 @@ WHERE workspace_id = $1
   AND id = $2
   AND state IN ('confirmed', 'acked')
   AND verified_sha256 = $3
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type MarkCorpusTransferAckedParams struct {
@@ -616,6 +831,13 @@ func (q *Queries) MarkCorpusTransferAcked(ctx context.Context, arg MarkCorpusTra
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,
@@ -636,7 +858,7 @@ SET state = 'uploaded',
 WHERE workspace_id = $1
   AND id = $2
   AND state = 'uploading'
-RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
 `
 
 type MarkCorpusTransferUploadedParams struct {
@@ -663,6 +885,144 @@ func (q *Queries) MarkCorpusTransferUploaded(ctx context.Context, arg MarkCorpus
 		&i.VerifiedSizeBytes,
 		&i.VerifiedSha256,
 		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
+		&i.ExpiresAt,
+		&i.UploadStartedAt,
+		&i.UploadedAt,
+		&i.VerificationStartedAt,
+		&i.ConfirmedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const retryCorpusTransferCleanup = `-- name: RetryCorpusTransferCleanup :one
+UPDATE corpus_transfer
+SET cleanup_lease_token = NULL,
+    cleanup_lease_expires_at = NULL,
+    cleanup_next_attempt_at = now() + $1::interval,
+    cleanup_last_error = left($2, 1024),
+    updated_at = now()
+WHERE workspace_id = $3
+  AND id = $4
+  AND cleanup_pending
+  AND cleanup_lease_token = $5
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+`
+
+type RetryCorpusTransferCleanupParams struct {
+	RetryAfter        pgtype.Interval `json:"retry_after"`
+	CleanupLastError  string          `json:"cleanup_last_error"`
+	WorkspaceID       pgtype.UUID     `json:"workspace_id"`
+	ID                pgtype.UUID     `json:"id"`
+	CleanupLeaseToken pgtype.UUID     `json:"cleanup_lease_token"`
+}
+
+func (q *Queries) RetryCorpusTransferCleanup(ctx context.Context, arg RetryCorpusTransferCleanupParams) (CorpusTransfer, error) {
+	row := q.db.QueryRow(ctx, retryCorpusTransferCleanup,
+		arg.RetryAfter,
+		arg.CleanupLastError,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.CleanupLeaseToken,
+	)
+	var i CorpusTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ActorID,
+		&i.IdempotencyKey,
+		&i.ObjectKey,
+		&i.Manifest,
+		&i.ManifestSha256,
+		&i.ExpectedSizeBytes,
+		&i.ExpectedSha256,
+		&i.State,
+		&i.VerificationToken,
+		&i.VerificationLeaseExpiresAt,
+		&i.VerifiedSizeBytes,
+		&i.VerifiedSha256,
+		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
+		&i.ExpiresAt,
+		&i.UploadStartedAt,
+		&i.UploadedAt,
+		&i.VerificationStartedAt,
+		&i.ConfirmedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const scheduleCorpusTransferCleanupPass = `-- name: ScheduleCorpusTransferCleanupPass :one
+UPDATE corpus_transfer
+SET cleanup_lease_token = NULL,
+    cleanup_lease_expires_at = NULL,
+    cleanup_pass = cleanup_pass + 1,
+    cleanup_next_attempt_at = now() + $1::interval,
+    cleanup_last_error = NULL,
+    updated_at = now()
+WHERE workspace_id = $2
+  AND id = $3
+  AND cleanup_pending
+  AND cleanup_lease_token = $4
+RETURNING id, workspace_id, actor_id, idempotency_key, object_key, manifest, manifest_sha256, expected_size_bytes, expected_sha256, state, verification_token, verification_lease_expires_at, verified_size_bytes, verified_sha256, failure_code, cleanup_pending, cleanup_lease_token, cleanup_lease_expires_at, cleanup_attempt, cleanup_pass, cleanup_next_attempt_at, cleanup_last_error, expires_at, upload_started_at, uploaded_at, verification_started_at, confirmed_at, failed_at, created_at, updated_at
+`
+
+type ScheduleCorpusTransferCleanupPassParams struct {
+	RetryAfter        pgtype.Interval `json:"retry_after"`
+	WorkspaceID       pgtype.UUID     `json:"workspace_id"`
+	ID                pgtype.UUID     `json:"id"`
+	CleanupLeaseToken pgtype.UUID     `json:"cleanup_lease_token"`
+}
+
+func (q *Queries) ScheduleCorpusTransferCleanupPass(ctx context.Context, arg ScheduleCorpusTransferCleanupPassParams) (CorpusTransfer, error) {
+	row := q.db.QueryRow(ctx, scheduleCorpusTransferCleanupPass,
+		arg.RetryAfter,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.CleanupLeaseToken,
+	)
+	var i CorpusTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ActorID,
+		&i.IdempotencyKey,
+		&i.ObjectKey,
+		&i.Manifest,
+		&i.ManifestSha256,
+		&i.ExpectedSizeBytes,
+		&i.ExpectedSha256,
+		&i.State,
+		&i.VerificationToken,
+		&i.VerificationLeaseExpiresAt,
+		&i.VerifiedSizeBytes,
+		&i.VerifiedSha256,
+		&i.FailureCode,
+		&i.CleanupPending,
+		&i.CleanupLeaseToken,
+		&i.CleanupLeaseExpiresAt,
+		&i.CleanupAttempt,
+		&i.CleanupPass,
+		&i.CleanupNextAttemptAt,
+		&i.CleanupLastError,
 		&i.ExpiresAt,
 		&i.UploadStartedAt,
 		&i.UploadedAt,

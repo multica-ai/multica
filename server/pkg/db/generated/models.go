@@ -503,6 +503,13 @@ type CorpusTransfer struct {
 	VerifiedSizeBytes          pgtype.Int8        `json:"verified_size_bytes"`
 	VerifiedSha256             pgtype.Text        `json:"verified_sha256"`
 	FailureCode                pgtype.Text        `json:"failure_code"`
+	CleanupPending             bool               `json:"cleanup_pending"`
+	CleanupLeaseToken          pgtype.UUID        `json:"cleanup_lease_token"`
+	CleanupLeaseExpiresAt      pgtype.Timestamptz `json:"cleanup_lease_expires_at"`
+	CleanupAttempt             int32              `json:"cleanup_attempt"`
+	CleanupPass                int32              `json:"cleanup_pass"`
+	CleanupNextAttemptAt       pgtype.Timestamptz `json:"cleanup_next_attempt_at"`
+	CleanupLastError           pgtype.Text        `json:"cleanup_last_error"`
 	ExpiresAt                  pgtype.Timestamptz `json:"expires_at"`
 	UploadStartedAt            pgtype.Timestamptz `json:"upload_started_at"`
 	UploadedAt                 pgtype.Timestamptz `json:"uploaded_at"`

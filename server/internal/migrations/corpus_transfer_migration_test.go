@@ -22,7 +22,7 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	}
 
 	transfer := readMigrationForTest(t, dir, "257_corpus_transfer.up.sql")
-	for _, state := range []string{"created", "uploading", "uploaded", "verifying", "confirmed", "acked", "failed", "expired"} {
+	for _, state := range []string{"created", "uploading", "uploaded", "verifying", "confirmed", "acked", "failed", "expired", "purged"} {
 		if !strings.Contains(transfer, "'"+state+"'") {
 			t.Errorf("transfer state check is missing %q", state)
 		}
@@ -32,23 +32,28 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	}
 	for _, invariant := range []string{
 		"(verified_size_bytes IS NULL) = (verified_sha256 IS NULL)",
+		"(state IN ('confirmed', 'acked', 'purged')) = (verified_size_bytes IS NOT NULL AND verified_sha256 IS NOT NULL)",
 		"(verification_token IS NULL) = (verification_lease_expires_at IS NULL)",
 		"(state = 'verifying') = (verification_token IS NOT NULL AND verification_lease_expires_at IS NOT NULL)",
 		"(state = 'failed') = (failure_code IS NOT NULL)",
+		"cleanup_pending = (cleanup_next_attempt_at IS NOT NULL)",
+		"NOT cleanup_pending OR state IN ('failed', 'expired', 'purged')",
 	} {
 		if !strings.Contains(transfer, invariant) {
 			t.Errorf("transfer schema is missing invariant %q", invariant)
 		}
 	}
 
-	for _, name := range []string{
-		"258_corpus_transfer_primary_index.up.sql",
-		"260_corpus_transfer_idempotency_index.up.sql",
-		"262_corpus_transfer_ack_primary_index.up.sql",
+	for name, prefix := range map[string]string{
+		"258_corpus_transfer_primary_index.up.sql":     "CREATE UNIQUE INDEX CONCURRENTLY",
+		"260_corpus_transfer_idempotency_index.up.sql": "CREATE UNIQUE INDEX CONCURRENTLY",
+		"262_corpus_transfer_ack_primary_index.up.sql": "CREATE UNIQUE INDEX CONCURRENTLY",
+		"264_corpus_transfer_cleanup_due_index.up.sql": "CREATE INDEX CONCURRENTLY",
+		"265_corpus_transfer_expiry_due_index.up.sql":  "CREATE INDEX CONCURRENTLY",
 	} {
 		body := readMigrationForTest(t, dir, name)
-		if !strings.Contains(strings.ToUpper(body), "CREATE UNIQUE INDEX CONCURRENTLY") {
-			t.Errorf("%s must create a unique index concurrently", name)
+		if !strings.Contains(strings.ToUpper(body), prefix) {
+			t.Errorf("%s must create its index concurrently", name)
 		}
 		if strings.Count(body, ";") != 1 {
 			t.Errorf("%s must contain exactly one SQL statement", name)
@@ -58,6 +63,8 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	for _, name := range []string{
 		"258_corpus_transfer_primary_index.down.sql",
 		"262_corpus_transfer_ack_primary_index.down.sql",
+		"264_corpus_transfer_cleanup_due_index.down.sql",
+		"265_corpus_transfer_expiry_due_index.down.sql",
 	} {
 		body := strings.ToUpper(readMigrationForTest(t, dir, name))
 		if !strings.Contains(body, "DROP INDEX CONCURRENTLY IF EXISTS") {
@@ -72,9 +79,30 @@ func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
 	for _, predicate := range []string{
 		"expected_size_bytes = sqlc.arg('verified_size_bytes')",
 		"expected_sha256 = sqlc.arg('verified_sha256')",
+		"verification_token = sqlc.arg('verification_token')\n  AND expires_at > now()",
 	} {
 		if !strings.Contains(string(queryBody), predicate) {
 			t.Errorf("confirmation CAS is missing %q", predicate)
+		}
+	}
+	for _, query := range []string{
+		"ClaimNextCorpusTransferForCleanup",
+		"RetryCorpusTransferCleanup",
+		"ScheduleCorpusTransferCleanupPass",
+		"CompleteCorpusTransferCleanup",
+	} {
+		if !strings.Contains(string(queryBody), query) {
+			t.Errorf("cleanup ledger query %q is missing", query)
+		}
+	}
+	for _, predicate := range []string{
+		"state IN ('created', 'uploading', 'uploaded', 'verifying', 'confirmed', 'acked')",
+		"WHEN transfer.state IN ('confirmed', 'acked') THEN 'purged'",
+		"WHEN transfer.state IN ('created', 'uploading', 'uploaded', 'verifying') THEN 'expired'",
+		"ELSE transfer.state",
+	} {
+		if !strings.Contains(string(queryBody), predicate) {
+			t.Errorf("cleanup must reclaim abandoned uploaded transfers; missing %q", predicate)
 		}
 	}
 }
