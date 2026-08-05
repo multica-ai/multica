@@ -149,6 +149,9 @@ type daemonRuntimeProbe struct {
 }
 
 func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
+		return err
+	}
 	cfg, err := daemon.LoadConfig(daemon.Overrides{
 		Profile:       resolveProfile(cmd),
 		AllowNoAgents: true,
@@ -307,6 +310,9 @@ func requireDaemonAuth(profile string) error {
 }
 
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon start"); err != nil {
+		return err
+	}
 	foreground, _ := cmd.Flags().GetBool("foreground")
 	if foreground {
 		return runDaemonForeground(cmd)
@@ -935,6 +941,9 @@ func requireDaemonRestartPreflight(cmd *cobra.Command, profile string) error {
 }
 
 func runDaemonRestart(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("daemon restart"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
 
@@ -981,6 +990,9 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 // --- daemon stop ---
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon stop"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
 
@@ -1063,6 +1075,9 @@ func requestDaemonShutdown(healthPort int) error {
 // --- daemon status ---
 
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon status"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
 
@@ -1128,6 +1143,9 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 // --- daemon logs ---
 
 func runDaemonLogs(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon logs"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	logPath := daemonLogPathForProfile(profile)
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
@@ -1320,6 +1338,9 @@ func resolveDaemonDisableAutoUpdate(flagValue bool, envName string, cfgValue boo
 // --- daemon disk-usage ---
 
 func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon disk-usage"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	rootOverride, _ := cmd.Flags().GetString("workspaces-root")
 	byWorkspace, _ := cmd.Flags().GetBool("by-workspace")

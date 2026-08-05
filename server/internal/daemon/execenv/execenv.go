@@ -198,6 +198,10 @@ type Environment struct {
 	// on "may I remove WorkDir as scratch?" must check this — for example
 	// the GC loop never deletes the user's directory.
 	LocalDirectory bool
+	// MulticaConfigRoot is the private per-task config directory exported to
+	// child CLI invocations. It prevents implicit discovery of the daemon
+	// owner's ~/.multica profile without changing the provider-facing HOME.
+	MulticaConfigRoot string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
@@ -301,12 +305,20 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	multicaConfigRoot := filepath.Join(envRoot, "multica-config")
+	if err := os.MkdirAll(multicaConfigRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("execenv: create task-local Multica config directory: %w", err)
+	}
+	if err := os.Chmod(multicaConfigRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("execenv: restrict task-local Multica config directory: %w", err)
+	}
 
 	env := &Environment{
-		RootDir:        envRoot,
-		WorkDir:        workDir,
-		LocalDirectory: params.LocalWorkDir != "",
-		logger:         logger,
+		RootDir:           envRoot,
+		WorkDir:           workDir,
+		LocalDirectory:    params.LocalWorkDir != "",
+		MulticaConfigRoot: multicaConfigRoot,
+		logger:            logger,
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -510,6 +522,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		WorkDir:        params.WorkDir,
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
+	}
+	if env.RootDir != "" {
+		env.MulticaConfigRoot = filepath.Join(env.RootDir, "multica-config")
+		if err := os.MkdirAll(env.MulticaConfigRoot, 0o700); err != nil {
+			logger.Warn("execenv: restore task-local Multica config directory failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		if err := os.Chmod(env.MulticaConfigRoot, 0o700); err != nil {
+			logger.Warn("execenv: restrict task-local Multica config directory failed; forcing fresh prepare", "error", err)
+			return nil
+		}
 	}
 
 	// Roll back the previous dispatch's sidecar writes before refreshing.
