@@ -35,6 +35,7 @@ a pointer.
 | `computeMentionedAgentCommentTriggers` builds the mention trigger set; `enqueueCommentAgentTriggers` is the shared enqueue helper | `server/internal/handler/comment.go:1381-1467,1124-1157` |
 | Comment creation runs `triggerTasksForComment`, which computes triggers, applies suppressions, then enqueues | `server/internal/handler/comment.go:1069,1092-1098` |
 | Comment edit re-triggering also runs `triggerTasksForComment` after cancelling old tasks for the edited comment | `server/internal/handler/comment.go:1577-1594` |
+| Task completion fallback comments reuse `triggerTasksForComment`, so an explicit mention emitted only in final output is routed with the same authorization, attribution, squad, coalescing, deferred, and blocked-outcome behavior as a live comment | `server/internal/service/task.go` (search `AgentCommentCreated`); `server/internal/handler/handler.go` (search `triggerSynthesizedAgentComment`); `server/internal/handler/comment.go` (search `func (h *Handler) triggerSynthesizedAgentComment`) |
 | `squad` branch: resolve squad in workspace, read `LeaderID`, add the leader trigger | `server/internal/handler/comment.go:1397-1435` |
 | `squad` → shared enqueue helper calls `EnqueueTaskForSquadLeader` | `server/internal/handler/comment.go:1141-1147` |
 | Everything not `agent` after the squad branch is skipped: `if m.Type != "agent" { continue }` | `server/internal/handler/comment.go:1437-1439` |

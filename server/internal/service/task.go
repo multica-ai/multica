@@ -40,6 +40,12 @@ type TaskService struct {
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
+	// AgentCommentCreated is invoked after a synthesized issue comment is
+	// persisted. The HTTP handler wires this hook to the same mention trigger
+	// engine used by live comments, so a handoff emitted only in a task's final
+	// output is not silently dropped. Nil keeps standalone service tests and
+	// non-HTTP callers backward-compatible.
+	AgentCommentCreated func(context.Context, db.Issue, db.Comment)
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
@@ -4867,6 +4873,9 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	if comment.Type == "comment" && s.AgentCommentCreated != nil {
+		s.AgentCommentCreated(ctx, issue, comment)
+	}
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a

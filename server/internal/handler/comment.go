@@ -1930,6 +1930,32 @@ func isClientAuthorableCommentType(t string) bool {
 	return ok
 }
 
+// triggerSynthesizedAgentComment routes explicit mentions from the fallback
+// comment TaskService creates when an agent finishes without posting a live
+// comment. It deliberately reuses the normal comment trigger engine instead
+// of enqueueing from the service layer, preserving invoke authorization,
+// attribution, squad resolution, pending-task folding, and blocked outcomes.
+func (h *Handler) triggerSynthesizedAgentComment(ctx context.Context, issue db.Issue, comment db.Comment) {
+	if comment.Type != "comment" || comment.AuthorType != "agent" {
+		return
+	}
+
+	var parentComment *db.Comment
+	if comment.ParentID.Valid {
+		if parent, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+			ID:          comment.ParentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			parentComment = &parent
+		}
+	}
+
+	authorID := uuidToString(comment.AuthorID)
+	originatorUserID := uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, comment.ID))
+	delegationAuthority := h.autopilotDelegationAuthorityFromComment(ctx, issue, comment)
+	h.triggerTasksForComment(ctx, issue, comment, parentComment, comment.AuthorType, authorID, originatorUserID, delegationAuthority, nil)
+}
+
 // noteCommentPrefix marks a comment as a human-only note. A comment whose first
 // whitespace-delimited token is this prefix (case-insensitive) is stored like
 // any other comment but never triggers an agent.
