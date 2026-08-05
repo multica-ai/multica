@@ -35,7 +35,7 @@ export function HighlightText({ text, query }: { text: string; query: string }) 
     <>
       {parts.map((part, i) =>
         part.highlight ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-900/60 text-inherit rounded-sm">
+          <mark key={i} className="rounded-sm bg-accent text-accent-foreground">
             {part.text}
           </mark>
         ) : (
