@@ -603,8 +603,9 @@ func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string 
 	return out
 }
 
-// workspaceRegisterLock returns the mutex serializing one workspace's
-// "send Register, record what it carried" critical section.
+// workspaceRegisterLock returns the mutex serializing one workspace's whole
+// registration sequence: send Register, apply or reject the response, then
+// deregister the rows that apply refused or dropped.
 //
 // The per-workspace version record (workspaceState.builtinVersions) must
 // reflect the order the SERVER processed the register calls in, because the
@@ -619,14 +620,35 @@ func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string 
 // version change or restart. Holding the lock across the request AND the
 // record makes lock order = server order = record order.
 //
-// Only the send+record section is serialized. The runtime-ID merges stay
-// outside on purpose: both flavors re-derive convergent state from a response
-// (mergeBuiltinRegisterResponse upserts additively and swaps rotated IDs;
-// applyRegisterResponseInPlace replaces the whole set), so their ordering
-// cannot strand anything the way a wrong version record can.
+// The section extends past the send because the cleanup has the same problem in
+// a nastier form. A deregistration is decided under d.mu and issued after
+// releasing it, so a recovery register completing in that gap re-creates the
+// same row — usually under the same runtime ID — and the older Deregister lands
+// on top of it. The daemon then tracks and heartbeats a runtime the server has
+// marked offline, which is the direction that silently strands work: the server
+// will not route to it, and neither side notices the disagreement. A
+// point-in-time tracking re-check cannot close that, because the gap is between
+// the check and the request; only putting the request itself inside the order
+// can. Every apply and every cleanup on a workspace therefore runs under this
+// lock, via withWorkspaceRegisterLock.
 func (d *Daemon) workspaceRegisterLock(workspaceID string) *sync.Mutex {
 	mu, _ := d.registerSerial.LoadOrStore(workspaceID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
+}
+
+// withWorkspaceRegisterLock runs one workspace's registration sequence as a
+// single ordered step. Everything that sends a Register for a workspace, folds
+// the response into local state, or deregisters rows that response cost, must
+// run inside fn — see workspaceRegisterLock for why the boundary sits after the
+// cleanup rather than after the send.
+//
+// The lock is per workspace, so sequences for different workspaces still run
+// concurrently and nothing here is ever held across two of them.
+func (d *Daemon) withWorkspaceRegisterLock(workspaceID string, fn func() error) error {
+	mu := d.workspaceRegisterLock(workspaceID)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
 }
 
 // recordBuiltinVersionsSent stores, per provider, the version a SUCCESSFUL
@@ -1132,8 +1154,9 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 //     them offline immediately instead of waiting on the 150 s
 //     stale-heartbeat sweep. On the runtime_gone path the triggering row was
 //     already deleted server-side (and pruned locally before the register),
-//     but a SIBLING dropped here — e.g. a provider confirmed below-minimum
-//     this round — still has a live server row that must be deregistered.
+//     but a SIBLING dropped here — e.g. a provider removed from the daemon's
+//     config, or a disabled profile — still has a live server row that must be
+//     deregistered.
 //   - ok:         false when the workspace was forgotten between the
 //     register call and this apply (e.g. the user left the workspace and
 //     syncWorkspacesFromAPI removed it). The caller must abort silently in
@@ -1143,15 +1166,18 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 // the explicit "fetch failed, keep the previous signature" sentinel from
 // appendProfileRuntimes.
 //
-// preserveProviders lists built-in providers whose probe was UNAVAILABLE this
-// round (version unreadable), keyed by provider. Their entries are absent from
-// the payload — and therefore from the response — because of a transient
-// failure, not because anything decided they should go: treating the response
-// as authoritative for them would delete (and, on the drift path, Deregister)
-// a healthy runtime over one failed probe. Their existing built-in runtime
-// rows are kept instead. A below-minimum provider is deliberately NOT in this
-// set — that verdict is confirmed, and dropping its rows here matches what
-// demoteBelowMinimumRuntimes does on the refresh path.
+// preserveProviders lists the built-in providers this response is not
+// authoritative about, keyed by provider — see preserveProvidersFromProbe. Their
+// entries are absent from the payload, and therefore from the response, either
+// because the probe failed (transient) or because they were confirmed
+// below-minimum by a path with no authority to demote. Either way, dropping
+// their rows here would take a runtime offline outside the one path that does it
+// safely, so their existing built-in runtime rows are kept instead.
+//
+// A provider already under a demotion hold is a different case and is still
+// rejected below: that verdict was reached by demoteBelowMinimumRuntimes, which
+// removed the rows under the claim barrier, and this response merely predates
+// it.
 func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs, droppedIDs []string, ok bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1408,11 +1434,16 @@ func (d *Daemon) clearProviderDemotions(providers []string, sampledAfter uint64)
 // track, so a deregistration decided a moment ago cannot take a row offline that
 // a NEWER legitimate registration has since brought back.
 //
-// Every deregistration on the demotion paths is decided under d.mu and issued
-// after releasing it — the HTTP call must not hold the daemon lock. A recovery
-// register completing in that gap re-creates the same server-side row, usually
-// under the same runtime ID, and the older cleanup would then knock out the row
-// that just recovered.
+// Every deregistration is decided under d.mu and issued after releasing it —
+// the HTTP call must not hold the daemon lock. A recovery register completing in
+// that gap re-creates the same server-side row, usually under the same runtime
+// ID, and the older cleanup would then knock out the row that just recovered.
+//
+// This filter is only half the guarantee, and on its own it is a TOCTOU: the
+// recovery can just as easily complete between the filter and the request.
+// Callers must therefore run both inside the workspace's register lock, which is
+// what makes the check and the Deregister one ordered step against every other
+// registration for that workspace.
 func (d *Daemon) untrackedRuntimeIDs(ids []string) []string {
 	if len(ids) == 0 {
 		return nil
@@ -1430,33 +1461,37 @@ func (d *Daemon) untrackedRuntimeIDs(ids []string) []string {
 }
 
 func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
-	resp, profileSig, unavailable, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	var newIDs []string
+	// Send, apply and clean up as one ordered step — see workspaceRegisterLock.
+	err := d.withWorkspaceRegisterLock(workspaceID, func() error {
+		resp, profileSig, preserve, err := d.registerRuntimesForWorkspaceLocked(ctx, workspaceID)
+		if err != nil {
+			return fmt.Errorf("register runtimes: %w", err)
+		}
+
+		ids, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, preserve)
+		if !ok {
+			return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+		}
+		newIDs = ids
+
+		for _, rid := range newIDs {
+			d.logger.Info("re-registered runtime after server-side deletion",
+				"workspace_id", workspaceID, "runtime_id", rid)
+		}
+
+		// A sibling runtime dropped by this recovery (a provider removed from the
+		// daemon's config, a disabled profile) still has a live server row — the
+		// runtime_gone trigger only deleted its own. Eagerly mark those offline,
+		// matching the drift path, instead of leaving them claimable until the
+		// stale-heartbeat sweep.
+		d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "runtime_gone recovery")
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("register runtimes: %w", err)
-	}
-
-	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig, unavailable)
-	if !ok {
-		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
-	}
-
-	for _, rid := range newIDs {
-		d.logger.Info("re-registered runtime after server-side deletion",
-			"workspace_id", workspaceID, "runtime_id", rid)
+		return err
 	}
 	d.notifyRuntimeSetChanged()
-
-	// A sibling runtime dropped by this recovery (a provider confirmed
-	// below-minimum this round) still has a live server row — the runtime_gone
-	// trigger only deleted its own. Eagerly mark those offline, matching the
-	// drift path, instead of leaving them claimable until the stale-heartbeat
-	// sweep. Best-effort: the sweep is the backstop.
-	if len(droppedIDs) > 0 {
-		if err := d.client.Deregister(ctx, droppedIDs); err != nil {
-			d.logger.Warn("deregister of dropped runtimes after runtime_gone recovery failed",
-				"workspace_id", workspaceID, "runtime_ids", droppedIDs, "error", err)
-		}
-	}
 
 	// Tell the server about any tasks the previous (now-deleted) runtime
 	// was working on, mirroring the registration path's recover-orphans call.
@@ -2120,14 +2155,52 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // registerRuntimesForWorkspaceBatch instead, which shares one probe round
 // across the batch.
 //
-// The third return value is the probe round's unavailable providers (version
-// unreadable this round, dropped from the payload). Callers that apply the
-// response as AUTHORITATIVE must pass it to applyRegisterResponseInPlace so
-// those providers' existing runtimes survive a transient probe failure.
-func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, map[string]string, error) {
-	builtins, _, unavailable := d.detectBuiltinRuntimes(ctx)
-	resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, builtins)
-	return resp, profileSig, unavailable, err
+// The third return value is the set of providers this round's response must not
+// be treated as authoritative about, provider to reason — see
+// preserveProvidersFromProbe. Callers that apply the response as AUTHORITATIVE
+// must pass it to applyRegisterResponseInPlace.
+//
+// The caller must hold the workspace's register lock (withWorkspaceRegisterLock)
+// for this call, the apply, and the cleanup that follows it.
+func (d *Daemon) registerRuntimesForWorkspaceLocked(ctx context.Context, workspaceID string) (*RegisterResponse, string, map[string]string, error) {
+	builtins, belowMinimum, unavailable := d.detectBuiltinRuntimes(ctx)
+	resp, profileSig, err := d.registerRuntimesForWorkspaceBatchLocked(ctx, workspaceID, builtins)
+	return resp, profileSig, preserveProvidersFromProbe(unavailable, belowMinimum), err
+}
+
+// preserveProvidersFromProbe returns the providers whose absence from a
+// registration payload must NOT be read as "this workspace should stop hosting
+// them", keyed by provider.
+//
+// Unavailable is the obvious half: the version could not be read, which is
+// transient, so dropping the rows would tear a working runtime down over one
+// failed probe.
+//
+// Below-minimum is the half that is easy to get wrong, because the verdict IS
+// confirmed — a version was read and rejected. What is missing on these paths is
+// not the evidence but the authority to act on it. Taking a runtime offline for
+// being too old requires two things neither the runtime_gone recovery nor the
+// profile-drift refresh has: the claim barrier, so the rows are never pulled out
+// from under a task that is still executing, and a seq-stamped hold, so a
+// register sent before the verdict cannot revive the provider when it lands.
+// demoteBelowMinimumRuntimes has both and is the single owner of the demotion.
+// A path that drops the rows without them reaches the same verdict and leaves no
+// record that it did, so the next in-flight response quietly undoes it.
+//
+// Preserving here costs at most one refresh tick of a too-old CLI staying
+// online, which is the pre-demotion status quo rather than a new exposure.
+func preserveProvidersFromProbe(unavailable, belowMinimum map[string]string) map[string]string {
+	if len(belowMinimum) == 0 {
+		return unavailable
+	}
+	preserve := make(map[string]string, len(unavailable)+len(belowMinimum))
+	for provider, reason := range unavailable {
+		preserve[provider] = reason
+	}
+	for provider, version := range belowMinimum {
+		preserve[provider] = "below minimum supported version: " + version
+	}
+	return preserve
 }
 
 // registerRuntimesForWorkspaceBatch registers one workspace against an already
@@ -2146,7 +2219,10 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 //
 // builtins is treated as read-only and is copied before this workspace's custom
 // runtime profiles are appended.
-func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, string, error) {
+//
+// The caller must hold the workspace's register lock (withWorkspaceRegisterLock)
+// for this call, the apply, and the cleanup that follows it.
+func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.agents()))
 	runtimes := cloneRuntimeEntries(builtins)
 	var failedProfiles []map[string]string
@@ -2184,12 +2260,6 @@ func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspac
 		"failed_profiles":   failedProfiles,
 	}
 
-	// Send and record under the workspace's register lock so the version
-	// record can never contradict the server's processing order — see
-	// workspaceRegisterLock.
-	regLock := d.workspaceRegisterLock(workspaceID)
-	regLock.Lock()
-	defer regLock.Unlock()
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("register runtimes: %w", err)
@@ -2216,7 +2286,10 @@ func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspac
 // the existing drift path.
 //
 // builtins is treated as read-only.
-func (d *Daemon) registerBuiltinRuntimesForWorkspace(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, error) {
+//
+// The caller must hold the workspace's register lock (withWorkspaceRegisterLock)
+// for this call, the merge, and the cleanup that follows it.
+func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, error) {
 	runtimes := cloneRuntimeEntries(builtins)
 	if len(runtimes) == 0 {
 		return nil, ErrNoRuntimesToRegister
@@ -2233,12 +2306,6 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspace(ctx context.Context, worksp
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},
 	}
-	// Send and record under the workspace's register lock so the version
-	// record can never contradict the server's processing order — see
-	// workspaceRegisterLock.
-	regLock := d.workspaceRegisterLock(workspaceID)
-	regLock.Lock()
-	defer regLock.Unlock()
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register builtin runtimes: %w", err)
@@ -2718,7 +2785,16 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 		"workspace_id", workspaceID, "previous_sig", cached, "current_sig", live,
 		"profile_count", len(profiles))
 
-	regResp, profileSig, unavailable, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	// Send, apply and clean up as one ordered step — see workspaceRegisterLock.
+	return d.withWorkspaceRegisterLock(workspaceID, func() error {
+		return d.applyProfileDriftRegistration(ctx, workspaceID)
+	})
+}
+
+// applyProfileDriftRegistration is refreshWorkspaceRuntimeProfiles' registration
+// half. The caller must hold the workspace's register lock.
+func (d *Daemon) applyProfileDriftRegistration(ctx context.Context, workspaceID string) error {
+	regResp, profileSig, preserve, err := d.registerRuntimesForWorkspaceLocked(ctx, workspaceID)
 	if err != nil {
 		if errors.Is(err, ErrNoRuntimesToRegister) {
 			// Convergence-to-zero: a custom-only daemon's only enabled
@@ -2729,20 +2805,21 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 			// stale-heartbeat sweep.
 			//
 			// An empty payload only proves "nothing to host" for the providers
-			// whose probe actually concluded. A provider dropped as UNAVAILABLE
-			// is a transient failure, and treating its absence as authoritative
-			// would Deregister a healthy runtime over one failed probe — so its
-			// existing built-in rows are preserved (the same rule
-			// applyRegisterResponseInPlace applies) while the profile runtimes
+			// whose probe actually concluded, and only for the verdicts this path
+			// is allowed to act on. A provider dropped as UNAVAILABLE or confirmed
+			// below-minimum is absent for a reason this path must not treat as
+			// authoritative (see preserveProvidersFromProbe), so its existing
+			// built-in rows are preserved — the same rule
+			// applyRegisterResponseInPlace applies — while the profile runtimes
 			// the drift is actually about still converge. Skipping the whole
 			// convergence instead would let one permanently unprobeable CLI
 			// keep a disabled profile's runtime online forever.
-			return d.convergeWorkspaceRuntimesToZero(ctx, workspaceID, profileSig, unavailable)
+			return d.convergeWorkspaceRuntimesToZero(ctx, workspaceID, profileSig, preserve)
 		}
 		return err
 	}
 
-	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, regResp, profileSig, unavailable)
+	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, regResp, profileSig, preserve)
 	if !ok {
 		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
 	}
@@ -2758,27 +2835,25 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	// so the runtime list reflects reality immediately; a 5xx blip here is
 	// fine because the server's stale-heartbeat sweep will pick them up
 	// within ~150 s as a backstop.
-	if len(droppedIDs) > 0 {
-		if err := d.client.Deregister(ctx, droppedIDs); err != nil {
-			d.logger.Warn("deregister of dropped runtimes after profile drift failed",
-				"workspace_id", workspaceID, "runtime_ids", droppedIDs, "error", err)
-		}
-	}
+	d.deregisterDroppedRuntimes(ctx, workspaceID, droppedIDs, "profile drift")
 
 	// Intentionally NO RecoverOrphans here: see method doc.
 	return nil
 }
 
 // convergeWorkspaceRuntimesToZero handles the drift-refresh case where
-// registerRuntimesForWorkspace would have short-circuited because the daemon
-// has nothing to host on this workspace anymore. It Deregisters the
+// registerRuntimesForWorkspaceLocked would have short-circuited because the
+// daemon has nothing to host on this workspace anymore. It Deregisters the
 // previously-tracked runtime IDs (best-effort) and clears the daemon's local
 // tracking so taskWakeup / heartbeat / poll loops stop attempting work
 // against runtimes that should now be offline.
 //
-// preserveProviders lists built-in providers whose probe was UNAVAILABLE this
-// round: their absence from the payload is a transient failure, not a
-// decision, so their existing built-in rows survive — the same preserve rule
+// The caller must hold the workspace's register lock — this is a cleanup, and it
+// has the same ordering requirement as every other one (workspaceRegisterLock).
+//
+// preserveProviders lists the built-in providers this round's absence from the
+// payload says nothing authoritative about (see preserveProvidersFromProbe), so
+// their existing built-in rows survive — the same preserve rule
 // applyRegisterResponseInPlace applies. Everything else (the disabled/deleted
 // profiles' runtimes, and any builtin whose probe concluded) converges away.
 //
@@ -2824,15 +2899,7 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 		"workspace_id", workspaceID, "deregistered_runtime_ids", dropped,
 		"preserved_providers", preserveProviders)
 
-	if len(dropped) > 0 {
-		if err := d.client.Deregister(ctx, dropped); err != nil {
-			// Best-effort: the server's stale-heartbeat sweep marks the rows
-			// offline within ~150 s as a backstop, and on the daemon side
-			// we have already stopped heartbeating them.
-			d.logger.Warn("deregister after zero-runtime convergence failed",
-				"workspace_id", workspaceID, "runtime_ids", dropped, "error", err)
-		}
-	}
+	d.deregisterDroppedRuntimes(ctx, workspaceID, dropped, "zero-runtime convergence")
 	d.notifyRuntimeSetChanged()
 	return nil
 }
@@ -3145,62 +3212,76 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			continue
 		}
 		payload := probeBuiltins()
-		resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, id, payload)
+		var (
+			resp       *RegisterResponse
+			runtimeIDs []string
+		)
+		// Send, publish and clean up as one ordered step — see
+		// workspaceRegisterLock.
+		err := d.withWorkspaceRegisterLock(id, func() error {
+			var profileSig string
+			var err error
+			resp, profileSig, err = d.registerRuntimesForWorkspaceBatchLocked(ctx, id, payload)
+			if err != nil {
+				return err
+			}
+			// First registration is the third path a response reaches local state
+			// through — it builds the workspaceState directly instead of going via
+			// applyRegisterResponseInPlace / mergeBuiltinRegisterResponse — so it
+			// needs the same demotion guard, taken in the same d.mu section that
+			// publishes the state. A workspace joining while a provider is held
+			// below-minimum must not be the way that provider comes back.
+			d.mu.Lock()
+			runtimeIDs = make([]string, 0, len(resp.Runtimes))
+			var revivedIDs []string
+			for _, rt := range resp.Runtimes {
+				if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+					revivedIDs = append(revivedIDs, rt.ID)
+					continue
+				}
+				runtimeIDs = append(runtimeIDs, rt.ID)
+				d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
+			}
+			ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
+			// Seed the profile signature so later on-demand change notifications can
+			// detect drift without re-registering on duplicates (empty sig is the
+			// explicit "unknown — keep the previous value" sentinel from
+			// appendProfileRuntimes; on first registration there is no previous
+			// value, so empty stays empty).
+			ws.profileSetSig = profileSig
+			// Seed the per-workspace record of what the server was told (the
+			// register call above ran before this workspaceState existed, so
+			// recordBuiltinVersionsSent inside it had nowhere to write).
+			ws.builtinVersions = builtinVersionsFromPayload(payload)
+			for provider := range ws.builtinVersions {
+				// Same reason recordBuiltinVersionsSent skips these: a version
+				// record for a provider whose rows are being refused reads as
+				// "this workspace is current" to the next refresh round.
+				if d.providerDemotedLocked(provider) {
+					delete(ws.builtinVersions, provider)
+				}
+			}
+			d.workspaces[id] = ws
+			for _, rt := range resp.Runtimes {
+				if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
+					continue
+				}
+				d.runtimeIndex[rt.ID] = rt
+			}
+			d.mu.Unlock()
+
+			// The server upserted the refused rows into existence, so it alone
+			// would believe they are online and keep routing work to them. Take
+			// them offline before anything else touches this workspace — and never
+			// RecoverOrphans them below: that reports tasks for a runtime the
+			// daemon does not track and will never claim for.
+			d.deregisterRevivedRuntimes(ctx, id, revivedIDs)
+			return nil
+		})
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
 		}
-		// First registration is the third path a response reaches local state
-		// through — it builds the workspaceState directly instead of going via
-		// applyRegisterResponseInPlace / mergeBuiltinRegisterResponse — so it
-		// needs the same demotion guard, taken in the same d.mu section that
-		// publishes the state. A workspace joining while a provider is held
-		// below-minimum must not be the way that provider comes back.
-		d.mu.Lock()
-		runtimeIDs := make([]string, 0, len(resp.Runtimes))
-		var revivedIDs []string
-		for _, rt := range resp.Runtimes {
-			if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
-				revivedIDs = append(revivedIDs, rt.ID)
-				continue
-			}
-			runtimeIDs = append(runtimeIDs, rt.ID)
-			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
-		}
-		ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
-		// Seed the profile signature so later on-demand change notifications can
-		// detect drift without re-registering on duplicates (empty sig is the
-		// explicit "unknown — keep the previous value" sentinel from
-		// appendProfileRuntimes; on first registration there is no previous
-		// value, so empty stays empty).
-		ws.profileSetSig = profileSig
-		// Seed the per-workspace record of what the server was told (the
-		// register call above ran before this workspaceState existed, so
-		// recordBuiltinVersionsSent inside it had nowhere to write).
-		ws.builtinVersions = builtinVersionsFromPayload(payload)
-		for provider := range ws.builtinVersions {
-			// Same reason recordBuiltinVersionsSent skips these: a version
-			// record for a provider whose rows are being refused reads as
-			// "this workspace is current" to the next refresh round.
-			if d.providerDemotedLocked(provider) {
-				delete(ws.builtinVersions, provider)
-			}
-		}
-		d.workspaces[id] = ws
-		for _, rt := range resp.Runtimes {
-			if rt.ProfileID == "" && d.providerDemotedLocked(rt.Provider) {
-				continue
-			}
-			d.runtimeIndex[rt.ID] = rt
-		}
-		d.mu.Unlock()
-
-		// The server upserted the refused rows into existence, so it alone
-		// would believe they are online and keep routing work to them. Take
-		// them offline before anything else touches this workspace — and never
-		// RecoverOrphans them below: that reports tasks for a runtime the
-		// daemon does not track and will never claim for.
-		d.deregisterRevivedRuntimes(ctx, id, revivedIDs)
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)

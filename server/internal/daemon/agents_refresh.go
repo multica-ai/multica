@@ -303,20 +303,25 @@ func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	// so that workspace stays behind and the next round retries it.
 	var changed bool
 	for _, id := range behind {
-		resp, err := d.registerBuiltinRuntimesForWorkspace(ctx, id, builtins)
-		if err != nil {
-			d.logger.Warn("re-register after agent CLI version change failed; will retry",
-				"workspace_id", id, "error", err)
-			continue
-		}
-		newIDs, rejectedIDs, ok := d.mergeBuiltinRegisterResponse(id, resp)
-		if !ok {
-			continue
-		}
-		if len(newIDs) > 0 {
-			changed = true
-		}
-		d.deregisterRevivedRuntimes(ctx, id, rejectedIDs)
+		// Send, merge and clean up as one ordered step — see
+		// workspaceRegisterLock.
+		_ = d.withWorkspaceRegisterLock(id, func() error {
+			resp, err := d.registerBuiltinRuntimesForWorkspaceLocked(ctx, id, builtins)
+			if err != nil {
+				d.logger.Warn("re-register after agent CLI version change failed; will retry",
+					"workspace_id", id, "error", err)
+				return nil
+			}
+			newIDs, rejectedIDs, ok := d.mergeBuiltinRegisterResponse(id, resp)
+			if !ok {
+				return nil
+			}
+			if len(newIDs) > 0 {
+				changed = true
+			}
+			d.deregisterRevivedRuntimes(ctx, id, rejectedIDs)
+			return nil
+		})
 	}
 	if changed {
 		d.notifyRuntimeSetChanged()
@@ -365,8 +370,11 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 
 	d.mu.Lock()
 	var demoted []string
+	// Grouped per workspace because the cleanup below has to run under each
+	// workspace's register lock — see deregisterDroppedRuntimes.
+	demotedByWorkspace := make(map[string][]string)
 	demotedProviders := make(map[string]string)
-	for _, ws := range d.workspaces {
+	for workspaceID, ws := range d.workspaces {
 		// A fresh array, not ws.runtimeIDs[:0]: the health handler copies this
 		// slice header under d.mu and serializes it after releasing the lock
 		// (removeStaleRuntime keeps the same rule), so filtering in place would
@@ -385,6 +393,7 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 			}
 			delete(d.runtimeIndex, rid)
 			demoted = append(demoted, rid)
+			demotedByWorkspace[workspaceID] = append(demotedByWorkspace[workspaceID], rid)
 			demotedProviders[rt.Provider] = version
 			// The runtime is gone, so the record of what was registered for it
 			// goes too. When the provider recovers, converge re-registers it and
@@ -407,17 +416,22 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 	d.logger.Warn("agent CLI downgraded below the minimum supported version; taking its runtimes offline",
 		"providers", demotedProviders, "runtime_ids", demoted)
 
-	// Same re-check as deregisterRevivedRuntimes: the rows were dropped under
-	// d.mu but this call runs without it, so an upgrade that recovered the
-	// provider in between must not be undone by this older cleanup.
-	if stale := d.untrackedRuntimeIDs(demoted); len(stale) > 0 {
-		// Best-effort, like every other deregistration path: the daemon has
-		// already stopped heartbeating these rows, so the server's
-		// stale-heartbeat sweep is the backstop if this call fails.
-		if err := d.client.Deregister(ctx, stale); err != nil {
-			d.logger.Warn("deregister after below-minimum downgrade failed",
-				"runtime_ids", stale, "error", err)
-		}
+	// One workspace at a time, each under its own register lock: the rows were
+	// dropped under d.mu but the requests go out without it, so an upgrade that
+	// recovered the provider in between must not be undone by this older
+	// cleanup. Sorted so the log order is deterministic; never two locks at
+	// once, so there is no ordering to deadlock on.
+	workspaceIDs := make([]string, 0, len(demotedByWorkspace))
+	for workspaceID := range demotedByWorkspace {
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	sort.Strings(workspaceIDs)
+	for _, workspaceID := range workspaceIDs {
+		_ = d.withWorkspaceRegisterLock(workspaceID, func() error {
+			d.deregisterDroppedRuntimes(ctx, workspaceID, demotedByWorkspace[workspaceID],
+				"below-minimum downgrade")
+			return nil
+		})
 	}
 	d.notifyRuntimeSetChanged()
 }
@@ -430,12 +444,16 @@ func (d *Daemon) demoteBelowMinimumRuntimes(ctx context.Context, belowMinimum ma
 // runtime list and route work to a daemon that no longer tracks it, and those
 // tasks would sit unclaimed until the stale-heartbeat sweep. Best-effort for the
 // same reason every other deregistration path is — the sweep is the backstop.
+//
+// The caller must hold the workspace's register lock (workspaceRegisterLock).
 func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID string, runtimeIDs []string) {
 	// Re-check tracking first: the rejection happened under d.mu but this call
 	// runs without it, and a legitimate recovery register landing in that gap
 	// re-creates the same row — usually under the same ID. Deregistering then
 	// would take the recovered runtime offline on the strength of an older
-	// decision. Anything the daemon tracks now is newer than this cleanup.
+	// decision. Anything the daemon tracks now is newer than this cleanup, and
+	// the register lock is what stops a recovery slipping in between this check
+	// and the request below.
 	runtimeIDs = d.untrackedRuntimeIDs(runtimeIDs)
 	if len(runtimeIDs) == 0 {
 		return
@@ -445,6 +463,30 @@ func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID stri
 	if err := d.client.Deregister(ctx, runtimeIDs); err != nil {
 		d.logger.Warn("deregister of revived below-minimum runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "error", err)
+	}
+}
+
+// deregisterDroppedRuntimes takes offline the server-side rows a convergence
+// decided this workspace should no longer host — a provider removed from the
+// daemon's config, a disabled custom profile, a workspace converging to zero.
+//
+// Same contract as deregisterRevivedRuntimes: the caller must hold the
+// workspace's register lock, so the tracking re-check and the request are one
+// ordered step against every other registration for this workspace. Without the
+// lock this is a TOCTOU — a recovery register completing between the two puts
+// the row back and this older cleanup knocks it out, leaving the daemon tracking
+// a runtime the server has offline.
+//
+// Best-effort: the daemon has already stopped heartbeating these rows, so the
+// server's stale-heartbeat sweep is the backstop if the call fails.
+func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID string, runtimeIDs []string, reason string) {
+	runtimeIDs = d.untrackedRuntimeIDs(runtimeIDs)
+	if len(runtimeIDs) == 0 {
+		return
+	}
+	if err := d.client.Deregister(ctx, runtimeIDs); err != nil {
+		d.logger.Warn("deregister of dropped runtimes failed",
+			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "reason", reason, "error", err)
 	}
 }
 
@@ -561,23 +603,28 @@ func (d *Daemon) convergeRuntimeRegistrations(ctx context.Context) {
 
 	var changed bool
 	for _, t := range targets {
-		resp, err := d.registerBuiltinRuntimesForWorkspace(ctx, t.id, builtins)
-		if err != nil {
-			// Left in the missing set on purpose: the next tick retries.
-			d.logger.Warn("register newly available runtimes failed; will retry",
-				"workspace_id", t.id, "providers", t.missing, "error", err)
-			continue
-		}
-		newIDs, rejectedIDs, ok := d.mergeBuiltinRegisterResponse(t.id, resp)
-		if !ok {
-			continue
-		}
-		if len(newIDs) > 0 {
-			changed = true
-			d.logger.Info("registered runtime for newly installed agent CLI",
-				"workspace_id", t.id, "providers", t.missing, "runtime_ids", newIDs)
-		}
-		d.deregisterRevivedRuntimes(ctx, t.id, rejectedIDs)
+		// Send, merge and clean up as one ordered step — see
+		// workspaceRegisterLock.
+		_ = d.withWorkspaceRegisterLock(t.id, func() error {
+			resp, err := d.registerBuiltinRuntimesForWorkspaceLocked(ctx, t.id, builtins)
+			if err != nil {
+				// Left in the missing set on purpose: the next tick retries.
+				d.logger.Warn("register newly available runtimes failed; will retry",
+					"workspace_id", t.id, "providers", t.missing, "error", err)
+				return nil
+			}
+			newIDs, rejectedIDs, ok := d.mergeBuiltinRegisterResponse(t.id, resp)
+			if !ok {
+				return nil
+			}
+			if len(newIDs) > 0 {
+				changed = true
+				d.logger.Info("registered runtime for newly installed agent CLI",
+					"workspace_id", t.id, "providers", t.missing, "runtime_ids", newIDs)
+			}
+			d.deregisterRevivedRuntimes(ctx, t.id, rejectedIDs)
+			return nil
+		})
 	}
 	if changed {
 		d.notifyRuntimeSetChanged()

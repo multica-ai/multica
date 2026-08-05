@@ -23,7 +23,18 @@ import (
 // daemon (and the server) knows about is frozen at registration.
 func newVersionRefreshFixture(t *testing.T) *batchFixture {
 	t.Helper()
+	return newVersionRefreshFixtureWith(t, nil)
+}
+
+// newVersionRefreshFixtureWith is newVersionRefreshFixture with a hook to
+// configure the fixture BEFORE the first registration, for the settings that
+// only mean anything if they were in place when the rows were created.
+func newVersionRefreshFixtureWith(t *testing.T, configure func(fx *batchFixture)) *batchFixture {
+	t.Helper()
 	fx := newBatchFixture(t)
+	if configure != nil {
+		configure(fx)
+	}
 	fx.daemon.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
 	fx.setWorkspaces(
 		WorkspaceInfo{ID: "ws-1", Name: "one"},
@@ -740,9 +751,15 @@ func TestConcurrentRegisters_SameWorkspaceSerializedSoRecordMatchesServer(t *tes
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-1", p); err != nil {
-				t.Errorf("register: %v", err)
-			}
+			// Through the wrapper, because that is the production contract: the
+			// Locked entry points assume their caller took the workspace's
+			// register lock for the whole send → apply → cleanup sequence.
+			_ = d.withWorkspaceRegisterLock("ws-1", func() error {
+				if _, err := d.registerBuiltinRuntimesForWorkspaceLocked(context.Background(), "ws-1", p); err != nil {
+					t.Errorf("register: %v", err)
+				}
+				return nil
+			})
 		}()
 	}
 	wg.Wait()
@@ -784,7 +801,7 @@ func TestRefreshAgentVersions_RevisitsWorkspaceRegisteredByAnOlderConcurrentRoun
 	// production entry points would send it: the server holds 9.9.9 for ws-2
 	// again, and the daemon records what that call carried.
 	stale := []map[string]string{{"name": "Codex", "type": "codex", "version": "9.9.9", "status": "online"}}
-	resp, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-2", stale)
+	resp, err := d.registerBuiltinRuntimesForWorkspaceLocked(context.Background(), "ws-2", stale)
 	if err != nil {
 		t.Fatalf("late register: %v", err)
 	}
@@ -1095,7 +1112,7 @@ func TestDemoteBelowMinimumRuntimes_LateRegisterResponseCannotReviveTheProvider(
 	// here and applied after the demotion, which is what "in flight across the
 	// verdict" means for a deterministic test.
 	inFlight := []map[string]string{{"name": "Codex", "type": "codex", "version": "9.9.9", "status": "online"}}
-	staleResp, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-1", inFlight)
+	staleResp, err := d.registerBuiltinRuntimesForWorkspaceLocked(context.Background(), "ws-1", inFlight)
 	if err != nil {
 		t.Fatalf("in-flight register: %v", err)
 	}
@@ -1150,7 +1167,7 @@ func TestDemoteBelowMinimumRuntimes_LateAuthoritativeResponseCannotReviveTheProv
 	d := fx.daemon
 
 	inFlight := []map[string]string{{"name": "Codex", "type": "codex", "version": "9.9.9", "status": "online"}}
-	staleResp, err := d.registerBuiltinRuntimesForWorkspace(context.Background(), "ws-1", inFlight)
+	staleResp, err := d.registerBuiltinRuntimesForWorkspaceLocked(context.Background(), "ws-1", inFlight)
 	if err != nil {
 		t.Fatalf("in-flight register: %v", err)
 	}
@@ -1364,5 +1381,277 @@ func TestDetectBuiltinRuntimes_StaleOKRoundDoesNotReleaseANewerHold(t *testing.T
 	if !stillHeld {
 		t.Error("a probe round that sampled before the downgrade cleared the newer hold — ordering the " +
 			"map writes is not enough when the evidence itself is sampled off the lock")
+	}
+}
+
+// stubBelowMinimumForProvider rejects ONE provider at a given version, leaving
+// every other provider acceptable at the same version. Round-4's findings are
+// about mixed rounds — one CLI too old while its neighbours are fine — which the
+// single-provider stub cannot express.
+func stubBelowMinimumForProvider(t *testing.T, provider, rejected string) {
+	t.Helper()
+	orig := checkAgentMinVersion
+	t.Cleanup(func() { checkAgentMinVersion = orig })
+	checkAgentMinVersion = func(name, version string) error {
+		if name == provider && version == rejected {
+			return &agent.BelowMinimumError{AgentType: name, Detected: version, Minimum: "1.0.0"}
+		}
+		return nil
+	}
+}
+
+// TestDemoteBelowMinimumRuntimes_CleanupCannotOutliveANewerRecovery closes the
+// TOCTOU that a tracking re-check could only narrow.
+//
+// A deregistration is decided under d.mu and issued after releasing it. The
+// re-check asked "does the daemon still track this row?" immediately before the
+// request, but the recovery can just as easily complete in the gap BETWEEN the
+// check and the request: the register brings the row back — under the same ID,
+// because the server upserts — and the older Deregister lands on top of it. The
+// daemon then tracks and heartbeats a runtime the server has marked offline,
+// which is the direction that strands work silently: the server will not route
+// to it, and neither side notices the disagreement.
+//
+// A point-in-time check cannot fix that; only putting the request inside the
+// order can. The workspace's register lock now spans send → apply → cleanup, so
+// a recovery for the same workspace cannot start while an older cleanup for it
+// is still in flight.
+func TestDemoteBelowMinimumRuntimes_CleanupCannotOutliveANewerRecovery(t *testing.T) {
+	// Stable IDs from the first registration, because a cleanup can only undo a
+	// recovery when the two name the same server-side row.
+	fx := newVersionRefreshFixtureWith(t, func(fx *batchFixture) { fx.enableStableRuntimeIDs() })
+	d := fx.daemon
+	codexID := fx.runtimeIDFor("ws-1", "codex")
+	if codexID == "" {
+		t.Fatal("no server-side runtime ID recorded for ws-1/codex")
+	}
+	if !fx.runtimeOnline(codexID) {
+		t.Fatalf("runtime %s is not online after registration", codexID)
+	}
+
+	// Hold the demotion's Deregister in flight. Only the first call blocks; the
+	// sibling workspace's cleanup runs normally once released.
+	deregisterStarted := make(chan struct{})
+	releaseDeregister := make(chan struct{})
+	var gateOnce sync.Once
+	fx.setDeregisterGate(func([]string) {
+		first := false
+		gateOnce.Do(func() { first = true })
+		if !first {
+			return
+		}
+		close(deregisterStarted)
+		<-releaseDeregister
+	})
+	// Signals that a register for ws-1 reached the server.
+	recovered := make(chan struct{})
+	var regOnce sync.Once
+	fx.setRegisterGate(func(workspaceID string) {
+		if workspaceID != "ws-1" {
+			return
+		}
+		regOnce.Do(func() { close(recovered) })
+	})
+
+	// codex downgrades below the minimum; the refresh round demotes it and
+	// blocks in the cleanup.
+	stubBelowMinimumAt(t, "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	refreshDone := make(chan struct{})
+	go func() {
+		defer close(refreshDone)
+		d.refreshAgentVersions(context.Background())
+	}()
+	<-deregisterStarted
+
+	// The user upgrades again while that Deregister is still in flight, and
+	// converge tries to bring the provider back.
+	fx.setProbeVersion("10.0.0")
+	convergeDone := make(chan struct{})
+	go func() {
+		defer close(convergeDone)
+		d.convergeRuntimeRegistrations(context.Background())
+	}()
+
+	select {
+	case <-recovered:
+		t.Error("a recovery register for ws-1 reached the server while an older Deregister for the same " +
+			"workspace was still in flight; the cleanup is outside the registration order, so it can land " +
+			"after the recovery and knock the restored runtime offline")
+	case <-time.After(250 * time.Millisecond):
+		// Expected: the recovery is queued behind the cleanup.
+	}
+
+	close(releaseDeregister)
+	<-refreshDone
+	<-convergeDone
+
+	if !fx.runtimeOnline(codexID) {
+		t.Errorf("runtime %s is offline server-side after the upgrade recovered it — an older cleanup "+
+			"landed on top of a newer registration, and the daemon now heartbeats a row the server will "+
+			"not route work to", codexID)
+	}
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Errorf("ws-1 providers after recovery = %v, want [codex]", got)
+	}
+}
+
+// TestRegisterRuntimesForWorkspace_ReportsBelowMinimumAsNotAuthoritative pins
+// the return value round 4 found being discarded.
+//
+// registerRuntimesForWorkspaceLocked probes, and its round can reach a
+// below-minimum verdict — but its callers apply the response as AUTHORITATIVE
+// for the whole workspace, so a provider absent from the payload has its rows
+// dropped and deregistered. Acting on the verdict there means acting on it
+// without the claim barrier (so a running task can have its runtime pulled out
+// from under it) and without recording the hold (so the next in-flight response
+// revives the provider and undoes it). The verdict therefore has to travel back
+// as "do not treat this response as authoritative about this provider".
+func TestRegisterRuntimesForWorkspace_ReportsBelowMinimumAsNotAuthoritative(t *testing.T) {
+	fx := newVersionRefreshFixture(t)
+	d := fx.daemon
+
+	stubBelowMinimumAt(t, "0.0.1")
+	fx.setProbeVersion("0.0.1")
+
+	var preserve map[string]string
+	err := d.withWorkspaceRegisterLock("ws-1", func() error {
+		_, _, p, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+		preserve = p
+		return err
+	})
+	// codex is the only provider, so its payload is empty and the register
+	// short-circuits — the verdict still has to come back.
+	if err != nil && !errors.Is(err, ErrNoRuntimesToRegister) {
+		t.Fatalf("registerRuntimesForWorkspaceLocked: %v", err)
+	}
+	if _, ok := preserve["codex"]; !ok {
+		t.Errorf("preserve set = %v, want codex — a caller that applies this response as authoritative "+
+			"would drop and deregister the provider's runtimes outside the one path allowed to demote", preserve)
+	}
+}
+
+// TestReregisterAfterRuntimeGone_LeavesBelowMinimumToTheDemotionPath is the
+// behaviour that return value buys.
+//
+// The runtime-gone recovery reaches the same below-minimum verdict
+// demoteBelowMinimumRuntimes does, but it has neither of the things that make
+// the demotion safe: the claim barrier, so the rows are never pulled out from
+// under a running task, and the seq-stamped hold, so a register sent before the
+// verdict cannot revive the provider. Dropping the rows here left no record that
+// the verdict had been reached, and the next in-flight response undid it.
+//
+// So it preserves instead. The verdict is not lost — the refresh tick that owns
+// the demotion still takes the provider offline, with both guards in place.
+func TestReregisterAfterRuntimeGone_LeavesBelowMinimumToTheDemotionPath(t *testing.T) {
+	fx := newBatchFixture(t)
+	// Stable IDs, so re-registering the surviving provider returns the row it
+	// already has — what UpsertAgentRuntime does. Without it every re-register
+	// looks like an ID rotation and the deregister count says nothing about the
+	// demotion.
+	fx.enableStableRuntimeIDs()
+	d := fx.daemon
+	agents := map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	d.cfg.Agents = agents
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, agents)
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 {
+		t.Fatalf("providers after registration = %v, want claude and codex", got)
+	}
+
+	// codex is downgraded; claude is fine at the same version.
+	stubBelowMinimumForProvider(t, "codex", "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	deregsBefore := fx.deregisteredCount()
+
+	if err := d.reregisterWorkspaceAfterRuntimeGone(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("reregisterWorkspaceAfterRuntimeGone: %v", err)
+	}
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 {
+		t.Errorf("providers after runtime_gone recovery = %v, want claude and codex kept — this path "+
+			"reached the below-minimum verdict without the claim barrier or the hold that make acting on "+
+			"it safe, so it must leave the demotion to the refresh tick", got)
+	}
+	if got := fx.deregisteredCount(); got != deregsBefore {
+		t.Errorf("deregister calls %d -> %d; the recovery took a runtime offline on a verdict it may not act on",
+			deregsBefore, got)
+	}
+	d.mu.Lock()
+	held := d.providerDemotedLocked("codex")
+	d.mu.Unlock()
+	if held {
+		t.Error("the recovery recorded a demotion hold; the hold and the rows must be taken by the same " +
+			"barrier-protected path, or recovery ordering has two owners")
+	}
+
+	// The verdict is deferred, not dropped: the owner still acts on it.
+	d.refreshAgentVersions(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("providers after the refresh tick = %v, want [claude] — deferring the demotion must not "+
+			"lose it", got)
+	}
+}
+
+// TestProfileDriftRefresh_LeavesBelowMinimumToTheDemotionPath is the same
+// deferral on the second authoritative caller.
+//
+// The drift path is the sharper-edged of the two: it Deregisters whatever the
+// authoritative apply drops, so acting on a below-minimum verdict here does not
+// just untrack the runtime locally, it takes the row offline server-side —
+// outside the claim barrier, so a task executing on that runtime has it pulled
+// away mid-flight, and with no hold recorded, so the next in-flight response
+// puts it back anyway.
+func TestProfileDriftRefresh_LeavesBelowMinimumToTheDemotionPath(t *testing.T) {
+	fx := newBatchFixture(t)
+	fx.enableStableRuntimeIDs()
+	d := fx.daemon
+	agents := map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	d.cfg.Agents = agents
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+	stubAgentProbe(t, agents)
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// The drift: a profile appears server-side. Its command_name is blank, so it
+	// changes the profile signature without entering the payload — the register
+	// carries built-ins only, and its response is applied as authoritative.
+	fx.mu.Lock()
+	fx.profiles["ws-1"] = []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Broken",
+		ProtocolFamily: "codex", Visibility: "workspace", Enabled: true,
+	}}
+	fx.mu.Unlock()
+	stubBelowMinimumForProvider(t, "codex", "0.0.1")
+	fx.setProbeVersion("0.0.1")
+	deregsBefore := fx.deregisteredCount()
+
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
+		t.Errorf("providers after drift refresh = %v, want [claude codex] — the drift path may not act on "+
+			"a below-minimum verdict it cannot record or barrier-protect", got)
+	}
+	if got := fx.deregisteredCount(); got != deregsBefore {
+		t.Errorf("deregister calls %d -> %d; the drift refresh took a runtime offline on a verdict it may "+
+			"not act on", deregsBefore, got)
+	}
+
+	// Deferred, not dropped.
+	d.refreshAgentVersions(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("providers after the refresh tick = %v, want [claude]", got)
 	}
 }

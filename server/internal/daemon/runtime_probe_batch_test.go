@@ -74,6 +74,53 @@ type batchFixture struct {
 	// run at once, so a test can assert same-workspace serialization.
 	registerInFlight    int
 	registerMaxInFlight int
+	// deregisterGate, when set, is invoked by the deregister handler (off fx.mu)
+	// with the runtime IDs before they are applied. A test blocks in it to hold
+	// one cleanup in flight while it drives a recovery, which is how the
+	// "an older cleanup outlives a newer recovery" interleave is made
+	// deterministic instead of timing-dependent.
+	deregisterGate func(runtimeIDs []string)
+	// stableRuntimeIDs makes the register handler return ONE id per
+	// (workspace, runtime) rather than a fresh one per call, mirroring the
+	// server's UpsertAgentRuntime: re-registering a provider returns the row
+	// that already exists. A cleanup can only undo a recovery when the two name
+	// the same row, so that interleave is invisible without this.
+	stableRuntimeIDs bool
+	runtimeIDs       map[string]string // "<workspace>|<profile_id or type>" -> runtime ID
+	// online is the server's view of each runtime row: register puts it online,
+	// deregister takes it offline. This is what a test asserts on when the
+	// question is "which side won", rather than "was a call made".
+	online map[string]bool
+}
+
+// enableStableRuntimeIDs must be called before the first registration.
+func (fx *batchFixture) enableStableRuntimeIDs() {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.stableRuntimeIDs = true
+}
+
+// setDeregisterGate installs a hook the deregister handler calls before the
+// rows are taken offline.
+func (fx *batchFixture) setDeregisterGate(fn func(runtimeIDs []string)) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.deregisterGate = fn
+}
+
+// runtimeIDFor returns the server-side runtime ID for a workspace's provider
+// (or profile), which only exists under enableStableRuntimeIDs.
+func (fx *batchFixture) runtimeIDFor(workspaceID, key string) string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return fx.runtimeIDs[workspaceID+"|"+key]
+}
+
+// runtimeOnline reports the server's current status for a runtime row.
+func (fx *batchFixture) runtimeOnline(id string) bool {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return fx.online[id]
 }
 
 // failRegister toggles register failure for every workspace.
@@ -227,6 +274,8 @@ func newBatchFixture(t *testing.T) *batchFixture {
 		profiles:     make(map[string][]RuntimeProfile),
 		probes:       make(map[string]int),
 		probeVersion: "9.9.9",
+		runtimeIDs:   make(map[string]string),
+		online:       make(map[string]bool),
 	}
 
 	origDetect := detectAgentVersion
@@ -292,18 +341,33 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			}
 			call := registeredCall{workspaceID: body.WorkspaceID, versions: map[string]string{}}
 			var resp RegisterResponse
+			fx.mu.Lock()
 			for _, rt := range body.Runtimes {
 				call.types = append(call.types, rt["type"])
 				call.versions[rt["type"]] = rt["version"]
+				// Mirror UpsertAgentRuntime: a re-register of a row that already
+				// exists returns that row's ID rather than minting a new one.
+				id := "rt-" + strconv.Itoa(int(runtimeSeq.Add(1)))
+				if fx.stableRuntimeIDs {
+					key := body.WorkspaceID + "|" + rt["type"]
+					if rt["profile_id"] != "" {
+						key = body.WorkspaceID + "|" + rt["profile_id"]
+					}
+					if existing, ok := fx.runtimeIDs[key]; ok {
+						id = existing
+					} else {
+						fx.runtimeIDs[key] = id
+					}
+				}
+				fx.online[id] = true
 				resp.Runtimes = append(resp.Runtimes, Runtime{
-					ID:        "rt-" + strconv.Itoa(int(runtimeSeq.Add(1))),
+					ID:        id,
 					Name:      rt["name"],
 					Provider:  rt["type"],
 					Status:    "online",
 					ProfileID: rt["profile_id"],
 				})
 			}
-			fx.mu.Lock()
 			fx.registered = append(fx.registered, call)
 			fx.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
@@ -314,7 +378,16 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			fx.mu.Lock()
+			gate := fx.deregisterGate
+			fx.mu.Unlock()
+			if gate != nil {
+				gate(body.RuntimeIDs)
+			}
+			fx.mu.Lock()
 			fx.deregistered = append(fx.deregistered, body.RuntimeIDs...)
+			for _, id := range body.RuntimeIDs {
+				fx.online[id] = false
+			}
 			fx.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):
@@ -482,7 +555,7 @@ func TestRegisterRuntimesForWorkspace_ProbesOnStandaloneCall(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/fake/claude"}}
 
 	for i := 1; i <= 2; i++ {
-		if _, _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+		if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
 			t.Fatalf("register #%d: %v", i, err)
 		}
 		if got := fx.probeCount("/fake/claude"); got != i {
@@ -773,7 +846,7 @@ func TestRegisterRuntimesForWorkspaceBatch_DoesNotMutateSharedPayload(t *testing
 	builtins := []map[string]string{
 		{"name": "Claude Code", "type": "claude", "version": "9.9.9", "status": "online"},
 	}
-	if _, _, err := d.registerRuntimesForWorkspaceBatch(context.Background(), "ws-1", builtins); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspaceBatchLocked(context.Background(), "ws-1", builtins); err != nil {
 		t.Fatalf("batch register: %v", err)
 	}
 
