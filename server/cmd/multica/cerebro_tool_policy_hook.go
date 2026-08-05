@@ -48,6 +48,16 @@ const (
 	hookExitDeny  = 2
 )
 
+// hookProtocolFlag selects the before-tool response protocol. Set by the
+// daemon when it writes provider-native hook config (Cursor gets "cursor") so
+// detection does not depend on env inheritance or payload field names.
+var hookProtocolFlag string
+
+func init() {
+	// CEREBRO-PATCH(cursor-tool-policy-hook-json): FIR-4526 — protocol flag.
+	cerebroToolPolicyHookCmd.Flags().StringVar(&hookProtocolFlag, "protocol", "", "before-tool response protocol: cursor|claude (empty = auto-detect)")
+}
+
 var cerebroToolPolicyHookCmd = &cobra.Command{
 	Use:    "cerebro-tool-policy-hook",
 	Short:  "Internal: local-runtime before-tool hook for Multica tool-policy enforcement",
@@ -65,7 +75,9 @@ var cerebroToolPolicyHookCmd = &cobra.Command{
 func runToolPolicyHook(cmd *cobra.Command) {
 	raw, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 1<<20))
 	if err != nil {
-		failHook(cmd, "unknown", err, false)
+		// Prefer cursor protocol on early IO failure when the daemon asked for
+		// it via --protocol; otherwise fail closed with Claude exit codes.
+		failHook(cmd, "unknown", err, usesCursorHookProtocol(raw))
 		return
 	}
 	cursorProto := usesCursorHookProtocol(raw)
@@ -141,20 +153,37 @@ func runToolPolicyHook(cmd *cobra.Command) {
 }
 
 // usesCursorHookProtocol reports whether the caller expects Cursor's JSON
-// stdout permission protocol. Prefer the daemon-injected provider env; fall
-// back to Cursor-only payload fields so older daemons still work.
+// stdout permission protocol.
+//
+// Order of preference (FIR-4526):
+//  1. --protocol cursor (baked into .cursor/hooks.json by the daemon — does not
+//     depend on env inheritance into the hook child process)
+//  2. MULTICA_AGENT_PROVIDER=cursor (daemon-injected agent env)
+//  3. Cursor payload markers (cursor_version, hook_event_name=preToolUse)
+//
+// tool_use_id is intentionally NOT used alone: Claude Code also sends it, so
+// it would flip Claude onto Cursor JSON when the flag/env are missing.
 func usesCursorHookProtocol(raw []byte) bool {
+	switch strings.ToLower(strings.TrimSpace(hookProtocolFlag)) {
+	case "cursor":
+		return true
+	case "claude", "codex", "gemini":
+		return false
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("MULTICA_AGENT_PROVIDER")), "cursor") {
 		return true
 	}
 	var probe struct {
-		ToolUseID     string `json:"tool_use_id"`
 		CursorVersion string `json:"cursor_version"`
+		HookEventName string `json:"hook_event_name"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return false
 	}
-	return probe.ToolUseID != "" || probe.CursorVersion != ""
+	if strings.TrimSpace(probe.CursorVersion) != "" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(probe.HookEventName), "preToolUse")
 }
 
 func allowHook(cmd *cobra.Command, cursorProto bool) {

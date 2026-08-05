@@ -208,6 +208,8 @@ func (d *Daemon) prepareToolPolicySpawn(provider, workdir, providerHome string, 
 func writeToolPolicySettingsJSON(provider, workdir, providerHome, exe string, fastMode bool) (string, error) {
 	var dir, filename string
 	var settings map[string]any
+	// Quote the binary path so spaces survive shell execution (Claude). Cursor
+	// also runs command hooks via a shell, so the same form is safe.
 	command := fmt.Sprintf("%q cerebro-tool-policy-hook", exe)
 	adapter, ok := localtoolpolicy.ProviderAdapterFor(provider)
 	if !ok {
@@ -221,6 +223,10 @@ func writeToolPolicySettingsJSON(provider, workdir, providerHome, exe string, fa
 		dir, filename = filepath.Join(workdir, ".gemini"), "settings.json"
 		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	case "cursor":
+		// CEREBRO-PATCH(cursor-tool-policy-hook-json): FIR-4526 — bake Cursor
+		// protocol into the hook argv. Cursor may not forward MULTICA_* env
+		// into hook children; --protocol does not depend on env inheritance.
+		command = fmt.Sprintf("%q cerebro-tool-policy-hook --protocol cursor", exe)
 		dir, filename = filepath.Join(workdir, ".cursor"), "hooks.json"
 		settings = map[string]any{
 			"version": 1,

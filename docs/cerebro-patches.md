@@ -2087,7 +2087,7 @@ Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
 
 | Patch | Location | Reason |
 |---|---|---|
-| `cursor-tool-policy-hook-json` | `server/cmd/multica/cerebro_tool_policy_hook.go`<br>`server/internal/daemon/daemon.go` | Cursor `preToolUse` requires JSON stdout `{"permission":"allow\|deny"}`. The shared hook only used Claude exit codes and empty stdout, so with `failClosed: true` every Cursor tool was blocked as "hook returned no output" even when policy allowed. Emit Cursor JSON when `MULTICA_AGENT_PROVIDER=cursor` or the payload carries Cursor-only fields; inject the provider env at spawn. |
+| `cursor-tool-policy-hook-json` | `server/cmd/multica/cerebro_tool_policy_hook.go`<br>`server/internal/daemon/daemon.go`<br>`server/internal/daemon/cerebro_toolpolicy.go`<br>`Dockerfile.runtime` | Cursor `preToolUse` requires JSON stdout `{"permission":"allow\|deny"}`. The shared hook only used Claude exit codes and empty stdout, so with `failClosed: true` every Cursor tool was blocked as "hook returned no output" even when policy allowed. Emit Cursor JSON when `--protocol cursor` (baked into `.cursor/hooks.json`), `MULTICA_AGENT_PROVIDER=cursor`, or Cursor payload markers (`cursor_version` / `hook_event_name=preToolUse`). Inject provider env at spawn. Cloud runtime cannot self-update `/usr/local/bin` (permission denied) so `Dockerfile.runtime` VERSION must track the fix. |
 
 
 ## FIR-3608 — Scoped service tokens (`msv_`)

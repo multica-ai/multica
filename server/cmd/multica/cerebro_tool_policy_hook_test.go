@@ -144,8 +144,8 @@ func TestHook_CursorAllowEmitsPermissionJSON(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"allowed": true})
 	}))
 	defer srv.Close()
-	// Cursor payload shape (tool_use_id) without relying on env.
-	payload := `{"tool_name":"Shell","tool_input":{"command":"printf ok"},"tool_use_id":"abc","cwd":"/tmp"}`
+	// Cursor payload with cursor_version (not tool_use_id alone — Claude sends that too).
+	payload := `{"tool_name":"Shell","tool_input":{"command":"printf ok"},"tool_use_id":"abc","cursor_version":"2026.07.20","cwd":"/tmp"}`
 	exit, stdout, stderr := runHookForTest(t, payload, map[string]string{
 		"MULTICA_DAEMON_PORT": portOf(t, srv),
 	})
@@ -164,12 +164,36 @@ func TestHook_CursorAllowEmitsPermissionJSON(t *testing.T) {
 	}
 }
 
+func TestHook_CursorProtocolFlagForcesJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"allowed": true})
+	}))
+	defer srv.Close()
+	prev := hookProtocolFlag
+	hookProtocolFlag = "cursor"
+	defer func() { hookProtocolFlag = prev }()
+	// No cursor_version, no MULTICA_AGENT_PROVIDER — flag alone must force JSON.
+	exit, stdout, _ := runHookForTest(t, `{"tool_name":"Shell","tool_input":{"command":"ls"}}`, map[string]string{
+		"MULTICA_DAEMON_PORT": portOf(t, srv),
+	})
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &out); err != nil {
+		t.Fatalf("stdout not JSON: %q (%v)", stdout, err)
+	}
+	if out["permission"] != "allow" {
+		t.Fatalf("permission = %v, want allow", out["permission"])
+	}
+}
+
 func TestHook_CursorDenyEmitsPermissionJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"allowed": false, "reason": "not allowed"})
 	}))
 	defer srv.Close()
-	exit, stdout, _ := runHookForTest(t, `{"tool_name":"Shell","tool_input":{"command":"rm -rf /"},"tool_use_id":"x"}`, map[string]string{
+	exit, stdout, _ := runHookForTest(t, `{"tool_name":"Shell","tool_input":{"command":"rm -rf /"},"cursor_version":"1"}`, map[string]string{
 		"MULTICA_DAEMON_PORT":    portOf(t, srv),
 		"MULTICA_AGENT_PROVIDER": "cursor",
 	})
@@ -189,9 +213,8 @@ func TestHook_CursorDenyEmitsPermissionJSON(t *testing.T) {
 }
 
 func TestHook_CursorTransportErrorJSONDeny(t *testing.T) {
-	exit, stdout, _ := runHookForTest(t, `{"tool_name":"Shell","tool_input":{"command":"ls"},"tool_use_id":"z"}`, map[string]string{
-		"MULTICA_DAEMON_PORT":    "1",
-		"MULTICA_AGENT_PROVIDER": "cursor",
+	exit, stdout, _ := runHookForTest(t, `{"tool_name":"Shell","tool_input":{"command":"ls"},"hook_event_name":"preToolUse"}`, map[string]string{
+		"MULTICA_DAEMON_PORT": "1",
 	})
 	if exit != 0 {
 		t.Fatalf("cursor fail-closed must exit 0 with JSON deny, got %d", exit)
