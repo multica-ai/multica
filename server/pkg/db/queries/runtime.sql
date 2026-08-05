@@ -315,6 +315,7 @@ SET sandbox_policy = COALESCE($2, '{}'::jsonb), updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- CEREBRO-PATCH(runtime-cheap-model-query): FIR-4492 per-runtime cheap model.
 -- name: UpdateAgentRuntimeCheapModel :one
 -- Sets the model this runtime uses for the provider-independent "cheap" tier
 -- (FIR-4492). '' clears it, which restores the pre-patch behaviour: "cheap"

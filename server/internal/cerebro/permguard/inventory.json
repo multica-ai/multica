@@ -645,6 +645,10 @@
       "gate": "cerebro_runtime_access"
     },
     {
+      "id": "PATCH /api/runtimes/{runtimeId}/cheap-model",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
       "gate": "cerebro_runtime_access"
     },
