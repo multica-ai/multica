@@ -189,6 +189,85 @@ func TestCodexHandleServerRequestFileChangeApproval(t *testing.T) {
 	}
 }
 
+func TestCodexMutationPolicyDeniesCommandAndPatchApprovals(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.cfg.Env = map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":31,"method":"item/commandExecution/requestApproval","params":{"command":"touch should-not-exist"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","id":32,"method":"applyPatchApproval","params":{"changes":[{"path":"reply.md"}]}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d: %v", len(lines), lines)
+	}
+	for _, line := range lines {
+		var resp map[string]any
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatalf("unmarshal %q: %v", line, err)
+		}
+		result := resp["result"].(map[string]any)
+		if result["decision"] != "reject" {
+			t.Fatalf("expected mutation approval decision=reject, got response: %v", resp)
+		}
+	}
+}
+
+func TestCodexMutationPolicyNarrowsFileSystemPermissionsToReadOnly(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.cfg.Env = map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":33,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/repo"],"write":["/tmp/repo"],"delete":["/tmp/repo"]}}}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	result := resp["result"].(map[string]any)
+	permissions := result["permissions"].(map[string]any)
+	fileSystem := permissions["fileSystem"].(map[string]any)
+	if _, ok := fileSystem["read"]; !ok {
+		t.Fatalf("read permissions should be preserved, got %v", fileSystem)
+	}
+	if _, ok := fileSystem["write"]; ok {
+		t.Fatalf("write permissions should be stripped under deny policy, got %v", fileSystem)
+	}
+	if _, ok := fileSystem["delete"]; ok {
+		t.Fatalf("delete permissions should be stripped under deny policy, got %v", fileSystem)
+	}
+}
+
+func TestCodexMutationPolicyDropsUnexpectedFileSystemShape(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.cfg.Env = map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":34,"method":"item/permissions/requestApproval","params":{"permissions":{"fileSystem":"write:/tmp/repo"}}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	result := resp["result"].(map[string]any)
+	permissions := result["permissions"].(map[string]any)
+	fileSystem := permissions["fileSystem"].(map[string]any)
+	if len(fileSystem) != 0 {
+		t.Fatalf("unexpected filesystem shape should fail closed to empty permissions, got %v", fileSystem)
+	}
+}
+
 func TestCodexHandleServerRequestMCPElicitation(t *testing.T) {
 	t.Parallel()
 

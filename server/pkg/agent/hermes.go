@@ -915,6 +915,33 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		if mutationPolicyDenies(c.cfg.Env) && acpPermissionRequestMutates(raw["params"]) {
+			optionID, ok := selectACPRejectOnce(raw["params"])
+			if ok {
+				resp = map[string]any{
+					"jsonrpc": "2.0",
+					"id":      json.RawMessage(rawID),
+					"result": map[string]any{
+						"outcome": map[string]any{
+							"outcome":  "selected",
+							"optionId": optionID,
+						},
+					},
+				}
+				c.cfg.Logger.Warn("mutation policy denied agent permission request", "method", method, "optionId", optionID)
+				break
+			}
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32603,
+					"message": "mutation policy denied permission request and no reject_once option was offered",
+				},
+			}
+			c.cfg.Logger.Warn("mutation policy denied agent permission request without reject_once; returning error", "method", method)
+			break
+		}
 		optionID, grant, ok := selectACPPermissionOption(raw["params"])
 		if ok {
 			// Select an offered option — either a safe grant (approve) or,

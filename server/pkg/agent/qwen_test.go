@@ -72,6 +72,31 @@ func TestBuildQwenArgsYoloAlwaysPresent(t *testing.T) {
 	}
 }
 
+func TestQwenBackendMutationPolicyOmitsYoloBypass(t *testing.T) {
+	t.Parallel()
+
+	argsPath := filepath.Join(t.TempDir(), "qwen.args")
+	backend := newFakeQwenBackend(t, map[string]string{
+		"QWEN_ARGS_FILE":                argsPath,
+		"MULTICA_AGENT_MUTATION_POLICY": "deny",
+	})
+	session, err := backend.Execute(context.Background(), "read only", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	_, result := awaitQwenResult(t, session)
+	if result.Status != "completed" {
+		t.Fatalf("result status = %s error=%s", result.Status, result.Error)
+	}
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read qwen args: %v", err)
+	}
+	if strings.Contains(string(data), "--yolo") {
+		t.Fatalf("mutation deny policy must not launch qwen with --yolo bypass, args=%s", string(data))
+	}
+}
+
 func fakeQwenScript() string {
 	return `#!/bin/sh
 if [ -n "$QWEN_ARGS_FILE" ]; then printf '%s\n' "$@" > "$QWEN_ARGS_FILE"; fi

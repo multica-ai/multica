@@ -39,6 +39,23 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	}
 }
 
+func TestAntigravityMutationPolicyRejectsUnsafeBypassBackend(t *testing.T) {
+	t.Parallel()
+
+	backend := &antigravityBackend{cfg: Config{
+		ExecutablePath: "/definitely/missing/agy",
+		Logger:         quietAntigravityLogger(),
+		Env:            map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"},
+	}}
+	_, err := backend.Execute(context.Background(), "read only", ExecOptions{})
+	if err == nil {
+		t.Fatal("expected mutation policy to reject antigravity before spawning")
+	}
+	if !strings.Contains(err.Error(), "mutation policy") {
+		t.Fatalf("error should name mutation policy, got %v", err)
+	}
+}
+
 func TestBuildAntigravityArgsModel(t *testing.T) {
 	t.Parallel()
 
