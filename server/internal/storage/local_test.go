@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -344,6 +345,69 @@ func TestLocalStorage_ServeFile_RejectsSidecarSuffix(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Disposition"); got != "" {
 		t.Errorf("Content-Disposition = %q, want empty", got)
+	}
+}
+
+func TestLocalStorage_ServeFileRejectsPrivateCorpusObjectButGetReaderAllowsIt(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	key := "workspaces/ws-1/corpus-transfers/transfer-1/archive.zip"
+	if _, err := store.UploadStream(context.Background(), key, strings.NewReader("private corpus"), int64(len("private corpus")), "application/zip", "archive.zip"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, key)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("public corpus object status = %d, want 404", rec.Code)
+	}
+	reader, err := store.GetReader(context.Background(), key)
+	if err != nil {
+		t.Fatalf("authenticated storage read: %v", err)
+	}
+	body, err := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if err != nil || closeErr != nil || string(body) != "private corpus" {
+		t.Fatalf("private read body/errors = %q/%v/%v", body, err, closeErr)
+	}
+	info, err := os.Stat(store.GetFilePath(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("private corpus mode = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestPrivateCorpusObjectKeyRejectsFilesystemAliases(t *testing.T) {
+	for _, key := range []string{
+		"workspaces/ws/corpus-transfers/transfer/archive.zip",
+		"WORKSPACES/ws/CORPUS-TRANSFERS/transfer/archive.zip",
+		"workspaces./ws/corpus-transfers./transfer/archive.zip",
+		"workspaces /ws/corpus-transfers /transfer/archive.zip",
+		"WORKSP~1/ws/CORPUS~1/transfer/archive.zip",
+		"WORKSP~2/ws/corpus-transfers/transfer/archive.zip",
+		"workspaces/ws/CORPU~12/transfer/archive.zip",
+	} {
+		if !isPrivateCorpusObjectKey(key) {
+			t.Errorf("private corpus alias was not recognized: %q", key)
+		}
+	}
+	for _, key := range []string{
+		"workspaces/ws/lark/attachment.zip",
+		"WORKSP~1/ws/lark/attachment.zip",
+		"workspaces/ws/corpus-transfers-public/archive.zip",
+		"other/ws/CORPUS~1/transfer/archive.zip",
+		"other/ws/corpus-transfers/transfer/archive.zip",
+	} {
+		if isPrivateCorpusObjectKey(key) {
+			t.Errorf("public key was classified as private corpus: %q", key)
+		}
 	}
 }
 

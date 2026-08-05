@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/corpustransfer"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -222,6 +225,169 @@ func TestCorpusTransferCompletionDownloadAndACK(t *testing.T) {
 	w = doCorpusHandler(t, h.AcknowledgeCorpusTransfer, http.MethodPost, "/acks", testCorpusWorkspace, okID, conflictACK, -2)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("conflicting ack status = %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCorpusTransferLocalStoragePackThroughACK(t *testing.T) {
+	source := t.TempDir()
+	duplicate := []byte("same private corpus payload")
+	for name, body := range map[string][]byte{
+		"皮皮/会话.jsonl": duplicate,
+		"copy.jsonl":  duplicate,
+	} {
+		filename := filepath.Join(source, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(filename), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	staging := filepath.Join(t.TempDir(), "staging")
+	manifest, err := corpustransfer.StageAndBuildManifest(context.Background(), []corpustransfer.SourceRoot{{
+		Type: "codex", Name: "pipi", Path: source,
+	}}, time.Time{}, staging)
+	if err != nil {
+		t.Fatalf("pack manifest: %v", err)
+	}
+	hasNonASCIIPath := false
+	hasReplica := false
+	for _, entry := range manifest.Entries {
+		hasNonASCIIPath = hasNonASCIIPath || strings.Contains(entry.Path, "皮皮/会话.jsonl")
+		hasReplica = hasReplica || entry.ReplicaOf != ""
+	}
+	if manifest.EntryCount != 2 || !hasNonASCIIPath || !hasReplica {
+		t.Fatalf("duplicate/non-ASCII pack evidence = %#v", manifest.Entries)
+	}
+	archivePath := filepath.Join(t.TempDir(), "archive.zip")
+	packedEnvelope, err := corpustransfer.BuildZIP(staging, archivePath, manifest)
+	if err != nil {
+		t.Fatalf("pack archive: %v", err)
+	}
+	archiveBytes, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON, err := manifest.CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sha256Hex(archiveBytes); got != packedEnvelope.SHA256 {
+		t.Fatalf("packed archive sha256 = %s, envelope = %s", got, packedEnvelope.SHA256)
+	}
+	if got := sha256Hex(manifestJSON); got != packedEnvelope.ManifestSHA256 {
+		t.Fatalf("packed manifest sha256 = %s, envelope = %s", got, packedEnvelope.ManifestSHA256)
+	}
+
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	localStore := storage.NewLocalStorageFromEnv()
+	if localStore == nil {
+		t.Fatal("initialize local storage")
+	}
+	ledger := &fakeCorpusTransferStore{transfers: make(map[string]db.CorpusTransfer), acks: make(map[string]db.CorpusTransferAck)}
+	h := &Handler{CorpusTransfers: ledger, CorpusStorage: localStore}
+	createBody, err := json.Marshal(createCorpusTransferRequest{
+		IdempotencyKey: "local-storage-e2e",
+		Manifest:       manifest,
+		Archive:        packedEnvelope,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doCorpusHandler(t, h.CreateCorpusTransfer, http.MethodPost, "/corpus-transfers", testCorpusWorkspace, "", createBody, -2)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var receipt corpusTransferResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Archive.SizeBytes != packedEnvelope.SizeBytes ||
+		receipt.Archive.SHA256 != packedEnvelope.SHA256 ||
+		receipt.Archive.ManifestSHA256 != packedEnvelope.ManifestSHA256 {
+		t.Fatalf("receipt archive = %#v, packed = %#v", receipt.Archive, packedEnvelope)
+	}
+	var receiptManifest corpustransfer.Manifest
+	if err := json.Unmarshal(receipt.Manifest, &receiptManifest); err != nil {
+		t.Fatal(err)
+	}
+	receiptManifestJSON, err := receiptManifest.CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(receiptManifestJSON, manifestJSON) || sha256Hex(receiptManifestJSON) != packedEnvelope.ManifestSHA256 {
+		t.Fatal("receipt manifest does not match the packed canonical manifest")
+	}
+
+	transfer := ledger.get(t, testCorpusWorkspace, receipt.TransferID)
+	w = doCorpusHandler(t, h.UploadCorpusTransferContent, http.MethodPut, "/content", testCorpusWorkspace, receipt.TransferID, archiveBytes, int64(len(archiveBytes)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload status = %d, body=%s", w.Code, w.Body.String())
+	}
+	storedBytes, err := os.ReadFile(localStore.GetFilePath(transfer.ObjectKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(storedBytes, archiveBytes) {
+		t.Fatal("local storage bytes differ from the packed archive")
+	}
+
+	w = doCorpusHandler(t, h.CompleteCorpusTransfer, http.MethodPost, "/complete", testCorpusWorkspace, receipt.TransferID, nil, -2)
+	if w.Code != http.StatusOK {
+		t.Fatalf("complete status = %d, body=%s", w.Code, w.Body.String())
+	}
+	confirmed := ledger.get(t, testCorpusWorkspace, receipt.TransferID)
+	if confirmed.State != "confirmed" || !confirmed.VerifiedSizeBytes.Valid || confirmed.VerifiedSizeBytes.Int64 != packedEnvelope.SizeBytes ||
+		!confirmed.VerifiedSha256.Valid || confirmed.VerifiedSha256.String != packedEnvelope.SHA256 {
+		t.Fatalf("server readback evidence = state %s, size %#v, sha %#v", confirmed.State, confirmed.VerifiedSizeBytes, confirmed.VerifiedSha256)
+	}
+
+	w = doCorpusHandler(t, h.DownloadCorpusTransferContent, http.MethodGet, "/content", testCorpusWorkspace, receipt.TransferID, nil, -2)
+	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), archiveBytes) {
+		t.Fatalf("download status/size = %d/%d, want 200/%d", w.Code, w.Body.Len(), len(archiveBytes))
+	}
+	downloadedPath := filepath.Join(t.TempDir(), "downloaded.zip")
+	if err := os.WriteFile(downloadedPath, w.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	downloadedManifest, downloadedEnvelope, err := corpustransfer.InspectZIP(downloadedPath, corpustransfer.SourceInfo{})
+	if err != nil {
+		t.Fatalf("inspect downloaded archive: %v", err)
+	}
+	if downloadedEnvelope.SizeBytes != packedEnvelope.SizeBytes || downloadedEnvelope.SHA256 != packedEnvelope.SHA256 ||
+		downloadedEnvelope.ManifestSHA256 != packedEnvelope.ManifestSHA256 {
+		t.Fatalf("downloaded envelope = %#v, packed = %#v", downloadedEnvelope, packedEnvelope)
+	}
+	downloadedManifestJSON, err := downloadedManifest.CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(downloadedManifestJSON, manifestJSON) {
+		t.Fatal("downloaded manifest differs from packed manifest")
+	}
+	installed := filepath.Join(t.TempDir(), manifest.PackageID)
+	if err := corpustransfer.ExtractVerified(downloadedPath, installed, downloadedManifest); err != nil {
+		t.Fatalf("extract downloaded archive: %v", err)
+	}
+	if err := corpustransfer.VerifyExtracted(installed, downloadedManifest); err != nil {
+		t.Fatalf("verify installed package: %v", err)
+	}
+
+	ackBody, err := json.Marshal(acknowledgeCorpusTransferRequest{SinkID: "local-corpus-sink", ConfirmedSHA256: packedEnvelope.SHA256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = doCorpusHandler(t, h.AcknowledgeCorpusTransfer, http.MethodPost, "/acks", testCorpusWorkspace, receipt.TransferID, ackBody, -2)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ack status = %d, body=%s", w.Code, w.Body.String())
+	}
+	acked := ledger.get(t, testCorpusWorkspace, receipt.TransferID)
+	ledger.mu.Lock()
+	ackCount := len(ledger.acks)
+	ledger.mu.Unlock()
+	if acked.State != "acked" || ackCount != 1 {
+		t.Fatalf("final state/ACK rows = %s/%d, want acked/1", acked.State, ackCount)
 	}
 }
 

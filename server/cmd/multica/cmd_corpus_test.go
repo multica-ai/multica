@@ -145,15 +145,8 @@ func TestCreateCorpusPackWorkspaceIsOutsideSourceRoots(t *testing.T) {
 	}
 }
 
-func TestCorpusSendStatusReceiveStreamsVerifiesInstallsAndACKs(t *testing.T) {
-	archive, manifest, envelope := buildCorpusCLIArchive(t)
-	manifestJSON, err := manifest.CanonicalJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(archive+".manifest.json", manifestJSON, 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestCorpusPackSendStatusReceiveEndToEnd(t *testing.T) {
+	archive, manifest, envelope := packCorpusCLIArchive(t)
 	archiveBytes, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatal(err)
@@ -526,6 +519,28 @@ func buildCorpusCLIArchive(t *testing.T) (string, corpustransfer.Manifest, corpu
 	}
 	archive := filepath.Join(t.TempDir(), "codex-export-皮皮-30d.zip")
 	envelope, err := corpustransfer.BuildZIP(stage, archive, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return archive, manifest, envelope
+}
+
+func packCorpusCLIArchive(t *testing.T) (string, corpustransfer.Manifest, corpustransfer.ArchiveEnvelope) {
+	t.Helper()
+	root := t.TempDir()
+	writeCorpusCLIFile(t, root, "皮皮/会话.jsonl", "same payload", time.Now().UTC())
+	writeCorpusCLIFile(t, root, "copy.jsonl", "same payload", time.Now().UTC())
+	archive := filepath.Join(t.TempDir(), "codex-export-皮皮-30d.zip")
+	command := newCorpusPackCommand()
+	command.SetContext(context.Background())
+	command.SetOut(io.Discard)
+	if err := command.Flags().Set("source", "codex-export=pipi:"+root); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.RunE(command, []string{archive}); err != nil {
+		t.Fatal(err)
+	}
+	manifest, envelope, err := corpustransfer.InspectZIP(archive, corpustransfer.SourceInfo{})
 	if err != nil {
 		t.Fatal(err)
 	}

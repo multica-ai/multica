@@ -1,0 +1,137 @@
+---
+title: 语料包回传
+description: 不依赖浏览器自动化，完成大体积语料 ZIP 的打包、流式上传、校验、接收与 ACK。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+语料包回传通过单个工作区的认证 API 传输私有 ZIP。它适合大体积 Codex 导出包和本机自采语料，解决浏览器自动化、附件上传或入站 SSH 无法稳定把文件送出电脑的问题。
+
+P0 流程如下：
+
+```text
+源文件 -> 规范 manifest -> ZIP + SHA-256 -> 认证上传
+  -> 服务端回读校验 -> confirmed -> 安全解包 -> ACK
+```
+
+<Callout type="warning">
+P0 只接受一个定长、最大 2 GiB 的 ZIP。不支持分片上传、断点续传、离线队列、Windows 源目录发现或跨工作区交付。正文上传中断后必须新建 transfer 重传。
+</Callout>
+
+## 开始前
+
+先安装并登录 [Multica CLI](/cli)，再选择目标工作区：
+
+```bash
+multica auth status
+multica workspace switch <workspace-slug>
+```
+
+发送端和接收端都需要有该工作区的访问权限。API 使用当前工作区身份，不信任 manifest 提供的工作区、操作者或对象 key。
+
+## 在 macOS 上打包源目录
+
+`pack` 扫描明确指定的源目录，保留所有常规文件，对完全相同的内容计算哈希，并记录副本来源，不会删除副本。导出层不做语义过滤或破坏性过滤。
+
+```bash
+multica corpus pack ./codex-export-alice-30d.zip \
+  --source codex=desktop:"/Users/alice/Library/Application Support/Codex" \
+  --source multica=workspace:"/Users/alice/Exports/multica" \
+  --source automation=jobs:"/Users/alice/Automation" \
+  --cutoff 2026-08-01T00:00:00Z
+```
+
+命令会生成：
+
+- `codex-export-alice-30d.zip`，其中包含 `manifest.json`；
+- `codex-export-alice-30d.zip.manifest.json`，即规范 sidecar；
+- 一段 JSON 输出，包含 ZIP 与 manifest 哈希、ZIP 大小、条目数和 `missing_sources`。
+
+源目录不存在时会记为缺少证据，不能解释为成员不愿协作。symlink、特殊文件、扫描中发生变化的输入、不安全路径，以及 macOS 上的 Unicode 或大小写冲突都会被拒绝。
+
+P0 暂不支持在 Windows 上安全扫描并打包源目录。Windows 可以直接发送已有 ZIP，见下文。
+
+## 发送并查看 transfer
+
+发送由 `pack` 生成的包：
+
+```bash
+multica corpus send ./codex-export-alice-30d.zip \
+  --idempotency-key alice-2026-08-05
+```
+
+命令会自动选择相邻 sidecar。如果 ZIP 既没有 sidecar，也没有内嵌 manifest，`send` 会检查 ZIP、计算哈希，并生成重试时保持稳定的 manifest。只有在重试同一份 ZIP 和同一组元数据时，才复用明确指定的 `--idempotency-key`。
+
+成功后的 JSON 回执包含 `transfer_id`、`state`、`last_success_at`、`late`、`missing` 和 `retry_reason`。保存 `transfer_id`，之后可以随时查看持久台账：
+
+```bash
+multica corpus status <transfer-id>
+```
+
+### 发送 Windows 上的已有导出包
+
+在存有 ZIP 的电脑上直接运行这条 PowerShell 命令：
+
+```powershell
+multica corpus send "C:\Users\EDY\Desktop\codex-export-皮皮-30d.zip" --source-type codex-export
+```
+
+这条路径不依赖 Chrome 远程调试、浏览器自动化、Tailscale、SSH 或浏览器上传表单。
+
+## 接收、校验与 ACK
+
+把包接收到本机语料消费者管理的目录：
+
+```bash
+multica corpus receive <transfer-id> \
+  --output-dir ./received-corpus \
+  --sink-id corpus-indexer-production
+```
+
+CLI 会把内容流式写入 mode-0600 临时文件，并在达到回执声明的大小时停止写入。在原子发布 `<output-dir>/<package_id>` 之前，它会校验 ZIP 大小与 SHA-256、manifest SHA-256、每个条目的哈希与大小、路径安全、解压上限和文件系统冲突。发布动作是目录的原子 rename。
+
+只有安装后的包通过校验，CLI 才会发送 ACK。ACK 证明某个稳定接收端已经校验并应用 confirmed 内容；服务端 confirmation 只能证明服务端已经保存并回读了这些字节。同一 ACK 可以幂等重放。如果安装已经成功，但 ACK 请求或响应失败，重新运行同一条 `receive` 命令：CLI 会重新校验现有目录，不重复下载或覆盖，再重试 ACK。
+
+## 保留与隐私
+
+- 路由需要认证并限定在工作区内。每次数据库查询也会带上工作区 ID。
+- 上传采用定长流式传输。内容进入对象存储后，服务端会重新读取并计算哈希，通过后才进入 confirmed。
+- 本机 staging 目录权限为 0700；ZIP、sidecar 和下载临时文件权限为 0600。
+- 使用本地存储时，语料对象及其元数据权限均为 0600，并从通用 `/uploads/*` 路由中排除；只有经过认证且限定工作区的 transfer API 可以读取正文。其他存储后端沿用部署环境配置的私有存储与静态加密控制。语料包回传不会创建公开 URL 或签名 URL。
+- 内容从 transfer 创建起最多保留 24 小时。到期后，confirmed 或 acked 内容会立即从 API 下线，记录进入 `purged`，同时物理清理进入排队或执行中。实际删除可能延后并重试；只有确认清理完成后，`cleanup_pending` 才会清除。
+- 内容进入 `purged` 后，台账仍保留 confirmation 与 ACK 证据，包括哈希和时间戳。
+
+不要把 transfer 对象当成长期语料本体库。内容到期前，应把已校验数据转入合规语料接收端。
+
+## 状态与失败语义
+
+| 状态 | 含义 |
+| --- | --- |
+| `created` / `uploading` | 已创建意图；正文尚未到达或仍在上传。 |
+| `uploaded` / `verifying` | 字节已经存在，但服务端回读校验成功前不能下载。 |
+| `confirmed` | 存储中的大小和 SHA-256 一致，可以接收。 |
+| `acked` | 至少一个具名接收端已校验并应用 confirmed 包。 |
+| `failed` | 上传、存储回读、大小或哈希校验失败。查看 `retry_reason`。 |
+| `expired` | 未确认的废弃 transfer 超过 24 小时。 |
+| `purged` | confirmed 或 acked 内容在保留期后已无法通过 API 获取；物理删除可能仍在等待或重试，证据记录继续保留。 |
+
+`missing: true` 表示缺少交付证据或可保留内容。绝不能把它当成员工参与度或协作意愿的指标。
+
+## 为什么选择认证流式传输
+
+| 路径 | P0 决策 |
+| --- | --- |
+| 认证 API 流式传输 | 采用：复用现有出站 HTTPS 连接，只维护一套工作区鉴权模型，内存有界，服务端能回读校验，并记录 ACK。 |
+| Tailscale 或 SSH 裸拉 | 不采用：依赖入站可达性、主机凭据和逐机网络配置；这些正是本通道要消除的阻塞点。 |
+| 飞书文件 | 不采用：会增加一套权限与保留域，也没有相同的服务端回读校验和接收端 ACK 台账。 |
+| 浏览器自动化 | 不采用：Chrome 远程调试与 Windows 沙箱路径不可用或不稳定，浏览器上传流程也不适合无人值守的 1.55 GB 传输。 |
+| 附件上传 | 不采用：附件路径上限为 100 MiB，并会缓冲请求数据，不具备本协议的定长大对象传输能力。 |
+| 对象存储签名 URL | 延后：效率高，但会增加第二套 bearer capability 鉴权模型，以及供应商特定的签名与 checksum 行为。它属于后续直传与跨租户加固范围。 |
+
+## 排查问题
+
+- **ZIP 超过 2 GiB：** 在本协议之外拆包，或等待分片与续传能力。CLI 会在解析 ZIP 前拒绝超大本地文件。
+- **上传中断：** P0 不能续传正文，使用新的 idempotency key 重试。只有 create、upload 或 complete 回执结果不明确时，才做受控重试。
+- **出现 `verification_mismatch`：** 上传字节与声明的大小或 SHA-256 不一致。保持本地 ZIP 不变，新建 transfer 重传。
+- **接收时报告条目不安全或不匹配：** 不要绕过校验。请从可信源文件重新打包或重新导出。
+- **内容已过期或状态为 `purged`：** 字节已经不能下载。把本地 ZIP 作为新 transfer 再发送一次。
