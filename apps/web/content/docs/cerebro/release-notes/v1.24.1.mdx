@@ -1,0 +1,25 @@
+---
+title: "Multica v1.24.1"
+description: "7 release bullets: 1 new, 5 fixed, 1 other changes."
+date: 2026-08-05
+---
+
+**Release summary:** 7 release bullets: 1 new, 5 fixed, 1 other changes.
+
+Changes since [v1.24.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.24.0...v1.24.1) — bump: **patch**
+
+## New
+
+- Check for an existing issue on the same matter (FIR-4183) [#2834](https://github.com/firtal-group/firtal-cerebro/pull/2834)
+
+## Fixed
+
+- Keep Cancel enabled in the delete dialog (FIR-4359) [#2921](https://github.com/firtal-group/firtal-cerebro/pull/2921)
+- Read the Claude keychain item Claude Code actually writes (FIR-4520)\n\nThe darwin credential fallback asked the keychain for the service name only:\n\n    security find-generic-password -s "Claude Code-credentials" -w\n\nClaude Code writes that item with an account name ($USER) and, when\nCLAUDE_CONFIG_DIR is set, a config-dir-scoped service suffix. On a Mac that\nalso carries an item written by a pre-2.x Claude Code, the account-less\nlookup matches the stale item first, so the daemon reads an expired token\nforever. The account's 5h/7d usage windows then stay empty and the only\nrecord is a debug-level "provider usage token unavailable" line.\n\nMirror Claude Code's own lookup and keep a fallback to the legacy\nservice-only item so older installs are unaffected.\n\nCo-Authored-By: Claude Opus 5 \<noreply@anthropic.com> [#2915](https://github.com/firtal-group/firtal-cerebro/pull/2915)
+- Index the autopilot_run FKs so deleting an autopilot returns [#2916](https://github.com/firtal-group/firtal-cerebro/pull/2916)
+- Stop Chat badge counting archived DMs the rail hides [#2912](https://github.com/firtal-group/firtal-cerebro/pull/2912)
+- Never spawn a task on a model the runtime cannot run [#2909](https://github.com/firtal-group/firtal-cerebro/pull/2909)
+
+## Other changes
+
+- FIR-4507: fix agent tooltip overlap + Spend today [#2908](https://github.com/firtal-group/firtal-cerebro/pull/2908)
