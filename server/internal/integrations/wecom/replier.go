@@ -131,7 +131,46 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	}
 	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
 	text := "👋 请先绑定你的 Multica 账号，才能与我对话：\n" + bindURL + "\n（链接 15 分钟内有效）"
-	return r.post(ctx, inst, msg, text)
+	// A binding token is a bearer credential: binding.Redeem only checks that
+	// the redeemer belongs to the token's workspace, and the bind page redeems
+	// on load as whoever is signed in. Sending it to msg.Source.ChatID — which
+	// in a group IS the group — would let any member click first and bind the
+	// sender's WeCom userid to their own Multica account, after which the
+	// sender's messages (/issue included) resolve to the hijacker. So deliver
+	// the link privately to the sender's own userid with chat_type=1 (the same
+	// address outbound.go uses for inbox pushes), never to the room. Lark's
+	// SendBindingPromptCard targets the sender's OpenID for the same reason.
+	if err := r.postPrivate(inst, sender, text); err != nil {
+		return err
+	}
+	// A group trigger still needs an answer — silence reads as a broken bot —
+	// but a token-less one that names nobody. Posted only after the private
+	// send is accepted, so the room is never pointed at a message the wire
+	// refused. A 1:1 trigger already received the prompt in its only room.
+	if aibotChatTypeFromChannel(msg.Source.ChatType) == chatTypeGroupInt {
+		return r.post(ctx, inst, msg, "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。")
+	}
+	return nil
+}
+
+// postPrivate delivers text to a single user's 1:1 chat (chat_type=1),
+// regardless of which room triggered the message. Used for bearer-credential
+// content (the binding link) that must never land in a group.
+func (r *OutboundReplier) postPrivate(inst engine.ResolvedInstallation, userID, text string) error {
+	if r.senders == nil {
+		return errors.New("wecom: sender registry not configured")
+	}
+	if !inst.ID.Valid {
+		return errors.New("wecom: installation id is zero")
+	}
+	if userID == "" {
+		return errors.New("wecom: missing user id")
+	}
+	sender := r.senders.get(inst.ID)
+	if sender == nil {
+		return errors.New("wecom: connection not ready")
+	}
+	return sender.sendText(userID, chatTypeSingleInt, text)
 }
 
 // post looks up the installation's live wsSender in the registry and
