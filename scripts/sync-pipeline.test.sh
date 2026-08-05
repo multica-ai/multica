@@ -83,9 +83,9 @@ else
 fi
 expect_grep "PR title is built from PR_TITLE" '^  -f title="\$\{PR_TITLE\}" \\$' "${SYNC}"
 expect_grep "PR_TITLE carries a bracketed ref" 'PR_TITLE="\$\{SYNC_SUBJECT\} \[\$\(normalize_jira_ref' "${SYNC}"
-expect_grep "README conflict keeps the fork-owned file" 'git checkout "\$\{FORK_REMOTE\}/\$\{FORK_BRANCH\}" -- README\.md' "${SYNC}"
+expect_grep "any KEEP_OURS conflict keeps the fork-owned file" 'git checkout "\$\{FORK_REMOTE\}/\$\{FORK_BRANCH\}" -- "\$\{keep\}"' "${SYNC}"
 expect_grep "upstream README is saved separately" 'git show "\$\{UPSTREAM_REF\}:README\.md" > "\$\{UPSTREAM_README_SNAPSHOT\}"' "${SYNC}"
-expect_grep "any non-README conflict still parks for a human" 'exit 2' "${SYNC}"
+expect_grep "any non-KEEP_OURS conflict still parks for a human" 'exit 2' "${SYNC}"
 expect_grep "a merge failure with no conflicts is still fatal" 'Merge failed for a non-conflict reason' "${SYNC}"
 
 # ── scripts/sync-tick.sh — pure helpers ──────────────────────────────────────

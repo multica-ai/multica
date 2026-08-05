@@ -187,22 +187,31 @@ if ! git merge --no-commit --no-ff "${UPSTREAM_REF}"; then
     # Merge failed for a non-conflict reason (dirty tree, bad ref, ...).
     exit 1
   fi
-  # README.md is fork-owned by policy. Resolve that expected conflict with
-  # the fork's copy now; step 9 snapshots upstream's copy separately before
-  # the merge is sealed. Any other conflict still requires human review.
+  # Every KEEP_OURS path is fork-owned by policy, so a conflict on any of them is
+  # expected — not just README.md. Resolve those now with the fork's copy; step 9
+  # restores KEEP_OURS again (and snapshots upstream's README separately) before
+  # the merge is sealed. Any conflict outside KEEP_OURS still requires human
+  # review. This used to check README.md alone, which meant a hop where upstream
+  # also touched CLAUDE.md (fork-owned too) aborted for a human even though the
+  # policy already had an answer for it.
   CONFLICTS=$(git diff --name-only --diff-filter=U | sort -u)
-  UNEXPECTED_CONFLICTS=$(printf '%s\n' "${CONFLICTS}" | grep -vxF 'README.md' || true)
-  if printf '%s\n' "${CONFLICTS}" | grep -qxF 'README.md' \
-    && [ -z "${UNEXPECTED_CONFLICTS}" ]; then
-    git checkout "${FORK_REMOTE}/${FORK_BRANCH}" -- README.md
-    git add -- README.md
-    echo "resolved fork-owned README.md; upstream copy will be saved as ${UPSTREAM_README_SNAPSHOT}"
-  else
+  UNEXPECTED_CONFLICTS="${CONFLICTS}"
+  for keep in "${KEEP_OURS[@]}"; do
+    UNEXPECTED_CONFLICTS=$(printf '%s\n' "${UNEXPECTED_CONFLICTS}" | grep -vxF -- "${keep}" || true)
+  done
+  if [ -n "${UNEXPECTED_CONFLICTS}" ]; then
     echo "conflict — aborting for human review:"
     printf '%s\n' "${CONFLICTS}"
     git merge --abort
     exit 2
   fi
+  for keep in "${KEEP_OURS[@]}"; do
+    if printf '%s\n' "${CONFLICTS}" | grep -qxF -- "${keep}"; then
+      git checkout "${FORK_REMOTE}/${FORK_BRANCH}" -- "${keep}"
+      git add -- "${keep}"
+      echo "resolved fork-owned ${keep}"
+    fi
+  done
   # Nothing may still be unmerged once the policy resolution has run.
   if [ -n "$(git ls-files -u)" ]; then
     echo "unresolved paths remain after applying the fork-owned-docs rule:"
