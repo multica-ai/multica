@@ -1,23 +1,23 @@
 ---
 title: 聊天集成
-description: 把 Multica 智能体接入飞书、Lark 或 Slack，在团队已有的聊天工具中使用。
+description: 把 Multica 智能体接入飞书、Lark、Slack 或钉钉，在团队已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 聊天集成让团队不用打开 Multica，也能直接向智能体提问、在群聊中 @它，或从聊天窗口创建 issue。
 
-目前支持飞书/Lark 和 Slack。两种集成使用相同的会话、身份和执行机制，但安装方式不同。
+目前支持飞书/Lark、Slack 和钉钉。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
 ## 选择平台
 
-| | 飞书 / Lark | Slack |
-|---|---|---|
-| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica |
-| 私聊智能体 | 支持 | 支持 |
-| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 |
-| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 |
-| 连接方式 | 平台长连接 | Socket Mode |
+| | 飞书 / Lark | Slack | 钉钉 |
+|---|---|---|---|
+| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica |
+| 私聊智能体 | 支持 | 支持 | 支持 |
+| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 |
+| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 |
+| 连接方式 | 平台长连接 | Socket Mode | Stream 模式 |
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
 
@@ -27,6 +27,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
+- [钉钉 Bot 接入](/dingtalk-bot-integration)
 
 ## 消息的执行流程
 
@@ -42,6 +43,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 - 飞书/Lark 按聊天区分会话；同一个聊天中的后续消息会继续原会话。
 - Slack 私聊按频道区分；频道中的每个 thread 分别保存一段会话。
+- 钉钉按 conversation 区分会话；每个单聊或群聊分别延续自己的会话。
 
 在频道中继续追问时仍需再次 @ Bot。智能体只收到发给自己的消息，不会自动读取整个频道的历史。
 
@@ -68,6 +70,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 ```dotenv
 MULTICA_LARK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
 
 这些密钥用于加密保存 Bot 凭据。生成、保存和轮换方法见[环境变量](/environment-variables)。Multica Cloud 已完成这项配置。
@@ -76,4 +79,5 @@ MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
 
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
+- [钉钉 Bot 接入](/dingtalk-bot-integration)
 - [与智能体对话](/chat)

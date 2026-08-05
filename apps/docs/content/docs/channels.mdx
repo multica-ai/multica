@@ -1,23 +1,23 @@
 ---
 title: Chat integrations
-description: Connect Multica agents to Feishu, Lark, or Slack and use them from the chat tools your team already uses.
+description: Connect Multica agents to Feishu, Lark, Slack, or DingTalk and use them from the chat tools your team already uses.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 Chat integrations let the team ask an agent questions, @-mention it in a group chat, or create issues from the chat window — without opening Multica.
 
-Feishu/Lark and Slack are supported today. Both integrations share the same session, identity, and execution mechanics but install differently.
+Feishu/Lark, Slack, and DingTalk are supported today. They share the same session, identity, and execution mechanics but install differently.
 
 ## Choose a platform
 
-| | Feishu / Lark | Slack |
-|---|---|---|
-| Installation | Generate a QR code in Multica and authorize by scanning it with Feishu | Create an app in Slack, then paste two tokens into Multica |
-| DM the agent | Supported | Supported |
-| Groups or channels | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot |
-| Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating |
-| Connection | Platform long connection | Socket Mode |
+| | Feishu / Lark | Slack | DingTalk |
+|---|---|---|---|
+| Installation | Generate a QR code in Multica and authorize by scanning it with Feishu | Create an app in Slack, then paste two tokens into Multica | Create an internal app and Stream-mode robot, then paste its AppKey and AppSecret into Multica |
+| DM the agent | Supported | Supported | Supported |
+| Groups or channels | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot |
+| Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating | `/issue` message command; creates the issue from your input as-is |
+| Connection | Platform long connection | Socket Mode | Stream mode |
 
 New connections are currently open only for mainland-China Feishu; existing international Lark connections keep working and can still be managed.
 
@@ -27,6 +27,7 @@ Step-by-step guides:
 
 - [Feishu / Lark Bot integration](/lark-bot-integration)
 - [Slack Bot integration](/slack-bot-integration)
+- [DingTalk Bot integration](/dingtalk-bot-integration)
 
 ## How a message is processed
 
@@ -42,6 +43,7 @@ Channel messages that don't @-mention the Bot never trigger the agent and are no
 
 - Feishu/Lark separates sessions by chat; later messages in the same chat continue the same session.
 - Slack separates DMs by channel; in a channel, each thread holds its own session.
+- DingTalk separates sessions by conversation; each DM or group continues its own session.
 
 Follow-ups in a channel still need a fresh @-mention. The agent only receives messages addressed to it — it never reads the whole channel history automatically.
 
@@ -68,6 +70,7 @@ A self-hosted deployment must configure a 32-byte encryption key for each platfo
 ```dotenv
 MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 These keys encrypt stored Bot credentials. See [Environment variables](/environment-variables) for how to generate, store, and rotate them. Multica Cloud already has this configured.
@@ -76,4 +79,5 @@ These keys encrypt stored Bot credentials. See [Environment variables](/environm
 
 - [Feishu / Lark Bot integration](/lark-bot-integration) — connect an agent by scanning a QR code.
 - [Slack Bot integration](/slack-bot-integration) — create a Slack app and paste its tokens into Multica.
+- [DingTalk Bot integration](/dingtalk-bot-integration) — create a Stream-mode robot and paste its credentials into Multica.
 - [Chat](/chat) — the conversation and execution model behind every Bot.
