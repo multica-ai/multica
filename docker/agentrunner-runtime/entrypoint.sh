@@ -33,6 +33,27 @@ fi
 git config --global user.name  "${GIT_USER_NAME:-g2-platform-bot[bot]}"
 git config --global user.email "${GIT_USER_EMAIL:-g2-platform-bot[bot]@users.noreply.github.com}"
 
+# ── Git ownership check ───────────────────────────────────────────────────────
+# $HOME is an EFS access point, so files created under it come back owned by an
+# EFS-mapped uid rather than the image's `agent` user (uid 1000), and the
+# fix-efs-permissions init container deliberately chowns top-level dirs only —
+# recursing across the real checkouts under multica_workspaces would scale with
+# repo size and slow every pod start. Access still works (the access point
+# enforces its own identity), but git compares st_uid against geteuid() and
+# refuses on inequality, so every agent-invoked git command in a fresh checkout
+# died with "detected dubious ownership" until the agent hand-added an exception.
+#
+# The daemon already does this for its own git subprocesses — see gitEnv() in
+# server/internal/daemon/repocache/cache.go — and the same reasoning applies to
+# agent-invoked git: single-tenant pod, one uid, nobody else can plant a repo,
+# so the check buys nothing here. Note that git supports only exact paths or a
+# literal `*`; a `/home/agent/multica_workspaces/*` prefix glob does NOT match.
+#
+# --replace-all rather than --add so pods with an accumulated (and duplicated)
+# list of per-checkout exceptions, added by agents working around this, collapse
+# to the single canonical entry on next start instead of growing forever.
+git config --global --replace-all safe.directory '*'
+
 # ── SSH key ───────────────────────────────────────────────────────────────────
 SSH_DIR="${HOME}/.ssh"
 SSH_KEY="${SSH_DIR}/id_ed25519"
