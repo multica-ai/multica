@@ -501,8 +501,13 @@ export function InboxPage() {
           // longer exists.
           setSelectedKey("");
         }}
+        doneAction={isArchivedView ? "unarchive" : "archive"}
         onDone={() => {
-          handleArchive(selected.id);
+          if (isArchivedView) {
+            handleUnarchive(selected.id);
+          } else {
+            handleArchive(selected.id);
+          }
         }}
       />
     </ErrorBoundary>

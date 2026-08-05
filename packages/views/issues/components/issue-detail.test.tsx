@@ -568,12 +568,18 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(
+  issueId = "issue-1",
+  options: {
+    onDone?: () => void;
+    doneAction?: "archive" | "unarchive";
+  } = {},
+) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} {...options} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -744,6 +750,34 @@ describe("IssueDetail (shared)", () => {
     // from the inline Inbox pane). A bare issue has no ancestor crumbs.
     const leaf = await screen.findByText("TES-1 Implement authentication");
     expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+  });
+
+  it("shows the restore action for archived Inbox issues", async () => {
+    const onDone = vi.fn();
+    const { container } = renderIssueDetail("issue-1", {
+      onDone,
+      doneAction: "unarchive",
+    });
+
+    await screen.findByText("TES-1 Implement authentication");
+    const restoreButton = container.querySelector(".lucide-archive-restore")?.closest("button");
+
+    expect(restoreButton).not.toBeNull();
+    expect(container.querySelector(".lucide-circle-check")).toBeNull();
+
+    fireEvent.click(restoreButton!);
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(mockApiObj.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("keeps the archive action for completed Inbox issues", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "done" });
+    const { container } = renderIssueDetail("issue-1", { onDone: vi.fn() });
+
+    await screen.findByText("TES-1 Implement authentication");
+
+    expect(container.querySelector(".lucide-archive")).not.toBeNull();
+    expect(container.querySelector(".lucide-archive-restore")).toBeNull();
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
