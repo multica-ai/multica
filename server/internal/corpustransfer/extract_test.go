@@ -66,6 +66,63 @@ func TestExtractVerifiedInstallsPackageOnlyAfterHashValidation(t *testing.T) {
 	}
 }
 
+func TestVerifyExtractedValidatesExistingInstallForACKRetry(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "legacy.zip")
+	writeTestZIP(t, archivePath, []zipTestEntry{{name: "sessions/a.jsonl", body: "alpha"}})
+	manifest, _, err := InspectZIP(archivePath, SourceInfo{Adapter: "zip", Type: "codex-export", Name: "pipi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "received")
+	if err := ExtractVerified(archivePath, destination, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyExtracted(destination, manifest); err != nil {
+		t.Fatalf("VerifyExtracted valid install: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, "sessions", "a.jsonl"), []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyExtracted(destination, manifest); err == nil || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("VerifyExtracted tampered error = %v", err)
+	}
+}
+
+func TestVerifyExtractedRejectsExtraFilesAndSymlinks(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "legacy.zip")
+	writeTestZIP(t, archivePath, []zipTestEntry{{name: "sessions/a.jsonl", body: "alpha"}})
+	manifest, _, err := InspectZIP(archivePath, SourceInfo{Adapter: "zip", Type: "codex-export", Name: "pipi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		add  func(t *testing.T, destination string)
+	}{
+		{name: "extra file", add: func(t *testing.T, destination string) {
+			if err := os.WriteFile(filepath.Join(destination, "extra"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "symlink", add: func(t *testing.T, destination string) {
+			if err := os.Symlink("sessions/a.jsonl", filepath.Join(destination, "link")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			destination := filepath.Join(t.TempDir(), "received")
+			if err := ExtractVerified(archivePath, destination, manifest); err != nil {
+				t.Fatal(err)
+			}
+			test.add(t, destination)
+			if err := VerifyExtracted(destination, manifest); err == nil {
+				t.Fatal("VerifyExtracted accepted an unexpected installed entry")
+			}
+		})
+	}
+}
+
 func TestInspectAndExtractRejectUnsafeZIPEntries(t *testing.T) {
 	tests := []struct {
 		name    string

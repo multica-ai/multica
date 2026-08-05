@@ -128,6 +128,10 @@ func InspectZIP(archivePath string, source SourceInfo) (Manifest, ArchiveEnvelop
 	if err != nil {
 		return Manifest{}, ArchiveEnvelope{}, err
 	}
+	archiveDigest, archiveSize, err := hashFile(archivePath)
+	if err != nil {
+		return Manifest{}, ArchiveEnvelope{}, err
+	}
 	var embedded []byte
 	embeddedPresent := false
 	entries := make([]Entry, 0, len(validated))
@@ -164,10 +168,16 @@ func InspectZIP(archivePath string, source SourceInfo) (Manifest, ArchiveEnvelop
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	resetReplicaLinks(entries)
+	createdAt := time.Unix(0, 0).UTC()
+	for _, entry := range entries {
+		if entry.Mtime.After(createdAt) {
+			createdAt = entry.Mtime
+		}
+	}
 	manifest := Manifest{
 		SchemaVersion:          ManifestSchemaVersion,
-		PackageID:              uuid.NewString(),
-		CreatedAt:              time.Now().UTC(),
+		PackageID:              uuid.NewSHA1(uuid.NameSpaceURL, []byte("corpus-zip:"+archiveDigest)).String(),
+		CreatedAt:              createdAt,
 		Source:                 source,
 		Entries:                entries,
 		EntryCount:             len(entries),
@@ -190,8 +200,11 @@ func InspectZIP(archivePath string, source SourceInfo) (Manifest, ArchiveEnvelop
 	if err != nil {
 		return Manifest{}, ArchiveEnvelope{}, err
 	}
-	envelope, err := envelopeForArchive(archivePath, manifestJSON)
-	return manifest, envelope, err
+	manifestDigest := sha256.Sum256(manifestJSON)
+	return manifest, ArchiveEnvelope{
+		Format: "zip", Filename: filepath.Base(archivePath), SizeBytes: archiveSize,
+		SHA256: archiveDigest, ManifestSHA256: hex.EncodeToString(manifestDigest[:]),
+	}, nil
 }
 
 func compareManifestEntries(expected, actual []Entry) error {

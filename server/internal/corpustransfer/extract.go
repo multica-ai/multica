@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -110,6 +111,111 @@ func ExtractVerified(archivePath, destination string, manifest Manifest) error {
 		return fmt.Errorf("publish extracted package: %w", err)
 	}
 	published = true
+	return nil
+}
+
+// VerifyExtracted revalidates a previously installed package so a receive
+// command can safely retry an ACK without downloading or publishing it again.
+func VerifyExtracted(destination string, manifest Manifest) error {
+	if err := manifest.Validate(); err != nil {
+		return err
+	}
+	rootInfo, err := os.Lstat(destination)
+	if err != nil {
+		return fmt.Errorf("inspect installed package: %w", err)
+	}
+	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("installed package is not a directory")
+	}
+	expected := make(map[string]Entry, len(manifest.Entries))
+	allowedDirs := map[string]struct{}{".": {}}
+	for _, entry := range manifest.Entries {
+		expected[entry.Path] = entry
+		for dir := path.Dir(entry.Path); dir != "."; dir = path.Dir(dir) {
+			allowedDirs[dir] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(expected))
+	err = filepath.WalkDir(destination, func(filename string, item os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(destination, filename)
+		if err != nil {
+			return err
+		}
+		archivePath := filepath.ToSlash(relative)
+		if archivePath == "." {
+			return nil
+		}
+		info, err := item.Info()
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if _, ok := allowedDirs[archivePath]; !ok {
+				return fmt.Errorf("unexpected installed directory %q", archivePath)
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("installed entry %q is not a regular file", archivePath)
+		}
+		entry, ok := expected[archivePath]
+		if !ok {
+			return fmt.Errorf("unexpected installed file %q", archivePath)
+		}
+		if err := verifyInstalledFile(filename, archivePath, info, entry); err != nil {
+			return err
+		}
+		seen[archivePath] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(seen) != len(expected) {
+		return fmt.Errorf("installed package contains %d manifest files, want %d", len(seen), len(expected))
+	}
+	return nil
+}
+
+func verifyInstalledFile(filename, archivePath string, before os.FileInfo, expected Entry) error {
+	if before.Size() != expected.SizeBytes {
+		return fmt.Errorf("size mismatch for installed entry %q", archivePath)
+	}
+	file, err := os.Open(filename)
+	if err != nil {
+		return fmt.Errorf("open installed entry %q: %w", archivePath, err)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return fmt.Errorf("stat installed entry %q: %w", archivePath, err)
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) || !sameFileSnapshot(before, opened) {
+		_ = file.Close()
+		return fmt.Errorf("installed entry changed before verification: %q", archivePath)
+	}
+	hash := sha256.New()
+	size, copyErr := io.Copy(hash, io.LimitReader(file, expected.SizeBytes+1))
+	closeErr := file.Close()
+	after, statErr := os.Lstat(filename)
+	if copyErr != nil {
+		return fmt.Errorf("hash installed entry %q: %w", archivePath, copyErr)
+	}
+	if closeErr != nil || statErr != nil {
+		return fmt.Errorf("close or restat installed entry %q", archivePath)
+	}
+	if !os.SameFile(before, after) || !sameFileSnapshot(before, after) {
+		return fmt.Errorf("installed entry changed during verification: %q", archivePath)
+	}
+	if size != expected.SizeBytes {
+		return fmt.Errorf("size mismatch for installed entry %q", archivePath)
+	}
+	if digest := hex.EncodeToString(hash.Sum(nil)); digest != expected.SHA256 {
+		return fmt.Errorf("sha256 mismatch for installed entry %q", archivePath)
+	}
 	return nil
 }
 

@@ -76,8 +76,8 @@ func (m Manifest) Validate() error {
 	if m.SchemaVersion != ManifestSchemaVersion {
 		return fmt.Errorf("unsupported manifest schema %q", m.SchemaVersion)
 	}
-	if strings.TrimSpace(m.PackageID) == "" {
-		return fmt.Errorf("manifest package_id is required")
+	if !validPathComponent(m.PackageID) || strings.TrimSpace(m.PackageID) != m.PackageID {
+		return fmt.Errorf("manifest package_id must be a safe path component")
 	}
 	if m.EntryCount != len(m.Entries) {
 		return fmt.Errorf("manifest entry_count %d does not match %d entries", m.EntryCount, len(m.Entries))

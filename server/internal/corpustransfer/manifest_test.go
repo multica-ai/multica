@@ -131,6 +131,15 @@ func TestManifestValidateRejectsFalseReplicaClaim(t *testing.T) {
 	}
 }
 
+func TestManifestValidateRejectsUnsafePackageID(t *testing.T) {
+	for _, packageID := range []string{".", "..", "../../escape", `folder\\escape`, "bad\x00id"} {
+		m := Manifest{SchemaVersion: ManifestSchemaVersion, PackageID: packageID, CreatedAt: time.Now().UTC()}
+		if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "package_id") {
+			t.Fatalf("unsafe package_id %q error = %v", packageID, err)
+		}
+	}
+}
+
 func TestManifestValidateReservesEmbeddedManifestPath(t *testing.T) {
 	for _, name := range []string{EmbeddedManifestName, "MANIFEST.JSON", "manifest.json"} {
 		m := Manifest{

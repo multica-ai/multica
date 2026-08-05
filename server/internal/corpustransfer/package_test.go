@@ -96,6 +96,21 @@ func TestInspectZIPBuildsManifestForExistingArchive(t *testing.T) {
 	if envelope.Filename != "legacy.zip" || envelope.SizeBytes <= 0 || len(envelope.SHA256) != 64 {
 		t.Fatalf("legacy envelope = %#v", envelope)
 	}
+	second, secondEnvelope, err := InspectZIP(archivePath, SourceInfo{Adapter: "zip", Type: "codex-export", Name: "pipi"})
+	if err != nil {
+		t.Fatalf("second InspectZIP: %v", err)
+	}
+	firstJSON, err := manifest.CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := second.CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, secondJSON) || envelope.ManifestSHA256 != secondEnvelope.ManifestSHA256 {
+		t.Fatalf("existing ZIP inspection is not stable across retries:\n%s\n%s", firstJSON, secondJSON)
+	}
 }
 
 func TestInspectZIPRejectsEmptyEmbeddedManifest(t *testing.T) {
