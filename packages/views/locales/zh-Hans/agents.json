@@ -506,6 +506,8 @@
     }
   },
   "profile_card": {
+    "_comment_model_label": "CEREBRO-PATCH(profile-card-model-row): FIR-3406 model row in agent hover card",
+    "model_label": "模型",
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
     "runtime_label": "运行时",

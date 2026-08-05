@@ -505,12 +505,15 @@ var catalog = []Capability{
 		Key:           "update_agent",
 		Title:         "Edit agent",
 		Category:      CategoryAgents,
-		Description:   "Edit an agent's config, skills, tools, env, archive/restore it, cancel its tasks, or govern its context (propose/review change-requests, roll back, transfer ownership).",
-		DescriptionZh: "编辑 agent 的配置、skills、tools、环境变量，归档/恢复，取消其任务，或管理其上下文（提交/审阅变更请求、回滚、转让所有权）。",
+		Description:   "Edit an agent's config, skills, tools, env, archive/restore it, pause/unpause it, cancel its tasks, or govern its context (propose/review change-requests, roll back, transfer ownership).",
+		DescriptionZh: "编辑 agent 的配置、skills、tools、环境变量，归档/恢复，暂停/恢复，取消其任务，或管理其上下文（提交/审阅变更请求、回滚、转让所有权）。",
 		Ops: []string{
 			"PUT /api/agents/{id}/",
 			"POST /api/agents/{id}/archive",
 			"POST /api/agents/{id}/restore",
+			// CEREBRO-PATCH(agent-pause-catalog): FIR-4508 agent-scoped pause/unpause.
+			"POST /api/agents/{id}/pause",
+			"POST /api/agents/{id}/unpause",
 			"POST /api/agents/{id}/cancel-tasks",
 			"PUT /api/agents/{id}/skills",
 			"POST /api/agents/{id}/skills/add",

@@ -140,6 +140,8 @@ type AutoPauseInvoker interface {
 	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — clear the consecutive
 	// auto-pause circuit-breaker counter when a task completes successfully.
 	ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID)
+	// CEREBRO-PATCH(agent-auto-pause-reset): FIR-4508 — clear agent-scoped counter.
+	ResetAgentAutoPauseCount(ctx context.Context, agentID pgtype.UUID)
 }
 
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
@@ -1358,6 +1360,20 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		return nil, nil
 	}
 
+	// CEREBRO-PATCH(task-claim-agent-pause-guard): FIR-4508 — multi-provider
+	// agent-scoped pause. Queued work stays queued until the agent unpauses.
+	if agent.PausedAt.Valid {
+		reason := ""
+		if agent.PauseReason.Valid {
+			reason = agent.PauseReason.String
+		}
+		slog.Debug("task claim blocked: agent paused",
+			"agent_id", util.UUIDToString(agentID),
+			"pause_reason", reason,
+		)
+		return nil, nil
+	}
+
 	t0 = time.Now()
 	running, err := s.Queries.CountRunningTasks(ctx, agentID)
 	countRunningMs = time.Since(t0).Milliseconds()
@@ -1727,8 +1743,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	s.captureTaskCompleted(ctx, task)
 	s.projectAnalyticsRun(ctx, task.ID)
 	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — a success clears the runtime's auto-pause circuit breaker.
-	if s.AutoPause != nil && task.RuntimeID.Valid {
-		s.AutoPause.ResetAutoPauseCount(ctx, task.RuntimeID)
+	// CEREBRO-PATCH(agent-auto-pause-reset): FIR-4508 — also clear the agent-scoped counter.
+	if s.AutoPause != nil {
+		if task.RuntimeID.Valid {
+			s.AutoPause.ResetAutoPauseCount(ctx, task.RuntimeID)
+		}
+		if task.AgentID.Valid {
+			s.AutoPause.ResetAgentAutoPauseCount(ctx, task.AgentID)
+		}
 	}
 
 	// Invariant: every completed issue task must have at least one agent
@@ -2094,6 +2116,26 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 			slog.Info("task auto-retry skipped: runtime paused",
 				"task_id", util.UUIDToString(parent.ID),
 				"runtime_id", util.UUIDToString(parent.RuntimeID),
+				"reason", reason,
+			)
+			return nil, nil
+		}
+	}
+	// CEREBRO-PATCH(retry-agent-pause-guard): FIR-4508 — same guard for agent pause.
+	if parent.AgentID.Valid {
+		agent, agErr := s.Queries.GetAgent(ctx, parent.AgentID)
+		if agErr != nil {
+			slog.Warn("task auto-retry skipped: agent lookup failed",
+				"task_id", util.UUIDToString(parent.ID),
+				"agent_id", util.UUIDToString(parent.AgentID),
+				"error", agErr,
+			)
+			return nil, nil
+		}
+		if agent.PausedAt.Valid {
+			slog.Info("task auto-retry skipped: agent paused",
+				"task_id", util.UUIDToString(parent.ID),
+				"agent_id", util.UUIDToString(parent.AgentID),
 				"reason", reason,
 			)
 			return nil, nil

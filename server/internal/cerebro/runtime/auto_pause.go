@@ -40,10 +40,16 @@ const (
 	autoPauseCircuitLimit = 4
 )
 
-// MaybeAutoPauseOnFailure inspects a recently-failed task and pauses the
-// task's runtime when the error text signals "the agent cannot work right
+// MaybeAutoPauseOnFailure inspects a recently-failed task and pauses either
+// the task's agent (multi-provider runtimes like Hermes) or the task's runtime
+// (single-provider) when the error text signals "the agent cannot work right
 // now": rate limits, monthly quota caps, expired auth tokens, OpenAI
 // insufficient_quota. Returns true when a pause was issued.
+//
+// FIR-4508: Hermes hosts many independent LLM backends behind one Multica
+// runtime. Auth/quota failures pause only the failing agent so siblings stay
+// online. True runtime death (gateway/provider unreachable = runtime_recovery)
+// still pauses the whole runtime.
 //
 // Wired into upstream's TaskService.FailTask via the AutoPauseInvoker seam
 // in task.go and the router-side assignment in router.go. The TaskService
@@ -77,7 +83,29 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 			"error", err,
 		)
 	}
+	// Keep the precise auth/rate_limit label even when we pause the agent
+	// (multi-provider) instead of the runtime.
+	if err := s.Cerebro.ReclassifyAutoPauseFailure(ctx, task.ID, decision.failureReason); err != nil {
+		slog.Warn("auto-pause on failure: reclassify task failed",
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+	}
 
+	// Multi-provider runtimes: pause the agent, not the runtime, for per-backend
+	// auth/quota failures. runtime_recovery stays on the runtime path — that is
+	// true runtime death (gateway/provider unreachable), not a single backend.
+	if decision.failureReason != "runtime_recovery" {
+		if provider := s.runtimeProvider(ctx, task.RuntimeID); pausesAgentNotRuntime(provider) {
+			return s.autoPauseAgent(ctx, task, decision, now)
+		}
+	}
+
+	return s.autoPauseRuntime(ctx, task, decision, now)
+}
+
+// autoPauseRuntime is the single-provider path (and Hermes runtime_recovery).
+func (s *Service) autoPauseRuntime(ctx context.Context, task db.AgentTaskQueue, decision autoPauseDecision, now time.Time) bool {
 	// Bump the consecutive auto-pause counter first; its value decides the
 	// backoff length and whether the circuit breaker trips. On a counter
 	// read/write error fall back to count=1 (flat default backoff) — never
@@ -115,19 +143,6 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		)
 		return false
 	}
-	// Re-classify the triggering task so the run log and unpause sweeper see
-	// the real pause cause. Rate-limit-like failures remain resumable; auth
-	// failures stay manual-only and require a human to fix credentials before
-	// retrying.
-	// The daemon sends an empty failure_reason for generic errors, which
-	// defaults to 'agent_error'. That value is excluded from
-	// ListResumableTasksForRuntime's Category-2 resume set.
-	if err := s.Cerebro.ReclassifyAutoPauseFailure(ctx, task.ID, decision.failureReason); err != nil {
-		slog.Warn("auto-pause on failure: reclassify task failed",
-			"task_id", util.UUIDToString(task.ID),
-			"error", err,
-		)
-	}
 
 	// Collapse the runtime's auth/quota bounce-loop into ONE aggregated inbox
 	// card per (runtime, day) for the runtime owner (FIR-2611), instead of the
@@ -154,18 +169,89 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 	return true
 }
 
+// autoPauseAgent is the multi-provider path (FIR-4508): pause only the agent
+// whose backend failed, leave the shared runtime and sibling agents online.
+func (s *Service) autoPauseAgent(ctx context.Context, task db.AgentTaskQueue, decision autoPauseDecision, now time.Time) bool {
+	if !task.AgentID.Valid {
+		slog.Warn("auto-pause agent: task has no agent_id",
+			"task_id", util.UUIDToString(task.ID),
+		)
+		return false
+	}
+
+	count, err := s.Cerebro.IncrementAgentAutoPauseCount(ctx, task.AgentID)
+	if err != nil {
+		slog.Warn("auto-pause agent: increment counter failed",
+			"agent_id", util.UUIDToString(task.AgentID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		count = 1
+	}
+
+	circuitOpen := circuitOpenForAutoPause(count, decision)
+	unpauseAt := nextUnpauseAt(count, decision.resetAt, decision.hasReset, now)
+	if decision.flatRetry > 0 && !decision.hasReset {
+		unpauseAt = now.Add(decision.flatRetry)
+	}
+
+	opts := AgentPauseOptions{Reason: decision.pauseReason}
+	if !circuitOpen {
+		opts.UnpauseAt = unpauseAt
+	}
+
+	if _, err := s.PauseAgent(ctx, task.AgentID, opts); err != nil {
+		slog.Warn("auto-pause agent: pause failed",
+			"agent_id", util.UUIDToString(task.AgentID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return false
+	}
+
+	// Reuse the issue-comment path with agent-scoped wording.
+	agentDecision := decision
+	agentDecision.scopeLabel = "Agenten"
+	agentDecision.detail = strings.ReplaceAll(agentDecision.detail, "Runtimen", "Agenten")
+	agentDecision.detail = strings.ReplaceAll(agentDecision.detail, "runtimen", "agenten")
+	s.notifyAutoPauseFailure(ctx, task, agentDecision, circuitOpen, count)
+
+	slog.Info("auto-paused agent on task failure",
+		"agent_id", util.UUIDToString(task.AgentID),
+		"runtime_id", util.UUIDToString(task.RuntimeID),
+		"task_id", util.UUIDToString(task.ID),
+		"consecutive_pauses", count,
+		"circuit_open", circuitOpen,
+		"pause_reason", decision.pauseReason,
+		"unpause_at", unpauseAtLog(unpauseAt, circuitOpen),
+	)
+	return true
+}
+
 // ResetAutoPauseCount clears the consecutive auto-pause counter for a runtime.
-// Called from CompleteTask (via the AutoPauseInvoker seam) when a task finishes
-// successfully — a single success means the runtime is working again, so the
-// next rate-limit pause starts a fresh chain. Best-effort: a failure here only
-// risks an early circuit trip on the next pause storm, not a crash.
+// Called from CompleteTask via the AutoPauseInvoker seam. Agent-scoped counters
+// are cleared separately via ResetAgentAutoPauseCount (FIR-4508). Best-effort:
+// a failure here only risks an early circuit trip on the next pause storm, not
+// a crash.
 func (s *Service) ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID) {
-	if !runtimeID.Valid {
+	if runtimeID.Valid {
+		if err := s.Cerebro.ResetAutoPauseCount(ctx, runtimeID); err != nil {
+			slog.Warn("reset auto-pause counter failed",
+				"runtime_id", util.UUIDToString(runtimeID),
+				"error", err,
+			)
+		}
+	}
+}
+
+// ResetAgentAutoPauseCount clears the agent-scoped circuit-breaker counter.
+func (s *Service) ResetAgentAutoPauseCount(ctx context.Context, agentID pgtype.UUID) {
+	if !agentID.Valid {
 		return
 	}
-	if err := s.Cerebro.ResetAutoPauseCount(ctx, runtimeID); err != nil {
-		slog.Warn("reset auto-pause counter failed",
-			"runtime_id", util.UUIDToString(runtimeID),
+	if err := s.Cerebro.ResetAgentAutoPauseCount(ctx, agentID); err != nil {
+		slog.Warn("reset agent auto-pause counter failed",
+			"agent_id", util.UUIDToString(agentID),
 			"error", err,
 		)
 	}
@@ -180,6 +266,8 @@ type autoPauseDecision struct {
 	failureReason string
 	title         string
 	detail        string
+	// scopeLabel is "Runtimen" or "Agenten" for human-facing pause copy.
+	scopeLabel string
 	// flatRetry, when > 0, overrides the growing 2h/4h/6h backoff with a
 	// fixed re-check interval AND keeps the circuit breaker closed forever
 	// (FIR-1889). A monthly spend cap is raisable by a human at any time
@@ -266,7 +354,44 @@ func classifyAutoPause(task db.AgentTaskQueue, now time.Time) autoPauseDecision 
 func isProviderAuthError(errText string) bool {
 	lower := strings.ToLower(errText)
 	return strings.Contains(lower, "401 invalid authentication credentials") ||
-		strings.Contains(lower, "failed to authenticate")
+		strings.Contains(lower, "failed to authenticate") ||
+		strings.Contains(lower, "invalid api key") ||
+		strings.Contains(lower, "incorrect api key") ||
+		strings.Contains(lower, "invalid x-api-key") ||
+		strings.Contains(lower, "authentication_error") ||
+		strings.Contains(lower, "not logged in") ||
+		strings.Contains(lower, "please run codex login") ||
+		strings.Contains(lower, "run codex login")
+}
+
+// pausesAgentNotRuntime reports Multica runtime providers that host multiple
+// independent LLM backends behind one runtime row. Auth/quota auto-pause must
+// target the agent, not the whole runtime (FIR-4508).
+func pausesAgentNotRuntime(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "hermes":
+		return true
+	default:
+		return false
+	}
+}
+
+// runtimeProvider resolves agent_runtime.provider for auto-pause scope.
+// Best-effort: lookup failures return "" so the single-provider (runtime)
+// pause path remains the default (fail closed toward pausing the runtime).
+func (s *Service) runtimeProvider(ctx context.Context, runtimeID pgtype.UUID) string {
+	if s == nil || s.TaskSvc == nil || s.TaskSvc.Queries == nil || !runtimeID.Valid {
+		return ""
+	}
+	rt, err := s.TaskSvc.Queries.GetAgentRuntime(ctx, runtimeID)
+	if err != nil {
+		slog.Warn("auto-pause: runtime provider lookup failed",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+		return ""
+	}
+	return rt.Provider
 }
 
 // isMonthlySpendLimit reports whether the provider error is Anthropic's
@@ -343,10 +468,20 @@ func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQ
 		body = circuitBreakerAnalysisCommentBody(task, decision, s.runtimeOwnerMention(ctx, task.RuntimeID))
 	}
 	if body == "" {
+		scope := decision.scopeLabel
+		if scope == "" {
+			scope = "Runtimen"
+		}
+		resumeTarget := "runtimen"
+		if scope == "Agenten" {
+			resumeTarget = "agenten"
+		}
 		body = fmt.Sprintf(
-			"Runtimen er sat på pause: %s.\n\n%s\n\nDen genoptager ikke automatisk. Ret årsagen og genoptag runtimen manuelt.",
+			"%s er sat på pause: %s.\n\n%s\n\nDen genoptager ikke automatisk. Ret årsagen og genoptag %s manuelt.",
+			scope,
 			decision.title,
 			decision.detail,
+			resumeTarget,
 		)
 	}
 	comment, err := s.Cerebro.CreateAutoPauseAlertComment(ctx, cerebrodb.CreateAutoPauseAlertCommentParams{
@@ -378,15 +513,23 @@ func (s *Service) runtimeOwnerMention(ctx context.Context, runtimeID pgtype.UUID
 
 func circuitBreakerAnalysisCommentBody(task db.AgentTaskQueue, decision autoPauseDecision, ownerMention string) string {
 	if ownerMention == "" {
-		ownerMention = "Runtime owner"
+		if decision.scopeLabel == "Agenten" {
+			ownerMention = "Agent owner"
+		} else {
+			ownerMention = "Runtime owner"
+		}
 	}
 	taskID := util.UUIDToString(task.ID)
 	errText := ""
 	if task.Error.Valid {
 		errText = strings.TrimSpace(redact.Text(task.Error.String))
 	}
+	target := "runtime"
+	if decision.scopeLabel == "Agenten" {
+		target = "agent"
+	}
 	if errText == "" {
-		errText = "The runtime hit a rate limit or usage limit."
+		errText = fmt.Sprintf("The %s hit a rate limit or usage limit.", target)
 	}
 	if len([]rune(errText)) > 900 {
 		rs := []rune(errText)
@@ -397,11 +540,12 @@ func circuitBreakerAnalysisCommentBody(task db.AgentTaskQueue, decision autoPaus
 		title = "Usage or rate limit reached"
 	}
 	return fmt.Sprintf(
-		"%s: Auto-restart has stopped for this runtime.\n\n"+
+		"%s: Auto-restart has stopped for this %s.\n\n"+
 			"Analysis: %s. The provider did not return a reset time, so Multica retried after 2 hours, 4 hours, and 6 hours. It still failed, so new auto-restarts are paused until the account, key, or spend limit is fixed.\n\n"+
 			"Last error:\n\n> %s\n\n"+
 			"Run: `%s`",
 		ownerMention,
+		target,
 		title,
 		errText,
 		taskID,
