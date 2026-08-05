@@ -394,7 +394,9 @@ func (c *APIClient) PutStream(ctx context.Context, path string, body io.Reader, 
 	if body == nil || size < 0 {
 		return fmt.Errorf("stream body and non-negative size are required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+path, body)
+	// Present only io.Reader so net/http closes its wrapper rather than a
+	// caller-owned io.ReadCloser such as *os.File.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+path, struct{ io.Reader }{Reader: body})
 	if err != nil {
 		return err
 	}

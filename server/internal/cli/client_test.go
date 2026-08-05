@@ -49,6 +49,25 @@ func TestClientPutStreamDoesNotBufferAndSetsExactLength(t *testing.T) {
 	}
 }
 
+func TestClientPutStreamLeavesCallerReaderOpen(t *testing.T) {
+	reader := &trackedReadCloser{Reader: strings.NewReader("stream-me")}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if _, err := io.Copy(io.Discard, req.Body); err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := NewAPIClient(server.URL, "workspace", "token")
+
+	if err := client.PutStream(context.Background(), "/content", reader, int64(len("stream-me")), nil); err != nil {
+		t.Fatalf("PutStream: %v", err)
+	}
+	if reader.closed {
+		t.Fatal("PutStream closed the caller-owned reader")
+	}
+}
+
 func TestClientDownloadStreamDoesNotBuffer(t *testing.T) {
 	payload := []byte(strings.Repeat("download", 128*1024))
 	client := NewAPIClient("https://api.example.test", "workspace", "token")
@@ -105,6 +124,16 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 type readAfterRoundTrip struct {
 	allowed *atomic.Bool
 	body    io.Reader
+}
+
+type trackedReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *trackedReadCloser) Close() error {
+	r.closed = true
+	return nil
 }
 
 func (r *readAfterRoundTrip) Read(p []byte) (int, error) {
