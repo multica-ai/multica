@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -174,10 +175,41 @@ func readClaudeCredentialsFile() ([]byte, error) {
 // tooling wrote (see providerKeychainItems in sandbox.go for the
 // per-provider contract). A 5s timeout guards against a blocking keychain
 // UI prompt on hosts where access was not previously granted.
+//
+// CEREBRO-PATCH(daemon-claude-keychain-account): FIR-4520 — look the item up
+// the way Claude Code writes it (account name + config-dir-scoped service),
+// falling back to the pre-2.x service-only item so older installs keep
+// working. Without the account name the keychain returns whichever item
+// matches first, which on a Mac carrying a stale pre-2.x item is an expired
+// token that never refreshes.
 func readClaudeCredentialsKeychain() ([]byte, error) {
+	service := cerebroaccount.ClaudeKeychainService(strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")))
+	account := cerebroaccount.ClaudeKeychainAccount(claudeKeychainUsername())
+	if data, err := runSecurityFindGenericPassword("-a", account, "-w", "-s", service); err == nil {
+		return data, nil
+	}
+	return runSecurityFindGenericPassword("-w", "-s", cerebroaccount.ClaudeKeychainServiceBase)
+}
+
+// claudeKeychainUsername resolves the OS username the same way Claude Code
+// does: $USER first, then the current user record.
+func claudeKeychainUsername() string {
+	if name := strings.TrimSpace(os.Getenv("USER")); name != "" {
+		return name
+	}
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return u.Username
+}
+
+// runSecurityFindGenericPassword is a var so tests can assert which keychain
+// item the lookup asks for without touching the real keychain.
+var runSecurityFindGenericPassword = func(args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output()
+	out, err := exec.CommandContext(ctx, "security", append([]string{"find-generic-password"}, args...)...).Output()
 	if err != nil {
 		return nil, errors.Join(cerebroaccount.ErrOAuthTokenUnavailable, err)
 	}
