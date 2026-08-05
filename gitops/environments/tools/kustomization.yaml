@@ -26,4 +26,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "3fb2870b"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: "fb823640"
+    newTag: "3fb2870b"
