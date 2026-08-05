@@ -399,6 +399,12 @@ func TestCreateUsesRuntimeCheapModelOnUncataloguedProvider(t *testing.T) {
 		t.Fatalf("cheap model unset: model_override = %q, want %q", got, "")
 	}
 
+	// Clear the first pending row so the agent+issue min-interval does not
+	// block the second Create in the same test (default is 5 minutes).
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1`, hermesAgent); err != nil {
+		t.Fatalf("clear first wakeup: %v", err)
+	}
+
 	if _, err := wkPool.Exec(ctx,
 		`UPDATE agent_runtime SET cheap_model = 'gemini-3.6-flash' WHERE id = $1`, hermesRuntime); err != nil {
 		t.Fatalf("set runtime cheap model: %v", err)
