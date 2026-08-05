@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY corpus_transfer_idempotency_uidx;

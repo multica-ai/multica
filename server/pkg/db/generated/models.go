@@ -487,6 +487,41 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type CorpusTransfer struct {
+	ID                         pgtype.UUID        `json:"id"`
+	WorkspaceID                pgtype.UUID        `json:"workspace_id"`
+	ActorID                    pgtype.UUID        `json:"actor_id"`
+	IdempotencyKey             string             `json:"idempotency_key"`
+	ObjectKey                  string             `json:"object_key"`
+	Manifest                   []byte             `json:"manifest"`
+	ManifestSha256             string             `json:"manifest_sha256"`
+	ExpectedSizeBytes          int64              `json:"expected_size_bytes"`
+	ExpectedSha256             string             `json:"expected_sha256"`
+	State                      string             `json:"state"`
+	VerificationToken          pgtype.UUID        `json:"verification_token"`
+	VerificationLeaseExpiresAt pgtype.Timestamptz `json:"verification_lease_expires_at"`
+	VerifiedSizeBytes          pgtype.Int8        `json:"verified_size_bytes"`
+	VerifiedSha256             pgtype.Text        `json:"verified_sha256"`
+	FailureCode                pgtype.Text        `json:"failure_code"`
+	ExpiresAt                  pgtype.Timestamptz `json:"expires_at"`
+	UploadStartedAt            pgtype.Timestamptz `json:"upload_started_at"`
+	UploadedAt                 pgtype.Timestamptz `json:"uploaded_at"`
+	VerificationStartedAt      pgtype.Timestamptz `json:"verification_started_at"`
+	ConfirmedAt                pgtype.Timestamptz `json:"confirmed_at"`
+	FailedAt                   pgtype.Timestamptz `json:"failed_at"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CorpusTransferAck struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	TransferID      pgtype.UUID        `json:"transfer_id"`
+	SinkID          string             `json:"sink_id"`
+	ConfirmedSha256 string             `json:"confirmed_sha256"`
+	AcknowledgedBy  pgtype.UUID        `json:"acknowledged_by"`
+	AcknowledgedAt  pgtype.Timestamptz `json:"acknowledged_at"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`

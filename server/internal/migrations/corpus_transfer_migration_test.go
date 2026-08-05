@@ -1,0 +1,89 @@
+package migrations
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCorpusTransferMigrationsPreserveLedgerContract(t *testing.T) {
+	dir := realMigrationsDir(t)
+	tableFiles := []string{
+		"257_corpus_transfer.up.sql",
+		"261_corpus_transfer_ack.up.sql",
+	}
+	for _, name := range tableFiles {
+		body := readMigrationForTest(t, dir, name)
+		upper := strings.ToUpper(body)
+		if strings.Contains(upper, "FOREIGN KEY") || strings.Contains(upper, "REFERENCES") {
+			t.Errorf("%s must not add foreign keys", name)
+		}
+	}
+
+	transfer := readMigrationForTest(t, dir, "257_corpus_transfer.up.sql")
+	for _, state := range []string{"created", "uploading", "uploaded", "verifying", "confirmed", "acked", "failed", "expired"} {
+		if !strings.Contains(transfer, "'"+state+"'") {
+			t.Errorf("transfer state check is missing %q", state)
+		}
+	}
+	if !strings.Contains(transfer, "2147483648") {
+		t.Error("transfer schema must enforce the 2 GiB P0 limit")
+	}
+	for _, invariant := range []string{
+		"(verified_size_bytes IS NULL) = (verified_sha256 IS NULL)",
+		"(verification_token IS NULL) = (verification_lease_expires_at IS NULL)",
+		"(state = 'verifying') = (verification_token IS NOT NULL AND verification_lease_expires_at IS NOT NULL)",
+		"(state = 'failed') = (failure_code IS NOT NULL)",
+	} {
+		if !strings.Contains(transfer, invariant) {
+			t.Errorf("transfer schema is missing invariant %q", invariant)
+		}
+	}
+
+	for _, name := range []string{
+		"258_corpus_transfer_primary_index.up.sql",
+		"260_corpus_transfer_idempotency_index.up.sql",
+		"262_corpus_transfer_ack_primary_index.up.sql",
+	} {
+		body := readMigrationForTest(t, dir, name)
+		if !strings.Contains(strings.ToUpper(body), "CREATE UNIQUE INDEX CONCURRENTLY") {
+			t.Errorf("%s must create a unique index concurrently", name)
+		}
+		if strings.Count(body, ";") != 1 {
+			t.Errorf("%s must contain exactly one SQL statement", name)
+		}
+	}
+
+	for _, name := range []string{
+		"258_corpus_transfer_primary_index.down.sql",
+		"262_corpus_transfer_ack_primary_index.down.sql",
+	} {
+		body := strings.ToUpper(readMigrationForTest(t, dir, name))
+		if !strings.Contains(body, "DROP INDEX CONCURRENTLY IF EXISTS") {
+			t.Errorf("%s must tolerate the primary-key constraint having dropped its owned index", name)
+		}
+	}
+
+	queryBody, err := os.ReadFile(filepath.Join(dir, "..", "pkg", "db", "queries", "corpus_transfer.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, predicate := range []string{
+		"expected_size_bytes = sqlc.arg('verified_size_bytes')",
+		"expected_sha256 = sqlc.arg('verified_sha256')",
+	} {
+		if !strings.Contains(string(queryBody), predicate) {
+			t.Errorf("confirmation CAS is missing %q", predicate)
+		}
+	}
+}
+
+func readMigrationForTest(t *testing.T, dir, name string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(body)
+}

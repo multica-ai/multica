@@ -1,0 +1,1 @@
+ALTER TABLE corpus_transfer_ack DROP CONSTRAINT corpus_transfer_ack_pkey;
