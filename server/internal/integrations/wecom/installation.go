@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -84,9 +85,65 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		InstallerUserID: p.InstallerUserID,
 	})
 	if err != nil {
-		return Installation{}, err
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return Installation{}, s.botOwnerConflictErr(ctx, p.WorkspaceID, p.BotID)
+		}
+		return Installation{}, fmt.Errorf("wecom: upsert installation: %w", err)
 	}
 	return installationFromRow(row)
+}
+
+// Sentinels for the one conflict Upsert cannot resolve: the bot is already
+// connected somewhere else. UpsertChannelInstallation conflicts on
+// (workspace_id, agent_id, channel_type), but idx_channel_installation_type_appid
+// is UNIQUE on (channel_type, config->>'app_id') — so connecting the SAME bot to
+// a second agent misses the ON CONFLICT clause entirely and trips the index
+// instead. Without these the admin reads the raw Postgres text
+// ("duplicate key value violates unique constraint …") in a toast.
+//
+// One bot is one connection: the WeChat Work long connection allows a single
+// live subscriber per bot, so two agents cannot share one. The way out is
+// always to free the bot first, which is what each message says.
+var (
+	// ErrBotOwnedBySameWorkspace — another agent in the admin's own workspace
+	// holds the bot. Reversible from the same settings screen.
+	ErrBotOwnedBySameWorkspace = errors.New("wecom: this bot is already connected to another agent in this workspace")
+
+	// ErrBotOwnedByArchivedAgent — the holder is archived, so it does not show
+	// up in the agent list and the bot looks free while it is not.
+	ErrBotOwnedByArchivedAgent = errors.New("wecom: this bot is connected to an archived agent in this workspace")
+
+	// ErrBotOwnedByAnotherWorkspace — the holder is out of sight entirely and
+	// only someone with access there can release it.
+	ErrBotOwnedByAnotherWorkspace = errors.New("wecom: this bot is already connected to a different Multica workspace")
+)
+
+// pgUniqueViolation is Postgres' unique_violation SQLSTATE.
+const pgUniqueViolation = "23505"
+
+// botOwnerConflictErr names who holds the (wecom, bot_id) routing slot so the
+// handler can tell the admin where to go, mirroring slack's owner-conflict
+// classification. Read after the upsert failed, so a slot that has since been
+// freed — or a lookup that fails — falls back to the cross-workspace message:
+// it is the only one that is never wrong about where to look, and a retry
+// succeeds anyway.
+func (s *InstallationService) botOwnerConflictErr(ctx context.Context, requestingWorkspaceID pgtype.UUID, botID string) error {
+	owner, err := s.store.Queries.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
+		ChannelType: channelTypeWecom,
+		AppID:       botID,
+	})
+	if err != nil {
+		return ErrBotOwnedByAnotherWorkspace
+	}
+	switch {
+	case owner.WorkspaceID != requestingWorkspaceID:
+		return ErrBotOwnedByAnotherWorkspace
+	case owner.AgentArchivedAt.Valid:
+		return ErrBotOwnedByArchivedAgent
+	default:
+		return ErrBotOwnedBySameWorkspace
+	}
 }
 
 // Revoke flips status to 'revoked' — the row is preserved so audit trails

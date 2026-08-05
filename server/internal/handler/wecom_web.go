@@ -10,6 +10,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -151,7 +152,27 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 		Secret:          strings.TrimSpace(body.Secret),
 	})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// One bot is one live long connection, so the (wecom, bot_id) slot has
+		// exactly one owner. Upsert conflicts on
+		// (workspace_id, agent_id, channel_type), which means connecting an
+		// already-connected bot to a SECOND agent misses ON CONFLICT and trips
+		// idx_channel_installation_type_appid instead. Each sentinel gets the
+		// sentence that tells the admin where the bot actually is; returning
+		// err.Error() here used to toast them the raw "duplicate key value
+		// violates unique constraint" text — and forwarded every other database
+		// error verbatim to the API caller besides.
+		switch {
+		case errors.Is(err, wecom.ErrBotOwnedBySameWorkspace):
+			writeError(w, http.StatusConflict, "this bot is already connected to another agent in this workspace — disconnect it there first, then connect it here")
+		case errors.Is(err, wecom.ErrBotOwnedByArchivedAgent):
+			writeError(w, http.StatusConflict, "this bot is connected to an archived agent in this workspace — restore that agent, or disconnect its bot, before connecting it here")
+		case errors.Is(err, wecom.ErrBotOwnedByAnotherWorkspace):
+			writeError(w, http.StatusConflict, "this bot is already connected to a different Multica workspace — disconnect it there before connecting it here")
+		default:
+			slog.Warn("wecom install failed",
+				"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
+			writeError(w, http.StatusBadRequest, "could not connect the WeCom bot — check the Bot ID and secret from the WeChat Work admin console, and that the bot is a smart bot with the long connection enabled")
+		}
 		return
 	}
 	h.publish(protocol.EventWecomInstallationCreated, uuidToString(inst.WorkspaceID), "user", userID, map[string]any{
