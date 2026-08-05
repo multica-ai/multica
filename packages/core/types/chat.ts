@@ -90,8 +90,28 @@ export interface ChatSession {
   /** True when the user has pinned this chat to the top of the list.
    *  Optional so older clients / non-list payloads stay valid. */
   pinned?: boolean;
+  /** Set when this conversation was opened to continue a background agent task.
+   *  A soft reference — the task may since have been pruned — so treat it as a
+   *  provenance label, not a guaranteed lookup key. Optional for older servers. */
+  continued_from_task_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Response of POST /api/tasks/{taskId}/continue-in-chat. */
+export interface ContinueTaskInChatResult {
+  chat_session: ChatSession;
+  /** True when this member had already continued the same task, so the existing
+   *  conversation was handed back instead of a second one being created. */
+  reopened: boolean;
+  /** False when the source task had no resumable provider session to inherit.
+   *  The chat still opens — in the task's work_dir when there was one — but the
+   *  agent starts a fresh conversation, so the UI must not imply continuity. */
+  session_carried: boolean;
+  /** Whether the chat inherited the task's working directory. Independent of
+   *  session_carried: a task can leave a usable directory and no resumable
+   *  conversation. */
+  work_dir_carried: boolean;
 }
 
 export interface PendingChatTaskItem {

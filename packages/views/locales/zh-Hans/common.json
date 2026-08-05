@@ -42,6 +42,15 @@
     "hours_ago": "{{count}} 小时前",
     "days_ago": "{{count}} 天前"
   },
+  "continue_in_chat": {
+    "tooltip": "在 chat 里继续",
+    "aria": "在 chat 里继续这次运行",
+    "no_session": "已在这次运行的工作目录里打开 chat，但这次运行没有留下可恢复的会话——智能体不会带着上下文开始。",
+    "blocked": "未打开——你没有该智能体的使用权限",
+    "still_running": "这次运行还没结束——先停止它再在 chat 里继续",
+    "already_chat": "这次运行已经属于一个 chat 会话",
+    "failed": "在 chat 里继续这次运行失败"
+  },
   "lark_bind": {
     "page_title": "绑定飞书账号",
     "redeeming": "正在兑换绑定 token…",

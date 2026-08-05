@@ -85,6 +85,7 @@ import type {
   TaskMessagePayload,
   Attachment,
   ChatSession,
+  ContinueTaskInChatResult,
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
@@ -2478,6 +2479,21 @@ export class ApiClient {
     });
     return parseWithFallback(raw, CancelTaskResponseSchema, EMPTY_CANCEL_TASK_RESPONSE, {
       endpoint: "POST /api/tasks/{taskId}/cancel",
+    });
+  }
+
+  // Open a chat that continues a finished background task: the new session
+  // inherits that task's provider session and work_dir, so the first message
+  // resumes the run instead of cold-starting.
+  //
+  // Idempotent by (task, member) server-side — a second call reopens the same
+  // conversation with `reopened: true` rather than forking a second one onto the
+  // same provider session. Callers must read `session_carried`: it is false when
+  // the task had no resumable session, and the UI has to say so rather than
+  // implying continuity the agent does not have.
+  async continueTaskInChat(taskId: string): Promise<ContinueTaskInChatResult> {
+    return this.fetch(`/api/tasks/${taskId}/continue-in-chat`, {
+      method: "POST",
     });
   }
 

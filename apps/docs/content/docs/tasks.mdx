@@ -62,6 +62,7 @@ From here you can:
 - Open a run record to see the agent's messages, tool calls, and error output.
 - Stop tasks that are deferred, queued, starting, waiting for a local directory, or running.
 - Retry a failed or cancelled task.
+- Continue a finished task in chat. The new conversation inherits that run's agent session and working directory, so you can ask follow-up questions with the run's context instead of starting cold. Only finished tasks offer this — a live run still owns its session and directory. When the run left no resumable session, the chat still opens in its working directory and tells you the agent starts without that context.
 
 ![Run record: status timeline, agent summary, and individual tool calls](/images/docs/task-transcript.png)
 

@@ -1582,9 +1582,14 @@ type ChatSessionResponse struct {
 	LastMessage *ChatLastMessage `json:"last_message"`
 	// Pinned marks a chat the user has stuck to the top of the list. Populated
 	// by list endpoints and by the pin/unpin + single-session responses.
-	Pinned    bool   `json:"pinned"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Pinned bool `json:"pinned"`
+	// ContinuedFromTaskID is set when this conversation was opened to continue a
+	// background agent task (see ContinueTaskInChat). A soft reference: the task
+	// may since have been pruned, so treat it as a provenance label, not a
+	// guaranteed join target.
+	ContinuedFromTaskID *string `json:"continued_from_task_id"`
+	CreatedAt           string  `json:"created_at"`
+	UpdatedAt           string  `json:"updated_at"`
 }
 
 // ChatLastMessage is a preview of a session's most recent message, used to
@@ -1646,16 +1651,17 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		ProjectID:   uuidToPtr(s.ProjectID),
-		Title:       s.Title,
-		Status:      s.Status,
-		Pinned:      s.PinnedAt.Valid,
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:                  uuidToString(s.ID),
+		WorkspaceID:         uuidToString(s.WorkspaceID),
+		AgentID:             uuidToString(s.AgentID),
+		CreatorID:           uuidToString(s.CreatorID),
+		ProjectID:           uuidToPtr(s.ProjectID),
+		Title:               s.Title,
+		Status:              s.Status,
+		Pinned:              s.PinnedAt.Valid,
+		ContinuedFromTaskID: uuidToPtr(s.ContinuedFromTaskID),
+		CreatedAt:           timestampToString(s.CreatedAt),
+		UpdatedAt:           timestampToString(s.UpdatedAt),
 	}
 }
 
