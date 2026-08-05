@@ -1,0 +1,172 @@
+{
+  "$comment": "Source of truth for text attachment preview types. Edit this file only, then run `pnpm generate:text-preview-types`. The generator validates the data and updates the Go and TypeScript lookup tables consumed by the preview proxy and client dispatcher.",
+  "contentTypes": [
+    "application/json",
+    "application/javascript",
+    "application/xml",
+    "application/x-yaml",
+    "application/yaml",
+    "application/toml",
+    "application/x-sh",
+    "application/x-httpd-php"
+  ],
+  "extensionGroups": [
+    {
+      "label": "Markdown",
+      "language": "markdown",
+      "extensions": ["md", "markdown"]
+    },
+    {
+      "label": "Plain text",
+      "language": "plaintext",
+      "extensions": ["txt", "log", "csv", "tsv", "gitignore"]
+    },
+    {
+      "label": "Web",
+      "language": "xml",
+      "extensions": ["html", "htm", "xml"]
+    },
+    {
+      "label": "Stylesheets",
+      "language": "css",
+      "extensions": ["css"]
+    },
+    {
+      "label": "Sass",
+      "language": "scss",
+      "extensions": ["scss", "sass"]
+    },
+    {
+      "label": "Less",
+      "language": "less",
+      "extensions": ["less"]
+    },
+    {
+      "label": "JSON",
+      "language": "json",
+      "extensions": ["json"]
+    },
+    {
+      "label": "YAML",
+      "language": "yaml",
+      "extensions": ["yml", "yaml"]
+    },
+    {
+      "label": "INI-style config",
+      "language": "ini",
+      "extensions": ["toml", "ini", "conf"]
+    },
+    {
+      "label": "Build files",
+      "language": "dockerfile",
+      "extensions": ["dockerfile"]
+    },
+    {
+      "label": "Makefiles",
+      "language": "makefile",
+      "extensions": ["makefile"]
+    },
+    {
+      "label": "Shell",
+      "language": "bash",
+      "extensions": ["sh", "bash", "zsh"]
+    },
+    {
+      "label": "Python",
+      "language": "python",
+      "extensions": ["py"]
+    },
+    {
+      "label": "Ruby",
+      "language": "ruby",
+      "extensions": ["rb"]
+    },
+    {
+      "label": "Go",
+      "language": "go",
+      "extensions": ["go"]
+    },
+    {
+      "label": "Rust",
+      "language": "rust",
+      "extensions": ["rs"]
+    },
+    {
+      "label": "TypeScript",
+      "language": "typescript",
+      "extensions": ["ts", "tsx"]
+    },
+    {
+      "label": "JavaScript",
+      "language": "javascript",
+      "extensions": ["js", "jsx", "mjs", "cjs"]
+    },
+    {
+      "label": "Java",
+      "language": "java",
+      "extensions": ["java"]
+    },
+    {
+      "label": "Kotlin",
+      "language": "kotlin",
+      "extensions": ["kt"]
+    },
+    {
+      "label": "Swift",
+      "language": "swift",
+      "extensions": ["swift"]
+    },
+    {
+      "label": "C",
+      "language": "c",
+      "extensions": ["c", "h"]
+    },
+    {
+      "label": "C++",
+      "language": "cpp",
+      "extensions": ["cc", "cpp", "hpp"]
+    },
+    {
+      "label": "C#",
+      "language": "csharp",
+      "extensions": ["cs"]
+    },
+    {
+      "label": "PHP",
+      "language": "php",
+      "extensions": ["php"]
+    },
+    {
+      "label": "Lua",
+      "language": "lua",
+      "extensions": ["lua"]
+    },
+    {
+      "label": "Vim script",
+      "language": "vim",
+      "extensions": ["vim"]
+    },
+    {
+      "label": "SQL",
+      "language": "sql",
+      "extensions": ["sql"]
+    }
+  ],
+  "basenameGroups": [
+    {
+      "label": "Dockerfile",
+      "language": "dockerfile",
+      "basenames": ["dockerfile"]
+    },
+    {
+      "label": "Makefile",
+      "language": "makefile",
+      "basenames": ["makefile"]
+    },
+    {
+      "label": "Environment and ignore files",
+      "language": "plaintext",
+      "basenames": [".env", ".gitignore"]
+    }
+  ]
+}

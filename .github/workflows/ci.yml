@@ -50,6 +50,9 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
+              - 'scripts/generate-text-preview-types.mjs'
+              - 'server/internal/handler/text_preview_types.json'
+              - 'server/internal/handler/text_preview_types_generated.go'
               - 'scripts/selfhost-config.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
@@ -149,15 +152,17 @@ jobs:
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
 
-      - name: Verify reserved-slugs.ts is up to date
+      - name: Verify generated shared sources are up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
-        # Re-runs the generator and fails on any drift from the
-        # checked-in TypeScript output. The Go side embeds the JSON
-        # source directly, so a passing diff here proves both sides
-        # share one source of truth.
+        # Re-runs cross-language generators and fails on any drift from
+        # their checked-in outputs.
         run: |
           pnpm generate:reserved-slugs
-          git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+          pnpm generate:text-preview-types
+          git diff --exit-code -- \
+            packages/core/paths/reserved-slugs.ts \
+            packages/views/editor/utils/text-preview-types.generated.ts \
+            server/internal/handler/text_preview_types_generated.go
 
       - name: Build, type check, and lint
         if: ${{ needs.changes.outputs.frontend == 'true' }}
