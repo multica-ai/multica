@@ -1062,9 +1062,9 @@ func TestUpdateAutopilotTrigger_AcceptsEnabledAndLabelOnWebhookKind(t *testing.T
 	}
 }
 
-func TestGetAutopilotRun_ReturnsFullPayload(t *testing.T) {
-	// List endpoint omits trigger_payload; the new GET /runs/{runId}
-	// endpoint must return it intact.
+func TestGetAutopilotRun_ReturnsSanitizedPayload(t *testing.T) {
+	// List endpoint omits trigger_payload; the GET /runs/{runId} endpoint
+	// returns the identity envelope without untrusted provider payload text.
 	agentID := createWebhookTestAgent(t, "WebhookGetRun Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
 	trig := createWebhookTriggerViaHandler(t, apID)
@@ -1097,8 +1097,11 @@ func TestGetAutopilotRun_ReturnsFullPayload(t *testing.T) {
 	if wDetail.Code != http.StatusOK {
 		t.Fatalf("detail: expected 200, got %d body=%s", wDetail.Code, wDetail.Body.String())
 	}
-	if !strings.Contains(wDetail.Body.String(), `"answer":42`) {
-		t.Fatalf("detail response should carry full trigger_payload, body=%s", wDetail.Body.String())
+	if strings.Contains(wDetail.Body.String(), `"answer":42`) {
+		t.Fatalf("detail response leaked raw trigger_payload, body=%s", wDetail.Body.String())
+	}
+	if !strings.Contains(wDetail.Body.String(), `"event":"demo.x"`) || !strings.Contains(wDetail.Body.String(), `"identity"`) {
+		t.Fatalf("detail response should carry sanitized webhook envelope, body=%s", wDetail.Body.String())
 	}
 }
 

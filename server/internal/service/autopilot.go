@@ -1669,8 +1669,8 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
 		var stored struct {
-			Event      string `json:"event"`
-			Identity   struct {
+			Event    string `json:"event"`
+			Identity struct {
 				DeliveryID  string `json:"deliveryId"`
 				Repository  string `json:"repository"`
 				PrURL       string `json:"prUrl"`
@@ -1682,7 +1682,17 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 			} `json:"identity"`
 			ScopeClaim string `json:"scopeClaim"`
 		}
-		if err := json.Unmarshal(run.TriggerPayload, &stored); err == nil && stored.Event != "" {
+		decodeErr := json.Unmarshal(run.TriggerPayload, &stored)
+		hasIdentity := stored.Identity.DeliveryID != "" ||
+			stored.Identity.Repository != "" ||
+			stored.Identity.PrURL != "" ||
+			stored.Identity.PrNumber != 0 ||
+			stored.Identity.HeadSHA != "" ||
+			stored.Identity.SenderLogin != "" ||
+			stored.Identity.SenderType != "" ||
+			stored.Identity.AppSlug != "" ||
+			stored.ScopeClaim != ""
+		if decodeErr == nil && stored.Event != "" && hasIdentity {
 			b.WriteString("\n\nWebhook event: ")
 			b.WriteString(stored.Event)
 			b.WriteString("\n\nWebhook identity:\n")

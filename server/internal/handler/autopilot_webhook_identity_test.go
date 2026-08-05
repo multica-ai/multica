@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestExtractWebhookIdentity_GitHubPullRequest(t *testing.T) {
 		"repository":{"full_name":"o/r"},
 		"sender":{"login":"bot","type":"Bot"}
 	}`)
-	headers := map[string][]string{
+	headers := http.Header{
 		"X-GitHub-Delivery": {"delivery-1"},
 		"X-GitHub-Event":    {"pull_request"},
 	}
@@ -36,7 +37,7 @@ func TestBuildStoredWebhookEnvelope_OmitsRawComment(t *testing.T) {
 		EventPayload: json.RawMessage(`{"comment":{"body":"secret"},"issue":{"pull_request":{"html_url":"https://github.com/o/r/pull/1","number":1,"head":{"sha":"sha1"}}},"repository":{"full_name":"o/r"}}`),
 		Request:      WebhookRequest{ReceivedAt: "2026-08-05T00:00:00Z"},
 	}
-	stored := buildStoredWebhookEnvelope("github", env, "coderabbit-pr-fix-monitor:https://github.com/o/r/pull/1", "d1", map[string][]string{"X-GitHub-Event": {"issue_comment"}}, env.EventPayload)
+	stored := buildStoredWebhookEnvelope("github", env, "coderabbit-pr-fix-monitor:https://github.com/o/r/pull/1", "d1", http.Header{"X-GitHub-Event": {"issue_comment"}}, env.EventPayload)
 	raw, err := json.Marshal(stored)
 	if err != nil {
 		t.Fatal(err)
@@ -46,5 +47,49 @@ func TestBuildStoredWebhookEnvelope_OmitsRawComment(t *testing.T) {
 	}
 	if stored.ScopeClaim == "" || stored.Identity.PrURL == "" {
 		t.Fatalf("identity envelope incomplete: %#v", stored)
+	}
+}
+
+func TestExtractScopeClaimRejectsOverlongClaim(t *testing.T) {
+	_, err := extractScopeClaim(http.Header{
+		scopeClaimHeader: {strings.Repeat("x", maxScopeClaimLength+1)},
+	})
+	if err == nil {
+		t.Fatal("expected overlong scope claim to be rejected")
+	}
+}
+
+func TestMergeStoredEnvelopeHeadSHA_PreservesOriginalDelivery(t *testing.T) {
+	oldPayload, err := json.Marshal(StoredWebhookEnvelope{
+		Event: "github.pull_request.opened",
+		Identity: WebhookEventIdentity{
+			DeliveryID: "delivery-old",
+			HeadSHA:    "sha-old",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPayload, err := json.Marshal(StoredWebhookEnvelope{
+		Event: "github.pull_request.synchronize",
+		Identity: WebhookEventIdentity{
+			DeliveryID: "delivery-new",
+			HeadSHA:    "sha-new",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	merged, changed, err := mergeStoredEnvelopeHeadSHA(oldPayload, newPayload)
+	if err != nil || !changed {
+		t.Fatalf("merge: changed=%v err=%v", changed, err)
+	}
+	var got StoredWebhookEnvelope
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Identity.DeliveryID != "delivery-old" || got.Identity.HeadSHA != "sha-new" {
+		t.Fatalf("unexpected merged identity: %#v", got.Identity)
 	}
 }

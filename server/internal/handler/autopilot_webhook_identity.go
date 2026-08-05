@@ -35,15 +35,15 @@ type StoredWebhookEnvelope struct {
 	ScopeClaim string               `json:"scopeClaim,omitempty"`
 }
 
-func extractScopeClaim(headers http.Header) string {
+func extractScopeClaim(headers http.Header) (string, error) {
 	claim := strings.TrimSpace(headers.Get(scopeClaimHeader))
 	if claim == "" {
-		return ""
+		return "", nil
 	}
 	if len(claim) > maxScopeClaimLength {
-		claim = claim[:maxScopeClaimLength]
+		return "", fmt.Errorf("scope claim exceeds %d bytes", maxScopeClaimLength)
 	}
-	return claim
+	return claim, nil
 }
 
 func buildStoredWebhookEnvelope(
@@ -142,10 +142,6 @@ func mergeStoredEnvelopeHeadSHA(existingPayload, newPayload []byte) ([]byte, boo
 	}
 	if newEnv.Event != "" && newEnv.Event != oldEnv.Event {
 		oldEnv.Event = newEnv.Event
-		changed = true
-	}
-	if newEnv.Identity.DeliveryID != "" {
-		oldEnv.Identity.DeliveryID = newEnv.Identity.DeliveryID
 		changed = true
 	}
 	if !changed {

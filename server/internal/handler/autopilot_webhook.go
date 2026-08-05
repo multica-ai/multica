@@ -438,7 +438,11 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	}
 	dedupeKey, dedupeSource := extractDedupeKey(provider, r.Header)
 	sigStatus := verifyWebhookSignatureForProvider(provider, trigRow.SigningSecret.String, r.Header, body)
-	scopeClaim := extractScopeClaim(r.Header)
+	scopeClaim, err := extractScopeClaim(r.Header)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	storedEnvelope := buildStoredWebhookEnvelope(provider, envelope, scopeClaim, dedupeKey, r.Header, body)
 	storedBytes, err := json.Marshal(storedEnvelope)
 	if err != nil {
