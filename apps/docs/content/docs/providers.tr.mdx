@@ -1,0 +1,120 @@
+---
+title: AI coding tool matrisi
+description: Multica 11 AI coding tool'u destekler; hepsi aynı arayüzü uygular, ancak yetenek ayrıntıları belirgin şekilde farklıdır.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica, **11 AI coding tool** için yerleşik destekle gelir. Hepsi aynı arayüzü uygular: kuyruğa alma, dispatch etme, çalıştırma, sonuç döndürme. Bu yüzden herhangi birini aynı Multica panosundan kullanabilirsiniz. **Ama yetenek ayrıntıları belirgin şekilde farklıdır**: oturum sürdürmenin gerçekten çalışıp çalışmadığı, MCP desteği, skill dosyalarının nerede durduğu, modellerin nasıl seçildiği. Bu sayfa tam matristir.
+
+Ajan oluştururken araç seçme rehberi için bkz. [Ajan oluşturma ve yapılandırma](/agents-create).
+
+## Yetenek matrisi
+
+| Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
+|---|---|---|---|---|---|
+| **Claude Code** | Anthropic | ✅ | **✅ (the only one that actually uses it)** | `.claude/skills/` | Static + flag |
+| **Codex** | OpenAI | ⚠️ Code exists but unreachable | ❌ | `$CODEX_HOME/skills/` | Static |
+| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
+| **Cursor** | Anysphere | ⚠️ Code exists but unusable | ❌ | `.cursor/skills/` | Dynamic discovery |
+| **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | Static |
+| **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` (fallback) | Dynamic discovery |
+| **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | Dynamic discovery |
+| **Kiro CLI** | Amazon | ✅ | ❌ | `.kiro/skills/` | Dynamic discovery |
+| **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | Dynamic discovery |
+| **OpenClaw** | Open source | ✅ | ❌ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
+| **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
+
+## Her araç ne için
+
+### Claude Code
+
+Anthropic'ten. **Yeni kullanıcılar için ilk tercih**: en eksiksiz özellik seti. Oturum sürdürme gerçekten çalışır, 11 araç içinde **MCP yapılandırmasını gerçekten okuyan tek araçtır** ve `--max-turns`, `--append-system-prompt` gibi ince ayar flag'lerini destekler. Anthropic API anahtarı gerektirir.
+
+### Codex
+
+OpenAI'dan. JSON-RPC 2.0 kullanır, daha güçlü durum yönetimi ve daha ince taneli onay mekanizması vardır (`exec_command` ve `patch_apply` için manuel onay). **Oturum sürdürme kodu var ama şu anda ulaşılamıyor**; resume gerekiyorsa Claude Code veya ACP ailesinden birini seçin.
+
+### Copilot
+
+GitHub'dan. Model yönlendirmesi GitHub hesap yetkiniz üzerinden geçer; araç modeli kendisi seçmez, hangi modeli alacağınıza GitHub karar verir. Skill'leri `.github/skills/` içine koymak GitHub CLI'ın yerel keşif mekanizmasıdır.
+
+### Cursor
+
+Anysphere'den, Cursor editörünün CLI karşılığı. **Oturum sürdürme kodu var ama gerçekten çalışmıyor**; Cursor CLI event stream bir session ID döndürmediği için verdiğiniz resume değeri her zaman geçersiz olur. Resume gerekiyorsa başka bir şey seçin.
+
+### Gemini
+
+Google'dan, Gemini 2.5 ve 3 serilerini destekler. **Oturum sürdürme yok, MCP yok**; uzun bağlam belleği gerektirmeyen tek seferlik görevler için uygundur.
+
+### Hermes
+
+Nous Research'ten. ACP protokolünü kullanır (Kimi ile aynı transport'u paylaşır). Oturum sürdürme çalışır. Ancak **skill injection path genel fallback'tir** (`.agent_context/skills/`), özel bir yol değildir; Hermes CLI'ın kendisi bu yolu okumuyorsa skill'ler etkili olmayabilir. Test ederek doğrulayın.
+
+### Kimi
+
+Moonshot'tan, Çin pazarına yöneliktir. Hermes ile ACP protokolünü paylaşır, ancak `.kimi/skills/` skill yolu Kimi CLI'ın yerel keşif mekanizmasıdır; Hermes'in fallback'inden farklıdır.
+
+### Kiro CLI
+
+Amazon'dan. `kiro-cli acp` üzerinden stdio ile ACP kullanır. Oturum sürdürme ACP `session/load` ile çalışır, model seçimi `session/set_model` ile çalışır ve skill'ler yerel proje düzeyi keşif için `.kiro/skills/` içine kopyalanır.
+
+### OpenCode
+
+SST'den, açık kaynak. Kullanılabilir modelleri dinamik olarak keşfeder (CLI'ın yapılandırma dosyasını tarar). Oturum sürdürme çalışır. **Model kataloğunu özelleştirmek isteyen kurcalayıcılar için uygundur.**
+
+### OpenClaw
+
+Açık kaynak proje, bir CLI ajan orkestratörü. **Model ajan katmanında bağlıdır** (`openclaw agents add --model`); görev başına override edilemez. Yapılandırma sıkı kontrol edilir: kullanıcılar `--model` veya `--system-prompt` geçemez; ajan kayıt yapılandırması karar verir.
+
+### Pi
+
+Inflection AI'dan, minimalist. **Oturum sürdürme alışılmadıktır**; session ID bir string ID yerine diskteki dosya yoludur (`~/.pi/...`). Diğer araçlarda resume id CLI tarafından döndürülen bir string'dir; Pi'de resume id oturum dosyasının kendisidir.
+
+## Oturum sürdürme: kim gerçekten destekliyor
+
+Oturum sürdürme mekanizması [Görevler](/tasks#can-a-task-continue-from-the-previous-context) sayfasında anlatılır. Araç başına **tam güncel durum**:
+
+| Status | Tools | Meaning |
+|---|---|---|
+| ✅ Really works | Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
+| ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
+| ❌ None | Gemini | The CLI has no resume mechanism |
+
+**Karar verirken**: iş akışınız ajanların görevler arasında bağlamı korumasını gerektiriyorsa (hata yeniden denemeleri, elle yeniden çalıştırmalar, konuşmalı iterasyon), yalnızca ✅ satırından seçin.
+
+## MCP yapılandırması: yalnızca Claude Code gerçekten okur
+
+**11 araç içinde yalnızca Claude Code `mcp_config` değerini gerçekten tüketir**. Diğer 10 araç alanı kabul eder ama **tamamen yok sayar**; hata yok, uyarı yok, yapılandırmanın hiçbir etkisi olmaz.
+
+<Callout type="warning">
+Bir ajan yapılandırmasında `mcp_config` ayarlayıp Claude Code dışında bir araç seçerseniz MCP sunucularınızın o ajan üzerinde **hiçbir etkisi olmaz**. MCP entegrasyonu şu anda yalnızca Claude Code'u kapsar.
+</Callout>
+
+## Skill dosyaları nereye gider
+
+Her araç **kendi** skill keşif yolunu kullanır. Bir görev çalışmadan önce Multica daemon, çalışma alanının skill dosyalarını ilgili yola kopyalar:
+
+| Tool | Path | Native discovery? |
+|---|---|---|
+| Claude Code | `.claude/skills/` | ✅ Native |
+| Codex | `$CODEX_HOME/skills/` | ✅ Native |
+| Copilot | `.github/skills/` | ✅ Native |
+| Cursor | `.cursor/skills/` | ✅ Native |
+| Kimi | `.kimi/skills/` | ✅ Native |
+| Kiro CLI | `.kiro/skills/` | ✅ Native |
+| OpenCode | `.opencode/skills/` | ✅ Native |
+| Pi | `.pi/skills/` | ✅ Native |
+| Gemini | `.agent_context/skills/` | ⚠️ Generic fallback |
+| Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
+| OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
+
+Fallback-path kullanan bir aracın bu dizini gerçekten okuyup okumadığı aracın kendi dokümantasyonuna bağlıdır; garanti yoktur. Skill'leriniz Gemini / Hermes / OpenClaw için etkili olmuyorsa önce bunu kontrol edin.
+
+Skill oluşturma ve kullanma için bkz. [Skills](/skills).
+
+## Sonraki
+
+- [Ajan oluşturma ve yapılandırma](/agents-create) — ajanınız için araç seçin
+- [Görevler](/tasks) — görev yaşam döngüsü ve oturum sürdürme mekanikleri
+- [Daemon and runtimes](/daemon-runtimes) — araçların nerede çalıştığı ve Multica'ya nasıl bağlandığı

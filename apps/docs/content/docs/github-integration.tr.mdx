@@ -1,0 +1,183 @@
+---
+title: GitHub entegrasyonu
+description: Bir GitHub App'i bir kez bağlayın; branch'i, başlığı veya gövdesi issue identifier referanslayan PR'lar o issue'ya otomatik eklenir ve PR merge edilince issue Done durumuna taşınır.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir GitHub hesabını veya organizasyonunu **Settings → GitHub** içinde bir kez bağlayın. Bundan sonra branch adı, başlığı veya gövdesi bir issue identifier (örneğin `MUL-123`) içeren her pull request o [issue](/issues)'ya **otomatik bağlanır**, issue kenar çubuğunda **Pull requests** altında görünür ve PR merge edildiğinde issue'yu **Done** durumuna taşır.
+
+Issue başına kurulum yoktur. Tüm akış identifier odaklıdır.
+
+## Entegrasyon ne yapar
+
+| Surface | Behavior |
+|---|---|
+| **Settings → GitHub** | Workspace admin'leri GitHub sekmesini master toggle, **Connect GitHub** düğmesi ve özellik anahtarlarıyla (PR sidebar, Co-authored-by, auto-link) görür. Install sonrası GitHub sekmesine geri dönersiniz. |
+| **Issue sidebar → Pull requests** | Bu issue'ya otomatik bağlanan her PR; başlık, repo, durum (`Open` / `Draft` / `Merged` / `Closed`) ve yazarla birlikte görünür. Bir satıra tıklayınca GitHub'daki PR'a gidersiniz. |
+| **Webhook (background)** | Her `pull_request` event'inde Multica PR satırını upsert eder, issue identifier'ları için PR'ı tarar ve link satırlarını (yeniden) oluşturur. Idempotent'tir; bir delivery'yi yeniden oynatmak no-op'tur. |
+| **Auto-status on merge** | Bir PR `merged` durumuna geçtiğinde, zaten `Done` veya `Cancelled` olmayan her bağlı issue `Done` durumuna taşınır. Durum değişikliği timeline'a `github_pr_merged` kaynağıyla yazılır. |
+
+Yalnızca PR'ın kendisi mirror edilir. Commit'ler, açık PR olmayan branch ref'leri ve CI check durumları **modellenmez**. Entegrasyon bilinçli olarak dardır.
+
+## Identifier'lar nasıl eşleşir
+
+Webhook identifier'ları üç alandan bu sırayla çıkarır: **PR head branch**, **PR title**, **PR body**. Matcher şöyledir:
+
+- Case-insensitive — `mul-123`, `MUL-123`, `Mul-123` hepsi eşleşir.
+- Bounded — solda `\b` ve sağda digit anchor; `v1.2-3` gibi version number'ları veya email-style string'leri kapmasını önler.
+- Workspace-scoped — yalnızca çalışma alanının kendi [issue prefix](/workspaces)'iyle eşleşir. Prefix'i `MUL` olan bir çalışma alanında `FOO-1`, integer başka issue ile eşleşse bile yok sayılır.
+- Deduplicated — gövdede `MUL-1, MUL-1` yazmak issue'yu bir kez bağlar.
+
+Tek bir PR içinde **birden fazla issue** referanslayabilirsiniz. `Closes MUL-1, MUL-2` PR'ı ikisine de bağlar ve merge etmek ikisini de `Done` durumuna ilerletir.
+
+## Auto-merge-to-Done kuralı
+
+Bir PR'ın `merged` alanı `true` olduğunda her bağlı issue değerlendirilir:
+
+| Issue current status | Result |
+|---|---|
+| `done` | No change (already terminal). |
+| `cancelled` | **No change** — cancelled means the user explicitly abandoned the work; the integration does not override that signal. |
+| Anything else (`todo`, `in_progress`, `in_review`, `blocked`, `backlog`) | Moved to `done`. |
+
+Bir PR'ı merge etmeden **kapatmak** yalnızca PR kartının durumunu `Closed` olarak günceller. Bağlı issue'lar oldukları yerde kalır; merge etmeden kapatmanın ne anlama geldiğine kullanıcı karar verir.
+
+<Callout type="info">
+Eylem timeline'da `system` aktörüne atfedilir. Issue aboneleri, bir insan taşımış gibi durum değişikliği için gelen kutusu bildirimi alır.
+</Callout>
+
+## Neler otomatik bağlanmaz
+
+- **Commit mesajlarındaki identifier'lar** — yalnızca branch / title / body taranır. `MUL-123: fix login` başlıklı bir commit, aynı string PR title veya body içinde de geçmediği sürece otomatik bağlanmaz.
+- **PR yorumlarındaki identifier'lar** — yalnızca PR'ın kendi metadata'sı taranır; sonraki GitHub yorumları yok sayılır.
+- **App'in install edilmediği repo'lardaki PR'lar** — App olmadan Multica webhook almaz.
+- **Bir PR'ı issue'ya elle bağlama** — bunun için henüz UI yoktur. Ekibinizin konvansiyonu identifier'ları Multica'nın okumadığı bir yere koyuyorsa PR title veya body'ye ekleyin.
+
+## Bağlantıyı kesme
+
+**Settings → GitHub** içinde installation listesi yoktur; mevcut installation'ları doğrudan GitHub'dan yönetirsiniz:
+
+- **GitHub'dan** — Multica GitHub App'i `https://github.com/settings/installations` (personal) veya `https://github.com/organizations/<org>/settings/installations` (org) adresinden uninstall edin. Multica `installation.deleted` webhook'unu alır ve satırı gerçek zamanlı siler; açık Settings sekmeleri refresh olmadan güncellenir.
+- **Multica içinden disconnect admin-only'dir** — GitHub sekmesindeki Disconnect kontrolü admin olmayanlardan gizlenir. Master GitHub switch kapalıyken bile erişilebilir kalır; böylece admin'ler özelliği tek tıkla disable ettikten sonra stale installation'ı yine revoke edebilir.
+
+Bağlantı kesildikten sonra mirrored PR satırları veritabanında kalır; böylece geçmiş issue kenar çubukları bağlı olanları göstermeye devam eder, ancak o installation'dan yeni webhook event'leri kabul edilmez.
+
+## İzinler ve görünürlük
+
+- **Connect / disconnect** çalışma alanı **owner veya admin** gerektirir. Üyeler kart açıklamasını görür ama Connect düğmesini görmez.
+- Bir issue üzerindeki **Pull requests** kenar çubuğu, issue'yu okuyabilen herkes tarafından görülebilir; issue detayının geri kalanıyla aynı izinlerdir.
+- GitHub App, pull request'lere ve metadata'ya **read-only** erişim ister. Multica GitHub'a commit, yorum veya status check geri göndermez.
+
+## Self-host kurulumu
+
+Multica'yı Multica Cloud üzerinde çalıştırıyorsanız entegrasyon zaten yapılandırılmıştır; bu bölümü atlayın.
+
+Self-host için bir GitHub App oluşturur, sunucunuza yönlendirir ve iki environment variable ayarlarsınız. Tüm akış aşağıdadır.
+
+### 1. GitHub App oluşturma
+
+Şunlardan birine gidin:
+
+- Personal account → `https://github.com/settings/apps/new`
+- Organization → `https://github.com/organizations/<org>/settings/apps/new`
+
+Doldurun:
+
+| Field | Value |
+|---|---|
+| **GitHub App name** | Tanınabilir herhangi bir şey, ör. `Multica` veya `Multica (staging)`. |
+| **Homepage URL** | Multica frontend'iniz, ör. `https://multica.example.com`. |
+| **Callback URL** | Boş bırakın; Multica OAuth user identity kullanmaz. |
+| **Setup URL** | `https://<api-host>/api/github/setup`. **"Redirect on update" seçeneğini işaretleyin**. |
+| **Webhook → Active** | Enabled. |
+| **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
+| **Webhook secret** | Uzun rastgele string üretin (ör. `openssl rand -hex 32`). Aynı değeri 2. adımda Multica env'ine yapıştıracaksınız. |
+| **Permissions → Repository → Pull requests** | **Read-only**. |
+| **Permissions → Repository → Metadata** | Read-only (mandatory). |
+| **Subscribe to events** | **Pull request** işaretleyin. |
+| **Where can this GitHub App be installed?** | Tercihiniz. Tek org kurulumları için `Only on this account` uygundur. |
+
+**Create GitHub App** sonrası App'in detay sayfasından iki şeyi not edin:
+
+- Üstteki **public link**; sondaki parça slug'dır. `https://github.com/apps/multica-acme` → slug = `multica-acme`.
+- Az önce ürettiğiniz **webhook secret** (GitHub'dan sonra tekrar okuyamazsınız; şimdi kaydedin).
+
+<Callout type="warning">
+**Webhook secret ≠ Client secret.** App settings sayfasında iki alan birlikte durur. **Webhook secret**, `pull_request` payload'larını imzalayan değerdir; Multica'nın ihtiyaç duyduğu budur. **Client secret** OAuth içindir ve bu entegrasyonda kullanılmaz. Karıştırmak her webhook delivery'sinde kafa karıştırıcı `401 invalid signature` üretir.
+</Callout>
+
+### 2. Environment variable'ları ayarlama
+
+API sunucusunda:
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
+```
+
+İki variable da zorunludur. Biri eksikse:
+
+- Settings içindeki `Connect GitHub` **disabled** olur ve "not configured" ipucu gösterir.
+- `/api/webhooks/github` endpoint'i **`503 github webhooks not configured`** döndürür; Multica secret yokken her signature'ı sessizce geçerli saymak yerine event işlemeyi reddeder.
+
+`FRONTEND_ORIGIN` de ayarlanmalıdır (production self-host için zaten ayarlıdır); setup callback install sonrası kullanıcıyı `<FRONTEND_ORIGIN>/settings?tab=github` adresine geri gönderir.
+
+Env var'ları ayarladıktan sonra API'yi yeniden başlatın.
+
+### 3. Migration'ları çalıştırma
+
+Entegrasyon tabloları migration `079_github_integration` içinde gelir. Daha eski bir deployment'ı yükseltiyorsanız:
+
+```bash
+make migrate-up
+```
+
+Üç tablo oluşturulur: `github_installation`, `github_pull_request`, `issue_pull_request`. Çalışma alanlarıyla cascade-delete edilirler; bu yüzden bir çalışma alanını silmek onları da otomatik temizler.
+
+### 4. UI'dan bağlama
+
+Multica içinde:
+
+1. Owner veya admin olarak **Settings → GitHub**'ı açın.
+2. **Connect GitHub**'a tıklayın. GitHub yeni sekmede açılır.
+3. Erişim verilecek repo'ları seçin ve **Install** yapın.
+4. GitHub `<api-host>/api/github/setup` adresine geri yönlendirir; bu installation'ı kaydeder ve sizi `<FRONTEND_ORIGIN>/settings?tab=github&github_connected=1` adresine geri gönderir.
+
+Bundan sonra branch / title / body içinde issue identifier bulunan herhangi bir PR'ı açın; birkaç saniye içinde Pull requests bloğu o issue'nun detay sayfasında görünür.
+
+### 5. curl probe ile doğrulama
+
+GitHub'ın **Recent Deliveries** sayfası install sonrası `401 invalid signature` bildiriyorsa iki tarafta farklı secret vardır. Hangi tarafın hatalı olduğunu öğrenmenin en hızlı yolu GitHub'ı bypass etmektir:
+
+```bash
+SECRET="<the value you put in GITHUB_WEBHOOK_SECRET>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/github \
+  -H "X-Hub-Signature-256: sha256=$SIG" \
+  -H "X-GitHub-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP status | Meaning | Fix |
+|---|---|---|
+| `200` `{"ok":"pong"}` | Server'ın yüklediği secret `$SECRET` ile eşleşiyor. Uyumsuzluk GitHub tarafında. | App'i düzenleyin → Webhook secret → **aynı değeri yapıştırın** → **Save changes** (alandan Save yapmadan çıkmak eski secret'ı korur). Redeliver. |
+| `401 invalid signature` | Server'ın yüklediği secret düşündüğünüz değer **değil**. | Env var'ın çalışan process'e ulaştığını doğrulayın (ör. `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" | wc -c`). Re-deploy. |
+| `503 github webhooks not configured` | Process içinde `GITHUB_WEBHOOK_SECRET` boş. | Env var'ı ayarlayın, API'yi yeniden başlatın. |
+
+## Sınırlamalar
+
+Bugün bilmeniz gereken birkaç pürüz:
+
+- **Henüz manuel link UI yok** — bir PR'ı bağlamanın tek yolu identifier'ın branch, title veya body içinde olmasıdır.
+- **CI / check state yok** — yalnızca PR'ın kendisi mirror edilir. Build status, review comment'leri ve reviewer'lar Multica'da gösterilmez.
+- **Merge → Done kuralı için workspace-level config yok** — sabit varsayılandır (`merged → done`, `cancelled` değilse). Çalışma alanı tarafından özelleştirilebilir mapping'ler gelecekte eklenecek.
+- **Multi-PR-to-one-issue merge konusunda konservatiftir** — iki PR da `MUL-123` referanslıyorsa ve ilki merge edilirse issue hemen `Done` durumuna taşınır. İlerletmeden önce tüm bağlı PR'ların çözülmesini bekleyen bir takip değişikliği devam ediyor.
+
+## Sonraki
+
+- [Issue'lar](/issues) — PR'lardan referanslanan issue identifier'ları (`MUL-123`)
+- [Çalışma alanları](/workspaces) — çalışma alanına özel issue prefix'inin ayarlandığı yer
+- [Environment variables](/environment-variables) — yukarıdaki GitHub variable'ları dahil tam env referansı

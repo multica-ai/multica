@@ -1,0 +1,341 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "Bu çalışma alanındaki herhangi bir ajanın kullanabileceği talimatlar.",
+    "learn_more": "Daha fazla bilgi →",
+    "new_skill": "Yeni skill",
+    "search_placeholder": "Skill ara…",
+    "scopes": {
+      "all": {
+        "label": "Tümü",
+        "description": "Bu çalışma alanındaki tüm skill'ler"
+      },
+      "used": {
+        "label": "Kullanımda",
+        "description": "En az bir ajana atanmış skill'ler"
+      },
+      "unused": {
+        "label": "Kullanılmıyor",
+        "description": "Hiçbir ajana atanmamış skill'ler"
+      },
+      "mine": {
+        "label": "Benim oluşturduklarım",
+        "description": "Oluşturduğunuz skill'ler"
+      }
+    },
+    "empty": {
+      "title": "Henüz skill yok",
+      "description": "İlk skill'inizi oluşturun, URL'den içe aktarın veya bağlı bir çalışma ortamından kopyalayın — çalışma alanındaki her ajan kullanabilir."
+    },
+    "no_matches": {
+      "title": "Eşleşme yok",
+      "with_query": "\"{{query}}\" ile eşleşen skill yok{{filterSuffix}}.",
+      "with_query_filter_suffix": " bu filtrede",
+      "filter_only": "Bu filtreyle eşleşen skill yok.",
+      "try_different": " Farklı bir sorgu deneyin."
+    },
+    "intro_banner": {
+      "title": "Çalışma alanınızle paylaşılıyor.",
+      "body": "Herkes skill oluşturabilir, URL'den içe aktarabilir veya local çalışma ortamından kopyalayabilir — ve her ajan kullanabilir.",
+      "highlight": "Local çalışma ortamı skill'leri buraya kopyalayana kadar private kalır."
+    },
+    "list_error": {
+      "title": "Skilller yüklenemedi",
+      "fallback": "Skill listesi alınırken bir sorun oluştu.",
+      "retry": "Tekrar dene"
+    },
+    "supporting_data_warning": "Bazı çalışma alanı verileri yüklenemedi. Oluşturan bilgisi, çalışma ortamı adları veya düzenleme izinleri eksik görünebilir."
+  },
+  "table": {
+    "name": "Ad",
+    "used_by": "Kullanan",
+    "source": "Kaynak · Ekleyen",
+    "updated": "Güncellendi",
+    "lock_tooltip": "Salt okunur — yalnızca oluşturan veya admin düzenleyebilir",
+    "unused": "— kullanılmıyor",
+    "by_creator": "{{name}} tarafından",
+    "source_manual": "Elle oluşturuldu",
+    "source_runtime_named": "{{name}} kaynağından",
+    "source_runtime_provider": "{{provider}} çalışma ortamından",
+    "source_runtime_unknown": "Bir çalışma ortamından",
+    "source_clawhub": "ClawHub'dan",
+    "source_skills_sh": "Skills.sh'den",
+    "source_github": "GitHub'dan",
+    "created_by": "Ekleyen",
+    "created": "Oluşturuldu"
+  },
+  "detail": {
+    "all_skills": "Tüm skill'ler",
+    "read_only": "Salt okunur",
+    "delete_aria": "Skill'i sil",
+    "delete_tooltip": "Skill'i sil",
+    "supporting_data_warning": "Bazı çalışma alanı verileri yüklenemedi. Oluşturan bilgisi, çalışma ortamı adları veya düzenleme izinleri sonraki yenilemeye kadar eksik görünebilir.",
+    "delete_file": "Dosyayı sil",
+    "name_placeholder": "skill-name",
+    "description_placeholder": "Bir ajanın bu skill'i ne zaman kullanması gerektiğini anlatan tek cümle…",
+    "subline": {
+      "origin_runtime_named": "Local çalışma ortamı · {{name}}",
+      "origin_runtime_provider": "Local çalışma ortamı · {{provider}}",
+      "origin_runtime_unknown": "Local çalışma ortamı",
+      "origin_clawhub": "İçe aktarıldı · ClawHub",
+      "origin_skills_sh": "İçe aktarıldı · Skills.sh",
+      "origin_github": "İçe aktarıldı · GitHub",
+      "origin_workspace": "Çalışma alanı"
+    },
+    "conflict_banner": {
+      "title": "Başka biri bu skill'i güncelledi",
+      "body": "Düzenlemeleriniz korundu. Onların değişikliklerini almak için vazgeçin veya üzerine yazmak için kaydedin."
+    },
+    "save_bar": {
+      "discard": "Vazgeç",
+      "save": "Değişiklikleri kaydet",
+      "saving": "Kaydediliyor…",
+      "changed_summary": "Değişenler: {{parts}}",
+      "changed_files_one": "{{count}} dosya",
+      "changed_files_other": "{{count}} dosya"
+    },
+    "not_found": {
+      "title": "Skill bulunamadı",
+      "fallback": "Bu skill silinmiş olabilir veya erişiminizi kaybetmiş olabilirsiniz.",
+      "back": "Skills'e dön"
+    },
+    "toast_saved": "Skill kaydedildi",
+    "toast_save_failed": "Skill kaydedilemedi",
+    "toast_deleted": "Skill silindi",
+    "toast_delete_failed": "Skill silinemedi",
+    "delete_dialog": {
+      "title": "Skill silinsin mi?",
+      "description_with_agents_one": "Bu işlem \"{{name}}\" skill'ini kalıcı olarak siler ve şu anda onu kullanan {{count}} ajandan kaldırır.",
+      "description_with_agents_other": "Bu işlem \"{{name}}\" skill'ini kalıcı olarak siler ve şu anda onu kullanan {{count}} ajandan kaldırır.",
+      "description_no_agents": "Bu işlem \"{{name}}\" skill'ini kalıcı olarak siler ve tüm ajanlardan kaldırır.",
+      "warning": "Bu işlem geri alınamaz.",
+      "cancel": "İptal",
+      "confirm": "Kalıcı olarak sil",
+      "deleting": "Siliniyor…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Ekle",
+      "cancel": "İptal",
+      "errors": {
+        "empty": "Path boş olamaz.",
+        "absolute": "Absolute pathlere izin verilmez.",
+        "double_dot": "Pathler \"..\" içeremez.",
+        "reserved": "SKILL.md ana dosya için ayrılmıştır.",
+        "exists": "Bu pathte zaten bir dosya var.",
+        "is_directory": "Bu adda bir klasör zaten var",
+        "under_file": "Bu konumda bir dosya zaten var"
+      }
+    },
+    "header": {
+      "files_one": "{{count}} dosya",
+      "files_other": "{{count}} dosya",
+      "used_by_one": "{{count}} ajan",
+      "used_by_other": "{{count}} ajan",
+      "updated": "{{when}} güncellendi",
+      "updated_by": "{{when}} {{name}} tarafından güncellendi"
+    },
+    "tabs": {
+      "aria": "Skill bölümleri",
+      "overview": "Genel bakış",
+      "files_one": "Dosyalar: {{count}}",
+      "files_other": "Dosyalar: {{count}}"
+    },
+    "overview": {
+      "properties": "Özellikler",
+      "properties_hint": "Bu alanlar SKILL.md ön bilgileriyle senkronize kalır.",
+      "name": "Ad",
+      "description": "Açıklama",
+      "description_hint": "{{count}} karakter. Ajanlar skill'i yükleyip yüklemeyeceğine karar vermek için bunu okur.",
+      "labels": "Etiketler",
+      "used_by_one": "{{count}} ajan kullanıyor",
+      "used_by_other": "{{count}} ajan kullanıyor",
+      "used_by_empty": "Henüz hiçbir ajana atanmadı. Atamak için bir ajanın Skill'ler sekmesini açın.",
+      "permissions_owner": "Bu skill'i düzenleyip silebilirsiniz. Değişiklikler bir sonraki ajan çalıştırmasında geçerli olur.",
+      "permissions_locked_creator": "Bu skill'i yalnızca oluşturan kişi ({{name}}) veya çalışma alanı admini düzenleyebilir.",
+      "permissions_locked": "Bu skill'i yalnızca oluşturan kişi veya çalışma alanı admini düzenleyebilir."
+    },
+    "files": {
+      "list_aria": "Skill dosyaları",
+      "main": "Ana dosya",
+      "supporting_one": "Supporting {{count}}",
+      "supporting_other": "Supporting {{count}}",
+      "supporting_empty": "Destekleyici dosya yok.",
+      "add_file": "Yeni dosya",
+      "mode_aria": "Dosya görünümü",
+      "mode_preview": "Önizleme",
+      "mode_raw": "Düz metin"
+    }
+  },
+  "create": {
+    "back": "Geri",
+    "back_aria": "Yöntem seçiciye dön",
+    "close": "Kapat",
+    "close_aria": "Kapat",
+    "method": {
+      "chooser": {
+        "title": "Yeni skill",
+        "desc": "Bu çalışma alanına nasıl skill eklemek istediğinizi seçin."
+      },
+      "manual": {
+        "title": "Elle oluştur",
+        "desc": "Sıfırdan yeni bir SKILL.md yazın."
+      },
+      "url": {
+        "title": "URL'den içe aktar",
+        "desc": "Yayımlanmış bir skill'i URL ile alın. Dosyalar server tarafında çekilir."
+      },
+      "runtime": {
+        "title": "Çalışma ortamından kopyala",
+        "desc": "Bir local çalışma ortamını tarayın ve diskindeki skill'lerden birini bu çalışma alanına taşıyın."
+      }
+    },
+    "method_card": {
+      "manual_title": "Elle oluştur",
+      "manual_desc": "Boş bir SKILL.md ile başlayın ve kendi talimatlarınızı yazın.",
+      "url_title": "URL'den içe aktar",
+      "url_desc": "ClawHub veya Skills.sh'den yayımlanmış bir skill çekin.",
+      "runtime_title": "Çalışma ortamından kopyala",
+      "runtime_desc": "Local çalışma ortamınızda zaten kurulu olan bir skill'i taşıyın."
+    },
+    "manual": {
+      "name_label": "Ad",
+      "name_placeholder": "örn. review-helper",
+      "name_hint": "Çalışma alanı içinde benzersiz olmalıdır.",
+      "description_label": "Açıklama",
+      "description_placeholder": "Bu skill'in bir ajana ne zaman atanacağını anlatan tek cümle.",
+      "name_conflict_hint": " Farklı bir ad deneyip tekrar gönderin.",
+      "fallback_error": "Skill oluşturulamadı",
+      "cancel": "İptal",
+      "submit": "Skill oluştur",
+      "submitting": "Oluşturuluyor…",
+      "toast_created": "Skill oluşturuldu"
+    },
+    "url": {
+      "url_label": "Skill URL",
+      "supported_sources": "Desteklenen kaynaklar",
+      "import": "İçe aktar",
+      "importing": "İçe aktarılıyor…",
+      "importing_clawhub": "ClawHub'dan içe aktarılıyor…",
+      "importing_skills_sh": "Skills.sh'den içe aktarılıyor…",
+      "importing_github": "GitHub'dan içe aktarılıyor…",
+      "name_conflict_hint": " İçe aktarılan skill'in adı zaten var — tekrar denemeden önce mevcut olanı silin.",
+      "fallback_error": "İçe aktarma başarısız",
+      "cancel": "İptal",
+      "toast_imported": "Skill içe aktarıldı"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Çalışma ortamı",
+    "runtime_placeholder": "Local çalışma ortamı seç",
+    "no_local_runtimes_title": "Kullanılabilir local çalışma ortamı yok",
+    "no_local_runtimes_hint": "Local skill'lerine göz atmak ve içe aktarmak için bir local çalışma ortamı bağlayın.",
+    "choose_runtime": "Devam etmek için bir çalışma ortamı seçin",
+    "must_be_online": "Local skill'lere göz atmak için çalışma ortamı online olmalıdır.",
+    "load_failed": "Çalışma ortamı local skill'leri yüklenemedi",
+    "not_supported": "Bu çalışma ortamı provider henüz local skill envanterini sunmuyor.",
+    "no_skills_title": "Local skill bulunamadı",
+    "no_skills_hint": "Bu çalışma ortamında henüz keşfedilebilir local skill yok.",
+    "ignored_files_hint": "Symlinkler, okunamayan dosyalar, çok büyük dosyalar ve çok büyük bundlelar içe aktarma sırasında yok sayılır.",
+    "ready": "İçe aktarmaya hazır",
+    "into_workspace": "bu çalışma alanına.",
+    "select_skill": "Devam etmek için bir skill seçin.",
+    "import_button": "Çalışma alanına içe aktar",
+    "importing": "İçe aktarılıyor…",
+    "skill_files_one": "{{count}} dosya",
+    "skill_files_other": "{{count}} dosya",
+    "skill_name_label": "Çalışma alanı skill adı",
+    "skill_description_label": "Açıklama",
+    "skill_description_placeholder": "İsteğe bağlı — bir ajanın bu skill'i ne zaman kullanması gerektiğini açıklayın.",
+    "toast_imported": "Skill içe aktarıldı",
+    "toast_import_failed": "Skill içe aktarılamadı",
+    "select_all": "Tümünü seç ({{count}})",
+    "bulk_ready": "{{count}} skill seçildi",
+    "bulk_import_button": "{{count}} Skill İçe Aktar",
+    "bulk_progress": "İçe aktarılıyor {{completed}} / {{total}}…",
+    "bulk_cancel_button": "İptal",
+    "bulk_complete_hint": "İçe aktarma tamamlandı.",
+    "bulk_cancelled_hint": "İçe aktarma iptal edildi.",
+    "bulk_done_button": "Tamam",
+    "bulk_summary_skipped": "Atlandı",
+    "bulk_summary_failed": "Başarısız",
+    "search_placeholder": "Yerel skill'lerde ara",
+    "no_search_results_title": "Eşleşen yerel skill yok",
+    "no_search_results_hint": "\"{{query}}\" ile eşleşen yerel skill yok.",
+    "bulk_summary_created": "Oluşturuldu",
+    "bulk_summary_updated": "Güncellendi",
+    "bulk_summary_conflicts": "Çakışmalar",
+    "conflict_single_title": "Bu adda bir skill zaten var",
+    "conflict_bulk_title": "{{count}} skill için karar gerekiyor",
+    "conflict_hint": "Mevcut çalışma alanı skill'inin üzerine yazmayı, yeni bir adla içe aktarmayı veya atlamayı seçin.",
+    "conflict_locked_creator": "Bu skill'i {{creator}} oluşturdu. Yerel içe aktarmada üzerine yalnızca oluşturan kişi yazabilir; değiştirmek için Skill ayrıntıları sayfasından düzenleyin.",
+    "conflict_locked": "Yerel içe aktarmada bu skill'in üzerine yalnızca oluşturan kişi yazabilir; değiştirmek için Skill ayrıntıları sayfasından düzenleyin.",
+    "conflict_overwrite": "Üzerine yaz",
+    "conflict_rename": "Yeniden adlandır",
+    "conflict_skip": "Atla",
+    "conflict_cancel": "İptal",
+    "conflict_overwrite_all": "Tümünün üzerine yaz",
+    "conflict_skip_all": "Tümünü atla",
+    "conflict_rename_label": "Yeni skill adı",
+    "conflict_footer": "{{count}} çakışma kararı bekliyor.",
+    "conflict_apply_button": "Kararları uygula",
+    "conflict_missing_resolution": "Bu çakışmanın nasıl çözüleceğini seçin.",
+    "conflict_name_still_exists": "Bu ad zaten var. Başka bir ad seçin veya atlayın."
+  },
+  "file_tree": {
+    "no_files": "Dosya yok",
+    "actions": {
+      "label": "{{path}} için eylemler",
+      "rename": "Yeniden adlandır",
+      "delete": "Sil"
+    }
+  },
+  "file_viewer": {
+    "no_content": "*Henüz içerik yok*",
+    "markdown_placeholder": "Markdown içeriği yazın...",
+    "raw_placeholder": "Dosya içeriği...",
+    "raw_aria": "{{path}} düz metin içeriği"
+  },
+  "actions": {
+    "row_menu": "Eylemler",
+    "add_to_agent": "Ajana ekle",
+    "my_agents": "Ajanlarım",
+    "other_agents": "Diğer ajanlar",
+    "no_agents": "Kullanılabilir ajan yok",
+    "search_placeholder": "Ajanlarda ara…",
+    "no_agents_match": "Aramanızla eşleşen ajan yok.",
+    "has_partial": "{{owned}}/{{total}} eklendi",
+    "added_toast": "{{name}} ajanına eklendi",
+    "add_failed_toast": "Skill eklenemedi",
+    "delete": "Sil",
+    "selected": "{{count}} seçildi",
+    "clear_selection": "Seçimi temizle",
+    "delete_no_permission": "Seçimde yalnızca oluşturan kişinin veya adminin silebileceği skill'ler var",
+    "delete_dialog_title_one": "{{count}} skill silinsin mi?",
+    "delete_dialog_title_other": "{{count}} skill silinsin mi?",
+    "delete_dialog_desc_one": "Seçilen skill kalıcı olarak silinir ve tüm ajanlardan kaldırılır.",
+    "delete_dialog_desc_other": "Seçilen {{count}} skill kalıcı olarak silinir ve tüm ajanlardan kaldırılır.",
+    "deleted_toast_one": "{{count}} skill silindi",
+    "deleted_toast_other": "{{count}} skill silindi",
+    "delete_failed_toast": "Skill'ler silinemedi",
+    "add_dialog_description": "Seçilen skill'lerin ekleneceği ajanları seçin.",
+    "cancel": "İptal",
+    "add_confirm": "Ekle ({{num}})",
+    "adding": "Ekleniyor...",
+    "added_multi_toast_one": "{{count}} ajana eklendi",
+    "added_multi_toast_other": "{{count}} ajana eklendi"
+  },
+  "toolbar": {
+    "result_count_title": "Eşleşen skill'ler / tüm skill'ler",
+    "filter_label": "Filtre",
+    "filter_active_count_one": "{{count}} filtre",
+    "filter_active_count_other": "{{count}} filtre",
+    "clear_filters": "Filtreleri temizle",
+    "section_usage": "Kullanım",
+    "display": "Görünüm",
+    "sort_by": "Sıralama",
+    "direction_asc": "Artan",
+    "direction_desc": "Azalan",
+    "section_columns": "Sütunlar"
+  }
+}

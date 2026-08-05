@@ -1,0 +1,99 @@
+---
+title: Desktop app
+description: Multica Desktop nedir, web app'ten nasıl ayrılır ve ne zaman kullanmaya değer.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica Desktop, macOS, Windows ve Linux için native desktop app'tir. Yapılandırıldığı ortam için web app ile aynı backend'e konuşur ve aynı veriyi gösterir. Varsayılan olarak Desktop Multica Cloud kullanır; self-hosted instance'lar yerel runtime config dosyasıyla yapılandırılabilir. Desktop ayrıca tarayıcının yapamadığı birkaç şey ekler: **[çalışma alanı](/workspaces) başına bağımsız tab grupları**, **otomatik [daemon](/daemon-runtimes) başlatma** ve **tek tıkla yükseltmeler**.
+
+## Desktop mı web mi — hangisini seçmeli
+
+| | Web | Desktop |
+|---|---|---|
+| Access | Tarayıcıda URL açın | Native app kurun |
+| Multiple tabs | Tarayıcınızın kendi tab'ları (çalışma alanı ayrımı yok) | **Çalışma alanı başına bağımsız tab grubu** |
+| Daemon | `multica daemon start` komutunu kendiniz çalıştırırsınız | Açılışta **otomatik başlatılır** |
+| Upgrades | En yeniyi almak için yenileyin | App arka planda kontrol eder ve sonraki açılışta kurar |
+| Signed-in data | Aynı | Aynı |
+
+Tek seferlik kullanım, başka birinin makinesinde çalışma veya hiçbir şey kurmak istemediğiniz durumlar için **web'i seçin**.
+Günlük kullanım, birden fazla çalışma alanı arasında geçiş veya manuel daemon yönetiminden kaçınmak için **desktop'ı seçin**.
+
+## Birden fazla tab: çalışma alanı değiştirince ne olur
+
+Desktop, **katıldığınız her çalışma alanı** için bağımsız bir tab grubu tutar. Çalışma alanı değiştirdiğinizde mevcut çalışma alanının tab'ları bir bütün olarak gizlenir ve önceki çalışma alanının tab'ları bıraktığınız gibi geri yüklenir; VSCode'un multi-workspace davranışına veya Slack'te çalışma alanı değiştirmeye benzer.
+
+Örnek: çalışma alanı A'da 3 issue tab'ı açıp çalışma alanı B'ye geçersiniz. A'nın 3 tab'ı kaybolur ve B, B'de en son açık bıraktığınız şeyi gösterir. A'ya geri dönünce o 3 tab aynen geri gelir. **Tab'lar çalışma alanları arasında asla sızmaz.**
+
+Çıkış yapmak **her çalışma alanının tab durumunu temizler**, böylece bir makine kullanıcılar arasında paylaşıldığında veri sızdırmazsınız.
+
+## Desktop otomatik nasıl güncellenir
+
+Açılışta Desktop, daha yeni sürüm için GitHub Releases'ı kontrol eder. Bulursa:
+
+1. Yeni sürümü arka planda sessizce indirir.
+2. Size "ready — will install on next launch" der.
+3. Çıktığınızda (veya sonraki yeniden başlatmada), app kapanmadan önce güncellemeyi kurar.
+4. Sonraki açılış yeni sürümü çalıştırır.
+
+Tüm süreç **üzerinde çalıştığınız işi bölmez**.
+
+<Callout type="warning">
+**Windows'ta ARM64 ve x64 ayrı güncelleme kanallarıdır**; yanlış mimariyi kurarsanız güncellemeler algılanmaz. İndirirken makinenize uyan `.exe` dosyasını seçin (ARM build'in `arm64` son eki vardır).
+</Callout>
+
+macOS build imzalı ve notarized olduğu için ilk açılışta "unidentified developer" uyarısı görmezsiniz. Linux build bir `.AppImage` dosyasıdır; otomatik güncellemeler electron-updater'a dayanır ve bazı distro'larda sorunlu olabilir. **Auto-update çalışmazsa yeni sürümü elle indirin ve eski dosyanın yerine koyun.**
+
+## Standalone CLI ve daemon'a hâlâ ihtiyacım var mı?
+
+**Hayır.** Desktop aynı `multica` CLI binary'sini içinde taşır ve başlangıçta kendi daemon profile'ını başlatır (terminalden elle çalıştırıyor olabileceğiniz daemon'dan izole).
+
+CLI'ı zaten kurduysanız ve `multica daemon start` komutunu elle çalıştırıyorsanız Desktop daemon'ınızı devralmaz; ayrı profile ile kendi daemon'ını başlatır. İkisi de **farklı çalışma ortamları** olarak kaydolur ve UI'da iki bağımsız çalışma ortamı görürsünüz.
+
+Terminalinizde CLI komutları çalıştırmak istiyorsanız Desktop özel bir path sunmaz; ayrı kurduğunuz CLI'ı kullanın veya app'in resources dizini içindeki `resources/bin/multica` paketli kopyasını çalıştırın.
+
+## İndirme ve kurulum
+
+Platformunuz için installer'ı [Multica downloads page](https://multica.ai/download) üzerinden alın:
+
+| Platform | File |
+|---|---|
+| macOS (Intel veya Apple Silicon) | `.dmg` |
+| Windows x64 | `.exe` (standart) |
+| Windows ARM64 | `.exe` (`arm64` son ekiyle) |
+| Linux | `.AppImage` |
+
+İlk açılışta oturum açmanız gerekir; web app ile aynı e-posta + doğrulama kodu akışı kullanılır. İçeri girdikten sonra Desktop çalışma alanı listenizi otomatik eşitler.
+
+<Callout type="info">
+**Desktop varsayılan olarak Multica Cloud kullanır, ancak yerel config dosyasıyla self-hosted instance'a yönlendirilebilir.** App içinde hâlâ "connect to self-host" seçici yok. Desktop, renderer başlamadan önce `~/.multica/desktop.json` dosyasını okur; dosya yoksa Cloud varsayılanlarını kullanır.
+
+Minimal self-host config:
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.your-domain"
+}
+```
+
+`apiUrl` zorunludur ve `http` veya `https` kullanmalıdır. Desktop `wsUrl` değerini aynı origin üzerinde `/ws` olarak türetir (`https` için `wss`, `http` için `ws`) ve `appUrl` değerini API origin'inden türetir. Dağıtımınız farklı origin'ler kullanıyorsa açıkça ayarlayın:
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.your-domain",
+  "wsUrl": "wss://api.your-domain/ws",
+  "appUrl": "https://your-domain"
+}
+```
+
+`desktop.json` varsa ama geçersizse Desktop sessizce Cloud'a düşmek yerine fail closed olur ve engelleyici config hatası gösterir. Development build'lerde `electron-vite dev` sırasında `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL` hâlâ önceliklidir. Runtime Desktop self-host yapılandırması [issue #1371](https://github.com/multica-ai/multica/issues/1371) için uygulanmıştır.
+</Callout>
+
+## Sonraki adımlar
+
+- [Cloud Quickstart](/cloud-quickstart) — Desktop için Cloud onboarding akışı
+- [Self-Host Quickstart](/self-host-quickstart) — kendi backend'inizi çalıştırma ve CLI veya Desktop runtime config ile bağlanma
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — daemon nasıl çalışır (Desktop sizin için başlatır, ama davranış aynıdır)

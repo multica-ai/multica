@@ -1,0 +1,54 @@
+---
+title: Multica nasıl çalışır
+description: Üç temel bileşenin (sunucu / daemon / AI kodlama aracı) bir ajanın işini yürütmek için nasıl koordine olduğunu açıklar.
+---
+
+import { ArchitectureDiagram } from "@/components/architecture-diagram";
+
+Multica **dağıtık** bir platformdur. Gördüğünüz web arayüzü yalnızca vitrindir — asıl iş üç bileşen tarafından yapılır: **Multica sunucusu** verilerin sahibidir ([çalışma alanları](/workspaces), [issue'lar](/issues), [üyeler](/members-roles), [görev](/tasks) kuyruğu vb.); **[daemon](/daemon-runtimes)** kendi makinenizde çalışır, görevleri alır ve AI kodlama aracını yönlendirir; **[AI kodlama aracı](/providers)** (Claude Code, Codex ve diğer yerel CLI'ler) ise kodu gerçekten yazan bileşendir. Multica ile Linear veya Jira arasındaki en büyük fark budur — **[ajanlar](/agents) bizim sunucularımızda değil, sizin makinenizde çalışır**.
+
+## Üç temel bileşen
+
+<ArchitectureDiagram />
+
+- **Multica sunucusu** — gördüğünüz çalışma alanları, issue listeleri ve yorum akışları onun veritabanında bulunur. Ayrıca sizinle ekip arkadaşlarınız arasında gerçek zamanlı güncellemeleri ileten bir WebSocket merkezidir. Hiçbir ajan görevini yürütmez.
+- **Daemon** — Multica CLI'nin parçasıdır ve kendi makinenizde çalışır. Başlangıçta yerelde hangi AI kodlama araçlarının kurulu olduğunu algılar, sunucuya kaydolur, her 3 saniyede bir görev yoklamaya ve her 15 saniyede bir heartbeat göndermeye başlar.
+- **AI kodlama araçları** — on bir araçtan biri (veya paralel olarak birkaçı): [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). Daemon bir görevi aldıktan sonra işi gerçekten yapmak için bu araçları kullanır.
+
+Araç zinciri yerelde kaldığı için **API anahtarlarınız, kod dizinleriniz ve yetkilendirilmiş araçlarınız** yalnızca makinenizde kullanılır — Multica sunucusu bunların hiçbirini görmez. Bu, self-host kullansanız da Cloud kullansanız da geçerlidir.
+
+## Bir görevin yaşam döngüsü
+
+En yaygın senaryoyu ele alalım — bir issue'yu ajana atıyorsunuz:
+
+1. Web UI'da assign'e tıklarsınız. Tarayıcı Multica sunucusuna bir HTTP isteği gönderir.
+2. Sunucu bu issue'nun atanan kişisini ajan yapar ve aynı anda görev kuyruğunda `queued` durumuyla bir yürütme görevi oluşturur.
+3. Makinenizdeki daemon görevi bir sonraki yoklamasında alır (3 saniye içinde). Görev durumu `dispatched` olur.
+4. Daemon yerelde izole bir çalışma dizini oluşturur ve ilgili AI kodlama aracını çağırır. Görev durumu `running` olur.
+5. AI yerelde kod yazar, testleri çalıştırır ve sunucuya yorum gönderir.
+6. Yürütme biter. Daemon sonucu (başarılı / başarısız) sunucuya bildirir ve görev durumu `completed` veya `failed` olur. Web UI'da ilerleme güncellemesini gerçek zamanlı görürsünüz (WebSocket üzerinden).
+
+Ayrıntılı mekanikler için [Daemon ve çalışma ortamları](/daemon-runtimes) ve [Tasks](/tasks) sayfalarına bakın.
+
+## Bir ajanı çalıştırmanın dört yolu
+
+Yalnızca "issue ata" yok — Multica'da her işbirliği tarzı için bir tetikleyici olmak üzere 4 tetikleyici vardır:
+
+| Nasıl | Tipik senaryo | Docs |
+|---|---|---|
+| **Issue ata** | En yaygın olanı. Bir issue'yu ajana atayın; kendi başına başlar | [Assigning issues](/assigning-issues) |
+| **Yorumda ajandan @mention ile bahset** | "Benim için buna bir bak" — atanan kişiyi veya durumu değiştirmeden yalnızca bir yorumla tetikle | [Mentioning agents](/mentioning-agents) |
+| **Doğrudan sohbet** | Issue'ya bağlı olmayan bağımsız konuşma — soru sorun, issue taslağı hazırlatın | [Chat](/chat) |
+| **Autopilots (scheduled)** | Sürekli talimatlar — "her Pazartesi sabahı standup özeti çıkar" gibi | [Autopilots](/autopilots) |
+
+## Çalışma ortamları: nerede çalışır ve kaç araç
+
+Bir **çalışma ortamı**, "daemon × bir AI kodlama aracı" eşleşmesidir. Tek makinedeki daemon'da hem Claude Code hem de Codex kuruluysa ve iki çalışma alanına katılmışsa, Multica 4 bağımsız çalışma ortamı kaydeder (2 çalışma alanı × 2 araç).
+
+Bugün yalnızca **yerel daemon** çalışma ortamı modeli desteklenir. Cloud çalışma ortamları (kendi makinenizi çalışır tutmanızın gerekmediği model) **yakında geliyor**, şu anda yalnızca bekleme listesinde — [Downloads](https://multica.ai/download) sayfasından kaydolun.
+
+## Sonraki adımlar
+
+- [Cloud Quickstart](/cloud-quickstart) — 5 dakikada Multica Cloud'a bağlanın
+- [Self-Host Quickstart](/self-host-quickstart) — kendi backend'inizi çalıştırın
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — mimarinin dayandığı bileşene derin bakış

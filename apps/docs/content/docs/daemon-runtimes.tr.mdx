@@ -1,0 +1,111 @@
+---
+title: Daemon ve çalışma ortamları
+description: Ajanlar Multica sunucularında çalışmaz — kendi makinelerinizde çalışır.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica'da [ajanlar](/agents) **sunucularımızda** çalışmaz — kendi makinelerinizde, yerelde kurulu [AI coding tools](/providers) araçlarını çağıran **daemon** adlı küçük bir program tarafından çalıştırılır. Multica server yalnızca koordinasyon yapar: [issue'ları](/issues) saklar, [görevleri](/tasks) kuyruğa alır ve doğru **çalışma ortamına** dispatch eder (çalışma ortamı = daemon × bir AI coding tool).
+
+Bu yapı Multica ile Linear / Jira arasındaki en büyük farktır: **API key'leriniz, toolchain'iniz ve kod dizinleriniz makinenizde kalır** — Multica server bunların hiçbirini görmez. Bu, "ajanım çalışmıyor" durumunun neredeyse her zaman yerel bir problem olduğu anlamına gelir — daemon çalışmıyordur, bir AI tool kurulu değildir, bir key süresi dolmuştur. Önce yereli kontrol edin; rehber için bkz. [Troubleshooting](/troubleshooting).
+
+## Daemon'ı başlatma
+
+Daemon, Multica CLI'ın parçasıdır. [Multica CLI](/cli) kurulduktan sonra kendi makinenizde çalıştırın:
+
+```bash
+multica daemon start
+```
+
+Başlangıçta dört şey yapar:
+
+1. Giriş yaptığınızda kaydedilen kimlik bilgilerini okur
+2. `PATH` üzerinde kurulu AI coding tools araçlarını algılar (11 yerleşik: [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi))
+3. Kendini server'a kaydeder ve algılanan her araç için bir çalışma ortamı oluşturur
+4. Alınacak görevler için **her 3 saniyede bir polling** yapar ve **her 15 saniyede bir heartbeat gönderir**
+
+Yaygın komutlar:
+
+| Command | Purpose |
+|---|---|
+| `multica daemon start` | Başlatır (varsayılan olarak background; foreground'da çalıştırmak için `--foreground` ekleyin) |
+| `multica daemon stop` | Durdurur |
+| `multica daemon restart` | Yeniden başlatır |
+| `multica daemon status` | Durumu gösterir |
+| `multica daemon logs` | Log'ları gösterir (takip etmek için `-f` ekleyin) |
+
+Tam CLI referansı [CLI commands](/cli) içinde.
+
+**Desktop app bir daemon ile gelir.** [Desktop app](/desktop-app) kullanıyorsanız `multica daemon start` komutunu manuel çalıştırmanız gerekmez — başlangıçta daemon'ı otomatik açar. İş akışınıza hangi seçeneğin uyduğunu görmek için [Desktop app](/desktop-app) sayfasına bakın.
+
+## Bir makinede neden birden çok çalışma ortamı olur
+
+Çalışma ortamı bir server veya container değildir — "**daemon × bir AI coding tool**" birleşimidir. Örneğin: hem Claude Code hem Codex kurulu bir MacBook'ta daemon'ı başlatırsınız ve iki çalışma alanının üyesisinizdir. Multica bunun sonucunda 4 çalışma ortamı kaydeder:
+
+<Mermaid chart={`
+graph TD
+    D["Your daemon<br/>MacBook"]
+    D --> R1["Runtime<br/>Workspace A × Claude Code"]
+    D --> R2["Runtime<br/>Workspace A × Codex"]
+    D --> R3["Runtime<br/>Workspace B × Claude Code"]
+    D --> R4["Runtime<br/>Workspace B × Codex"]
+`} />
+
+Temel noktalar:
+
+- **Bir daemon birden çok çalışma ortamına map edebilir** — üyesi olduğunuz çalışma alanı ve kurulu araç kombinasyonu başına bir tane
+- **Aynı daemon, çalışma alanı ve araç tam olarak bir çalışma ortamı üretir** — daemon'ı yeniden başlatmak duplicate kayıt oluşturmaz
+- Multica UI'daki **Runtimes** sayfası bu satırları listeler
+
+<Callout type="info">
+**Cloud runtimes geliyor**, şu anda waitlist aşamasında. Kullanılabilir olduğunda, yerel daemon çalıştırmadan ajan görevlerini doğrudan Multica Cloud üzerinde yürütebileceksiniz. Haberdar olmak için [download page](https://multica.ai/download) üzerinden e-postanızla kayıt olun.
+</Callout>
+
+## Bir çalışma ortamı ne zaman offline işaretlenir
+
+Multica, bir çalışma ortamının online olup olmadığını belirlemek için heartbeat kullanır. Üç temel sayı:
+
+| Event | Threshold |
+|---|---|
+| Daemon heartbeat frequency | Her **15 saniyede bir** |
+| Marked as missing | **45 saniye** heartbeat yok (3 kaçırılmış beat) |
+| Auto-deleted | **7 günden** uzun süre ilişkili ajan olmadan missing |
+
+Missing kalıcı değildir — daemon başka bir heartbeat gönderir göndermez online'a döner ve çalışma ortamı kaydı korunur. Daemon'ı yeniden başlatmak çalışma ortamlarını kaybettirmez.
+
+<Callout type="warning">
+**Missing durumdaki bir çalışma ortamında çalışan görevler failed olarak işaretlenir** (failure reason `runtime_offline`). Retry edilebilir kaynaklar için (issues, chat) Multica bunları otomatik olarak yeniden kuyruğa alır; Autopilot tetiklemeli görevler otomatik retry edilmez. Bkz. [Tasks → Which failures retry automatically](/tasks#which-failures-retry-automatically-which-dont).
+</Callout>
+
+## Paralel kaç görev çalışabilir
+
+Multica eşzamanlılık limitlerini iki katmanda uygular:
+
+- **Daemon katmanı**: varsayılan olarak **20 eşzamanlı görev** (`MULTICA_DAEMON_MAX_CONCURRENT_TASKS` env var ile ayarlanabilir)
+- **Ajan katmanı**: varsayılan olarak **ajan başına 6 eşzamanlı görev** (ajan bazında yapılandırılır)
+
+Hangisi daha darsa o geçerli olur. Daemon'ınız zaten 20 görev çalıştırıyorsa, bir ajanın hâlâ kapasitesi olsa bile yeni görevler bekler.
+
+`queued` durumunda takılı kalan ve `dispatched` durumuna geçmeyen görevler görüyorsanız, genellikle bu iki limitten biri dolmuştur.
+
+## Daemon crash sonrası devam eden görevlere ne olur
+
+Daemon crash olduğunda veya force-kill edildiğinde, aldığı görevler `dispatched` veya `running` durumunda kalır. Sonraki başlangıçta daemon server'a şunu söyler: "bu görevler artık benim değil, lütfen failed işaretle." Server bunları `runtime_recovery` reason ile `failed` yapar — retry edilebilir kaynaklar için görevler otomatik olarak yeniden kuyruğa alınır.
+
+Bu adım network sorunu nedeniyle başarısız olsa bile, backstop olarak server tarafında **her 30 saniyede bir** tarama vardır: 45 saniyeden uzun süredir heartbeat almayan tüm çalışma ortamları missing işaretlenir ve görevleri onunla birlikte geri alınır.
+
+## Çalışmayan ajanlarda troubleshooting
+
+"Ajanım çalışmıyor" problemiyle karşılaştığınızda önce bu üç adımlık checklist'i çalıştırın:
+
+1. `multica daemon status` çalıştırın — daemon'ın çalıştığını ve online olduğunu doğrulayın
+2. `multica daemon logs -f` çalıştırın — hataları kontrol edin
+3. Multica UI'da **Runtimes** sayfasını açın — çalışma ortamınızın "online" göründüğünü doğrulayın
+
+Daha fazla senaryo [Troubleshooting](/troubleshooting) içinde.
+
+## Sırada
+
+- [Tasks](/tasks) — daemon aldıktan sonra bir görevin tam yaşam döngüsü
+- [Providers Matrix](/providers) — 11 AI coding tool arasındaki yetenek farkları

@@ -1,0 +1,144 @@
+---
+title: Proje Kaynakları
+description: Ajanların kapsamlı bağlam olarak kullanabilmesi için bir projeye türlendirilmiş işaretçiler (bugün Git repo'ları, ileride daha fazlası) ekleyin.
+---
+
+Bir **Project Resource**, bir [projeye](/workspaces) eklenen türlendirilmiş bir işaretçidir — bugün bir Git repo URL'si, yarın bir Notion sayfası veya belge bağlantısı. Bir [ajan](/agents) o projenin içindeki bir issue üzerinde çalıştığında daemon, projenin kaynak listesini otomatik olarak ajanın çalışma dizinine ve [meta-skill](/skills) prompt'una yazar.
+
+Sonuç: ajan hangi repo'yu checkout edeceğini, bu proje için hangi dokümanların "birincil referans" olduğunu bilir; kimsenin bağlamı issue gövdesine kopyalayıp yapıştırması gerekmez.
+
+## Zihinsel model
+
+Bir proje artık yalnızca bir etiket değildir. Küçük bir **kaynak kapsayıcısıdır**:
+
+- Bir projenin 0..N **kaynağı** vardır.
+- Bir kaynağın `resource_type` değeri (örn. `github_repo`) ve `resource_ref` değeri (`resource_type` tarafından türlendirilen bir JSON payload'u) vardır.
+- Yeni kaynak türleri bir string + bir handler ekler. **Şema migrasyonu yok. Frontend'i yeniden yazmak yok.**
+
+Bu şekil bilinçli bir tercihtir — Multica'nın ajan sağlayıcıları için zaten kullandığı desenle aynıdır: bir `type` ayırıcı ve türlendirilmiş payload. Şemayı stabil tutar; böylece ileride "Notion page", "Google Doc", "uploaded file" veya "external URL" eklemek küçük ve eklemeli bir değişiklik olur.
+
+## Bugün: `github_repo`
+
+İlk kaynak türü kullanıma hazır gelir:
+
+```json
+{
+  "resource_type": "github_repo",
+  "resource_ref": {
+    "url": "https://github.com/owner/repo",
+    "default_branch_hint": "main"
+  }
+}
+```
+
+`default_branch_hint` isteğe bağlıdır — varsa daemon bunu meta-skill içinde gösterir, böylece ajan çalışmasını hangi branch üzerine kuracağını bilir.
+
+## Proje oluştururken repo ekleme
+
+**Web** veya **Desktop** uygulamasında *New project* açıldığında Status / Priority / Lead yanında bir **Repos** pill'i gösterilir. Çalışma alanına bağlı repo'ları seçmek (veya geçici bir URL yapıştırmak), proje oluşturulduğu anda bunları `github_repo` kaynakları olarak ekler.
+
+**CLI** üzerinden:
+
+```bash
+# Create + attach in one shot. The server attaches resources in the same
+# transaction as the project create — invalid resources roll back the whole
+# operation, so you never end up with a project that has half its resources.
+multica project create \
+  --title "Agent UX 2026" \
+  --repo https://github.com/multica-ai/multica
+
+# Manage resources later
+multica project resource list <project-id>
+multica project resource add  <project-id> --type github_repo --url <url>
+multica project resource remove <project-id> <resource-id>
+
+# Generic escape hatch for any resource_type the server understands —
+# no CLI change needed when a new type ships:
+multica project resource add <project-id> \
+  --type notion_page \
+  --ref '{"page_id":"…","title":"…"}'
+```
+
+`--repo` tekrarlanabilir; her değer ayrı bir `github_repo` kaynağı olarak eklenir.
+
+## Ajan çalışma zamanında ne görür
+
+Daemon bir proje içindeki issue için ajan başlattığında iki şey olur:
+
+### 1. `.multica/project/resources.json`
+
+API yanıtının yapılandırılmış bir pass-through kopyası ajanın çalışma dizinine yazılır:
+
+```json
+{
+  "project_id": "…",
+  "project_title": "Agent UX 2026",
+  "resources": [
+    {
+      "id": "…",
+      "resource_type": "github_repo",
+      "resource_ref": {
+        "url": "https://github.com/multica-ai/multica",
+        "default_branch_hint": "main"
+      }
+    }
+  ]
+}
+```
+
+Skills, yardımcı script'ler veya ajanın kendisi, çalıştırma için *tam* kaynak kümesine ihtiyaç duyduğunda bu dosyayı parse edebilir.
+
+### 2. Meta-skill prompt'unda bir "Project Context" bölümü
+
+Ajanın `CLAUDE.md` / `AGENTS.md` dosyası (sağlayıcıya bağlı olarak) artık insan tarafından okunabilir bir özet içerir:
+
+```
+## Project Context
+
+This issue belongs to **Agent UX 2026**.
+
+Project resources (also written to `.multica/project/resources.json`):
+
+- **GitHub repo**: https://github.com/multica-ai/multica (default branch: `main`)
+
+Resources are pointers — open them only when relevant to the task. For
+`github_repo` resources, use `multica repo checkout <url>` to fetch the code.
+```
+
+Metin özellikle minimal tutulur. Tam payload disktedir; prompt yalnızca ajanı projenin varlığı ve eklenenler hakkında yönlendirir.
+
+### Hata modu
+
+Kaynak getirme **best-effort** çalışır. API çağrısı başarısız olursa proje bölümü prompt'tan çıkarılır ve dosya yazılmaz, ama görev yine de başlar. Ajanlar eksik proje bağlamı yüzünden asla bloke olmaz.
+
+## Yeni bir kaynak türü ekleme
+
+Bu soyutlamanın amacı yeni türleri ucuz hale getirmektir. Tam yol:
+
+1. **Server validator** (`server/internal/handler/project_resource.go`) — yeni payload'u parse edip normalize eden bir case'i `validateAndNormalizeResourceRef` içine ekleyin.
+2. **Daemon meta-skill formatter** (`server/internal/daemon/execenv/runtime_config.go`) — ajan prompt'unun yeni türü okunabilir bir madde olarak render etmesi için `formatProjectResource` içine bir case ekleyin.
+3. **TypeScript types** (`packages/core/types/project.ts`) — `ProjectResourceType` değerini genişletin ve payload interface'ini ekleyin.
+4. **UI renderer** (`packages/views/projects/components/project-resources-section.tsx`) — yeni tür için `ResourceRow` içine bir case ekleyin.
+
+**Şema migrasyonu yok**, yeni sqlc query yok, yeni endpoint yok, **CLI değişikliği de yok** — CLI'ın generic `--ref '<json>'` flag'i validator'ın anladığı her payload'u kabul eder; bu yüzden yeni bir tür için ilk gün desteği yalnızca yukarıdaki dört adımdır. (İsterseniz daha sonra türe özel bir CLI kısayolu *opsiyonel* olarak ekleyebilirsiniz; gerekli değildir.)
+
+Aynı `project_resource` tablosu ve aynı üç CRUD çağrısı her türü yönetir.
+
+## Çalışma alanı repo'ları ve proje repo'ları
+
+Ajana gösterilen repo listesi (`CLAUDE.md` / `AGENTS.md` içindeki `## Repositories` bloğu), daemon claim handler tarafından şu öncelikle seçilir:
+
+- **Projede en az bir `github_repo` kaynağı varsa** → ajana yalnızca bu repo'lar gösterilir. Çalışma alanına bağlı repo'lar özellikle gizlenir; böylece ajan bu issue için hangisinin geçerli olduğunu tahmin etmek zorunda kalmaz.
+- **Projede `github_repo` kaynağı yoksa (veya issue bir projede değilse)** → önceki gibi çalışma alanının repo listesine fallback yapılır.
+
+Bu, ajanın çalışma kümesini dar tutar: bir proje repo'ları konusunda açık davranıyorsa otorite cevap budur. `.multica/project/resources.json` içindeki yapılandırılmış kaynak listesi her zaman tam kümeyi taşır; her şeyi incelemek isteyen bir skill bunu hâlâ yapabilir.
+
+Daemon bunu checkout tarafında da yansıtır: bir görev proje kapsamlı `github_repo` URL'leriyle geldiğinde, bu URL'ler çalışma alanı başına allowlist'e eklenir *ve* ajan başlatılmadan önce yerel repo cache'ine sync edilir. Bu yüzden çalışma alanı seviyesinde bağlı olmayan bir proje repo URL'si de `multica repo checkout` için geçerli bir argümandır — daemon bunu "not configured" diye reddetmez. Allowlist ayrımı içseldir: çalışma alanına bağlı URL'ler ve görev kapsamlı URL'ler ayrı izlenir; böylece workspace-repos refresh çalıştırma sırasında yanlışlıkla bir proje URL'sini iptal etmez.
+
+## Burada bilinçli olarak kapsam dışında olanlar
+
+- **Projeler arası paylaşım.** Bugün her kaynak tam olarak bir projede yaşar.
+- **Skill başına kaynak kapsamı.** Ajanın çalıştırmasında tüm kaynaklar her skill'e görünür; tür farkındalığı olan filtreleme sonraki adımdır.
+- **Cache / sync.** `github_repo` yalnızca metadata'dır — checkout hâlâ ihtiyaç halinde `multica repo checkout` ile yapılır. Notion / Google Docs için cache'lenmiş belge metni bu türlerle birlikte gelecek.
+
+Bunlar bilinçli eksiltmelerdir — ilk sürümün amacı soyutlamayı en küçük hareketli parça kümesiyle doğrulamaktır.

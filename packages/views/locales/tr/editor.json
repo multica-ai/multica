@@ -1,0 +1,115 @@
+{
+  "bubble_menu": {
+    "bold": "Kalın",
+    "italic": "İtalik",
+    "strikethrough": "Üstü çizili",
+    "code": "Kod",
+    "link": "Bağlantı",
+    "list": "Liste",
+    "quote": "Alıntı",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Metin",
+      "normal_text": "Normal metin",
+      "heading_1": "Başlık 1",
+      "heading_2": "Başlık 2",
+      "heading_3": "Başlık 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Madde işaretli liste",
+      "ordered_list": "Numaralı liste",
+      "task_list": "Görev listesi"
+    },
+    "sub_issue": {
+      "tooltip": "Seçimden alt issue oluştur",
+      "created": "{{identifier}} oluşturuldu",
+      "create_failed": "Alt issue oluşturulamadı"
+    },
+    "highlight": "Vurgula",
+    "task_list": "Görev listesi"
+  },
+  "image": {
+    "view": "Görseli görüntüle",
+    "download": "İndir",
+    "copy_link": "Bağlantıyı kopyala",
+    "delete": "Sil",
+    "link_copied": "Bağlantı kopyalandı",
+    "copy_link_failed": "Bağlantı kopyalanamadı",
+    "canvas_label": "Görsel tuvali. Kaydırmak için sürükleyin, yakınlaştırmak için kaydırın, gerçek boyutu açıp kapatmak için çift tıklayın."
+  },
+  "attachment": {
+    "download_failed": "İndirme bağlantısı alınamadı. Birazdan tekrar deneyin.",
+    "preview": "Önizleme",
+    "preview_loading": "Önizleme yükleniyor…",
+    "preview_failed": "Önizleme yüklenemedi",
+    "preview_too_large": "Dosya önizlemek için çok büyük. Lütfen indirin.",
+    "preview_unsupported": "Bu dosya türü önizlenemiyor.",
+    "close": "Kapat",
+    "open_in_new_tab": "Yeni sekmede aç",
+    "remove": "Eki kaldır"
+  },
+  "link_hover": {
+    "copy_link": "Bağlantıyı kopyala",
+    "open_link": "Bağlantıyı aç",
+    "link_copied": "Bağlantı kopyalandı",
+    "copy_failed": "Kopyalanamadı"
+  },
+  "mention": {
+    "group_users": "Kullanıcılar",
+    "group_issues": "Issue'lar",
+    "all_members": "Tüm üyeler",
+    "searching": "Aranıyor...",
+    "no_results": "Sonuç yok",
+    "group_current": "Geçerli sayfa",
+    "group_recent": "Son görüntülenenler",
+    "group_search": "Arama sonuçları"
+  },
+  "code_block": {
+    "copy_code": "Kodu kopyala",
+    "show_preview": "Önizlemeyi göster",
+    "show_source": "Kaynağı göster",
+    "fullscreen": "Tam ekran"
+  },
+  "file_card": {
+    "uploading": "{{filename}} yükleniyor"
+  },
+  "title_editor": {
+    "title_aria_label": "Başlık"
+  },
+  "mermaid": {
+    "render_error": "Mermaid diyagramı oluşturulamadı.",
+    "rendering": "Diyagram oluşturuluyor…",
+    "viewer_title": "Diyagram",
+    "canvas_label": "Diyagram tuvali. Kaydırmak için sürükleyin, yakınlaştırmak için kaydırın.",
+    "open_viewer": "Diyagram görüntüleyicisini aç",
+    "close_viewer": "Kapat",
+    "copy_source": "Diyagram kaynağını kopyala",
+    "show_source": "Kaynağı göster",
+    "show_diagram": "Diyagramı göster",
+    "export": "Dışa aktar",
+    "export_png": "PNG indir",
+    "export_svg": "SVG indir",
+    "export_source": ".mmd indir"
+  },
+  "canvas": {
+    "zoom_in": "Yakınlaştır",
+    "zoom_out": "Uzaklaştır",
+    "zoom_fit": "Görünüme sığdır",
+    "zoom_actual": "Gerçek boyut"
+  },
+  "slash_command": {
+    "no_skills_configured": "Yapılandırılmış skill yok",
+    "no_results": "Eşleşen skill yok",
+    "commands": {
+      "note": "Not ekle — hiçbir ajanı tetiklemez"
+    }
+  },
+  "upload": {
+    "failed": "{{filename}} yüklenemedi: {{reason}}",
+    "in_progress": "Yükleniyor…",
+    "interrupted": "Yükleme kesildi — dosya kaydedilmedi. Yeniden ekleyin.",
+    "remove": "Kaldır",
+    "uploading_label": "{{filename}} yükleniyor…",
+    "failed_label": "{{filename}} yüklenemedi"
+  }
+}

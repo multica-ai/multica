@@ -1,0 +1,63 @@
+---
+title: "Yorumlarda ajanlara @-mention yapma"
+description: Bir yorumdan ajanın bakmasını sağlamak için @ ile mention edin; atanan değişmez, durum değişmez, atamadan daha hafiftir.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir [yorum](/comments) içinde bir [ajan](/agents)a `@`-mention yapmak daha hafif tetikleyicidir: **atanan değişmez, durum değişmez**; yalnızca ajanın mevcut [issue](/issues)'ya bakması için bir dürtmedir. [**Atama**](/assigning-issues) ile karşılaştırıldığında (ajanı sahip yapıp issue'yu devretmek), @-mention "bu bölüme bak", "başka bir açı ver" veya "kısa bir tartışmaya dahil et" durumlarına uyar.
+
+## Bir yorumda ajana mention yapma
+
+Üye mention etmekle aynıdır: seçiciyi açmak için `@` yazın ve bir ajan seçin. Yorum gönderildiğinde Multica, mention edilen her ajan için **o yorumu** tetik bağlamı olarak kullanan bir `task`'ı hemen kuyruğa alır. Ajan görevi aldığında şunları okuyabilir:
+
+- Tüm issue (açıklama + tüm geçmiş yorumlar)
+- Tetikleyici yorumun kendisi; bu çalıştırmanın başlangıç noktası olarak
+
+`@mention` Markdown söz dizimi, seçici ve `@all` semantiği [**Yorumlar**](/comments) sayfasında anlatılır.
+
+<Callout type="info">
+**Bir yorumda bir [ekip](/squads)e de `@`-mention yapabilirsiniz.** Aynı seçici üyeler ve ajanlarla birlikte ekipleri de gösterir; birini seçmek `[@SquadName](mention://squad/<uuid>)` ekler ve yanıtı koordine etmesi için ekibin **lider ajanını** tetikler. Atanan ve durum değişmez.
+</Callout>
+
+## Atamadan farkı
+
+İkisi de ajanı çalıştırır, ancak mekanikler tamamen farklıdır:
+
+| Dimension | Assign | @-mention |
+|---|---|---|
+| Changes `assignee` | ✓ | ✗ |
+| Changes `status` | ✗ | ✗ |
+| Enqueues a `task` | Immediately (non-Backlog) | Immediately |
+| Trigger comment ID | Optional | Always carries the current comment |
+| Agents targeted per action | 1 (one assignee) | Many (a comment can @ multiple) |
+| Priority | Inherits from issue | Inherits from issue |
+
+Kısa kural basit: **ajandan "bu issue'nun sahibi bundan sonra sensin" demek istediğinizde atama kullanın; "mevcut bağlama bir bak" demek istediğinizde @-mention kullanın.**
+
+## Birden fazla ajana @ yaptığınızda ne olur
+
+Bir yorum birkaç ajana @-mention yaparsa her biri kendi çalışma ortamında bağımsız bir `task` olarak kuyruğa alınır; **birbirini engellemeden paralel çalışırlar**.
+
+Bir ajanın aynı issue üzerinde zaten `queued` veya `dispatched` durumunda bir `task`'ı varsa (örneğin yeni mention edilmiştir ve henüz başlamamıştır), yeni mention **dedupe edilir** ve yinelenen `task` kuyruğa alınmaz. Dedupe **tek bir yorumla sınırlıdır**; saniyeler arayla gelen ve aynı ajana @ yapan iki farklı yorumun ikisi de `task` kuyruğa alır.
+
+<Callout type="warning">
+**Bir yorumu düzenleyip @ eklemek yeniden tetiklemez.** `@agent` eklemeyi ancak gönderimden sonra hatırlarsanız, düzenleme yalnızca görünen metni değiştirir; o ajana **yeni bir `task` göndermez**. Tetiklemek için yeni bir yorum gönderin veya issue'yu ajana atayın.
+</Callout>
+
+## `@all` hiçbir ajanı tetiklemez
+
+`@all` ile herkesi çağırdığınızda **yalnızca çalışma alanı üyeleri gelen kutusuna düşer; ajanlar `@all` genişletmesine dahil edilmez.** Bu tasarım gereğidir: ajanlar gelen kutusu bildirimi almaz, bu yüzden `@all` onlar için anlamlı değildir. Bir ajanı çalıştırmak için adıyla mention edin.
+
+## Ajanların kendilerine @-mention yapması döngü oluşturmaz
+
+Ajanlar çalışırken yorum yazabilir ve bu yorumlar `@mention` içerebilir. Multica'da sabit bir koruma vardır: **yorum yazarı, bir `@` mention ile hedeflenen ajanla aynıysa o mention atlanır**. Böylece "ajan A @ ajan A → yeni task → tekrar @ ajan A" sonsuz döngüsü oluşmaz.
+
+Bu koruma **yalnızca doğrudan kendine referansları engeller.** Ajan A'nın ajan B'ye @-mention yapması normal çalışır; B yanıtında A'ya @-mention yaparsa A tekrar tetiklenir. Başka bir deyişle **dolaylı özyineleme engellenmez**. Ajan talimatları yazarken bir grup ajanın birbirini döngü halinde @-mention etmesine izin vermemeye dikkat edin.
+
+## Sonraki
+
+- [**Ekipler**](/squads) — liderin soruyu doğru üyeye yönlendirmesi için bir ekibe `@`-mention yapın
+- [**Chat**](/chat) — herhangi bir issue dışında bire bir konuşma
+- [**Autopilots**](/autopilots) — ajanların zamanlamayla otomatik çalışmaya başlamasını sağlayın
+- [**Yorumlar**](/comments) — `@mention` söz dizimi, seçici ve `@all` semantiği

@@ -1,0 +1,119 @@
+---
+title: Cloud hızlı başlangıç
+description: Kayıttan ilk görevinizi bir ajana atamaya kadar 5 dakika.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bu sayfa Multica Cloud'u uçtan uca kurmanızı sağlar — **kaydol → [CLI](/cli) kur → [daemon](/daemon-runtimes) başlat → [ajan](/agents) oluştur → ilk [görevi](/tasks) ata**. Yaklaşık 5 dakika sürer.
+
+Tek ön koşul: yerelde en az bir [AI kodlama aracı](/providers) kurulu olmalı ([Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw) veya [Pi](/providers#pi)). Daemon başlangıçta bunları otomatik algılar ve hiçbiri yoksa başlamayı reddeder.
+
+## 1. Hesap oluşturun
+
+[multica.ai](https://multica.ai) adresinden kaydolun. Email (6 haneli doğrulama kodu) veya Google ile giriş yapabilirsiniz.
+
+Kayıttan sonra otomatik olarak varsayılan bir çalışma alanına yerleştirilirsiniz (hesap adınızdan üretilir). Daha sonra adını değiştirebilir veya yeni çalışma alanları oluşturabilirsiniz.
+
+## 2. Multica CLI'yi kurun
+
+**macOS / Linux (Homebrew önerilir)**:
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+**macOS / Linux (Homebrew yoksa)**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell)**:
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Kurulumu doğrulayın:
+
+```bash
+multica version
+```
+
+## 3. Giriş yapın + daemon'u başlatın
+
+Tek bir komut giriş işlemini yapar ve daemon'u başlatır:
+
+```bash
+multica setup
+```
+
+`multica setup` şunları yapar:
+
+1. CLI'yi Multica Cloud'a bağlanacak şekilde yapılandırır
+2. Giriş için tarayıcınızı açar (web ile aynı email doğrulama kodu / Google OAuth)
+3. Oluşturulan PAT'i `~/.multica/config.json` içine kaydeder
+4. **Daemon'u otomatik başlatır** — her 3 saniyede bir görev yoklamaya ve her 15 saniyede bir heartbeat göndermeye başlar
+
+<Callout type="info">
+**Desktop app mi kullanıyorsunuz?** Desktop app açılışta **daemon'u otomatik başlatır** — `multica setup` komutunu elle çalıştırmanız gerekmez. Bkz. [Desktop app](/desktop-app).
+</Callout>
+
+Daemon'un çalıştığını doğrulayın:
+
+```bash
+multica daemon status
+```
+
+`online`, sunucuya kaydolduğu anlamına gelir.
+
+## 4. Çalışma ortamının online olduğunu doğrulayın
+
+Web UI'da **Settings → Runtimes** bölümüne gidin. Az önce başlattığınız daemon, yerelde kurulu her AI kodlama aracı için bir tane olmak üzere bir veya daha fazla aktif çalışma ortamı olarak görünmelidir.
+
+Offline görünüyorsa panik yapmayın — [Troubleshooting → Daemon can't connect to the server](/troubleshooting#daemon-cant-connect-to-the-server) bölümüne bakın.
+
+## 5. Ajan oluşturun
+
+Web UI'da **Settings → Agents** bölümüne gidin ve **New Agent**'a tıklayın:
+
+- **Name** — bu ajanın panolarda ve yorumlarda görünen adı. Sevdiğiniz bir ad seçin
+- **Provider** — yerelde kurulu bir AI kodlama aracı seçin (açılır liste yalnızca çalışma ortamlarınız tarafından algılanan araçları gösterir)
+- **Model** (opsiyonel) — o aracın içindeki model seçimi (sağlayıcıya göre statik liste veya dinamik keşif)
+- **Instructions** (opsiyonel) — bu ajan için system prompt
+
+Oluşturulduktan sonra ajan çalışma alanı üye listenizde görünür ve bir insan üye gibi iş atanabilir.
+
+## 6. İlk görevinizi atayın
+
+Web UI'da veya CLI'den bir issue oluşturun:
+
+```bash
+multica issue create --title "Add an ASCII architecture diagram to the README"
+```
+
+Issue'yu az önce oluşturduğunuz ajana atayın — Web UI'da avatarına tıklayın veya CLI'yi kullanın:
+
+```bash
+multica issue assign MUL-1 --to my-agent-name
+```
+
+`--to`, bir ajanın veya üyenin **adını** alır. Alt dize eşleşmesi çalışır — ajanın adı `my-code-reviewer` ise `reviewer` ona çözümlenir. Çalışma alanınızda çakışan adlar varsa bunun yerine `--to-id <uuid>` geçin (`--to` ile birlikte kullanılamaz); UUID'yi `multica agent list --output json` veya `multica workspace member list --output json` ile bulun.
+
+**Daemon tarafında sonra ne olur**:
+
+1. Görevi 3 saniye içinde alır (durum `queued`'dan `dispatched`'a geçer)
+2. Çalışmaya başlamak için eşleşen AI kodlama aracını çağırır (durum `running` olur)
+3. AI yerelde çalışır — kod dizininizi okuyabilir, komut çalıştırabilir, dosya düzenleyebilir
+4. İş bitince sonucu Multica'ya bildirir (otomatik yeniden denemenin devreye girip girmemesine göre durum `completed` veya `failed` olur)
+
+Web UI **gerçek zamanlı** güncellenir (WebSocket üzerinden) — yenileme gerekmez.
+
+## Sonraki adımlar
+
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — daemon'un nasıl çalıştığı ve çalışma ortamlarının ne anlama geldiği
+- [Tasks](/tasks) — görev yaşam döngüsü ve yeniden deneme kuralları
+- [AI kodlama araçları karşılaştırması](/providers) — 11 araç arasındaki yetenek farkları
+- [Desktop app](/desktop-app) — daemon'u kendiniz çalıştırmak istemiyorsanız
+- [Self-host hızlı başlangıç](/self-host-quickstart) — kendi backend'inizi çalıştırın

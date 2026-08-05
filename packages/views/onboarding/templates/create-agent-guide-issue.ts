@@ -24,10 +24,11 @@ export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
   zh: "第 2 步 —— 创建你的第一个 Multica Agent",
   ko: "2단계 — 첫 Multica Agent 만들기",
   ja: "ステップ2 — 最初の Multica Agent を作成する",
+  tr: "2. adım — İlk Multica ajanınızı oluşturun",
 } as const;
 
 interface BodyOpts {
-  lang: "en" | "zh" | "ko" | "ja";
+  lang: "en" | "zh" | "ko" | "ja" | "tr";
   installRuntimeIdentifier: string;
   installRuntimeId: string;
 }
@@ -42,6 +43,9 @@ export function getCreateAgentGuideBody(opts: BodyOpts): string {
   }
   if (opts.lang === "ja") {
     return jaBody(mention);
+  }
+  if (opts.lang === "tr") {
+    return trBody(mention);
   }
   return enBody(mention);
 }
@@ -212,4 +216,46 @@ ${HELPER_INSTRUCTIONS.ja}
 - **Squads** — 一緒に割り当てられる agent のグループです。
 - **Autopilots** — スケジュールや webhook で実行される処理です。
 - **Docs** — https://multica.ai/docs。`;
+}
+
+function trBody(installRuntimeMention: string): string {
+  return `Çalışma ortamınız online olduğunda (${installRuntimeMention} bölümüne bakın), ilk ajanınızı oluşturun: Multica Helper. Aşağıdaki prompt hazır; doğrudan kopyalayabilirsiniz.
+
+## 1. Yeni ajan ekranını açın
+
+Kenar çubuğunda **Ajanlar** bölümüne gidin → **Yeni Ajan**'a tıklayın.
+
+## 2. Az önce kurduğunuz çalışma ortamını seçin
+
+"Çalışma ortamı" alanında ilgili çalışma ortamını seçin. Hiçbir şey görünmüyorsa çalışma ortamı henüz online değildir; ${installRuntimeMention} içindeki kurulum adımlarını tamamlayın.
+
+## 3. Aşağıdaki blokları ilgili alanlara kopyalayın
+
+**Ad**
+\`\`\`md
+${HELPER_AGENT_NAME}
+\`\`\`
+
+**Açıklama**
+\`\`\`md
+${HELPER_DESCRIPTION.tr}
+\`\`\`
+
+**Talimatlar**
+\`\`\`md
+${HELPER_INSTRUCTIONS.tr}
+\`\`\`
+
+## 4. Kaydet → bir issue atayın
+
+**Oluştur**'a basın. Yeni ajan, çalışma alanı ajan listesinde görünür.
+
+Şimdi bir issue oluşturun (veya mevcut bir issue'yu yeniden atayın) → assignee = Multica Helper yapın → durumu **Yapılacak** olarak ayarlayın. Çalışma ortamı birkaç saniye içinde task'i alır ve çalışmaya başlar. İlerlemeyi issue'nun task panelinden izleyebilirsiniz.
+
+## Sonraki adımlar
+
+- **Skill'ler** — herhangi bir ajana bağlayabileceğiniz yeniden kullanılabilir talimat paketleri.
+- **Ekipler** — birlikte atanabilen ajan grupları.
+- **Autopilot'lar** — zamanlanmış veya webhook ile tetiklenen çalıştırmalar.
+- **Dokümanlar** — https://multica.ai/docs.`;
 }

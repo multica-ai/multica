@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "Geri",
+    "log_out": "Çıkış yap"
+  },
+  "not_found": {
+    "title": "Davet bulunamadı",
+    "description": "Bu davetin süresi dolmuş, davet geri alınmış veya hesabınıza ait olmayabilir.",
+    "go_to_dashboard": "Dashboard'a git"
+  },
+  "accepted": {
+    "title": "{{workspace_name}} çalışma alanınıne katıldınız!",
+    "redirecting": "Çalışma alanına yönlendiriliyor..."
+  },
+  "declined": {
+    "title": "Davet reddedildi",
+    "description": "Bu çalışma alanına eklenmeyeceksiniz.",
+    "go_to_dashboard": "Dashboard'a git"
+  },
+  "main": {
+    "join_title": "{{workspace_name}} çalışma alanınıne katıl",
+    "fallback_workspace_name": "çalışma alanı",
+    "invited_role_admin": "sizi admin olarak katılmaya davet etti.",
+    "invited_role_member": "sizi member olarak katılmaya davet etti.",
+    "already_handled_accepted": "Bu davet zaten kabul edilmiş.",
+    "already_handled_declined": "Bu davet zaten reddedilmiş.",
+    "expired": "Bu davetin süresi dolmuş.",
+    "decline": "Reddet",
+    "declining": "Reddediliyor...",
+    "accept": "Kabul et ve katıl",
+    "joining": "Katılınıyor..."
+  },
+  "errors": {
+    "accept_failed": "Davet kabul edilemedi",
+    "decline_failed": "Davet reddedilemedi"
+  },
+  "batch": {
+    "log_out": "Çıkış yap",
+    "empty_title": "Bekleyen davet yok",
+    "empty_hint": "Kendi çalışma alanınızi kurmaya devam edin.",
+    "empty_continue": "Kuruluma devam et",
+    "title": "Davet edildiniz",
+    "subtitle": "Katılmak istediğiniz çalışma alanlari seçin. Kalanları daha sonra sidebar'dan her zaman yönetebilirsiniz.",
+    "submit_skip": "Atla ve kendi çalışma alanınımi kur",
+    "submit_join_one": "1 çalışma alanına katıl",
+    "submit_join_other": "{{count}} çalışma alanına katıl",
+    "joining": "Katılınıyor...",
+    "error_generic": "Davetler işlenemedi. Lütfen tekrar deneyin.",
+    "row_workspace_fallback": "Çalışma alanı",
+    "row_inviter_fallback": "Biri",
+    "row_invited_admin": "{{inviter}} sizi admin olarak davet etti",
+    "row_invited_member": "{{inviter}} sizi member olarak davet etti"
+  }
+}

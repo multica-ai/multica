@@ -1,0 +1,169 @@
+---
+title: Self-host hızlı başlangıç
+description: Multica'yı Docker ile kendi sunucunuzda veya makinenizde çalıştırın. Yaklaşık 10 dakika sürer.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bu sayfa Multica **sunucusunu** (backend + frontend + PostgreSQL) Docker ile kendi makinenizde veya sunucunuzda çalıştırmanızı sağlar. İşiniz bittiğinde verileriniz tamamen sizin kontrolünüzde olur — [çalışma alanları](/workspaces), [issue'lar](/issues), [yorumlar](/comments) ve [ajan](/agents) yapılandırması dahil.
+
+Ajan **yürütmesi** yine yerelde çalıştırdığınız [daemon](/daemon-runtimes) ve o makinede kurulu [AI kodlama araçlarına](/providers) dayanır — Cloud ile tamamen aynıdır. Self-host yalnızca sunucu katmanını değiştirir, yürütme katmanını değil.
+
+## Ön koşullar
+
+- **Docker** kurulu ve `docker compose` çalıştırabiliyor olmalı
+- **Git** (opsiyonel, ama kaynağı çekebilmek için önerilir)
+- Çalışır durumda kalabilecek bir makine (yerel / iç ağ / cloud host hepsi olur)
+- **Daemon'u çalıştıran makinede** en az bir AI kodlama aracı kurulu olmalı (sunucuyu çalıştıran makine olmak zorunda değil — geliştirme laptop'ınız yeterli)
+
+## 1. Projeyi çekin ve backend'i başlatın
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+```
+
+`make selfhost` şunları yapar:
+
+1. Eksikse `.env.example` dosyasından, **rastgele JWT_SECRET** içeren bir `.env` üretir
+2. Resmi Docker imajlarını çeker (PostgreSQL, Multica backend, Multica frontend)
+3. `docker-compose.selfhost.yml` ile tüm servisleri ayağa kaldırır
+4. Backend'in `/health` endpoint'i hazır olana kadar bekler
+
+Başlangıçtan sonraki sürekli production kontrolleri için, denetimin veritabanı veya migration sorunlarında başarısız olmasını istediğinizde `/readyz` kullanın.
+
+Backend container'ı başlangıçta **database migration'larını otomatik çalıştırır** (`docker/entrypoint.sh`, sunucu başlamadan önce `./migrate up` çalıştırır) — migration çıktısını backend loglarında görürsünüz. Sürüm yükseltmeleri de aynı şekilde ele alınır.
+
+<Callout type="info">
+**İmaj henüz yayınlanmadı mı?** `make selfhost` imajları çekemiyorsa yayınlanmamış bir sürüm tag'inde olabilirsiniz. Kararlı bir sürüme geçin veya kaynaktan build alın: `make selfhost-build`.
+</Callout>
+
+Ayağa kalkınca:
+
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Backend**: [http://localhost:8080](http://localhost:8080)
+
+<Callout type="info">
+**Portlar yalnızca `127.0.0.1` üzerinde dinler.** `docker-compose.selfhost.yml` yayınlanan her portu loopback'e bağlar — `ss -tlnp`, `0.0.0.0:8080` göstermez ve servisler tasarım gereği diğer makinelerden erişilemez. Varsayılan `JWT_SECRET` ve Postgres kimlik bilgileri açık internette durmamalıdır. Makineler arası erişim için stack'in önüne TLS sonlandıran bir reverse proxy koyun — bkz. [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+</Callout>
+
+## 2. Önemli: production güvenliğini açık tutun
+
+<Callout type="warning">
+**`docker-compose.selfhost.yml`, `APP_ENV` değerini varsayılan olarak `production` yapar** ve `MULTICA_DEV_VERIFICATION_CODE` boş kalır; bu yüzden herkese açık instance'larda sabit kod yoktur.
+
+`MULTICA_DEV_VERIFICATION_CODE` değerini yalnızca yerel veya özel test otomasyonu için ayarlayın. Sabit kod `APP_ENV` production değilken etkinleştirilirse, kod isteyebilen herkes bu sabit değerle giriş yapabilir. Bkz. [Auth setup → Fixed local testing codes](/auth-setup#fixed-local-testing-codes).
+
+Herkese açık herhangi bir deployment'tan önce `.env` içinde `APP_ENV=production` olduğundan ve `MULTICA_DEV_VERIFICATION_CODE` değerinin boş olduğundan emin olun.
+</Callout>
+
+## 3. Email servisini yapılandırın (opsiyonel ama önerilir)
+
+Email yapılandırılmadan kullanıcılarınız doğrulama kodlarını email ile alamaz; sunucu oluşturulan kodları bunun yerine stdout'a yazdırır.
+
+İki gönderim backend'i desteklenir — ağınıza uygun olanı seçin:
+
+**Seçenek A — Resend (cloud / public-internet deployment'ları):**
+
+1. [Resend](https://resend.com/) üzerinde kaydolun ve bir API anahtarı alın
+2. Kontrol ettiğiniz bir gönderim domain'ini doğrulayın
+3. Bunları `.env` içinde ayarlayın:
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com
+    ```
+
+**Seçenek B — SMTP relay (iç ağlar / on-premise):**
+
+Deployment `api.resend.com` adresine erişemiyorsa veya zaten bir iç mail relay'iniz varsa (Exchange, Postfix, on-prem SendGrid vb.) bunu kullanın. İkisi de ayarlıysa `SMTP_HOST`, Resend'e göre önceliklidir.
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
+SMTP_USERNAME=multica          # leave empty for unauthenticated relay
+SMTP_PASSWORD=...
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+Sonra yeniden başlatın: `docker compose -f docker-compose.selfhost.yml restart backend`.
+
+Daha fazla auth yapılandırması (OAuth, signup allowlist) ve tam SMTP değişken referansı için [Auth setup](/auth-setup) ve [Environment variables → Email](/environment-variables#email-configuration) sayfalarına bakın.
+
+## 4. İlk giriş + çalışma alanı oluşturma
+
+[http://localhost:3000](http://localhost:3000) adresini açın:
+
+- Email adresinizi girin
+- Doğrulama kodunu yapılandırdığınız email backend'inden alın (Resend veya SMTP relay); hiçbiri yapılandırılmadıysa sunucu container stdout'undan kopyalayın — `[DEV] Verification code` satırını arayın
+- Production olmayan özel bir instance'ta açıkça `MULTICA_DEV_VERIFICATION_CODE=888888` ayarlamadıysanız `888888` kullanmayın
+- Giriş yapın ve ilk çalışma alanınızı oluşturun
+
+## 5. CLI'yi kendi sunucunuza yönlendirin
+
+CLI kurulumu [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) ile aynıdır — Homebrew / script / PowerShell seçeneklerinden birini seçin.
+
+### 5a. Aynı makine
+
+CLI ve sunucu aynı host üzerinde çalışıyorsa varsayılanlar zaten çalışır:
+
+```bash
+multica setup self-host
+```
+
+Bu komut CLI'yi `http://localhost:8080` (backend) ve `http://localhost:3000` (frontend) adreslerine yönlendirir, sizi tarayıcıdan giriş akışına sokar, PAT'i yerelde saklar ve **daemon'u otomatik başlatır**.
+
+### 5b. Cross-machine: front with a reverse proxy
+
+Compose stack'i yalnızca `127.0.0.1` üzerinde dinlediği için farklı bir makinedeki daemon doğrudan `http://<server-ip>:8080` adresine erişemez — erişmesini de istemezsiniz, çünkü varsayılan `JWT_SECRET` aksi halde açık internetten ulaşılabilir olur. Sunucuya TLS sonlandıran ve istekleri `127.0.0.1:8080` (backend) ile `127.0.0.1:3000` (frontend) adreslerine ileten bir reverse proxy koyun, sonra CLI'yi public HTTPS URL'ye yönlendirin:
+
+```bash
+multica setup self-host \
+  --server-url https://<your-domain> \
+  --app-url https://<your-domain>
+```
+
+Frontend ve backend'i tek hostname üzerinde öne alan minimal bir Caddyfile (daemon ve web app'in ikisinin de ihtiyaç duyduğu WebSocket desteğiyle):
+
+```nginx
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Backend API
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else → frontend
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+Proxy'yi ayağa kaldırdıktan sonra sunucunun `.env` dosyasında `FRONTEND_ORIGIN=https://multica.example.com` ayarlayın ve backend'i yeniden başlatın — aksi halde WebSocket origin kontrolü tarayıcıyı reddeder ([Troubleshooting → WebSocket can't connect](/troubleshooting#websocket-cant-connect)).
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) başka güçlü bir seçenektir — host üzerinde hiçbir port açmadan TLS ve public hostname sağlar. Nginx eşdeğeri de (ayrı `app.` / `api.` host adları, WebSocket'ler için `proxy_set_header Upgrade`) aynı şekilde çalışır; temel gereksinimler TLS termination ve `/ws` üzerinde `Upgrade` header'ının iletilmesidir.
+
+## 6. Ajan oluşturun + ilk görevinizi atayın
+
+Cloud ile aynı akış — bkz. [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-create-an-agent).
+
+## Yaygın sorunlar
+
+- **Backend başlamıyor**: container loglarını `docker compose -f docker-compose.selfhost.yml logs backend` ile kontrol edin; genellikle `.env` içindeki hatalı `DATABASE_URL` veya `JWT_SECRET` neden olur
+- **Doğrulama kodu gelmedi**: email backend'i yapılandırılmamış (ne Resend ne SMTP) → `docker compose logs backend` içinde `[DEV] Verification code` arayın
+- **WebSocket bağlanmıyor**: public deployment'larda `FRONTEND_ORIGIN` gerçek frontend domain'inize ayarlanmalıdır; bkz. [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
+
+## Sonraki adımlar
+
+- [Environment variables](/environment-variables) — tam env referansı
+- [Auth setup](/auth-setup) — Resend / OAuth / signup allowlist ayrıntıları
+- [GitHub integration](/github-integration) — PR'ların issue'lara otomatik bağlanması ve merge ile kapanması için GitHub App bağlayın
+- [Troubleshooting](/troubleshooting) — işler ters gittiğinde buradan başlayın
+- [Desktop app](/desktop-app) — `~/.multica/desktop.json` üzerinden opsiyonel Desktop kurulumu; web frontend + CLI en hızlı self-host yolu olmaya devam eder
