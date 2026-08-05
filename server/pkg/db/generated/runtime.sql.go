@@ -1070,6 +1070,7 @@ type UpdateAgentRuntimeCheapModelParams struct {
 	CheapModel string      `json:"cheap_model"`
 }
 
+// CEREBRO-PATCH(runtime-cheap-model-query): FIR-4492 per-runtime cheap model.
 // Sets the model this runtime uses for the provider-independent "cheap" tier
 // (FIR-4492). ” clears it, which restores the pre-patch behaviour: "cheap"
 // resolves to no override and the run uses the agent's own model.
