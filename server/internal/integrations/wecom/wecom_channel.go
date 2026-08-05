@@ -277,13 +277,20 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			log.Warn("wecom: bad aibot_msg_callback body", "error", err)
 			return nil
 		}
+		msg := channelMessageFromCallback(c.botID, mc, env.Headers.ReqID)
 		if mc.MsgType != "text" {
-			// Media types arrive but iteration 1 only routes text; drop
-			// the rest silently so the handler pipeline is not spammed.
-			log.Debug("wecom: dropped non-text message", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
+			// Iteration 1 routes only text. Rather than drop other types
+			// (voice / image / file) silently — which reads as a broken bot —
+			// answer the same chat with a one-line "text only" receipt, then
+			// stop. Media routing, and dedup'd receipts that never double-answer
+			// a WeChat delivery retry, are a follow-up. Best-effort: a send
+			// failure degrades to the prior silent drop.
+			log.Debug("wecom: non-text message, replying text-only", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
+			if err := sender.sendText(msg.Source.ChatID, aibotChatTypeFromChannel(msg.Source.ChatType), "抱歉，我目前只能处理文字消息。"); err != nil {
+				log.Debug("wecom: text-only receipt send failed", "error", err, "msg_id", mc.MsgID)
+			}
 			return nil
 		}
-		msg := channelMessageFromCallback(c.botID, mc, env.Headers.ReqID)
 		if err := c.handler(ctx, msg); err != nil {
 			return err
 		}
@@ -370,32 +377,16 @@ func (c *wecomChannel) pingLoop(ctx context.Context, sender *wsSender, log *slog
 // replies, so we implement it here for parity with feishuChannel /
 // slackChannel.
 func (c *wecomChannel) Send(ctx context.Context, out channel.OutboundMessage) (channel.SendResult, error) {
-	if out.ChatID == "" {
-		return channel.SendResult{}, errors.New("wecom: send requires chat_id")
-	}
-	if c.senders == nil || !c.installationID.Valid {
-		return channel.SendResult{}, errors.New("wecom: sender registry not configured")
-	}
-	sender := c.senders.get(c.installationID)
-	if sender == nil {
-		return channel.SendResult{}, errors.New("wecom: connection not ready")
-	}
-	chatType := chatTypeSingleInt
-	if len(out.ChatID) > 32 {
-		chatType = chatTypeGroupInt
-	}
-	body, err := sendMsgTextBody(out.ChatID, chatType, out.Text)
-	if err != nil {
-		return channel.SendResult{}, err
-	}
-	if err := sender.write(map[string]any{
-		"cmd":     cmdSendMsg,
-		"headers": frameHeaders{ReqID: newReqID()},
-		"body":    body,
-	}); err != nil {
-		return channel.SendResult{}, fmt.Errorf("wecom: send_msg: %w", err)
-	}
-	return channel.SendResult{}, nil
+	// Not used. Outbound for wecom goes through OutboundReplier / Outbound
+	// (EventChatDone + EventInboxNew), which know the message's real
+	// Source.ChatType and address the correct chat. The generic
+	// Channel.Send seam is never invoked by the engine for this channel; a
+	// stub here previously guessed single-vs-group from len(ChatID) > 32,
+	// the only chat-type inference in the package. Return not-supported
+	// rather than keep a second, heuristic outbound path alive.
+	_ = ctx
+	_ = out
+	return channel.SendResult{}, errors.New("wecom: Channel.Send not supported; outbound goes through OutboundReplier/Outbound")
 }
 
 // ---- factory ----

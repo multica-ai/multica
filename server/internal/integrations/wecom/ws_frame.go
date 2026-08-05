@@ -230,9 +230,12 @@ func channelMsgType(wecomType string) channel.MsgType {
 		return channel.MsgTypeAudio
 	case "video":
 		return channel.MsgTypeVideo
-	case "mixed":
-		return channel.MsgTypeText
 	default:
+		// Includes "mixed" (text + media): dispatchFrame only routes msgtype
+		// == "text", so anything else is answered with the text-only receipt
+		// and never reaches this normalization. Kept as Unknown rather than
+		// mapping "mixed" → Text, which was dead and implied mixed messages
+		// were routed as text when they are not.
 		return channel.MsgTypeUnknown
 	}
 }
