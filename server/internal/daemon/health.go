@@ -25,14 +25,16 @@ type HealthResponse struct {
 	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
 	// so a foreign-OS daemon can't be started/stopped by the app even though
 	// /health is reachable. See #3916.
-	OS              string   `json:"os"`
-	Uptime          string   `json:"uptime"`
-	DaemonID        string   `json:"daemon_id"`
-	DeviceName      string   `json:"device_name"`
-	ServerURL       string   `json:"server_url"`
-	CLIVersion      string   `json:"cli_version"`
-	ActiveTaskCount int64    `json:"active_task_count"`
-	Agents          []string `json:"agents"`
+	OS                   string   `json:"os"`
+	Uptime               string   `json:"uptime"`
+	DaemonID             string   `json:"daemon_id"`
+	DeviceName           string   `json:"device_name"`
+	ServerURL            string   `json:"server_url"`
+	CLIVersion           string   `json:"cli_version"`
+	ActiveTaskCount      int64    `json:"active_task_count"`
+	AdmissionPaused      bool     `json:"admission_paused"`
+	AdmissionPauseOwners []string `json:"admission_pause_owners"`
+	Agents               []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
 	// reason the last registration round dropped it (version undetectable,
 	// below the minimum supported version). Purely diagnostic, and omitted when
@@ -103,22 +105,86 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		}
 
 		resp := HealthResponse{
-			Status:          status,
-			PID:             os.Getpid(),
-			OS:              runtime.GOOS,
-			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
-			DaemonID:        d.cfg.DaemonID,
-			DeviceName:      d.cfg.DeviceName,
-			ServerURL:       d.cfg.ServerBaseURL,
-			CLIVersion:      d.cfg.CLIVersion,
-			ActiveTaskCount: d.activeTasks.Load(),
-			Agents:          agents,
-			SkippedAgents:   d.skippedAgentsSnapshot(),
-			Workspaces:      wsList,
+			Status:               status,
+			PID:                  os.Getpid(),
+			OS:                   runtime.GOOS,
+			Uptime:               time.Since(startedAt).Truncate(time.Second).String(),
+			DaemonID:             d.cfg.DaemonID,
+			DeviceName:           d.cfg.DeviceName,
+			ServerURL:            d.cfg.ServerBaseURL,
+			CLIVersion:           d.cfg.CLIVersion,
+			ActiveTaskCount:      d.activeTasks.Load(),
+			AdmissionPaused:      d.isAdmissionPaused(),
+			AdmissionPauseOwners: d.admissionPauseOwnersSnapshot(),
+			Agents:               agents,
+			SkippedAgents:        d.skippedAgentsSnapshot(),
+			Workspaces:           wsList,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func (d *Daemon) isAdmissionPaused() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return len(d.admissionPauseOwners) > 0
+}
+
+func (d *Daemon) admissionPauseOwnersSnapshot() []string {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return sortedAdmissionOwners(d.admissionPauseOwners)
+}
+
+// admissionHandler changes only the operator-controlled claim barrier. Pausing
+// does not cancel active tasks. A 202 response means a claim that began before
+// the pause is still draining; the barrier already blocks every later claim.
+func (d *Daemon) admissionHandler(paused bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		owner, err := normalizeAdmissionOwner(r.URL.Query().Get("owner"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		d.claimMu.Lock()
+		next := cloneAdmissionOwners(d.admissionPauseOwners)
+		if paused {
+			next[owner] = struct{}{}
+		} else {
+			delete(next, owner)
+		}
+		if err := d.persistAdmissionOwnersLocked(next); err != nil {
+			d.claimMu.Unlock()
+			http.Error(w, "persist admission barrier: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		d.admissionPauseOwners = next
+		claimsInFlight := d.claimsInFlight
+		owners := sortedAdmissionOwners(next)
+		_, ownerPaused := next[owner]
+		d.claimMu.Unlock()
+
+		statusCode := http.StatusOK
+		if paused && claimsInFlight > 0 {
+			statusCode = http.StatusAccepted
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"admission_paused":       len(owners) > 0,
+			"admission_pause_owners": owners,
+			"owner":                  owner,
+			"owner_paused":           ownerPaused,
+			"claims_in_flight":       claimsInFlight,
+			"active_task_count":      d.activeTasks.Load(),
+		})
 	}
 }
 
@@ -150,6 +216,8 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/admission/pause", d.admissionHandler(true))
+	mux.HandleFunc("/admission/resume", d.admissionHandler(false))
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}
