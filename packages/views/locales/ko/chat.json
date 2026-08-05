@@ -34,9 +34,9 @@
   "queue": {
     "title_other": "대기 중인 메시지 {{count}}개",
     "clear": "모두 지우기",
-    "send_now": "지시",
-    "send_now_unavailable": "현재 답변이 시작되면 지시할 수 있습니다",
-    "send_now_unavailable_toast": "현재는 지시할 수 없습니다. 대기열을 새로 고치는 중입니다.",
+    "steer": "지시",
+    "steer_unavailable": "현재 답변이 시작되면 지시할 수 있습니다",
+    "steer_unavailable_toast": "현재는 지시할 수 없습니다. 대기열을 새로 고치는 중입니다.",
     "edit": "대기 중인 메시지 편집",
     "remove": "대기열에서 삭제",
     "more": "추가 대기열 작업",

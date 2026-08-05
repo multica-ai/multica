@@ -241,6 +241,7 @@ export function ChatPage() {
   // No compose-box agent selector — the agent is fixed when the chat starts.
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
+  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -298,7 +299,7 @@ export function ChatPage() {
       )}
 
       <ChatQueue
-        tasks={c.pendingTask?.queued_tasks ?? []}
+        tasks={queuedTasks}
         headStatus={c.pendingTask?.status}
         onSendNow={c.handleSendQueuedTaskNow}
         onEdit={c.handleEditQueuedTask}
@@ -314,7 +315,7 @@ export function ChatPage() {
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
         allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
-        hasQueue={(c.pendingTask?.queued_tasks?.length ?? 0) > 0}
+        hasQueue={queuedTasks.length > 0}
         disabled={
           c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
         }

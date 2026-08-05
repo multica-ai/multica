@@ -69,6 +69,8 @@ export function ChatQueue({
         aria-label={t(($) => $.queue.title, { count: tasks.length })}
         className={cn(
           CHAT_COLUMN,
+          // This is the rear card in the attached stack. The composer uses
+          // the stronger menu shadow so it reads as the foreground surface.
           "overflow-hidden rounded-4xl border border-surface-border bg-surface pb-10 shadow-[var(--surface-shadow)]",
         )}
       >
@@ -80,6 +82,7 @@ export function ChatQueue({
             const sendNowKey = `send-now:${task.task_id}`;
             const editKey = `edit:${task.task_id}`;
             const removeKey = `remove:${task.task_id}`;
+            const clearKey = `clear:${task.task_id}`;
             return (
               <div
                 key={task.task_id}
@@ -98,7 +101,7 @@ export function ChatQueue({
                   <span
                     className="shrink-0"
                     title={t(($) =>
-                      canSendNow ? $.queue.send_now : $.queue.send_now_unavailable
+                      canSendNow ? $.queue.steer : $.queue.steer_unavailable
                     )}
                   >
                     <Button
@@ -108,8 +111,8 @@ export function ChatQueue({
                       disabled={busyAction !== null || !canSendNow}
                       aria-label={t(($) =>
                         canSendNow
-                          ? $.queue.send_now
-                          : $.queue.send_now_unavailable
+                          ? $.queue.steer
+                          : $.queue.steer_unavailable
                       )}
                       onClick={() => void run(sendNowKey, () => onSendNow(task.task_id))}
                     >
@@ -118,7 +121,7 @@ export function ChatQueue({
                       ) : (
                         <CornerDownRight aria-hidden="true" />
                       )}
-                      {t(($) => $.queue.send_now)}
+                      {t(($) => $.queue.steer)}
                     </Button>
                   </span>
                   <Button
@@ -150,7 +153,7 @@ export function ChatQueue({
                         />
                       }
                     >
-                      {busyAction === editKey ? (
+                      {busyAction === editKey || busyAction === clearKey ? (
                         <Loader2 className="animate-spin" aria-hidden="true" />
                       ) : (
                         <Ellipsis aria-hidden="true" />
@@ -173,7 +176,7 @@ export function ChatQueue({
                       <DropdownMenuItem
                         variant="destructive"
                         disabled={busyAction !== null}
-                        onClick={() => void run("clear", onClear)}
+                        onClick={() => void run(clearKey, onClear)}
                       >
                         <Trash2 aria-hidden="true" />
                         {t(($) => $.queue.clear)}

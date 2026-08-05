@@ -748,6 +748,7 @@ export function ChatWindow() {
   };
 
   const contextItems = useChatContextItems(wsId);
+  const queuedTasks = pendingTask?.queued_tasks ?? [];
 
   return (
     <motion.div
@@ -894,7 +895,7 @@ export function ChatWindow() {
       )}
 
       <ChatQueue
-        tasks={pendingTask?.queued_tasks ?? []}
+        tasks={queuedTasks}
         headStatus={pendingTask?.status}
         onSendNow={handleSendQueuedTaskNow}
         onEdit={handleEditQueuedTask}
@@ -913,7 +914,7 @@ export function ChatWindow() {
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
-        hasQueue={(pendingTask?.queued_tasks?.length ?? 0) > 0}
+        hasQueue={queuedTasks.length > 0}
         disabled={
           isSessionArchived || isAgentArchived || !activeAgentRuntimeBound
         }

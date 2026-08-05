@@ -673,6 +673,18 @@ describe("ChatInput project context", () => {
     );
   });
 
+  it("keeps the default composer chrome without an attached queue", () => {
+    const { container } = renderInput({ hasQueue: false });
+    const surface = container.querySelector('[data-slot="chat-input-surface"]');
+
+    expect(container.firstElementChild).not.toHaveClass("relative", "z-10");
+    expect(surface).toHaveClass("rounded-lg");
+    expect(surface).not.toHaveClass(
+      "rounded-4xl",
+      "shadow-[var(--menu-shadow)]",
+    );
+  });
+
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
     // A brand-new chat creates its session row lazily during send, bound to
     // the project selected at click time. If the user could switch project

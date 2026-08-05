@@ -34,9 +34,9 @@
   "queue": {
     "title_other": "{{count}} 条排队消息",
     "clear": "全部清空",
-    "send_now": "引导",
-    "send_now_unavailable": "当前回复开始后才能引导",
-    "send_now_unavailable_toast": "暂时无法引导，正在刷新队列。",
+    "steer": "引导",
+    "steer_unavailable": "当前回复开始后才能引导",
+    "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
     "more": "更多队列操作",

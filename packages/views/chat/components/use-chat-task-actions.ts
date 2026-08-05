@@ -219,7 +219,7 @@ export function useChatTaskActions(
         });
         toast.error(
           err instanceof ApiError && err.status === 409
-            ? t(($) => $.queue.send_now_unavailable_toast)
+            ? t(($) => $.queue.steer_unavailable_toast)
             : t(($) => $.queue.action_failed_toast),
         );
       } finally {

@@ -89,7 +89,10 @@ interface ChatInputProps {
   isRunning?: boolean;
   /** Enabled only after the server explicitly advertises follow-up queues. */
   allowSubmitWhileRunning?: boolean;
-  /** Visually stacks the composer above the ChatGPT-style follow-up queue. */
+  /**
+   * Visually stacks the composer above the ChatGPT-style follow-up queue.
+   * Must use the same queued-task array and non-empty condition as ChatQueue.
+   */
   hasQueue?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
@@ -591,6 +594,8 @@ export function ChatInput({
           // then resolve to none).
           CHAT_COLUMN,
           "relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          // The attached composer is the foreground card, so it intentionally
+          // uses a stronger shadow than ChatQueue's rear surface shadow.
           hasQueue && "rounded-4xl shadow-[var(--menu-shadow)]",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
@@ -690,7 +695,10 @@ export function ChatInput({
             busy={gate.uploading}
             // Queue-capable runs reuse this one action slot: an empty composer
             // offers Stop, while live content swaps it to Queue Send. Older
-            // servers cannot accept follow-ups, so they remain stop-only.
+            // servers cannot accept follow-ups, so they remain stop-only. An
+            // upload blocks submit, so it also falls back to Stop rather than
+            // removing chat's only cancellation path; the attachment node
+            // remains the visible upload-progress surface in the editor.
             running={
               !!isRunning &&
               (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)

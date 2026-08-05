@@ -103,9 +103,11 @@ describe("ChatQueue", () => {
     const scroller = actions.container.querySelector('[data-slot="chat-queue-list"]');
     expect(scroller).toHaveClass("max-h-48");
 
-    fireEvent.click(screen.getAllByLabelText("More queue actions")[0]!);
+    const clearTrigger = screen.getAllByLabelText("More queue actions")[0]!;
+    fireEvent.click(clearTrigger);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Clear all" }));
     await waitFor(() => {
+      expect(clearTrigger.querySelector(".animate-spin")).toBeInTheDocument();
       for (const button of screen.getAllByRole("button")) {
         expect(button).toBeDisabled();
       }
@@ -113,6 +115,7 @@ describe("ChatQueue", () => {
 
     finishClear?.();
     await waitFor(() => {
+      expect(clearTrigger.querySelector(".animate-spin")).not.toBeInTheDocument();
       for (const button of screen.getAllByRole("button")) {
         expect(button).toBeEnabled();
       }
