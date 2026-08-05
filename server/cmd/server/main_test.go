@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 func TestRedisClientName(t *testing.T) {
@@ -79,6 +82,30 @@ func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	// Invalid value falls back to default (false), so ClientName IS set
 	if opts.ClientName != "multica-api:store" {
 		t.Errorf("ClientName = %q, want %q (invalid env should fall back to naming enabled)", opts.ClientName, "multica-api:store")
+	}
+}
+
+// TestBackgroundServicesReuseRouterServices guards the process wiring used by
+// scheduled Autopilot dispatch and the runtime sweeper. The router owns the
+// fully configured TaskService (including the Redis empty-claim cache), so
+// background workers must not construct a second partially wired instance.
+func TestBackgroundServicesReuseRouterServices(t *testing.T) {
+	taskSvc := &service.TaskService{}
+	routerAutopilotSvc := &service.AutopilotService{TaskSvc: taskSvc}
+	h := &handler.Handler{
+		TaskService:      taskSvc,
+		AutopilotService: routerAutopilotSvc,
+	}
+
+	backgroundTaskSvc, autopilotSvc := backgroundServices(h)
+	if backgroundTaskSvc != taskSvc {
+		t.Fatal("background workers must reuse the router TaskService")
+	}
+	if autopilotSvc != routerAutopilotSvc {
+		t.Fatal("background Autopilot service must reuse the router service")
+	}
+	if autopilotSvc.TaskSvc != backgroundTaskSvc {
+		t.Fatal("background Autopilot dispatch must use the background TaskService")
 	}
 }
 
