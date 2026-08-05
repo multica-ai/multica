@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"strconv"
@@ -135,6 +137,15 @@ func TestMainUsesRouterOwnedBackgroundServices(t *testing.T) {
 		t.Fatalf("no func main() with a body found in %s — this guard must be pointed at the real wiring", mainSourceFile)
 	}
 
+	// Resolve the variable holding the router's *handler.Handler rather than
+	// hardcoding "h": the argument identity is the whole point of the guard,
+	// and reading it off the NewRouterWithOptions assignment keeps a rename of
+	// that variable from silently weakening the check below.
+	routerHandlerVar := routerHandlerIdent(mainFunc.Body)
+	if routerHandlerVar == "" {
+		t.Fatalf("could not find the *handler.Handler result of NewRouterWithOptions in main() — re-point this guard at the current router wiring")
+	}
+
 	forbidden := make(map[string]bool, len(backgroundServiceConstructors))
 	for _, name := range backgroundServiceConstructors {
 		forbidden[name] = true
@@ -142,6 +153,7 @@ func TestMainUsesRouterOwnedBackgroundServices(t *testing.T) {
 
 	var (
 		offenders          []string
+		badReuse           []string
 		reusesRouter       bool
 		registersScheduler bool
 	)
@@ -154,7 +166,16 @@ func TestMainUsesRouterOwnedBackgroundServices(t *testing.T) {
 		case forbidden[callee]:
 			offenders = append(offenders, fmt.Sprintf("%s at %s", callee, fset.Position(call.Pos())))
 		case callee == "backgroundServices":
-			reusesRouter = true
+			// Matching the callee name alone would accept
+			// backgroundServices(nil) — which compiles, reuses nothing, and
+			// panics at startup. The argument must be the router's handler.
+			if len(call.Args) == 1 {
+				if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == routerHandlerVar {
+					reusesRouter = true
+					return true
+				}
+			}
+			badReuse = append(badReuse, fmt.Sprintf("%s at %s", exprText(fset, call), fset.Position(call.Pos())))
 		case callee == "scheduler.AutopilotScheduleDispatchJob":
 			registersScheduler = true
 		}
@@ -168,11 +189,46 @@ func TestMainUsesRouterOwnedBackgroundServices(t *testing.T) {
 		t.Fatalf("scheduler.AutopilotScheduleDispatchJob is no longer registered in main() — re-point this guard at wherever the schedule job is now wired")
 	}
 	if len(offenders) > 0 {
-		t.Errorf("main() constructs its own background services (%s); take them from the router via backgroundServices(h) so EmptyClaim and the rest of the router wiring come along", strings.Join(offenders, ", "))
+		t.Errorf("main() constructs its own background services (%s); take them from the router via backgroundServices(%s) so EmptyClaim and the rest of the router wiring come along", strings.Join(offenders, ", "), routerHandlerVar)
+	}
+	if len(badReuse) > 0 {
+		t.Errorf("main() calls backgroundServices with something other than the router handler %q (%s); background workers must reuse the services the router finished wiring", routerHandlerVar, strings.Join(badReuse, ", "))
 	}
 	if !reusesRouter {
-		t.Error("main() no longer calls backgroundServices(h); background workers must reuse the router-owned TaskService/AutopilotService")
+		t.Errorf("main() no longer calls backgroundServices(%s); background workers must reuse the router-owned TaskService/AutopilotService", routerHandlerVar)
 	}
+}
+
+// routerHandlerIdent returns the name of the variable that receives the
+// *handler.Handler from NewRouterWithOptions (the `h` in `r, h := ...`), or ""
+// when that assignment is no longer recognizable.
+func routerHandlerIdent(body *ast.BlockStmt) string {
+	var name string
+	ast.Inspect(body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || len(assign.Rhs) != 1 || len(assign.Lhs) != 2 {
+			return true
+		}
+		call, ok := assign.Rhs[0].(*ast.CallExpr)
+		if !ok || calleeName(call) != "NewRouterWithOptions" {
+			return true
+		}
+		if ident, ok := assign.Lhs[1].(*ast.Ident); ok {
+			name = ident.Name
+			return false
+		}
+		return true
+	})
+	return name
+}
+
+// exprText renders an expression back to source for error messages.
+func exprText(fset *token.FileSet, expr ast.Expr) string {
+	var buf bytes.Buffer
+	if err := printer.Fprint(&buf, fset, expr); err != nil {
+		return "<unprintable expression>"
+	}
+	return buf.String()
 }
 
 // calleeName renders a call's target as "pkg.Func" or "Func" for matching.
