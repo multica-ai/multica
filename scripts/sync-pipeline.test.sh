@@ -231,6 +231,160 @@ expect_eq "both throwaway classifiers agree" \
   "$(classifier_body "${TICK}" sweep_want_status)" \
   "$(classifier_body "${SMOKE}" smoke_sweep_want_status)"
 
+# A hop parked at `syncing` has to be resumable. The interrupted-branch guard
+# used to glob every `upstream-sync/*` branch on origin — and those branches are
+# never deleted after their PR merges, so the guard fired on every single hop and
+# no `syncing` block could ever clear itself.
+expect_no_grep "no unscoped upstream-sync/* refname glob reaches ls-remote" \
+  "ls-remote.*upstream-sync/\\*['\"]" "${TICK}"
+
+# stale_sync_branch is the single answer to "has this hop already pushed?", so both
+# the stage_idle pre-check and the stage_syncing guard inherit its scoping. It is
+# exercised for real against a stub `git` — the branch list below is the shape that
+# broke the old guard: many merged hops, none of them this hop.
+echo "==> sync-tick.sh: stale branch detection"
+eval "$(sed -n '/^stale_sync_branch() {$/,/^}$/p' "${TICK}")"
+if ! declare -F stale_sync_branch >/dev/null; then
+  fail "could not extract stale_sync_branch from ${TICK}"
+else
+  STUB_DIR="$(mktemp -d)"
+  trap 'rm -rf "${STUB_DIR}"' EXIT
+  # Emulates `git ls-remote --heads origin <pattern>`: the real command applies the
+  # refname glob on the server and prints `<sha>\t<ref>`, so the stub matches
+  # ${FAKE_BRANCHES} the same way and prints the survivors in that same format.
+  cat > "${STUB_DIR}/git" <<'STUB'
+#!/usr/bin/env bash
+[[ "$1" == "ls-remote" ]] || exit 1
+pattern="${!#}"
+for b in ${FAKE_BRANCHES:-}; do
+  # shellcheck disable=SC2053  # unquoted RHS is the glob match, on purpose
+  [[ "${b}" == ${pattern} ]] \
+    && printf '0000000000000000000000000000000000000000\trefs/heads/%s\n' "${b}"
+done
+exit 0
+STUB
+  chmod +x "${STUB_DIR}/git"
+  stale_for() { ( PATH="${STUB_DIR}:${PATH}"; export FAKE_BRANCHES="$2"; stale_sync_branch "$1" ); }
+
+  MERGED="upstream-sync/v0.4.12-to-v0.4.13 upstream-sync/v0.4.13-to-v0.4.14 upstream-sync/v0.4.14-to-v0.4.15"
+
+  expect_eq "a fork with no sync branches at all is not stale" \
+    "" "$(stale_for v0.4.16 "")"
+  expect_eq "branches from hops that already merged are not stale" \
+    "" "$(stale_for v0.4.16 "${MERGED}")"
+  expect_eq "a branch for THIS target is stale, and is named without refs/heads/" \
+    "upstream-sync/v0.4.15-to-v0.4.16" \
+    "$(stale_for v0.4.16 "${MERGED} upstream-sync/v0.4.15-to-v0.4.16")"
+  expect_eq "a from-side short SHA (no cursor tag) still matches" \
+    "upstream-sync/a9a4a3d-to-v0.4.16" \
+    "$(stale_for v0.4.16 "${MERGED} upstream-sync/a9a4a3d-to-v0.4.16")"
+  expect_eq "a tag that is a prefix of another does not cross-match" \
+    "" "$(stale_for v0.4.1 "upstream-sync/v0.4.0-to-v0.4.16")"
+fi
+
+# stage_idle must consult it BEFORE opening a ticket and running the sync:
+# upstream-sync.sh rebuilds the merge commit with a fresh timestamp, so its push
+# against a leftover branch is a non-fast-forward and the hop dies at the very last
+# step with an error that names none of the cause.
+expect_grep "stage_idle checks for a leftover branch before starting a hop" \
+  'stale="\$\(stale_sync_branch "\$\{latest\}"\)"' "${TICK}"
+expect_grep "a leftover branch is reported, not pushed over" \
+  'block stale_sync_branch ' "${TICK}"
+expect_grep "the report names the exact command that clears it" \
+  'git push origin --delete \$\{stale\}' "${TICK}"
+expect_grep "stale_sync_branch has no auto-clear case, so it parks for a human" \
+  'waits for a human, no action this tick' "${TICK}"
+
+# `git status --porcelain` prints nothing on stdout when it cannot read the
+# repository at all, so testing only its output read an unusable checkout as a
+# clean one and synced on regardless.
+expect_grep "a git status that fails is fatal, not 'clean'" \
+  'if ! DIRTY=\$\(git status --porcelain\)' "${SYNC}"
+expect_grep "a dirty tree reports which paths are dirty" \
+  "printf '%s\\\\n' \"\\\$\{DIRTY\}\" | head -20" "${SYNC}"
+
+echo "==> git ownership trust"
+
+# The runtime creates the checkout as uid 50012 while the agent runs as 1000, so
+# git exits 128 with `detected dubious ownership` on the FIRST git command in
+# either script — before any stage runs and before anything is reported. Both
+# scripts are entry points (the tick on a schedule, upstream-sync.sh by hand), so
+# both must declare the trust themselves.
+for script in "${TICK}" "${SYNC}"; do
+  expect_grep "${script} declares the trust helper" \
+    '^trust_git_checkouts\(\) \{' "${script}"
+  expect_grep "${script} calls it before any git command" \
+    '^trust_git_checkouts$' "${script}"
+  # A path-specific entry cannot work: every task gets a freshly named workdir, so
+  # an entry naming one run's path never covers the next run.
+  expect_grep "${script} trusts by wildcard, not by this run's path" \
+    'GIT_CONFIG_VALUE_\$\{n\}=\*' "${script}"
+done
+
+# Exercise the real helper rather than trusting the greps above: what matters is
+# the exact env it leaves behind, and an off-by-one in the index silently drops
+# the entry (git reads keys 0..COUNT-1 and ignores anything above).
+TRUST_FN="$(sed -n '/^trust_git_checkouts() {$/,/^}$/p' "${TICK}")"
+if [[ -z "${TRUST_FN}" ]]; then
+  fail "could not extract trust_git_checkouts from ${TICK}"
+else
+  # Run the REAL helper in a child shell with a controlled env. Reports
+  # `COUNT|KEY_at_that_index|VALUE_at_that_index` for the index the helper claims to
+  # have filled, so a count that disagrees with the pair it actually wrote shows up
+  # here — git reads keys 0..COUNT-1 and silently ignores anything outside that.
+  trust_env() {
+    env -u GIT_CONFIG_COUNT "$@" bash -c "${TRUST_FN}"'
+      trust_git_checkouts
+      i=$(( GIT_CONFIG_COUNT - 1 ))
+      k="GIT_CONFIG_KEY_${i}"; v="GIT_CONFIG_VALUE_${i}"
+      printf "%s|%s|%s\n" "${GIT_CONFIG_COUNT}" "${!k-UNSET}" "${!v-UNSET}"'
+  }
+
+  expect_eq "a clean env gets safe.directory at index 0" \
+    "1|safe.directory|*" "$(trust_env)"
+
+  # The runtime may already place env-scoped pairs (an auth header, a URL rewrite).
+  # Overwriting index 0 would silently disable one of them, so the helper appends.
+  expect_eq "pre-existing pairs are appended to, never overwritten" \
+    "3|safe.directory|*" \
+    "$(trust_env GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1)"
+
+  expect_eq "the pre-existing pair at index 0 survives untouched" \
+    "http.version=HTTP/1.1" \
+    "$(env -u GIT_CONFIG_COUNT GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=http.version \
+         GIT_CONFIG_VALUE_0=HTTP/1.1 bash -c "${TRUST_FN}"'
+         trust_git_checkouts
+         printf "%s=%s\n" "${GIT_CONFIG_KEY_0}" "${GIT_CONFIG_VALUE_0}"')"
+
+  # A non-numeric or negative count must fall back to 0. Without the guard, "abc"
+  # makes `$(( n + 1 ))` yield 1 while the pair lands at KEY_abc — the count and the
+  # pair disagree, so git looks up KEY_0, finds nothing, and the trust is lost.
+  for junk in "" abc -1 2x; do
+    expect_eq "a GIT_CONFIG_COUNT of '${junk}' falls back to index 0" \
+      "1|safe.directory|*" "$(trust_env "GIT_CONFIG_COUNT=${junk}")"
+  done
+
+  # End-to-end, on this very checkout: the repository git refuses without the helper
+  # must be readable with it. GIT_CONFIG_GLOBAL is masked because this pod's
+  # ~/.gitconfig has accreted per-workdir safe.directory entries from earlier runs,
+  # and those hide the bug the helper exists to fix.
+  NO_CFG=(env -u GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
+  if [[ "$(stat -c '%u' .git 2>/dev/null || id -u)" == "$(id -u)" ]]; then
+    pass "checkout is owned by this uid — ownership refusal not reproducible here"
+  elif "${NO_CFG[@]}" git rev-parse HEAD >/dev/null 2>&1; then
+    fail "expected git to refuse this foreign-owned checkout without the helper"
+  else
+    pass "git refuses a foreign-owned checkout without the helper"
+    if "${NO_CFG[@]}" bash -c "${TRUST_FN}"'
+         trust_git_checkouts
+         git rev-parse HEAD' >/dev/null 2>&1; then
+      pass "the helper makes that same checkout readable"
+    else
+      fail "git still refuses the checkout after trust_git_checkouts"
+    fi
+  fi
+fi
+
 echo
 if (( FAILURES > 0 )); then
   printf '✗ %s check(s) failed.\n' "${FAILURES}"

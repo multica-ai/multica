@@ -84,6 +84,36 @@
 # answer about an entirely different PR.
 set -euo pipefail
 
+# ── Git ownership trust ───────────────────────────────────────────────────────
+# The runtime creates the checkout under a different uid than the one this script
+# runs as, so git refuses the repository with `detected dubious ownership` and
+# exits 128 on the FIRST git command — before the tick can reach a stage or report
+# anything. That is ANK-49, and it is why a failing tick printed nothing at all.
+#
+# Concretely: everything under multica_workspaces is owned by uid 50012 while the
+# agent process is uid 1000. The runtime's own fix-efs-permissions init container
+# tries to chown it, but root is squashed on the EFS access point, so that chown is
+# a silent no-op and the mismatch survives every pod start.
+#
+# Declared through GIT_CONFIG_* rather than `git config --global --add
+# safe.directory <path>`, for two reasons. The env is scoped to this process tree,
+# so nothing is written to the pod's shared ~/.gitconfig — which is long-lived and
+# would otherwise accrete one entry per task forever. And a path-specific entry
+# cannot work anyway: every task gets a freshly named workdir, so an entry added by
+# one run never covers the next. Hence `*`; the tick reads several checkouts plus
+# the bare object cache, and none of those paths are knowable from here.
+#
+# Existing GIT_CONFIG_* pairs are appended to, never overwritten, so an env-scoped
+# auth header or URL rewrite placed by the runtime survives.
+trust_git_checkouts() {
+  local n="${GIT_CONFIG_COUNT:-0}"
+  case "${n}" in ''|*[!0-9]*) n=0 ;; esac
+  export "GIT_CONFIG_KEY_${n}=safe.directory"
+  export "GIT_CONFIG_VALUE_${n}=*"
+  export GIT_CONFIG_COUNT=$(( n + 1 ))
+}
+trust_git_checkouts
+
 FORK_SLUG="${FORK_SLUG:-g2crowd/agentfarm}"
 SYNC_REQUESTER_ID="${SYNC_REQUESTER_ID:-b97bf628-51c0-417a-8d15-b5bdd8789ceb}"
 SYNC_ROLLOUT_DEADLINE_MIN="${SYNC_ROLLOUT_DEADLINE_MIN:-45}"
@@ -653,6 +683,24 @@ open_sync_pr() {
                 | sort_by(.created_at) | last // empty' 2>/dev/null
 }
 
+# Print the name of a branch already on origin for the hop that targets ${1}, or
+# nothing. Callers use it to tell "this hop has never been attempted" apart from
+# "a previous attempt pushed a branch and then died".
+#
+# Scoped by `-to-<target>`, never a bare `upstream-sync/*`: upstream-sync.sh names
+# branches `upstream-sync/<from>-to-<target>`, where <from> is the cursor tag or the
+# fork's short SHA, so only the target side is predictable from here. Branches from
+# hops that already merged are never deleted, so an unscoped glob matches all of
+# them and reports every hop as stale.
+#
+# Always exits 0 — `set -e` is on, and "no such branch" is an answer, not a failure.
+stale_sync_branch() {
+  local target="$1" ref=""
+  ref="$(git ls-remote --heads origin "upstream-sync/*-to-${target}" 2>/dev/null \
+          | head -1 | awk '{print $2}')" || true
+  printf '%s\n' "${ref#refs/heads/}"
+}
+
 # Read a smoke verdict off the PR. The dev workspace cannot reach this workspace's
 # Multica API and vice versa (two namespaces, two tokens, ANK-34 constraint 6), so
 # the PR is the only cross-boundary bus (Q2). Keyed to the artifact SHA so a stale
@@ -721,8 +769,35 @@ stage_idle() {
     return 0
   fi
 
+  # No open PR to adopt. Before starting the hop, check that an earlier attempt at
+  # this same target did not leave a branch behind on origin.
+  #
+  # upstream-sync.sh rebuilds the merge commit from scratch, and the rebuilt commit
+  # carries a fresh committer timestamp, so it hashes differently from the one on the
+  # leftover branch. Its `git push -u` is then a non-fast-forward and is rejected.
+  # Starting the hop anyway spends a ticket and a full merge run to land on
+  # `sync_failed` with a push error that names none of this, so report it up front
+  # instead. Deleting the branch is a human's call: it is unmerged work, and the
+  # reason its PR is missing (never opened, or closed unmerged on purpose) is not
+  # knowable from here.
+  local stale
+  stale="$(stale_sync_branch "${latest}")"
+
   if [[ -n "${DRY_RUN}" ]]; then
-    say "DRY RUN — would start a sync hop ${cursor:-?} → ${latest} (deployed ${deployed})."
+    if [[ -n "${stale}" ]]; then
+      say "DRY RUN — would NOT start ${cursor:-?} → ${latest}: branch \`${stale}\` is already on origin with no open PR."
+    else
+      say "DRY RUN — would start a sync hop ${cursor:-?} → ${latest} (deployed ${deployed})."
+    fi
+    return 0
+  fi
+
+  if [[ -n "${stale}" ]]; then
+    # Ticket first: block() reports through ${TICKET}, so it needs a surface to
+    # report on, and opening one also gives the human the standard "close the
+    # ticket to release the guard" affordance.
+    open_ticket "${cursor:-unknown}" "${latest}" "stale sync branch"
+    block stale_sync_branch "Branch \`${stale}\` is already on \`origin\` from an earlier attempt at this hop, and no open PR points at it. A fresh sync would rebuild the merge commit with a different SHA and its push would be rejected as a non-fast-forward, so this tick did not start one. Either open a PR for \`${stale}\` and let the pipeline adopt it, or delete it (\`git push origin --delete ${stale}\`) and close this ticket to release the guard."
     return 0
   fi
 
@@ -1191,12 +1266,17 @@ stage_syncing() {
   local orphan
   orphan="$(open_sync_pr)"
   if [[ -n "${orphan}" ]]; then recover_missing_pr; return 0; fi
-  # No branch pushed yet — safe to (re)run the sync.
-  if git ls-remote --exit-code --heads origin 'upstream-sync/*' >/dev/null 2>&1; then
-    block sync_interrupted "A previous tick pushed an \`upstream-sync/*\` branch but no open PR exists for it. Open the PR by hand, or delete the branch and close this ticket to release the guard."
+  # Nothing to adopt. Re-running the sync in place is only safe if this hop never
+  # got as far as pushing — stale_sync_branch is what tells those two apart, scoped
+  # to THIS hop's target so the fork's already-merged branches don't all match.
+  local target stale
+  target="$(mget sync_to)"
+  stale="$(stale_sync_branch "${target}")"
+  if [[ -n "${stale}" ]]; then
+    block sync_interrupted "A previous tick pushed \`${stale}\` but no open PR exists for it. Open the PR by hand, or delete the branch (\`git push origin --delete ${stale}\`) and close this ticket to release the guard."
     return 0
   fi
-  run_sync "$(mget sync_to)"
+  run_sync "${target}"
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────

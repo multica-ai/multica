@@ -17,6 +17,31 @@
 # `[NO JIRA]` when JIRA_REF is unset — see step 14b.
 set -euo pipefail
 
+# ── Git ownership trust ───────────────────────────────────────────────────────
+# The runtime creates the checkout under a different uid (50012) than the one this
+# script runs as (1000), so git refuses the repository with `detected dubious
+# ownership` and exits 128 on step 1 — the first git command in the file, before
+# any of the guards below can report anything. That is ANK-49.
+#
+# Duplicated from sync-tick.sh rather than sourced: this script is also a
+# standalone entry point (a human runs it directly to walk one release at a time),
+# so it cannot depend on the tick having exported anything. When the tick DOES
+# invoke it the exported vars are simply inherited, and re-running the helper is
+# idempotent in effect — it adds a second identical safe.directory entry, which
+# git treats the same as one.
+#
+# See sync-tick.sh for why this is env-scoped (`GIT_CONFIG_*`) instead of
+# `git config --global --add safe.directory`, and why the value is `*` rather than
+# this checkout's path.
+trust_git_checkouts() {
+  local n="${GIT_CONFIG_COUNT:-0}"
+  case "${n}" in ''|*[!0-9]*) n=0 ;; esac
+  export "GIT_CONFIG_KEY_${n}=safe.directory"
+  export "GIT_CONFIG_VALUE_${n}=*"
+  export GIT_CONFIG_COUNT=$(( n + 1 ))
+}
+trust_git_checkouts
+
 UPSTREAM_URL="https://github.com/multica-ai/multica.git"
 UPSTREAM_REMOTE="upstream"
 FORK_REMOTE="origin"
@@ -48,7 +73,26 @@ if ! git remote get-url "${UPSTREAM_REMOTE}" >/dev/null 2>&1; then
 fi
 
 # 2. Refuse to run on a dirty tree.
-[ -z "$(git status --porcelain)" ] || { echo "working tree dirty"; exit 1; }
+#    git's exit status is checked separately from its output: a git that cannot
+#    read the repository at all (dubious ownership, corrupt objects) complains on
+#    stderr and prints NOTHING on stdout, which is indistinguishable from a clean
+#    tree — the old one-line test read that as "clean" and synced on against a
+#    repository it could not trust.
+if ! DIRTY=$(git status --porcelain); then
+  echo "cannot read the working tree — git status failed; the checkout is unusable"
+  exit 1
+fi
+if [ -n "${DIRTY}" ]; then
+  # Print the evidence. A checkout cloned from a blobless cache without its
+  # promisor config reports every tracked file as deleted rather than failing, so
+  # a bare "working tree dirty" is not diagnosable once the checkout is pruned —
+  # which is exactly how ANK-51 died with nothing left to inspect.
+  echo "working tree dirty:"
+  printf '%s\n' "${DIRTY}" | head -20
+  DIRTY_COUNT=$(printf '%s\n' "${DIRTY}" | wc -l | tr -d ' ')
+  [ "${DIRTY_COUNT}" -le 20 ] || echo "... and $((DIRTY_COUNT - 20)) more"
+  exit 1
+fi
 
 # 3. Resolve the sync target.
 #    Tags are listed from the upstream REMOTE rather than `git tag -l` so the
