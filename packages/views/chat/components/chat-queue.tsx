@@ -88,7 +88,7 @@ export function ChatQueue({
               >
                 <ListEnd
                   data-slot="chat-queue-item-icon"
-                  className="size-5 shrink-0 text-muted-foreground/70"
+                  className="size-5 shrink-0 text-faint-foreground"
                   aria-hidden="true"
                 />
                 <span className="min-w-0 flex-1 truncate">
