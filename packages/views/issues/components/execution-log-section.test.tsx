@@ -1,12 +1,29 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
+import { toast } from "sonner";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
+  cancelTask: vi.fn(),
+  dispatchReasonCode: vi.fn(),
+  rerunIssue: vi.fn(),
   taskMessagesOptions: vi.fn(),
+  useQuery: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: mockState.useQuery,
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    cancelTask: mockState.cancelTask,
+    rerunIssue: mockState.rerunIssue,
+  },
+  dispatchReasonCode: mockState.dispatchReasonCode,
 }));
 
 vi.mock("@multica/core/chat/queries", () => ({
@@ -24,10 +41,25 @@ vi.mock("../../common/task-transcript", () => ({
 }));
 
 vi.mock("./terminate-task-confirm-dialog", () => ({
-  TerminateTaskConfirmDialog: () => null,
+  TerminateTaskConfirmDialog: ({
+    open,
+    onConfirm,
+  }: {
+    open: boolean;
+    onConfirm: () => void;
+  }) =>
+    open ? (
+      <button type="button" onClick={onConfirm}>
+        Confirm stop
+      </button>
+    ) : null,
 }));
 
-import { ActiveTaskRow, TaskCommentCoverage } from "./execution-log-section";
+import {
+  ActiveTaskRow,
+  ExecutionLogSection,
+  TaskCommentCoverage,
+} from "./execution-log-section";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -56,10 +88,53 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
+describe("ExecutionLogSection", () => {
+  it("confirms a successful task retry", async () => {
+    const failedTask = makeTask({
+      status: "failed",
+      completed_at: "2026-06-08T08:04:00Z",
+      failure_reason: "agent_error",
+    });
+    mockState.rerunIssue.mockResolvedValue(
+      makeTask({ id: "task-2", status: "queued" }),
+    );
+    const successToast = vi.spyOn(toast, "success").mockReturnValue("toast-id");
+    mockState.useQuery.mockReturnValue({ data: [failedTask] });
+
+    renderWithI18n(<ExecutionLogSection issueId="issue-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show past runs (1)" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry task" }));
+      await Promise.resolve();
+    });
+
+    expect(mockState.rerunIssue).toHaveBeenCalledWith("issue-1", "task-1");
+    expect(successToast).toHaveBeenCalledWith("Task retried");
+  });
+});
+
 describe("ActiveTaskRow", () => {
+  it("confirms a successful task cancellation", async () => {
+    mockState.cancelTask.mockResolvedValue(undefined);
+    const successToast = vi.spyOn(toast, "success").mockReturnValue("toast-id");
+
+    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm stop" }));
+      await Promise.resolve();
+    });
+
+    expect(mockState.cancelTask).toHaveBeenCalledWith("issue-1", "task-1");
+    expect(successToast).toHaveBeenCalledWith("Task cancelled");
+  });
+
   it("renders running status as elapsed time only", () => {
     renderWithI18n(
       <ActiveTaskRow

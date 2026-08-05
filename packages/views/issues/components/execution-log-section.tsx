@@ -293,6 +293,7 @@ export function ActiveTaskRow({
     setCancelling(true);
     try {
       await api.cancelTask(issueId, task.id);
+      toast.success(t(($) => $.execution_log.cancel_success));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
       setCancelling(false);
@@ -387,6 +388,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     setRetrying(true);
     try {
       await api.rerunIssue(issueId, task.id);
+      toast.success(t(($) => $.execution_log.retry_success));
     } catch (e) {
       // A rerun is now re-gated on the operator's invoke permission (MUL-4525):
       // a structured 403 means the agent can't be triggered, not a transient
