@@ -308,7 +308,9 @@
     "unsubscribe_this": "Unsubscribe from this issue",
     "unsubscribe_subtree": "Unsubscribe from this issue and its sub-issues",
     "unsubscribe_subtree_failed": "Could not unsubscribe from the sub-issues. Please try again.",
+    "unsubscribe_subtree_succeeded": "Unsubscribed from this issue and its sub-issues.",
     "unsubscribe_subtree_unsupported": "This workspace's server does not support unsubscribing from sub-issues yet. Try again after the next update.",
+    "subscription_update_failed": "Could not update the subscription. Please try again.",
     "no_subscribers_results": "No results found",
     "change_subscribers_placeholder": "Change subscribers...",
     "members_group": "Members",
@@ -584,7 +586,7 @@
   "pickers": {
     "custom_property": {
       "empty": "Empty",
-      "clear_action": "Clear",
+      "none": "No value",
       "true_label": "Yes",
       "false_label": "No",
       "value_placeholder": "Enter value…",
@@ -606,11 +608,11 @@
     },
     "start_date": {
       "trigger_label": "Start date",
-      "clear_action": "Clear date"
+      "none": "No start date"
     },
     "due_date": {
       "trigger_label": "Due date",
-      "clear_action": "Clear date"
+      "none": "No due date"
     },
     "label": {
       "trigger_label": "Add label",

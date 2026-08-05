@@ -607,7 +607,7 @@ export function ChatInput({
                     disabled={!projectSelectionEnabled}
                     aria-label={t(($) => $.input.change_project_context)}
                     title={t(($) => $.input.change_project_context)}
-                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 pr-7 text-caption font-medium text-foreground transition-colors hover:bg-accent/60"
+                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 text-caption font-medium text-foreground transition-colors hover:bg-accent/60"
                   />
                 }
               />

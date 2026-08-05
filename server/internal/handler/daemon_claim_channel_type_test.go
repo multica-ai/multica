@@ -119,6 +119,34 @@ func TestClaim_SlackBoundSessionStillReportsThreadState(t *testing.T) {
 	}
 }
 
+// A channel whose adapter the claim handler does not name must still be
+// reported. The lookup enumerated a fixed {slack, feishu} list, so every
+// channel added after it — WeCom is the first — claimed as a web chat and
+// inherited the web chat's `multica attachment upload` guidance, the exact
+// MUL-4899 failure the fixed list was supposed to have ended.
+//
+// The list is what is under test here, not WeCom: the binding row shape is
+// identical for every channel, so a handler that reads the row instead of
+// guessing the channel_type cannot regress the next one either.
+func TestClaim_UnlistedChannelBoundSessionReportsChannelType(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "wecom-backed chat")
+	seedChannelBinding(t, ctx, agentID, sessionID, "wecom", "msg-1", "thread-9")
+	insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	requeueTaskForClaim(t, ctx, sessionID)
+
+	channelType, inThread := claimChatChannelFields(t, runtimeID)
+	if channelType != "wecom" {
+		t.Errorf("chat_channel_type = %q, want %q — a channel the handler does not name must not look like a web chat", channelType, "wecom")
+	}
+	if inThread {
+		t.Error("chat_in_thread must stay false off Slack: it selects between two Slack-only read commands")
+	}
+}
+
 func TestClaim_UnboundSessionReportsNoChannelType(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -305,7 +305,9 @@
     "unsubscribe_this": "取消订阅此 issue",
     "unsubscribe_subtree": "取消订阅此 issue 及其子 issue",
     "unsubscribe_subtree_failed": "取消订阅子 issue 失败，请重试。",
+    "unsubscribe_subtree_succeeded": "已取消订阅此 issue 及其子 issue。",
     "unsubscribe_subtree_unsupported": "当前服务端还不支持取消订阅子 issue，请在下次更新后再试。",
+    "subscription_update_failed": "无法更新订阅状态，请重试。",
     "no_subscribers_results": "未找到结果",
     "change_subscribers_placeholder": "更改订阅者...",
     "members_group": "成员",
@@ -559,7 +561,7 @@
   "pickers": {
     "custom_property": {
       "empty": "空",
-      "clear_action": "清除",
+      "none": "无值",
       "true_label": "是",
       "false_label": "否",
       "value_placeholder": "输入值…",
@@ -581,11 +583,11 @@
     },
     "start_date": {
       "trigger_label": "开始日期",
-      "clear_action": "清除日期"
+      "none": "无开始日期"
     },
     "due_date": {
       "trigger_label": "截止日期",
-      "clear_action": "清除日期"
+      "none": "无截止日期"
     },
     "label": {
       "trigger_label": "添加标签",

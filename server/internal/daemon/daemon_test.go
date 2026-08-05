@@ -854,13 +854,19 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		"Daily dependency check",
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
-		"Do not run `multica issue get`",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("autopilot prompt missing %q\n---\n%s", want, prompt)
 		}
 	}
 
+	// The issue-command boundary is emitted ONCE, by the brief's autopilot
+	// workflow section (execenv.AutopilotIssueCommandsGuard). MUL-5696 found
+	// that a second hand-maintained per-turn copy drifts, so the per-turn
+	// prompt must not restate it in any form.
+	if strings.Contains(prompt, "Do not run `multica issue get`") {
+		t.Fatalf("autopilot prompt restates the issue-command boundary the brief owns (MUL-5696)\n---\n%s", prompt)
+	}
 	if strings.Contains(prompt, "Your assigned issue ID is:") {
 		t.Fatalf("autopilot prompt should not use issue assignment template\n---\n%s", prompt)
 	}

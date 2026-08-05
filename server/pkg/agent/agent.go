@@ -55,10 +55,11 @@ type ExecOptions struct {
 	// live resume RPC was rejected, or a transport failure forced a fresh retry —
 	// the backend surfaces a continuity notice to the user instead of silently
 	// restarting. Currently honoured by the codex backend (MUL-4424).
-	ResumeExpected bool
-	ExtraArgs      []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs     []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig      json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeExpected   bool
+	ExtraArgs        []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs       []string        // per-agent CLI arguments appended after ExtraArgs
+	QwenpawWorkspace string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
+	McpConfig        json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means
@@ -217,7 +218,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -253,6 +254,7 @@ var SupportedTypes = []string{
 	"traecli",
 	"grok",
 	"qwen",
+	"qwenpaw",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -334,8 +336,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &grokBackend{cfg: cfg}, nil
 	case "qwen":
 		return &qwenBackend{cfg: cfg}, nil
+	case "qwenpaw":
+		return &qwenpawBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
 	}
 }
 
@@ -369,6 +373,7 @@ var launchHeaders = map[string]string{
 	"traecli":     "traecli acp serve",
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
+	"qwenpaw":     "qwenpaw acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

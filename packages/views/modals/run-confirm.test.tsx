@@ -1,5 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  configureShortcutPlatform,
+  createShortcutChord,
+  useShortcutStore,
+} from "@multica/core/shortcuts";
 import { RunConfirmModal } from "./run-confirm";
 
 // --- Warm agent / squad / runtime caches (prefetched in the real app) --------
@@ -85,7 +90,10 @@ vi.mock("../i18n", () => ({
 // Keep the ui primitives as light DOM so the logic is what's under test.
 vi.mock("@multica/ui/components/ui/dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  // Keeps the real Popup's prop passthrough, which the send chord binds to.
+  DialogContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div data-testid="dialog-content" {...props}>{children}</div>
+  ),
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -115,7 +123,20 @@ beforeEach(() => {
   cache.agents = [{ id: "agent-1", runtime_id: "runtime-1" }];
   cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }];
   cache.squads = [{ id: "squad-1", leader_id: "agent-1" }];
+  // The real shortcut store drives both the submit chord and the keycap hint,
+  // and jsdom's platform follows the host OS — pin it so the chord is ⌘+Enter
+  // everywhere, not Ctrl+Enter on a Linux CI runner.
+  configureShortcutPlatform("macos");
+  useShortcutStore.setState({ overrides: {} });
 });
+
+afterEach(() => {
+  configureShortcutPlatform(null);
+  useShortcutStore.setState({ overrides: {} });
+});
+
+const confirmButton = () => screen.getByRole("button", { name: "Confirm assignment" });
+const noteBox = () => screen.getByPlaceholderText("scope...");
 
 const single = {
   issueIds: ["issue-1"],
@@ -129,16 +150,16 @@ describe("RunConfirmModal", () => {
     // The MUL-5010 core: opening the dialog fires nothing and blocks nothing.
     const { container } = render(<RunConfirmModal onClose={vi.fn()} data={single} />);
     expect(screen.queryByTestId("spinner")).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("scope...")).not.toBeDisabled();
-    expect(screen.getByText("Confirm assignment")).not.toBeDisabled();
+    expect(noteBox()).not.toBeDisabled();
+    expect(confirmButton()).not.toBeDisabled();
     // Headline reads across elements — the assignee name is bolded in place.
     expect(container.textContent).toContain("assign to Walt");
   });
 
   it("single assign sends the assignee change with the handoff note", async () => {
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "only login" } });
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.change(noteBox(), { target: { value: "only login" } });
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     expect(mockUpdate).toHaveBeenCalledWith({
       id: "issue-1",
@@ -154,7 +175,7 @@ describe("RunConfirmModal", () => {
     // run surface through the issue's normal updates, so submit adds no toast.
     const onClose = vi.fn();
     render(<RunConfirmModal onClose={onClose} data={single} />);
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mockToast.success).not.toHaveBeenCalled();
     expect(mockToast.error).not.toHaveBeenCalled();
@@ -162,7 +183,7 @@ describe("RunConfirmModal", () => {
 
   it("'暂不开始' sends suppress_run and no handoff note", async () => {
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "ignored" } });
+    fireEvent.change(noteBox(), { target: { value: "ignored" } });
     fireEvent.click(screen.getByText("Don't start yet"));
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     const payload = mockUpdate.mock.calls[0]![0];
@@ -174,7 +195,7 @@ describe("RunConfirmModal", () => {
   it("disables the note box when the agent's runtime is too old", () => {
     cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
+    expect(noteBox()).toBeDisabled();
     expect(screen.getByText("runtime too old")).toBeInTheDocument();
   });
 
@@ -188,7 +209,7 @@ describe("RunConfirmModal", () => {
         data={{ ...single, assigneeType: "squad", assigneeId: "squad-1" }}
       />,
     );
-    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
+    expect(noteBox()).toBeDisabled();
     expect(screen.getByText("runtime too old")).toBeInTheDocument();
   });
 
@@ -197,7 +218,7 @@ describe("RunConfirmModal", () => {
     // unresolvable target must not produce a spurious warning.
     cache.agents = [];
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    expect(screen.getByPlaceholderText("scope...")).not.toBeDisabled();
+    expect(noteBox()).not.toBeDisabled();
     expect(screen.queryByText("runtime too old")).not.toBeInTheDocument();
   });
 
@@ -206,7 +227,7 @@ describe("RunConfirmModal", () => {
       <RunConfirmModal onClose={vi.fn()} data={{ ...single, issueIds: ["i1", "i2"] }} />,
     );
     expect(container.textContent).toContain("assign 2 to Walt");
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
     expect(mockBatch).toHaveBeenCalledWith({
       ids: ["i1", "i2"],
@@ -216,11 +237,87 @@ describe("RunConfirmModal", () => {
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 
+  // --- Send chord (MUL-5694) ------------------------------------------------
+  // The note box is where the caret starts, so the dialog has to submit from
+  // the keyboard there, the same way the issue composer creates.
+
+  it("confirms on the send chord typed in the note box", async () => {
+    const onClose = vi.fn();
+    render(<RunConfirmModal onClose={onClose} data={single} />);
+    fireEvent.change(noteBox(), { target: { value: "only login" } });
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+      handoff_note: "only login",
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("confirms from a focused footer button, which the chord cannot activate", async () => {
+    // Chromium fires no click for ⌘/Ctrl+Enter on a focused button, so without
+    // the dialog handling it there the chord is simply dead. The dialog focuses
+    // its first tabbable child, so this is where an old runtime leaves the user.
+    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(screen.getByText("Don't start yet"), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    // The primary action, not the button the caret happened to sit on.
+    const payload = mockUpdate.mock.calls[0]![0];
+    expect(payload.suppress_run).toBeUndefined();
+    expect(payload.handoff_note).toBeUndefined();
+  });
+
+  it("yields to a focused button when send is remapped to plain Enter", () => {
+    // A bare Enter DOES activate a focused button, so confirming here as well
+    // would double-write — and on "Don't start yet" the two would disagree.
+    useShortcutStore.setState({ overrides: { send: createShortcutChord("Enter") } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(screen.getByText("Don't start yet"), { key: "Enter" });
+    fireEvent.keyDown(confirmButton(), { key: "Enter" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("leaves plain Enter alone so the note stays multi-line", () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(noteBox(), { key: "Enter" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("submits once for a held chord, and never for an IME's committing Enter", async () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true, isComposing: true });
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true, repeat: true });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("follows a remapped send chord instead of hardcoding ⌘+Enter", async () => {
+    useShortcutStore.setState({ overrides: { send: createShortcutChord("Enter") } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    fireEvent.keyDown(noteBox(), { key: "Enter" });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the chord on the confirm button without renaming it", () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    // Decorative: discoverable next to the label, absent from the a11y name —
+    // `confirmButton()` resolving by that exact name is the assertion.
+    expect(
+      confirmButton().querySelector('[data-slot="shortcut-keycaps"]'),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the dialog open and surfaces the error when the write fails", async () => {
     const onClose = vi.fn();
     mockUpdate.mockRejectedValue(new Error("boom"));
     render(<RunConfirmModal onClose={onClose} data={single} />);
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("boom"));
     expect(onClose).not.toHaveBeenCalled();
     expect(mockToast.success).not.toHaveBeenCalled();

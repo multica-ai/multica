@@ -45,11 +45,21 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
+		// attachment boundary (MUL-5696): the ban is scoped to URLs, and file
+		// delivery defers to the quick-create ## Output section — a blanket
+		// "do NOT pass --attachment" contradicted it (it names --attachment
+		// on the create call as this surface's only file-delivery channel).
+		"`--attachment` takes LOCAL file paths, never URLs",
+		"Files you produced: see `## Output`",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("buildQuickCreatePrompt output missing required rule: %q", s)
 		}
+	}
+
+	if strings.Contains(out, "do NOT pass `--attachment`") {
+		t.Errorf("buildQuickCreatePrompt carries the unconditional --attachment ban that conflicts with the quick-create ## Output delivery channel (MUL-5696)\n--- output ---\n%s", out)
 	}
 }
 

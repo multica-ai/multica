@@ -56,7 +56,11 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
   const nameClass = fullName ? "break-all" : "truncate max-w-[12rem]";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
+      // `min-w-0` lets the chip shrink when it is a flex item in a width-capped
+      // container (the create toolbar's label pill). Without it the chip keeps
+      // its content width and the parent clips it mid-shape; with it the inner
+      // name truncates and the chip keeps its rounded ends.
+      className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
       style={{ backgroundColor: label.color, color: textColor }}
       // aria-label exposes the full name to screen readers when the span
       // visually truncates. title stays for sighted hover-tooltip.

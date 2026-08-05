@@ -205,6 +205,14 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "qwenpaw":
+		// QwenPaw's model selection is unsupported (session/set_model
+		// persists to agent scope, not session scope), so there is no
+		// consumer for a discovered catalog. Return an empty list to
+		// avoid spawning an ACP subprocess that has no effect. If upstream
+		// makes model selection session-scoped, restore a discovery helper
+		// here modelled on discoverTraecliModels.
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -226,11 +234,22 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 // 1.0.6 — MUL-3125).
 //
 // The hook is retained — rather than inlining `true` at the call sites — so
-// a future model-less runtime can opt out in one place, which makes the UI
+// a model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	return true
+	switch providerType {
+	case "qwenpaw":
+		// QwenPaw's `session/set_model` persists to agent.json at the agent
+		// scope, not the session scope. Calling it would mutate the user's
+		// shared, persistent agent config. Model override is therefore
+		// unsupported — the runtime uses whatever model is configured in
+		// the agent profile. If QwenPaw makes model selection session-scoped
+		// upstream, this can be reverted to `true`.
+		return false
+	default:
+		return true
+	}
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known

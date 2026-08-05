@@ -1976,7 +1976,29 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 // CancelTaskWithResult cancels a single task and returns any chat-specific
 // cleanup result needed by user-facing callers.
 func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID, opts CancelTaskOptions) (*CancelTaskResult, error) {
-	task, err := s.Queries.CancelAgentTask(ctx, taskID)
+	// The status flip and the chat resume-pointer advance commit together. Split
+	// across two statements, the `cancelled` status becomes visible to every
+	// other connection while the pointer still names the PREVIOUS turn's
+	// session — and a follow-up the user had already queued can be claimed in
+	// that gap and resume the older session, which is the bug this change is
+	// supposed to remove (GH #6340). AdvanceCancelledChatSessionPointer reads
+	// the row this transaction just wrote, so it also sees a session pinned
+	// concurrently rather than a stale in-memory copy.
+	var task db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
+			return err
+		}
+		cancelled, err := qtx.CancelAgentTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		task = cancelled
+		if !cancelled.ChatSessionID.Valid {
+			return nil
+		}
+		return qtx.AdvanceCancelledChatSessionPointer(ctx, cancelled.ID)
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, err := s.Queries.GetAgentTask(ctx, taskID)
 		if err != nil {
@@ -2005,6 +2027,32 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	}, nil
 }
 
+// lockChatSessionForTaskWrite takes the chat_session row a task belongs to. It
+// must be the FIRST statement of any transaction that ends up holding both that
+// session row and the task's own row, which is every terminal-state path a chat
+// task has: complete, fail, cancel, the cancelled-turn finalize, and the
+// daemon's mid-flight pin.
+//
+// chat_session -> agent_task_queue is the repo-wide order (see
+// LockChatSessionForTask in chat.sql). DeleteChatSession and
+// FinalizeDeferredCancelledChat already took it; the terminal reports did not,
+// because they only ever wrote the task row first and the session second and
+// nothing else contended for both. Once the cancel and pin paths started
+// holding the session row too, "task first" and "session first" existed side by
+// side and any crossing pair could deadlock — PostgreSQL aborts one with 40P01
+// and runInTx has no retry. There is no per-path fix for that: either every
+// writer agrees or none of them are safe.
+//
+// ErrNoRows means there is nothing to lock — a non-chat task, or one whose
+// session was already deleted (the FK NULLs the column) — and the caller then
+// has no session write to protect either.
+func lockChatSessionForTaskWrite(ctx context.Context, qtx *db.Queries, taskID pgtype.UUID) error {
+	if _, err := qtx.LockChatSessionForTask(ctx, taskID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("lock chat session for task write: %w", err)
+	}
+	return nil
+}
+
 // chatInputOwnerID resolves the id the task's user-message input batch is
 // keyed on: chat_input_task_id when set (auto-retry clones inherit their
 // parent's, so provenance checks reach the parent's sealed messages), falling
@@ -2022,6 +2070,12 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 	}
 	var cancelled *CancelledChatMessageResult
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		// Same protocol as every other terminal path: this transaction marks the
+		// task row and then writes chat_message rows, whose FK takes a KEY SHARE
+		// lock on the session — two rows again, so it takes the session first.
+		if err := lockChatSessionForTaskWrite(ctx, qtx, task.ID); err != nil {
+			return err
+		}
 		messages, err := qtx.ListTaskMessages(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
@@ -2873,6 +2927,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// only after the transaction commits.
 	var chatAssistantMsg *db.ChatMessage
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
+			return err
+		}
 		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
 			ID:                    taskID,
 			Result:                result,
@@ -3310,6 +3367,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var task db.AgentTaskQueue
 	var retried *db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
+			return err
+		}
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
 			ID:                    taskID,
 			Error:                 pgtype.Text{String: errMsg, Valid: true},

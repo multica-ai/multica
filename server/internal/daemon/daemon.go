@@ -4298,6 +4298,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"grok":       "Grok",
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
+	"qwenpaw":    "QwenPaw",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -4331,7 +4332,7 @@ func providerDisplayName(name string) string {
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli":
+	case "openclaw", "kimi", "traecli", "qwenpaw":
 		return true
 	default:
 		return false
@@ -5395,6 +5396,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ServiceTier:        serviceTier,
 		OpenclawMode:       openclawMode,
 		ClaudeSettingsPath: env.ClaudeSettingsPath,
+		QwenpawWorkspace:   env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -6748,6 +6750,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodebuddyArgs
 	case "qwen":
 		args = cfg.QwenArgs
+	case "qwenpaw":
+		args = cfg.QwenpawArgs
 	default:
 		return nil
 	}

@@ -148,6 +148,57 @@ describe("ProjectPicker search", () => {
     expect(screen.queryByRole("button", { name: /mobile web/i })).not.toBeInTheDocument();
   });
 
+  // Regression: the empty value is pinned as the first row, which also made it
+  // the first `data-picker-item`. PropertyPicker used to reset the highlight to
+  // index 0 on every keystroke, so typing a query and pressing Enter committed
+  // the empty row — clearing the field the user was searching in instead of
+  // picking the match they were looking at.
+  it("commits the first match on Enter, not the empty row", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+
+    render(<CreateDialogHarness onUpdate={onUpdate} />);
+
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    await user.type(await screen.findByPlaceholderText("Search projects..."), "mobile");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdate).toHaveBeenCalledWith({ project_id: "project-2" });
+    expect(onUpdate).not.toHaveBeenCalledWith({ project_id: null });
+  });
+
+  it("leaves Enter inert when the query matches nothing", async () => {
+    // The empty row survives every filter, so a no-match query leaves it as
+    // the sole item. The single-item auto-select must not fire on it.
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+
+    render(<CreateDialogHarness onUpdate={onUpdate} />);
+
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    await user.type(await screen.findByPlaceholderText("Search projects..."), "zzzznomatch");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still reaches the empty row by arrow key while searching", async () => {
+    // Skipping it as the Enter default must not make it unreachable.
+    // jsdom has no layout, so scrollIntoView isn't defined at all — assign it
+    // rather than spy on it (vi.spyOn requires an existing property).
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+
+    render(<CreateDialogHarness onUpdate={onUpdate} />);
+
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    await user.type(await screen.findByPlaceholderText("Search projects..."), "mobile");
+    await user.keyboard("{ArrowUp}{Enter}");
+
+    expect(onUpdate).toHaveBeenCalledWith({ project_id: null });
+  });
+
   // Regression: selecting a row closes the popover by calling `setOpen(false)`
   // directly, which never routes through PropertyPicker's own open-change
   // handler — the only place that used to reset the query. The stale search

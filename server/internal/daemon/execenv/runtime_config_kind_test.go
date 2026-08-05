@@ -96,7 +96,10 @@ func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
 			for _, want := range []string{
 				"## Issue Body Formatting",
 				"An issue title already serves as its H1.",
-				"do not add a Markdown H1 (`# ...`)",
+				// The rule covers BOTH surfaces: `description` is the CLI/API
+				// field name, `body` the UI term — the alias is a cross-surface
+				// mapping, not prose (MUL-5442 stage-1 review).
+				"do not add a Markdown H1 (`# ...`) to an issue body or description",
 				"start with prose or `##` subheadings",
 				"Only add an H1 when the user specifically requests one",
 			} {
@@ -175,6 +178,38 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
 		}
+	}
+}
+
+// TestBriefDueDateTeachesCalendarDayFormat pins the --due-date synopsis to
+// the calendar-day format the server canonically accepts
+// (util.ParseCalendarDate: YYYY-MM-DD; an RFC3339 value passes only at exact
+// UTC midnight). MUL-5696 found the brief teaching `<RFC3339>` while the CLI
+// help and the projects skill say YYYY-MM-DD, steering agents that computed a
+// natural timestamp into 400s.
+func TestBriefDueDateTeachesCalendarDayFormat(t *testing.T) {
+	for name, ctx := range map[string]TaskContextForEnv{
+		"issue":        {IssueID: "issue-1"},
+		"quick-create": {QuickCreatePrompt: "create an issue"},
+	} {
+		out := buildMetaSkillContent("claude", ctx)
+		if !strings.Contains(out, "--due-date <YYYY-MM-DD>") {
+			t.Errorf("%s brief missing the calendar-day --due-date synopsis", name)
+		}
+		if strings.Contains(out, "--due-date <RFC3339>") {
+			t.Errorf("%s brief still teaches --due-date <RFC3339>, which the server rejects except at UTC midnight (MUL-5696)", name)
+		}
+	}
+}
+
+// TestBriefOwnsAutopilotIssueCommandsGuard pins the guard's single emission
+// point: the autopilot brief carries AutopilotIssueCommandsGuard, and the
+// per-turn prompt defers to it (daemon.TestBuildPromptAutopilotRunOnly pins
+// the deferral side). MUL-5696.
+func TestBriefOwnsAutopilotIssueCommandsGuard(t *testing.T) {
+	out := buildMetaSkillContent("claude", TaskContextForEnv{AutopilotRunID: "run-1"})
+	if !strings.Contains(out, AutopilotIssueCommandsGuard) {
+		t.Errorf("autopilot brief missing AutopilotIssueCommandsGuard — the per-turn prompt defers to this single emission point")
 	}
 }
 

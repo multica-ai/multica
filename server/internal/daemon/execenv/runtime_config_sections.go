@@ -96,13 +96,13 @@ func writeHeader(b *strings.Builder) {
 // all, not to any one later bullet.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any process, tool call, or subagent owned by this run that is still active is orphaned, its result lost, and the final comment you meant to post after it never sends. There is no background-completion wakeup here.\n\n")
-	b.WriteString("- Do NOT end your turn while background tasks or other work that still belongs to the current run is active, including async subagents, background shell commands, and detached tool calls. Never background-and-yield: no future notification or wakeup will arrive to resume you. A tool response that says to wait for a future notification/reminder, or that it is running in the background so you can keep working, does not change that — block before exiting. If you can't observe a result, run the work synchronously instead, and never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message: that becomes your final output and the task ends.\n")
+	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup here.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks or other run-owned work is active — async subagents, background shells, and detached tool calls included. Never background-and-yield: no future notification or wakeup will arrive to resume you. A tool response that says to wait for a future notification/reminder, or that it is running in the background so you can keep working, does not change that — block before exiting. If you can't observe a result, run the work synchronously instead, and never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message: it becomes your final output.\n")
 	b.WriteString("- When a required result from run-owned work must be collected, wait synchronously inside one foreground tool call that blocks to completion (e.g. a blocking test or build command); never split \"start the wait\" and \"collect the result\" across turns.\n")
 	b.WriteString("- A user explicitly asking for a local service to stay available after the turn is a persistent service handoff, not background-and-yield — allowed only when the running service itself is the requested deliverable. Detach its lifecycle from this run first (durable logs, a recorded cleanup handle such as PID/profile), verify readiness, and reply with the URL, logs, and stop instructions. Without a supervisor, describe survival as best-effort, not guaranteed.\n")
 	b.WriteString("- The persistent-service exception does not cover tests, builds, CI polling, monitors, or any other work whose completion the agent still owes; those remain run-owned, and the CI-specific rules below still apply.\n")
 	b.WriteString("- External systems triggered by a completed action — for example GitHub Actions after a successful push — are not agent-owned background tasks. Do not wait for them by default; report them as pending and finish the handoff.\n")
-	b.WriteString("- Concretely, after a push or a PR create, unless the explicit exception below applies: do NOT run `gh pr checks --watch`, `gh run watch`, or any sleep / retry loop that polls check status (`gh pr merge --auto` is fine — it returns immediately). Take at most ONE non-blocking status snapshot (e.g. `gh pr checks <pr>`) and deliver the evidence you already have: \"Local tests pass; CI running: <PR link>\". A PR whose CI is still in flight is a complete hand-off.\n")
+	b.WriteString("- Concretely, after a push or a PR create, unless the explicit exception below applies: do NOT run `gh pr checks --watch`, `gh run watch`, or any sleep / retry loop that polls check status (`gh pr merge --auto` is fine — it returns immediately). Take at most ONE non-blocking status snapshot (e.g. `gh pr checks <pr>`) and deliver what you have: \"Local tests pass; CI running: <PR link>\". A PR whose CI is still in flight is a complete hand-off.\n")
 	b.WriteString("- A repo's merge requirements — \"CI must be green before merge\", required reviews, branch protection — are GitHub's merge gate, NOT your delivery acceptance criteria, and do not license a wait.\n")
 	b.WriteString("- The one exception: when the trigger comment or the issue's acceptance criteria explicitly ask you for the CI result, that result IS the deliverable — wait for it as ONE foreground blocking call (`gh pr checks <pr> --watch`) inside this same turn and report the outcome. Nothing else re-opens this door.\n\n")
 }
@@ -262,9 +262,9 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("Prefer `--output json` for structured data. The default brief lists only the core agent loop and common issue create/update tasks; for everything else run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — full issue.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--roots-only] [--summary] [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — thread-aware comment reads. `--recent N` caps THREADS, not comments: every returned thread carries its root plus EVERY descendant with no per-thread cap, so on an issue with fewer than N root threads it hands you the entire history apart from the resolved threads it folds. Bound a wide read with `--roots-only` (roots plus `reply_count` / `last_activity_at`) and `--summary` (bodies clipped to a preview); bound a deep one with `--thread <id> --tail N`. Resolved threads come back folded on complete-thread reads (default list, `--recent`, `--thread` without `--tail`); `--full` expands them. Page with `--before`/`--before-id` (stderr labels: `Next reply cursor`, `Next thread cursor`); `--help` for full semantics.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths — same workdir rule as `## Comment Formatting`.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>]` — update fields; pass `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica issue comment list <issue-id> [--roots-only] [--summary] [--thread <comment-id> [--tail N] | --recent N] [--since <RFC3339>] --output json` — thread-aware comment reads. Bound a wide read with `--roots-only --summary` (roots plus `reply_count` / `last_activity_at`, clipped bodies); bound a deep one with `--thread <id> --tail N`. Careful with `--recent N`: it caps THREADS, not comments, and can return the whole history on a small issue. Resolved-thread folding, paging cursors, and full flag semantics: `--help`.\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths — same workdir rule as `## Comment Formatting`.\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>]` — update fields; pass `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`; see `## Comment Formatting` for why. `multica issue comment add --help` for full flags.\n")
@@ -291,7 +291,7 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** For anything beyond `issue create`, run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
 }
 
 // writeIssueBodyFormatting emits the default Markdown hierarchy for issue
@@ -300,7 +300,7 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 // surfaces.
 func writeIssueBodyFormatting(b *strings.Builder) {
 	b.WriteString("## Issue Body Formatting\n\n")
-	b.WriteString("An issue title already serves as its H1. By default, do not add a Markdown H1 (`# ...`) to an issue body or description; start with prose or `##` subheadings instead. Only add an H1 when the user specifically requests one.\n\n")
+	b.WriteString("An issue title already serves as its H1. By default, do not add a Markdown H1 (`# ...`) to an issue body or description; start with prose or `##` subheadings. Only add an H1 when the user specifically requests one.\n\n")
 }
 
 // writeCommentFormatting emits the cross-platform file-first guardrail.
@@ -309,10 +309,10 @@ func writeIssueBodyFormatting(b *strings.Builder) {
 func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString("## Comment Formatting\n\n")
 	if runtimeGOOS == "windows" {
-		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin` (PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`). Never use inline `--content` for agent-authored comments. Write that file inside your working directory (`./reply.md`), never `/tmp` or shared paths — the CLI rejects a `--content-file` path outside the workdir so another run's stale file can't leak in (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`Remove-Item ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
+		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin` (PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?`). Never use inline `--content` for agent-authored comments. Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`Remove-Item ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 		return
 	}
-	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments — the shell rewrites backticks / `$()` / quotes in the body (MUL-2904). Never use `--content-stdin` with a HEREDOC alongside other flags either — the heredoc/flag boundary is fragile and flags get silently swallowed (#4182). Write that file inside your working directory (`./reply.md`), never `/tmp` or shared paths — the CLI rejects a `--content-file` path outside the workdir so another run's stale file can't leak in (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
+	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments — the shell rewrites the body (MUL-2904); never use `--content-stdin` HEREDOCs alongside other flags — flags get silently swallowed (#4182). Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying; delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 }
 
 // writeRepositories emits the Repositories section when at least one repo
@@ -368,11 +368,9 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 // helper does not re-check.
 func writeIssueMetadata(b *strings.Builder) {
 	b.WriteString("## Issue Metadata\n\n")
-	b.WriteString("`metadata` is a small KV bag per issue — a high-signal scratchpad for facts future runs on this same issue will read more than once (PR URL, deploy URL, current blocker). Most runs pin **zero** new keys; that is the expected case.\n\n")
-	b.WriteString("- **Read on entry.** Metadata is hints, not truth: latest comment / code wins on conflict. Empty `{}` is normal.\n")
-	b.WriteString("- **Write on exit.** Pin only if BOTH: (a) materially important to this issue, AND (b) a future run is likely to re-read it. Otherwise leave the bag alone. Stale keys: overwrite with the new value or `multica issue metadata delete`.\n")
-	b.WriteString("- **What NOT to pin.** No secrets, tokens, or API keys. No logs or comment summaries. No runtime bookkeeping (attempts, run timestamps, agent ids). No single-run details — those belong in the result comment.\n")
-	b.WriteString("- **Recommended keys** (use snake_case ASCII; reuse these names so queries stay consistent): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`.\n\n")
+	b.WriteString("`metadata` is a small per-issue KV bag — custom key-value state your workflow wants future runs on this issue to re-read. Most runs write nothing.\n\n")
+	b.WriteString("- **Read on entry.** Hints, not truth: latest comment / code wins on conflict. Empty `{}` is normal.\n")
+	b.WriteString("- **Write on exit.** Only what a future run will actually re-read — short values, never secrets or long content. Overwrite or `multica issue metadata delete` stale keys. Full write discipline: the `multica-working-on-issues` skill.\n\n")
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue
@@ -435,6 +433,13 @@ func writeWorkflowQuickCreate(b *strings.Builder) {
 	b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 }
 
+// AutopilotIssueCommandsGuard is the run-only autopilot issue-command boundary,
+// shared verbatim by the runtime brief (writeWorkflowAutopilot) and the
+// per-turn prompt (daemon.buildAutopilotPrompt). Both land in the same context
+// window; MUL-5696 found the two hand-maintained copies had drifted into an
+// unconditional ban on one surface and a conditional one on the other.
+const AutopilotIssueCommandsGuard = "Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue"
+
 // writeWorkflowAutopilot emits the autopilot run-only workflow.
 func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
@@ -460,7 +465,7 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 		fmt.Fprintf(b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
 	}
 	b.WriteString("- Complete the autopilot instructions directly\n")
-	b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
+	b.WriteString("- " + AutopilotIssueCommandsGuard + "\n\n")
 }
 
 // writeWorkflowIssue emits the single issue workflow used by BOTH
@@ -507,15 +512,12 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 // ctx.IsSquadLeader is agent configuration, not per-run state, so branching
 // on it does not break byte-stability across runs of one session.
 func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
-	b.WriteString("**Mode router — read this before acting.** This file is identical on every run, so it cannot tell you what triggered THIS turn. The user message for this turn names its mode on a line of its own:\n\n")
-	b.WriteString("- `Turn mode: Reply.` → **Reply mode**. That message also carries the triggering comment's id, the exact `--parent` value for your reply, and the comment's content when the platform supplied it.\n")
-	b.WriteString("- `Turn mode: Ownership.` → **Ownership mode** (an assignment or status change started this run).\n\n")
-	b.WriteString("Steps 1–6 below are the same in both modes. The mode blocks after them differ, and they differ on issue status in particular — **apply exactly one mode block, the one the user message named. Never apply both.** If neither line is present, treat the turn as Reply mode and do not change the issue status.\n\n")
+	b.WriteString("**Turn mode.** The per-turn user message names this run's mode on a line of its own: `Turn mode: Reply.` (respond to the comment that message carries — it brings the triggering comment's id and your `--parent` value) or `Turn mode: Ownership.` (an assignment or status change started this run). Steps 1–6 are shared; then **apply exactly one mode block, the one the user message named** — they differ on issue status. No mode line → Reply mode, do not change the issue status.\n\n")
 
 	b.WriteString("**Steps 1–6 — both modes**\n\n")
 	fmt.Fprintf(b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
 	fmt.Fprintf(b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. What to look for: `## Issue Metadata`.\n", ctx.IssueID)
-	fmt.Fprintf(b, "3. Catch up on the comment history — this is mandatory, not optional — in two bounded reads, never one bulk pull. Scan every thread cheaply with `multica issue comment list %s --roots-only --summary --output json`, then expand only the threads that matter with `multica issue comment list %s --thread <thread-id> --tail 30 --output json`. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions — so always run the scan, even when the trigger looks self-contained. In Reply mode the per-turn user message names the thread to expand first; the scan is how you decide whether any OTHER thread is also relevant. Flag semantics and pagination: `## Available Commands`.\n", ctx.IssueID, ctx.IssueID)
+	fmt.Fprintf(b, "3. Catch up on the comment history — this is mandatory, not optional — in two bounded reads, never one bulk pull: scan every thread cheaply with `multica issue comment list %s --roots-only --summary --output json`, then expand only the threads that matter with `multica issue comment list %s --thread <thread-id> --tail 30 --output json`. Earlier comments often carry context the issue body lacks. Skipping this step is the most common cause of agents acting on stale or incomplete instructions — so always run the scan, even when the trigger looks self-contained. In Reply mode the per-turn user message names the thread to expand first; the scan is how you decide whether any OTHER thread is also relevant.\n", ctx.IssueID, ctx.IssueID)
 	b.WriteString("4. Complete the task within your Agent Identity boundaries (`## Instruction Precedence` lists the actions Agent Identity can forbid). If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered.\n")
 	if ctx.IsSquadLeader {
 		fmt.Fprintf(b, "5. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
@@ -534,8 +536,8 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	fmt.Fprintf(b, "- If blocked, run `multica issue status %s blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
 
 	b.WriteString("**Reply mode only — respond to the comment in the user message**\n\n")
-	b.WriteString("- Your primary job is to respond to THAT specific comment, even if you have handled similar requests before in this session. Do NOT confuse it with previous comments; take its id from the user message, never from this file or from an earlier turn.\n")
-	b.WriteString("- **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 5 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+	b.WriteString("- Respond to THAT specific comment; take its id from the user message, never from this file or from an earlier turn.\n")
+	b.WriteString("- **Decide whether a reply is warranted.** If you produced actual work this turn, post the result via step 5. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work, do NOT reply — not even a 'No reply needed' comment; exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 	if ctx.IsSquadLeader {
 		fmt.Fprintf(b, "- **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
 	}
@@ -634,7 +636,7 @@ func writeAttachments(b *strings.Builder) {
 // (compressed).
 func writeAlwaysUseCLI(b *strings.Builder) {
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
-	b.WriteString("Access Multica platform resources (issues, comments, attachments, files) only through the `multica` CLI — never `curl` / `wget`. For any operation the CLI doesn't cover, post a comment mentioning the workspace owner rather than working around it.\n\n")
+	b.WriteString("Access Multica platform resources only through the `multica` CLI — never `curl` / `wget`. For anything the CLI doesn't cover, post a comment mentioning the workspace owner rather than working around it.\n\n")
 }
 
 // writeDeliveryInvariant emits the always-on delivery contract, shared by every
