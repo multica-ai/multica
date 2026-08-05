@@ -608,6 +608,7 @@ SELECT channel_media_pending_until
 FROM chat_message
 WHERE chat_session_id = $1
   AND role = 'user'
+  AND message_kind != 'channel_command'
   AND channel_media_pending_until > now()
 ORDER BY channel_media_pending_until DESC
 LIMIT 1
@@ -615,6 +616,10 @@ LIMIT 1
 
 // The latest unexpired media deadline gates a channel task. Using a durable
 // task fire_at means a process restart still produces the placeholder fallback.
+// Only a turn that can join a task's input batch may gate one: channel_command
+// turns are excluded from the seal below, so an unrelated later message would
+// otherwise wait out a command's media (or its whole fallback budget, since a
+// command whose create failed never runs the binder that clears the marker).
 func (q *Queries) GetChannelMediaPendingUntil(ctx context.Context, chatSessionID pgtype.UUID) (pgtype.Timestamptz, error) {
 	row := q.db.QueryRow(ctx, getChannelMediaPendingUntil, chatSessionID)
 	var channel_media_pending_until pgtype.Timestamptz
@@ -1794,6 +1799,7 @@ WHERE task.chat_session_id = $1
       FROM chat_message AS message
       WHERE message.chat_session_id = $1
         AND message.role = 'user'
+        AND message.message_kind != 'channel_command'
         AND message.channel_media_pending_until > now()
   )
 RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for
@@ -1801,7 +1807,10 @@ RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, tas
 
 // Media completion may race with the 3s run batcher. Promote every original
 // channel task waiting for this session only after all unexpired media markers
-// are gone; retry/escalation/direct-chat deferred tasks are excluded.
+// are gone; retry/escalation/direct-chat deferred tasks are excluded. The
+// marker scan uses the same population as GetChannelMediaPendingUntil and the
+// seal: a channel_command turn belongs to no batch, so it must not hold a
+// deferred task back either.
 func (q *Queries) PromoteChannelChatTasksIfMediaReady(ctx context.Context, chatSessionID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, promoteChannelChatTasksIfMediaReady, chatSessionID)
 	if err != nil {
