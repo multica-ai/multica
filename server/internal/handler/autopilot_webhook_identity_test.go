@@ -15,10 +15,9 @@ func TestExtractWebhookIdentity_GitHubPullRequest(t *testing.T) {
 		"repository":{"full_name":"o/r"},
 		"sender":{"login":"bot","type":"Bot"}
 	}`)
-	headers := http.Header{
-		"X-GitHub-Delivery": {"delivery-1"},
-		"X-GitHub-Event":    {"pull_request"},
-	}
+	headers := http.Header{}
+	headers.Set("X-GitHub-Delivery", "delivery-1")
+	headers.Set("X-GitHub-Event", "pull_request")
 	id := extractWebhookIdentity("github", headers, "", json.RawMessage(payload))
 	if id.DeliveryID != "delivery-1" {
 		t.Fatalf("delivery: %q", id.DeliveryID)
