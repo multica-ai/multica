@@ -52,6 +52,10 @@ const REASON_CLASS: Record<string, FailureClass> = {
   "agent_error.provider_network": "provider",
   "agent_error.model_not_found_or_unavailable": "provider",
   api_invalid_request: "provider",
+  // Retiring a session that kept failing on resume. Grouped with provider
+  // because the underlying rejection came from the model API — the circuit
+  // breaker is our response to it, not a separate class of fault.
+  session_resume_exhausted: "provider",
 
   // Multica-side execution substrate: daemon offline / restarted, task never
   // got picked up, runner binary missing or too old.

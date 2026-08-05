@@ -2877,7 +2877,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'session_resume_exhausted')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
@@ -2930,7 +2930,8 @@ type GetLastTaskSessionRow struct {
 // Tasks that ended in a known "poisoned" terminal state are also excluded
 // here so even auto-retry does not inherit the bad session. The daemon
 // classifies these failures (iteration_limit, agent_fallback_message,
-// api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow)
+// api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow,
+// session_resume_exhausted)
 // when it detects either an agent fallback marker in the output, an upstream
 // API 400 that means the conversation history itself is unprocessable
 // (oversized image, malformed base64, etc.), a Codex semantic inactivity
@@ -3039,6 +3040,41 @@ func (q *Queries) GetLatestChatTaskRolloutMissing(ctx context.Context, chatSessi
 	var session_rollout_missing bool
 	err := row.Scan(&session_rollout_missing)
 	return session_rollout_missing, err
+}
+
+const getLatestTaskResumeExhausted = `-- name: GetLatestTaskResumeExhausted :one
+SELECT COALESCE(failure_reason, '') = 'session_resume_exhausted' AS exhausted
+FROM agent_task_queue
+WHERE agent_id = $1 AND issue_id = $2
+  AND status IN ('completed', 'failed')
+  AND started_at IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetLatestTaskResumeExhaustedParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+}
+
+// Reports whether the most recent terminal task on this (agent_id, issue_id)
+// pair retired its conversation for repeated failures. Drives the same
+// PriorSessionResumeUnavailable disclosure as GetLatestTaskRolloutMissing
+// (MUL-5305): without it the circuit breaker would silently drop the
+// conversation, which is the behaviour GH #6143 complained about in the first
+// place — the user could not tell why the agent had lost its context.
+//
+// Only the LATEST terminal row is consulted, mirroring
+// GetLatestTaskRolloutMissing. A transcript-neutral failure landing between the
+// breaker and the next claim (retirement, then a runtime_offline run) therefore
+// hides the disclosure, and that turn starts fresh without saying so. Rare, and
+// the alternative — scanning back to the last success — would keep re-announcing
+// the same retirement on every later turn, which is worse.
+func (q *Queries) GetLatestTaskResumeExhausted(ctx context.Context, arg GetLatestTaskResumeExhaustedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, getLatestTaskResumeExhausted, arg.AgentID, arg.IssueID)
+	var exhausted bool
+	err := row.Scan(&exhausted)
+	return exhausted, err
 }
 
 const getLatestTaskRoleForIssueAndAgent = `-- name: GetLatestTaskRoleForIssueAndAgent :one
@@ -3319,6 +3355,33 @@ func (q *Queries) HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx cont
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err
+}
+
+const isSessionRetiredForIssue = `-- name: IsSessionRetiredForIssue :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE agent_id = $1 AND issue_id = $2
+      AND retired_session_id = $3
+) AS retired
+`
+
+type IsSessionRetiredForIssueParams struct {
+	AgentID          pgtype.UUID `json:"agent_id"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+	RetiredSessionID pgtype.Text `json:"retired_session_id"`
+}
+
+// Reports whether any task on this (agent_id, issue_id) pair has retired the
+// given session id. The manual-rerun claim path reads the exact source task
+// rather than GetLastTaskSession, so it never consulted the retired_sessions
+// CTE and would happily resume a session a later run had already abandoned
+// (GH #6143 review). Session ids are opaque per-provider strings, so the
+// (agent, issue) scope is what keeps the lookup from colliding across issues.
+func (q *Queries) IsSessionRetiredForIssue(ctx context.Context, arg IsSessionRetiredForIssueParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isSessionRetiredForIssue, arg.AgentID, arg.IssueID, arg.RetiredSessionID)
+	var retired bool
+	err := row.Scan(&retired)
+	return retired, err
 }
 
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
@@ -4132,6 +4195,79 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runti
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listResumeFailuresSinceLastSuccess = `-- name: ListResumeFailuresSinceLastSuccess :many
+SELECT t.session_id, COALESCE(t.failure_reason, '') AS failure_reason
+FROM agent_task_queue t
+WHERE t.agent_id = $1 AND t.issue_id = $2
+  AND t.id <> $3
+  AND t.status = 'failed'
+  AND COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) > COALESCE((
+      SELECT MAX(COALESCE(c.completed_at, c.started_at, c.dispatched_at, c.created_at))
+      FROM agent_task_queue c
+      WHERE c.agent_id = $1 AND c.issue_id = $2 AND c.status = 'completed'
+  ), '-infinity'::timestamptz)
+ORDER BY COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC, t.id DESC
+`
+
+type ListResumeFailuresSinceLastSuccessParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+type ListResumeFailuresSinceLastSuccessRow struct {
+	SessionID     pgtype.Text `json:"session_id"`
+	FailureReason string      `json:"failure_reason"`
+}
+
+// Returns the failed tasks for this (agent_id, issue_id) pair since its last
+// successful run, excluding the caller's own row ($3). TaskService.FailTask
+// counts them to decide whether the conversation has proved unresumable and
+// should be retired (GH #6143) — see sessionResumeExhausted.
+//
+// Deliberately NOT keyed on session_id, even though the thing being judged is
+// a session. ACP backends (resolveResumedSessionID in pkg/agent/hermes.go)
+// may answer a resume with a DIFFERENT session id when their server-side
+// state is gone, and a run that dies before establishing a session records no
+// id at all. Keying on the id would restart the count on every drift and the
+// threshold would never be reached in exactly the situation it exists for.
+// The (agent, issue) pair is the unit the user actually experiences as stuck,
+// and every id seen in the window is retired together.
+//
+// "Since the last success" is the reset: one completed run proves the
+// conversation is healthy, so older failures must not count toward retiring
+// the session it left behind. Tasks with no terminal timestamp at all sort as
+// -infinity and are therefore included, which is the safe direction.
+//
+// failure_reason is returned rather than filtered here on purpose: which
+// reasons are transient enough to skip is decided ONCE in Go
+// (transcriptNeutralReasons). This file and internal/service/task.go have
+// drifted apart before — the sibling NOT IN blacklist above exists in three
+// places precisely because of that — so the set that is expected to grow
+// lives in one language only.
+// Newest first, with id as a tiebreak so rows sharing a timestamp keep a
+// stable order. The caller retires the most recent DIFFERENT session id it
+// sees, which is only well-defined if this ordering is.
+func (q *Queries) ListResumeFailuresSinceLastSuccess(ctx context.Context, arg ListResumeFailuresSinceLastSuccessParams) ([]ListResumeFailuresSinceLastSuccessRow, error) {
+	rows, err := q.db.Query(ctx, listResumeFailuresSinceLastSuccess, arg.AgentID, arg.IssueID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListResumeFailuresSinceLastSuccessRow{}
+	for rows.Next() {
+		var i ListResumeFailuresSinceLastSuccessRow
+		if err := rows.Scan(&i.SessionID, &i.FailureReason); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

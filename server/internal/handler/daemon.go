@@ -2053,8 +2053,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
+				// The retired check is separate from ResumeUnsafeFailure on
+				// purpose: that predicate judges the SOURCE task's own failure,
+				// so it cannot see a session some LATER run abandoned. Reruns of
+				// an older task would otherwise resurrect a conversation the
+				// circuit breaker already retired (GH #6143 review).
 				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
-					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
+					src.SessionID.Valid && src.RuntimeID == task.RuntimeID &&
+					!h.sessionRetiredForIssue(r.Context(), task.AgentID, task.IssueID, src.SessionID.String) {
 					resp.PriorSessionID = src.SessionID.String
 				}
 				// MUL-5305: if the source task withheld its Codex session because
@@ -2091,6 +2097,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && missing {
+				resp.PriorSessionResumeUnavailable = true
+			}
+			// GH #6143: same disclosure when the circuit breaker retired the
+			// previous conversation. Without this the breaker would be silent,
+			// and silence is half of what made the original bug so hard to
+			// diagnose — the user saw an agent that had lost its memory with no
+			// explanation anywhere in the product.
+			if exhausted, err := h.Queries.GetLatestTaskResumeExhausted(r.Context(), db.GetLatestTaskResumeExhaustedParams{
+				AgentID: task.AgentID,
+				IssueID: task.IssueID,
+			}); err == nil && exhausted {
 				resp.PriorSessionResumeUnavailable = true
 			}
 		}
@@ -2538,6 +2555,31 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// sessionRetiredForIssue reports whether any run on this (agent, issue) pair
+// has retired sessionID. Used by the manual-rerun claim path, which resolves
+// its session from one specific source task and so bypasses the
+// retired_sessions CTE that guards the (agent, issue) resume lookup.
+//
+// Fails OPEN — a lookup error resumes as before. The breaker exists to bound a
+// failure loop, and refusing to resume on a transient DB error would turn that
+// safety net into a way to lose healthy conversation context.
+func (h *Handler) sessionRetiredForIssue(ctx context.Context, agentID, issueID pgtype.UUID, sessionID string) bool {
+	if sessionID == "" || !agentID.Valid || !issueID.Valid {
+		return false
+	}
+	retired, err := h.Queries.IsSessionRetiredForIssue(ctx, db.IsSessionRetiredForIssueParams{
+		AgentID:          agentID,
+		IssueID:          issueID,
+		RetiredSessionID: pgtype.Text{String: sessionID, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("task claim: retired-session lookup failed",
+			"agent_id", uuidToString(agentID), "error", err)
+		return false
+	}
+	return retired
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.

@@ -168,6 +168,7 @@ const FAILURE_REASON_LABEL: Record<string, string> = {
   iteration_limit: "Iteration limit",
   agent_blocked: "Needs input",
   api_invalid_request: "Request rejected",
+  session_resume_exhausted: "Session retired",
   skill_bundle_unavailable: "Skill download failed",
 
   "agent_error.provider_auth_or_access": "Auth failed",

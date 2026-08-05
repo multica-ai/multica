@@ -100,6 +100,27 @@ const (
 	// resume lookup. Written by classifyPoisonedError in daemon/poisoned.go.
 	ReasonAPIInvalidRequest Reason = "api_invalid_request"
 
+	// ReasonSessionResumeExhausted: the conversation was resumed and
+	// failed again, repeatedly, with no success in between. Unlike
+	// ReasonAPIInvalidRequest this is not recognised from the provider's
+	// error text — it is concluded from the session's own track record,
+	// which is the only signal that survives a provider wording we have
+	// never seen (GH #6143).
+	//
+	// The distinction matters because error text has no contract across
+	// the compatible-gateway ecosystem: a vendor code like GLM's 1210
+	// lives in that vendor's namespace, HTTP 400 covers both poisoned
+	// history and plain misconfiguration, and any of it can be reworded
+	// or localised at will. Pattern matching therefore both misses new
+	// shapes and collides with old ones, and an unrecognised shape used
+	// to mean "resume forever" — permanently bricking the (agent, issue)
+	// pair with no in-product recovery, since manual rerun resumes too.
+	// Counting consecutive failures instead downgrades "unrecognised"
+	// from unbounded retries to exactly one, so the cost of a wording we
+	// cannot classify is a single wasted run rather than a dead issue.
+	// Written by TaskService.FailTask, never by the daemon.
+	ReasonSessionResumeExhausted Reason = "session_resume_exhausted"
+
 	// ReasonSkillBundleUnavailable: the daemon could not download the
 	// agent's skill bundles from the control plane during task
 	// preparation — the agent process was never launched. Platform-side
@@ -204,6 +225,7 @@ var allReasons = []Reason{
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
+	ReasonSessionResumeExhausted,
 	ReasonSkillBundleUnavailable,
 
 	// Agent process side: provider errors.
