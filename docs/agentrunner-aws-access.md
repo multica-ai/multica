@@ -77,7 +77,7 @@ wildcard, because each workspace now has its own Role to match against.
 
 ## What the role can reach
 
-`s3:GetObject` and `s3:PutObject` on
+`s3:GetObject`, `s3:PutObject`, and `s3:GetObjectAttributes` on
 `arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/*`,
 plus `s3:ListBucket` on the bucket carrying an `s3:prefix` condition limited to
 the same prefix. Nothing else — and nothing outside that one workspace's own
@@ -92,7 +92,16 @@ grants access to its own `agent-scratchpad/<slug>/` prefix.
 The `s3:prefix` condition matters as much as the object-ARN scope: `ListObjectsV2`
 is authorised against the *bucket* ARN, not the object ARN, so without it an
 agent could enumerate every attachment key in the bucket even though it could not
-read any of them.
+read any of them. `s3:ListBucketMultipartUploads` carries the same condition for
+the same reason.
+
+`GetObjectAttributes` lets an agent check an object's size or checksum without
+downloading it — useful for picking the right file out of several candidates.
+`s3:ListMultipartUploadParts` and `s3:AbortMultipartUpload`, both scoped to the
+same object prefix, cover resuming or cleaning up an interrupted multipart
+upload of a large file; the multipart calls that actually move data
+(`CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`) are already
+covered by the `s3:PutObject` grant, since AWS maps all three to that action.
 
 `s3:DeleteObject` is deliberately absent — the request was read and upload.
 
@@ -196,6 +205,12 @@ echo hello > /tmp/probe.txt
 aws s3 cp /tmp/probe.txt s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/probe.txt
 aws s3 ls s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/
 aws s3 cp s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/probe.txt -
+
+# Metadata without a full download (GetObjectAttributes).
+aws s3api get-object-attributes \
+  --bucket g2-agentfarm-dev-uploads \
+  --key agent-scratchpad/<workspace-slug>/probe.txt \
+  --object-attributes ObjectSize
 
 # Boundary holds: all of these must fail with AccessDenied.
 aws s3 ls s3://g2-agentfarm-dev-uploads/

@@ -90,7 +90,16 @@ spec:
     # ListBucket carries an s3:prefix condition because ListObjectsV2 is
     # authorised against the bucket ARN, not the object ARN; without the
     # condition an agent could enumerate every key in the bucket even though
-    # it could not read them.
+    # it could not read them. ListBucketMultipartUploads carries the same
+    # condition for the same reason.
+    #
+    # GetObjectAttributes lets an agent check an object's size/checksum
+    # without downloading it, so it can pick the right file among several
+    # candidates before paying for a full GetObject. ListMultipartUploadParts
+    # and AbortMultipartUpload cover resuming or cleaning up an interrupted
+    # multipart (large file) upload — CreateMultipartUpload, UploadPart, and
+    # CompleteMultipartUpload are already covered by the s3:PutObject grant
+    # above, since AWS maps all three to that action.
     #
     # None of this widens the avatar-upload permissions: those belong to
     # agentfarm-backend-role in iam-backend.yaml and are untouched.
@@ -113,6 +122,35 @@ spec:
             "Action": [
               "s3:ListBucket"
             ],
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads",
+            "Condition": {
+              "StringLike": {
+                "s3:prefix": [
+                  "agent-scratchpad/PLACEHOLDER/",
+                  "agent-scratchpad/PLACEHOLDER/*"
+                ]
+              }
+            }
+          },
+          {
+            "Sid": "AllowAgentScratchpadObjectMetadata",
+            "Effect": "Allow",
+            "Action": "s3:GetObjectAttributes",
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratchpad/PLACEHOLDER/*"
+          },
+          {
+            "Sid": "AllowAgentScratchpadMultipartCleanup",
+            "Effect": "Allow",
+            "Action": [
+              "s3:ListMultipartUploadParts",
+              "s3:AbortMultipartUpload"
+            ],
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratchpad/PLACEHOLDER/*"
+          },
+          {
+            "Sid": "AllowAgentScratchpadMultipartListing",
+            "Effect": "Allow",
+            "Action": "s3:ListBucketMultipartUploads",
             "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads",
             "Condition": {
               "StringLike": {
