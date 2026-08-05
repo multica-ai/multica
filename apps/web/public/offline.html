@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- Served by sw.js when a navigation fails offline. Deliberately outside the
+     build pipeline: no Tailwind, no hashed assets, everything inline. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#05070b" />
+    <title>Multica — offline</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        background: #05070b;
+        color: #9ca3af;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 15px;
+        text-align: center;
+        padding: 24px;
+      }
+      svg {
+        width: 56px;
+        height: 56px;
+      }
+    </style>
+  </head>
+  <body>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Multica">
+      <rect width="100" height="100" rx="20" fill="#ffffff" />
+      <polygon
+        fill="#111827"
+        points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
+      />
+    </svg>
+    <p>You are offline. Multica will be back once you reconnect.</p>
+  </body>
+</html>

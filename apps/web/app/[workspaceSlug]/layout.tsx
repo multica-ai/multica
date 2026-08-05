@@ -11,6 +11,7 @@ import { NoAccessPage } from "@multica/views/workspace/no-access-page";
 import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
+import { registerServiceWorker } from "@/platform/service-worker";
 
 export default function WorkspaceLayout({
   children,
@@ -23,6 +24,13 @@ export default function WorkspaceLayout({
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const router = useRouter();
+
+  // Workspace pages only — the marketing pages under `/` must never install
+  // a worker on the origin. Registration makes the app installable on
+  // Android and serves /offline.html when a navigation fails offline.
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
 
   // Workspace routes require auth. If user is unauthenticated (initial visit
   // without a session, token expired, another tab logged out, etc.), bounce
