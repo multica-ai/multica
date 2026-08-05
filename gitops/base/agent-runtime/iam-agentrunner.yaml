@@ -1,0 +1,143 @@
+# IRSA identity for agentrunner pods, so AWS calls made from an agent session
+# authenticate without static keys (AIPLAT-169). One consumer: the AWS CLI
+# bundled in the runner image, reading and writing objects under this
+# workspace's own agent-scratchpad/<slug>/ prefix of g2-agentfarm-dev-uploads.
+#
+# Declared here (base/agent-runtime, rendered once per workspace Application)
+# rather than in a single-instance overlay: every name below carries the
+# PLACEHOLDER token the appset already substitutes for Namespace/ServiceAccount,
+# so each workspace Application provisions its own uniquely-named Role/Policy/
+# Attachment instead of every workspace fighting over one shared cluster-scoped
+# name. That per-workspace uniqueness is what makes per-workspace S3 scoping
+# possible at all — see docs/agentrunner-aws-access.md.
+#
+# The `aws-s3` MCP server (awslabs.s3-tables-mcp-server) was the original
+# consumer and is retired — S3 Tables is not what this platform wants from S3,
+# and that server cannot read or write ordinary objects at all. No s3tables:*
+# permissions remain here.
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-agentrunner-role-PLACEHOLDER
+spec:
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+      - key: Environment
+        value: development
+      - key: Purpose
+        value: "S3 object access for agentrunner agent sessions"
+    # Each workspace gets its own Role, so the trust policy can match its
+    # ServiceAccount exactly (StringEquals) instead of every workspace's SA
+    # (the old StringLike wildcard). The appset substitutes PLACEHOLDER with
+    # the workspace slug (and namespace prefix) for both the tools-server and
+    # dev-server pipelines.
+    assumeRolePolicyDocument: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::975049976121:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:aud": "sts.amazonaws.com",
+              "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:sub": "system:serviceaccount:agentrunner-PLACEHOLDER:agentrunner"
+            }
+          }
+        }]
+      }
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-agentrunner-policy-PLACEHOLDER
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+      - key: Environment
+        value: development
+    description: "agent-scratchpad object access on g2-agentfarm-dev-uploads for this workspace's agentrunner sessions"
+    # Read + upload on g2-agentfarm-dev-uploads, confined to this workspace's
+    # own agent-scratchpad/<slug>/ key prefix, for the AWS CLI bundled in the
+    # runner image.
+    #
+    # The prefix is the whole security boundary here: the backend writes user
+    # attachments to the same bucket under workspaces/<workspace-id>/... , and
+    # every other workspace has its own copy of this policy scoped to its own
+    # prefix. Confining each workspace to its own agent-scratchpad/<slug>/
+    # keeps every other workspace's (and the backend's) keys unreachable while
+    # still giving agents somewhere to put files.
+    #
+    # DeleteObject is deliberately absent — the ask was read and upload.
+    # ListBucket carries an s3:prefix condition because ListObjectsV2 is
+    # authorised against the bucket ARN, not the object ARN; without the
+    # condition an agent could enumerate every key in the bucket even though
+    # it could not read them.
+    #
+    # None of this widens the avatar-upload permissions: those belong to
+    # agentfarm-backend-role in iam-backend.yaml and are untouched.
+    document: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowAgentScratchpadObjectAccess",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratchpad/PLACEHOLDER/*"
+          },
+          {
+            "Sid": "AllowAgentScratchpadListing",
+            "Effect": "Allow",
+            "Action": [
+              "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::g2-agentfarm-dev-uploads",
+            "Condition": {
+              "StringLike": {
+                "s3:prefix": [
+                  "agent-scratchpad/PLACEHOLDER/",
+                  "agent-scratchpad/PLACEHOLDER/*"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    name: agentfarm-agentrunner-policy-document-PLACEHOLDER
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: RolePolicyAttachment
+metadata:
+  name: agentfarm-agentrunner-policy-attachment-PLACEHOLDER
+spec:
+  forProvider:
+    policyArnRef:
+      name: agentfarm-agentrunner-policy-PLACEHOLDER
+    roleNameRef:
+      name: agentfarm-agentrunner-role-PLACEHOLDER
+  providerConfigRef:
+    name: provider-aws-config

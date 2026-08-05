@@ -10,10 +10,6 @@ labels:
 resources:
   - ../../base/
   - infra/s3-uploads-bucket.yaml
-  # IRSA role for agentrunner pods. Cluster-scoped and dev-cluster-only, so it
-  # is declared here rather than in base/agent-runtime, which the appset renders
-  # once per workspace. See the header of the file for the full reasoning.
-  - infra/iam-agentrunner.yaml
   - onepassword-sa-token-external-secret.yaml
 patchesStrategicMerge:
   # Infra patches — override env-specific values from base (VPC, subnets, OIDC, tags)

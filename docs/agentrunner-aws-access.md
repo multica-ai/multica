@@ -4,7 +4,9 @@ How AWS calls made from an agent session authenticate, and what they are allowed
 to reach. Background: AIPLAT-169.
 
 One consumer: the **AWS CLI** bundled in the runner image, reading and writing
-objects under the `agent-scratch/` prefix of `g2-agentfarm-dev-uploads`.
+objects under the `agent-scratchpad/<workspace-slug>/` prefix of
+`g2-agentfarm-dev-uploads` — each workspace gets its own prefix and its own
+IAM role, so no workspace can reach another's scratch files.
 
 ## What was wrong
 
@@ -43,14 +45,14 @@ long-lived or human-refreshed credentials anywhere.
 | Cluster | development EKS, `us-east-1` |
 | Account | `975049976121` |
 | OIDC provider | `oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F` |
-| ServiceAccount | `agentrunner` in every `agentrunner-<slug>` namespace |
-| Role | `arn:aws:iam::975049976121:role/agentfarm-agentrunner-role` |
-| Policy | `agentfarm-agentrunner-policy` |
+| ServiceAccount | `agentrunner` in every `agentrunner-<slug>` / `agentrunner-dev-<slug>` namespace |
+| Role | `arn:aws:iam::975049976121:role/agentfarm-agentrunner-role-<slug>` (tools pipeline) / `-dev-<slug>` (dev-server pipeline), one pair per workspace |
+| Policy | `agentfarm-agentrunner-policy-<slug>` / `-dev-<slug>`, one pair per workspace |
 
 Manifests:
 
-- `gitops/environments/development/infra/iam-agentrunner.yaml` — role, policy,
-  attachment.
+- `gitops/base/agent-runtime/iam-agentrunner.yaml` — role, policy, attachment,
+  templated per workspace (see below).
 - `gitops/base/agent-runtime/service-account.yaml` — the `role-arn` annotation.
 - `gitops/base/agent-runtime/deployment.yaml` — `AWS_REGION`. The IRSA webhook
   injects `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` but never a region,
@@ -61,26 +63,31 @@ Manifests:
 
 Both agentrunner pipelines (`environments/development/agent-runtime` for the
 tools-server runners and `environments/development/agent-runtime-devserver` for
-the dev-server ones) render the same base ServiceAccount into the same
-development cluster, so a single role covers both.
+the dev-server ones) render the same `base/agent-runtime` manifests once per
+workspace, via ArgoCD ApplicationSets in `g2crowd/configuration`
+(`agentrunner-appset` / `agentrunner-dev-appset`). Those appsets patch the
+`PLACEHOLDER` tokens in the Role/Policy/RolePolicyAttachment names — and in the
+ServiceAccount's `role-arn` annotation — to the workspace slug, so every
+workspace gets its own uniquely-named Role and Policy rather than sharing one.
 
-Trust is `StringLike` on the namespace segment
-(`system:serviceaccount:agentrunner-*:agentrunner`) because runner namespaces are
-generated per workspace slug and that set grows as workspaces are added. The
-ServiceAccount name segment stays exact.
+Trust is `StringEquals` on both the namespace and ServiceAccount-name segments
+of the `sub` claim (`system:serviceaccount:agentrunner-<slug>:agentrunner`,
+or `agentrunner-dev-<slug>` for the dev-server pipeline) — exact, not a
+wildcard, because each workspace now has its own Role to match against.
 
 ## What the role can reach
 
 `s3:GetObject` and `s3:PutObject` on
-`arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratch/*`, plus `s3:ListBucket` on
-the bucket carrying an `s3:prefix` condition limited to the same prefix. Nothing
-else.
+`arn:aws:s3:::g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/*`,
+plus `s3:ListBucket` on the bucket carrying an `s3:prefix` condition limited to
+the same prefix. Nothing else — and nothing outside that one workspace's own
+prefix, since each workspace has its own Role/Policy pair.
 
 The prefix is the security boundary, and it is there because the backend writes
 **user attachments** to the same bucket under `workspaces/<workspace-id>/...`.
-Every runner pod in every workspace shares one ServiceAccount and therefore this
-one role, so a bucket-wide grant would let any agent in any workspace read and
-overwrite every other workspace's uploads.
+Per-workspace scoping also means one workspace's agent sessions cannot read or
+overwrite another workspace's scratch files — each workspace's Policy only
+grants access to its own `agent-scratchpad/<slug>/` prefix.
 
 The `s3:prefix` condition matters as much as the object-ARN scope: `ListObjectsV2`
 is authorised against the *bucket* ARN, not the object ARN, so without it an
@@ -95,12 +102,13 @@ belong to `agentfarm-backend-role`, a different role.
 ### Using it from a session
 
 ```bash
-aws s3 cp ./report.pdf s3://g2-agentfarm-dev-uploads/agent-scratch/report.pdf
-aws s3 ls s3://g2-agentfarm-dev-uploads/agent-scratch/
-aws s3 cp s3://g2-agentfarm-dev-uploads/agent-scratch/report.pdf ./report.pdf
+aws s3 cp ./report.pdf s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/report.pdf
+aws s3 ls s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/
+aws s3 cp s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/report.pdf ./report.pdf
 ```
 
-Anything outside `agent-scratch/` returns `AccessDenied`, including a bare
+Anything outside this workspace's own `agent-scratchpad/<workspace-slug>/`
+returns `AccessDenied` — including another workspace's prefix and a bare
 `aws s3 ls s3://g2-agentfarm-dev-uploads/`. That is the design, not a
 misconfiguration.
 
@@ -136,8 +144,9 @@ are high-throughput sequential reads of large objects and letting tools that onl
 accept file paths read S3 data without staging it locally.
 
 None of this is a permanent no. The IAM grant above is the same one Mountpoint
-would need (it honours IAM and supports `--prefix`, so the `agent-scratch/`
-boundary survives), so adopting it later is additive — the CSI driver, a PV/PVC
+would need (it honours IAM and supports `--prefix`, so the per-workspace
+`agent-scratchpad/<slug>/` boundary survives), so adopting it later is
+additive — the CSI driver, a PV/PVC
 per runner namespace, and `--allow-delete` / `--allow-overwrite` decisions. The
 trigger to revisit would be a concrete case where an agent must stream a large
 object it cannot afford to download, or hand a path to a tool that cannot speak
@@ -179,15 +188,17 @@ config has been cleared, and the pod has been recreated on a new image:
 ```bash
 # Identity resolves at all — no InvalidClientTokenId.
 aws sts get-caller-identity
-# Expect an assumed-role ARN under agentfarm-agentrunner-role.
+# Expect an assumed-role ARN under agentfarm-agentrunner-role-<workspace-slug>
+# (or -dev-<workspace-slug> on the dev-server pipeline).
 
 # Object path: upload, list, read back.
 echo hello > /tmp/probe.txt
-aws s3 cp /tmp/probe.txt s3://g2-agentfarm-dev-uploads/agent-scratch/probe.txt
-aws s3 ls s3://g2-agentfarm-dev-uploads/agent-scratch/
-aws s3 cp s3://g2-agentfarm-dev-uploads/agent-scratch/probe.txt -
+aws s3 cp /tmp/probe.txt s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/probe.txt
+aws s3 ls s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/
+aws s3 cp s3://g2-agentfarm-dev-uploads/agent-scratchpad/<workspace-slug>/probe.txt -
 
-# Boundary holds: both of these must fail with AccessDenied.
+# Boundary holds: all of these must fail with AccessDenied.
 aws s3 ls s3://g2-agentfarm-dev-uploads/
 aws s3 cp s3://g2-agentfarm-dev-uploads/workspaces/ . --recursive
+aws s3 ls s3://g2-agentfarm-dev-uploads/agent-scratchpad/<other-workspace-slug>/
 ```

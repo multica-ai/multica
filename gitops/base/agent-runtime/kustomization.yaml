@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - service-account.yaml
+  - iam-agentrunner.yaml
   - external-secret.yaml
   - storage.yaml
   - secret-store.yaml
