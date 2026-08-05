@@ -85,11 +85,12 @@ export function DeleteAutopilotsDialog({
           {t(($) => $.actions.delete_dialog.warning)}
         </p>
         <DialogFooter>
+          {/* CEREBRO-PATCH(autopilot-delete-cancel-escape): FIR-4359 — Cancel stays
+              enabled while deleting so a slow DELETE cannot trap the user in the dialog. */}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={deleting}
             onClick={() => onOpenChange(false)}
           >
             {t(($) => $.actions.delete_dialog.cancel)}
