@@ -37,7 +37,10 @@ COPY server/ ./server/
 # drift back to a stale baseline. Letting it drift is not cosmetic: the server
 # schedules a CLI update for every runtime reporting an older version, which is
 # what produced the FIR-4369 update loop on multica-runtime-jesper.
-ARG VERSION=v1.23.0
+# Bump when the runtime binary must carry a new cerebro hook/daemon fix that
+# auto-update cannot install (container user cannot write /usr/local/bin —
+# FIR-4526). Keep in sync with the latest firtal-group/homebrew-tap release.
+ARG VERSION=v1.24.2
 ARG COMMIT=unknown
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 

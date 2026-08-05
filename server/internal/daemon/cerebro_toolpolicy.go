@@ -221,11 +221,13 @@ func writeToolPolicySettingsJSON(provider, workdir, providerHome, exe string, fa
 		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	case "cursor":
 		dir, filename = filepath.Join(workdir, ".cursor"), "hooks.json"
+		// CEREBRO-PATCH(cursor-tool-policy-hook-json): FIR-4526 bake Cursor JSON protocol into the hook command.
+		cursorCommand := fmt.Sprintf("%q cerebro-tool-policy-hook --protocol cursor", exe)
 		settings = map[string]any{
 			"version": 1,
 			"hooks": map[string]any{
 				adapter.HookEvent: []map[string]any{{
-					"type": "command", "command": command, "failClosed": true, "timeout": 300,
+					"type": "command", "command": cursorCommand, "failClosed": true, "timeout": 300,
 				}},
 			},
 		}

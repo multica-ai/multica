@@ -114,6 +114,9 @@ func TestWriteToolPolicySettingsJSON_ProviderContracts(t *testing.T) {
 			if tc.provider == "cursor" && !strings.Contains(string(raw), `"failClosed": true`) {
 				t.Fatalf("cursor hook is not fail-closed: %s", raw)
 			}
+			if tc.provider == "cursor" && !strings.Contains(string(raw), "--protocol cursor") {
+				t.Fatalf("cursor hook missing --protocol cursor: %s", raw)
+			}
 		})
 	}
 }

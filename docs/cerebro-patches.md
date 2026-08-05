@@ -2151,3 +2151,10 @@ values above and nothing else.
 
 - **Why:** FIR-4507 — agent/member/squad profile peeks only opened on hover. Touch devices have no hover, so the card never appeared. Tap must open the same content; Detail must be visible without group-hover; avatar tap must not navigate away before the peek opens. Follow-up: Sheet body uses `pr-12` so Detail does not sit under the absolute close button.
 - **Where:** Net-new shell in `packages/cerebro-agent-avatar/{hover-shell,use-coarse-pointer}.tsx` (coarse → bottom Sheet on phone / Popover on tablet; fine → HoverCard). Thin upstream wiring in `packages/views/common/actor-avatar.tsx` (import shell, skip profile-link on coarse+hover). Detail always-visible class on `agent-profile-card.tsx` and `squad-profile-card.tsx`; member Detail link added in `member-profile-card.tsx`.
+
+## FIR-4526 — Cursor tool-policy hook JSON protocol
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cursor-tool-policy-hook-json` | `server/cmd/multica/cerebro_tool_policy_hook.go`<br>`server/internal/daemon/daemon.go`<br>`server/internal/daemon/cerebro_toolpolicy.go`<br>`Dockerfile.runtime` | Cursor `preToolUse` requires JSON stdout `{"permission":"allow\|deny"}`. Bake `--protocol cursor` into `.cursor/hooks.json`, emit Cursor JSON from the hook, inject `MULTICA_AGENT_PROVIDER`, and bump runtime image VERSION so cloud runtimes pick up the binary (auto-update cannot overwrite root-owned `/usr/local/bin`). |
+
