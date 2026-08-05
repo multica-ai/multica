@@ -2134,7 +2134,7 @@ func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
 		"quick-create task",
 		"Created <identifier-or-id>: <title>",
 		"identifier` from JSON output",
-		"Do not assume any workspace issue prefix",
+		"never assume a workspace issue prefix",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("quick-create runtime config missing %q\n---\n%s", want, s)

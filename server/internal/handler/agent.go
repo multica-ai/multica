@@ -1111,7 +1111,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
+		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
 		return
 	}
 	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
@@ -1754,7 +1754,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !agent.IsKnownThinkingValue(provider, value) {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider))
+				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
@@ -1777,10 +1777,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
-				existing.ThinkingLevel.String, provider,
-			))
+			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
 	}
@@ -2002,6 +1999,39 @@ func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID,
 		return "", false
 	}
 	return rt.Provider, true
+}
+
+// thinkingLevelRejection explains why the target runtime will not take this
+// thinking_level. Two different failures used to share one sentence: a token
+// the runtime's catalog doesn't list, and a runtime with no reasoning control
+// at all. The second one made "high" look like a spelling mistake and sent
+// users hunting for a value that does not exist for that runtime (MUL-5770),
+// so it now names the capability gap instead.
+func thinkingLevelRejection(provider, value string) string {
+	if !agent.ThinkingControlSupported(provider) {
+		return fmt.Sprintf(
+			"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
+			provider,
+		)
+	}
+	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
+}
+
+// existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
+// path, where the caller changed runtime without touching a level the new
+// runtime cannot take. Both branches point at the same escape hatch, so the
+// user does not have to guess that clearing is allowed.
+func existingThinkingLevelRejection(provider, value string) string {
+	if !agent.ThinkingControlSupported(provider) {
+		return fmt.Sprintf(
+			"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
+			provider, value,
+		)
+	}
+	return fmt.Sprintf(
+		"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
+		value, provider,
+	)
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {

@@ -156,6 +156,13 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // via the ACP (Agent Communication Protocol) JSON-RPC 2.0 over stdin/stdout.
 // This is the same pattern as Codex but with the ACP protocol instead of
 // the Codex-specific JSON-RPC methods.
+//
+// opts.ThinkingLevel is deliberately not consumed here: Hermes' ACP surface
+// has nowhere to put a reasoning effort (see ThinkingControlSupported in
+// thinking.go for the evidence and the version it was verified against), and
+// the server rejects the field for this provider before a task is ever
+// dispatched. Wire it up here — alongside the model selection below — once
+// Hermes' ACP adapter carries reasoning onto the session.
 type hermesBackend struct {
 	cfg Config
 }
