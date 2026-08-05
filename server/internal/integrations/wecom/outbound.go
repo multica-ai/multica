@@ -11,6 +11,16 @@ package wecom
 // mrkdwn conversion — the reply text goes through sendMsgTextBody the
 // same way OutboundReplier's messages do (markdown msgtype, which
 // renders plaintext without escaping).
+//
+// SINGLE-REPLICA CONSTRAINT: WeCom's only outbound path is the in-process
+// WebSocket held in the sendersRegistry, but EventChatDone / EventInboxNew are
+// dispatched on the in-process events.Bus. On a multi-replica deployment the
+// replica that publishes the event is not necessarily the one holding the
+// bot's WS lease, so senders.get() returns nil and the reply cannot be
+// delivered from here (Slack/Lark are immune — their outbound is stateless
+// HTTP any replica can perform). Until outbound is routed to the lease holder,
+// a WeCom-enabled backend must run as a single replica; boot emits a warning
+// when a multi-replica setup (REDIS_URL) is detected. See router.go.
 
 import (
 	"context"
@@ -114,11 +124,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	}
 	sender := o.senders.get(inst.ID)
 	if sender == nil {
-		// Supervisor lost the lease or is mid-reconnect. Dropping is
-		// preferable to buffering (the reply is stale by the time the
-		// socket comes back), and the user's next inbound message will
-		// reach the newly-reconnected loop normally.
-		return errors.New("wecom: connection not ready")
+		// No live WS for this installation on this replica. Two causes:
+		// (1) the Supervisor lost the lease or is mid-reconnect — transient,
+		// and the user's next inbound message reaches the reconnected loop;
+		// (2) on a multi-replica deployment the lease is held by a DIFFERENT
+		// replica than the one that published this event, so it can never be
+		// delivered from here (see the single-replica constraint in this
+		// file's header). Either way, buffering is wrong — the reply is stale
+		// by the time a socket returns — so we surface it to the caller's WARN
+		// rather than drop it silently.
+		return errors.New("wecom: connection not ready on this replica")
 	}
 	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
 	return sender.sendText(binding.ChannelChatID, chatType, content)

@@ -709,6 +709,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")
+				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
+				// inbox pushes) is delivered only by the replica holding each
+				// bot's in-process WebSocket lease. On a multi-replica
+				// deployment (REDIS_URL set → Redis relay), an event published
+				// on another replica cannot reach the lease holder, so those
+				// replies are dropped. Warn loudly until cross-replica outbound
+				// routing lands. See wecom/outbound.go's header.
+				if os.Getenv("REDIS_URL") != "" {
+					slog.Warn("wecom integration: multi-replica deployment detected (REDIS_URL set) — WeCom agent replies and inbox pushes are only delivered by the replica holding each bot's WebSocket lease, so responses produced on other replicas will be dropped. Run the WeCom-enabled backend as a single replica until cross-replica outbound routing is implemented.")
+				}
 			}
 		}
 	} else {
