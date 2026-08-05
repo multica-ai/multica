@@ -74,7 +74,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     isLoading: agentsLoading,
     error: agentsError,
     refetch: refetchAgents,
-  } = useQuery(agentListOptions(wsId));
+  } = useQuery(agentListOptions(wsId, { full: true })); // CEREBRO-PATCH(list-agents-slim): FIR-4359 the Instructions + Skills tabs read this row.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
 
@@ -135,7 +135,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     // would clobber a concurrent successful mutation if the failing call
     // resolves last (e.g. flipping visibility then runtime simultaneously
     // and only the visibility PATCH fails).
-    const queryKey = workspaceKeys.agents(wsId);
+    // CEREBRO-PATCH(list-agents-slim): FIR-4359 patch the full-list cache this page
+    // reads; invalidate the shared prefix so the slim list converges too.
+    const queryKey = [...workspaceKeys.agents(wsId), "full"];
+    const invalidateKey = workspaceKeys.agents(wsId);
     const prevAgents = qc.getQueryData<Agent[]>(queryKey);
     const prevAgent = prevAgents?.find((a) => a.id === id);
     const prevFields: Record<string, unknown> = {};
@@ -149,7 +152,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     );
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
-      qc.invalidateQueries({ queryKey });
+      qc.invalidateQueries({ queryKey: invalidateKey }); // CEREBRO-PATCH(list-agents-slim): FIR-4359 prefix key reaches both caches.
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
       if (prevAgent) {
@@ -159,7 +162,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           ),
         );
       }
-      qc.invalidateQueries({ queryKey });
+      qc.invalidateQueries({ queryKey: invalidateKey }); // CEREBRO-PATCH(list-agents-slim): FIR-4359 prefix key reaches both caches.
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
       throw e;
     }

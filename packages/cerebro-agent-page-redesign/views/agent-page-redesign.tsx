@@ -107,7 +107,8 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelTasks, setConfirmCancelTasks] = useState(false);
 
-  const { data: agents = [], isLoading } = useQuery(agentListOptions(wsId));
+  // FIR-4359: this page renders Instructions + Skills, so it needs the full list.
+  const { data: agents = [], isLoading } = useQuery(agentListOptions(wsId, { full: true }));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: larkListing } = useQuery({
@@ -136,7 +137,10 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const handleUpdate = async (data: Record<string, unknown>) => {
     if (!agent) return;
     const id = agent.id;
-    const queryKey = workspaceKeys.agents(wsId);
+    // FIR-4359: patch the full-list cache this page reads; invalidate the shared
+    // prefix so the slim list used everywhere else converges too.
+    const queryKey = [...workspaceKeys.agents(wsId), "full"];
+    const invalidateKey = workspaceKeys.agents(wsId);
     const prevAgents = qc.getQueryData<Agent[]>(queryKey);
     const prevAgent = prevAgents?.find((a) => a.id === id);
     const prevFields: Record<string, unknown> = {};
@@ -150,7 +154,7 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
     );
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
-      qc.invalidateQueries({ queryKey });
+      qc.invalidateQueries({ queryKey: invalidateKey });
       qc.invalidateQueries({ queryKey: agentContextKeys.versions(id) });
       toast.success("Agent updated");
     } catch (e) {
@@ -161,7 +165,7 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
           ),
         );
       }
-      qc.invalidateQueries({ queryKey });
+      qc.invalidateQueries({ queryKey: invalidateKey });
       toast.error(e instanceof Error ? e.message : "Update failed");
       throw e;
     }

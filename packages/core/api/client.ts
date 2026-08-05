@@ -1860,10 +1860,11 @@ export class ApiClient {
   }
 
   // Agents
-  async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
+  async listAgents(params?: { workspace_id?: string; include_archived?: boolean; slim?: boolean }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.slim) search.set("slim", "true"); // CEREBRO-PATCH(list-agents-slim): FIR-4359 drop instructions + skills from the list payload.
     return this.fetch(`/api/agents?${search}`);
   }
 

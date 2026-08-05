@@ -590,6 +590,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := requestUserID(r)
+	// CEREBRO-PATCH(list-agents-slim): FIR-4359 instructions + skills are 93% of this
+	// response (845 KB in prod). Callers that only need agent identity pass ?slim=true.
+	slim := r.URL.Query().Get("slim") == "true"
 
 	var agents []db.Agent
 	var err error
@@ -604,20 +607,22 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Batch-load skills for all agents to avoid N+1.
-	skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
-		return
-	}
 	skillMap := map[string][]AgentSkillSummary{}
-	for _, row := range skillRows {
-		agentID := uuidToString(row.AgentID)
-		skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
-			ID:          uuidToString(row.ID),
-			Name:        row.Name,
-			Description: row.Description,
-			AlwaysOn:    row.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-4002 the agent page renders the Skills tab from the LIST response, not GET /agents/{id} — dropping the flag here made every checkbox read back unchecked.
-		})
+	if !slim { // CEREBRO-PATCH(list-agents-slim): FIR-4359 skip the ~1000-row skill join on slim reads.
+		skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+			return
+		}
+		for _, row := range skillRows {
+			agentID := uuidToString(row.AgentID)
+			skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
+				ID:          uuidToString(row.ID),
+				Name:        row.Name,
+				Description: row.Description,
+				AlwaysOn:    row.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-4002 the agent page renders the Skills tab from the LIST response, not GET /agents/{id} — dropping the flag here made every checkbox read back unchecked.
+			})
+		}
 	}
 
 	// CEREBRO-PATCH(list-agents-visibility-split): JEH-1066 — workspace
@@ -666,6 +671,12 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		resp := agentToResponse(a)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
+		}
+		// CEREBRO-PATCH(list-agents-slim): FIR-4359 both fields have client-side
+		// defaults ("" / []), so an older build renders a slim row unchanged.
+		if slim {
+			resp.Instructions = ""
+			resp.Skills = []AgentSkillSummary{}
 		}
 		// Agent actors NEVER see mcp_config secrets, even when their host's
 		// PAT would normally satisfy the owner/admin role gate. Otherwise an

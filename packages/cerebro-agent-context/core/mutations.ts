@@ -41,7 +41,7 @@ export function useReviewAgentContextChangeRequest(
       });
       qc.invalidateQueries({ queryKey: agentContextKeys.versions(agentId) });
       qc.invalidateQueries({ queryKey: agentContextKeys.pendingAll() });
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId), exact: true });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) /* FIR-4359: prefix, so the full-list cache the agent page reads is invalidated too */ });
     },
   });
 }
@@ -53,7 +53,7 @@ export function useRollbackAgentContext(agentId: string, wsId: string) {
       api.rollbackAgentContext(agentId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentContextKeys.versions(agentId) });
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId), exact: true });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) /* FIR-4359: prefix, so the full-list cache the agent page reads is invalidated too */ });
     },
   });
 }

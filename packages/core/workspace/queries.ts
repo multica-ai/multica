@@ -51,11 +51,15 @@ export function memberUsageOptions(wsId: string, memberId: string) {
   });
 }
 
-export function agentListOptions(wsId: string) {
+// CEREBRO-PATCH(list-agents-slim): FIR-4359 the default list is slim — no instructions,
+// no skills. Only the agent + skill pages pass { full: true }; their cache key extends
+// workspaceKeys.agents(wsId), so every existing prefix invalidation still reaches it.
+export function agentListOptions(wsId: string, opts?: { full?: boolean }) {
+  const full = opts?.full === true;
   return queryOptions({
-    queryKey: workspaceKeys.agents(wsId),
+    queryKey: full ? [...workspaceKeys.agents(wsId), "full"] : workspaceKeys.agents(wsId),
     queryFn: () =>
-      api.listAgents({ workspace_id: wsId, include_archived: true }),
+      api.listAgents({ workspace_id: wsId, include_archived: true, slim: !full }),
   });
 }
 
