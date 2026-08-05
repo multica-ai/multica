@@ -617,6 +617,45 @@ describe("ChatInput project context", () => {
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
   });
 
+  it("keeps Stop available while queued content is uploading", async () => {
+    let resolveUpload!: (value: UploadResult) => void;
+    mockApiUploadFile.mockImplementation(
+      () => new Promise<UploadResult>((resolve) => (resolveUpload = resolve)),
+    );
+    const onStop = vi.fn();
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onStop });
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "follow-up with attachment" },
+    });
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+
+    await act(async () => {
+      dropHandlers.onDrop?.([
+        new File(["x"], "slow.png", { type: "image/png" }),
+      ]);
+      await Promise.resolve();
+    });
+
+    const stopButton = await screen.findByRole("button", { name: "Stop" });
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    fireEvent.click(stopButton);
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveUpload(
+        makeUpload({
+          id: "att-slow-stop",
+          link: "/api/attachments/att-slow-stop/download",
+          filename: "slow.png",
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("button", { name: "Queue message" })).not.toBeDisabled();
+  });
+
   it("shows only Stop while an older server is running", () => {
     renderInput({ isRunning: true, onStop: vi.fn() });
 
