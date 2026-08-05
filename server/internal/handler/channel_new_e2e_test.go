@@ -217,12 +217,17 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 		t.Fatalf("created issues = %d, want 0; /new must be mutually exclusive with /issue", issueCount)
 	}
 
-	messages, err := queries.ListChatMessages(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("list persisted chat messages: %v", err)
+	var storedText string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM chat_message
+		WHERE chat_session_id = $1 AND role = 'user'
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, sessionID).Scan(&storedText); err != nil {
+		t.Fatalf("load persisted chat message: %v", err)
 	}
-	if len(messages) != 1 || messages[0].Content != wantStoredText {
-		t.Fatalf("persisted messages = %#v, want one user message %q", messages, wantStoredText)
+	if storedText != wantStoredText {
+		t.Fatalf("persisted message = %q, want %q", storedText, wantStoredText)
 	}
 
 	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)

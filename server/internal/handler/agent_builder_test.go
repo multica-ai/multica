@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -563,6 +565,132 @@ func TestDeleteChatSessionPrunesTheBuilderDraft(t *testing.T) {
 	}
 }
 
+// newSaveDraftRequest prepares a save the way saveBuilderDraft does but hands
+// the pieces back, so the two tests below can run the handler on their own
+// goroutine — both need a save in flight while another transaction holds the
+// session row.
+func newSaveDraftRequest(t *testing.T, sessionID string, draft any) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM agent_builder_draft WHERE chat_session_id = $1`, sessionID)
+	})
+	return httptest.NewRecorder(), withURLParams(
+		newRequest(http.MethodPut, "/api/agent-builder/sessions/"+sessionID+"/draft",
+			map[string]any{"draft": draft}),
+		"sessionId", sessionID,
+	)
+}
+
+func countBuilderDrafts(t *testing.T, sessionID string) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_builder_draft WHERE chat_session_id = $1
+	`, sessionID).Scan(&n); err != nil {
+		t.Fatalf("count stored drafts: %v", err)
+	}
+	return n
+}
+
+// runSaveDraftAgainst holds the session row in a transaction, runs `hold`
+// inside it, then starts a save and proves the save is waiting rather than
+// racing. Returns once the save has finished, after the transaction commits.
+//
+// Asserting that the save blocks is the point: before the fix it read the
+// session, sailed past the uncommitted transaction and wrote its row, so the
+// outcome depended on which statement won rather than on the lock.
+func runSaveDraftAgainst(t *testing.T, sessionID string, w *httptest.ResponseRecorder, req *http.Request, hold string) {
+	t.Helper()
+	ctx := context.Background()
+
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin holder transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	// The same row and lock mode DeleteChatSession and SetChatSessionArchived
+	// take, as their transaction's first statement.
+	if _, err := tx.Exec(ctx, `SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+		t.Fatalf("lock chat session: %v", err)
+	}
+	if _, err := tx.Exec(ctx, hold, sessionID); err != nil {
+		t.Fatalf("hold statement %q: %v", hold, err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		testHandler.SaveAgentBuilderDraft(w, req)
+	}()
+
+	select {
+	case <-done:
+		t.Fatalf("save finished while the session row was held: %d %s", w.Code, w.Body.String())
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit holder transaction: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("save never returned after the holder committed")
+	}
+}
+
+// The client autosaves on a debounce, so a save is routinely in flight when the
+// user confirms "Discard this draft" — and because the conversation is
+// addressable by URL, a second tab can autosave at any moment while this one
+// discards. Unlocked, the save's read and its write straddled the delete: the
+// upsert landed after the conversation was gone, and agent_builder_draft has no
+// chat_session FK to reject it. What survived was the configuration the user had
+// just explicitly discarded, invisible to the UI and reachable by no prune but
+// the workspace teardown.
+func TestSaveAgentBuilderDraftLosesToAConcurrentDelete(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	session := newBuilderSession(t)
+	// Deliberately no draft saved first. A pre-existing row would make the
+	// upsert contend on that row's own lock, and the test would pass for a
+	// reason that has nothing to do with the session lock under test.
+	w, req := newSaveDraftRequest(t, session.SessionID, map[string]any{"name": "Discarded"})
+
+	runSaveDraftAgainst(t, session.SessionID, w, req,
+		`DELETE FROM chat_session WHERE id = $1`)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("save after the conversation was deleted: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	if n := countBuilderDrafts(t, session.SessionID); n != 0 {
+		t.Fatalf("orphaned draft rows = %d, want 0", n)
+	}
+}
+
+// Same race against the other writer of chat_session.status. Creating the agent
+// archives the conversation, and the studio's last autosave can still be in
+// flight — an unlocked status check let it write a draft onto a session that is
+// already read-only, where the drafts list will never show it again.
+func TestSaveAgentBuilderDraftLosesToAConcurrentArchive(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	session := newBuilderSession(t)
+	w, req := newSaveDraftRequest(t, session.SessionID, map[string]any{"name": "Too late"})
+
+	runSaveDraftAgainst(t, session.SessionID, w, req,
+		`UPDATE chat_session SET status = 'archived' WHERE id = $1`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("save after the conversation was archived: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if n := countBuilderDrafts(t, session.SessionID); n != 0 {
+		t.Fatalf("draft rows on an archived conversation = %d, want 0", n)
+	}
+}
+
 // A rebind moves the carrier without touching chat_session.runtime_id, which is
 // deliberately left stale as the daemon's resume pointer. Reading the list from
 // that column instead of the carrier would resume the conversation onto a
@@ -865,6 +993,135 @@ func TestSendDirectChatMessageWaitsForUncommittedRebind(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("send did not complete after the rebind committed")
+	}
+}
+
+func TestSendDirectChatMessageRejectsSessionArchivedWhileWaitingForLock(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Chat Send Archive Race", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load chat agent: %v", err)
+	}
+
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin archive tx: %v", err)
+	}
+	defer tx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `
+		UPDATE chat_session SET status = 'archived' WHERE id = $1
+	`, sessionID); err != nil {
+		t.Fatalf("archive chat session: %v", err)
+	}
+
+	results := make(chan error, 1)
+	go func() {
+		_, err := testHandler.TaskService.SendDirectChatMessage(
+			context.Background(), session, agent, parseUUID(testUserID),
+			"must not enqueue after archive", nil, "member", parseUUID(testUserID),
+		)
+		results <- err
+	}()
+
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		t.Fatal("send did not wait for the session archive transaction")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit archive: %v", err)
+	}
+
+	select {
+	case err := <-results:
+		if !errors.Is(err, service.ErrChatSessionArchived) {
+			t.Fatalf("send after archive error = %v, want ErrChatSessionArchived", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("send did not return after archive committed")
+	}
+
+	var taskCount, messageCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1
+	`, sessionID).Scan(&taskCount); err != nil {
+		t.Fatalf("count chat tasks: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_message WHERE chat_session_id = $1
+	`, sessionID).Scan(&messageCount); err != nil {
+		t.Fatalf("count chat messages: %v", err)
+	}
+	if taskCount != 0 || messageCount != 0 {
+		t.Fatalf("archived send persisted tasks=%d messages=%d, want zero", taskCount, messageCount)
+	}
+}
+
+func TestDeleteBuilderSessionLocksAgentBeforeTasks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	created := newBuilderSession(t)
+	taskID := insertPendingChatTask(t, created.BuilderAgentID, created.SessionID, "queued")
+
+	claimTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin claim tx: %v", err)
+	}
+	defer claimTx.Rollback(context.Background())
+	qtx := testHandler.Queries.WithTx(claimTx)
+	agent, err := qtx.GetAgentForClaimUpdate(ctx, parseUUID(created.BuilderAgentID))
+	if err != nil {
+		t.Fatalf("lock builder agent: %v", err)
+	}
+	holderPID := holderBackendPID(t, ctx, claimTx)
+
+	deleteReq := withURLParam(
+		newRequestAs(testUserID, http.MethodDelete, "/api/chat/sessions/"+created.SessionID, nil),
+		"sessionId",
+		created.SessionID,
+	)
+	deleteReq = withChatTestWorkspaceCtx(t, deleteReq)
+	deleteCodes := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		testHandler.DeleteChatSession(w, deleteReq)
+		deleteCodes <- w.Code
+	}()
+
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		t.Fatal("delete did not wait for the builder agent lock")
+	}
+	claimed, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+		AgentID:          agent.ID,
+		PrepareLeaseSecs: 30,
+	})
+	if err != nil {
+		t.Fatalf("claim while delete waits for agent lock: %v", err)
+	}
+	if got := uuidToString(claimed.ID); got != taskID {
+		t.Fatalf("claimed task = %q, want %q", got, taskID)
+	}
+	if err := claimTx.Rollback(ctx); err != nil {
+		t.Fatalf("release claim transaction: %v", err)
+	}
+
+	select {
+	case code := <-deleteCodes:
+		if code != http.StatusNoContent {
+			t.Fatalf("delete returned %d, want 204", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("delete did not complete after agent lock released")
 	}
 }
 

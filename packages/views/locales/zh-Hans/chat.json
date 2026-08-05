@@ -17,6 +17,7 @@
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
+    "queue_send_tooltip": "排队发送",
     "stop_tooltip": "停止",
     "send_failed_toast": "发送消息失败",
     "send_blocked_toast": "消息未发送——你已没有该智能体的使用权限",
@@ -29,6 +30,18 @@
     "remove_project_context": "移除项目上下文",
     "no_projects": "还没有项目",
     "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级"
+  },
+  "queue": {
+    "title_other": "{{count}} 条排队消息",
+    "clear": "全部清空",
+    "steer": "引导",
+    "steer_unavailable": "当前回复开始后才能引导",
+    "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
+    "edit": "编辑排队消息",
+    "remove": "移除排队消息",
+    "more": "更多队列操作",
+    "fallback": "排队消息",
+    "action_failed_toast": "无法更新排队消息"
   },
   "message_list": {
     "show_details": "查看详情",
@@ -84,8 +97,8 @@
     },
     "stop_dialog": {
       "title": "停止这次运行？",
-      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体任务。已产生的内容会保留在对话里。",
-      "description_default": "这会取消当前智能体任务。已产生的内容会保留在对话里。",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体 task。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体 task。已产生的内容会保留在对话里。",
       "cancel": "继续运行",
       "confirm": "停止运行",
       "confirming": "停止中..."
@@ -121,7 +134,7 @@
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",
-    "first_time_pillars": "issue、项目、skill",
+    "first_time_pillars": "任务、项目、skill",
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
@@ -150,6 +163,7 @@
     "stages": {
       "offline": "离线",
       "reconnecting": "重连中",
+      "retrying": "重试中",
       "queued": "排队中",
       "waiting_local_directory": "等待本地目录释放",
       "starting_up": "启动中",

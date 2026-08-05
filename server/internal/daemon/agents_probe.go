@@ -177,6 +177,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
 		agents["kimi"] = e
 	}
+	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
+		agents["reasonix"] = e
+	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
@@ -223,6 +226,11 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// QWEN.md and .qwen/skills task context is prepared by execenv.
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
+	}
+	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
+	// `qwenpaw acp serve`. MULTICA_QWENPAW_MODEL seeds the daemon-wide default.
+	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", "MULTICA_QWENPAW_MODEL"); ok {
+		agents["qwenpaw"] = e
 	}
 	return agents
 }

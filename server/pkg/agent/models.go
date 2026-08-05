@@ -169,6 +169,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discovered(discoverKimiModels(ctx, executablePath))
 		})
+	case "reasonix":
+		return cachedDiscovery(providerType, func() (Catalog, error) {
+			return discovered(discoverReasonixModels(ctx, executablePath))
+		})
 	case "kiro":
 		return cachedDiscovery(providerType, func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, executablePath))
@@ -205,6 +209,14 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "qwenpaw":
+		// QwenPaw's model selection is unsupported (session/set_model
+		// persists to agent scope, not session scope), so there is no
+		// consumer for a discovered catalog. Return an empty list to
+		// avoid spawning an ACP subprocess that has no effect. If upstream
+		// makes model selection session-scoped, restore a discovery helper
+		// here modelled on discoverTraecliModels.
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -221,16 +233,27 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 // any effect for the given provider. Every built-in provider now honours
 // `opts.Model` end-to-end — Hermes routes it through the ACP
 // `session/set_model` RPC before each prompt; Claude / Codex / Cursor /
-// Gemini / Copilot / Kimi / Kiro / OpenCode / OpenClaw / Pi / Antigravity
+// Gemini / Copilot / Kimi / Reasonix / Kiro / OpenCode / OpenClaw / Pi / Antigravity
 // pass it via flag or session config (Antigravity gained `--model` in agy
 // 1.0.6 — MUL-3125).
 //
 // The hook is retained — rather than inlining `true` at the call sites — so
-// a future model-less runtime can opt out in one place, which makes the UI
+// a model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	return true
+	switch providerType {
+	case "qwenpaw":
+		// QwenPaw's `session/set_model` persists to agent.json at the agent
+		// scope, not the session scope. Calling it would mutate the user's
+		// shared, persistent agent config. Model override is therefore
+		// unsupported — the runtime uses whatever model is configured in
+		// the agent profile. If QwenPaw makes model selection session-scoped
+		// upstream, this can be reverted to `true`.
+		return false
+	default:
+		return true
+	}
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known
@@ -880,6 +903,20 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverReasonixModels drives a short Reasonix ACP session and parses the
+// model configOptions advertised by session/new. Authentication and provider
+// configuration remain owned by `reasonix setup`; discovery failure therefore
+// falls back to manual model entry like the other ACP runtimes.
+func discoverReasonixModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:       "reasonix",
+		clientName:       "multica-model-discovery",
+		acpArgs:          reasonixACPLaunchArgs(),
+		tmpdirPrefix:     "multica-reasonix-discovery-",
+		isolatedStateEnv: "REASONIX_STATE_HOME",
+	})
+}
+
 // discoverKiroModels spins up a throwaway `kiro-cli acp` process and parses
 // the models block Kiro returns from session/new.
 func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, error) {
@@ -948,10 +985,11 @@ func discoverQoderModels(ctx context.Context, executablePath, defaultBin string)
 // `--acp`), and what to label temporary work directories so they're
 // easy to identify in logs.
 type acpDiscoveryProvider struct {
-	defaultBin   string
-	clientName   string
-	extraEnv     []string
-	tmpdirPrefix string
+	defaultBin       string
+	clientName       string
+	extraEnv         []string
+	tmpdirPrefix     string
+	isolatedStateEnv string
 	// acpArgs is the argv passed to the binary to start it in ACP
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
@@ -991,6 +1029,15 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	var isolatedStateDir string
+	if p.isolatedStateEnv != "" {
+		var err error
+		isolatedStateDir, err = os.MkdirTemp("", p.tmpdirPrefix+"state-")
+		if err != nil {
+			return fail("temporary state", err)
+		}
+		defer os.RemoveAll(isolatedStateDir)
+	}
 
 	cmdArgs := p.acpArgs
 	if len(cmdArgs) == 0 {
@@ -999,6 +1046,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
 	hideAgentWindow(cmd)
 	childEnv := append(os.Environ(), p.extraEnv...)
+	if isolatedStateDir != "" {
+		childEnv = replaceEnvValue(childEnv, p.isolatedStateEnv, isolatedStateDir)
+	}
 	cmd.Env = childEnv
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -1148,6 +1198,18 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		p.annotate(models, sessionResult)
 	}
 	return models, nil
+}
+
+func replaceEnvValue(env []string, key, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, key) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, key+"="+value)
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
@@ -1730,7 +1792,7 @@ func isOpenclawIdentifier(s string) bool {
 // ── CodeBuddy model discovery ──
 
 // discoverCodebuddyModels asks CodeBuddy for its catalog over ACP
-// (`codebuddy --acp`), the same handshake Copilot / Kimi / Kiro / Qoder / Grok /
+// (`codebuddy --acp`), the same handshake Copilot / Kimi / Reasonix / Kiro / Qoder / Grok /
 // TRAE already use. `session/new` answers with a structured catalog under
 // `models.availableModels` plus a `currentModelId`, which is what the shared
 // parseACPSessionNewModels reads.

@@ -261,3 +261,41 @@ func TestFailTaskKeepsChatPointerOnTransientFailure(t *testing.T) {
 		t.Fatal("a transient failure must keep the chat resume pointer")
 	}
 }
+
+// TestGetLastChatTaskSessionExcludesOverflowedResumeFromOlderCompletedRow is
+// the chat half of the MUL-5722 topology. Same shape as the issue side: the
+// overflowed resume records no session, so only the older completed row names
+// the oversized thread.
+//
+// Scope worth stating: this only guards the FALLBACK query. The claim handler
+// reads chat_session.session_id first, so a pointer still naming the oversized
+// thread shadows everything asserted here — clearing that pointer at fail time
+// is what covers the rest, and for a daemon too old to report the failure it is
+// still open (see the PR notes).
+func TestGetLastChatTaskSessionExcludesOverflowedResumeFromOlderCompletedRow(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	_, agentID, runtimeID := setupRerunTestFixture(t)
+	chatSessionID := newPoisonTestChatSession(t, agentID, runtimeID, "overflow-resume")
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'THR-CHAT-OVERSIZED', '/tmp/chat')
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("insert completed task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/chat', 'agent_error.process_failure',
+		        'codex thread/resume failed: codex process exited: bufio.Scanner: token too long')
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("insert overflow failed task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	requireSessionExcluded(t, prior.SessionID, err)
+}

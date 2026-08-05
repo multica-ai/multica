@@ -170,6 +170,13 @@ export interface ChatMessagesPage {
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
+  /** True when the server supports queued follow-up sends. */
+  supports_queue?: boolean;
+  /**
+   * True only when this task was accepted behind another in-flight task in
+   * the same chat session. Optional for compatibility with older servers.
+   */
+  queued?: boolean;
   /**
    * Server-authoritative task creation time. Optimistic StatusPill seed
    * uses this as its anchor so the timer starts from the real `0s` —
@@ -237,8 +244,29 @@ export interface ChatDraftRestoresResponse {
  * task_id/status only, then this query catches up with the real created_at
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
+export interface ChatQueuedTask {
+  task_id: string;
+  status: string;
+  created_at: string;
+  message_id?: string;
+  content?: string;
+}
+
+export interface PrioritizeQueuedChatTaskResponse {
+  task_id: string;
+  /** Server-authoritative task to stop after the selected task is prioritized. */
+  active_task_id?: string;
+}
+
 export interface ChatPendingTask {
   task_id?: string;
   status?: string;
   created_at?: string;
+  /** Explicit capability gate; absent on servers predating follow-up queues. */
+  supports_queue?: boolean;
+  /**
+   * Ordered follow-ups behind the root task. The root may itself still have
+   * database status `queued` before claim, but is never duplicated here.
+   */
+  queued_tasks?: ChatQueuedTask[];
 }

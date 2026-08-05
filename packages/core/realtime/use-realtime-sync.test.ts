@@ -345,6 +345,79 @@ describe("applyChatCancelFinalizedToCache", () => {
     expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
   });
 
+  it("promotes the next queued task when the restored task was the head", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData<ChatPendingTask>(pendingKey, {
+      task_id: taskId,
+      status: "running",
+      queued_tasks: [
+        {
+          task_id: "task-next",
+          status: "queued",
+          created_at: "2026-05-13T05:00:01Z",
+          content: "next",
+        },
+        {
+          task_id: "task-later",
+          status: "queued",
+          created_at: "2026-05-13T05:00:02Z",
+          content: "later",
+        },
+      ],
+    });
+
+    applyChatCancelFinalizedToCache(qc, {
+      outcome: "restored",
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-cancelled-user",
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({
+      task_id: "task-next",
+      status: "queued",
+      created_at: "2026-05-13T05:00:01Z",
+      content: "next",
+      queued_tasks: [
+        {
+          task_id: "task-later",
+          status: "queued",
+          created_at: "2026-05-13T05:00:02Z",
+          content: "later",
+        },
+      ],
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: pendingKey });
+  });
+
+  it("keeps a promoted successor when the restored event arrives late", () => {
+    const qc = createQueryClient();
+    const successor: ChatPendingTask = {
+      task_id: "task-next",
+      status: "running",
+      created_at: "2026-05-13T05:00:01Z",
+      queued_tasks: [
+        {
+          task_id: "task-later",
+          status: "queued",
+          created_at: "2026-05-13T05:00:02Z",
+          content: "later",
+        },
+      ],
+    };
+    qc.setQueryData<ChatPendingTask>(pendingKey, successor);
+
+    applyChatCancelFinalizedToCache(qc, {
+      outcome: "restored",
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-cancelled-user",
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual(successor);
+  });
+
   it("invalidates the draft-restores query for the initiator", () => {
     const qc = createQueryClient();
     const invalidate = vi.spyOn(qc, "invalidateQueries");

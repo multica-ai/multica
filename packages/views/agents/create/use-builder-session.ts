@@ -207,7 +207,22 @@ export function useBuilderSession(options: {
     }
   };
 
-  const send = async (content: string): Promise<boolean> => {
+  /**
+   * Sends one turn.
+   *
+   * `commitInput` is the composer's clear (MUL-5181): it runs the moment the
+   * server has accepted the message and the caches render it, NOT after the
+   * reconciling invalidations settle. Awaiting those held the user's text in
+   * the box for three more round-trips while their message was already on
+   * screen. Same ordering as the main chat's handleSend.
+   *
+   * Optional because the empty-state prompt buttons call this directly, with
+   * no composer to clear.
+   */
+  const send = async (
+    content: string,
+    commitInput?: () => void,
+  ): Promise<boolean> => {
     const text = content.trim();
     // switchingRuntime blocks the send while a rebind is in flight: the server
     // serialises the two anyway, but letting the message through would mean the
@@ -240,13 +255,13 @@ export function useBuilderSession(options: {
         status: "queued",
         created_at: createdAt,
       });
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) }),
-        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) }),
-        // The first turn is what makes a brand-new conversation listable at
-        // all, and every later one moves it to the top with a new preview.
-        invalidateDraftList(),
-      ]);
+      // Accepted and rendered — release the composer before reconciling.
+      commitInput?.();
+      void qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      void qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+      // The first turn is what makes a brand-new conversation listable at
+      // all, and every later one moves it to the top with a new preview.
+      void invalidateDraftList();
       return true;
     } catch (err) {
       setError(

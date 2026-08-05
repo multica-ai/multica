@@ -81,6 +81,7 @@ func Classify(rawError string) Reason {
 		"prompt is too long",
 		"context size has been exceeded",
 	),
+		containsAny(lower, contextWindowExceededWitnesses...),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
 		// approximate with both substrings present, which catches
 		// "token limit", "tokens per minute limit", etc., without the
@@ -254,6 +255,37 @@ func Classify(rawError string) Reason {
 	return ReasonAgentUnknown
 }
 
+// contextWindowExceededWitnesses are the two wordings for an overflow reported
+// on the RESPONSE rather than as a 400 on the request: the provider accepts the
+// call and ends the turn with stop_reason "model_context_window_exceeded", which
+// Claude Code 2.1.x surfaces verbatim as "API Error: The model has reached its
+// context window limit." (GH #6360). Both are matched so a backend forwarding
+// the raw stop reason classifies the same way as one forwarding the CLI's copy.
+//
+// Neither carries "token" nor any of rule 1's other phrases, so before this the
+// failure landed in agent_error.unknown — a reason no resume blacklist covers,
+// which left the over-full session pinned as the resume pointer and made every
+// later comment on that issue replay the same overflow.
+//
+// Each is an unambiguous witness on its own, which is what lets
+// NormalizeDaemonReason reuse them to upgrade an older daemon's catchall
+// server-side. Matched against pre-lowercased text.
+// Mirror these substrings into the MUL-1949 offline backfill SQL.
+//
+// terminal_reason=prompt_too_long joins them for GH #6402: it is the structured
+// enum value Claude Code puts on the result frame when the turn ended because
+// the context window is full, and the daemon quotes it verbatim into the error
+// it reports (see claudeTerminalReasonFailure in pkg/agent/claude.go). Being an
+// enum token rather than prose, it is at least as unambiguous as the two above
+// — no free-form provider message produces it by accident — so a run classified
+// from it lands in context_overflow even when the CLI's accompanying copy is
+// empty or reworded between releases.
+var contextWindowExceededWitnesses = []string{
+	"context window limit",
+	"model_context_window_exceeded",
+	TerminalReasonPromptTooLong,
+}
+
 // legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
 // failed skill-bundle download. It is an unambiguous witness: no other code
 // path ever produced it, and a current daemon writes "skill bundle
@@ -272,6 +304,22 @@ var legacySkillBundleReasons = map[string]bool{
 	"agent_error":                      true,
 }
 
+// legacyContextOverflowReasons are the buckets an older daemon lands the
+// response-side context overflow in: agent_error.unknown from its own
+// classifier (its rule 1 predates contextWindowExceededWitnesses) and the
+// pre-MUL-1949 coarse agent_error.
+//
+// Deliberately narrower than legacySkillBundleReasons. A refined reason means
+// the old daemon matched an earlier rule on the same text — process_failure on
+// a crash marker, provider_network on a stream cut — and that says more about
+// what actually ended the run than a witness appearing somewhere in the same
+// blob does. Upgrading those would discard information; leaving them alone
+// costs at most the pre-existing behaviour.
+var legacyContextOverflowReasons = map[string]bool{
+	string(ReasonAgentUnknown): true,
+	"agent_error":              true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -284,13 +332,25 @@ var legacySkillBundleReasons = map[string]bool{
 // generic copy. Recognising the wire shape an old daemon produces closes that
 // gap the moment the server deploys.
 //
-// This is a boundary compatibility shim, not internal fallback logic: it can
-// be deleted once no daemon old enough to emit legacySkillBundlePrefix is
-// still reporting.
+// This is a boundary compatibility shim, not internal fallback logic: each rule
+// can be deleted once no daemon old enough to produce its wire shape is still
+// reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
 		return ReasonSkillBundleUnavailable
+	}
+	// GH #6360: the same mixed-version gap, on a failure where waiting for
+	// every host to update is more expensive. A daemon whose rule 1 predates
+	// contextWindowExceededWitnesses reports the catchall, and the catchall is
+	// on no resume blacklist — so the over-full session stays pinned as the
+	// resume pointer and every later comment on that issue replays the same
+	// overflow. One un-upgraded host means a permanently stuck (agent, issue)
+	// pair, not just a missing label; upgrading here retires the session the
+	// moment the server deploys.
+	if legacyContextOverflowReasons[reason] &&
+		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
+		return ReasonAgentContextOverflow
 	}
 	return Reason(reason)
 }

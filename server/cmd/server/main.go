@@ -172,6 +172,10 @@ func envBool(name string, def bool) bool {
 	return v
 }
 
+func backgroundServices(h *handler.Handler) (*service.TaskService, *service.AutopilotService) {
+	return h.TaskService, h.AutopilotService
+}
+
 func main() {
 	logger.Init()
 
@@ -198,7 +202,7 @@ func main() {
 
 	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
 	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
-	// See docs/feature-flags.md for the schema and lifecycle rules.
+	// See server/pkg/featureflag for the schema and lifecycle rules.
 	//
 	// Booting the server without any flag config is intentional: when the
 	// env var is unset, every IsEnabled call falls through to the caller's
@@ -211,7 +215,7 @@ func main() {
 		slog.Error("feature flag configuration failed to load", "error", err)
 		os.Exit(1)
 	}
-	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see docs/feature-flags.md
+	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see server/pkg/featureflag
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -407,10 +411,12 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
-	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
-	taskSvc.Analytics = analyticsClient
-	taskSvc.Metrics = businessMetrics
-	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	// Reuse the router's services here. In particular, the router wires the
+	// EmptyClaim cache into TaskService; constructing a second TaskService for
+	// scheduled Autopilot dispatch would send the daemon wakeup without bumping
+	// that cache's version, so an idle runtime could keep returning an empty
+	// claim until the cache TTL expires.
+	taskSvc, autopilotSvc := backgroundServices(h)
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP

@@ -817,7 +817,13 @@
     "copy_workdir": "Copy working directory",
     "close": "Close",
     "fact_created": "Created {{time}}",
-    "fact_took": "Took {{duration}}"
+    "fact_took": "Took {{duration}}",
+    "details_input": "Input",
+    "details_output": "Output",
+    "details_cache_read": "Cache read",
+    "details_cache_write": "Cache write",
+    "details_cost": "Cost",
+    "usage_chip_title": "Tokens and estimated cost for this run"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

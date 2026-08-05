@@ -7,7 +7,7 @@
     "highlight": "高亮",
     "link": "链接",
     "list": "列表",
-    "task_list": "任务列表",
+    "task_list": "待办列表",
     "quote": "引用",
     "url_aria_label": "URL",
     "heading_dropdown": {
@@ -20,12 +20,12 @@
     "list_dropdown": {
       "bullet_list": "无序列表",
       "ordered_list": "有序列表",
-      "task_list": "任务列表"
+      "task_list": "待办列表"
     },
     "sub_issue": {
-      "tooltip": "用选中内容创建子 issue",
+      "tooltip": "用选中内容创建子任务",
       "created": "已创建 {{identifier}}",
-      "create_failed": "创建子 issue 失败"
+      "create_failed": "创建子任务失败"
     }
   },
   "image": {
@@ -35,7 +35,11 @@
     "delete": "删除",
     "link_copied": "已复制链接",
     "copy_link_failed": "复制链接失败",
-    "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。"
+    "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。",
+    "previous": "上一张",
+    "next": "下一张",
+    "sequence_position": "第 {{index}} / {{total}} 张",
+    "unavailable": "这张图片已失效,已跳过。"
   },
   "canvas": {
     "zoom_in": "放大",
@@ -62,7 +66,7 @@
   },
   "mention": {
     "group_users": "用户",
-    "group_issues": "Issues",
+    "group_issues": "任务",
     "all_members": "所有成员",
     "searching": "搜索中...",
     "no_results": "无结果",

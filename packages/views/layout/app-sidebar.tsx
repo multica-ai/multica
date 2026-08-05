@@ -45,6 +45,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -359,6 +360,18 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+
+  // On a phone the sidebar is a Sheet covering the page, so navigating out of
+  // it has to dismiss it — otherwise the destination renders underneath and the
+  // tap reads as "nothing happened". Closing on `pathname` rather than on each
+  // link's onClick covers every route out of here at once: the nav groups, the
+  // pinned items, the workspace switcher's programmatic push, and anything
+  // added later. `setOpenMobile` is a no-op on desktop, where the sheet is not
+  // the sidebar's rendering at all.
+  const { setOpenMobile } = useSidebar();
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
 
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({

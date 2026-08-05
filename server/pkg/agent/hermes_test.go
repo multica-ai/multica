@@ -2142,7 +2142,7 @@ func TestHermesProviderErrorSnifferLongRealErrorStillFails(t *testing.T) {
 		t.Fatalf("fixture is %d bytes, must exceed the cap %d to exercise the path", len(longReal), acpMaxErrorLineLen)
 	}
 
-	for _, provider := range []string{"hermes", "kimi", "kiro", "qoder", "grok", "traecli"} {
+	for _, provider := range []string{"hermes", "kimi", "reasonix", "kiro", "qoder", "grok", "traecli"} {
 		t.Run(provider, func(t *testing.T) {
 			s := newACPProviderErrorSniffer(provider)
 			if _, err := s.Write([]byte(longReal + "\n")); err != nil {

@@ -50,9 +50,11 @@ import {
 import { matchesPinyin } from "./pinyin-match";
 import {
   createSuggestionPopupRender,
+} from "./suggestion-popup";
+import {
   isPickerAcceptKey,
   pickerNavigationDirection,
-} from "./suggestion-popup";
+} from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
 

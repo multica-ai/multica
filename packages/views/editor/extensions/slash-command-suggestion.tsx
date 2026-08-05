@@ -21,9 +21,11 @@ import type { Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import {
   createSuggestionPopupRender,
+} from "./suggestion-popup";
+import {
   isPickerAcceptKey,
   pickerNavigationDirection,
-} from "./suggestion-popup";
+} from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 
 const MAX_ITEMS = 20;

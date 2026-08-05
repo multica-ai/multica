@@ -155,6 +155,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "tmp", want: true},
 		{key: "TEMP", want: true},
 		{key: "CODEX_HOME", want: true},
+		{key: "REASONIX_STATE_HOME", want: true},
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
@@ -167,6 +168,9 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		// bound the per-task overlay overrides it after custom_env is layered.
 		{key: "HERMES_HOME", want: false},
 		{key: "hermes_home", want: false},
+		// Reasonix credentials/config remain tool-owned and may use a custom
+		// home; only the daemon-owned state overlay is blocked above.
+		{key: "REASONIX_HOME", want: false},
 	}
 
 	for _, tt := range tests {
@@ -176,6 +180,55 @@ func TestIsBlockedEnvKey(t *testing.T) {
 				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPrepareReasonixTaskStateHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := prepareReasonixTaskStateHome("work", "runtime-1", "agent_2")
+	if err != nil {
+		t.Fatalf("prepareReasonixTaskStateHome: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "work", "reasonix-state", "runtime-1", "agent_2")
+	if got != want {
+		t.Fatalf("state home = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat state home: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("state home mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestLayerCustomEnvKeepsReasonixCredentialsHomeButBlocksStateHome(t *testing.T) {
+	t.Parallel()
+	agentEnv := map[string]string{}
+	layerCustomEnvAndHermesHome(agentEnv, map[string]string{
+		"REASONIX_HOME":       "/operator/reasonix-home",
+		"REASONIX_STATE_HOME": "/unsafe/shared-state",
+	}, "", nil)
+	if got := agentEnv["REASONIX_HOME"]; got != "/operator/reasonix-home" {
+		t.Fatalf("REASONIX_HOME = %q, want operator-owned home", got)
+	}
+	if _, ok := agentEnv["REASONIX_STATE_HOME"]; ok {
+		t.Fatal("daemon-owned REASONIX_STATE_HOME accepted a custom override")
+	}
+}
+
+func TestValidateReasonixStateSegmentRejectsTraversal(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"", "../agent", "runtime/agent", "agent id"} {
+		if _, err := validateReasonixStateSegment("agent", value); err == nil {
+			t.Errorf("validateReasonixStateSegment(%q) succeeded, want error", value)
+		}
+	}
+	if got, err := validateReasonixStateSegment("agent", "agent-1_uuid"); err != nil || got != "agent-1_uuid" {
+		t.Fatalf("safe segment = %q, %v", got, err)
 	}
 }
 
@@ -573,6 +626,8 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// runtime brief duplicates it at the start of every user turn.
 		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
+		// Reasonix loads AGENTS.md from the ACP session cwd.
+		{provider: "reasonix", want: false},
 		{provider: "traecli", want: true},
 		// Qwen Code loads the per-task QWEN.md file natively.
 		{provider: "qwen", want: false},
@@ -696,37 +751,127 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	}
 }
 
-// TestFreshSessionRetryPrompt asserts the daemon's single fresh-session retry
-// preserves the current prompt verbatim and prefixes an explicit context-loss
-// disclosure (GH #5975), so the new provider session does not assume continuity
-// with the conversation that could not be resumed.
-func TestFreshSessionRetryPrompt(t *testing.T) {
+// TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
+// event costs each surface something different, so it cannot be reported with
+// one sentence. The dividing question is whether the conversation can still be
+// READ, not whether it is a chat: an issue's comments and a Slack channel's
+// history both can, a web chat's and a Feishu channel's cannot. Announcing a
+// loss on the first two describes something that did not happen — the user
+// hears "the discussion is gone" when every word survives.
+func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
-	base := BuildPrompt(Task{
-		IssueID:          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-		TriggerCommentID: "c0ffee00-0000-0000-0000-000000000000",
-		Agent:            &AgentData{Name: "Local Kiro"},
-	}, "kiro")
-
-	got := freshSessionRetryPrompt(base)
-
-	// The disclosure must come first and clearly signal a brand-new session
-	// with no prior provider context.
-	for _, want := range []string{
-		"brand-new session",
-		"could not be resumed",
-		"re-read the issue",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("fresh-retry prompt missing disclosure %q; got:\n%s", want, got)
-		}
+	cases := []struct {
+		name         string
+		task         Task
+		tellUser     bool
+		wantMentions string
+	}{
+		{
+			name:         "issue rebuilds from comments",
+			task:         Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},
+			tellUser:     false,
+			wantMentions: "comment history",
+		},
+		{
+			// Slack has a history reader, so the conversation is recoverable —
+			// just from the channel rather than from Multica. Telling the user it
+			// was lost contradicts the commands the same prompt hands the agent.
+			name:         "slack rebuilds from the channel",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeSlack},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
+		{
+			// Web chat history lived only in the provider session.
+			name:         "web chat is unrecoverable",
+			task:         Task{ChatSessionID: "chat-1"},
+			tellUser:     true,
+			wantMentions: "not readable from anywhere",
+		},
+		{
+			// Multica ships no history reader for Feishu, so despite being a
+			// channel it is in the same position as a web chat.
+			name:         "feishu has no history reader",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeFeishu},
+			tellUser:     true,
+			wantMentions: "not readable from anywhere",
+		},
 	}
-	if !strings.HasSuffix(got, base) {
-		t.Fatal("fresh-retry prompt must preserve the current prompt verbatim as its suffix")
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			notice := sessionContinuityNoticeFor(tc.task)
+			if got := strings.Contains(notice, "tell the user up front"); got != tc.tellUser {
+				t.Errorf("tells the user = %v, want %v:\n%s", got, tc.tellUser, notice)
+			}
+			if !strings.Contains(notice, tc.wantMentions) {
+				t.Errorf("notice missing %q, so the agent is not told where to rebuild from:\n%s", tc.wantMentions, notice)
+			}
+			// Where the conversation survives, the ONLY loss is the agent's
+			// unrecorded working memory, and it has to be told so or it assumes
+			// it still remembers work it no longer has. Where nothing survives
+			// that distinction is meaningless — everything is gone — so the
+			// requirement applies to the recoverable surfaces only.
+			if !tc.tellUser && !strings.Contains(notice, "your own working memory") {
+				t.Errorf("recoverable surface must name the real loss:\n%s", notice)
+			}
+		})
 	}
-	if strings.Index(got, "brand-new session") > strings.Index(got, base) {
-		t.Fatal("context-loss disclosure must precede the preserved prompt")
+
+	// The notice only renders when the resume actually failed.
+	if blocks := perTurnContextBlocks(Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}); strings.Contains(blocks, "Session Continuity Notice") {
+		t.Errorf("continuity notice leaked into a run that resumed fine:\n%s", blocks)
+	}
+	lost := perTurnContextBlocks(Task{
+		IssueID:                       "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		PriorSessionResumeUnavailable: true,
+	})
+	if !strings.Contains(lost, "Session Continuity Notice") {
+		t.Errorf("continuity notice missing when the resume was unavailable:\n%s", lost)
+	}
+}
+
+// TestBackendResumeContinuityNoticeSuppressedWhenPromptAlreadyHasIt is the
+// count guard Elon asked for, on the combination that actually occurs: the
+// codex overflow fresh retry. The daemon appends the notice to the prompt AND
+// hands the backend a notice to prepend, so before MUL-5722 one turn carried
+// the same paragraph twice — at full token price, from two hand-written
+// strings. Suppression is keyed on the prompt already carrying it, so the two
+// injectors cannot both fire.
+func TestBackendResumeContinuityNoticeSuppressedWhenPromptAlreadyHasIt(t *testing.T) {
+	t.Parallel()
+
+	const heading = "## Session Continuity Notice"
+
+	// Live resume rejection the daemon cannot see pre-launch: the prompt says
+	// nothing, so the backend must.
+	fresh := Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", TriggerCommentID: "c0ffee00-0000-0000-0000-000000000000"}
+	if got := backendResumeContinuityNotice(fresh); !strings.Contains(got, heading) {
+		t.Fatal("backend must disclose when the prompt does not")
+	}
+	if strings.Contains(BuildPrompt(fresh, "codex"), heading) {
+		t.Fatal("prompt should not carry the notice when the resume has not failed yet")
+	}
+
+	// The daemon's fresh-session retry sets this, which is what makes
+	// BuildPrompt append the notice — so the backend must now stay silent.
+	retry := fresh
+	retry.PriorSessionResumeUnavailable = true
+	prompt := BuildPrompt(retry, "codex")
+	if n := strings.Count(prompt, heading); n != 1 {
+		t.Fatalf("prompt must carry exactly one notice, got %d", n)
+	}
+	backendNotice := backendResumeContinuityNotice(retry)
+	if backendNotice != "" {
+		t.Fatalf("backend must not add a second copy, got:\n%s", backendNotice)
+	}
+	// The whole turn, as codex would assemble it.
+	turn := backendNotice + prompt
+	if n := strings.Count(turn, heading); n != 1 {
+		t.Fatalf("assembled turn carries %d notices, want exactly 1:\n%s", n, turn)
 	}
 }
 
@@ -854,13 +999,19 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		"Daily dependency check",
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
-		"Do not run `multica issue get`",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("autopilot prompt missing %q\n---\n%s", want, prompt)
 		}
 	}
 
+	// The issue-command boundary is emitted ONCE, by the brief's autopilot
+	// workflow section (execenv.AutopilotIssueCommandsGuard). MUL-5696 found
+	// that a second hand-maintained per-turn copy drifts, so the per-turn
+	// prompt must not restate it in any form.
+	if strings.Contains(prompt, "Do not run `multica issue get`") {
+		t.Fatalf("autopilot prompt restates the issue-command boundary the brief owns (MUL-5696)\n---\n%s", prompt)
+	}
 	if strings.Contains(prompt, "Your assigned issue ID is:") {
 		t.Fatalf("autopilot prompt should not use issue assignment template\n---\n%s", prompt)
 	}
@@ -2394,6 +2545,41 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			provider:       "kiro",
 			want:           false,
 		},
+		{
+			// MUL-5722: a codex thread/resume whose response overflowed the
+			// stdout line buffer. This is the case #5715 accidentally
+			// stranded — codex reported no rejection and is not in the
+			// undetectable set, so the gate returned false and the same
+			// oversized thread got resumed on every later turn. The backend
+			// now supplies the positive evidence; this asserts the gate
+			// actually acts on it.
+			name: "codex resume overflow retries on a fresh session",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "codex thread/resume failed: codex process exited: bufio.Scanner: token too long",
+				ResumeRejected: true,
+			},
+			priorSessionID: "thr_oversized",
+			tools:          0,
+			provider:       "codex",
+			want:           true,
+		},
+		{
+			// The tools gate is not weakened by the new evidence: a run that
+			// already acted is never replayed, poisoned resume or not. Such a
+			// task still gets its session retired — by the layer-3 classifier
+			// at report time rather than by an in-turn retry.
+			name: "codex resume overflow after tool use does not retry",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "codex thread/resume failed: codex process exited: bufio.Scanner: token too long",
+				ResumeRejected: true,
+			},
+			priorSessionID: "thr_oversized",
+			tools:          1,
+			provider:       "codex",
+			want:           false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2432,7 +2618,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "qoderclicn", "traecli", "pi", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()
@@ -3765,6 +3951,52 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
+	}
+}
+
+// TestHandleTask_UntrackedRuntimeFailsBackForRetry covers the window between a
+// batch claim leaving with a runtime ID and the claimed task arriving here.
+//
+// A below-minimum demotion or a drift convergence to zero drops runtime rows
+// without coordinating with in-flight claims — deliberately, since gating claims
+// on that is the machinery this daemon does not have. So the task can arrive for
+// a runtime the daemon no longer holds, and the unchecked map read used to hand
+// it a zero-value Runtime: an empty provider that died hundreds of lines later
+// as `no agent configured for provider ""`, a reason the server does not retry.
+func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
+	t.Parallel()
+
+	var failBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		failBody.Store(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runtimeIndex:       map[string]Runtime{},
+		cancelPollInterval: time.Hour,
+	}
+	d.runner = taskRunnerFunc(func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error) {
+		t.Error("runner ran for a runtime the daemon no longer hosts")
+		return TaskResult{}, nil
+	})
+
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
+
+	body, _ := failBody.Load().(map[string]any)
+	if body == nil {
+		t.Fatal("task was never reported as failed; the server would wait out its dispatch timeout")
+	}
+	if got := body["failure_reason"]; got != "runtime_offline" {
+		t.Errorf("failure_reason = %v, want runtime_offline — the reason the server auto-retries on", got)
 	}
 }
 

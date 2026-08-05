@@ -109,6 +109,34 @@ To run in the foreground (useful for debugging):
 multica daemon start --foreground
 ```
 
+#### Following a replaced binary
+
+A CLI-launched daemon periodically compares its own compile-time version against
+the `--version` output of the `multica` binary it would re-exec. When they differ
+— `brew upgrade multica`, a re-download, a local `make build` — it waits for any
+running task to finish, then restarts into the new binary. A running task is
+never interrupted; if the daemon is busy the restart is deferred to the next
+check, and `multica daemon status` shows why it's still on the old version.
+
+This is separate from the GitHub self-update poller: disabling that does not stop
+the daemon from following a binary you installed yourself. To turn it off:
+
+```bash
+MULTICA_DAEMON_AUTO_RELOAD=0 multica daemon start
+# or
+multica daemon start --no-auto-reload
+# or persist it
+multica config set disable_auto_reload true
+```
+
+Agent CLIs (codex, claude, ...) are handled differently: when one of them is
+upgraded in place, the daemon re-probes its version and re-registers the runtime
+**without restarting**, so subsequent tasks pick up the new CLI while Multica's
+availability stays independent of a third party's release cadence.
+
+Desktop-managed daemons ignore both, because the Desktop app owns its bundled
+CLI's lifecycle.
+
 ### Stop
 
 ```bash
@@ -148,6 +176,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
+| [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix` | DeepSeek-focused ACP coding agent (run `reasonix setup` first) |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/product-overview/what-is-qoder-cli-cn) | `qoderclicn` | Qoder CN ACP coding agent |
@@ -229,6 +258,8 @@ Agent-specific overrides:
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
 | `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
+| `MULTICA_REASONIX_PATH` | Custom path to the `reasonix` binary |
+| `MULTICA_REASONIX_MODEL` | Override the Reasonix model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |

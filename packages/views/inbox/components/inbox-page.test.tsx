@@ -261,6 +261,33 @@ describe("InboxPage", () => {
     expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
   });
 
+  // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
+  // not an issue, so `IssueDetail` never renders for it — and `IssueDetail` is
+  // what carries the way back in its own header on a phone. This branch has to
+  // supply its own bar or opening one of these is a dead end.
+  it("keeps a way back to the list for a notification with no issue", () => {
+    reset();
+    listData.active = [
+      item({ id: "inbox-note", issue_id: null, type: "quick_create_failed" }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    // Mobile swaps the list out for the detail, so the row is gone…
+    expect(screen.queryByTestId("row")).toBeNull();
+
+    // …and the only thing that can bring it back is the bar this branch adds.
+    // Located structurally: the test's `useT` returns one string for every key,
+    // so every button in this detail shares an accessible name.
+    const back = document.querySelector<HTMLButtonElement>(".h-12.border-b button");
+    expect(back).not.toBeNull();
+
+    fireEvent.click(back!);
+
+    expect(screen.getByTestId("row")).toBeInTheDocument();
+  });
+
   it("marks the opened notification read", () => {
     reset();
     listData.active = [

@@ -33,7 +33,7 @@ export function StartDatePicker({
       onChange={(v) => onUpdate({ start_date: v })}
       icon={<CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />}
       placeholder={t(($) => $.pickers.start_date.trigger_label)}
-      clearLabel={t(($) => $.pickers.start_date.clear_action)}
+      emptyLabel={t(($) => $.pickers.start_date.none)}
       trigger={trigger}
       triggerRender={triggerRender}
       open={open}

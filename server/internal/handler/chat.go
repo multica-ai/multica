@@ -595,6 +595,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Claim, clear, prioritize, and direct send all lock the agent before task
+	// rows. Keep delete on the same agent -> task suffix after its session lock,
+	// otherwise a builder-agent delete can deadlock with a concurrent claim.
+	if _, err := qtx.GetAgentForClaimUpdate(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock chat agent")
+		return
+	}
+
 	cancelled, err := qtx.CancelAgentTasksByChatSession(r.Context(), session.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to cancel chat session tasks")
@@ -677,8 +685,10 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
-	MessageID string `json:"message_id"`
-	TaskID    string `json:"task_id"`
+	MessageID     string `json:"message_id"`
+	TaskID        string `json:"task_id"`
+	SupportsQueue bool   `json:"supports_queue"`
+	Queued        bool   `json:"queued"`
 	// AttachmentIDs are the attachment rows actually bound to this message by
 	// the server. The client diffs these against the ids it requested so it
 	// can warn the user when an attachment silently failed to bind — no extra
@@ -797,7 +807,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// invoke gate.
 	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
+		switch {
+		case errors.Is(err, service.ErrChatSessionArchived):
+			writeError(w, http.StatusConflict, "chat session is archived")
+		case errors.Is(err, service.ErrChatTaskAgentArchived):
+			writeError(w, http.StatusConflict, "chat agent is archived")
+		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
+			writeError(w, http.StatusConflict, "chat agent has no runtime")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
+		}
 		return
 	}
 	msg := sent.Message
@@ -850,6 +869,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
+		SupportsQueue: true,
+		Queued:        sent.Queued,
 		CreatedAt:     timestampToString(task.CreatedAt),
 		AttachmentIDs: boundAttachmentIDs,
 	})
@@ -1099,9 +1120,24 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID    string `json:"task_id,omitempty"`
-	Status    string `json:"status,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
+	TaskID        string                   `json:"task_id,omitempty"`
+	Status        string                   `json:"status,omitempty"`
+	CreatedAt     string                   `json:"created_at,omitempty"`
+	SupportsQueue bool                     `json:"supports_queue"`
+	QueuedTasks   []QueuedChatTaskResponse `json:"queued_tasks,omitempty"`
+}
+
+type QueuedChatTaskResponse struct {
+	TaskID    string `json:"task_id"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+	MessageID string `json:"message_id,omitempty"`
+	Content   string `json:"content,omitempty"`
+}
+
+type PrioritizeQueuedChatTaskResponse struct {
+	TaskID       string `json:"task_id"`
+	ActiveTaskID string `json:"active_task_id,omitempty"`
 }
 
 // MarkChatSessionRead clears the session's unread_since (→ has_unread=false)
@@ -1420,9 +1456,9 @@ func (h *Handler) HasPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, HasPendingChatTasksResponse{HasPending: hasPending})
 }
 
-// GetPendingChatTask returns the most recent in-flight task (queued / dispatched
-// / running) for a chat session. The frontend polls this on mount / session
-// switch so pending UI state survives refresh and reopen.
+// GetPendingChatTask returns the current task plus its ordered follow-ups. The
+// root fields retain the original response shape so older clients continue to
+// recover a single pending task after refresh / reopen.
 func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -1436,18 +1472,136 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.Queries.GetPendingChatTask(r.Context(), session.ID)
+	tasks, err := h.Queries.ListPendingChatTasksForSession(r.Context(), session.ID)
 	if err != nil {
-		// No in-flight task — return an empty object, not an error.
-		writeJSON(w, http.StatusOK, PendingChatTaskResponse{})
+		writeError(w, http.StatusInternalServerError, "failed to list pending chat tasks")
+		return
+	}
+	if len(tasks) == 0 {
+		writeJSON(w, http.StatusOK, PendingChatTaskResponse{SupportsQueue: true})
 		return
 	}
 
+	head := tasks[0]
+	queued := make([]QueuedChatTaskResponse, 0, len(tasks)-1)
+	for _, task := range tasks[1:] {
+		if task.Status != "queued" {
+			continue
+		}
+		queued = append(queued, QueuedChatTaskResponse{
+			TaskID:    uuidToString(task.ID),
+			Status:    task.Status,
+			CreatedAt: timestampToString(task.CreatedAt),
+			MessageID: uuidToString(task.MessageID),
+			Content:   task.Content,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, PendingChatTaskResponse{
-		TaskID:    uuidToString(task.ID),
-		Status:    task.Status,
-		CreatedAt: timestampToString(task.CreatedAt),
+		TaskID:        uuidToString(head.ID),
+		Status:        head.Status,
+		CreatedAt:     timestampToString(head.CreatedAt),
+		SupportsQueue: true,
+		QueuedTasks:   queued,
 	})
+}
+
+// PrioritizeQueuedChatTask moves one queued follow-up ahead of its FIFO peers.
+// The client then cancels the current task through the existing cancellation
+// endpoint, preserving that path's transcript and draft-restore semantics.
+func (h *Handler) PrioritizeQueuedChatTask(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+	taskID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "taskId"), "task id")
+	if !ok {
+		return
+	}
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start prioritize transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// ClaimTask takes this same row lock before selecting work. Holding it here
+	// makes "prioritize + report the active task" one server-authoritative
+	// decision instead of two client requests racing the daemon.
+	if _, err := qtx.GetAgentForClaimUpdate(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock chat agent")
+		return
+	}
+	prioritized, err := qtx.PrioritizeQueuedChatTask(
+		r.Context(),
+		db.PrioritizeQueuedChatTaskParams{ID: taskID, ChatSessionID: session.ID},
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The compare-and-set rejects both a stale queue row and a still-valid
+		// follow-up that has no claimed reply to replace. Distinguish them for
+		// current clients while preserving the same 409 compatibility contract.
+		queuedTask, loadErr := qtx.GetAgentTask(r.Context(), taskID)
+		if loadErr != nil && !errors.Is(loadErr, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to load queued task")
+			return
+		}
+		if loadErr == nil &&
+			queuedTask.Status == "queued" &&
+			queuedTask.ChatSessionID.Valid &&
+			uuidToString(queuedTask.ChatSessionID) == uuidToString(session.ID) {
+			writeError(w, http.StatusConflict, "there is no active reply to replace")
+			return
+		}
+		writeError(w, http.StatusConflict, "task is no longer queued")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prioritize queued task")
+		return
+	}
+	queuedTask, err := qtx.GetAgentTask(r.Context(), taskID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load prioritized task")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit queued task priority")
+		return
+	}
+	h.TaskService.BroadcastTaskQueued(r.Context(), queuedTask)
+
+	writeJSON(w, http.StatusOK, PrioritizeQueuedChatTaskResponse{
+		TaskID:       uuidToString(prioritized.TaskID),
+		ActiveTaskID: uuidToString(prioritized.ActiveTaskID),
+	})
+}
+
+// ClearQueuedChatTasks cancels every queued follow-up without touching the
+// session's current positional head, even when that head is not claimed yet.
+func (h *Handler) ClearQueuedChatTasks(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+	if err := h.TaskService.CancelQueuedChatTasks(r.Context(), session.ID, session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear queued tasks")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------------------------------------------------------------------------
@@ -1499,6 +1653,34 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var (
+		queuedOnly      bool
+		expectedSession pgtype.UUID
+		queueAction     string
+	)
+	if expectedStatus := r.URL.Query().Get("expected_status"); expectedStatus != "" {
+		if expectedStatus != "queued" {
+			writeError(w, http.StatusBadRequest, "expected_status must be queued")
+			return
+		}
+		sessionID := r.URL.Query().Get("chat_session_id")
+		var ok bool
+		expectedSession, ok = parseUUIDOrBadRequest(w, sessionID, "chat_session_id")
+		if !ok {
+			return
+		}
+		if !task.ChatSessionID.Valid || task.ChatSessionID != expectedSession {
+			writeError(w, http.StatusConflict, "task does not belong to the expected chat session")
+			return
+		}
+		queueAction = r.URL.Query().Get("queue_action")
+		if queueAction != "edit" && queueAction != "remove" {
+			writeError(w, http.StatusBadRequest, "queue_action must be edit or remove")
+			return
+		}
+		queuedOnly = true
+	}
+
 	if task.ChatSessionID.Valid {
 		// Chat privacy: only the member who opened the conversation may
 		// cancel its task, even though the workspace is shared.
@@ -1535,7 +1717,14 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 
 	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID, service.CancelTaskOptions{
 		ClientSupportsDraftRestore: requestHasClientCapability(r, protocol.AppCapabilityChatDraftRestoreV1),
+		QueuedOnly:                 queuedOnly,
+		ExpectedChatSession:        expectedSession,
+		QueueAction:                queueAction,
 	})
+	if errors.Is(err, service.ErrTaskNoLongerQueued) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

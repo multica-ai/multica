@@ -24,6 +24,7 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
+import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
@@ -240,6 +241,7 @@ export function ChatPage() {
   // No compose-box agent selector — the agent is fixed when the chat starts.
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
+  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -296,6 +298,15 @@ export function ChatPage() {
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
 
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={c.pendingTask?.status}
+        onSendNow={c.handleSendQueuedTaskNow}
+        onEdit={c.handleEditQueuedTask}
+        onRemove={c.handleRemoveQueuedTask}
+        onClear={c.handleClearQueuedTasks}
+      />
+
       <ChatInput
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
@@ -303,6 +314,7 @@ export function ChatPage() {
         uploadEnabled={c.uploadEnabled}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
+        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         disabled={
           c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
         }

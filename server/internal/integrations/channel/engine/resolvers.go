@@ -58,6 +58,13 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// IssueDuplicate marks an /issue command that did not create a new issue
+	// because the shared duplicate guard found the active IssueID above.
+	// Repliers render this as a business conflict, never as an internal error.
+	IssueDuplicate bool
+	// runScheduled reports whether this ingest scheduled a normal chat run.
+	// It is Router-internal state: repliers must continue to use Outcome.
+	runScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router

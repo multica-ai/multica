@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "智能体",
-    "tagline": "能领取 issue、留下评论、推进状态的 AI 队友。",
+    "tagline": "能领取任务、留下评论、推进状态的 AI 队友。",
     "learn_more": "了解更多 →",
     "new_agent": "新建智能体",
     "search_placeholder": "搜索智能体...",
@@ -40,7 +40,7 @@
   },
   "empty": {
     "title": "还没有智能体",
-    "description": "创建一个智能体，像分配给同事那样把 issue 交给它。本地智能体在你的机器上运行，云智能体在 Multica 运行时上运行。"
+    "description": "创建一个智能体，像分配给同事那样把任务交给它。本地智能体在你的机器上运行，云智能体在 Multica 运行时上运行。"
   },
   "no_matches": {
     "title": "无匹配项",
@@ -81,7 +81,7 @@
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
     "actions_aria": "行操作",
-    "task_count_other": "{{count}} 个任务"
+    "task_count_other": "{{count}} 个 task"
   },
   "activity_tooltip": {
     "created_today": "今天创建",
@@ -157,7 +157,7 @@
     "section_profile": "资料",
     "section_profile_hint": "管理该智能体在工作区内的展示方式。",
     "section_execution": "执行配置",
-    "section_execution_hint": "选择运行时、模型、思考强度、速度和并行任务上限。",
+    "section_execution_hint": "选择运行时、模型、思考强度、速度和并行 task 上限。",
     "section_access": "访问权限",
     "section_access_hint": "控制谁可以运行该智能体并使用它已连接的能力。",
     "section_properties": "属性",
@@ -436,7 +436,7 @@
       "unsaved_changes": "未保存的修改"
     },
     "instructions": {
-      "intro": "设置每个任务都会使用的 System Prompt，支持 Markdown。",
+      "intro": "设置每个 task 都会使用的 System Prompt，支持 Markdown。",
       "system_prompt_label": "System Prompt",
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
     },
@@ -484,14 +484,14 @@
     "mcp_config": {
       "intro": "管理该智能体可用的 MCP Server。由 Multica 管理的 Server 会与本地 Runtime 继承的 Server 合并使用。",
       "managed_title": "由 Multica 管理",
-      "managed_hint": "保存在 Multica 中并仅配置给该智能体。执行任务时会与 Runtime MCP 合并；名称相同时以 Multica 配置为准。",
+      "managed_hint": "保存在 Multica 中并仅配置给该智能体。执行 task 时会与 Runtime MCP 合并；名称相同时以 Multica 配置为准。",
       "managed_empty": "还没有由 Multica 管理的 MCP Server。",
       "add_action": "添加 MCP",
       "agent_disabled_badge": "已为智能体关闭",
       "runtime_disabled_badge": "运行时中已关闭",
       "runtime_overridden_badge": "已由 Multica 覆盖",
       "runtime_title": "从运行时继承",
-      "runtime_hint": "自动从 {{runtime}} 发现，并在任务启动时于本机完成合并。URL、Header、命令和环境变量等敏感值不会离开本机。",
+      "runtime_hint": "自动从 {{runtime}} 发现，并在 task 启动时于本机完成合并。URL、Header、命令和环境变量等敏感值不会离开本机。",
       "refresh_action": "刷新",
       "runtime_missing": "请先分配一个本地运行时，以发现继承的 MCP Server。",
       "runtime_offline": "本地运行时处于离线状态，重新连接后即可刷新继承的 MCP Server。",
@@ -663,18 +663,18 @@
       "avg_duration_label": "平均耗时",
       "failed_count": "{{count}} 次失败",
       "failed_label": "失败",
-      "source_issue": "Issue",
+      "source_issue": "任务",
       "source_chat": "聊天",
       "source_autopilot": "自动化",
       "source_untracked": "未追踪",
       "source_quick_create": "快速创建",
-      "source_creating_issue": "正在创建 issue",
+      "source_creating_issue": "正在创建任务",
       "source_chat_session": "聊天会话",
       "source_autopilot_run": "自动化运行",
-      "issue_short_fallback": "Issue {{prefix}}...",
+      "issue_short_fallback": "任务 {{prefix}}...",
       "triggered_by": "触发来源",
-      "open_issue_aria": "打开 issue",
-      "open_issue_tooltip": "打开 issue",
+      "open_issue_aria": "打开任务",
+      "open_issue_tooltip": "打开任务",
       "transcript_tooltip": "查看记录",
       "cancel_task_aria": "取消 task",
       "cancel_task_tooltip": "取消 task",
@@ -744,7 +744,7 @@
   },
   "live_peek": {
     "current_issue_label": "正在处理",
-    "no_current_issue": "暂无任务",
+    "no_current_issue": "暂无 task",
     "last_activity_label": "最近活动",
     "no_recent_activity": "暂无活动",
     "failed_indicator": "失败"
@@ -802,7 +802,13 @@
     "copy_workdir": "复制工作目录",
     "close": "关闭",
     "fact_created": "创建于 {{time}}",
-    "fact_took": "用时 {{duration}}"
+    "fact_took": "用时 {{duration}}",
+    "details_input": "输入",
+    "details_output": "输出",
+    "details_cache_read": "缓存读",
+    "details_cache_write": "缓存写",
+    "details_cost": "费用",
+    "usage_chip_title": "这次运行消耗的 token 与估算费用"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",

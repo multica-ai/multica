@@ -10,21 +10,23 @@ import type { RuntimeDevice } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { BuilderSetupPanel } from "./builder-setup-panel";
-import { BuilderWorkspace } from "./builder-workspace";
 import { AgentCreateChip, AgentCreateShell } from "./create-shell";
 import { createPathWithParams } from "./squad-param";
 
 /**
- * Conversational agent creation.
+ * Starting a conversational agent creation: pick where it will run.
  *
- * The route holds the conversation list and the identity of the open one; each
- * conversation's own state lives in {@link BuilderWorkspace}, mounted under a
- * `key` so switching is a remount rather than a reset every future field would
- * have to remember to join.
+ * This route is the ACTION — one screen, one job. The conversation it produces
+ * is a durable object and lives at its own address (ai-builder-session-page),
+ * because it is left and resumed rather than completed in one sitting. Both
+ * used to share this route, switched on a `?session=` param, which made the
+ * route render two unrelated screens and left the conversation — the thing
+ * with a lifetime — as a modifier on the thing without one.
  *
- * `?session=` is what makes a conversation addressable — a refresh, a
- * back/forward, and a reopened tab all land back in the same chat instead of
- * silently starting a new one.
+ * Entering a conversation REPLACES this entry. The runtime choice is consumed
+ * the moment the session exists — it is frozen onto the hidden carrier agent
+ * and cannot be revisited from here — so leaving it on the history stack would
+ * only offer to start a second conversation on the way back.
  */
 export function AiCreateAgentPage() {
   const { t } = useT("agents");
@@ -32,45 +34,25 @@ export function AiCreateAgentPage() {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const squadId = navigation.searchParams.get("squad");
-  const sessionId = navigation.searchParams.get("session") ?? "";
 
   const builderSessions = useQuery(agentBuilderSessionListOptions(wsId));
   const sessions = builderSessions.data ?? [];
-  const sessionSettled = builderSessions.isSuccess || builderSessions.isError;
-  const openSession = sessions.find(
-    (session) => session.session_id === sessionId,
-  );
 
-  // The chip has to say something before the list answers, and only the open
-  // pane knows which runtime it settled on.
+  // The chip has to say something before a runtime is settled on.
   const [runtimeLabel, setRuntimeLabel] = useState<string | null>(null);
-  // The runtime a just-started conversation was created with. It cannot be read
-  // back yet — a conversation joins the list only once it has a message — and
-  // without it the first turn would render against the first runtime in the
-  // list instead of the one the user picked.
-  const [startedRuntimeId, setStartedRuntimeId] = useState("");
-
-  const handleSetupRuntimeLabel = useCallback(
+  const handleRuntimeLabel = useCallback(
     (runtime: RuntimeDevice | null) =>
       setRuntimeLabel(runtime ? runtimeDisplayLabel(runtime) : null),
     [],
   );
 
   const open = useCallback(
-    (nextSessionId: string) =>
+    (sessionId: string, runtimeId: string | null) =>
       navigation.replace(
-        createPathWithParams(paths.newAgentAi(), {
+        createPathWithParams(paths.newAgentAiSession(sessionId), {
           squad: squadId,
-          session: nextSessionId,
+          runtime: runtimeId,
         }),
-      ),
-    [navigation, paths, squadId],
-  );
-
-  const closeSession = useCallback(
-    () =>
-      navigation.replace(
-        createPathWithParams(paths.newAgentAi(), { squad: squadId }),
       ),
     [navigation, paths, squadId],
   );
@@ -95,35 +77,14 @@ export function AiCreateAgentPage() {
         </>
       }
     >
-      {sessionId ? (
-        <BuilderWorkspace
-          // Switching conversations remounts everything below: the draft, the
-          // applied-message marker and the composer all belong to one
-          // conversation, and a remount is the only reset that cannot forget a
-          // field.
-          key={sessionId}
-          sessionId={sessionId}
-          squadId={squadId}
-          session={openSession}
-          sessionSettled={sessionSettled}
-          fallbackRuntimeId={startedRuntimeId}
-          onDiscarded={closeSession}
-          onRuntimeLabel={setRuntimeLabel}
-        />
-      ) : (
-        <BuilderSetupPanel
-          sessions={sessions}
-          onResume={(nextSessionId) => {
-            setStartedRuntimeId("");
-            open(nextSessionId);
-          }}
-          onStarted={(nextSessionId, runtimeId) => {
-            setStartedRuntimeId(runtimeId);
-            open(nextSessionId);
-          }}
-          onRuntimeLabel={handleSetupRuntimeLabel}
-        />
-      )}
+      <BuilderSetupPanel
+        sessions={sessions}
+        // Resuming carries no runtime seed: a listed conversation reports its
+        // own, which is the truthful answer after a runtime switch.
+        onResume={(sessionId) => open(sessionId, null)}
+        onStarted={(sessionId, runtimeId) => open(sessionId, runtimeId)}
+        onRuntimeLabel={handleRuntimeLabel}
+      />
     </AgentCreateShell>
   );
 }

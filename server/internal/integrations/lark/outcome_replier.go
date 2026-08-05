@@ -181,18 +181,13 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 			)
 		}
 	case OutcomeIngested:
-		// The agent's chat reply itself goes through the Patcher (text
-		// message on ChatDone). But /issue does NOT block on the
-		// agent — the user expects an immediate "Created [MUL-42]"
-		// confirmation as soon as the issue row commits, separate
-		// from whatever the agent eventually replies. Without this,
-		// the user types `/issue fix login bug` and just sees the
-		// agent's eventual response, with no clear signal that the
-		// command itself was understood. Gate on IssueID.Valid so a
-		// plain chat message (no /issue) stays silent here.
+		// The agent's chat reply itself goes through the Patcher. An /issue
+		// command gets an immediate product result: either the newly created
+		// issue or the active duplicate that blocked it. Gate on IssueID.Valid
+		// so a plain chat message stays silent here.
 		if res.IssueID.Valid {
-			if err := r.sendIssueCreated(ctx, inst, msg, res); err != nil {
-				r.log.Warn("lark outcome replier: issue-created confirmation failed",
+			if err := r.sendIssueOutcome(ctx, inst, msg, res); err != nil {
+				r.log.Warn("lark outcome replier: issue outcome reply failed",
 					"installation_id", uuidString(inst.ID),
 					"chat_id", string(msg.ChatID),
 					"issue_id", uuidString(res.IssueID),
@@ -228,14 +223,9 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 	})
 }
 
-// sendIssueCreated posts the "Created [MUL-42] <title>" confirmation
-// as a plain text message. We deliberately send text rather than an
-// interactive card so the confirmation flows inline with the rest of
-// the Lark conversation — consistent with how chat replies render
-// after MUL-2671's plain-text refactor. The link to Multica is
-// included on its own line so Lark's auto-linker turns it into a
-// tappable URL.
-func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
+// sendIssueOutcome posts either the created confirmation or active-duplicate
+// conflict as plain text, with a link to the relevant issue when configured.
+func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -244,12 +234,15 @@ func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installa
 		return err
 	}
 	text := issueCreatedText(res, r.appURL)
+	if res.IssueDuplicate {
+		text = issueDuplicateText(res, r.appURL)
+	}
 	// Share the Patcher's classified fallback: a thread reply that
 	// fails because the topic cannot receive it (recalled trigger,
 	// topics disabled, aggregated message) falls back to a chat-level
-	// send so the confirmation is not lost; transport/5xx/rate-limit
+	// send so the product result is not lost; transport/5xx/rate-limit
 	// failures stay failures rather than leaking into the group chat.
-	return sendWithThreadFallback(r.log, "send issue-created text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithThreadFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,
@@ -296,6 +289,24 @@ func issueCreatedText(res DispatchResult, appURL string) string {
 	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
 }
 
+func issueDuplicateText(res DispatchResult, appURL string) string {
+	identifier := res.IssueIdentifier
+	if identifier == "" {
+		identifier = fmt.Sprintf("#%d", res.IssueNumber)
+	}
+	title := strings.TrimSpace(res.IssueTitle)
+	var line string
+	if title == "" {
+		line = fmt.Sprintf("Not created — active issue %s already exists.", identifier)
+	} else {
+		line = fmt.Sprintf("Not created — active issue %s already exists: %s", identifier, title)
+	}
+	if appURL == "" {
+		return line
+	}
+	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
+}
+
 func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
@@ -312,7 +323,7 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 	if err != nil {
 		return fmt.Errorf("render notice card: %w", err)
 	}
-	// Same classified fallback as sendIssueCreated: only thread-reply
+	// Same classified fallback as sendIssueOutcome: only thread-reply
 	// failures that mean the topic cannot receive the message fall back
 	// to a chat-level send; ambiguous/transport failures stay failures.
 	return sendWithThreadFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {

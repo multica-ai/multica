@@ -346,6 +346,7 @@ type AgentTaskResponse struct {
 	NewCommentsSince         string                 `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
 	ChatSessionID            string                 `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string                 `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
+	ChatType                 string                 `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
 	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
@@ -397,6 +398,17 @@ type AgentTaskResponse struct {
 	// pure taskToResponse builds the labels + raw ids); initiator/originator names
 	// are hydrated from the global user table only on user-facing surfaces.
 	Attribution *TaskAttribution `json:"attribution,omitempty"`
+	// Usage is this run's own token consumption, one entry per (provider, model)
+	// it used — the same grain `task_usage` stores and the same grain the client
+	// prices at. Hydrated only on the issue-facing execution-log endpoint
+	// (ListTasksByIssue); the daemon claim path leaves it nil so the claim
+	// payload does not carry accounting the agent has no use for.
+	//
+	// nil and [] are both "no usage recorded" and the UI renders an em dash for
+	// them — a run that predates usage reporting, or one that died before any
+	// model call, genuinely has no number, and showing 0 would assert it was
+	// free. omitempty keeps both off the wire.
+	Usage []TaskUsageData `json:"usage,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -573,6 +585,26 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+// TaskUsageData is one (provider, model) slice of a single run's token usage.
+// Field names match the runtime/dashboard usage rows exactly so the client can
+// feed it to the same `estimateCost` / `estimateCacheSavings` helpers without
+// an adapter.
+//
+// CostUsdTicks is the provider's own price for these tokens (1e-10 USD) and is
+// nil when the provider reported none — the client then estimates that slice
+// from its rate table. A pointer, not a zero value: 0 ticks is a real answer
+// ("the provider says this was free") and must stay distinguishable from
+// "the provider said nothing".
+type TaskUsageData struct {
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	CostUsdTicks     *int64 `json:"cost_usd_ticks,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -1079,7 +1111,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
+		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
 		return
 	}
 	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
@@ -1722,7 +1754,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !agent.IsKnownThinkingValue(provider, value) {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider))
+				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
@@ -1745,10 +1777,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
-				existing.ThinkingLevel.String, provider,
-			))
+			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
 	}
@@ -1970,6 +1999,39 @@ func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID,
 		return "", false
 	}
 	return rt.Provider, true
+}
+
+// thinkingLevelRejection explains why the target runtime will not take this
+// thinking_level. Two different failures used to share one sentence: a token
+// the runtime's catalog doesn't list, and a runtime with no reasoning control
+// at all. The second one made "high" look like a spelling mistake and sent
+// users hunting for a value that does not exist for that runtime (MUL-5770),
+// so it now names the capability gap instead.
+func thinkingLevelRejection(provider, value string) string {
+	if !agent.ThinkingControlSupported(provider) {
+		return fmt.Sprintf(
+			"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
+			provider,
+		)
+	}
+	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
+}
+
+// existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
+// path, where the caller changed runtime without touching a level the new
+// runtime cannot take. Both branches point at the same escape hatch, so the
+// user does not have to guess that clearing is allowed.
+func existingThinkingLevelRejection(provider, value string) string {
+	if !agent.ThinkingControlSupported(provider) {
+		return fmt.Sprintf(
+			"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
+			provider, value,
+		)
+	}
+	return fmt.Sprintf(
+		"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
+		value, provider,
+	)
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {

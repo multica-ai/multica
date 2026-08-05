@@ -784,6 +784,12 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	if h.issues.params.OriginType.String != "lark_chat" {
 		t.Fatalf("origin_type must come from the resolver set, got %q", h.issues.params.OriginType.String)
 	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("direct issue create must not also enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.typing.calls() != 0 {
+		t.Fatalf("terminal issue command must not start a chat processing indicator, calls=%d", h.typing.calls())
+	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
 			if r.IssueIdentifier == "MUL-42" && r.IssueTitle == "Fix login" {
@@ -793,6 +799,93 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 		return false
 	}) {
 		t.Fatalf("expected an issue-created reply with the workspace-qualified identifier")
+	}
+}
+
+func TestRouter_IssueCommandWithMediaBindsWithoutChatRun(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		MessageID:   uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Inspect image",
+		},
+	}
+	h.issues.result = service.IssueCreateResult{Issue: db.Issue{
+		ID: uuidFromString(t, "88888888-8888-4888-8888-888888888888"), Number: 43, Title: "Inspect image",
+	}}
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("issue command media did not finish binding")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("media completion must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 1 {
+		t.Fatalf("bound media refs = %+v", got.MediaRefs)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		MessageID:   uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("duplicate issue must be a product outcome, got error: %v", err)
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("duplicate command must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.typing.calls() != 0 {
+		t.Fatalf("duplicate command must not start a processing indicator, calls=%d", h.typing.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		for _, result := range h.replier.calls() {
+			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueTitle == duplicate.Title {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("duplicate result was not delivered to replier: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_IssueCommand_InfrastructureFailureRemainsError(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Unavailable issue",
+		},
+	}
+	issueErr := errors.New("database unavailable")
+	h.issues.err = issueErr
+
+	err := h.router.Handle(context.Background(), p2pMessage(t))
+	if !errors.Is(err, issueErr) {
+		t.Fatalf("infrastructure failure = %v", err)
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("failed issue command must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed issue command must not emit a success outcome: %+v", h.replier.calls())
 	}
 }
 
@@ -986,12 +1079,107 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	msg := p2pMessage(t)
 	msg.ForceFresh = true
 	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
+	msg.CommandText = "/new current prompt"
 
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := h.binder.lastAppend.Message.Text; got != msg.Text {
 		t.Fatalf("adapter-enriched body changed: got %q want %q", got, msg.Text)
+	}
+}
+
+func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "/new"
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+	if h.binder.appendedParams().Message.MessageID != "" {
+		t.Fatal("bare fresh must not append an empty user message")
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("bare fresh must not schedule an empty agent run")
+	}
+	if h.typing.calls() != 0 {
+		t.Fatal("bare fresh must not start a typing indicator without a run")
+	}
+	if h.dedup.marks() != 1 {
+		t.Fatalf("bare fresh dedup marks = %d, want 1", h.dedup.marks())
+	}
+
+	next := p2pMessage(t)
+	next.MessageID = "om-2"
+	next.Text = "start the new topic"
+	if err := h.router.Handle(context.Background(), next); err != nil {
+		t.Fatalf("next Handle: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("the next real message must consume the pending ForceFresh intent")
+	}
+
+	again := p2pMessage(t)
+	again.MessageID = "om-3"
+	if err := h.router.Handle(context.Background(), again); err != nil {
+		t.Fatalf("again Handle: %v", err)
+	}
+	if h.tasks.freshArg() {
+		t.Fatal("the pending ForceFresh intent must be consumed exactly once")
+	}
+}
+
+func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "<recent_context>old topic</recent_context>"
+	reset.CommandText = "/new"
+	reset.ForceFresh = true
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+	if h.binder.appendedParams().Message.MessageID != "" {
+		t.Fatal("adapter-enriched bare fresh must not append a user message")
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("adapter-enriched bare fresh must not schedule an empty agent run")
+	}
+}
+
+func TestRouter_BareFreshSurvivesFailedEnqueue(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "/new"
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+
+	h.tasks.err = service.ErrChatTaskAgentNoRuntime
+	failed := p2pMessage(t)
+	failed.MessageID = "om-2"
+	failed.Text = "first attempt while offline"
+	if err := h.router.Handle(context.Background(), failed); err != nil {
+		t.Fatalf("failed enqueue Handle: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("failed enqueue must still receive the pending ForceFresh intent")
+	}
+
+	h.tasks.err = nil
+	next := p2pMessage(t)
+	next.MessageID = "om-3"
+	next.Text = "retry after runtime is available"
+	if err := h.router.Handle(context.Background(), next); err != nil {
+		t.Fatalf("retry Handle: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("pending ForceFresh intent must survive until a run queues")
 	}
 }
 

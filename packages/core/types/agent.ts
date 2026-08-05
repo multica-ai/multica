@@ -115,6 +115,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "pi",
   "cursor",
   "kimi",
+  "reasonix",
   "kiro",
   "antigravity",
   "qoder",
@@ -368,6 +369,41 @@ export interface AgentTask {
    * user-facing task surfaces; older backends omit it — render conditionally.
    */
   attribution?: TaskAttribution;
+  /**
+   * This run's own token consumption, one entry per (provider, model) it used.
+   * Present on the issue execution-log endpoint only; the daemon claim path
+   * omits it.
+   *
+   * `undefined` (old backend, or a surface that doesn't hydrate it) and `[]`
+   * (backend hydrated, this run has no recorded usage) both mean "no number to
+   * show" and must render as an em dash, never as 0 — a run that predates usage
+   * reporting was not free, we just don't know what it cost.
+   */
+  usage?: TaskUsage[];
+}
+
+/**
+ * One (provider, model) slice of a single run's token usage.
+ *
+ * Field names deliberately match {@link RuntimeUsage} so the same
+ * `estimateCost` / `estimateCostBreakdown` / `estimateCacheSavings` helpers in
+ * `packages/views/runtimes/utils.ts` price a run and a runtime-day identically
+ * — there is exactly one cost formula in the product.
+ *
+ * `cost_usd_ticks` is the provider's own price for this slice (1e-10 USD),
+ * absent when it reported none; those tokens get estimated from the rate table
+ * instead. Unlike the aggregate rows there is no `uncosted_*` split here: a
+ * `task_usage` row is priced or it isn't, so "uncosted" is just "all of them
+ * when cost_usd_ticks is absent", which is what the estimator already assumes.
+ */
+export interface TaskUsage {
+  provider?: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
 }
 
 export interface Agent {

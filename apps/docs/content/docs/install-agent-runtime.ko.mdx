@@ -25,6 +25,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | Grok Build | `grok` | [Grok Build 빠른 시작](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes 빠른 시작](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | Kiro CLI | `kiro-cli` | [Kiro CLI 설치](https://kiro.dev/docs/cli/installation/) |
 | OpenClaw | `openclaw` | [OpenClaw 설치](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 빠른 시작](https://opencode.ai/en/docs) |
@@ -39,6 +40,8 @@ Multica는 현재 다음 명령을 감지합니다.
 ## 2. 로컬에서 로그인 완료
 
 설치 후 터미널에서 도구를 한 번 직접 실행하고 도구 자체의 절차에 따라 로그인하거나 모델 서비스를 설정합니다. 터미널에서 요청을 완료하지 못하면 데몬이 호출할 때도 실패합니다.
+
+Reasonix를 사용할 때는 데몬을 시작하기 전에 `reasonix setup`을 실행해 기본 공급자와 모델을 설정하세요.
 
 로그인 자격 증명은 도구가 로컬에 저장합니다. Multica는 Claude, Codex, Cursor 또는 다른 CLI의 로그인 token을 받지 않습니다.
 

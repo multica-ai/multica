@@ -2,8 +2,8 @@
   "nav": {
     "inbox": "인박스",
     "chat": "채팅",
-    "my_issues": "내 이슈",
-    "issues": "이슈",
+    "my_issues": "내 태스크",
+    "issues": "태스크",
     "projects": "프로젝트",
     "autopilots": "오토파일럿",
     "agents": "에이전트",
@@ -14,7 +14,7 @@
     "settings": "설정"
   },
   "tab": {
-    "issue": "이슈",
+    "issue": "태스크",
     "project": "프로젝트",
     "autopilot": "오토파일럿",
     "agent": "에이전트",
@@ -48,7 +48,7 @@
     "invitation_join": "참가",
     "invitation_decline": "거절",
     "log_out": "로그아웃",
-    "new_issue": "새 이슈",
+    "new_issue": "새 태스크",
     "new_issue_shortcut": "C",
     "pinned_label": "고정됨",
     "workspace_group": "워크스페이스",

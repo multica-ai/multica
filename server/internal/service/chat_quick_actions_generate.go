@@ -100,6 +100,12 @@ type ChatQuickActionsLLM interface {
 // agent-operations actions; this pass has no such context and must be told the
 // frame explicitly.
 //
+// Output language is settled by chatQuickActionsLanguageRule, which closes the
+// user message; this prompt only says that rule wins. Naming a specific
+// language in these stable instructions is what this file must avoid — a model
+// reading "…in Chinese" in a rule about button width will sometimes take it as
+// permission to answer in Chinese (MUL-5689).
+//
 // The word "JSON" must stay in this text: response_format=json_object is
 // rejected upstream without it.
 const chatQuickActionsSystemPrompt = `You generate follow-up suggestions for a chat between a user and an AI agent.
@@ -122,21 +128,47 @@ Quality bar:
   rewordings of the same request.
 
 Field rules:
-- "label": the button text. A short verb phrase — at most 6 words in English, at
-  most 12 characters in Chinese. No trailing punctuation, no quotes, no emoji.
-  It is a button, not a sentence.
+- "label": the button text. A short verb phrase — at most 6 words, or at most 12
+  characters in a script that does not put spaces between words. No trailing
+  punctuation, no quotes, no emoji. It is a button, not a sentence.
 - "prompt": the full message sent on the user's behalf. First person, the user's
   own voice, and SELF-CONTAINED — the agent never sees the label, so the prompt
   must carry every detail itself. One or two sentences.
 - "primary": true on exactly one suggestion, the single most likely next step.
   false on all others.
 
-Write both fields in the same language the USER has been writing in, regardless
-of what language the agent replied in.
+Language: the user message contains a LANGUAGE RULE line near the end. It is
+authoritative; follow it exactly.
 
 Output JSON only, exactly this shape:
 {"actions":[{"label":"...","prompt":"...","primary":true}]}
 No prose, no markdown, no code fences.`
+
+// chatQuickActionsLanguageRule closes the pass's user message and is the whole
+// language policy. It is last on purpose: everything above it is conversation
+// that may be in a language the pills must NOT be written in, and the rule has
+// to be the final thing read before the task line.
+//
+// It anchors on the MOST RECENT user turn, not on the window as a whole. A pill
+// sends a message as the user, so it follows how they are writing right now —
+// which also means switching language takes effect on the very next turn
+// instead of waiting for the window to tip.
+//
+// Everything else is named and excluded explicitly, because each one has been
+// observed to pull the output the wrong way (MUL-5689): the agent may reply in
+// another language, the system prompt is English, and ALREADY SUGGESTED
+// replays the previous turn's labels — which is what made one bad pass stick,
+// each Chinese label seeding the next round.
+//
+// Deliberately NOT done here: resolving the language server-side from
+// `"user".language` or from Unicode script detection. The stored preference is
+// the UI locale, not the language of this conversation, so an English UI would
+// silently override someone chatting in Chinese. Script detection fares worse —
+// it cannot tell one Latin-script language from another (so the model still has
+// to infer), it reads an earlier Korean turn over the latest Japanese one, and
+// a kana sentence carrying enough English identifiers classifies as Latin, at
+// which point a "never emit CJK" clause forbids the user's own script.
+const chatQuickActionsLanguageRule = `LANGUAGE RULE: Write every "label" and "prompt" in the same language as the most recent [user] message above. Ignore the agent's reply, older messages, the system instructions, and ALREADY SUGGESTED when choosing the language. If there is no [user] message, use the latest [agent] message.`
 
 // GenerateChatQuickActionsForTask runs one suggestion pass for a completed chat
 // turn and attaches the result to that turn's assistant row, broadcasting
@@ -176,7 +208,7 @@ func (s *TaskService) GenerateChatQuickActionsForTask(ctx context.Context, task 
 		return s.SupplementChatQuickActions(ctx, task, "", false)
 	}
 
-	prompt, err := s.buildChatQuickActionsPrompt(ctx, target)
+	prompt, err := s.buildChatQuickActionsPrompt(ctx, target, chatInputOwnerID(task))
 	if err != nil {
 		return err
 	}
@@ -304,7 +336,7 @@ func (s *TaskService) resolveChatQuickActionsPlaceholder(task db.AgentTaskQueue)
 // completion callback and this read would otherwise supply the context while
 // the result is still written to the older turn, and a newly-sent user message
 // would leave the window ending on a user row with no reply to build on.
-func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db.ChatMessage) (string, error) {
+func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db.ChatMessage, inputOwnerID pgtype.UUID) (string, error) {
 	// Strictly older than target, newest-first; reversed below. Over-fetch so
 	// dropped rows (no_response, failures) don't shrink the window below the
 	// intended turn count.
@@ -317,10 +349,30 @@ func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db
 	if err != nil {
 		return "", fmt.Errorf("load chat messages for quick actions: %w", err)
 	}
+	msgs := selectChatQuickActionsContext(rows, target, inputOwnerID)
+	return renderChatQuickActionsContext(msgs, collectPreviousChatQuickActions(msgs)), nil
+}
 
+func selectChatQuickActionsContext(rows []db.ChatMessage, target db.ChatMessage, inputOwnerID pgtype.UUID) []db.ChatMessage {
+	// A queued successor's input can be stored before target even though it is
+	// logically the next turn. Keep user rows only when their task has already
+	// answered inside this anchored window (or owns the target task's input;
+	// auto-retry replies use the child task ID while their input keeps the root).
+	answeredTaskIDs := map[pgtype.UUID]struct{}{target.TaskID: {}}
+	answeredTaskIDs[inputOwnerID] = struct{}{}
+	for _, msg := range rows {
+		if msg.Role == "assistant" && msg.TaskID.Valid {
+			answeredTaskIDs[msg.TaskID] = struct{}{}
+		}
+	}
 	msgs := make([]db.ChatMessage, 0, len(rows)+1)
 	for i := len(rows) - 1; i >= 0; i-- {
 		msg := rows[i]
+		if msg.Role == "user" && msg.TaskID.Valid {
+			if _, answered := answeredTaskIDs[msg.TaskID]; !answered {
+				continue
+			}
+		}
 		// Only ordinary turns carry usable text. A no_response row holds an
 		// English placeholder body and a failure row holds an error, neither of
 		// which describes what the conversation is about.
@@ -336,7 +388,7 @@ func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db
 		msgs = msgs[len(msgs)-(chatQuickActionsContextMessages-1):]
 	}
 	msgs = append(msgs, target)
-	return renderChatQuickActionsContext(msgs, collectPreviousChatQuickActions(msgs)), nil
+	return msgs
 }
 
 // collectPreviousChatQuickActions gathers the labels already offered in this
@@ -344,6 +396,11 @@ func (s *TaskService) buildChatQuickActionsPrompt(ctx context.Context, target db
 // included: on an explicit refresh it holds the pills the user is asking to
 // replace, and offering the same three back is the one outcome a refresh must
 // never produce.
+//
+// These labels are a de-duplication list ONLY. They are replayed verbatim, so
+// on a session that once drifted they are the wrong language — which is exactly
+// how one bad pass used to seed the next. chatQuickActionsLanguageRule names
+// them explicitly as something to ignore when choosing the output language.
 func collectPreviousChatQuickActions(msgs []db.ChatMessage) []string {
 	labels := make([]string, 0, chatQuickActionsPreviousMax)
 	seen := make(map[string]struct{}, chatQuickActionsPreviousMax)
@@ -407,7 +464,10 @@ func renderChatQuickActionsContext(msgs []db.ChatMessage, previous []string) str
 		}
 	}
 
-	b.WriteString("\nProduce the follow-up suggestions for the latest agent reply.")
+	b.WriteString("\n")
+	b.WriteString(chatQuickActionsLanguageRule)
+
+	b.WriteString("\n\nProduce the follow-up suggestions for the latest agent reply.")
 	return b.String()
 }
 

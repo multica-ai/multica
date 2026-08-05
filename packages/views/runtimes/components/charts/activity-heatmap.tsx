@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
-import { addDaysIso, estimateCost, todayIso, weekStartIso } from "../../utils";
+import { addDaysIso, estimateCost, formatUsd, todayIso, weekStartIso } from "../../utils";
 import { useT } from "../../../i18n";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
@@ -26,11 +26,6 @@ function getHeatmapColor(level: number): string {
   if (level === 0) return "var(--color-muted)";
   const opacities = ["20%", "45%", "70%", "100%"];
   return `color-mix(in oklch, var(--color-chart-1) ${opacities[level - 1]}, transparent)`;
-}
-
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
 }
 
 function fmtDate(iso: string): string {
@@ -284,19 +279,19 @@ function InsightsRow({ insights }: { insights: Insights }) {
       <Insight
         label="Busiest day"
         value={busiestDay ? fmtDate(busiestDay.date) : "—"}
-        sub={busiestDay ? fmtMoney(busiestDay.cost) : null}
+        sub={busiestDay ? formatUsd(busiestDay.cost) : null}
       />
       <Insight
         label="Most active weekday"
         value={busyDayName ?? "—"}
-        sub={busyDayName ? `avg ${fmtMoney(busyDayAvg)}` : null}
+        sub={busyDayName ? `avg ${formatUsd(busyDayAvg)}` : null}
       />
       <Insight
         label="Quietest weekday"
         value={quietDayName ?? "—"}
-        sub={quietDayName ? `avg ${fmtMoney(quietDayAvg)}` : null}
+        sub={quietDayName ? `avg ${formatUsd(quietDayAvg)}` : null}
       />
-      <Insight label={`${windowDays}-day total`} value={fmtMoney(totalCost)} />
+      <Insight label={`${windowDays}-day total`} value={formatUsd(totalCost)} />
     </dl>
   );
 }

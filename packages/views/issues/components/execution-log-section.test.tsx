@@ -27,7 +27,10 @@ vi.mock("./terminate-task-confirm-dialog", () => ({
   TerminateTaskConfirmDialog: () => null,
 }));
 
-import { ActiveTaskRow, TaskCommentCoverage } from "./execution-log-section";
+import { ActiveTaskRow, TaskCommentCoverage, IssueUsageTotal } from "./execution-log-section";
+import type { TaskUsage } from "@multica/core/types";
+import { act } from "@testing-library/react";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -214,5 +217,80 @@ describe("TaskCommentCoverage", () => {
     );
 
     expect(screen.getByText("包含 3 条评论")).toBeInTheDocument();
+  });
+});
+
+// claude-opus-5 at 5 / 25 / 0.50 / 6.25 per million.
+function usageSlice(overrides: Partial<TaskUsage> = {}): TaskUsage {
+  return {
+    provider: "anthropic",
+    model: "claude-opus-5",
+    input_tokens: 96_000,
+    output_tokens: 34_000,
+    cache_read_tokens: 712_000,
+    cache_write_tokens: 50_000,
+    ...overrides,
+  };
+}
+
+describe("per-run token usage", () => {
+  // An active row shows only its timer. The daemon reports usage once, after
+  // the run returns, and that write publishes no realtime event — so no
+  // running task carries usage in production. Asserting a token figure here
+  // would only prove that a hand-written fixture renders.
+  it("shows a running row's timer, and no token figure even if usage exists", () => {
+    renderWithI18n(
+      <ActiveTaskRow
+        task={makeTask({ usage: [usageSlice()] })}
+        issueId="issue-1"
+      />,
+    );
+
+    expect(screen.getByText("5m 04s")).toBeInTheDocument();
+    expect(screen.queryByText("892K")).not.toBeInTheDocument();
+    // And no em dash either — mid-run, "no figure yet" is not a claim worth
+    // making next to a ticking timer.
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+});
+
+describe("IssueUsageTotal pricing", () => {
+  afterEach(() => {
+    useCustomPricingStore.setState({ pricings: {} });
+  });
+
+  it("recomputes when a custom model rate is saved", () => {
+    // `estimateCost` reads the custom-rate store imperatively, so nothing
+    // re-renders this on a rate change unless the component subscribes. Before
+    // that subscription existed the figure stayed stale until the task list
+    // happened to refetch.
+    const unpriced: TaskUsage = {
+      provider: "acme",
+      model: "totally-made-up-model",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+    const task = makeTask({ status: "completed", usage: [unpriced] });
+
+    renderWithI18n(
+      <IssueUsageTotal tasks={[task]} alone onOpen={() => {}} />,
+    );
+
+    // No rate on file for this model yet.
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+
+    act(() => {
+      useCustomPricingStore.getState().setCustomPricing("acme/totally-made-up-model", {
+        input: 7,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+    });
+
+    // 1M input tokens at $7/M, without any refetch.
+    expect(screen.getByText("$7.00")).toBeInTheDocument();
   });
 });

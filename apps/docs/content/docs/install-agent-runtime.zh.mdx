@@ -25,6 +25,7 @@ Multica 当前会检测以下命令：
 | Grok Build | `grok` | [Grok Build 快速开始](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes 快速开始](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | Kiro CLI | `kiro-cli` | [安装 Kiro CLI](https://kiro.dev/docs/cli/installation/) |
 | OpenClaw | `openclaw` | [安装 OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 快速开始](https://opencode.ai/en/docs) |
@@ -39,6 +40,8 @@ Multica 当前会检测以下命令：
 ## 2. 在本机完成登录
 
 安装后，先在终端中单独启动一次工具，并按照它自己的流程登录或配置模型服务。工具在终端中无法完成请求时，守护进程调用它同样会失败。
+
+使用 Reasonix 时，请先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
 
 这些登录凭据由工具保存在本机。Multica 不会接收 Claude、Codex、Cursor 或其他 CLI 的登录 token。
 

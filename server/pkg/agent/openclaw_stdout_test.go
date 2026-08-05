@@ -3,11 +3,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -55,10 +58,39 @@ JSON
 }
 
 func newOpenclawTestBackend(bin string) *openclawBackend {
+	b, _ := newOpenclawTestBackendWithLog(bin)
+	return b
+}
+
+// newOpenclawTestBackendWithLog also captures what the backend logs, so a test
+// can assert that a specific branch was taken instead of inferring it from
+// timing. Warnings still reach stderr so a failure stays readable.
+func newOpenclawTestBackendWithLog(bin string) (*openclawBackend, *syncBuffer) {
+	buf := &syncBuffer{}
 	return &openclawBackend{cfg: Config{
 		ExecutablePath: bin,
-		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-	}}
+		Logger: slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, buf),
+			&slog.HandlerOptions{Level: slog.LevelWarn})),
+	}}, buf
+}
+
+// syncBuffer is a bytes.Buffer safe for the backend's logging goroutine to write
+// to while the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // TestOpenclawExecuteCompletesWhenCLINeverExits is the assertion that would have
@@ -153,7 +185,7 @@ func TestOpenclawExecuteStillWorksWhenCLIExits(t *testing.T) {
 //
 // The stub reproduces precisely that shape: stdout reaches EOF when the parent
 // exits (the descendant's own stdout goes to /dev/null so it is not a writer on
-// that pipe), while the descendant keeps stderr open for ~1s, well past the
+// that pipe), while the descendant keeps stderr open for 5s, well past the
 // 500ms delay.
 func TestOpenclawExecuteToleratesLingeringStderrHolder(t *testing.T) {
 	dir := t.TempDir()
@@ -164,7 +196,13 @@ case "$1" in
 esac
 # Holds ONLY stderr: its stdout is /dev/null, so the stdout pipe's sole writer
 # is this parent and EOF arrives as soon as it exits.
-( sleep 1 ) >/dev/null &
+#
+# 5s rather than something nearer WaitDelay: at ~1s a loaded runner could let
+# this descendant exit before Wait's 500ms timer elapses, so ErrWaitDelay would
+# never fire and the test would pass without exercising the branch it exists
+# for. The margin plus the log assertion below turn that vacuous pass into a
+# failure.
+( sleep 5 ) >/dev/null &
 cat <<'JSON'
 ` + completeOpenclawResult + `
 JSON
@@ -173,7 +211,7 @@ exit 0
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write openclaw stub: %v", err)
 	}
-	b := newOpenclawTestBackend(bin)
+	b, logs := newOpenclawTestBackendWithLog(bin)
 
 	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
 	if err != nil {
@@ -196,6 +234,13 @@ exit 0
 	}
 	if result.SessionID != "sess-abc" {
 		t.Errorf("session id = %q, want sess-abc", result.SessionID)
+	}
+	// Without this the test could pass on a run where the descendant happened to
+	// exit first, leaving the ErrWaitDelay branch untested and this regression
+	// silently uncovered.
+	if !strings.Contains(logs.String(), "held a pipe past WaitDelay") {
+		t.Errorf("the ErrWaitDelay branch was never taken, so this test proved "+
+			"nothing about it; logged warnings were: %q", logs.String())
 	}
 }
 

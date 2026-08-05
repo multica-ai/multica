@@ -25,6 +25,7 @@ Multica は現在、次のコマンドを検出します。
 | Grok Build | `grok` | [Grok Build クイックスタート](https://docs.x.ai/build/overview) |
 | Hermes Agent | `hermes` | [Hermes クイックスタート](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | Kiro CLI | `kiro-cli` | [Kiro CLI のインストール](https://kiro.dev/docs/cli/installation/) |
 | OpenClaw | `openclaw` | [OpenClaw のインストール](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
@@ -39,6 +40,8 @@ Multica は現在、次のコマンドを検出します。
 ## 2. ローカル環境でログインする
 
 インストール後、まずターミナルからツールを単独で起動し、各ツールの手順に従ってログインするか、モデルプロバイダーを設定してください。ターミナル上でリクエストを実行できない場合は、デーモンから呼び出しても失敗します。
+
+Reasonix を使う場合は、デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
 
 ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 

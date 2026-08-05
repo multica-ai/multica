@@ -55,6 +55,10 @@ import {
   QUICK_ACTIONS_PENDING_TIMEOUT_MS,
 } from "../chat/queries";
 import { useChatStore } from "../chat";
+import {
+  promotePendingChatTask,
+  removePendingChatTask,
+} from "../chat/pending";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
@@ -174,8 +178,12 @@ export function applyChatDoneToCache(
       (old) => patchLatestChatMessagePage(old, assistant),
     );
   }
-  // Replacement is in the messages list now; safe to drop pending.
-  qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+  // Replacement is in the messages list now; remove only this task. If a
+  // follow-up is queued, it becomes the next head in the same render tick.
+  qc.setQueryData<ChatPendingTask>(
+    chatKeys.pendingTask(sessionId),
+    (old) => removePendingChatTask(old, taskId),
+  );
   // Raise/clear the quick-actions placeholder marker. Kept OUTSIDE the
   // message caches deliberately: the authoritative refetch below replaces
   // those, and a flag stored on the message would vanish with it. Explicit
@@ -412,8 +420,14 @@ export function applyChatCancelFinalizedToCache(
     if (payload.message_id) {
       removeChatMessageFromCaches(qc, sessionId, payload.message_id);
     }
-    qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+    // Deferred finalization can arrive after a queued successor was promoted.
+    // Remove only the cancelled task so a late restore cannot hide newer work.
+    qc.setQueryData<ChatPendingTask>(
+      chatKeys.pendingTask(sessionId),
+      (old) => removePendingChatTask(old, payload.task_id),
+    );
     invalidateChatMessageQueries(qc, sessionId);
+    qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
     const isInitiator =
       !!payload.initiator_user_id &&
       !!currentUserId &&
@@ -1305,27 +1319,13 @@ export function useRealtimeSync(
       }
     });
 
-    // Chat task lifecycle writethrough: keep `chatKeys.pendingTask(sessionId)`
-    // synchronized with the server state machine via setQueryData rather than
-    // invalidate-refetch. Same pattern as task:message — the WS payload
-    // carries everything we need, and an HTTP roundtrip just to read what we
-    // already know would add latency to every stage transition.
-    //
-    // task:queued is emitted by EnqueueChatTask. The optimistic seed in
-    // chat-window.tsx may have already populated the cache with a temporary
-    // id; this handler upgrades it to the real task_id (and reaffirms status
-    // when reconnect replays the event for an already-running task).
+    // Lifecycle events are invalidation hints. They intentionally omit queue
+    // previews and message ids, so only the pending-task endpoint can author
+    // the complete queue shape.
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
       if (!payload.chat_session_id) return;
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(payload.chat_session_id),
-        (old) => ({
-          ...(old ?? {}),
-          task_id: payload.task_id,
-          status: "queued",
-        }),
-      );
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1340,11 +1340,10 @@ export function useRealtimeSync(
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
-        (old) => {
-          if (!old || old.task_id !== payload.task_id) return old;
-          return { ...old, status: "running" };
-        },
+        (old) => promotePendingChatTask(old, payload.task_id, "running"),
       );
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1358,11 +1357,10 @@ export function useRealtimeSync(
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
-        (old) => {
-          if (!old || old.task_id !== payload.task_id) return old;
-          return { ...old, status: "running" };
-        },
+        (old) => promotePendingChatTask(old, payload.task_id, "running"),
       );
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1378,11 +1376,15 @@ export function useRealtimeSync(
         if (!payload.chat_session_id) return;
         qc.setQueryData<ChatPendingTask>(
           chatKeys.pendingTask(payload.chat_session_id),
-          (old) => {
-            if (!old || old.task_id !== payload.task_id) return old;
-            return { ...old, status: "waiting_local_directory" };
-          },
+          (old) =>
+            promotePendingChatTask(
+              old,
+              payload.task_id,
+              "waiting_local_directory",
+            ),
         );
+        invalidateChatMessageQueries(qc, payload.chat_session_id);
+        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
         invalidatePendingAggregate();
       },
     );
@@ -1402,9 +1404,14 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => removePendingChatTask(old, payload.task_id),
+      );
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       invalidatePendingAggregate();
+      invalidateSessionLists();
     });
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
@@ -1414,12 +1421,11 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // `chat:done` (broadcast immediately before this event in CompleteTask)
-      // already wrote the assistant message into the messages cache and
-      // cleared `chatKeys.pendingTask`. This event is now only responsible
-      // for refreshing the per-user cross-session aggregate that drives the
-      // FAB indicator — `chat:done` is per-session and doesn't carry that
-      // information.
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => removePendingChatTask(old, payload.task_id),
+      );
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1436,7 +1442,10 @@ export function useRealtimeSync(
       // failure bubble shows up without requiring a page refresh. Pre-#1823
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => removePendingChatTask(old, payload.task_id),
+      );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
