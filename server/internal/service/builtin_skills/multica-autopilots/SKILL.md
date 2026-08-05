@@ -59,8 +59,16 @@ For "why didn't it run":
 2. `multica autopilot runs <id> --output json` — run status and failure reason.
 3. If assigned to a squad, inspect the squad: `multica squad get <squad-id> --output json`; execution goes to the leader.
 4. Inspect the target agent/runtime: `multica agent get <agent-id> --output json` and `multica runtime list --output json`.
-5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
+5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery. When a caller supplies `X-Multica-Scope-Claim` (for example `coderabbit-pr-fix-monitor:<canonical-pr-url>`), only one unfinished webhook run is admitted per scope; later deliveries return `status=scope_claimed` with the active `run_id` and may refresh `headSha` on the stored identity envelope.
 6. For `create_issue`, inspect the created issue if the run records one.
+
+## Webhook trigger configuration
+
+- Create: `multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json`
+- Optional GitHub HMAC: `multica autopilot trigger-update <autopilot-id> <trigger-id> --provider github` then set signing secret via the authenticated API (`PUT /api/autopilots/{id}/triggers/{triggerId}/signing-secret` with `{"signing_secret":"..."}`). The CLI never prints the secret; responses expose only `has_signing_secret` and a short hint.
+- Rotate ingress token: `multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json` (old URL stops working immediately).
+- Disable before external hookup: `multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled false --output json`.
+- Ingress acknowledges within the HTTP handler; durable dispatch is worker-owned with bounded retries. `webhook_delivery.raw_body` is retained for operator replay; agent-visible `trigger_payload` stores only the identity envelope (event, delivery id, repository, PR URL/number, head SHA, sender/app identity, scope claim).
 
 ## Side effects
 

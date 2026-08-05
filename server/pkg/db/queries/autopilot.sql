@@ -297,11 +297,11 @@ RETURNING *;
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id
+    webhook_delivery_id, scope_claim
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
-    sqlc.narg('webhook_delivery_id')
+    sqlc.narg('webhook_delivery_id'), sqlc.narg('scope_claim')
 ) RETURNING *;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
@@ -591,3 +591,17 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
+-- name: GetActiveAutopilotRunByScopeClaim :one
+-- Returns the in-flight webhook run holding a caller-supplied scope claim.
+SELECT * FROM autopilot_run
+WHERE autopilot_id = $1
+  AND scope_claim = $2
+  AND source = 'webhook'
+  AND status IN ('pending', 'issue_created', 'running')
+LIMIT 1;
+
+-- name: UpdateAutopilotRunTriggerPayload :one
+UPDATE autopilot_run
+SET trigger_payload = $2
+WHERE id = $1
+RETURNING *;

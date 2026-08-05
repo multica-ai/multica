@@ -160,7 +160,16 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if delivery.ReceivedAt.Valid {
 		envelope.Request.ReceivedAt = delivery.ReceivedAt.Time.UTC().Format(time.RFC3339)
 	}
-	payload, err := json.Marshal(envelope)
+	scopeClaim := ""
+	if delivery.ScopeClaim.Valid {
+		scopeClaim = delivery.ScopeClaim.String
+	}
+	dedupeKey := ""
+	if delivery.DedupeKey.Valid {
+		dedupeKey = delivery.DedupeKey.String
+	}
+	storedEnvelope := buildStoredWebhookEnvelope(delivery.Provider, envelope, scopeClaim, dedupeKey, headers, delivery.RawBody)
+	payload, err := json.Marshal(storedEnvelope)
 	if err != nil {
 		return true, w.retryOrFail(ctx, delivery, fmt.Errorf("encode envelope: %w", err))
 	}

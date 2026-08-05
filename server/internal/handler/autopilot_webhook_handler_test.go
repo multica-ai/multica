@@ -684,18 +684,15 @@ func TestWebhookHandler_ActiveDispatchesRunWithPayload(t *testing.T) {
 	if uuidToString(run.TriggerID) != trig.ID {
 		t.Fatalf("run.trigger_id mismatch: %q vs %q", uuidToString(run.TriggerID), trig.ID)
 	}
-	var payload struct {
-		Event        string                 `json:"event"`
-		EventPayload map[string]interface{} `json:"eventPayload"`
-	}
+	var payload StoredWebhookEnvelope
 	if err := json.Unmarshal(run.TriggerPayload, &payload); err != nil {
 		t.Fatalf("payload decode: %v body=%s", err, string(run.TriggerPayload))
 	}
 	if payload.Event != "demo.received" {
 		t.Fatalf("envelope event: %q", payload.Event)
 	}
-	if payload.EventPayload["k"] != "v" {
-		t.Fatalf("envelope payload: %#v", payload.EventPayload)
+	if strings.Contains(string(run.TriggerPayload), `"eventPayload"`) {
+		t.Fatalf("raw eventPayload should not be stored on run: %s", string(run.TriggerPayload))
 	}
 
 	// last_fired_at must have been bumped.

@@ -157,6 +157,7 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 	triggerID pgtype.UUID,
 	payload []byte,
 	deliveryID pgtype.UUID,
+	scopeClaim pgtype.Text,
 ) (*db.AutopilotRun, error) {
 	if !deliveryID.Valid {
 		return nil, fmt.Errorf("admit webhook delivery: delivery_id is required")
@@ -186,7 +187,9 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 		if err != nil {
 			return s.recoverConcurrentWebhookAdmission(
 				ctx,
+				autopilot.ID,
 				deliveryID,
+				scopeClaim,
 				fmt.Errorf("admit webhook delivery: create skipped run: %w", err),
 			)
 		}
@@ -205,11 +208,14 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 		TriggerPayload:    payload,
 		SquadID:           autopilotSquadAttribution(autopilot),
 		WebhookDeliveryID: deliveryID,
+		ScopeClaim:        scopeClaim,
 	})
 	if err != nil {
 		return s.recoverConcurrentWebhookAdmission(
 			ctx,
+			autopilot.ID,
 			deliveryID,
+			scopeClaim,
 			fmt.Errorf("admit webhook delivery: create run: %w", err),
 		)
 	}
@@ -219,7 +225,9 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 
 func (s *AutopilotService) recoverConcurrentWebhookAdmission(
 	ctx context.Context,
+	autopilotID pgtype.UUID,
 	deliveryID pgtype.UUID,
+	scopeClaim pgtype.Text,
 	cause error,
 ) (*db.AutopilotRun, error) {
 	// Another server replica may have claimed the durable delivery after
@@ -236,6 +244,18 @@ func (s *AutopilotService) recoverConcurrentWebhookAdmission(
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("admit webhook delivery: reload concurrent run: %w", err)
 	}
+	if scopeClaim.Valid && scopeClaim.String != "" {
+		byScope, scopeErr := s.Queries.GetActiveAutopilotRunByScopeClaim(ctx, db.GetActiveAutopilotRunByScopeClaimParams{
+			AutopilotID: autopilotID,
+			ScopeClaim:  scopeClaim,
+		})
+		if scopeErr == nil {
+			return &byScope, nil
+		}
+		if !errors.Is(scopeErr, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("admit webhook delivery: reload scope claim run: %w", scopeErr)
+		}
+	}
 	return nil, cause
 }
 
@@ -250,7 +270,13 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 	payload []byte,
 	deliveryID pgtype.UUID,
 ) (*db.AutopilotRun, error) {
-	run, err := s.AdmitAutopilotWebhookDelivery(ctx, autopilot, triggerID, payload, deliveryID)
+	scopeClaim := pgtype.Text{}
+	if deliveryID.Valid {
+		if delivery, loadErr := s.Queries.GetWebhookDelivery(ctx, deliveryID); loadErr == nil {
+			scopeClaim = delivery.ScopeClaim
+		}
+	}
+	run, err := s.AdmitAutopilotWebhookDelivery(ctx, autopilot, triggerID, payload, deliveryID, scopeClaim)
 	if err != nil {
 		return nil, err
 	}
@@ -1642,34 +1668,99 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
 
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
-		event := "webhook.received"
-		var payloadJSON []byte
-		var env struct {
-			Event        string          `json:"event"`
-			EventPayload json.RawMessage `json:"eventPayload"`
+		var stored struct {
+			Event      string `json:"event"`
+			Identity   struct {
+				DeliveryID  string `json:"deliveryId"`
+				Repository  string `json:"repository"`
+				PrURL       string `json:"prUrl"`
+				PrNumber    int    `json:"prNumber"`
+				HeadSHA     string `json:"headSha"`
+				SenderLogin string `json:"senderLogin"`
+				SenderType  string `json:"senderType"`
+				AppSlug     string `json:"appSlug"`
+			} `json:"identity"`
+			ScopeClaim string `json:"scopeClaim"`
 		}
-		if err := json.Unmarshal(run.TriggerPayload, &env); err == nil {
-			if env.Event != "" {
-				event = env.Event
+		if err := json.Unmarshal(run.TriggerPayload, &stored); err == nil && stored.Event != "" {
+			b.WriteString("\n\nWebhook event: ")
+			b.WriteString(stored.Event)
+			b.WriteString("\n\nWebhook identity:\n")
+			if stored.Identity.DeliveryID != "" {
+				b.WriteString("- deliveryId: ")
+				b.WriteString(stored.Identity.DeliveryID)
+				b.WriteString("\n")
 			}
-			if len(env.EventPayload) > 0 {
-				if pretty, err := prettifyJSON(env.EventPayload); err == nil {
-					payloadJSON = pretty
+			if stored.Identity.Repository != "" {
+				b.WriteString("- repository: ")
+				b.WriteString(stored.Identity.Repository)
+				b.WriteString("\n")
+			}
+			if stored.Identity.PrURL != "" {
+				b.WriteString("- prUrl: ")
+				b.WriteString(stored.Identity.PrURL)
+				b.WriteString("\n")
+			}
+			if stored.Identity.PrNumber != 0 {
+				b.WriteString("- prNumber: ")
+				b.WriteString(fmt.Sprintf("%d", stored.Identity.PrNumber))
+				b.WriteString("\n")
+			}
+			if stored.Identity.HeadSHA != "" {
+				b.WriteString("- headSha: ")
+				b.WriteString(stored.Identity.HeadSHA)
+				b.WriteString("\n")
+			}
+			if stored.Identity.SenderLogin != "" {
+				b.WriteString("- sender: ")
+				b.WriteString(stored.Identity.SenderLogin)
+				if stored.Identity.SenderType != "" {
+					b.WriteString(" (")
+					b.WriteString(stored.Identity.SenderType)
+					b.WriteString(")")
+				}
+				b.WriteString("\n")
+			}
+			if stored.Identity.AppSlug != "" {
+				b.WriteString("- app: ")
+				b.WriteString(stored.Identity.AppSlug)
+				b.WriteString("\n")
+			}
+			if stored.ScopeClaim != "" {
+				b.WriteString("- scopeClaim: ")
+				b.WriteString(stored.ScopeClaim)
+				b.WriteString("\n")
+			}
+		} else {
+			event := "webhook.received"
+			var payloadJSON []byte
+			var env struct {
+				Event        string          `json:"event"`
+				EventPayload json.RawMessage `json:"eventPayload"`
+			}
+			if err := json.Unmarshal(run.TriggerPayload, &env); err == nil {
+				if env.Event != "" {
+					event = env.Event
+				}
+				if len(env.EventPayload) > 0 {
+					if pretty, err := prettifyJSON(env.EventPayload); err == nil {
+						payloadJSON = pretty
+					}
 				}
 			}
-		}
-		if len(payloadJSON) == 0 {
-			if pretty, err := prettifyJSON(run.TriggerPayload); err == nil {
-				payloadJSON = pretty
-			} else {
-				payloadJSON = run.TriggerPayload
+			if len(payloadJSON) == 0 {
+				if pretty, err := prettifyJSON(run.TriggerPayload); err == nil {
+					payloadJSON = pretty
+				} else {
+					payloadJSON = run.TriggerPayload
+				}
 			}
+			b.WriteString("\n\nWebhook event: ")
+			b.WriteString(event)
+			b.WriteString("\n\nWebhook payload:\n```json\n")
+			b.Write(payloadJSON)
+			b.WriteString("\n```")
 		}
-		b.WriteString("\n\nWebhook event: ")
-		b.WriteString(event)
-		b.WriteString("\n\nWebhook payload:\n```json\n")
-		b.Write(payloadJSON)
-		b.WriteString("\n```")
 	}
 
 	return pgtype.Text{String: b.String(), Valid: true}

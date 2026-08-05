@@ -983,3 +983,101 @@ func TestSetSigningSecretParams_NullableWrite(t *testing.T) {
 		t.Fatalf("sqlc NULL write: %v", err)
 	}
 }
+
+func TestWebhookHandler_ScopeClaimReturnsActiveRun(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ScopeClaim Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	scope := "coderabbit-pr-fix-monitor:https://github.com/o/r/pull/42"
+
+	w1 := postWebhook(t, *trig.WebhookToken, map[string]any{"hello": "first"}, map[string]string{
+		"X-Multica-Scope-Claim": scope,
+		"Idempotency-Key":       "delivery-1",
+	})
+	delivery1 := requireAcceptedWebhookResponse(t, w1)
+	run1 := processQueuedWebhookDelivery(t, delivery1)
+	runID1 := uuidToString(run1.AutopilotRunID)
+
+	w2 := postWebhook(t, *trig.WebhookToken, map[string]any{"hello": "second"}, map[string]string{
+		"X-Multica-Scope-Claim": scope,
+		"Idempotency-Key":       "delivery-2",
+	})
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "scope_claimed" {
+		t.Fatalf("status: %#v", resp)
+	}
+	if resp["run_id"] != runID1 {
+		t.Fatalf("run_id: got %v want %s", resp["run_id"], runID1)
+	}
+
+	runs, err := testHandler.Queries.ListAutopilotRuns(context.Background(), db.ListAutopilotRunsParams{AutopilotID: parseUUID(apID), Limit: 20, Offset: 0})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+}
+
+func TestWebhookHandler_ScopeClaimUpdatesHeadSHA(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ScopeHead Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	setTriggerProvider(t, trig.ID, "github")
+	scope := "coderabbit-pr-fix-monitor:https://github.com/o/r/pull/7"
+
+	body1 := map[string]any{
+		"action": "opened",
+		"pull_request": map[string]any{
+			"number":   7,
+			"html_url": "https://github.com/o/r/pull/7",
+			"head":     map[string]any{"sha": "sha-old"},
+		},
+		"repository": map[string]any{"full_name": "o/r"},
+	}
+	w1 := postWebhook(t, *trig.WebhookToken, body1, map[string]string{
+		"X-Multica-Scope-Claim": scope,
+		"X-GitHub-Delivery":     "gh-1",
+		"X-GitHub-Event":        "pull_request",
+	})
+	processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w1))
+
+	body2 := map[string]any{
+		"action": "synchronize",
+		"pull_request": map[string]any{
+			"number":   7,
+			"html_url": "https://github.com/o/r/pull/7",
+			"head":     map[string]any{"sha": "sha-new"},
+		},
+		"repository": map[string]any{"full_name": "o/r"},
+	}
+	w2 := postWebhook(t, *trig.WebhookToken, body2, map[string]string{
+		"X-Multica-Scope-Claim": scope,
+		"X-GitHub-Delivery":     "gh-2",
+		"X-GitHub-Event":        "pull_request",
+	})
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w2.Code)
+	}
+
+	runs, err := testHandler.Queries.ListAutopilotRuns(context.Background(), db.ListAutopilotRunsParams{AutopilotID: parseUUID(apID), Limit: 20, Offset: 0})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	var stored StoredWebhookEnvelope
+	if err := json.Unmarshal(runs[0].TriggerPayload, &stored); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if stored.Identity.HeadSHA != "sha-new" {
+		t.Fatalf("head sha not updated: %q", stored.Identity.HeadSHA)
+	}
+}

@@ -431,11 +431,6 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	envelopeBytes, err := json.Marshal(envelope)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
-		return
-	}
 	// 6. Provider + dedupe + signature.
 	provider := trigRow.Provider
 	if provider == "" {
@@ -443,6 +438,13 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	}
 	dedupeKey, dedupeSource := extractDedupeKey(provider, r.Header)
 	sigStatus := verifyWebhookSignatureForProvider(provider, trigRow.SigningSecret.String, r.Header, body)
+	scopeClaim := extractScopeClaim(r.Header)
+	storedEnvelope := buildStoredWebhookEnvelope(provider, envelope, scopeClaim, dedupeKey, r.Header, body)
+	storedBytes, err := json.Marshal(storedEnvelope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
+		return
+	}
 
 	// 7. Persist (INSERT delivery). Dedupe collision → bump existing row.
 	delivery, dup, err := h.persistInboundDelivery(r, persistDeliveryInput{
@@ -457,6 +459,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		ContentType:     envelope.Request.ContentType,
 		RawBody:         body,
 		SelectedHeaders: selectedHeadersJSON(r.Header),
+		ScopeClaim:      scopeClaim,
 	})
 	if err != nil {
 		slog.Error("webhook: persist delivery failed",
@@ -559,6 +562,34 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if scopeClaim != "" {
+		if existing, scopeErr := h.Queries.GetActiveAutopilotRunByScopeClaim(r.Context(), db.GetActiveAutopilotRunByScopeClaimParams{
+			AutopilotID: autopilot.ID,
+			ScopeClaim:  pgtype.Text{String: scopeClaim, Valid: true},
+		}); scopeErr == nil {
+			if merged, changed, mergeErr := mergeStoredEnvelopeHeadSHA(existing.TriggerPayload, storedBytes); mergeErr == nil && changed {
+				if _, updateErr := h.Queries.UpdateAutopilotRunTriggerPayload(r.Context(), db.UpdateAutopilotRunTriggerPayloadParams{
+					ID:              existing.ID,
+					TriggerPayload:  merged,
+				}); updateErr != nil {
+					slog.Warn("webhook: update scope head sha failed",
+						"run_id", uuidToString(existing.ID),
+						"error", updateErr,
+					)
+				}
+			}
+			respBody := map[string]any{
+				"status":      "scope_claimed",
+				"delivery_id": uuidToString(delivery.ID),
+				"run_id":      uuidToString(existing.ID),
+				"reason":      "scope_claim_active",
+			}
+			h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, "scope_claim_active")
+			writeJSON(w, http.StatusOK, respBody)
+			return
+		}
+	}
+
 	// 11. Allocate the idempotent run synchronously so existing webhook clients
 	//     keep the v0.4.0 response contract. The queued delivery remains the
 	//     durable dispatch source: the worker resumes this run after the response
@@ -567,8 +598,9 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		r.Context(),
 		autopilot,
 		trigRow.ID,
-		envelopeBytes,
+		storedBytes,
 		delivery.ID,
+		pgtype.Text{String: scopeClaim, Valid: scopeClaim != ""},
 	)
 	if err != nil {
 		slog.Warn("webhook admission failed",
@@ -780,6 +812,7 @@ type persistDeliveryInput struct {
 	ContentType     string
 	RawBody         []byte
 	SelectedHeaders []byte
+	ScopeClaim      string
 }
 
 // persistInboundDelivery INSERTs a fresh `queued` delivery, returning (row,
@@ -804,6 +837,9 @@ func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInpu
 	}
 	if in.ContentType != "" {
 		params.ContentType = pgtype.Text{String: in.ContentType, Valid: true}
+	}
+	if in.ScopeClaim != "" {
+		params.ScopeClaim = pgtype.Text{String: in.ScopeClaim, Valid: true}
 	}
 
 	delivery, err := h.Queries.CreateWebhookDelivery(r.Context(), params)
