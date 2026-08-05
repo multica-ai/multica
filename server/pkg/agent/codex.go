@@ -894,7 +894,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				// thread may hold the submitted input or an unfinished turn.
 				// Resuming it again could duplicate that input; start a fresh
 				// thread instead and keep ResumeExpected so codexTurnInput
-				// prepends the continuity notice about the lost context.
+				// prepends the caller's continuity notice about the lost
+				// context.
 				if attemptOpts.ResumeSessionID != "" {
 					b.cfg.Logger.Warn("codex retry dropping resume pointer after model catalog refresh failure",
 						"prior_thread_id", attemptOpts.ResumeSessionID,
@@ -1397,13 +1398,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// 3. Send turn and wait for completion. When a resume was expected but we
 		// ended up on a fresh thread (the live thread/resume RPC was rejected — a
 		// corrupt/incompatible rollout, server-side thread GC, schema drift — or a
-		// transport failure forced a fresh retry), prepend a continuity notice so
-		// the agent tells the user the prior conversation could not be restored.
-		// The daemon's pre-flight gates only catch cases detectable before launch;
+		// transport failure forced a fresh retry), prepend the caller's continuity
+		// notice so the agent does not assume continuity it no longer has. The
+		// daemon's pre-flight gates only catch cases detectable before launch;
 		// this covers the ones only the live resume reveals (MUL-4424).
+		//
+		// Whether that notice asks the agent to tell the USER is the caller's
+		// call, not ours: it depends on whether this surface's conversation is
+		// still readable, which this package cannot see (MUL-5722).
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.DurableHistoryAvailable),
+			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -1705,31 +1710,26 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-// codexResumeUnavailableNotice is prepended to the first turn's input when a
-// resume was expected but Codex ended up on a fresh thread. It mirrors the
-// daemon's Session Continuity Notice so the wording is the same whether the
-// loss is detected pre-launch (daemon gate) or only by the live thread/resume
-// RPC (MUL-4424) — keep the two in sync, execenv holds the canonical text.
-//
-// durableHistory picks which of the two the caller gets; see
-// ExecOptions.DurableHistoryAvailable for why an issue and a chat differ.
-func codexResumeUnavailableNotice(durableHistory bool) string {
-	if durableHistory {
-		return "[System notice] You were expected to continue an earlier conversation, but restoring that provider session failed and this is a fresh thread. The issue and its comments are unaffected — that record is the authoritative version of this conversation, and reading it reconstructs it. What is gone is only your own working memory from earlier turns: what you tried, what you ruled out, how far you had got. Re-derive what you need rather than assuming it. Do not open your reply by announcing this; raise it only where it actually matters.\n\n"
-	}
-	return "[System notice] You were expected to continue an earlier conversation, but restoring that session failed and this is a fresh thread with no memory of the previous turns. This conversation's history lived only in that session, so nothing you can read now reconstructs it. When you reply, tell the user up front (one short sentence) that the previous conversation context could not be restored and this is a new session.\n\n"
-}
+// The continuity notice this backend prepends is supplied by the caller via
+// ExecOptions.ResumeContinuityNotice rather than written here. It used to be a
+// constant in this file that mirrored the daemon's, which meant two hand-kept
+// copies of the same paragraph and no way for this package to know which
+// surface it was running on — the wording is only correct if you know whether
+// the conversation is still readable (MUL-5722).
 
 // codexTurnInput builds the input content for the first turn/start. When a
 // resume was expected (resumeExpected) but the backend landed on a fresh thread
-// (!resumed), it prepends the continuity notice matching what the surface
-// actually lost, so the run does not silently continue as new. The notice is
-// folded into the same text block as the prompt to stay within the
-// single-text-block turn input Codex already accepts.
-func codexTurnInput(prompt string, resumeExpected, resumed, durableHistory bool) []map[string]any {
+// (!resumed), it prepends the caller's continuity notice so the run does not
+// silently continue as new. The notice is folded into the same text block as
+// the prompt to stay within the single-text-block turn input Codex accepts.
+//
+// An empty notice means the caller has already disclosed the loss in the prompt
+// itself, so this must add nothing — that is the whole guard against a turn
+// carrying the same paragraph twice.
+func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) []map[string]any {
 	text := prompt
 	if resumeExpected && !resumed {
-		text = codexResumeUnavailableNotice(durableHistory) + prompt
+		text = notice + prompt
 	}
 	return []map[string]any{{"type": "text", "text": text}}
 }

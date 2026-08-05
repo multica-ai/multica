@@ -1935,6 +1935,9 @@ func TestCodexTurnInput(t *testing.T) {
 	t.Parallel()
 
 	const prompt = "do the task"
+	// Stands in for whatever the daemon computed for this surface; the backend
+	// only carries it, so the exact wording is the caller's business.
+	const chatNotice = "[System notice] the previous conversation context could not be restored.\n\n"
 	text := func(input []map[string]any) string {
 		if len(input) != 1 {
 			t.Fatalf("expected a single input block, got %d", len(input))
@@ -1944,9 +1947,8 @@ func TestCodexTurnInput(t *testing.T) {
 	}
 
 	// Resume expected but the backend fell back to a fresh thread → disclose,
-	// and the original prompt must still be delivered. Without a durable
-	// record (chat) the disclosure is user-facing.
-	fallback := text(codexTurnInput(prompt, true, false, false))
+	// and the original prompt must still be delivered.
+	fallback := text(codexTurnInput(prompt, true, false, chatNotice))
 	if !strings.Contains(fallback, "previous conversation context could not be restored") {
 		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
 	}
@@ -1956,10 +1958,10 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Successful resume, or an ordinary fresh start with no resume expected →
 	// no notice, prompt delivered verbatim.
-	if got := text(codexTurnInput(prompt, true, true, false)); got != prompt {
+	if got := text(codexTurnInput(prompt, true, true, chatNotice)); got != prompt {
 		t.Errorf("successful resume must not add a notice, got:\n%s", got)
 	}
-	if got := text(codexTurnInput(prompt, false, false, false)); got != prompt {
+	if got := text(codexTurnInput(prompt, false, false, chatNotice)); got != prompt {
 		t.Errorf("fresh start must not add a notice, got:\n%s", got)
 	}
 }
@@ -1970,29 +1972,19 @@ func TestCodexTurnInput(t *testing.T) {
 // was lost" tells the user the discussion is gone when none of it is. The
 // notice still has to fire — the agent must not silently assume continuity —
 // but on that surface it informs the agent instead of scripting an apology.
-func TestCodexTurnInputNoticeMatchesWhatTheSurfaceLost(t *testing.T) {
+func TestCodexTurnInputSuppressesNoticeWhenCallerAlreadyDisclosed(t *testing.T) {
 	t.Parallel()
 
+	// An empty notice is how the caller says "the prompt already carries it".
+	// Honouring that is the backend's half of the no-duplicate guarantee: on
+	// the daemon's fresh-session retry the prompt already ends with the
+	// continuity notice, and before MUL-5722 this path prepended a second copy
+	// of the same paragraph into the same turn.
 	const prompt = "do the task"
-	notice := func(durableHistory bool) string {
-		input := codexTurnInput(prompt, true, false, durableHistory)
-		s, _ := input[0]["text"].(string)
-		return strings.TrimSuffix(s, prompt)
-	}
-
-	issue := notice(true)
-	if strings.Contains(issue, "tell the user") {
-		t.Errorf("issue notice must not order an announcement — the comments are intact:\n%s", issue)
-	}
-	for _, want := range []string{"comments are unaffected", "your own working memory"} {
-		if !strings.Contains(issue, want) {
-			t.Errorf("issue notice missing %q, so the agent is not told what it actually lost:\n%s", want, issue)
-		}
-	}
-
-	chat := notice(false)
-	if !strings.Contains(chat, "tell the user up front") {
-		t.Errorf("chat notice must stay user-facing — that history is genuinely gone:\n%s", chat)
+	input := codexTurnInput(prompt, true, false, "")
+	got, _ := input[0]["text"].(string)
+	if got != prompt {
+		t.Fatalf("empty notice must leave the prompt untouched, got:\n%s", got)
 	}
 }
 
@@ -3619,8 +3611,12 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 		`fi`+"\n")
 
 	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
-		ResumeSessionID:           "thr-prior",
-		ResumeExpected:            true,
+		ResumeSessionID: "thr-prior",
+		ResumeExpected:  true,
+		// Supplied by the daemon since MUL-5722: this package no longer holds
+		// the wording, because only the caller knows whether the surface's
+		// conversation can still be read.
+		ResumeContinuityNotice:    "[System notice] the previous conversation context could not be restored.\n\n",
 		Timeout:                   20 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, 20*time.Second)
@@ -3649,8 +3645,8 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 	if !strings.Contains(string(second), "thread/start") {
 		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
 	}
-	// ResumeExpected survives the cleared pointer, so the agent is told the
-	// prior context could not be restored.
+	// ResumeExpected survives the cleared pointer, so the caller's notice is
+	// still prepended and the agent is told the prior context is gone.
 	if !strings.Contains(string(second), "previous conversation context could not be restored") {
 		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
 	}

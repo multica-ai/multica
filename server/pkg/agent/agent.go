@@ -56,23 +56,23 @@ type ExecOptions struct {
 	// the backend surfaces a continuity notice instead of silently
 	// restarting. Currently honoured by the codex backend (MUL-4424).
 	ResumeExpected bool
-	// DurableHistoryAvailable says the caller keeps its own readable record of
-	// this conversation, so a lost provider session costs the agent its private
-	// working memory rather than the discussion itself. True for an issue, whose
-	// comments the agent re-reads every turn; false for a web chat, whose history
-	// lives only inside the provider session (see daemon.buildChatPrompt).
+	// ResumeContinuityNotice is the text to prepend to the first turn when
+	// ResumeExpected holds but the backend lands on a fresh thread anyway. The
+	// caller owns the wording because only it knows what the surface lost — an
+	// issue's comments and a Slack channel's history survive and can be re-read,
+	// a web chat's and a Feishu channel's cannot — and that difference decides
+	// whether the agent should tell the user anything at all (MUL-5722).
 	//
-	// It selects the wording of the continuity notice above, and specifically
-	// whether the agent is told to announce the gap to the user. Announcing it on
-	// a surface where nothing visible was lost reads as "the discussion is gone"
-	// when every word of it survives, which is worse than staying quiet
-	// (MUL-5722). Defaults to false so a caller that does not set it keeps the
-	// louder, safer wording.
-	DurableHistoryAvailable bool
-	ExtraArgs               []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs              []string        // per-agent CLI arguments appended after ExtraArgs
-	QwenpawWorkspace        string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
-	McpConfig               json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// Empty means say nothing, and the caller MUST leave it empty when its own
+	// prompt already carries the notice. That is what keeps a turn from paying
+	// for the same paragraph twice: the daemon injects it whenever it already
+	// knows the resume is gone, and the backend covers only the case the daemon
+	// cannot see — a live resume RPC rejected mid-run.
+	ResumeContinuityNotice string
+	ExtraArgs              []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs             []string        // per-agent CLI arguments appended after ExtraArgs
+	QwenpawWorkspace       string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
+	McpConfig              json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means

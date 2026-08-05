@@ -305,8 +305,8 @@ func TestSessionContinuityNoticeLivesOutsideBrief(t *testing.T) {
 		"could NOT be restored",
 		"tell the user up front",
 	} {
-		if !strings.Contains(SessionContinuityNoticeChat, want) {
-			t.Errorf("SessionContinuityNoticeChat missing %q", want)
+		if !strings.Contains(SessionContinuityNoticeUnrecoverable, want) {
+			t.Errorf("SessionContinuityNoticeUnrecoverable missing %q", want)
 		}
 	}
 

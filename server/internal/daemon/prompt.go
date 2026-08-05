@@ -8,35 +8,37 @@ import (
 )
 
 // sessionContinuityNoticeFor picks the notice matching what this surface
-// actually lost. See the two constants in execenv for why they differ; the
-// short version is that an issue's conversation survives in its comments and a
-// web chat's does not, so only the latter warrants telling the user.
+// actually lost. See the constants in execenv for the full reasoning; the
+// question is whether the conversation is still READABLE, not whether it is a
+// chat — an issue's comments and a Slack channel's history both are, a web
+// chat's and a Feishu channel's are not (MUL-5722).
 func sessionContinuityNoticeFor(task Task) string {
-	if task.ChatSessionID != "" {
-		return execenv.SessionContinuityNoticeChat
+	if task.ChatSessionID == "" {
+		return execenv.SessionContinuityNoticeIssue
 	}
-	return execenv.SessionContinuityNoticeIssue
+	if task.ChatChannelType == execenv.ChannelTypeSlack {
+		return execenv.SessionContinuityNoticeChannelHistory
+	}
+	// Web chat (no channel type) and every channel Multica cannot read back.
+	return execenv.SessionContinuityNoticeUnrecoverable
 }
 
-// freshSessionRetryPrompt prefixes an explicit context-loss disclosure onto the
-// (already cold-rebuilt) prompt used for the daemon's single fresh-session
-// retry. When a resumed run is refused — the transcript is gone, belongs to
-// another account, or (GH #5975) carries history the provider now rejects —
-// the retry starts a brand-new provider session with none of the prior
-// conversation. Stating that up front stops the agent from assuming continuity
-// (e.g. "as I said earlier", relying on files/state it never created). The
-// current user prompt is preserved verbatim below the notice.
+// backendResumeContinuityNotice returns the notice the BACKEND should inject if
+// it lands on a fresh thread, or "" when the prompt already carries one.
 //
-// Addressed to the agent only: it says what to do, never what to announce.
-// Whether the user hears about the gap is decided by the continuity notice
-// above, which knows the surface — this one fires on both and must not
-// second-guess it (MUL-5722).
-func freshSessionRetryPrompt(task Task, prompt string) string {
-	const common = "⚠️ Note: a previous provider session for this task could not be resumed, so this is a brand-new session. None of the earlier provider conversation context is available to you now. Do not assume any prior back-and-forth, in-memory state, or uncommitted work carried over — "
-	if task.ChatSessionID != "" {
-		return common + "this chat's earlier messages are not recoverable, so work from what the user tells you in this turn.\n\n" + prompt
+// Only one notice may reach a turn. Two paths can produce it — the daemon,
+// which appends it to the prompt whenever it already knows the resume is gone,
+// and the backend, which is the only one that can see a live resume RPC being
+// rejected mid-run. Before MUL-5722 both fired on the codex overflow retry, so
+// the same paragraph was paid for twice in one turn and maintained as two
+// hand-written strings. Deriving the backend's copy from the daemon's, and
+// suppressing it exactly when the prompt already said it, makes a duplicate
+// structurally impossible rather than merely unlikely.
+func backendResumeContinuityNotice(task Task) string {
+	if task.PriorSessionResumeUnavailable {
+		return ""
 	}
-	return common + "re-read the issue and the triggering thread to reconstruct what you need before acting.\n\n" + prompt
+	return sessionContinuityNoticeFor(task)
 }
 
 // Turn-mode markers consumed by the runtime brief's mode router

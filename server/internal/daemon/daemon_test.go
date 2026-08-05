@@ -696,69 +696,77 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	}
 }
 
-// TestFreshSessionRetryPrompt asserts the daemon's single fresh-session retry
-// preserves the current prompt verbatim and prefixes an explicit context-loss
-// disclosure (GH #5975), so the new provider session does not assume continuity
-// with the conversation that could not be resumed.
-func TestFreshSessionRetryPrompt(t *testing.T) {
-	t.Parallel()
-
-	task := Task{
-		IssueID:          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-		TriggerCommentID: "c0ffee00-0000-0000-0000-000000000000",
-		Agent:            &AgentData{Name: "Local Kiro"},
-	}
-	base := BuildPrompt(task, "kiro")
-
-	got := freshSessionRetryPrompt(task, base)
-
-	// The disclosure must come first and clearly signal a brand-new session
-	// with no prior provider context.
-	for _, want := range []string{
-		"brand-new session",
-		"could not be resumed",
-		"re-read the issue",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("fresh-retry prompt missing disclosure %q; got:\n%s", want, got)
-		}
-	}
-	if !strings.HasSuffix(got, base) {
-		t.Fatal("fresh-retry prompt must preserve the current prompt verbatim as its suffix")
-	}
-	if strings.Index(got, "brand-new session") > strings.Index(got, base) {
-		t.Fatal("context-loss disclosure must precede the preserved prompt")
-	}
-	// Agent-facing only. Whether the USER hears about the gap is the continuity
-	// notice's call, and that one knows the surface — this prefix fires on both
-	// and must not decide for it (MUL-5722).
-	if strings.Contains(got, "tell the user") {
-		t.Fatalf("retry prefix must not script a user-facing announcement:\n%s", got)
-	}
-}
-
-// TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split: the same
-// event costs the two surfaces different things, so it cannot be reported with
-// one sentence. On an issue the discussion survives in comments the agent
-// re-reads every turn; announcing a loss there makes the user believe the
-// discussion is gone when none of it is. In a web chat the history lived only
-// in the provider session (buildChatPrompt never replays it), so the user
-// genuinely cannot see what went missing unless told.
+// TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
+// event costs each surface something different, so it cannot be reported with
+// one sentence. The dividing question is whether the conversation can still be
+// READ, not whether it is a chat: an issue's comments and a Slack channel's
+// history both can, a web chat's and a Feishu channel's cannot. Announcing a
+// loss on the first two describes something that did not happen — the user
+// hears "the discussion is gone" when every word survives.
 func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
-	issue := sessionContinuityNoticeFor(Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
-	if strings.Contains(issue, "tell the user") {
-		t.Errorf("issue notice must not order an announcement:\n%s", issue)
+	cases := []struct {
+		name         string
+		task         Task
+		tellUser     bool
+		wantMentions string
+	}{
+		{
+			name:         "issue rebuilds from comments",
+			task:         Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},
+			tellUser:     false,
+			wantMentions: "comment history",
+		},
+		{
+			// Slack has a history reader, so the conversation is recoverable —
+			// just from the channel rather than from Multica. Telling the user it
+			// was lost contradicts the commands the same prompt hands the agent.
+			name:         "slack rebuilds from the channel",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeSlack},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
+		{
+			// Web chat history lived only in the provider session.
+			name:         "web chat is unrecoverable",
+			task:         Task{ChatSessionID: "chat-1"},
+			tellUser:     true,
+			wantMentions: "not readable from anywhere",
+		},
+		{
+			// Multica ships no history reader for Feishu, so despite being a
+			// channel it is in the same position as a web chat.
+			name:         "feishu has no history reader",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeFeishu},
+			tellUser:     true,
+			wantMentions: "not readable from anywhere",
+		},
 	}
 
-	chat := sessionContinuityNoticeFor(Task{ChatSessionID: "chat-1"})
-	if !strings.Contains(chat, "tell the user up front") {
-		t.Errorf("chat notice must stay user-facing:\n%s", chat)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			notice := sessionContinuityNoticeFor(tc.task)
+			if got := strings.Contains(notice, "tell the user up front"); got != tc.tellUser {
+				t.Errorf("tells the user = %v, want %v:\n%s", got, tc.tellUser, notice)
+			}
+			if !strings.Contains(notice, tc.wantMentions) {
+				t.Errorf("notice missing %q, so the agent is not told where to rebuild from:\n%s", tc.wantMentions, notice)
+			}
+			// Where the conversation survives, the ONLY loss is the agent's
+			// unrecorded working memory, and it has to be told so or it assumes
+			// it still remembers work it no longer has. Where nothing survives
+			// that distinction is meaningless — everything is gone — so the
+			// requirement applies to the recoverable surfaces only.
+			if !tc.tellUser && !strings.Contains(notice, "your own working memory") {
+				t.Errorf("recoverable surface must name the real loss:\n%s", notice)
+			}
+		})
 	}
 
-	// The notice only renders when the resume actually failed; an ordinary run
-	// must not carry either variant.
+	// The notice only renders when the resume actually failed.
 	if blocks := perTurnContextBlocks(Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}); strings.Contains(blocks, "Session Continuity Notice") {
 		t.Errorf("continuity notice leaked into a run that resumed fine:\n%s", blocks)
 	}
@@ -768,6 +776,47 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	})
 	if !strings.Contains(lost, "Session Continuity Notice") {
 		t.Errorf("continuity notice missing when the resume was unavailable:\n%s", lost)
+	}
+}
+
+// TestBackendResumeContinuityNoticeSuppressedWhenPromptAlreadyHasIt is the
+// count guard Elon asked for, on the combination that actually occurs: the
+// codex overflow fresh retry. The daemon appends the notice to the prompt AND
+// hands the backend a notice to prepend, so before MUL-5722 one turn carried
+// the same paragraph twice — at full token price, from two hand-written
+// strings. Suppression is keyed on the prompt already carrying it, so the two
+// injectors cannot both fire.
+func TestBackendResumeContinuityNoticeSuppressedWhenPromptAlreadyHasIt(t *testing.T) {
+	t.Parallel()
+
+	const heading = "## Session Continuity Notice"
+
+	// Live resume rejection the daemon cannot see pre-launch: the prompt says
+	// nothing, so the backend must.
+	fresh := Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", TriggerCommentID: "c0ffee00-0000-0000-0000-000000000000"}
+	if got := backendResumeContinuityNotice(fresh); !strings.Contains(got, heading) {
+		t.Fatal("backend must disclose when the prompt does not")
+	}
+	if strings.Contains(BuildPrompt(fresh, "codex"), heading) {
+		t.Fatal("prompt should not carry the notice when the resume has not failed yet")
+	}
+
+	// The daemon's fresh-session retry sets this, which is what makes
+	// BuildPrompt append the notice — so the backend must now stay silent.
+	retry := fresh
+	retry.PriorSessionResumeUnavailable = true
+	prompt := BuildPrompt(retry, "codex")
+	if n := strings.Count(prompt, heading); n != 1 {
+		t.Fatalf("prompt must carry exactly one notice, got %d", n)
+	}
+	backendNotice := backendResumeContinuityNotice(retry)
+	if backendNotice != "" {
+		t.Fatalf("backend must not add a second copy, got:\n%s", backendNotice)
+	}
+	// The whole turn, as codex would assemble it.
+	turn := backendNotice + prompt
+	if n := strings.Count(turn, heading); n != 1 {
+		t.Fatalf("assembled turn carries %d notices, want exactly 1:\n%s", n, turn)
 	}
 }
 
