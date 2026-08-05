@@ -3910,6 +3910,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	// CEREBRO-PATCH(task-mandate-claim-generation): FIR-4292 expose server-owned task generation to CLI requests.
+	// CEREBRO-PATCH(cursor-tool-policy-hook-json): FIR-4526 provider identity for before-tool hook protocol selection.
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":                   agentToken,
 		"MULTICA_SERVER_URL":              d.cfg.ServerBaseURL,
@@ -3920,6 +3921,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":                 task.ID,
 		"MULTICA_TASK_MANDATE_GENERATION": strconv.FormatInt(task.TaskMandateGeneration, 10),
 		"MULTICA_TASK_SLOT":               strconv.Itoa(slot),
+		"MULTICA_AGENT_PROVIDER":          provider,
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID

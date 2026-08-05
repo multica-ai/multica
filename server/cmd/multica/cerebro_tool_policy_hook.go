@@ -8,21 +8,25 @@ package main
 // binary itself, so there is no separate hook binary to build or ship: wherever
 // the daemon runs, the hook runs.
 //
-// Per tool call Claude Code invokes it with the tool payload on stdin. The hook:
+// Per tool call the provider invokes it with the tool payload on stdin. The hook:
 //   1. Parses the provider's before-tool payload.
 //   2. POSTs every named tool to the daemon's
 //      loopback resolve IPC, which proxies the unified tool-policy chain and
 //      long-polls a pending approval.
-//   3. Exits 0 to allow or 2 to block (Claude Code's hook protocol: exit 2
-//      blocks the tool and surfaces stderr to the model).
+//   3. Answers with the provider's before-tool protocol:
+//        - Claude / Codex / Gemini: exit 0 allow, exit 2 deny (stderr reason).
+//        - Cursor: exit 0 with JSON stdout `{"permission":"allow|deny",...}`.
+//          Cursor requires JSON on stdout; empty stdout is treated as a hook
+//          failure, and with failClosed:true that blocks every tool (FIR-4526).
 //
-// Transport, input and protocol errors fail closed (exit 2).
+// Transport, input and protocol errors fail closed.
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -46,7 +50,7 @@ const (
 
 var cerebroToolPolicyHookCmd = &cobra.Command{
 	Use:    "cerebro-tool-policy-hook",
-	Short:  "Internal: Claude Code PreToolUse hook for local-runtime tool-policy enforcement",
+	Short:  "Internal: local-runtime before-tool hook for Multica tool-policy enforcement",
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -55,25 +59,32 @@ var cerebroToolPolicyHookCmd = &cobra.Command{
 	},
 }
 
-// runToolPolicyHook reads the PreToolUse payload, resolves the verdict, and
-// exits with the Claude hook code. It never returns on a deny (os.Exit(2)); on
-// allow it returns so the process exits 0.
+// runToolPolicyHook reads the before-tool payload, resolves the verdict, and
+// answers with the active provider protocol. Deny/fail paths call os.Exit;
+// allow returns so the process exits 0.
 func runToolPolicyHook(cmd *cobra.Command) {
-	in, err := claudehook.Parse(cmd.InOrStdin())
+	raw, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 1<<20))
 	if err != nil {
-		failHook("unknown", err)
+		failHook(cmd, "unknown", err, false)
+		return
+	}
+	cursorProto := usesCursorHookProtocol(raw)
+
+	in, err := claudehook.Parse(bytes.NewReader(raw))
+	if err != nil {
+		failHook(cmd, "unknown", err, cursorProto)
 		return
 	}
 	tool := in.Name()
 	if tool == "" || !claudehook.Gated(tool) {
-		failHook("unknown", fmt.Errorf("tool_name missing from hook payload"))
+		failHook(cmd, "unknown", fmt.Errorf("tool_name missing from hook payload"), cursorProto)
 		return
 	}
 
 	port := os.Getenv("MULTICA_DAEMON_PORT")
 	if port == "" {
 		// No daemon to ask — fail closed.
-		failHook(tool, fmt.Errorf("MULTICA_DAEMON_PORT not set"))
+		failHook(cmd, tool, fmt.Errorf("MULTICA_DAEMON_PORT not set"), cursorProto)
 		return
 	}
 
@@ -94,19 +105,19 @@ func runToolPolicyHook(cmd *cobra.Command) {
 	url := fmt.Sprintf("http://127.0.0.1:%s/tool-policy/resolve", port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		failHook(tool, err)
+		failHook(cmd, tool, err, cursorProto)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := (&http.Client{Timeout: toolPolicyHookClientTimeout}).Do(req)
 	if err != nil {
-		failHook(tool, err)
+		failHook(cmd, tool, err, cursorProto)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		failHook(tool, fmt.Errorf("daemon returned status %d", resp.StatusCode))
+		failHook(cmd, tool, fmt.Errorf("daemon returned status %d", resp.StatusCode), cursorProto)
 		return
 	}
 
@@ -115,25 +126,69 @@ func runToolPolicyHook(cmd *cobra.Command) {
 		Reason  string `json:"reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		failHook(tool, err)
+		failHook(cmd, tool, err, cursorProto)
 		return
 	}
 	if out.Allowed {
+		allowHook(cmd, cursorProto)
 		return
 	}
 	reason := out.Reason
 	if reason == "" {
 		reason = "blocked by tool policy"
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Blocked by Multica tool policy: %s (%s)\n", tool, reason)
+	denyHook(cmd, tool, reason, cursorProto)
+}
+
+// usesCursorHookProtocol reports whether the caller expects Cursor's JSON
+// stdout permission protocol. Prefer the daemon-injected provider env; fall
+// back to Cursor-only payload fields so older daemons still work.
+func usesCursorHookProtocol(raw []byte) bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MULTICA_AGENT_PROVIDER")), "cursor") {
+		return true
+	}
+	var probe struct {
+		ToolUseID     string `json:"tool_use_id"`
+		CursorVersion string `json:"cursor_version"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return probe.ToolUseID != "" || probe.CursorVersion != ""
+}
+
+func allowHook(cmd *cobra.Command, cursorProto bool) {
+	if cursorProto {
+		// Cursor: exit 0 + JSON permission. Empty stdout is a hook failure.
+		fmt.Fprintln(cmd.OutOrStdout(), `{"permission":"allow"}`)
+	}
+}
+
+func denyHook(cmd *cobra.Command, tool, reason string, cursorProto bool) {
+	msg := fmt.Sprintf("Blocked by Multica tool policy: %s (%s)", tool, reason)
+	if cursorProto {
+		// Cursor failClosed treats non-JSON / non-zero exits as hook failure.
+		// Emit an explicit deny decision on stdout so the agent sees the reason.
+		_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
+			"permission":    "deny",
+			"agent_message": msg,
+			"user_message":  msg,
+		})
+		return
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), msg)
 	osExit(hookExitDeny)
 }
 
-// failHook applies the fail direction for a transport/IO error: deny under
-// enforce, allow otherwise.
-func failHook(tool string, err error) {
-	fmt.Fprintf(os.Stderr, "Blocked by Multica tool policy: %s (enforcement unreachable: %v)\n", tool, err)
-	osExit(hookExitDeny)
+// failHook applies fail-closed deny for transport/IO errors.
+func failHook(cmd *cobra.Command, tool string, err error, cursorProto bool) {
+	denyHook(cmd, tool, fmt.Sprintf("enforcement unreachable: %v", err), cursorProto)
+	if cursorProto {
+		// Cursor already got a JSON deny above; exit 0 so failClosed does not
+		// rewrite it as "hook returned no output".
+		return
+	}
+	// Claude path: denyHook already exited.
 }
 
 // osExit is a package var so tests can intercept the exit code instead of

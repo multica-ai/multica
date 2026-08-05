@@ -2082,6 +2082,14 @@ listening on `before.issue.status_change` exists.
 
 Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
 
+
+## FIR-4526 — Cursor tool-policy hook JSON protocol
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cursor-tool-policy-hook-json` | `server/cmd/multica/cerebro_tool_policy_hook.go`<br>`server/internal/daemon/daemon.go` | Cursor `preToolUse` requires JSON stdout `{"permission":"allow\|deny"}`. The shared hook only used Claude exit codes and empty stdout, so with `failClosed: true` every Cursor tool was blocked as "hook returned no output" even when policy allowed. Emit Cursor JSON when `MULTICA_AGENT_PROVIDER=cursor` or the payload carries Cursor-only fields; inject the provider env at spawn. |
+
+
 ## FIR-3608 — Scoped service tokens (`msv_`)
 
 | Patch | Location | Reason |
