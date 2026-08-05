@@ -57,7 +57,7 @@ func ParseTrustedProxies(raw string) []*net.IPNet {
 // When the list is empty (default), XFF is never consulted — only
 // RemoteAddr is used. This matches the project's conservative trust
 // model (see health_realtime.go).
-func RateLimit(rdb *redis.Client, limit int, window time.Duration, trustedProxies []*net.IPNet) func(http.Handler) http.Handler {
+func RateLimit(rdb redis.UniversalClient, limit int, window time.Duration, trustedProxies []*net.IPNet) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if rdb == nil {
 			return next

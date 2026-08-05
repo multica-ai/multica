@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -31,13 +33,77 @@ var (
 	commit  = "unknown"
 )
 
-func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
-	opts := *base
-	if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
-		opts.ClientName = ""
-	} else {
-		opts.ClientName = redisClientName(opts.ClientName, suffix)
+// filteredRedisLogger drops go-redis's benign "getting command info" line,
+// which managed Redis Cluster deployments (COMMAND disabled) emit repeatedly on
+// every new client, and forwards everything else to stderr in go-redis's
+// default logger format.
+type filteredRedisLogger struct{}
+
+func (filteredRedisLogger) Printf(_ context.Context, format string, v ...interface{}) {
+	if strings.Contains(format, "getting command info") {
+		return
 	}
+	_ = log.Output(2, fmt.Sprintf(format, v...))
+}
+
+// redisClientFactory builds named Redis clients from a single parsed
+// REDIS_URL. It abstracts over single-node vs Cluster so the rest of the
+// server only ever sees redis.UniversalClient. Cluster mode is opt-in via
+// REDIS_CLUSTER=true (a lone seed address cannot be auto-detected as a
+// cluster); when off, behavior is identical to the previous single-node
+// redis.NewClient path, including the REDIS_DISABLE_CLIENT_NAME toggle.
+type redisClientFactory struct {
+	base    *redis.Options
+	cluster bool
+	// disableClientName mirrors the single-node REDIS_DISABLE_CLIENT_NAME
+	// behavior: some managed Redis offerings reject CLIENT SETNAME, so this
+	// blanks the client name on every client the factory produces.
+	disableClientName bool
+	// extraAddrs are optional additional cluster seed nodes from REDIS_ADDRS.
+	// The cluster client discovers the full topology via CLUSTER SLOTS, so a
+	// single seed suffices; extra seeds only add failover resilience if the
+	// first seed is down at startup.
+	extraAddrs []string
+}
+
+func newRedisClientFactory(base *redis.Options) redisClientFactory {
+	f := redisClientFactory{
+		base:              base,
+		cluster:           strings.EqualFold(strings.TrimSpace(os.Getenv("REDIS_CLUSTER")), "true"),
+		disableClientName: envBool("REDIS_DISABLE_CLIENT_NAME", false),
+	}
+	if raw := strings.TrimSpace(os.Getenv("REDIS_ADDRS")); raw != "" {
+		for _, a := range strings.Split(raw, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				f.extraAddrs = append(f.extraAddrs, a)
+			}
+		}
+	}
+	if f.cluster {
+		// Suppress the benign "getting command info" flood that managed
+		// clusters with COMMAND disabled produce (see filteredRedisLogger).
+		redis.SetLogger(filteredRedisLogger{})
+	}
+	return f
+}
+
+func (f redisClientFactory) newNamedClient(suffix string) redis.UniversalClient {
+	clientName := ""
+	if !f.disableClientName {
+		clientName = redisClientName(f.base.ClientName, suffix)
+	}
+	if f.cluster {
+		addrs := append([]string{f.base.Addr}, f.extraAddrs...)
+		return redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs:      addrs,
+			ClientName: clientName,
+			Username:   f.base.Username,
+			Password:   f.base.Password,
+			TLSConfig:  f.base.TLSConfig,
+		})
+	}
+	opts := *f.base
+	opts.ClientName = clientName
 	return redis.NewClient(&opts)
 }
 
@@ -51,7 +117,7 @@ func redisClientName(existing, suffix string) string {
 	return "multica-api:" + suffix
 }
 
-func closeRedisClient(label string, client *redis.Client) {
+func closeRedisClient(label string, client redis.UniversalClient) {
 	if client == nil {
 		return
 	}
@@ -248,11 +314,11 @@ func main() {
 	// operations.
 	relayCtx, relayCancel := context.WithCancel(context.Background())
 	var broadcaster realtime.Broadcaster = hub
-	var storeRedis *redis.Client
-	var relayWriteRedis *redis.Client
-	var relayReadRedis *redis.Client
-	var shardedReadRedis *redis.Client
-	var legacyReadRedis *redis.Client
+	var storeRedis redis.UniversalClient
+	var relayWriteRedis redis.UniversalClient
+	var relayReadRedis redis.UniversalClient
+	var shardedReadRedis redis.UniversalClient
+	var legacyReadRedis redis.UniversalClient
 	var relay realtime.ManagedRelay
 	defer func() {
 		if relay != nil {
@@ -276,26 +342,32 @@ func main() {
 			if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
 				slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
 			}
-			storeRedis = newNamedRedisClient(opts, "store")
-			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
+			// factory abstracts single-node vs Cluster (REDIS_CLUSTER=true) so
+			// every client below is a redis.UniversalClient regardless of topology.
+			factory := newRedisClientFactory(opts)
+			if factory.cluster {
+				slog.Info("redis: Cluster mode enabled (REDIS_CLUSTER=true)", "seeds", append([]string{opts.Addr}, factory.extraAddrs...))
+			}
+			storeRedis = factory.newNamedClient("store")
+			relayWriteRedis = factory.newNamedClient("realtime-write")
 
 			relayMode := realtimeRelayModeFromEnv()
 			relayConfig := shardedRelayConfigFromEnv()
 			switch relayMode {
 			case "legacy":
-				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
+				relayReadRedis = factory.newNamedClient("realtime-read")
 				relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
 				slog.Info("daemon websocket wakeup: Redis fanout disabled in legacy realtime relay mode")
 			case "dual":
-				shardedReadRedis = newNamedRedisClient(opts, "realtime-read-sharded")
-				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
+				shardedReadRedis = factory.newNamedClient("realtime-read-sharded")
+				legacyReadRedis = factory.newNamedClient("realtime-read-legacy")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
 				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, legacyReadRedis)
 				relay = realtime.NewMirroredRelay(sharded, legacy)
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			default:
-				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
+				relayReadRedis = factory.newNamedClient("realtime-read")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
 				relay = sharded

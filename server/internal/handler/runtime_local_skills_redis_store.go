@@ -72,10 +72,10 @@ func localSkillImportPendingKey(runtimeID string) string {
 // RedisLocalSkillListStore stores pending / running / completed list requests
 // in Redis so every API node agrees on the same state.
 type RedisLocalSkillListStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisLocalSkillListStore(rdb *redis.Client) *RedisLocalSkillListStore {
+func NewRedisLocalSkillListStore(rdb redis.UniversalClient) *RedisLocalSkillListStore {
 	return &RedisLocalSkillListStore{rdb: rdb}
 }
 
@@ -94,7 +94,11 @@ func (s *RedisLocalSkillListStore) Create(ctx context.Context, runtimeID string)
 		return nil, fmt.Errorf("marshal list request: %w", err)
 	}
 
-	pipe := s.rdb.TxPipeline()
+	// Plain Pipeline, not TxPipeline: managed Redis Cluster deployments may
+	// disable MULTI (NOPERM), which TxPipeline emits. Both keys carry the
+	// shared {runtime_pending} hash tag so they land on one slot and pipeline
+	// in a single round-trip; PopPending tolerates a partially-applied pair.
+	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, localSkillListKey(req.ID), data, runtimeLocalSkillStoreRetention)
 	pipe.ZAdd(ctx, localSkillListPendingKey(runtimeID), redis.Z{
 		Score:  float64(now.UnixNano()),
@@ -259,10 +263,10 @@ func (s *RedisLocalSkillListStore) Fail(ctx context.Context, id string, errMsg s
 // request shape carries import-specific fields (skill_key, optional rename,
 // creator id) and Go generics don't buy us much for two concrete impls.
 type RedisLocalSkillImportStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisLocalSkillImportStore(rdb *redis.Client) *RedisLocalSkillImportStore {
+func NewRedisLocalSkillImportStore(rdb redis.UniversalClient) *RedisLocalSkillImportStore {
 	return &RedisLocalSkillImportStore{rdb: rdb}
 }
 
@@ -287,7 +291,11 @@ func (s *RedisLocalSkillImportStore) Create(ctx context.Context, input LocalSkil
 		return nil, err
 	}
 
-	pipe := s.rdb.TxPipeline()
+	// Plain Pipeline, not TxPipeline: managed Redis Cluster deployments may
+	// disable MULTI (NOPERM), which TxPipeline emits. Both keys carry the
+	// shared {runtime_pending} hash tag so they land on one slot and pipeline
+	// in a single round-trip; PopPending tolerates a partially-applied pair.
+	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, localSkillImportKey(req.ID), data, runtimeLocalSkillStoreRetention)
 	pipe.ZAdd(ctx, localSkillImportPendingKey(input.RuntimeID), redis.Z{
 		Score:  float64(now.UnixNano()),

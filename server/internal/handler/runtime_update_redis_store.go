@@ -36,10 +36,10 @@ return 0
 `)
 
 type RedisUpdateStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisUpdateStore(rdb *redis.Client) *RedisUpdateStore {
+func NewRedisUpdateStore(rdb redis.UniversalClient) *RedisUpdateStore {
 	return &RedisUpdateStore{rdb: rdb}
 }
 
@@ -68,7 +68,11 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion,
 		return nil, errUpdateInProgress
 	}
 
-	pipe := s.rdb.TxPipeline()
+	// Plain Pipeline, not TxPipeline: managed Redis Cluster deployments may
+	// disable MULTI (NOPERM), which TxPipeline emits. Both keys carry the
+	// shared {runtime_pending} hash tag so they land on one slot; the Exec
+	// error path below already compensates non-atomically.
+	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, updateKey(req.ID), data, updateStoreRetention)
 	pipe.ZAdd(ctx, updatePendingKey(runtimeID), redis.Z{
 		Score:  float64(now.UnixNano()),

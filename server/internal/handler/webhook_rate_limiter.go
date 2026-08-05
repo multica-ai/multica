@@ -212,21 +212,21 @@ func webhookLimiterAllowSource() string { return webhookLimiterAllowSrc }
 
 type redisWebhookRateLimiter struct {
 	cfg       WebhookRateLimit
-	rdb       *redis.Client
+	rdb       redis.UniversalClient
 	keyPrefix string
 }
 
-func NewRedisWebhookRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+func NewRedisWebhookRateLimiter(rdb redis.UniversalClient, cfg WebhookRateLimit) WebhookRateLimiter {
 	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookLimiterKeyPrefix}
 }
 
 // NewRedisWebhookIPRateLimiter is the per-IP variant: same sliding-window
 // Lua script, different key namespace so the two budgets don't interfere.
-func NewRedisWebhookIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+func NewRedisWebhookIPRateLimiter(rdb redis.UniversalClient, cfg WebhookRateLimit) WebhookRateLimiter {
 	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookIPLimiterKeyPrefix}
 }
 
-func NewRedisWebhookAbsoluteIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+func NewRedisWebhookAbsoluteIPRateLimiter(rdb redis.UniversalClient, cfg WebhookRateLimit) WebhookRateLimiter {
 	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookAbsoluteIPLimiterKeyPrefix}
 }
 

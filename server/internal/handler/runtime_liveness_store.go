@@ -77,10 +77,10 @@ func runtimeLivenessKey(runtimeID string) string {
 // of an unexpired key is the signal "this runtime is alive right now"; the
 // sweeper consults this before marking a stale-in-DB runtime offline.
 type RedisLivenessStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisLivenessStore(rdb *redis.Client) *RedisLivenessStore {
+func NewRedisLivenessStore(rdb redis.UniversalClient) *RedisLivenessStore {
 	return &RedisLivenessStore{rdb: rdb}
 }
 
@@ -103,19 +103,30 @@ func (s *RedisLivenessStore) IsAliveBatch(ctx context.Context, runtimeIDs []stri
 	if !s.Available() || len(runtimeIDs) == 0 {
 		return map[string]bool{}, s.Available()
 	}
-	keys := make([]string, len(runtimeIDs))
+	// Liveness keys are per-runtime with no shared hash tag, so they span
+	// slots on Redis Cluster where a multi-key MGET returns CROSSSLOT. Issue
+	// one GET per key through a pipeline instead: go-redis routes each command
+	// to its own slot and batches them, so this stays a single round-trip on
+	// single-node Redis and is Cluster-safe.
+	pipe := s.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(runtimeIDs))
 	for i, id := range runtimeIDs {
-		keys[i] = runtimeLivenessKey(id)
+		cmds[i] = pipe.Get(ctx, runtimeLivenessKey(id))
 	}
-	values, err := s.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
-		slog.Warn("liveness mget failed; falling back to DB",
-			"error", err, "count", len(keys))
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		slog.Warn("liveness batch get failed; falling back to DB",
+			"error", err, "count", len(runtimeIDs))
 		return nil, false
 	}
 	out := make(map[string]bool, len(runtimeIDs))
 	for i, id := range runtimeIDs {
-		out[id] = values[i] != nil
+		_, err := cmds[i].Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			slog.Warn("liveness batch get failed; falling back to DB",
+				"error", err, "count", len(runtimeIDs))
+			return nil, false
+		}
+		out[id] = err == nil
 	}
 	return out, true
 }

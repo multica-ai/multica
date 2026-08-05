@@ -78,8 +78,8 @@ func (c ShardedStreamRelayConfig) withDefaults() ShardedStreamRelayConfig {
 // bounded by pod_count * shard_count instead of active_scope_count.
 type ShardedStreamRelay struct {
 	hub      *Hub
-	writeRDB *redis.Client
-	readRDB  *redis.Client
+	writeRDB redis.UniversalClient
+	readRDB  redis.UniversalClient
 	nodeID   string
 	config   ShardedStreamRelayConfig
 
@@ -90,7 +90,7 @@ type ShardedStreamRelay struct {
 	daemonRuntime DaemonRuntimeDeliverer
 }
 
-func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB *redis.Client, config ShardedStreamRelayConfig) *ShardedStreamRelay {
+func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB redis.UniversalClient, config ShardedStreamRelayConfig) *ShardedStreamRelay {
 	if readRDB == nil {
 		readRDB = writeRDB
 	}
