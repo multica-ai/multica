@@ -833,7 +833,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     isLoading,
     error: listError,
     refetch: refetchList,
-  } = useQuery(agentListOptions(wsId));
+  } = useQuery(agentListOptions(wsId, { full: true })); // CEREBRO-PATCH(list-agents-slim): FIR-4359 duplicate-agent copies instructions + skills off this row.
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
   );
