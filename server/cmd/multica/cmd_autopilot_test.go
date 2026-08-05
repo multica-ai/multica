@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -41,6 +43,57 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("clear-subscribers", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func newAutopilotListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Bool("full-id", false, "")
+	return cmd
+}
+
+func newAutopilotGetTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "get"}
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = w.Close()
+		_ = r.Close()
+	}()
+
+	type readResult struct {
+		out []byte
+		err error
+	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		readCh <- readResult{out: out, err: err}
+	}()
+
+	runErr := fn()
+	closeErr := w.Close()
+	result := <-readCh
+	if closeErr != nil {
+		t.Fatalf("close stdout pipe: %v", closeErr)
+	}
+	if result.err != nil {
+		t.Fatalf("read stdout pipe: %v", result.err)
+	}
+	return string(result.out), runErr
 }
 
 func TestResolveAgent(t *testing.T) {
@@ -129,6 +182,106 @@ func TestResolveAgent(t *testing.T) {
 			t.Errorf("got %q, want %q", got, id)
 		}
 	})
+}
+
+func TestRunAutopilotListJSONEscapesDescriptionBackslashes(t *testing.T) {
+	const autopilotID = "11111111-1111-1111-1111-111111111111"
+	description := "Regex ITT-\\d+ and Windows path C:\\Temp\\new plus invalid JSON escape candidate \\q"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots" {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"autopilots": []map[string]any{{
+				"id":             autopilotID,
+				"title":          "Escaping fixture",
+				"description":    description,
+				"execution_mode": "run_only",
+				"status":         "active",
+			}},
+			"total": 1,
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotList(newAutopilotListTestCmd(), nil)
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotList: %v", err)
+	}
+
+	var got struct {
+		Autopilots []map[string]any `json:"autopilots"`
+		Total      int              `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("list output is not valid JSON: %v\n%s", err, out)
+	}
+	if got.Total != 1 || len(got.Autopilots) != 1 {
+		t.Fatalf("unexpected list response: %#v", got)
+	}
+	if got.Autopilots[0]["description"] != description {
+		t.Fatalf("description = %#v, want %q", got.Autopilots[0]["description"], description)
+	}
+}
+
+func TestRunAutopilotGetJSONEscapesDescriptionBackslashes(t *testing.T) {
+	const autopilotID = "22222222-2222-2222-2222-222222222222"
+	description := "Prompt includes markdown <id>, regex ITT-\\d+, and a literal bad escape candidate \\q"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{
+				"id":             autopilotID,
+				"title":          "Escaping fixture",
+				"description":    description,
+				"execution_mode": "run_only",
+				"status":         "active",
+			},
+			"triggers": []map[string]any{{
+				"id":    "trigger-1",
+				"kind":  "schedule",
+				"label": "contains backslash \\q",
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotGet(newAutopilotGetTestCmd(), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotGet: %v", err)
+	}
+
+	var got struct {
+		Autopilot map[string]any   `json:"autopilot"`
+		Triggers  []map[string]any `json:"triggers"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("get output is not valid JSON: %v\n%s", err, out)
+	}
+	if got.Autopilot["description"] != description {
+		t.Fatalf("description = %#v, want %q", got.Autopilot["description"], description)
+	}
+	if len(got.Triggers) != 1 || got.Triggers[0]["label"] != "contains backslash \\q" {
+		t.Fatalf("unexpected triggers: %#v", got.Triggers)
+	}
 }
 
 func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
