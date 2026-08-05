@@ -23,6 +23,7 @@ import {
   Brain,
   AlertCircle,
   AlertTriangle,
+  ArrowDown,
   ArrowUpRight,
   Copy,
   RotateCw,
@@ -180,6 +181,7 @@ export function ChatMessageList({
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
 }: ChatMessageListProps) {
+  const { t } = useT("chat");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
@@ -252,70 +254,103 @@ export function ChatMessageList({
     availability,
   };
 
+  const handleScrollToLatest = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: Math.max(0, container.scrollHeight - container.clientHeight),
+      behavior: "smooth",
+    });
+  }, []);
+
   return (
-    <div
-      ref={setScrollContainerRef}
-      data-tab-scroll-root
-      style={fadeStyle}
-      // The gutter lives on the scroll container, so it applies once to the
-      // whole list — rows, header, footer — and the scrollbar still rides the
-      // surface edge rather than being inset with the text.
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER)}
-    >
-      {/* Already inside the gutter + column, so this pre-mount frame renders the
-       *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
-       *  wrapper for use as a standalone sibling of the list. */}
-      {!scrollContainerEl ? (
-        <div className={cn(CHAT_COLUMN, "pt-4")}>
-          <ChatSkeletonBody />
-        </div>
-      ) : (
-      // Chat scrolls inside its own element, so rich blocks must measure
-      // "near-viewport" against that element rather than the browser viewport —
-      // otherwise a diagram only starts loading once it is already on screen.
-      <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
-      <Virtuoso
-        customScrollParent={scrollContainerEl}
-        data={renderItems}
-        firstItemIndex={firstIndex}
-        // Open pinned to the newest message. The list is remounted per session
-        // (`key={activeSessionId}` upstream), so this initial position is
-        // re-applied on every session switch. Without it a fresh Virtuoso
-        // renders from the top and the only thing that can scroll it down is
-        // `followOutput`, which reacts to post-mount data growth — leaving the
-        // landing spot racy: cached sessions resolve synchronously and stick at
-        // the top, while fetched ones sometimes catch a growth tick and land at
-        // the bottom. `align: "end"` bottom-aligns even a last message taller
-        // than the viewport, so switching sessions always shows the latest reply.
-        initialTopMostItemIndex={{ index: "LAST", align: "end" }}
-        increaseViewportBy={{ top: 400, bottom: 600 }}
-        atBottomThreshold={120}
-        atBottomStateChange={setIsNearBottom}
-        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
-        startReached={() => {
-          if (hasOlderMessages && !isFetchingOlderMessages) {
-            onLoadOlderMessages?.();
-          }
-        }}
-        computeItemKey={(_, item) => item.key}
-        context={listContext}
-        components={LIST_COMPONENTS}
-        itemContent={(_, item) => (
-          <div className={cn(CHAT_COLUMN, "py-2")}>
-            <MessageBubble
-              item={item}
-              isPending={!!pendingTaskId && item.taskId === pendingTaskId}
-              transformContent={transformContent}
-              onQuickAction={onQuickAction}
-              quickActionsDisabled={quickActionsDisabled}
-              onRegenerateQuickActions={onRegenerateQuickActions}
-              latestAssistantMessageId={latestAssistantMessageId}
-              quickActionsPendingMessageId={quickActionsPendingMessageId}
-            />
+    <div className="relative flex min-h-0 flex-1">
+      <div
+        ref={setScrollContainerRef}
+        data-tab-scroll-root
+        style={fadeStyle}
+        // The gutter lives on the scroll container, so it applies once to the
+        // whole list — rows, header, footer — and the scrollbar still rides the
+        // surface edge rather than being inset with the text.
+        className={cn("h-full flex-1 overflow-y-auto", CHAT_GUTTER)}
+      >
+        {/* Already inside the gutter + column, so this pre-mount frame renders the
+         *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
+         *  wrapper for use as a standalone sibling of the list. */}
+        {!scrollContainerEl ? (
+          <div className={cn(CHAT_COLUMN, "pt-4")}>
+            <ChatSkeletonBody />
           </div>
+        ) : (
+        // Chat scrolls inside its own element, so rich blocks must measure
+        // "near-viewport" against that element rather than the browser viewport —
+        // otherwise a diagram only starts loading once it is already on screen.
+        <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
+        <Virtuoso
+          customScrollParent={scrollContainerEl}
+          data={renderItems}
+          firstItemIndex={firstIndex}
+          // Open pinned to the newest message. The list is remounted per session
+          // (`key={activeSessionId}` upstream), so this initial position is
+          // re-applied on every session switch. Without it a fresh Virtuoso
+          // renders from the top and the only thing that can scroll it down is
+          // `followOutput`, which reacts to post-mount data growth — leaving the
+          // landing spot racy: cached sessions resolve synchronously and stick at
+          // the top, while fetched ones sometimes catch a growth tick and land at
+          // the bottom. `align: "end"` bottom-aligns even a last message taller
+          // than the viewport, so switching sessions always shows the latest reply.
+          initialTopMostItemIndex={{ index: "LAST", align: "end" }}
+          increaseViewportBy={{ top: 400, bottom: 600 }}
+          atBottomThreshold={120}
+          atBottomStateChange={setIsNearBottom}
+          followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+          startReached={() => {
+            if (hasOlderMessages && !isFetchingOlderMessages) {
+              onLoadOlderMessages?.();
+            }
+          }}
+          computeItemKey={(_, item) => item.key}
+          context={listContext}
+          components={LIST_COMPONENTS}
+          itemContent={(_, item) => (
+            <div className={cn(CHAT_COLUMN, "py-2")}>
+              <MessageBubble
+                item={item}
+                isPending={!!pendingTaskId && item.taskId === pendingTaskId}
+                transformContent={transformContent}
+                onQuickAction={onQuickAction}
+                quickActionsDisabled={quickActionsDisabled}
+                onRegenerateQuickActions={onRegenerateQuickActions}
+                latestAssistantMessageId={latestAssistantMessageId}
+                quickActionsPendingMessageId={quickActionsPendingMessageId}
+              />
+            </div>
+          )}
+        />
+        </RichContentScrollRootProvider>
         )}
-      />
-      </RichContentScrollRootProvider>
+      </div>
+
+      {!isNearBottom && renderItems.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label={t(($) => $.message_list.scroll_to_latest)}
+                onClick={handleScrollToLatest}
+                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-background shadow-md touch-manipulation size-11 md:size-8"
+              />
+            }
+          >
+            <ArrowDown />
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {t(($) => $.message_list.scroll_to_latest)}
+          </TooltipContent>
+        </Tooltip>
       )}
     </div>
   );

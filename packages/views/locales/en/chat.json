@@ -63,6 +63,7 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "copy_failed_toast": "Copy failed",
+    "scroll_to_latest": "Scroll to latest message",
     "loading_older": "Loading older messages…",
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_regenerate": "Regenerate suggestions",
