@@ -37,6 +37,16 @@ export interface RuntimeDevice {
   // MULTICA_ENABLE_SANDBOX env var; true/false = explicit on/off override.
   sandbox_enabled: boolean | null;
   sandbox_policy?: RuntimeSandboxPolicy;
+  // CEREBRO-PATCH(runtime-cheap-model-type): FIR-4492 per-runtime cheap model.
+  // The model this runtime uses when a caller asks for the provider-independent
+  // "cheap" tier. Only meaningful for providers the server has no model catalog
+  // for (hermes, opencode, cursor and the rest), where the list lives on the
+  // machine. "" or missing = unset: "cheap" resolves to no override and the run
+  // uses the agent's own model.
+  cheap_model?: string;
+  // The cheap model Multica curates for this provider, or "" / missing when it
+  // curates none. Non-empty means `cheap_model` is ignored.
+  cheap_model_curated?: string;
   // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 keeps runtime contracts free of persona_sandbox.
   // Daemon-reported capability snapshot (E3). Shape is loose — different
   // providers report what they have (Claude Code's tool list, MCP servers,

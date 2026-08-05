@@ -60,8 +60,20 @@ type AgentRuntimeResponse struct {
 	Visibility       string  `json:"visibility"`
 	CurrentAccountID *string `json:"current_account_id,omitempty"`
 	ToolsConfig      any     `json:"tools_config,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	// CEREBRO-PATCH(runtime-cheap-model-response): FIR-4492 per-runtime cheap model.
+	// The model this runtime uses for the provider-independent "cheap" tier. Only
+	// meaningful for providers the server has no catalog for (hermes, opencode,
+	// cursor and the rest), where the model list lives on the machine. "" means
+	// unset: "cheap" resolves to no override and the run uses the agent's own model.
+	CheapModel string `json:"cheap_model"`
+	// CheapModelCurated is the cheap model Multica curates for this provider, or
+	// "" when it curates none. Non-empty means CheapModel is ignored: the curated
+	// value is asserted against the provider's static catalog, so a hand-typed one
+	// must not override it. The UI reads this to show the setting as managed
+	// instead of offering a picker that would have no effect.
+	CheapModelCurated string `json:"cheap_model_curated"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 	// CEREBRO-PATCH(runtime-account-id-response): expose current_account_id so RuntimeAccountsCard can link runtime→account (JEH-1461).
 	// CEREBRO-PATCH(runtime-tools-config-response): runtime-level MCP defaults JSON (9031).
 }
@@ -105,8 +117,11 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		CurrentAccountID: uuidToPtr(rt.CurrentAccountID),
 		// CEREBRO-PATCH(runtime-tools-config-response): unmarshal runtime tools_config jsonb so the UI gets a structured object (9031).
 		ToolsConfig: unmarshalToolsConfig(rt.ToolsConfig),
-		CreatedAt:   timestampToString(rt.CreatedAt),
-		UpdatedAt:   timestampToString(rt.UpdatedAt),
+		// CEREBRO-PATCH(runtime-cheap-model-response): FIR-4492 expose the runtime's cheap model.
+		CheapModel:        rt.CheapModel,
+		CheapModelCurated: curatedCheapModel(rt.Provider),
+		CreatedAt:         timestampToString(rt.CreatedAt),
+		UpdatedAt:         timestampToString(rt.UpdatedAt),
 	}
 }
 

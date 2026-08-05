@@ -605,6 +605,7 @@ var catalog = []Capability{
 			"PATCH /api/runtimes/{runtimeId}/sandbox",
 			"PATCH /api/runtimes/{runtimeId}/sandbox-policy",
 			"PATCH /api/runtimes/{runtimeId}/tools-config",
+			"PATCH /api/runtimes/{runtimeId}/cheap-model",
 			"PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
 			"POST /api/runtimes/{runtimeId}/tools/scan-now",
 			"POST /api/runtimes/{runtimeId}/local-skills",

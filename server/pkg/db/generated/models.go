@@ -129,6 +129,7 @@ type AgentRuntime struct {
 	ToolsConfig      []byte             `json:"tools_config"`
 	SandboxPolicy    []byte             `json:"sandbox_policy"`
 	AutoPauseCount   int32              `json:"auto_pause_count"`
+	CheapModel       string             `json:"cheap_model"`
 }
 
 type AgentSkill struct {
