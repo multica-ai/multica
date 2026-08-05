@@ -39,28 +39,46 @@ function renderQueue(headStatus = "running") {
 }
 
 describe("ChatQueue", () => {
-  it("renders queued messages in order and falls back for empty content", () => {
-    renderQueue();
+  it("matches the ChatGPT desktop queue chrome without a separate header", () => {
+    const { container } = renderQueue();
 
-    expect(screen.getByText("2 queued messages")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "2 queued messages" })).toBeInTheDocument();
+    expect(screen.queryByText("2 queued messages")).not.toBeInTheDocument();
     expect(screen.getByText("First follow-up")).toBeInTheDocument();
     expect(screen.getByText("Queued message")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Send now")).toHaveLength(2);
-    expect(screen.getAllByLabelText("Edit queued message")).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Steer" })).toHaveLength(2);
     expect(screen.getAllByLabelText("Remove queued message")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Clear all" })).toBeInTheDocument();
+    expect(screen.getAllByLabelText("More queue actions")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Clear all" })).not.toBeInTheDocument();
+
+    const shell = container.querySelector('[data-slot="chat-queue-shell"]');
+    const queue = container.querySelector('[data-slot="chat-queue"]');
+    expect(shell).toHaveClass("-mb-8");
+    expect(queue).toHaveClass(
+      "rounded-4xl",
+      "border-surface-border",
+      "bg-surface",
+      "pb-10",
+    );
+    expect(container.querySelectorAll('[data-slot="chat-queue-row"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-slot="chat-queue-item-icon"]')).toHaveLength(2);
   });
 
-  it("runs send-now, edit, remove, and clear against the selected queue state", async () => {
+  it("runs steer, remove, and overflow actions against the selected queue state", async () => {
     const actions = renderQueue();
 
-    fireEvent.click(screen.getAllByLabelText("Send now")[1]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Steer" })[1]!);
     await waitFor(() => expect(actions.onSendNow).toHaveBeenCalledWith("task-3"));
-    fireEvent.click(screen.getAllByLabelText("Edit queued message")[0]!);
+
+    fireEvent.click(screen.getAllByLabelText("More queue actions")[0]!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit queued message" }));
     await waitFor(() => expect(actions.onEdit).toHaveBeenCalledWith("task-2"));
+
     fireEvent.click(screen.getAllByLabelText("Remove queued message")[1]!);
     await waitFor(() => expect(actions.onRemove).toHaveBeenCalledWith("task-3"));
-    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+    fireEvent.click(screen.getAllByLabelText("More queue actions")[1]!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Clear all" }));
     await waitFor(() => expect(actions.onClear).toHaveBeenCalledTimes(1));
   });
 
@@ -68,7 +86,7 @@ describe("ChatQueue", () => {
     const actions = renderQueue("queued");
 
     const buttons = screen.getAllByRole("button", {
-      name: "Send now is available after the current reply starts",
+      name: "Steer is available after the current reply starts",
     });
     expect(buttons).toHaveLength(2);
     for (const button of buttons) expect(button).toBeDisabled();
@@ -82,10 +100,11 @@ describe("ChatQueue", () => {
       finishClear = resolve;
     }));
 
-    const scroller = actions.container.querySelector(".overflow-y-auto");
-    expect(scroller).toHaveClass("max-h-40");
+    const scroller = actions.container.querySelector('[data-slot="chat-queue-list"]');
+    expect(scroller).toHaveClass("max-h-48");
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(screen.getAllByLabelText("More queue actions")[0]!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Clear all" }));
     await waitFor(() => {
       for (const button of screen.getAllByRole("button")) {
         expect(button).toBeDisabled();

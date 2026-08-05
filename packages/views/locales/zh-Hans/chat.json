@@ -34,11 +34,12 @@
   "queue": {
     "title_other": "{{count}} 条排队消息",
     "clear": "全部清空",
-    "send_now": "立即发送",
-    "send_now_unavailable": "当前回复开始后才能立即发送",
-    "send_now_unavailable_toast": "暂时无法立即发送，正在刷新队列。",
+    "send_now": "引导",
+    "send_now_unavailable": "当前回复开始后才能引导",
+    "send_now_unavailable_toast": "暂时无法引导，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
+    "more": "更多队列操作",
     "fallback": "排队消息",
     "action_failed_toast": "无法更新排队消息"
   },

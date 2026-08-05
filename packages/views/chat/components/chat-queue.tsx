@@ -1,9 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Pencil, Send, X } from "lucide-react";
+import {
+  CornerDownRight,
+  Ellipsis,
+  ListEnd,
+  Loader2,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import type { ChatQueuedTask } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -45,101 +59,133 @@ export function ChatQueue({
 
   return (
     <div
-      className={cn(CHAT_GUTTER, "mb-2")}
+      data-slot="chat-queue-shell"
+      className={cn(CHAT_GUTTER, "relative z-0 -mb-8")}
       aria-live="polite"
       aria-busy={busyAction !== null}
     >
-      <div className={cn(CHAT_COLUMN, "rounded-lg border bg-muted/30 p-2")}>
-        <div className="mb-1 flex items-center justify-between gap-2 px-1">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.queue.title, { count: tasks.length })}
-          </span>
-          <Button
-            variant="ghost"
-            size="xs"
-            disabled={busyAction !== null}
-            onClick={() => void run("clear", onClear)}
-          >
-            {busyAction === "clear" && <Loader2 className="animate-spin" aria-hidden="true" />}
-            {t(($) => $.queue.clear)}
-          </Button>
-        </div>
-        <div className="max-h-40 space-y-0.5 overflow-y-auto">
-          {tasks.map((task, index) => {
+      <section
+        data-slot="chat-queue"
+        aria-label={t(($) => $.queue.title, { count: tasks.length })}
+        className={cn(
+          CHAT_COLUMN,
+          "overflow-hidden rounded-4xl border border-surface-border bg-surface pb-10 shadow-[var(--surface-shadow)]",
+        )}
+      >
+        <div
+          data-slot="chat-queue-list"
+          className="max-h-48 overflow-y-auto px-4 pt-3"
+        >
+          {tasks.map((task) => {
             const sendNowKey = `send-now:${task.task_id}`;
             const editKey = `edit:${task.task_id}`;
             const removeKey = `remove:${task.task_id}`;
             return (
               <div
                 key={task.task_id}
-                className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-body"
+                data-slot="chat-queue-row"
+                className="flex min-h-12 min-w-0 items-center gap-3 rounded-xl px-1 py-1 text-body"
               >
-                <span className="w-4 shrink-0 text-center text-caption tabular-nums text-muted-foreground">
-                  {index + 1}
-                </span>
+                <ListEnd
+                  data-slot="chat-queue-item-icon"
+                  className="size-5 shrink-0 text-muted-foreground/70"
+                  aria-hidden="true"
+                />
                 <span className="min-w-0 flex-1 truncate">
                   {task.content?.trim() || t(($) => $.queue.fallback)}
                 </span>
-                <span
-                  className="shrink-0"
-                  title={t(($) =>
-                    canSendNow ? $.queue.send_now : $.queue.send_now_unavailable
-                  )}
-                >
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <span
+                    className="shrink-0"
+                    title={t(($) =>
+                      canSendNow ? $.queue.send_now : $.queue.send_now_unavailable
+                    )}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1.5 px-2 font-normal text-muted-foreground"
+                      disabled={busyAction !== null || !canSendNow}
+                      aria-label={t(($) =>
+                        canSendNow
+                          ? $.queue.send_now
+                          : $.queue.send_now_unavailable
+                      )}
+                      onClick={() => void run(sendNowKey, () => onSendNow(task.task_id))}
+                    >
+                      {busyAction === sendNowKey ? (
+                        <Loader2 className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <CornerDownRight aria-hidden="true" />
+                      )}
+                      {t(($) => $.queue.send_now)}
+                    </Button>
+                  </span>
                   <Button
                     variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground"
-                    disabled={busyAction !== null || !canSendNow}
-                    aria-label={t(($) =>
-                      canSendNow
-                        ? $.queue.send_now
-                        : $.queue.send_now_unavailable
-                    )}
-                    onClick={() => void run(sendNowKey, () => onSendNow(task.task_id))}
+                    size="icon-sm"
+                    className="shrink-0 text-muted-foreground"
+                    disabled={busyAction !== null}
+                    title={t(($) => $.queue.remove)}
+                    aria-label={t(($) => $.queue.remove)}
+                    onClick={() => void run(removeKey, () => onRemove(task.task_id))}
                   >
-                    {busyAction === sendNowKey ? (
+                    {busyAction === removeKey ? (
                       <Loader2 className="animate-spin" aria-hidden="true" />
                     ) : (
-                      <Send aria-hidden="true" />
+                      <Trash2 aria-hidden="true" />
                     )}
                   </Button>
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0 text-muted-foreground"
-                  disabled={busyAction !== null}
-                  title={t(($) => $.queue.edit)}
-                  aria-label={t(($) => $.queue.edit)}
-                  onClick={() => void run(editKey, () => onEdit(task.task_id))}
-                >
-                  {busyAction === editKey ? (
-                    <Loader2 className="animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Pencil aria-hidden="true" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0 text-muted-foreground"
-                  disabled={busyAction !== null}
-                  title={t(($) => $.queue.remove)}
-                  aria-label={t(($) => $.queue.remove)}
-                  onClick={() => void run(removeKey, () => onRemove(task.task_id))}
-                >
-                  {busyAction === removeKey ? (
-                    <Loader2 className="animate-spin" aria-hidden="true" />
-                  ) : (
-                    <X aria-hidden="true" />
-                  )}
-                </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-muted-foreground"
+                          disabled={busyAction !== null}
+                          title={t(($) => $.queue.more)}
+                          aria-label={t(($) => $.queue.more)}
+                        />
+                      }
+                    >
+                      {busyAction === editKey ? (
+                        <Loader2 className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Ellipsis aria-hidden="true" />
+                      )}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      side="top"
+                      sideOffset={6}
+                      className="w-auto"
+                    >
+                      <DropdownMenuItem
+                        disabled={busyAction !== null}
+                        onClick={() => void run(editKey, () => onEdit(task.task_id))}
+                      >
+                        <Pencil aria-hidden="true" />
+                        {t(($) => $.queue.edit)}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={busyAction !== null}
+                        onClick={() => void run("clear", onClear)}
+                      >
+                        <Trash2 aria-hidden="true" />
+                        {t(($) => $.queue.clear)}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             );
           })}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

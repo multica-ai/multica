@@ -34,11 +34,12 @@
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
     "clear": "すべて削除",
-    "send_now": "今すぐ送信",
-    "send_now_unavailable": "現在の返信が開始されると今すぐ送信できます",
-    "send_now_unavailable_toast": "今すぐ送信できません。キューを更新しています。",
+    "send_now": "指示",
+    "send_now_unavailable": "現在の返信が開始されると指示できます",
+    "send_now_unavailable_toast": "現在は指示できません。キューを更新しています。",
     "edit": "キュー内のメッセージを編集",
     "remove": "キューから削除",
+    "more": "その他のキュー操作",
     "fallback": "キュー内のメッセージ",
     "action_failed_toast": "キュー内のメッセージを更新できませんでした"
   },

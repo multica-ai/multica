@@ -354,12 +354,12 @@ beforeEach(() => {
 
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   const onSend = props.onSend ?? vi.fn();
-  render(
+  const view = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatInput onSend={onSend} uploadEnabled agentName="Multica" {...props} />
     </I18nProvider>,
   );
-  return { onSend };
+  return { onSend, ...view };
 }
 
 function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
@@ -622,6 +622,16 @@ describe("ChatInput project context", () => {
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("raises and rounds the composer above an attached queue", () => {
+    const { container } = renderInput({ hasQueue: true });
+
+    expect(container.firstElementChild).toHaveClass("relative", "z-10");
+    expect(container.querySelector('[data-slot="chat-input-surface"]')).toHaveClass(
+      "rounded-4xl",
+      "shadow-[var(--menu-shadow)]",
+    );
   });
 
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
