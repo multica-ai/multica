@@ -5,11 +5,17 @@ package execenv
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+)
+
+const (
+	runtimeConfigFaultHelperModeEnv = "MULTICA_RUNTIME_CONFIG_FAULT_HELPER_MODE"
+	runtimeConfigFaultHelperPathEnv = "MULTICA_RUNTIME_CONFIG_FAULT_HELPER_PATH"
 )
 
 // TestWriteRuntimeConfigFilePartialWriteFailurePreservesOriginal is the
@@ -18,6 +24,11 @@ import (
 // truncating the existing user-owned file. The old direct os.WriteFile
 // implementation leaves path as a 64-byte prefix and fails this test.
 func TestWriteRuntimeConfigFilePartialWriteFailurePreservesOriginal(t *testing.T) {
+	if os.Getenv(runtimeConfigFaultHelperModeEnv) == "write" {
+		runRuntimeConfigFaultHelper(t, "write")
+		return
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "AGENTS.md")
 	original := []byte("# User-owned AGENTS.md\n\nThese bytes must survive a failed Multica runtime-brief write.\n")
@@ -25,12 +36,7 @@ func TestWriteRuntimeConfigFilePartialWriteFailurePreservesOriginal(t *testing.T
 		t.Fatalf("seed original: %v", err)
 	}
 
-	err := withRuntimeConfigFileSizeLimit(t, 64, func() error {
-		return writeRuntimeConfigFile(path, strings.Repeat("load-bearing runtime instruction\n", 1024))
-	})
-	if err == nil {
-		t.Fatal("write unexpectedly succeeded under a 64-byte file-size limit")
-	}
+	runRuntimeConfigFaultSubprocess(t, "write", path)
 
 	got, err := os.ReadFile(path)
 	if err != nil {
@@ -42,6 +48,11 @@ func TestWriteRuntimeConfigFilePartialWriteFailurePreservesOriginal(t *testing.T
 }
 
 func TestCleanupRuntimeConfigPartialWriteFailurePreservesInjectedFile(t *testing.T) {
+	if os.Getenv(runtimeConfigFaultHelperModeEnv) == "cleanup" {
+		runRuntimeConfigFaultHelper(t, "cleanup")
+		return
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "AGENTS.md")
 	original := []byte("# User-owned AGENTS.md\n\nThese bytes must survive a failed Multica runtime-brief cleanup.\n")
@@ -56,12 +67,7 @@ func TestCleanupRuntimeConfigPartialWriteFailurePreservesInjectedFile(t *testing
 		t.Fatalf("read injected file: %v", err)
 	}
 
-	err = withRuntimeConfigFileSizeLimit(t, 64, func() error {
-		return CleanupRuntimeConfig(dir, "codex")
-	})
-	if err == nil {
-		t.Fatal("cleanup unexpectedly succeeded under a 64-byte file-size limit")
-	}
+	runRuntimeConfigFaultSubprocess(t, "cleanup", path)
 
 	got, err := os.ReadFile(path)
 	if err != nil {
@@ -69,6 +75,44 @@ func TestCleanupRuntimeConfigPartialWriteFailurePreservesInjectedFile(t *testing
 	}
 	if !bytes.Equal(got, injected) {
 		t.Fatalf("failed runtime-config cleanup changed injected file\n got: %q\nwant: %q", got, injected)
+	}
+}
+
+// runRuntimeConfigFaultSubprocess keeps the process-wide RLIMIT_FSIZE away
+// from the parent go test process. In particular, cmd intentionally omits
+// -test.testlogfile: otherwise Go's test-cache recorder can try to write while
+// the 64-byte limit is active and fail the package after every test has passed.
+func runRuntimeConfigFaultSubprocess(t *testing.T, mode, path string) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+	cmd.Env = append(os.Environ(),
+		runtimeConfigFaultHelperModeEnv+"="+mode,
+		runtimeConfigFaultHelperPathEnv+"="+path,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("runtime-config fault helper failed: %v\n%s", err, output)
+	}
+}
+
+func runRuntimeConfigFaultHelper(t *testing.T, mode string) {
+	t.Helper()
+	path := os.Getenv(runtimeConfigFaultHelperPathEnv)
+	if path == "" {
+		t.Fatal("runtime-config fault helper path is empty")
+	}
+
+	err := withRuntimeConfigFileSizeLimit(t, 64, func() error {
+		switch mode {
+		case "write":
+			return writeRuntimeConfigFile(path, strings.Repeat("load-bearing runtime instruction\n", 1024))
+		case "cleanup":
+			return CleanupRuntimeConfig(filepath.Dir(path), "codex")
+		default:
+			return nil
+		}
+	})
+	if err == nil {
+		t.Fatalf("%s unexpectedly succeeded under a 64-byte file-size limit", mode)
 	}
 }
 
