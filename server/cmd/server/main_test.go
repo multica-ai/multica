@@ -1,16 +1,18 @@
 package main
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-
-	"github.com/multica-ai/multica/server/internal/handler"
-	"github.com/multica-ai/multica/server/internal/service"
 )
 
 func TestRedisClientName(t *testing.T) {
@@ -85,28 +87,106 @@ func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	}
 }
 
-// TestBackgroundServicesReuseRouterServices guards the process wiring used by
-// scheduled Autopilot dispatch and the runtime sweeper. The router owns the
-// fully configured TaskService (including the Redis empty-claim cache), so
-// background workers must not construct a second partially wired instance.
-func TestBackgroundServicesReuseRouterServices(t *testing.T) {
-	taskSvc := &service.TaskService{}
-	routerAutopilotSvc := &service.AutopilotService{TaskSvc: taskSvc}
-	h := &handler.Handler{
-		TaskService:      taskSvc,
-		AutopilotService: routerAutopilotSvc,
+// mainSourceFile is parsed by TestMainUsesRouterOwnedBackgroundServices. The
+// test asserts the markers below are actually present so a future move of the
+// background-worker wiring fails loudly instead of vacuously passing on a walk
+// that matched nothing.
+const mainSourceFile = "main.go"
+
+// backgroundServiceConstructors must never be called from main(): they build a
+// TaskService / AutopilotService that the router has not finished wiring.
+var backgroundServiceConstructors = []string{
+	"service.NewTaskService",
+	"service.NewAutopilotService",
+}
+
+// TestMainUsesRouterOwnedBackgroundServices guards the process wiring behind
+// scheduled Autopilot dispatch and the runtime sweeper: both must take the
+// router's fully wired services off *handler.Handler instead of constructing
+// their own.
+//
+// The router — not NewTaskService — assigns h.TaskService.EmptyClaim. A second
+// TaskService built inside main() therefore has EmptyClaim == nil, and because
+// EmptyClaimCache is deliberately nil-safe the missed invalidation is silent:
+// a scheduled dispatch still delivers the daemon wakeup while the claim path's
+// cached "no queued task" verdict survives, so an idle runtime keeps returning
+// empty claims until EmptyClaimCacheTTL expires.
+//
+// This parses main.go instead of asserting on backgroundServices' return
+// values. A value-level assertion only proves the helper hands back h's fields,
+// which stays true even when main() stops calling it and constructs its own
+// services again — i.e. it cannot fail on the exact regression it names.
+func TestMainUsesRouterOwnedBackgroundServices(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, mainSourceFile, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", mainSourceFile, err)
 	}
 
-	backgroundTaskSvc, autopilotSvc := backgroundServices(h)
-	if backgroundTaskSvc != taskSvc {
-		t.Fatal("background workers must reuse the router TaskService")
+	var mainFunc *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && fn.Name.Name == "main" {
+			mainFunc = fn
+			break
+		}
 	}
-	if autopilotSvc != routerAutopilotSvc {
-		t.Fatal("background Autopilot service must reuse the router service")
+	if mainFunc == nil || mainFunc.Body == nil {
+		t.Fatalf("no func main() with a body found in %s — this guard must be pointed at the real wiring", mainSourceFile)
 	}
-	if autopilotSvc.TaskSvc != backgroundTaskSvc {
-		t.Fatal("background Autopilot dispatch must use the background TaskService")
+
+	forbidden := make(map[string]bool, len(backgroundServiceConstructors))
+	for _, name := range backgroundServiceConstructors {
+		forbidden[name] = true
 	}
+
+	var (
+		offenders          []string
+		reusesRouter       bool
+		registersScheduler bool
+	)
+	ast.Inspect(mainFunc.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch callee := calleeName(call); {
+		case forbidden[callee]:
+			offenders = append(offenders, fmt.Sprintf("%s at %s", callee, fset.Position(call.Pos())))
+		case callee == "backgroundServices":
+			reusesRouter = true
+		case callee == "scheduler.AutopilotScheduleDispatchJob":
+			registersScheduler = true
+		}
+		return true
+	})
+
+	// Anti-vacuity: the scheduled-dispatch registration is what makes the
+	// unwired-service hazard reachable. If it moves out of main(), this test
+	// no longer covers the path it claims to and must fail rather than pass.
+	if !registersScheduler {
+		t.Fatalf("scheduler.AutopilotScheduleDispatchJob is no longer registered in main() — re-point this guard at wherever the schedule job is now wired")
+	}
+	if len(offenders) > 0 {
+		t.Errorf("main() constructs its own background services (%s); take them from the router via backgroundServices(h) so EmptyClaim and the rest of the router wiring come along", strings.Join(offenders, ", "))
+	}
+	if !reusesRouter {
+		t.Error("main() no longer calls backgroundServices(h); background workers must reuse the router-owned TaskService/AutopilotService")
+	}
+}
+
+// calleeName renders a call's target as "pkg.Func" or "Func" for matching.
+func calleeName(call *ast.CallExpr) string {
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		return fn.Name
+	case *ast.SelectorExpr:
+		if pkg, ok := fn.X.(*ast.Ident); ok {
+			return pkg.Name + "." + fn.Sel.Name
+		}
+		return fn.Sel.Name
+	}
+	return ""
 }
 
 // TestNormalizeServerVersion covers the router-config wiring path (not just
