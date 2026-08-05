@@ -34,6 +34,8 @@ export {
 export { AccountsSettingsTab } from "./components/accounts-settings-tab";
 export { AccountDetailPage } from "./components/account-detail-page";
 export { PauseRuntimeButton, PauseBanner, formatPauseReason } from "./components/pause-controls";
+// FIR-4492: per-runtime cheap model, picked from the machine's own model list.
+export { CheapModelCard } from "./components/cheap-model-card";
 export {
   parseRuntimePauseWaitReason,
   runtimePauseQueuedLabel,

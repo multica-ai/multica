@@ -130,6 +130,7 @@ type AgentRuntime struct {
 	SandboxPolicy    []byte             `json:"sandbox_policy"`
 	AutoPauseCount   int32              `json:"auto_pause_count"`
 	CustomName       pgtype.Text        `json:"custom_name"`
+	CheapModel       string             `json:"cheap_model"`
 }
 
 type AgentSkill struct {

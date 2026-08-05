@@ -1995,6 +1995,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/pause", h.PauseRuntime)
 					r.Post("/unpause", h.UnpauseRuntime)
 					r.Post("/models", h.InitiateListModels)
+					// CEREBRO-PATCH(router-runtime-cheap-model): FIR-4492 per-runtime cheap model, picked from the list /models returns.
+					r.Patch("/cheap-model", h.UpdateAgentRuntimeCheapModel)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
 					r.Post("/local-skills", h.InitiateListLocalSkills)
 					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
