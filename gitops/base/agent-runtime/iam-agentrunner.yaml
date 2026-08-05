@@ -126,6 +126,7 @@ spec:
             "Condition": {
               "StringLike": {
                 "s3:prefix": [
+                  "agent-scratchpad/PLACEHOLDER",
                   "agent-scratchpad/PLACEHOLDER/",
                   "agent-scratchpad/PLACEHOLDER/*"
                 ]
