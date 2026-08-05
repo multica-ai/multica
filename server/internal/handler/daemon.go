@@ -1635,6 +1635,31 @@ type claimBuildFailure struct {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// Automatic retries resume from their exact parent, including when a
+	// provider-limit failover routed the child to another account on the same
+	// daemon. Resolve this before the issue/chat fallback lookups so a parallel
+	// task can never replace the intended continuation source.
+	retryResumeResolved := false
+	if task.RetryOfTaskID.Valid {
+		retryResumeResolved = true
+		if src, err := h.Queries.GetAgentTask(r.Context(), task.RetryOfTaskID); err == nil {
+			if src.WorkDir.Valid {
+				resp.PriorWorkDir = src.WorkDir.String
+			}
+			compatible := src.RuntimeID == task.RuntimeID
+			if !compatible {
+				if sourceRuntime, rerr := h.Queries.GetAgentRuntime(r.Context(), src.RuntimeID); rerr == nil {
+					compatible = service.RuntimeResumeCompatible(sourceRuntime, runtime)
+				}
+			}
+			if compatible && !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) && src.SessionID.Valid {
+				resp.PriorSessionID = src.SessionID.String
+			}
+			if src.SessionRolloutMissing {
+				resp.PriorSessionResumeUnavailable = true
+			}
+		}
+	}
 	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded
@@ -2064,7 +2089,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.PriorSessionResumeUnavailable = true
 				}
 			}
-		} else if !task.ForceFreshSession {
+		} else if !retryResumeResolved && !task.ForceFreshSession {
 			// Non-rerun follow-up on the same issue: resume the most recent
 			// (agent, issue) session so the agent keeps the issue's conversation
 			// context across turns. The "Focus on THIS comment" guard in
@@ -2199,7 +2224,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.Repos = repos
 				}
 			}
-			if !task.ForceFreshSession {
+			if !retryResumeResolved && !task.ForceFreshSession {
 				// Resume chat sessions only when the stored pointer was produced
 				// by the same runtime as the claiming task. When the chat_session
 				// pointer is missing (legacy NULL runtime_id), stale (last task

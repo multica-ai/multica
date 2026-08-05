@@ -122,8 +122,9 @@ const (
 	ReasonAgentProviderAuthOrAccess Reason = "agent_error.provider_auth_or_access"
 
 	// ReasonAgentProviderQuotaLimit: 402, insufficient_balance,
-	// monthly usage limit, credits exhausted. Not retryable until the
-	// account is topped up.
+	// monthly/session usage limit, credits exhausted. Retryable only when the
+	// agent has a compatible alternate runtime configured; retrying the same
+	// provider account would only consume another attempt.
 	ReasonAgentProviderQuotaLimit Reason = "agent_error.provider_quota_limit"
 
 	// ReasonAgentProviderCapacityOrRateLimit: 429 / 529, rate-limited,

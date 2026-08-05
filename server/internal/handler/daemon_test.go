@@ -3654,6 +3654,69 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	})
 }
 
+func TestClaimTask_AutoRetryResumesAcrossCompatibleRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, sourceRuntimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	profileID := insertRuntimeProfileFixture(t, ctx, "Failover Runtime", "opencode", "opencode-failover")
+	var targetRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, profile_id, last_seen_at
+		)
+		VALUES ($1, $2, 'Failover Runtime', 'local', 'opencode', 'online',
+		       'failover fixture', '{}'::jsonb, $3, $4, now())
+		RETURNING id
+	`, testWorkspaceID, daemonID, testUserID, profileID).Scan(&targetRuntimeID); err != nil {
+		t.Fatalf("setup: create compatible failover runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, targetRuntimeID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'runtime failover retry fixture', 'in_progress', 'none', $2, 'member', 81220, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var sourceTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+			failure_reason, error, session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'failed', 0, 1, 2,
+		        'agent_error.provider_quota_limit', 'session limit', 'failover-session', '/tmp/failover-workdir')
+		RETURNING id
+	`, agentID, sourceRuntimeID, issueID).Scan(&sourceTaskID); err != nil {
+		t.Fatalf("setup: create source task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+			parent_task_id, retry_of_task_id
+		)
+		VALUES ($1, $2, $3, 'queued', 0, 2, 2, $4, $4)
+	`, agentID, targetRuntimeID, issueID, sourceTaskID); err != nil {
+		t.Fatalf("setup: create failover retry: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, targetRuntimeID, daemonID)
+	if task.PriorWorkDir != "/tmp/failover-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want source workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionID != "failover-session" {
+		t.Fatalf("PriorSessionID = %q, want exact source session", task.PriorSessionID)
+	}
+}
+
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

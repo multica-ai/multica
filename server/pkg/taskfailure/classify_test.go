@@ -73,6 +73,8 @@ func TestClassifyRules(t *testing.T) {
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
 		{"monthly usage limit", "You've hit your org's monthly usage limit", ReasonAgentProviderQuotaLimit},
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
+		{"session limit ascii", "You've hit your session limit · resets 2pm (Asia/Seoul)", ReasonAgentProviderQuotaLimit},
+		{"session limit curly", "You\u2019ve hit your session limit · resets 2pm", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
@@ -322,6 +324,12 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			reason: string(ReasonAgentUnknown),
 			raw:    "  " + legacyErr,
 			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			name:   "old daemon session-limit catchall is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "You've hit your session limit · resets 2pm (Asia/Seoul)",
+			want:   ReasonAgentProviderQuotaLimit,
 		},
 		{
 			// A current daemon already sends the right reason and a different

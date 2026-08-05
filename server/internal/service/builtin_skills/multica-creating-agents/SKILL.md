@@ -122,7 +122,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
-| `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
+| `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config and server-side failover policy; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
 | `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
@@ -135,6 +135,21 @@ Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 (all materialized server-side before the insert). `custom_args`/`runtime_config`
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
+
+To opt into provider-limit failover, set an ordered list of alternate runtime
+ids in `runtime_config`:
+
+```json
+{"failover":{"runtime_ids":["<alternate-runtime-uuid>"]}}
+```
+
+The server uses this list only after a provider quota/session/rate-limit
+failure. It creates a bounded retry child on the first online candidate that
+shares the source runtime's workspace, owner, daemon, and provider; other
+failures retain their existing retry behavior. The agent's default runtime is
+not mutated. Cross-runtime continuation reuses the exact failed task's workdir
+and, when resume-safe, its provider session. This is resumptive failover after
+the provider returns a limit error, not live process migration.
 
 The 1–50 concurrency range applies consistently to manual create, update, and
 the create-from-template HTTP path. On create paths, an omitted field defaults

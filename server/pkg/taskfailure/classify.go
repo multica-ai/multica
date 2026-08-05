@@ -127,11 +127,13 @@ func Classify(rawError string) Reason {
 			"balance is too low",
 			"monthly usage limit",
 			"usage limit",
+			"you've hit your session limit",
 			"you've hit your limit",
 			// Curly apostrophe variant: providers and copy-pasted error
 			// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE
 			// would not match the curly form either, so this is a small
 			// in-flight improvement on top of the SQL classifier.
+			"you\u2019ve hit your session limit",
 			"you\u2019ve hit your limit",
 			"credits",
 			"quota",
@@ -310,21 +312,28 @@ var legacyContextOverflowReasons = map[string]bool{
 	"agent_error":              true,
 }
 
+var legacyProviderQuotaReasons = map[string]bool{
+	string(ReasonAgentUnknown): true,
+	"agent_error":              true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
 //
-// Why this exists (MUL-5370): installed daemons upgrade on their own cadence,
-// so a fix that only labels a failure correctly on the daemon side reaches
-// nobody until every host updates. The daemon reports a non-empty reason, so
-// FailTask's "classify when empty" guard does not fire, and the server would
-// persist the stale label — no auto-retry, and the chat bubble falls back to
-// generic copy. Recognising the wire shape an old daemon produces closes that
-// gap the moment the server deploys.
+// Why this exists (MUL-5370 and provider-limit failover): installed daemons
+// upgrade on their own cadence, so a fix that only labels a failure correctly
+// on the daemon side reaches nobody until every host updates. The daemon
+// reports a non-empty reason, so FailTask's "classify when empty" guard does
+// not fire, and the server would persist the stale label. Recognising the wire
+// shape an old daemon produces closes that gap when the server deploys.
 //
-// This is a boundary compatibility shim, not internal fallback logic: each rule
-// can be deleted once no daemon old enough to produce its wire shape is still
-// reporting.
+// This is a boundary compatibility shim, not internal fallback logic. Each
+// rule is deliberately narrow and only upgrades legacy catchalls backed by an
+// unambiguous witness. A daemon's more specific reason always wins.
+// The quota branch is deliberately narrow: only legacy catchalls are upgraded,
+// and only to the quota bucket backed by an unambiguous current classifier
+// result. A daemon's more specific reason always wins.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
@@ -341,6 +350,12 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacyContextOverflowReasons[reason] &&
 		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
 		return ReasonAgentContextOverflow
+	}
+	if legacyProviderQuotaReasons[reason] {
+		classified := Classify(rawError)
+		if classified == ReasonAgentProviderQuotaLimit {
+			return classified
+		}
 	}
 	return Reason(reason)
 }

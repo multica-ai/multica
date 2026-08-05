@@ -21,13 +21,22 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
-	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
 
 	// agent_task_queue.runtime_id is NOT NULL; reuse the fixture agent's runtime.
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
 		t.Fatalf("read agent runtime: %v", err)
 	}
+	var alternateRuntimeID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id)
+		VALUES ($1, 'retry alternate', 'cloud', 'claude', 'online', '', '{}'::jsonb, $2)
+		RETURNING id
+	`, workspaceID, userID).Scan(&alternateRuntimeID); err != nil {
+		t.Fatalf("insert alternate runtime: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, alternateRuntimeID) })
 
 	// Parent: a provider_network failure on its second attempt — the point at
 	// which the schedule wants the next (final) retry deferred.
@@ -50,16 +59,18 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 		wantStatus      string
 		wantFireAt      bool
 		wantMaxAttempts int32
+		runtimeID       pgtype.UUID
+		wantRuntimeID   string
 	}{
 		// Final tier: deferred, and the effective budget (3) written into the row
 		// so it self-describes as attempt=3/max_attempts=3, not attempt=3/max=2.
-		{"deferred final tier persists budget", pgtype.Timestamptz{Time: time.Now().Add(5 * time.Second), Valid: true}, pgtype.Int4{Int32: 3, Valid: true}, "deferred", true, 3},
+		{"deferred final tier persists budget", pgtype.Timestamptz{Time: time.Now().Add(5 * time.Second), Valid: true}, pgtype.Int4{Int32: 3, Valid: true}, "deferred", true, 3, pgtype.UUID{}, runtimeID},
 		// NULL max_attempts inherits the parent's column (COALESCE fallback).
-		{"queued immediate tier inherits budget", pgtype.Timestamptz{}, pgtype.Int4{}, "queued", false, 2},
+		{"queued immediate tier can override runtime", pgtype.Timestamptz{}, pgtype.Int4{}, "queued", false, 2, util.MustParseUUID(alternateRuntimeID), alternateRuntimeID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			child, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parentID, FireAt: tc.fireAt, MaxAttempts: tc.maxAttempts})
+			child, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parentID, RuntimeID: tc.runtimeID, FireAt: tc.fireAt, MaxAttempts: tc.maxAttempts})
 			if err != nil {
 				t.Fatalf("CreateRetryTask: %v", err)
 			}
@@ -76,6 +87,9 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 			}
 			if child.MaxAttempts != tc.wantMaxAttempts {
 				t.Errorf("max_attempts = %d, want %d", child.MaxAttempts, tc.wantMaxAttempts)
+			}
+			if got := util.UUIDToString(child.RuntimeID); got != tc.wantRuntimeID {
+				t.Errorf("runtime_id = %s, want %s", got, tc.wantRuntimeID)
 			}
 			// provider_network is resume-safe: the retry must continue the session.
 			if child.ForceFreshSession {

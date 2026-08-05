@@ -3335,6 +3335,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		retryOverlay     runtimeMCPOverlayData
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
+		retryRuntimeID   pgtype.UUID
 	)
 	if retryableReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
@@ -3342,6 +3343,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				"task_id", util.UUIDToString(taskID), "error", perr)
 		} else if retryEligible(failureReason, parent) {
 			wantRetry = true
+			retryRuntimeID = parent.RuntimeID
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
@@ -3358,8 +3360,28 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				slog.Warn("fail task auto-retry: load agent for overlay failed",
 					"task_id", util.UUIDToString(taskID),
 					"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
+				if isFailoverOnlyRetryReason(failureReason) {
+					wantRetry = false
+				}
 			} else {
 				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+				if isFailoverOnlyRetryReason(failureReason) {
+					target, ok, ferr := s.configuredFailoverRuntime(ctx, agent, parent.RuntimeID)
+					switch {
+					case ferr != nil:
+						slog.Warn("fail task auto-retry: resolve failover runtime failed",
+							"task_id", util.UUIDToString(taskID), "error", ferr)
+						wantRetry = false
+					case !ok:
+						slog.Info("fail task auto-retry skipped: no compatible failover runtime",
+							"task_id", util.UUIDToString(taskID),
+							"runtime_id", util.UUIDToString(parent.RuntimeID),
+							"reason", failureReason)
+						wantRetry = false
+					default:
+						retryRuntimeID = target
+					}
+				}
 			}
 		}
 	}
@@ -3453,6 +3475,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if wantRetry {
 			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 				ID:                   taskID,
+				RuntimeID:            retryRuntimeID,
 				FireAt:               retryFireAt,
 				MaxAttempts:          retryMaxAttempts,
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
@@ -3505,6 +3528,8 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			"parent_task_id", util.UUIDToString(task.ID),
 			"child_task_id", util.UUIDToString(retried.ID),
 			"reason", failureReason,
+			"source_runtime_id", util.UUIDToString(task.RuntimeID),
+			"target_runtime_id", util.UUIDToString(retried.RuntimeID),
 			"attempt", retried.Attempt,
 			"max_attempts", retried.MaxAttempts,
 			"status", retried.Status,
@@ -3567,7 +3592,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 //
-// The one agent_error.* exception is provider_network: a mid-stream provider
+// Provider network is a same-runtime retry for transient stream cuts. Provider
+// quota and capacity reasons are retryable only when runtime_config names a
+// compatible alternate runtime; they are never retried against the exhausted
+// account.
+//
+// provider_network is a mid-stream provider
 // disconnect (e.g. Claude Code's "API Error: Connection closed mid-response")
 // is transient infrastructure flakiness, not an agent decision. Unattended
 // issue runs otherwise terminate on it, while interactive chat only survives
@@ -3584,8 +3614,10 @@ var retryableReasons = map[string]bool{
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
-	string(taskfailure.ReasonAgentProviderNetwork):   true,
-	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonAgentProviderNetwork):             true,
+	string(taskfailure.ReasonAgentProviderQuotaLimit):          true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
+	string(taskfailure.ReasonSkillBundleUnavailable):           true,
 }
 
 // Transient provider stream cuts (provider_network) get a bespoke three-tier
@@ -3675,11 +3707,12 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	return taskfailure.UnresumableHistory(errorText)
 }
 
-// retryEligible reports whether a failed task qualifies for an automatic retry
-// attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
+// retryEligible reports whether a failed task passes the common automatic
+// retry gates: an allowed failure_reason, remaining attempt budget, not an
+// autopilot run, and linked to an issue or chat session. Provider-limit reasons
+// must additionally resolve a configured alternate runtime before callers
+// create a child. Shared by FailTask's in-transaction retry and the orphan
+// sweeper's MaybeRetryFailedTask so both agree on the common gates.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
@@ -3730,6 +3763,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 
 	var runtimeMCPOverlay runtimeMCPOverlayData
+	retryRuntimeID := parent.RuntimeID
 	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
 	if agentErr != nil {
 		// Best-effort: failing to resolve the agent for the overlay is not
@@ -3740,8 +3774,27 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 			"agent_id", util.UUIDToString(parent.AgentID),
 			"error", agentErr,
 		)
+		if isFailoverOnlyRetryReason(reason) {
+			return nil, nil
+		}
 	} else {
 		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+		if isFailoverOnlyRetryReason(reason) {
+			target, ok, err := s.configuredFailoverRuntime(ctx, agent, parent.RuntimeID)
+			if err != nil {
+				slog.Warn("task auto-retry: resolve failover runtime failed",
+					"parent_task_id", util.UUIDToString(parent.ID), "error", err)
+				return nil, err
+			}
+			if !ok {
+				slog.Info("task auto-retry skipped: no compatible failover runtime",
+					"parent_task_id", util.UUIDToString(parent.ID),
+					"runtime_id", util.UUIDToString(parent.RuntimeID),
+					"reason", reason)
+				return nil, nil
+			}
+			retryRuntimeID = target
+		}
 	}
 	// Mirror FailTask's in-tx backoff + effective-budget persistence: defer the
 	// final provider_network attempt ~5s via fire_at (zero delay leaves fire_at
@@ -3753,6 +3806,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:                   parent.ID,
+		RuntimeID:            retryRuntimeID,
 		FireAt:               retryFireAt,
 		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
@@ -3770,6 +3824,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"parent_task_id", util.UUIDToString(parent.ID),
 		"child_task_id", util.UUIDToString(child.ID),
 		"reason", reason,
+		"source_runtime_id", util.UUIDToString(parent.RuntimeID),
+		"target_runtime_id", util.UUIDToString(child.RuntimeID),
 		"attempt", child.Attempt,
 		"max_attempts", child.MaxAttempts,
 		"status", child.Status,
