@@ -123,13 +123,16 @@ type AppendResult struct {
 }
 
 // BindMediaParams carries stored media references to the post-append
-// attachment transaction. MessageID is the durable chat_message created by
-// AppendMessage; media downloads must never run inside this transaction.
+// attachment transaction. MessageID is the durable chat_message whose pending
+// marker the binder clears. IssueID selects issue ownership for an /issue turn;
+// otherwise the references bind to MessageID. Media downloads must never run
+// inside this transaction.
 type BindMediaParams struct {
 	MessageID   pgtype.UUID
 	SessionID   pgtype.UUID
 	WorkspaceID pgtype.UUID
 	Sender      pgtype.UUID
+	IssueID     pgtype.UUID
 	MediaRefs   []channel.MediaRef
 }
 
@@ -208,8 +211,9 @@ type MediaResolver interface {
 	// plain ingest path: no marker, no deferred run, no semaphore slot.
 	HasMedia(msg channel.InboundMessage) bool
 	// ResolveMedia downloads the platform media and uploads it to object
-	// storage. chatMessageID is the durable chat_message the refs will bind
-	// to; the intent ledger keys the reconciler's reference check on it.
+	// storage. chatMessageID is the durable chat_message that owns the pending
+	// intent; the Router decides whether the resulting refs belong to that
+	// message or to an issue created from the same turn.
 	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
 }
 
@@ -312,6 +316,7 @@ type ResolverSet struct {
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+	PublishAttachmentsChanged(issue db.Issue, actorID pgtype.UUID)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
@@ -319,6 +324,7 @@ type IssueCreator interface {
 type TaskEnqueuer interface {
 	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
+	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.

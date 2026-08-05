@@ -80,6 +80,23 @@ WHERE workspace_id = sqlc.arg('workspace_id')
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockIssueForChannelMediaBind :one
+-- Channel media resolves after /issue creation. Hold a key-share lock while
+-- the attachment row is written so a concurrent issue delete cannot land
+-- between the workspace-scoped validation and the attachment insert.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
+-- name: LockIssueForDelete :one
+-- Issue deletion must collect every attachment URL after it has won the same
+-- row-lock race used by channel media binding. FOR UPDATE conflicts with the
+-- binder's FOR KEY SHARE: either bind commits first and its URL is collected,
+-- or delete commits first and the binder leaves its durable intent for cleanup.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,

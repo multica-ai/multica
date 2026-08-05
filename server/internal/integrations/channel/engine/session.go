@@ -45,6 +45,7 @@ type SessionQueries interface {
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 	ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error
+	LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error)
 	CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error)
 	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error)
@@ -79,6 +80,9 @@ func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateCh
 }
 func (a dbSessionQueries) ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error {
 	return a.q.ClearChatMessageChannelMediaPending(ctx, arg)
+}
+func (a dbSessionQueries) LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error) {
+	return a.q.LockIssueForChannelMediaBind(ctx, arg)
 }
 func (a dbSessionQueries) CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
 	return a.q.CreateAttachment(ctx, arg)
@@ -270,14 +274,15 @@ type AppendInput struct {
 	MediaPendingSeconds float64
 }
 
-// BindMediaInput links already-uploaded media to a durable chat message in a
-// short database-only transaction. Remote downloads/uploads happen before
-// this call and outside the connector ACK path.
+// BindMediaInput links already-uploaded media to either an /issue target or a
+// durable chat message in a short database-only transaction. Remote downloads/
+// uploads happen before this call and outside the connector ACK path.
 type BindMediaInput struct {
 	MessageID   pgtype.UUID
 	SessionID   pgtype.UUID
 	WorkspaceID pgtype.UUID
 	Sender      pgtype.UUID
+	IssueID     pgtype.UUID
 	MediaRefs   []channel.MediaRef
 }
 
@@ -370,10 +375,11 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	return AppendResult{MessageID: msg.ID, IssueCommand: cmd, DedupMarked: markedInTx}, nil
 }
 
-// BindMediaRefs creates attachment rows, links them to an existing durable chat
-// message, and clears its media-pending marker. A link failure rolls back the
-// attachment rows, then clears the marker separately so the placeholder can be
-// promoted immediately for graceful degradation.
+// BindMediaRefs creates attachment rows owned by IssueID when present, otherwise
+// links them to the existing durable chat message. It also clears the message's
+// media-pending marker. A failure rolls back the attachment rows, then clears
+// the marker separately so the placeholder can be promoted immediately for
+// graceful degradation.
 func (s *ChatSession) BindMediaRefs(ctx context.Context, in BindMediaInput) error {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
@@ -429,6 +435,14 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		}
 		keys = append(keys, ref.StorageKey)
 	}
+	if in.IssueID.Valid {
+		if _, err := qtx.LockIssueForChannelMediaBind(ctx, db.LockIssueForChannelMediaBindParams{
+			ID:          in.IssueID,
+			WorkspaceID: in.WorkspaceID,
+		}); err != nil {
+			return fmt.Errorf("validate issue media target: %w", err)
+		}
+	}
 	// Claim the intent-ledger rows inside this same transaction: commit
 	// landed <=> intents gone, atomically, so an ambiguous COMMIT never needs
 	// adjudication. A key the reconciler already moved to 'deleting' is not
@@ -464,10 +478,15 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		if filename == "" {
 			filename = defaultMediaFilename(ref.Type, id.String(), contentType)
 		}
+		chatSessionID := in.SessionID
+		if in.IssueID.Valid {
+			chatSessionID = pgtype.UUID{}
+		}
 		att, err := qtx.CreateAttachment(ctx, db.CreateAttachmentParams{
 			ID:            pgtype.UUID{Bytes: id, Valid: true},
 			WorkspaceID:   in.WorkspaceID,
-			ChatSessionID: in.SessionID,
+			IssueID:       in.IssueID,
+			ChatSessionID: chatSessionID,
 			UploaderType:  "member",
 			UploaderID:    in.Sender,
 			Filename:      filename,
@@ -476,11 +495,14 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 			SizeBytes:     ref.SizeBytes,
 		})
 		if err != nil {
-			return fmt.Errorf("create chat attachment: %w", err)
+			return fmt.Errorf("create channel attachment: %w", err)
 		}
 		ids = append(ids, att.ID)
 	}
 	if len(ids) == 0 {
+		return nil
+	}
+	if in.IssueID.Valid {
 		return nil
 	}
 	if _, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{

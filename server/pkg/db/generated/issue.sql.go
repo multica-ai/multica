@@ -1233,6 +1233,49 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
+const lockIssueForChannelMediaBind = `-- name: LockIssueForChannelMediaBind :one
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockIssueForChannelMediaBindParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Channel media resolves after /issue creation. Hold a key-share lock while
+// the attachment row is written so a concurrent issue delete cannot land
+// between the workspace-scoped validation and the attachment insert.
+func (q *Queries) LockIssueForChannelMediaBind(ctx context.Context, arg LockIssueForChannelMediaBindParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForChannelMediaBind, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockIssueForDelete = `-- name: LockIssueForDelete :one
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockIssueForDeleteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Issue deletion must collect every attachment URL after it has won the same
+// row-lock race used by channel media binding. FOR UPDATE conflicts with the
+// binder's FOR KEY SHARE: either bind commits first and its URL is collected,
+// or delete commits first and the binder leaves its durable intent for cleanup.
+func (q *Queries) LockIssueForDelete(ctx context.Context, arg LockIssueForDeleteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForDelete, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
 UPDATE issue
 SET first_executed_at = now()
