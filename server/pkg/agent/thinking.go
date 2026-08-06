@@ -11,8 +11,9 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude, codex, opencode, and pi backends so the daemon can advertise them to
-// the UI without hard-coding (and getting wrong) what's installed locally.
+// claude, codex, opencode, pi, and kimi backends so the daemon can advertise
+// them to the UI without hard-coding (and getting wrong) what's installed
+// locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
 // xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh|max|ultra`
@@ -780,6 +781,7 @@ var providerThinkingEnums = map[string]map[string]bool{
 var thinkingDynamicCatalogProviders = map[string]bool{
 	"codex":    true,
 	"opencode": true,
+	"kimi":     true,
 }
 
 // ThinkingControlSupported reports whether Multica can deliver a per-agent
@@ -817,8 +819,9 @@ func ThinkingControlSupported(providerType string) bool {
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
 // "use runtime default"). Providers with no reasoning control accept
-// only empty; Codex and OpenCode accept well-formed tokens here because their
-// daemon-local catalogs perform the exact per-model check before execution.
+// only empty; Codex, OpenCode, and Kimi accept well-formed tokens here because
+// their daemon-local catalogs perform the exact per-model check before
+// execution.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live

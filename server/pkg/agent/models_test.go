@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -75,6 +76,281 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	if !ids["gpt-5.4"] || !ids["claude-sonnet-4.6"] {
 		t.Errorf("static fallback missing expected models: %+v", got)
 	}
+}
+
+func TestParseKimiProviderThinking(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+  "models": {
+    "kimi-code/kimi-for-coding": {
+      "displayName": "K2.7 Coding"
+    },
+    "kimi-code/k3": {
+      "supportEfforts": ["low", "high", "max", "high", "bad value"],
+      "defaultEffort": "high"
+    },
+    "kimi-code/k3-256k": {
+      "support_efforts": ["low", "max"],
+      "default_effort": "missing"
+    }
+  }
+}`)
+
+	got, err := parseKimiProviderThinking(raw)
+	if err != nil {
+		t.Fatalf("parseKimiProviderThinking: %v", err)
+	}
+	if thinking, ok := got["kimi-code/kimi-for-coding"]; ok {
+		t.Fatalf("model without supportEfforts = %+v, want no entry at all", thinking)
+	}
+	k3 := got["kimi-code/k3"]
+	if k3 == nil {
+		t.Fatal("k3 thinking catalog is nil")
+	}
+	if k3.DefaultLevel != "high" {
+		t.Errorf("k3 default = %q, want high", k3.DefaultLevel)
+	}
+	if values := thinkingValues(k3); !reflect.DeepEqual(values, []string{"low", "high", "max"}) {
+		t.Errorf("k3 levels = %v, want [low high max]", values)
+	}
+	if labels := []string{k3.SupportedLevels[0].Label, k3.SupportedLevels[1].Label, k3.SupportedLevels[2].Label}; !reflect.DeepEqual(labels, []string{"Low", "High", "Max"}) {
+		t.Errorf("k3 labels = %v, want [Low High Max]", labels)
+	}
+	k3Short := got["kimi-code/k3-256k"]
+	if k3Short == nil {
+		t.Fatal("snake_case k3-256k thinking catalog is nil")
+	}
+	if k3Short.DefaultLevel != "" {
+		t.Errorf("unsupported default = %q, want empty", k3Short.DefaultLevel)
+	}
+}
+
+func TestFindACPConfigOptionRequiresExactID(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+  "config_options": [{
+    "type": "select",
+    "id": "thinking",
+    "category": "thought_level",
+    "current_value": "high"
+  }]
+}`)
+	option, ok := findACPConfigOption(raw, "thinking")
+	if !ok || option.ID != "thinking" {
+		t.Fatalf("findACPConfigOption = (%+v, %v), want exact thinking option", option, ok)
+	}
+	value, ok := acpConfigOptionCurrentValue(raw, "thinking")
+	if !ok || value != "high" {
+		t.Errorf("acpConfigOptionCurrentValue = (%q, %v), want (high, true)", value, ok)
+	}
+
+	for _, invalidID := range []string{"reasoning", "Thinking", " thinking "} {
+		renamed := []byte(fmt.Sprintf(`{"configOptions":[{"id":%q,"category":"thought_level","currentValue":"high"}]}`, invalidID))
+		if option, ok := findACPConfigOption(renamed, "thinking"); ok {
+			t.Fatalf("non-exact id %q exposed config option: %+v", invalidID, option)
+		}
+	}
+}
+
+func TestDiscoverKimiModelsAnnotatesThinkingPerModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/kimi-for-coding":{"displayName":"K2.7 Coding"},"kimi-code/k3":{"supportEfforts":["low","high","max"],"defaultEffort":"high"},"kimi-code/k3-256k":{"supportEfforts":["low","high","max"],"defaultEffort":"high"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"},{"value":"kimi-code/k3-256k","name":"K3-256k"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	if byID["kimi-code/kimi-for-coding"].Thinking != nil {
+		t.Errorf("kimi-for-coding must not inherit the current model's efforts: %+v", byID["kimi-code/kimi-for-coding"].Thinking)
+	}
+	for _, id := range []string{"kimi-code/k3", "kimi-code/k3-256k"} {
+		thinking := byID[id].Thinking
+		if thinking == nil || thinking.DefaultLevel != "high" ||
+			!reflect.DeepEqual(thinkingValues(thinking), []string{"low", "high", "max"}) {
+			t.Errorf("%s thinking = %+v", id, thinking)
+		}
+	}
+
+	valid, err := ValidateThinkingLevel(context.Background(), "kimi", fake, "kimi-code/k3", "high")
+	if err != nil || !valid {
+		t.Errorf("ValidateThinkingLevel(k3, high) = (%v, %v), want (true, nil)", valid, err)
+	}
+	// Unsupported persisted values are ordinary catalog results, not discovery
+	// errors. The daemon logs a warning, ignores the value, and starts the task
+	// with the runtime's own setting, just as it does for other providers.
+	valid, err = ValidateThinkingLevel(context.Background(), "kimi", fake, "kimi-code/k3", "medium")
+	if err != nil || valid {
+		t.Errorf("ValidateThinkingLevel(k3, medium) = (%v, %v), want unsupported without an error", valid, err)
+	}
+	valid, err = ValidateThinkingLevel(context.Background(), "kimi", fake, "kimi-code/kimi-for-coding", "high")
+	if err != nil || valid {
+		t.Errorf("ValidateThinkingLevel(kimi-for-coding, high) = (%v, %v), want unsupported without an error", valid, err)
+	}
+}
+
+func TestDiscoverKimiModelsProviderListFailureHidesThinking(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  exit 1
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/kimi-for-coding","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	for _, id := range []string{"kimi-code/kimi-for-coding", "kimi-code/k3"} {
+		if thinking := byID[id].Thinking; thinking != nil {
+			t.Errorf("%s received session-local thinking after provider-list failure: %+v", id, thinking)
+		}
+	}
+}
+
+func TestDiscoverKimiModelsDoesNotMigrateSessionThinkingToAnotherModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/kimi-for-coding":{"displayName":"K2.7 Coding"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]},{"id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	for _, model := range models {
+		if model.Thinking != nil {
+			t.Errorf("%s received thinking from a different ACP session model: %+v", model.ID, model.Thinking)
+		}
+	}
+}
+
+// TestDiscoverKimiModelsIgnoresTheDiscoverySessionsOwnThinkingSupport pins the
+// per-model rule against the case that makes a session-wide gate wrong. The CLI
+// default model here has no thinking capability at all, so Kimi's session/new
+// omits the `thinking` config id entirely — yet K3 still advertises
+// supportEfforts in the provider catalog and must keep its levels. The mirror
+// case matters just as much: the session does advertise thinking, but that says
+// nothing about a model provider-list gives no efforts for.
+func TestDiscoverKimiModelsIgnoresTheDiscoverySessionsOwnThinkingSupport(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/kimi-for-coding":{"displayName":"K2.7 Coding"},"kimi-code/k3":{"supportEfforts":["low","high","max"],"defaultEffort":"high"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/kimi-for-coding","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	k3 := byID["kimi-code/k3"].Thinking
+	if k3 == nil || k3.DefaultLevel != "high" ||
+		!reflect.DeepEqual(thinkingValues(k3), []string{"low", "high", "max"}) {
+		t.Errorf("k3 lost its efforts because the default model has none: %+v", k3)
+	}
+	if thinking := byID["kimi-code/kimi-for-coding"].Thinking; thinking != nil {
+		t.Errorf("kimi-for-coding has no efforts in the provider catalog: %+v", thinking)
+	}
+}
+
+func thinkingValues(thinking *ModelThinking) []string {
+	if thinking == nil {
+		return nil
+	}
+	values := make([]string, 0, len(thinking.SupportedLevels))
+	for _, level := range thinking.SupportedLevels {
+		values = append(values, level.Value)
+	}
+	return values
 }
 
 func TestClaudeStaticModelsExposesFable5(t *testing.T) {
