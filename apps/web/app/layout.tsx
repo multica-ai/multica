@@ -73,6 +73,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.multica.ai"),
+  manifest:
+    process.env.NODE_ENV === "production"
+      ? "/manifest.webmanifest"
+      : undefined,
   title: {
     default: "Multica — Project Management for Human + Agent Teams",
     template: "%s | Multica",
