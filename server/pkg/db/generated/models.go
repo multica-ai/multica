@@ -458,6 +458,7 @@ type Comment struct {
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
 	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
+	Metadata       []byte             `json:"metadata"`
 }
 
 type CommentReaction struct {

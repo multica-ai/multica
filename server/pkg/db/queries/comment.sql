@@ -430,8 +430,11 @@ WITH touched_issue AS (
     WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
     RETURNING issue.id, issue.workspace_id
 )
-INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id)
-SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id)
+-- metadata defaults to '{}' via the column default, but the INSERT lists it
+-- explicitly, so every Go caller MUST pass a non-nil value (use []byte("{}")
+-- for a plain comment). Passing nil sends SQL NULL and violates NOT NULL.
+INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, metadata)
+SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.arg(metadata)
 FROM touched_issue ti
 RETURNING *;
 
@@ -441,6 +444,18 @@ UPDATE comment SET
     source_task_id = sqlc.narg(source_task_id),
     updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: UpdateCommentAnswer :one
+-- Records the answer for an ask_user_question comment by setting the
+-- metadata.ask_user_question.answer object. Uses jsonb_set so the rest of the
+-- payload (question, options, target_user, source_user) is preserved. The
+-- handler is responsible for idempotency (rejecting if an answer already
+-- exists) — this query unconditionally overwrites.
+UPDATE comment SET
+    metadata = jsonb_set(metadata, '{ask_user_question,answer}', @answer::jsonb, true),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
 -- name: HasAgentCommentedSince :one

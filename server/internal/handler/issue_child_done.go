@@ -308,6 +308,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		Content:     content,
 		Type:        "system",
 		ParentID:    pgtype.UUID{Valid: false},
+		Metadata:    []byte("{}"),
 	})
 	if err != nil {
 		slog.Warn("child done: create system comment failed",

@@ -1155,3 +1155,32 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// ask_user_question answers
+// ---------------------------------------------------------------------------
+
+export interface AnswerAskUserQuestionVars {
+  commentId: string;
+  state: "submitted" | "ignored";
+  selectedIndex?: number;
+  selectedIndices?: number[];
+  customText?: string;
+}
+
+/** Records the target user's answer to an ask_user_question comment. The
+ *  server updates the comment in place and (on submit) posts a reply that
+ *  re-triggers the source agent; the resulting comment:updated / comment:created
+ *  WS events refresh the timeline, so this only invalidates on settle as a
+ *  fallback. */
+export function useAnswerAskUserQuestion(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: ["answerAskUserQuestion", issueId] as const,
+    mutationFn: ({ commentId, state, selectedIndex, selectedIndices, customText }: AnswerAskUserQuestionVars) =>
+      api.answerAskUserQuestion(commentId, state, { selectedIndex, selectedIndices, customText }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+  });
+}

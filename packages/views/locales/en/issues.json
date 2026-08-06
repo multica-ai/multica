@@ -697,5 +697,17 @@
     "row_backlog_hint": "keeps the agent paused",
     "row_todo_label": "Todo",
     "row_todo_hint": "starts the agent"
+  },
+  "ask_user_question": {
+    "prompt": "Please make a selection for the question below:",
+    "submit": "Confirm",
+    "ignore": "Ignore",
+    "submitted": "Selected",
+    "ignored": "Ignored",
+    "submit_failed": "Failed to submit selection",
+    "ignore_failed": "Failed to ignore",
+    "other": "Other",
+    "custom_placeholder": "Enter your answer…",
+    "multi_hint": "(multiple choice)"
   }
 }

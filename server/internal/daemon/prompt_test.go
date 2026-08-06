@@ -1382,3 +1382,39 @@ func TestBriefModeRouterMatchesPromptMarkers(t *testing.T) {
 		t.Error("brief still routes on the prompt's opening line; it must route on the explicit marker")
 	}
 }
+
+// TestAskUserQuestionHintInjected verifies both the comment-triggered and the
+// assignment-triggered prompts teach the agent to ask structured questions via
+// `--type ask_user_question` rather than in prose.
+func TestAskUserQuestionHintInjected(t *testing.T) {
+	issue := "11111111-1111-1111-1111-111111111111"
+	mustContain := []string{
+		"--type ask_user_question",
+		"--target-user",
+		"--options-json",
+		"--multi-select",
+		"--allow-custom",
+	}
+
+	t.Run("comment-triggered", func(t *testing.T) {
+		out := BuildPrompt(Task{
+			IssueID:               issue,
+			TriggerCommentID:      "22222222-2222-2222-2222-222222222222",
+			TriggerCommentContent: "please decide X",
+		}, "claude")
+		for _, s := range mustContain {
+			if !strings.Contains(out, s) {
+				t.Errorf("comment prompt missing %q", s)
+			}
+		}
+	})
+
+	t.Run("assignment-triggered", func(t *testing.T) {
+		out := BuildPrompt(Task{IssueID: issue}, "claude")
+		for _, s := range mustContain {
+			if !strings.Contains(out, s) {
+				t.Errorf("assignment prompt missing %q", s)
+			}
+		}
+	})
+}

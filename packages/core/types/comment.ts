@@ -1,9 +1,48 @@
-export type CommentType = "comment" | "status_change" | "progress_update" | "system";
+export type CommentType = "comment" | "status_change" | "progress_update" | "system" | "ask_user_question";
 
 // `system` is used by platform-generated rows (e.g. the parent-issue
 // child-done notification, MUL-2538). System rows carry a zero UUID for
 // author_id; render paths should branch on author_type rather than the UUID.
 export type CommentAuthorType = "member" | "agent" | "system";
+
+/** One selectable choice in an ask_user_question comment. `label` is the short
+ *  headline (rendered on top), `description` the longer explanation (below). */
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+}
+
+/** Written once the target user responds. Absent until then. Selection is
+ *  recorded per mode: `selected_index` (single, also legacy rows),
+ *  `selected_indices` (multi), `custom_text` (the auto "Other" free-text). */
+export interface AskUserQuestionAnswer {
+  state: "submitted" | "ignored";
+  selected_index?: number;
+  selected_indices?: number[];
+  custom_text?: string;
+  answered_at: string;
+}
+
+/** Structured payload for an ask_user_question comment, stored under
+ *  comment.metadata.ask_user_question. */
+export interface AskUserQuestionMeta {
+  /** user_id of the human being asked; only this user may answer. */
+  target_user: string;
+  /** agent id that asked (= comment author); the confirmation reply @mentions it. */
+  source_user: string;
+  question: string;
+  options: AskUserQuestionOption[];
+  /** Allow picking multiple options (checkbox). Default false = single (radio). */
+  multi_select?: boolean;
+  /** Append an auto "Other" choice with a free-text input. Default false. */
+  allow_custom?: boolean;
+  answer?: AskUserQuestionAnswer | null;
+}
+
+/** Decoded comment.metadata. Only ask_user_question is modeled today. */
+export interface CommentMetadata {
+  ask_user_question?: AskUserQuestionMeta;
+}
 
 export interface Reaction {
   id: string;
@@ -22,6 +61,7 @@ export interface Comment {
   content: string;
   type: CommentType;
   parent_id: string | null;
+  metadata?: CommentMetadata | null;
   reactions: Reaction[];
   attachments: import("./attachment").Attachment[];
   created_at: string;
