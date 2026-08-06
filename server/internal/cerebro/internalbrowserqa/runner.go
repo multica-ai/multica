@@ -142,15 +142,10 @@ var targets = map[string]Target{
 		Vault: "Shared/browser-login/registry", AccessHeaders: true,
 		AccessClientIDKey: "CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "CF_ACCESS_CLIENT_SECRET",
 		UsernameSelector: "#email", PasswordSelector: "#password",
-		// The Authentication section sits below the fold of the scrollable
-		// sidebar, and agent-browser's find-by-role only matches on-screen
-		// elements, so the run opens the route directly. The test user's key
-		// table is legitimately empty (keys require an Access-synced actor),
-		// so the run proves the API Keys management page itself rather than a
-		// key's detail view.
 		SubmitSelector: "button[type=submit]", NavigatePath: "/authentication/api-keys",
-		ExpectedURLPart: "/authentication/api-keys",
-		ExpectedText:    []string{"API Keys", "Generate New Key", "Your Registry API URL", "Actors", "Systems"},
+		NavigateSelector: "tbody tr", NavigateTabName: "Permissions",
+		ExpectedURLPart: "/authentication/api-keys/", VersionPath: "/api/health",
+		ExpectedText: []string{"Data Sources", "API Endpoints", "AI Models", "Apps", "API Access", "Save"},
 	},
 	// Finance is firtal-agents-private, not firtal-internal-private — those are
 	// two different apps that share a login, so pointing at the wrong one logged
@@ -461,7 +456,7 @@ type Runner struct {
 	cleanupTimeout time.Duration
 	dnsTimeout     time.Duration
 	resolveHost    func(context.Context, string) error
-	fetchVersion   func(context.Context, string) (string, error)
+	fetchVersion   func(context.Context, string, map[string]string) (string, error)
 	verificationMu sync.Mutex
 	observeStage   func(stageObservation)
 }
@@ -510,10 +505,13 @@ func NewRunner(commander Commander) *Runner {
 	}
 }
 
-func fetchVersionCommit(ctx context.Context, versionURL string) (string, error) {
+func fetchVersionCommit(ctx context.Context, versionURL string, headers map[string]string) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
 	if err != nil {
 		return "", err
+	}
+	for name, value := range headers {
+		request.Header.Set(name, value)
 	}
 	client := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -529,13 +527,17 @@ func fetchVersionCommit(ctx context.Context, versionURL string) (string, error) 
 		return "", fmt.Errorf("version endpoint returned %d", response.StatusCode)
 	}
 	var payload struct {
-		Commit string `json:"commit"`
+		Commit      string `json:"commit"`
+		BuildCommit string `json:"build_commit"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 4096))
 	if err := decoder.Decode(&payload); err != nil {
 		return "", err
 	}
 	commit := strings.TrimSpace(payload.Commit)
+	if commit == "" {
+		commit = strings.TrimSpace(payload.BuildCommit)
+	}
 	if !safeVersionCommit(commit) {
 		return "", fmt.Errorf("version endpoint returned an invalid commit")
 	}
@@ -562,14 +564,21 @@ func versionURL(target Target) string {
 	return parsed.Scheme + "://" + parsed.Host + target.VersionPath
 }
 
-func (r *Runner) readVersion(ctx context.Context, target Target) (string, error) {
+func (r *Runner) readVersion(ctx context.Context, target Target, credential Credential) (string, error) {
 	if target.VersionPath == "" {
 		return "", nil
 	}
 	stageCtx, cancel := context.WithTimeout(ctx, r.stageTimeout)
 	defer cancel()
 	started := time.Now()
-	commit, err := r.fetchVersion(stageCtx, versionURL(target))
+	var headers map[string]string
+	if target.AccessHeaders {
+		headers = map[string]string{
+			"CF-Access-Client-Id":     credential.AccessClientID,
+			"CF-Access-Client-Secret": credential.AccessClientSecret,
+		}
+	}
+	commit, err := r.fetchVersion(stageCtx, versionURL(target), headers)
 	if err == nil && !safeVersionCommit(commit) {
 		err = fmt.Errorf("version endpoint returned an invalid commit")
 	}
@@ -996,7 +1005,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 				stageError{stage: "url", kind: commandFailureNotFound})
 		}
 	}
-	versionCommit, err := r.readVersion(ctx, target)
+	versionCommit, err := r.readVersion(ctx, target, credential)
 	if err != nil {
 		return r.failure(target, baseArgs, "version endpoint: "+target.VersionPath, err)
 	}
