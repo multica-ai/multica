@@ -1,0 +1,59 @@
+import { test, expect } from "@playwright/test";
+import { loginAsDefault } from "./helpers";
+
+interface ManifestIcon {
+  src: string;
+  sizes: string;
+  type: string;
+  purpose: string;
+}
+
+interface Manifest {
+  id: string;
+  start_url: string;
+  icons: ManifestIcon[];
+}
+
+test.describe("PWA", () => {
+  test("manifest is served and declares the install surface", async ({ request }) => {
+    const res = await request.get("/manifest.webmanifest");
+    expect(res.status()).toBe(200);
+
+    const manifest = (await res.json()) as Manifest;
+    expect(manifest.id).toBe("/");
+    expect(manifest.start_url).toBe("/?source=pwa");
+
+    const sizes = manifest.icons.map((icon) => icon.sizes);
+    expect(sizes).toContain("192x192");
+    expect(sizes).toContain("512x512");
+
+    for (const icon of manifest.icons) {
+      const iconRes = await request.get(icon.src);
+      expect(iconRes.status(), `icon ${icon.src} should resolve`).toBe(200);
+    }
+  });
+
+  test("service worker takes control on a workspace page", async ({ page }) => {
+    await loginAsDefault(page);
+
+    // Registration happens in the workspace layout; sw.js calls skipWaiting
+    // and clients.claim, so the page becomes controlled without a reload.
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+      timeout: 30000,
+    });
+
+    const scriptURL = await page.evaluate(
+      () => navigator.serviceWorker.controller?.scriptURL ?? null,
+    );
+    expect(scriptURL).toContain("/sw.js");
+  });
+
+  test("no service worker registers on the marketing page", async ({ page }) => {
+    await page.goto("/", { waitUntil: "networkidle" });
+
+    const registrations = await page.evaluate(() =>
+      navigator.serviceWorker.getRegistrations().then((regs) => regs.length),
+    );
+    expect(registrations).toBe(0);
+  });
+});

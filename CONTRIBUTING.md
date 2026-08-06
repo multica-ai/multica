@@ -313,6 +313,17 @@ Notes:
 - E2E tests create their own workspace and issue fixtures
 - the check flow starts backend/frontend only if they are not already running
 
+## Regenerating PWA icons
+
+The PWA icons in `apps/web/public/icons/` are generated, not hand-edited. The
+source of truth is `apps/desktop/resources/icon.png`. After changing it, run:
+
+```bash
+pnpm generate:pwa-icons
+```
+
+Commit the regenerated PNGs.
+
 ## Local Codex Daemon
 
 Run the local daemon:
