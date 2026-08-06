@@ -319,7 +319,43 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 }
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
+	path := fmt.Sprintf("/api/daemon/tasks/%s/start", taskID)
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		err := c.postJSON(ctx, path, map[string]any{}, nil)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientError(err) {
+			return err
+		}
+
+		// A transport error is ambiguous: the server may have committed the
+		// transition even when the daemon did not receive its response. Read
+		// the task state before considering another POST so this logical start
+		// never launches the agent twice.
+		status, statusErr := c.GetTaskStatus(ctx, taskID)
+		if statusErr != nil {
+			return fmt.Errorf("reconcile start task after %w: get task status: %w", err, statusErr)
+		}
+		switch status {
+		case "running":
+			return nil
+		case "dispatched", "waiting_local_directory":
+			// The server has confirmed that no start committed, so retrying the
+			// same task ID is safe. The SQL transition only accepts these states.
+		default:
+			return fmt.Errorf("reconcile start task after %w: task status is %q", err, status)
+		}
+
+		if attempt >= len(startTaskRetrySchedule) {
+			return lastErr
+		}
+		if sleepErr := retrySleep(ctx, startTaskRetrySchedule[attempt]); sleepErr != nil {
+			return lastErr
+		}
+	}
 }
 
 // MarkTaskWaitingLocalDirectory parks a freshly-dispatched task in the
@@ -845,6 +881,15 @@ var defaultTerminalRetrySchedule = []time.Duration{
 var skillBundleResolveRetrySchedule = []time.Duration{
 	500 * time.Millisecond,
 	2 * time.Second,
+}
+
+// startTaskRetrySchedule bounds recovery for an uncertain task-start callback.
+// Each retry is preceded by GetTaskStatus: another POST is allowed only after
+// the server confirms the task is still not running. Two backoffs mean at most
+// three POST attempts for one logical task start.
+var startTaskRetrySchedule = []time.Duration{
+	250 * time.Millisecond,
+	time.Second,
 }
 
 // retrySleep is the sleep used between retry attempts. Pulled into a package
