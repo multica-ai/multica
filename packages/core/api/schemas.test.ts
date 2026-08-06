@@ -6,6 +6,7 @@ import {
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
+  DashboardRunTimeDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
@@ -722,6 +723,23 @@ describe("dashboard + runtime usage schema drift", () => {
     ]);
     expect(parsed).toHaveLength(1);
     expect(parsed[0]?.agent_id).toBe("");
+  });
+
+  it("defaults a missing cancelled_count to 0 so a pre-cancelled-count server still renders", () => {
+    // cancelled_count was added when the run-time rollups started counting
+    // runs the user stopped mid-flight. A backend predating it omits the
+    // field; the row must survive with a 0 segment rather than drop the
+    // whole series (installed desktop clients hit older backends).
+    expect(
+      DashboardAgentRunTimeListSchema.parse([
+        { agent_id: "a", total_seconds: 42, task_count: 3, failed_count: 0 },
+      ])[0]?.cancelled_count,
+    ).toBe(0);
+    expect(
+      DashboardRunTimeDailyListSchema.parse([
+        { date: "2026-05-19", total_seconds: 42, task_count: 3, failed_count: 0 },
+      ])[0]?.cancelled_count,
+    ).toBe(0);
   });
 
   it("coerces a missing agent_id key to \"\" for the usage-by-agent panel", () => {

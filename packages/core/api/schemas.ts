@@ -1030,11 +1030,15 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
+// `cancelled_count` defaults to 0 so an installed client pointed at a
+// backend that predates it still renders: those rows simply carry no
+// cancelled segment, which is exactly what that backend measured.
 const DashboardAgentRunTimeSchema = z.object({
   agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
 }).loose();
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
@@ -1044,6 +1048,7 @@ const DashboardRunTimeDailySchema = z.object({
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
 }).loose();
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
