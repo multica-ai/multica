@@ -86,6 +86,17 @@ services:
       S3_USE_PATH_STYLE: ${S3_USE_PATH_STYLE:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # LocalStorage backend, used when S3_BUCKET is unset. LOCAL_UPLOAD_DIR is
+      # the in-container upload root and must match the volume mounted above
+      # (backend_uploads:/app/data/uploads), so leave the default unless you
+      # also retarget the volume. LOCAL_UPLOAD_BASE_URL is the externally-
+      # reachable origin for those uploads; with it empty, attachment URLs fall
+      # back to the authenticated /api/attachments/{id}/download path, which
+      # browsers and <video>/<audio>/PDF views cannot load as plain resources
+      # — set it to the backend's public origin to mint unauthenticated
+      # {baseURL}/uploads/{key} URLs instead. See #6324.
+      LOCAL_UPLOAD_DIR: ${LOCAL_UPLOAD_DIR:-/app/data/uploads}
+      LOCAL_UPLOAD_BASE_URL: ${LOCAL_UPLOAD_BASE_URL:-}
       ATTACHMENT_DOWNLOAD_MODE: ${ATTACHMENT_DOWNLOAD_MODE:-auto}
       ATTACHMENT_DOWNLOAD_URL_TTL: ${ATTACHMENT_DOWNLOAD_URL_TTL:-30m}
       CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
