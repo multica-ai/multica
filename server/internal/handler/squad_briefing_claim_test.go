@@ -29,9 +29,10 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 
 	var resp struct {
 		Task *struct {
-			ID           string `json:"id"`
-			IsLeaderTask bool   `json:"is_leader_task"`
-			Agent        *struct {
+			ID                 string `json:"id"`
+			IsLeaderTask       bool   `json:"is_leader_task"`
+			LeaderRoleResolved bool   `json:"leader_role_resolved"`
+			Agent              *struct {
 				Instructions string `json:"instructions"`
 			} `json:"agent"`
 		} `json:"task"`
@@ -41,6 +42,13 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 	}
 	if resp.Task == nil {
 		return "", "", false, w.Body.String()
+	}
+	// Every claim must advertise the capability, leader or not: its absence is
+	// how a daemon detects a server too old to resolve the role, and silently
+	// dropping it would send every upgraded daemon back to inferring the role
+	// from instructions text — the bug MUL-5811 removed.
+	if !resp.Task.LeaderRoleResolved {
+		t.Fatalf("claim response must set leader_role_resolved=true: %s", w.Body.String())
 	}
 	var instr string
 	if resp.Task.Agent != nil {

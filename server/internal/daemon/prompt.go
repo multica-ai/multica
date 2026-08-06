@@ -603,22 +603,35 @@ func buildAutopilotPrompt(task Task) string {
 	return b.String()
 }
 
+// squadBriefingMarker is the first heading of the squad-leader briefing the
+// server appends to Instructions. It is ONLY a legacy role signal — see
+// taskIsSquadLeader — never a role signal against a current server.
+const squadBriefingMarker = "## Squad Operating Protocol"
+
 // taskIsSquadLeader reports whether THIS TASK runs the agent as a squad
 // leader. Leadership is a PER-TASK role — the same agent can be leader one
-// turn and worker the next — and the server already says so explicitly on the
+// turn and worker the next — and a current server says so explicitly on the
 // wire: `is_leader_task` for issue-bound leader runs, `squad_id` for
 // quick-create runs the squad picker routed to its leader. The claim handler
-// sets each field on exactly the responses it injected a squad-leader
-// briefing into, so these two signals are the authoritative role marker.
+// sets each field on exactly the responses it injected a briefing into, and
+// advertises that it did so with `leader_role_resolved`.
 //
-// This used to sniff Instructions for the "## Squad Operating Protocol"
-// heading the briefing starts with, which made role detection depend on
-// user-writable Markdown: any ordinary agent whose own instructions happened
-// to contain that heading was promoted to leader and handed the leader rules
-// (mandatory `multica squad activity`, silent no_action exit). Reading the
-// protocol fields instead removes that failure mode without changing a single
-// byte on any legal path — the server sets them precisely when it injects
-// (MUL-5811).
+// The role used to be inferred by sniffing Instructions for the briefing's
+// first heading, which made detection depend on user-writable Markdown: any
+// ordinary agent whose own instructions happened to contain that heading was
+// promoted to leader and handed the leader rules (mandatory `multica squad
+// activity`, silent no_action exit).
+//
+// The capability gate is load-bearing, not ceremony. `is_leader_task` only
+// reached the claim response in #4951; a server older than that still injects
+// the briefing but leaves both fields at their zero value, so reading fields
+// alone would silently demote a real leader to a worker. Absent capability
+// therefore means "this server never answered the question" and the legacy
+// text inference — exactly today's behavior — is the only correct read. Drop
+// this branch once a minimum server version is enforced (MUL-5811).
 func taskIsSquadLeader(task Task) bool {
+	if !task.LeaderRoleResolved {
+		return task.Agent != nil && strings.Contains(task.Agent.Instructions, squadBriefingMarker)
+	}
 	return task.IsLeaderTask || task.SquadID != ""
 }

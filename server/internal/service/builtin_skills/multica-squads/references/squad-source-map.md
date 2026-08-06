@@ -105,6 +105,12 @@ Contracts:
   injected" and the run degrades to an ordinary agent turn. The daemon derives
   the leader role from that flag (plus `squad_id` for quick-create), never from
   the briefing text (MUL-5811);
+- every claim response carries `leader_role_resolved: true`, the capability
+  that tells the daemon those fields are authoritative. Servers predating it
+  omit it, and a daemon seeing it absent falls back to the legacy
+  "`## Squad Operating Protocol` appears in instructions" inference — the only
+  correct read of a server that never sent `is_leader_task` on claim (#4951).
+  The field is claim-only and never rendered into a prompt;
 - `instructions` section appears only when non-empty (squad_briefing.go:110-112);
 - archived agent members are skipped from roster (squad_briefing.go:178-179);
 - agent member roster rows list assigned workspace skills via

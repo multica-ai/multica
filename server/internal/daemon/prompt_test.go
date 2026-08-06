@@ -250,6 +250,7 @@ func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
 		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
 		},
@@ -273,6 +274,7 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "deploy-boy",
 		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
 		},
@@ -284,44 +286,77 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 }
 
 // TestTaskIsSquadLeaderReadsProtocolFields pins the role signal to the wire
-// fields the server sets when (and only when) it injects a squad-leader
-// briefing. The instructions-only row is the regression that motivated
-// MUL-5811: the previous implementation grepped Instructions for
-// "## Squad Operating Protocol", so any agent whose own instructions used that
-// heading was silently promoted to squad leader.
+// fields a current server sets when (and only when) it injects a squad-leader
+// briefing, and pins the legacy fallback to the behavior a pre-#4951 server
+// (briefing injected, is_leader_task never sent) requires.
+//
+// Two regressions live in this table. The "current" instructions-only row is
+// MUL-5811 itself: the previous implementation grepped Instructions for the
+// briefing heading, so any agent whose own instructions used that heading was
+// promoted to squad leader. The "legacy" rows are the inverse — reading the
+// fields unconditionally would demote a real leader on an un-upgraded server
+// to a plain worker and drop the whole operating protocol.
 func TestTaskIsSquadLeaderReadsProtocolFields(t *testing.T) {
 	t.Parallel()
 
+	// What an agent's Instructions look like once the server has appended the
+	// briefing — and what an ordinary agent that merely writes about squads
+	// looks like. They are indistinguishable by text, which is the point.
 	const briefed = "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER..."
+	const plain = "You are a regular agent."
 
 	cases := []struct {
 		name string
 		task Task
 		want bool
 	}{
+		// --- current server: leader_role_resolved advertises that
+		// is_leader_task / squad_id are authoritative ---
 		{
-			name: "issue-bound leader task",
-			task: Task{IsLeaderTask: true, Agent: &AgentData{Instructions: briefed}},
+			name: "current: issue-bound leader task",
+			task: Task{LeaderRoleResolved: true, IsLeaderTask: true, Agent: &AgentData{Instructions: briefed}},
 			want: true,
 		},
 		{
-			name: "quick-create routed through a squad picker",
-			task: Task{SquadID: "5f7f7c12-b579-4c6d-aaa0-8ae1d7e72b61", Agent: &AgentData{Instructions: briefed}},
+			name: "current: quick-create routed through a squad picker",
+			task: Task{LeaderRoleResolved: true, SquadID: "5f7f7c12-b579-4c6d-aaa0-8ae1d7e72b61", Agent: &AgentData{Instructions: briefed}},
 			want: true,
 		},
 		{
-			name: "leader flag without agent payload",
-			task: Task{IsLeaderTask: true},
+			name: "current: leader flag without agent payload",
+			task: Task{LeaderRoleResolved: true, IsLeaderTask: true},
 			want: true,
 		},
 		{
-			name: "ordinary agent whose own instructions carry the protocol heading",
-			task: Task{Agent: &AgentData{Instructions: briefed}},
+			name: "current: ordinary agent whose own instructions carry the protocol heading",
+			task: Task{LeaderRoleResolved: true, Agent: &AgentData{Instructions: briefed}},
 			want: false,
 		},
 		{
-			name: "ordinary agent",
-			task: Task{Agent: &AgentData{Instructions: "You are a regular agent."}},
+			// Briefing withheld by the claim's defensive gate (squad deleted /
+			// leader swapped): the server clears the flag, so no leader role.
+			name: "current: withheld briefing leaves no leader signal",
+			task: Task{LeaderRoleResolved: true, Agent: &AgentData{Instructions: plain}},
+			want: false,
+		},
+		// --- legacy server: no capability, so the injected briefing is the
+		// only evidence of the role that server ever produced ---
+		{
+			name: "legacy: real leader recognised by the injected briefing",
+			task: Task{Agent: &AgentData{Instructions: briefed}},
+			want: true,
+		},
+		{
+			name: "legacy: ordinary agent",
+			task: Task{Agent: &AgentData{Instructions: plain}},
+			want: false,
+		},
+		{
+			// Server in [#4951, this change): it sends is_leader_task but can
+			// still withhold the briefing. Without a roster or a protocol
+			// there is nothing to lead, so the absent briefing wins.
+			name: "legacy: leader flag but briefing withheld",
+			task: Task{IsLeaderTask: true, Agent: &AgentData{Instructions: plain}},
 			want: false,
 		},
 	}
@@ -337,10 +372,11 @@ func TestTaskIsSquadLeaderReadsProtocolFields(t *testing.T) {
 }
 
 // TestBuildPromptProtocolHeadingInInstructionsIsNotALeader is the end-to-end
-// negative regression for MUL-5811: a plain agent that happens to document a
-// "## Squad Operating Protocol" section in its own instructions must get the
-// ordinary comment prompt — no squad activity obligation, no silent-exit
-// licence, and the unconditional reply imperative intact.
+// negative regression for MUL-5811: on a current server, a plain agent that
+// happens to document a "## Squad Operating Protocol" section in its own
+// instructions must get the ordinary comment prompt — no squad activity
+// obligation, no silent-exit licence, and the unconditional reply imperative
+// intact.
 func TestBuildPromptProtocolHeadingInInstructionsIsNotALeader(t *testing.T) {
 	t.Parallel()
 
@@ -350,6 +386,7 @@ func TestBuildPromptProtocolHeadingInInstructionsIsNotALeader(t *testing.T) {
 		TriggerCommentContent: "please take a look",
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Name:         "Docs writer",
 			Instructions: "I document squads.\n\n## Squad Operating Protocol\n\nHow leaders dispatch work...",
@@ -368,6 +405,40 @@ func TestBuildPromptProtocolHeadingInInstructionsIsNotALeader(t *testing.T) {
 	}
 	if !strings.Contains(out, "Post your reply as a comment") {
 		t.Fatalf("ordinary agent prompt lost the unconditional reply imperative\n---\n%s", out)
+	}
+}
+
+// TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole is the other half of
+// the compatibility contract. A server predating `leader_role_resolved` still
+// injects the briefing but never sends is_leader_task on claim (#4951), so an
+// upgraded daemon that trusted the fields alone would demote a real squad
+// leader to a plain worker and drop the entire operating protocol. Absent
+// capability must keep the legacy briefing-marker inference.
+func TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole(t *testing.T) {
+	t.Parallel()
+
+	out := BuildPrompt(Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "LGTM",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		// No LeaderRoleResolved and no IsLeaderTask — an old server sends
+		// neither, and the injected briefing is the only evidence it produced.
+		Agent: &AgentData{
+			Name:         "Lead",
+			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+		},
+	}, "claude")
+
+	for _, want := range []string{
+		"Squad leader no_action rule",
+		"multica squad activity",
+		"DO NOT post any comment",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("legacy-server leader prompt lost %q\n---\n%s", want, out)
+		}
 	}
 }
 

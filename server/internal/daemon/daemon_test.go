@@ -1163,6 +1163,7 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "Worker",
 		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Name:         "Leader",
 			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
@@ -5044,6 +5045,7 @@ func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
 		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
 		Agent: &AgentData{
 			Name:         "Lead",
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
@@ -5080,7 +5082,8 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 		CoalescedComments: []CoalescedCommentData{
 			{ID: "comment-8", ThreadID: "thread-A", Content: "first update"},
 		},
-		IsLeaderTask: true,
+		IsLeaderTask:       true,
+		LeaderRoleResolved: true,
 		Agent: &AgentData{
 			Name:         "Lead",
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
