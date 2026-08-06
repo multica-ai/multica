@@ -1138,3 +1138,139 @@ func TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker(t *testing.T) 
 		t.Fatalf("expected the dimension-phrase-only session to stay resumable, got %q (valid=%v)", prior.SessionID.String, prior.SessionID.Valid)
 	}
 }
+
+// TestGetLastTaskSessionExcludesOverflowedResumeFromOlderCompletedRow is the
+// MUL-5722 topology, and the one the first attempt at the fix got wrong.
+//
+// A codex thread/resume that overflows the reader fails BEFORE any turn runs,
+// so the backend has no session id to report and the failed row lands with
+// session_id NULL. The thread it could not read is only named by the OLDER
+// completed row. That means a row-level error-text filter on the failed row can
+// never fire — `session_id IS NOT NULL` drops the row before any filter sees
+// it — and the lookup happily returns the same oversized thread again.
+//
+// This is the shape every already-stuck issue is in right now, and the shape a
+// daemon too old to classify the failure keeps producing, so the block has to
+// key off the failure being newer than the candidate rather than off the failed
+// row carrying the session.
+func TestGetLastTaskSessionExcludesOverflowedResumeFromOlderCompletedRow(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	// The turn that grew the thread past the reader's cap. Perfectly healthy
+	// looking: it completed, and it is the only row naming the thread.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'THR-OVERSIZED', '/tmp/codex')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed task: %v", err)
+	}
+
+	// The next turn resumed it and could not read the response back. No session
+	// id, and the pre-fix daemon classifies it as the resume-SAFE
+	// agent_error.process_failure — so only the error text identifies it.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/codex', 'agent_error.process_failure',
+		        'codex thread/resume failed: codex process exited: bufio.Scanner: token too long')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert overflow failed task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	requireSessionExcluded(t, prior.SessionID, err)
+}
+
+// TestGetLastTaskSessionResumesAgainAfterOverflowRecovery is the other half of
+// the time-based block above: it must expire, not latch. Once a fresh thread
+// terminates after the overflow, that thread is resumable again — otherwise
+// every later turn on the issue would start cold forever, trading a permanent
+// stall for permanent amnesia.
+func TestGetLastTaskSessionResumesAgainAfterOverflowRecovery(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '3 minutes', now() - interval '3 minutes', 'THR-OVERSIZED', '/tmp/codex')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', NULL, '/tmp/codex', 'agent_error.process_failure',
+		        'codex thread/resume failed: codex process exited: bufio.Scanner: token too long')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert overflow failed task: %v", err)
+	}
+	// The fresh-session retry that recovered the turn.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', 'THR-FRESH', '/tmp/codex')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert recovered task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if prior.SessionID.String != "THR-FRESH" {
+		t.Fatalf("expected the post-overflow thread THR-FRESH, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionExcludesOverflowRetiredSession covers the path a
+// current daemon takes: it names the thread it could not read via
+// retired_session_id, so the block does not have to rely on timing at all.
+func TestGetLastTaskSessionExcludesOverflowRetiredSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'THR-OVERSIZED', '/tmp/codex')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error, retired_session_id)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/codex', 'codex_resume_oversized',
+		        'codex thread/resume failed: codex process exited: bufio.Scanner: token too long', 'THR-OVERSIZED')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert overflow failed task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	requireSessionExcluded(t, prior.SessionID, err)
+}

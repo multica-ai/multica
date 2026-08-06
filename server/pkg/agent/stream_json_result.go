@@ -22,6 +22,17 @@ type streamTerminalState struct {
 	sawResult         bool
 	resultIsError     bool
 	scanErr           error
+	// terminalReasonError, when non-empty, is a failure the backend read out of
+	// a STRUCTURED field on the terminal result event.
+	//
+	// It is not a claim that is_error missed the failure — on every frame
+	// captured so far the two fire together. It is a claim about which one
+	// NAMES the failure: Claude Code sets is_error from whether the last
+	// message it rendered was an API error, and terminal_reason from why the
+	// turn ended, so only the latter identifies the condition without relying
+	// on the CLI's prose (GH #6402). Backends that read no such field leave
+	// this empty and keep the pre-existing contract.
+	terminalReasonError string
 }
 
 // finalizeStreamResult applies the shared fail-closed terminal contract used by
@@ -40,7 +51,28 @@ func finalizeStreamResult(
 	completionGuardError string,
 ) (status, output, errMsg string) {
 	status = "completed"
-	if state.resultIsError {
+	switch {
+	case state.terminalReasonError != "":
+		// A recognised structured terminal reason wins outright — including
+		// over is_error, which is the ordering that matters in practice.
+		//
+		// On the shape actually captured from Claude Code 2.1.220/2.1.221, a
+		// context-exhausted turn arrives as is_error:true AND
+		// terminal_reason:prompt_too_long together. Letting is_error go first
+		// makes the structured branch dead code on the only frame we have, and
+		// hands the failure whatever prose the CLI happened to put in `result`:
+		// today that string classifies correctly by luck, but an empty or
+		// reworded `result` degrades to "returned an error result without
+		// details" → agent_error.unknown, which no resume blacklist covers, so
+		// the saturated session stays pinned and the stall returns (GH #6402).
+		//
+		// Ordering it first costs nothing: the branch only fires for a reason
+		// the backend positively recognised, and the message it builds carries
+		// the CLI's own `result` text along as detail, so nothing is lost for
+		// diagnosis.
+		status = "failed"
+		errMsg = state.terminalReasonError
+	case state.resultIsError:
 		status = "failed"
 		errMsg = state.finalResultText
 		if errMsg == "" {

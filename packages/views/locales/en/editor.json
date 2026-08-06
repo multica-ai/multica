@@ -35,7 +35,11 @@
     "delete": "Delete",
     "link_copied": "Link copied",
     "copy_link_failed": "Failed to copy link",
-    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size."
+    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size.",
+    "previous": "Previous image",
+    "next": "Next image",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "That image is no longer available — skipped it."
   },
   "canvas": {
     "zoom_in": "Zoom in",

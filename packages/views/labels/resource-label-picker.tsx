@@ -4,8 +4,6 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Search, Tag } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useFeatureEnabled } from "@multica/core/config";
-import { RESOURCE_LABELS_FLAG } from "@multica/core/feature-flags";
 import {
   labelListOptions,
   resourceLabelsOptions,
@@ -22,17 +20,6 @@ import {
 import { useT } from "../i18n";
 import { LabelChip } from "./label-chip";
 
-/**
- * Whether agent- and skill-scoped labels are available. The server gates the
- * attach/detach routes on the same release flag, so with it off the picker has
- * no working endpoint to call — and callers need to know that before they lay
- * out a row for it, since a row whose only control renders nothing reads as a
- * broken field rather than an absent feature.
- */
-export function useResourceLabelsEnabled() {
-  return useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
-}
-
 export function ResourceLabelPicker({
   resourceType,
   resourceId,
@@ -44,18 +31,11 @@ export function ResourceLabelPicker({
 }) {
   const { t } = useT("labels");
   const wsId = useWorkspaceId();
-  const resourceLabelsEnabled = useResourceLabelsEnabled();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { data: catalog = [] } = useQuery({
-    ...labelListOptions(wsId, resourceType),
-    enabled: resourceLabelsEnabled,
-  });
+  const { data: catalog = [] } = useQuery(labelListOptions(wsId, resourceType));
   const { data: selected = [] } = useQuery(
-    {
-      ...resourceLabelsOptions(wsId, resourceType, resourceId),
-      enabled: resourceLabelsEnabled,
-    },
+    resourceLabelsOptions(wsId, resourceType, resourceId),
   );
   const attach = useAttachResourceLabel(resourceType, resourceId);
   const detach = useDetachResourceLabel(resourceType, resourceId);
@@ -63,8 +43,6 @@ export function ResourceLabelPicker({
   const filtered = catalog.filter((label) =>
     label.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
-
-  if (!resourceLabelsEnabled) return null;
 
   const content = selected.length > 0 ? (
     <div className="flex flex-wrap justify-start gap-1 sm:justify-end">

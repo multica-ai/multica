@@ -11,88 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestQuickCreateCompletion_SubscribesRequester locks in the fix for the
-// quick-create requester not being subscribed to the issue: the agent runs
-// the CLI and is recorded as the issue's creator, so the issue:created event
-// only auto-subscribes the agent. The completion path must explicitly
-// subscribe the human requester so they receive follow-up notifications.
-func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
-	ctx := context.Background()
-	queries := db.New(testPool)
-	bus := events.New()
-	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
-
-	var agentID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID); err != nil {
-		t.Fatalf("load fixture agent: %v", err)
-	}
-
-	task, err := taskSvc.EnqueueQuickCreateTask(ctx,
-		parseUUID(testWorkspaceID),
-		parseUUID(testUserID),
-		parseUUID(agentID),
-		pgtype.UUID{},
-		"please file a bug",
-		"",
-		"",
-		pgtype.UUID{},
-		pgtype.UUID{},
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("EnqueueQuickCreateTask: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
-	})
-
-	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
-		task.ID,
-	); err != nil {
-		t.Fatalf("dispatch task: %v", err)
-	}
-	if _, err := queries.StartAgentTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
-	}
-
-	number, err := queries.IncrementIssueCounter(ctx, parseUUID(testWorkspaceID))
-	if err != nil {
-		t.Fatalf("IncrementIssueCounter: %v", err)
-	}
-	issue, err := queries.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Title:       "agent-filed bug",
-		Status:      "todo",
-		Priority:    "none",
-		CreatorType: "agent",
-		CreatorID:   parseUUID(agentID),
-		Number:      number,
-		OriginType:  pgtype.Text{String: "quick_create", Valid: true},
-		OriginID:    task.ID,
-	})
-	if err != nil {
-		t.Fatalf("CreateIssueWithOrigin: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
-	})
-
-	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", false, ""); err != nil {
-		t.Fatalf("CompleteTask: %v", err)
-	}
-
-	if !isSubscribed(t, queries, util.UUIDToString(issue.ID), "member", testUserID) {
-		t.Fatal("expected requester to be subscribed after quick-create completion")
-	}
-}
+// Subscribing the quick-create requester moved OFF the completion path in
+// MUL-5483. It now happens at issue-creation time in the shared
+// delegated-subscriber rule, which resolves the human from
+// origin_type='quick_create' + the origin task's originator_user_id — the same
+// origin waterfall attribution uses. That behavior is covered by
+// TestDelegatedSubscribe_QuickCreateKeepsDirectReason in
+// delegated_subscriber_test.go, including the assertion that quick create keeps
+// the direct 'creator' tier rather than the reduced delegated one.
+//
+// The failure-path test below stays here: "no issue created ⇒ no subscriber
+// row" is a property of the quick-create completion flow itself and holds
+// regardless of which layer writes the subscription.
 
 // TestQuickCreateFailure_DoesNotSubscribeRequester confirms the failure path
 // (agent finished without producing an issue) does not invent a subscriber

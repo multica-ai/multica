@@ -169,6 +169,10 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 
 다음 명령은 Docker 서버가 아니라 **AI 코딩 도구를 실행할 컴퓨터**에서 실행합니다. 두 컴퓨터가 같을 수도 있습니다.
 
+<Callout type="warning">
+작업은 데몬을 실행하는 사용자의 모든 권한으로 동작하며, 그 사용자가 읽고 쓸 수 있는 모든 것에 접근할 수 있습니다. 개인 계정 대신 전용 Unix 사용자, 컨테이너, 또는 VM에서 데몬을 실행하세요. [보안 모델](/security-model)을 참고하세요.
+</Callout>
+
 먼저 Multica CLI를 설치합니다.
 
 **macOS / Linux**

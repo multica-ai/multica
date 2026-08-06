@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -77,7 +77,23 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
+	// 500ms, matching cursor-agent — the other backend whose CLI can deliver a
+	// terminal result while keeping a process alive.
+	//
+	// Note what WaitDelay actually bounds, because it is easy to get wrong: the
+	// timer starts when the context is done OR when Wait observes the child has
+	// exited, whichever comes first. So a *clean* exit reaches it too, whenever
+	// any descendant still holds one of the pipes os/exec manages — and this
+	// backend has such a pipe, since cmd.Stderr below is a plain io.Writer. In
+	// that case Wait returns exec.ErrWaitDelay even though the process exited 0,
+	// which is why the status switch has to special-case it: the result is
+	// already parsed and in hand, and only a tail of stderr logs is lost.
+	//
+	// Lowering the bound is still right. The delay is only reached when someone
+	// is holding a pipe open, and on the cut-short path we deliberately kill a
+	// process that is doing exactly that — a long delay there would add its full
+	// length to every reply.
+	cmd.WaitDelay = 500 * time.Millisecond
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -118,17 +134,56 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		startTime := time.Now()
 		scanResult := b.processOutput(stdout, msgCh)
 
+		// openclaw delivered a complete result but would not exit. Cancel the
+		// run context so CommandContext kills it and cmd.Wait can return —
+		// otherwise this goroutine parks forever on an agent that has already
+		// finished, and the reply never reaches the user. Same protocol-boundary
+		// treatment cursor-agent gets on its terminal `result` event.
+		if scanResult.cutShort {
+			b.cfg.Logger.Warn("openclaw delivered its result but did not exit; "+
+				"treating the complete result as the protocol boundary",
+				"pid", cmd.Process.Pid)
+			cancel()
+		}
+
 		// Wait for process exit.
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		switch {
+		case scanResult.cutShort:
+			// A complete result is the protocol boundary. Ignore the
+			// cancellation and exit error caused by stopping an openclaw that
+			// lingers afterward — the run succeeded, and reporting it as
+			// "aborted" would throw away a reply we already hold.
+		case runCtx.Err() == context.DeadlineExceeded:
 			scanResult.status = "timeout"
 			scanResult.errMsg = fmt.Sprintf("openclaw timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		case runCtx.Err() == context.Canceled:
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
-		} else if exitErr != nil && scanResult.status == "completed" {
+		case errors.Is(exitErr, exec.ErrWaitDelay) && scanResult.status == "completed":
+			// The process itself exited successfully — that is what
+			// ErrWaitDelay means by definition — and only a lingering
+			// descendant kept one of os/exec's pipes open past WaitDelay.
+			// stdout has already been read to EOF and the result parsed, so the
+			// only thing lost is a tail of stderr log lines. Reporting this as
+			// a failure would discard a deliverable reply, which is a worse
+			// outcome than the hang this whole change fixes.
+			//
+			// Not folded into the cutShort case above: that path cancels on
+			// purpose, and a Cancel call makes Wait report the kill instead of
+			// ErrWaitDelay. This case is specifically the clean-exit one.
+			//
+			// Reword with care: this warning is the only observable proof that
+			// this branch ran, so TestOpenclawExecuteToleratesLingeringStderrHolder
+			// asserts on the "held a pipe past WaitDelay" fragment. That fragment
+			// straddles the concatenation below, so grepping the source for it
+			// finds nothing — hence this note.
+			b.cfg.Logger.Warn("openclaw exited cleanly but a descendant held a "+
+				"pipe past WaitDelay; delivering the parsed result and dropping "+
+				"the stderr tail", "pid", cmd.Process.Pid)
+		case exitErr != nil && scanResult.status == "completed":
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
 		}
@@ -294,6 +349,13 @@ type openclawEventResult struct {
 	// which for the openclaw backend is the openclaw *agent* name passed
 	// via `--agent`, not the underlying model.
 	model string
+	// cutShort is true when the run ended because openclaw had delivered a
+	// complete result but would not exit, rather than because stdout reached
+	// EOF. The caller must cancel the run context before cmd.Wait() in that
+	// case — otherwise it waits on a process that never leaves — and must not
+	// report the resulting cancellation as an abort. Same treatment
+	// cursor-agent's `resultSeen` gets.
+	cutShort bool
 }
 
 // processOutput reads the JSON output from openclaw --json stdout and returns
@@ -318,7 +380,7 @@ type openclawEventResult struct {
 // the dominant happy path (one pretty-printed JSON blob) deterministic
 // while keeping NDJSON event support intact.
 func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclawEventResult {
-	buf, readErr := io.ReadAll(r)
+	buf, cutShort, readErr := readOpenclawStdout(r, openclawResultIdleGrace)
 	if readErr != nil {
 		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", readErr)}
 	}
@@ -329,7 +391,9 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	// matches, we're done — no need to involve the line scanner at all.
 	if result, ok := parseWholeBufferOpenclawResult(buf); ok {
 		var output strings.Builder
-		return b.buildOpenclawEventResult(result, ch, &output)
+		res := b.buildOpenclawEventResult(result, ch, &output)
+		res.cutShort = cutShort
+		return res
 	}
 
 	// Fall-back path: NDJSON line scanner. Note that because we already
@@ -340,8 +404,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	// backend on this code path emits real NDJSON streams and needs live
 	// progress updates, we'll need to split the fast path off a streaming
 	// reader instead of io.ReadAll.
-	scanner := bufio.NewScanner(bytes.NewReader(buf))
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(bytes.NewReader(buf))
 
 	var output strings.Builder
 	var sessionID string

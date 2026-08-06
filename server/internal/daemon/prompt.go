@@ -7,18 +7,38 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
-// freshSessionRetryPrompt prefixes an explicit context-loss disclosure onto the
-// (already cold-rebuilt) prompt used for the daemon's single fresh-session
-// retry. When a resumed run is refused — the transcript is gone, belongs to
-// another account, or (GH #5975) carries history the provider now rejects —
-// the retry starts a brand-new provider session with none of the prior
-// conversation. Stating that up front stops the agent from assuming continuity
-// (e.g. "as I said earlier", relying on files/state it never created) and steers
-// it to re-read the issue and triggering thread before acting. The current user
-// prompt is preserved verbatim below the notice.
-func freshSessionRetryPrompt(prompt string) string {
-	const notice = "⚠️ Note: a previous provider session for this task could not be resumed, so this is a brand-new session. None of the earlier provider conversation context is available to you now. Do not assume any prior back-and-forth, in-memory state, or uncommitted work carried over — re-read the issue and the triggering thread to reconstruct what you need before acting.\n\n"
-	return notice + prompt
+// sessionContinuityNoticeFor picks the notice matching what this surface
+// actually lost. See the constants in execenv for the full reasoning; the
+// question is whether the conversation is still READABLE, not whether it is a
+// chat — an issue's comments and a Slack channel's history both are, a web
+// chat's and a Feishu channel's are not (MUL-5722).
+func sessionContinuityNoticeFor(task Task) string {
+	if task.ChatSessionID == "" {
+		return execenv.SessionContinuityNoticeIssue
+	}
+	if task.ChatChannelType == execenv.ChannelTypeSlack {
+		return execenv.SessionContinuityNoticeChannelHistory
+	}
+	// Web chat (no channel type) and every channel Multica cannot read back.
+	return execenv.SessionContinuityNoticeUnrecoverable
+}
+
+// backendResumeContinuityNotice returns the notice the BACKEND should inject if
+// it lands on a fresh thread, or "" when the prompt already carries one.
+//
+// Only one notice may reach a turn. Two paths can produce it — the daemon,
+// which appends it to the prompt whenever it already knows the resume is gone,
+// and the backend, which is the only one that can see a live resume RPC being
+// rejected mid-run. Before MUL-5722 both fired on the codex overflow retry, so
+// the same paragraph was paid for twice in one turn and maintained as two
+// hand-written strings. Deriving the backend's copy from the daemon's, and
+// suppressing it exactly when the prompt already said it, makes a duplicate
+// structurally impossible rather than merely unlikely.
+func backendResumeContinuityNotice(task Task) string {
+	if task.PriorSessionResumeUnavailable {
+		return ""
+	}
+	return sessionContinuityNoticeFor(task)
 }
 
 // Turn-mode markers consumed by the runtime brief's mode router
@@ -51,7 +71,7 @@ const (
 func perTurnContextBlocks(task Task) string {
 	var b strings.Builder
 	if task.PriorSessionResumeUnavailable {
-		b.WriteString(execenv.SessionContinuityNotice)
+		b.WriteString(sessionContinuityNoticeFor(task))
 	}
 	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
@@ -104,7 +124,7 @@ func buildPromptBody(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. Your runtime workflow file documents the rest of the read surface, including pagination and `--since` for incremental polling.\n", task.IssueID)
+	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -200,7 +220,7 @@ func buildQuickCreatePrompt(task Task) string {
 		}
 	}
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
-	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
+	b.WriteString("- **attachments**: `--attachment` takes LOCAL file paths, never URLs. Image URLs in the user input are already markdown — keep them inline. Files you produced: see `## Output`.\n\n")
 
 	// output format
 	b.WriteString("Output format:\n")
@@ -275,8 +295,40 @@ func buildCommentPrompt(task Task, provider string) string {
 			}
 			fmt.Fprintf(&b, "\nIf you need the surrounding discussion for any of them, fetch its thread with `multica issue comment list %s --thread <thread-id> --tail 30 --output json` using the thread id shown above.\n\n", task.IssueID)
 		} else if len(task.CoalescedCommentIDs) > 0 {
-			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above: %s. These may be in DIFFERENT threads, so do not assume they share the triggering thread; fetch each by pulling the issue-wide discussion with `multica issue comment list %s --recent 30 --output json` (expand with `--full` if a thread is folded) and locate the ids above.\n\n",
-				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "), task.IssueID)
+			// MUL-5442: this fallback used to send the agent at `--recent 30`.
+			// That flag caps THREADS, not comments, and every returned thread
+			// carries all of its descendants — so on an issue with fewer than 30
+			// root threads it returned the entire comment history to locate a
+			// handful of ids. It also contradicted the brief's own catch-up step,
+			// which tells the agent to read in two bounded steps and never make
+			// one bulk pull (MUL-5372): the platform was recommending exactly the
+			// shape it forbids elsewhere.
+			//
+			// The replacement is a per-id lookup, which is what makes it
+			// deterministic: `--thread` accepts ANY comment id, reply or root, and
+			// the server resolves it to the containing thread. So each id can be
+			// fetched directly and bounded, without knowing its thread and without
+			// guessing which threads look recent.
+			//
+			// `--since` is only a prefetch, never the guarantee. Two ways it can
+			// miss an id, so the per-id pass below is unconditional:
+			//   - A retry inherits the previous attempt's coalesced_comment_ids
+			//     verbatim (queries/agent.sql RetryTask), while the anchor is
+			//     recomputed from the last STARTED task's started_at
+			//     (GetLastTaskStartedAtForIssueAndAgent). An inherited id can
+			//     therefore predate the anchor.
+			//   - The anchor is only populated when some comment landed after it,
+			//     which is independent of where these ids sit.
+			// It is also not a precise fetch in the other direction: the window
+			// carries the trigger comment and unrelated comments too.
+			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address every one of them, not just the one above: %s. They may be in DIFFERENT threads, so do not assume they share the triggering thread.\n\n",
+				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "))
+			if task.NewCommentsSince != "" {
+				fmt.Fprintf(&b, "Start with `multica issue comment list %s --since %s --output json`. Treat that as a candidate window, not a guarantee — it also carries unrelated comments, and a retried run can carry ids older than the window. Check every id above against the result.\n\n",
+					task.IssueID, task.NewCommentsSince)
+			}
+			fmt.Fprintf(&b, "Fetch each id you still need directly: `multica issue comment list %s --thread <comment-id> --tail 30 --output json`. `--thread` accepts a reply id, not just a thread root, so you do not need to know which thread the comment lives in. If it is older than those 30 replies, page back with the `Next reply cursor` values (`--before` / `--before-id`) until it appears. Do not finish this turn until every id above is accounted for.\n\n",
+				task.IssueID)
 		}
 		if task.TriggerAuthorType == "agent" {
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
@@ -390,7 +442,18 @@ func buildChatPrompt(task Task) string {
 
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
-	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	// Audience is per-session context, so keep it out of the cached runtime
+	// brief. The compact anchors here preserve the non-inferable boundaries: a
+	// group reply is not private to its sender and people not otherwise present
+	// in the run context may read it. Unknown never defaults to private.
+	switch execenv.AudienceOf(task.ChatChannelType, task.ChatType) {
+	case execenv.ChatAudienceGroup:
+		b.WriteString("Audience: group room; not private; unseen members may read replies.\n\n")
+	case execenv.ChatAudienceUnknown:
+		b.WriteString("Audience: unknown.\n\n")
+	default:
+		b.WriteString("Audience: direct room.\n\n")
+	}
 	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
 	// the agent must KNOW it is operating inside that channel — otherwise an ask
 	// like "what did you just talk about" sends it to read Multica instead of the
@@ -538,6 +601,9 @@ func buildAutopilotPrompt(task Task) string {
 	} else {
 		b.WriteString("Complete the instructions above.\n")
 	}
-	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
+	// The issue-command boundary (execenv.AutopilotIssueCommandsGuard) is NOT
+	// restated here: the brief's autopilot workflow section is its single
+	// emission point, and a second hand-maintained per-turn copy is exactly
+	// how the two surfaces drifted into conflict before (MUL-5696).
 	return b.String()
 }

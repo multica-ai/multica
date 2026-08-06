@@ -1,7 +1,7 @@
 -- Hourly rollup table for `task_usage`, materialised in **UTC**. Replaces
 -- both per-runtime `task_usage_daily` (073, 082) and per-workspace
 -- `task_usage_dashboard_daily` (084) as the single source of truth for
--- all token-usage reports. See docs/timezone-architecture-rfc.md §4.
+-- all token-usage reports.
 --
 -- WHY HOURLY + UTC:
 --   The two existing rollups materialise on a `DATE` bucket — one in the

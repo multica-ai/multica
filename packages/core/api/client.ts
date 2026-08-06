@@ -27,6 +27,8 @@ import type {
   CreateAgentFromTemplateResponse,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
+  AgentBuilderSessionSummary,
+  StoredAgentDraft,
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
@@ -88,6 +90,7 @@ import type {
   ChatMessagesPage,
   ChatDraftRestoresResponse,
   ChatPendingTask,
+  PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
@@ -104,6 +107,10 @@ import type {
   IssueProperty,
   IssuePropertyValue,
   CreatePropertyRequest,
+  QuickAction,
+  CreateQuickActionRequest,
+  UpdateQuickActionRequest,
+  ListQuickActionsResponse,
   UpdatePropertyRequest,
   ListPropertiesResponse,
   IssuePropertiesResponse,
@@ -183,6 +190,11 @@ import {
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
+  ChatMessageListSchema,
+  ChatMessagesPageSchema,
+  ChatPendingTaskSchema,
+  PrioritizeQueuedChatTaskResponseSchema,
+  SendChatMessageResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
@@ -192,6 +204,8 @@ import {
   CreateAgentFromTemplateResponseSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
+  AgentBuilderSessionListSchema,
+  EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -203,6 +217,9 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
+  EMPTY_CHAT_MESSAGE_LIST,
+  EMPTY_CHAT_PENDING_TASK,
+  EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
@@ -280,6 +297,13 @@ import {
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
+  QuickActionSchema,
+  ListQuickActionsResponseSchema,
+  QuickActionRenderSchema,
+  EMPTY_QUICK_ACTION,
+  EMPTY_LIST_QUICK_ACTIONS_RESPONSE,
+  CommentSchema,
+  EMPTY_COMMENT,
   EMPTY_ISSUE_PROPERTY,
   EMPTY_LIST_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
@@ -395,6 +419,20 @@ export class PreviewUnsupportedError extends Error {
  * Must stay in sync with protocol.AppCapabilityChatDraftRestoreV1.
  */
 export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
+
+/**
+ * Body shared by both unsubscribe endpoints: an omitted target means "the
+ * caller", which the server resolves from the request actor.
+ */
+function subscriberTarget(
+  userId?: string,
+  userType?: string,
+): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (userId) body.user_id = userId;
+  if (userType) body.user_type = userType;
+  return body;
+}
 
 export class ApiClient {
   private baseUrl: string;
@@ -1046,13 +1084,37 @@ export class ApiClient {
     });
   }
 
-  async unsubscribeFromIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
-    const body: Record<string, string> = {};
-    if (userId) body.user_id = userId;
-    if (userType) body.user_type = userType;
+  async unsubscribeFromIssue(
+    issueId: string,
+    userId?: string,
+    userType?: string,
+  ): Promise<void> {
     await this.fetch(`/api/issues/${issueId}/unsubscribe`, {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify(subscriberTarget(userId, userType)),
+    });
+  }
+
+  /**
+   * Leaves this issue and every descendant, and keeps future children of the
+   * tree from re-subscribing the user — the escape hatch for an agent-built
+   * tree that keeps growing (MUL-5483).
+   *
+   * Deliberately its own endpoint rather than a `subtree` flag on
+   * `unsubscribeFromIssue`. Web/desktop staging ships on merge while the
+   * backend is deployed by hand, so this client regularly runs against an
+   * older server; one that predates the feature would ignore an unknown body
+   * field, unsubscribe only the root, and still answer 200. A distinct path
+   * 404s there, which surfaces as a failed mutation instead of a silent lie.
+   */
+  async unsubscribeFromIssueSubtree(
+    issueId: string,
+    userId?: string,
+    userType?: string,
+  ): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unsubscribe/subtree`, {
+      method: "POST",
+      body: JSON.stringify(subscriberTarget(userId, userType)),
     });
   }
 
@@ -1089,6 +1151,46 @@ export class ApiClient {
       EMPTY_AGENT_BUILDER_SESSION,
       { endpoint: "POST /api/agent-builder/sessions" },
     );
+  }
+
+  /**
+   * The caller's unfinished agent-creation conversations.
+   *
+   * Builder sessions are hidden from every chat list (their carrier agent is
+   * `kind = 'system'`), so this is the only route back to one. A 404 means the
+   * backend predates the endpoint: degrade to "no drafts" instead of erroring
+   * the Agents page, exactly as listChatDraftRestores does.
+   */
+  async listAgentBuilderSessions(): Promise<AgentBuilderSessionSummary[]> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>("/api/agent-builder/sessions");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return [];
+      throw err;
+    }
+    return parseWithFallback(
+      raw,
+      AgentBuilderSessionListSchema,
+      EMPTY_AGENT_BUILDER_SESSION_LIST,
+      { endpoint: "GET /api/agent-builder/sessions" },
+    ).sessions;
+  }
+
+  /**
+   * Stores the configuration a creation conversation has arrived at, including
+   * edits the user typed but has not sent. Whole-object last-write-wins: one
+   * conversation has one editor, so a field-level merge could only reconstruct
+   * a state nobody saw. Read back through `listAgentBuilderSessions`.
+   */
+  async saveAgentBuilderDraft(
+    sessionId: string,
+    draft: StoredAgentDraft,
+  ): Promise<void> {
+    await this.fetch(`/api/agent-builder/sessions/${sessionId}/draft`, {
+      method: "PUT",
+      body: JSON.stringify({ draft }),
+    });
   }
 
   /** Rebinds a live builder conversation to another runtime. Callers must not
@@ -1390,19 +1492,30 @@ export class ApiClient {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
 
-  // Cascade variant of deleteRuntime. The strict DELETE refuses with
+  // Confirmed variant of deleteRuntime. The strict DELETE refuses with
   // structured 409 (`code: "runtime_has_active_agents"`, body carries the
   // blocking agents) when active agents are bound; the front-end then opens
-  // the cascade-mode confirmation dialog and submits the user-confirmed
-  // active agent set here. Server compares the snapshot to the live set
-  // inside the transaction and refuses with `code: "runtime_delete_plan_changed"`
-  // (same shape, fresh `active_agents`) if they don't match — caller should
-  // re-render the agent list and force the user to re-confirm.
-  async archiveAgentsAndDeleteRuntime(
+  // the confirmation dialog and submits the user-confirmed active agent set
+  // here. Server compares the snapshot to the live set inside the transaction
+  // and refuses with `code: "runtime_delete_plan_changed"` (same shape, fresh
+  // `active_agents`) if they don't match — caller should re-render the agent
+  // list and force the user to re-confirm.
+  //
+  // The agents are UNBOUND, not archived or deleted (MUL-5559): they keep their
+  // configuration, chats and task history and need a new runtime to run again.
+  // `agents_archived` is the server's deprecated mirror of `agents_unbound`,
+  // kept because installed clients read it; prefer `agents_unbound`.
+  async unbindAgentsAndDeleteRuntime(
     runtimeId: string,
     expectedActiveAgentIds: string[],
-  ): Promise<{ status: string; agents_archived: number; tasks_cancelled: number }> {
-    return this.fetch(`/api/runtimes/${runtimeId}/archive-agents-and-delete`, {
+  ): Promise<{
+    status: string;
+    agents_unbound?: number;
+    agents_archived?: number;
+    tasks_cancelled: number;
+    autopilots_paused?: number;
+  }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/unbind-agents-and-delete`, {
       method: "POST",
       body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }),
     });
@@ -1842,6 +1955,10 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
   }
 
+  async markInboxUnread(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/unread`, { method: "POST" });
+  }
+
   async archiveInbox(id: string): Promise<InboxItem> {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
   }
@@ -2189,6 +2306,26 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 
+  // Refresh the quick-action suggestions for a session's latest assistant turn.
+  // Fire-and-forget: the server enqueues a background regeneration pass and the
+  // refreshed pills arrive over the chat:quick_actions realtime event, so the
+  // caller anchors its pending placeholder on the turn it already knows rather
+  // than on this response.
+  // Refresh the quick actions for the given assistant turn. Sends the message
+  // id the caller is refreshing so the server can atomically confirm it is still
+  // the session's latest turn (409 otherwise) — that keeps the client's pending
+  // marker aligned with the turn chat:quick_actions will resolve, with no
+  // response reconciliation needed even under a WS-before-HTTP race (MUL-5149).
+  async regenerateChatQuickActions(
+    sessionId: string,
+    messageId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/quick-actions/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    });
+  }
+
   async updateChatSession(
     id: string,
     data: { title: string } | { project_id: string | null },
@@ -2230,7 +2367,10 @@ export class ApiClient {
   }
 
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
+    const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/messages`);
+    return parseWithFallback(raw, ChatMessageListSchema, EMPTY_CHAT_MESSAGE_LIST, {
+      endpoint: "GET /api/chat/sessions/:id/messages",
+    });
   }
 
   async listChatMessagesPage(
@@ -2244,8 +2384,16 @@ export class ApiClient {
       query.set("before_id", params.before.id);
     }
     try {
-      return await this.fetch(
+      const raw: unknown = await this.fetch(
         `/api/chat/sessions/${sessionId}/messages/page?${query.toString()}`,
+      );
+      return parseWithFallback(
+        raw,
+        ChatMessagesPageSchema,
+        { messages: [], limit, has_more: false, next_cursor: null },
+        {
+          endpoint: "GET /api/chat/sessions/:id/messages/page",
+        },
       );
     } catch (err) {
       // Deployment-order compatibility: a backend deployed before this endpoint
@@ -2269,18 +2417,54 @@ export class ApiClient {
     content: string,
     attachmentIds?: string[],
   ): Promise<SendChatMessageResponse> {
-    const body: { content: string; attachment_ids?: string[] } = { content };
+    const body: {
+      content: string;
+      attachment_ids?: string[];
+    } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
     }
-    return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify(body),
     });
+    const response = parseWithFallback<SendChatMessageResponse | null>(
+      raw,
+      SendChatMessageResponseSchema,
+      null,
+      { endpoint: "POST /api/chat/sessions/:id/messages" },
+    );
+    if (!response) throw new Error("invalid send chat message response");
+    return response;
   }
 
   async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/pending-task`);
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/pending-task`);
+    return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
+      endpoint: "GET /api/chat/sessions/:id/pending-task",
+    });
+  }
+
+  async prioritizeQueuedChatTask(
+    sessionId: string,
+    taskId: string,
+  ): Promise<PrioritizeQueuedChatTaskResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/queued-tasks/${taskId}/prioritize`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      PrioritizeQueuedChatTaskResponseSchema,
+      EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
+      { endpoint: "POST /api/chat/sessions/:id/queued-tasks/:taskId/prioritize" },
+    );
+  }
+
+  async clearQueuedChatTasks(sessionId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/queued-tasks`, {
+      method: "DELETE",
+    });
   }
 
   /**
@@ -2326,8 +2510,19 @@ export class ApiClient {
   // defers the empty-transcript judgment — and therefore only withholds the
   // synchronous restore from the response — for clients that send this; without
   // it we would be treated as a pre-#5219 client and get the legacy behaviour.
-  async cancelTaskById(taskId: string): Promise<CancelTaskResponse> {
-    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/cancel`, {
+  async cancelTaskById(
+    taskId: string,
+    options?: { queuedAction?: "edit" | "remove"; sessionId?: string },
+  ): Promise<CancelTaskResponse> {
+    const params = new URLSearchParams();
+    if (options?.queuedAction) {
+      if (!options.sessionId) throw new Error("sessionId is required for queued-only cancellation");
+      params.set("expected_status", "queued");
+      params.set("chat_session_id", options.sessionId);
+      params.set("queue_action", options.queuedAction);
+    }
+    const query = params.size > 0 ? `?${params}` : "";
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/cancel${query}`, {
       method: "POST",
       headers: { "X-Client-Capabilities": CHAT_DRAFT_RESTORE_CAPABILITY },
     });
@@ -2535,6 +2730,89 @@ export class ApiClient {
     return parseWithFallback(raw, ListPropertiesResponseSchema, EMPTY_LIST_PROPERTIES_RESPONSE, {
       endpoint: "GET /api/properties",
     });
+  }
+
+  /**
+   * Quick actions catalog — one projection for every caller.
+   *
+   * The server hides nothing beyond `private` ownership; whether the caller
+   * may RUN an action is answered by runQuickAction, not here. There is
+   * deliberately no "runnable only" mode: filtering the sidebar by permission
+   * made two people looking at one issue see different sidebars with no
+   * explanation.
+   *
+   * A backend predating quick actions 404s here; treat that as an empty
+   * catalog so the sidebar section and settings tab simply do not render.
+   */
+  async listQuickActions(opts?: { includeArchived?: boolean }): Promise<ListQuickActionsResponse> {
+    const suffix = opts?.includeArchived === true ? "?include_archived=true" : "";
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/quick-actions${suffix}`);
+    } catch (error) {
+      if (error instanceof Error && "status" in error && (error as { status?: number }).status === 404) {
+        return EMPTY_LIST_QUICK_ACTIONS_RESPONSE;
+      }
+      throw error;
+    }
+    return parseWithFallback(raw, ListQuickActionsResponseSchema, EMPTY_LIST_QUICK_ACTIONS_RESPONSE, {
+      endpoint: "GET /api/quick-actions",
+    });
+  }
+
+  async createQuickAction(data: CreateQuickActionRequest): Promise<QuickAction> {
+    const raw = await this.fetch<unknown>(`/api/quick-actions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, QuickActionSchema, EMPTY_QUICK_ACTION, {
+      endpoint: "POST /api/quick-actions",
+    });
+  }
+
+  async updateQuickAction(id: string, data: UpdateQuickActionRequest): Promise<QuickAction> {
+    const raw = await this.fetch<unknown>(`/api/quick-actions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, QuickActionSchema, EMPTY_QUICK_ACTION, {
+      endpoint: "PATCH /api/quick-actions/{id}",
+    });
+  }
+
+  async deleteQuickAction(id: string): Promise<void> {
+    await this.fetch<void>(`/api/quick-actions/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Run a quick action against one issue. The response is a Comment carrying
+   * `trigger_outcomes` — the same shape POST /comments returns — so callers
+   * reuse one result handler and inherit `queued` / `coalesced` / `deferred` /
+   * `blocked` instead of a parallel vocabulary that would drift.
+   */
+  async runQuickAction(issueId: string, quickActionId: string): Promise<Comment> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/quick-actions/${quickActionId}/run`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
+      endpoint: "POST /api/issues/{id}/quick-actions/{quickActionId}/run",
+    });
+  }
+
+  /**
+   * What a quick action WOULD post, without posting it. Backs the composer
+   * hand-off (⌥-click and the `/` menu) so the user can edit before sending.
+   * Returns "" when the response cannot be read — callers must treat an empty
+   * string as "insert nothing" rather than clearing the composer.
+   */
+  async renderQuickAction(issueId: string, quickActionId: string): Promise<string> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/quick-actions/${quickActionId}/render`, {
+      method: "POST",
+    });
+    const parsed = parseWithFallback(raw, QuickActionRenderSchema, { content: "" }, {
+      endpoint: "POST /api/issues/{id}/quick-actions/{quickActionId}/render",
+    });
+    return parsed.content;
   }
 
   async createProperty(data: CreatePropertyRequest): Promise<IssueProperty> {

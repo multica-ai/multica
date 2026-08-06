@@ -334,7 +334,7 @@ describe("WelcomeAfterOnboarding", () => {
 
       fireEvent.click(screen.getByText("Multica를 간단히 소개해 주세요"));
       fireEvent.click(
-        await screen.findByRole("button", { name: /작업 1개를 나에게 할당/i }),
+        await screen.findByRole("button", { name: /태스크 1개를 나에게 할당/i }),
       );
 
       await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));

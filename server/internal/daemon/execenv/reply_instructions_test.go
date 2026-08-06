@@ -30,8 +30,8 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md",
-		"Write the reply body to a UTF-8 file",
-		"`--content-file`",
+		"Write the body file first",
+		"--content-file ./reply.md",
 		"#4182",
 		"rm ./reply.md",
 		"Do NOT write literal `\\n` escapes to simulate line breaks",
@@ -78,7 +78,7 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 	triggerID := "22222222-2222-2222-2222-222222222222"
 
 	for _, host := range []string{"linux", "darwin"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "reasonix", "kiro", "cursor"} {
 			name := provider + "/" + host
 			t.Run(name, func(t *testing.T) {
 				runtimeGOOS = host
@@ -86,8 +86,11 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 
 				for _, want := range []string{
 					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md",
-					"Write the reply body to a UTF-8 file",
-					"`--content-file`",
+					// MUL-5442 cross-channel dedup: shell-hazard mechanics live in
+					// the brief's Comment Formatting; the cookbook keeps the
+					// file-first order, the command, and the pointer.
+					"Write the body file first",
+					"## Comment Formatting",
 					"#4182",
 					"rm ./reply.md",
 					"do NOT reuse --parent values from previous turns",
@@ -133,15 +136,19 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 	issueID := "11111111-1111-1111-1111-111111111111"
 	triggerID := "22222222-2222-2222-2222-222222222222"
 
-	for _, provider := range []string{"codex", "claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor"} {
+	for _, provider := range []string{"codex", "claude", "opencode", "openclaw", "hermes", "kimi", "reasonix", "kiro", "cursor"} {
 		t.Run(provider+"/windows", func(t *testing.T) {
 			got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 			for _, want := range []string{
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file",
-				"On Windows, write the reply body to a UTF-8 file",
-				"Do NOT pipe via `--content-stdin`",
-				"silently drops non-ASCII",
-				"$OutputEncoding",
+				// MUL-5442 cross-channel dedup: the $OutputEncoding trap's
+				// full mechanics live once, in the brief's Windows Comment
+				// Formatting variant; the per-turn cookbook keeps the ban,
+				// the one-line consequence, and the pointer.
+				"Write the body file first",
+				"never pipe via `--content-stdin`",
+				"PowerShell drops non-ASCII",
+				"## Comment Formatting",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s reply instructions missing %q\n---\n%s", provider, want, got)
@@ -197,7 +204,19 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 		t.Errorf("CLAUDE.md must not carry the trigger comment id (MUL-5377)\n---\n%s", s)
 	}
 	for _, want := range []string{
-		"Mode router",
+		// MUL-5442 stage 1: the mode-router paragraph compressed to a
+		// "Turn mode." lead. Pin every routing RULE, not just the markers —
+		// a further compression that drops the one-block rule or the
+		// no-mode-line fallback must fail here (stage-1 review).
+		"**Turn mode.**",
+		"Steps 1–6 are shared",
+		"apply exactly one mode block",
+		"differ on issue status",
+		// The full fallback MAPPING, not its halves: "No mode line" and
+		// "Reply mode" pinned separately could both pass while the text
+		// says "No mode line → Ownership mode" (final-review catch).
+		"No mode line → Reply mode",
+		"do not change the issue status",
 		"`Turn mode: Reply.`",
 		"`Turn mode: Ownership.`",
 		"Use the `--parent` value the per-turn user message gives you for this turn",

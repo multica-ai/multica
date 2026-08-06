@@ -247,6 +247,18 @@
     "section_metadata": "Metadata",
     "section_details": "Details",
     "section_token_usage": "Token usage",
+    "section_quick_actions": "Quick Actions",
+    "quick_actions_more": "Show {{count}} more",
+    "quick_action_runs_as": "Runs as {{name}}",
+    "quick_action_target_fallback": "the agent",
+    "quick_action_queued": "{{name}} started working",
+    "quick_action_coalesced": "Added to {{name}}’s current run",
+    "quick_action_deferred": "{{name}} is offline — it will start once back online",
+    "quick_action_blocked": "{{name}} could not be triggered",
+    "quick_action_posted": "Comment posted",
+    "quick_action_blocked_title": "You can’t run this quick action",
+    "quick_action_blocked_body": "“{{name}}” runs as an agent you’re not allowed to trigger. Ask a workspace admin to make that agent available to the team, or to point this action at a shared one.",
+    "quick_action_blocked_ok": "Got it",
     "pull_requests_loading": "Loading…",
     "pull_requests_empty": "No linked pull requests yet. Reference this issue's identifier in a PR's branch name, title, or body to auto-link it.",
     "pull_request_state_open": "Open",
@@ -291,6 +303,14 @@
     "activity_section": "Activity",
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
+    "delegated_subscription_badge": "Watching via agent",
+    "delegated_subscription_hint": "Your agent created this issue on your behalf, so you're subscribed to it. You'll get notified when it needs review, finishes, or gets stuck.",
+    "unsubscribe_this": "Unsubscribe from this issue",
+    "unsubscribe_subtree": "Unsubscribe from this issue and its sub-issues",
+    "unsubscribe_subtree_failed": "Could not unsubscribe from the sub-issues. Please try again.",
+    "unsubscribe_subtree_succeeded": "Unsubscribed from this issue and its sub-issues.",
+    "unsubscribe_subtree_unsupported": "This workspace's server does not support unsubscribing from sub-issues yet. Try again after the next update.",
+    "subscription_update_failed": "Could not update the subscription. Please try again.",
     "no_subscribers_results": "No results found",
     "change_subscribers_placeholder": "Change subscribers...",
     "members_group": "Members",
@@ -301,6 +321,26 @@
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
+    "thread_nav": {
+      "button_label_one": "Comment threads ({{count}})",
+      "button_label_other": "Comment threads ({{count}})",
+      "search_placeholder": "Search threads or authors",
+      "match_count_one": "{{count}} match",
+      "match_count_other": "{{count}} matches",
+      "filter_all": "All",
+      "filter_unresolved": "Unresolved",
+      "filter_resolved": "Resolved",
+      "filter_mine": "@me",
+      "group": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "earlier": "Earlier"
+      },
+      "empty": "No threads match",
+      "hint_select": "select",
+      "hint_jump": "jump",
+      "hint_close": "close"
+    },
     "sidebar_tooltip": "Toggle sidebar",
     "find": {
       "placeholder": "Find in issue...",
@@ -369,13 +409,15 @@
     "posted_partial_trigger_other": "Comment posted, but {{count}} mentions weren't triggered",
     "posted_partial_trigger_named": "Comment posted, but {{name}} wasn't triggered ({{reason}})",
     "trigger_blocked_chip_aria": "{{name}} won't be triggered — {{reason}}",
-    "trigger_blocked_invocation_not_allowed": "You don't have permission to use this target",
+    "trigger_blocked_invocation_not_allowed": "This target can't be found, or you don't have permission to use it",
     "trigger_blocked_target_unavailable": "This target is unavailable",
     "trigger_blocked_runtime_offline": "This target's runtime is offline",
+    "trigger_blocked_agent_runtime_required": "This target has no runtime — bind one to run it",
     "trigger_blocked_generic": "This target won't be triggered",
-    "trigger_blocked_short_invocation_not_allowed": "No permission",
+    "trigger_blocked_short_invocation_not_allowed": "Not found or no permission",
     "trigger_blocked_short_target_unavailable": "Unavailable",
     "trigger_blocked_short_runtime_offline": "Runtime offline",
+    "trigger_blocked_short_agent_runtime_required": "Needs a runtime",
     "trigger_blocked_short_generic": "Won't start",
     "send_reply_failed": "Failed to send reply",
     "delete_failed": "Failed to delete comment",
@@ -433,6 +475,7 @@
     "status_running": "Working",
     "status_queued": "Queued",
     "empty_hover": "No agents working right now",
+    "unknown_hover": "Agents working: not loaded yet",
     "filter_active_label": "Viewing issues with agents working",
     "tasks_count_one": "{{count}} task",
     "tasks_count_other": "{{count}} tasks",
@@ -441,6 +484,11 @@
     "issues_count_one": "{{count}} issue",
     "issues_count_other": "{{count}} issues",
     "chip_agents_working_unknown": "Agents working: —"
+  },
+  "filtered_empty": {
+    "title": "No issues match these filters",
+    "hint": "Adjust or clear the filters to see the issues in this view.",
+    "clear_button": "Clear filters"
   },
   "agent_live": {
     "is_working": "{{name}} is working",
@@ -558,7 +606,7 @@
   "pickers": {
     "custom_property": {
       "empty": "Empty",
-      "clear_action": "Clear",
+      "none": "No value",
       "true_label": "Yes",
       "false_label": "No",
       "value_placeholder": "Enter value…",
@@ -574,15 +622,17 @@
       "search_placeholder": "Assign to...",
       "members_group": "Members",
       "agents_group": "Agents",
-      "squads_group": "Squads"
+      "squads_group": "Squads",
+      "agent_runtime_required": "Bind a runtime before assigning work to this agent",
+      "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
     },
     "start_date": {
       "trigger_label": "Start date",
-      "clear_action": "Clear date"
+      "none": "No start date"
     },
     "due_date": {
       "trigger_label": "Due date",
-      "clear_action": "Clear date"
+      "none": "No due date"
     },
     "label": {
       "trigger_label": "Add label",

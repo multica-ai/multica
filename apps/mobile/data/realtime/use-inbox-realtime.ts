@@ -42,6 +42,11 @@ export function useInboxRealtime() {
         // Inbox-domain events: refetch the small inbox list.
         ws.on("inbox:new", invalidate),
         ws.on("inbox:read", invalidate),
+        // Mobile has no mark-unread affordance yet (web/desktop right-click
+        // only), but a mark-unread there must un-read the row here too —
+        // otherwise the phone keeps showing it read and the unread dots
+        // disagree across clients.
+        ws.on("inbox:unread", invalidate),
         ws.on("inbox:archived", invalidate),
         // Mobile has no archived view yet (web/desktop only, MUL-3736), but an
         // unarchive there restores the item to THIS list — without refetching,

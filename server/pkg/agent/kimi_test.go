@@ -66,7 +66,7 @@ func fakeKimiACPScript() string {
 #
 # Writes the full argv (one arg per line) to $KIMI_ARGS_FILE if that env
 # var is set, so tests can assert that the daemon invokes us with the
-# right flags (`+"`--yolo acp`"+`, not bare `+"`acp`"+`).
+# right flags (` + "`--yolo acp`" + `, not bare ` + "`acp`" + `).
 #
 # Then reads one JSON-RPC request per line from stdin, matches on the
 # method name, and writes back a canned response. Exits after set_model
@@ -156,6 +156,38 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 // actually does — RequestError.invalid_params (-32602) with
 // {"session_id": "Session not found"} in data
 // (src/kimi_cli/acp/server.py, set_session_model).
+// fakeKimiACPPromptScript is a fake `kimi` binary that completes a full
+// ACP turn: initialize, session/new, session/prompt with a streamed
+// message chunk, then the prompt response. When $KIMI_LATE_CHUNK is set
+// it emits one more chunk shortly AFTER the session/prompt response, the
+// way a real ACP agent can, so tests can prove the backend drains
+// trailing notifications instead of cutting the process off at the
+// response boundary.
+func fakeKimiACPPromptScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      if [ -n "$KIMI_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
 func fakeKimiACPStaleResumeSetModelScript() string {
 	return `#!/bin/sh
 while IFS= read -r line; do
@@ -333,5 +365,133 @@ func TestKimiResumeIncludesMcpServers(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
 		t.Fatalf("session/resume.mcpServers: got %v, want one entry named fetch", servers)
+	}
+}
+
+// TestKimiDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. kimi ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestKimiDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPPromptScript()))
+
+	backend, err := New("kimi", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIMI_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "pong tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
+	}
+}
+
+// fakeKimiACPResumeHistoryReplayScript impersonates kimi acp during session
+// resume: after session/resume responds it emits a history-replay notification
+// (the way a real Kimi CLI replays prior turns when loadSession:true). Then on
+// session/prompt it emits a new chunk with the actual answer. The gate must
+// ensure the history chunk never reaches output.
+func fakeKimiACPResumeHistoryReplayScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      # Emit history replay BEFORE responding — this is what real Kimi does.
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_resumed","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old history from previous turn"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_resumed"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_resumed","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"fresh answer"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendDropsHistoryReplayOnResume pins the streaming gate: when a
+// Kimi session is resumed, the runtime may replay prior-turn transcripts as
+// ACP notifications before the client sends session/prompt. Without the
+// streamingCurrentTurn gate those replayed messages would be appended to the
+// message channel and contaminate Result.Output with the previous answer.
+func TestKimiBackendDropsHistoryReplayOnResume(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPResumeHistoryReplayScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do something new", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_resumed",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var messages []Message
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for m := range session.Messages {
+			messages = append(messages, m)
+		}
+	}()
+
+	result := <-session.Result
+	<-done
+
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "ses_resumed" {
+		t.Errorf("expected session id ses_resumed, got %q", result.SessionID)
+	}
+	// The gate must block the history replay chunk.
+	if strings.Contains(result.Output, "old history") {
+		t.Fatalf("history replay leaked into Result.Output: %q", result.Output)
+	}
+	// The current-turn answer must pass through.
+	if !strings.Contains(result.Output, "fresh answer") {
+		t.Fatalf("expected current-turn output to contain 'fresh answer', got %q", result.Output)
+	}
+	// Also verify the message channel didn't receive the history chunk.
+	for _, m := range messages {
+		if m.Type == MessageText && strings.Contains(m.Content, "old history") {
+			t.Fatalf("history replay leaked into message stream: %+v", m)
+		}
 	}
 }

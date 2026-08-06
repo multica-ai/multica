@@ -393,7 +393,7 @@ function SquadNameEditor({
           className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded px-1 text-left text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
         >
           <span>{value}</span>
-          <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+          <Pencil className="h-3.5 w-3.5 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
         </button>
       )}
     </InlineEditPopover>
@@ -620,7 +620,7 @@ function AddMemberDialog({
           <div>
             <Label className="text-caption text-muted-foreground">
               {t(($) => $.add_member_dialog.label_role)}{" "}
-              <span className="text-muted-foreground/60">{t(($) => $.add_member_dialog.label_optional)}</span>
+              <span className="text-muted-foreground">{t(($) => $.add_member_dialog.label_optional)}</span>
             </Label>
             <Input
               type="text"
@@ -770,7 +770,7 @@ function SquadDetailInspector({
                   {squad.description}
                 </span>
               ) : (
-                <span className="text-caption italic leading-relaxed text-muted-foreground/50">
+                <span className="text-caption italic leading-relaxed text-muted-foreground">
                   {t(($) => $.description_dialog.placeholder_empty)}
                 </span>
               )}
@@ -844,9 +844,9 @@ function SquadDescriptionEditor({
         {value ? (
           <span className="text-muted-foreground">{value}</span>
         ) : (
-          <span className="italic text-muted-foreground/50">{t(($) => $.description_dialog.placeholder_empty)}</span>
+          <span className="italic text-muted-foreground">{t(($) => $.description_dialog.placeholder_empty)}</span>
         )}
-        <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+        <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>

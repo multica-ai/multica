@@ -1,8 +1,28 @@
+import { readFileSync } from "node:fs";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ProviderLogo } from "./provider-logo";
 
 describe("ProviderLogo", () => {
+  it("keeps the official Reasonix artwork", () => {
+    const logoSvg = readFileSync("runtimes/components/reasonix-logo.svg", "utf8");
+
+    expect(logoSvg).toContain('viewBox="0 0 64 64"');
+    expect(logoSvg).toContain('stop-color="#4f9dff"');
+    expect(logoSvg).toContain('stop-color="#c46bff"');
+  });
+
+  it("renders the official Reasonix logo", () => {
+    const { container } = render(
+      <ProviderLogo provider="reasonix" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector('img[alt="Reasonix"]');
+
+    expect(logo?.getAttribute("src")).toBeTruthy();
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
   it("renders the dedicated Qwen Code mark", () => {
     const { container } = render(<ProviderLogo provider="qwen" className="runtime-logo" />);
 

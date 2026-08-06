@@ -169,6 +169,10 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 
 以下のコマンドは **AI コーディングツールを実行するコンピュータ**で実行します。Docker を実行しているサーバーとは限りません。
 
+<Callout type="warning">
+タスクはデーモンを実行しているユーザーの全権限で動作し、そのユーザーが読み書きできるものはすべて読み書きできます。個人アカウントではなく、専用の Unix ユーザー、コンテナ、または VM でデーモンを実行してください。[セキュリティモデル](/security-model)を参照してください。
+</Callout>
+
 まず Multica CLI をインストールします。
 
 **macOS / Linux**

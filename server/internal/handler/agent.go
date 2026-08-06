@@ -35,9 +35,18 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RuntimeID     string          `json:"runtime_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	// RuntimeID is the empty string when the agent is unbound — it kept its
+	// configuration and history when its runtime was deleted, and needs a new
+	// runtime before it can run again (MUL-5559). The wire type stays a string
+	// so installed clients keep parsing; RuntimeBound is the explicit signal.
+	RuntimeID string `json:"runtime_id"`
+	// RuntimeBound is false exactly when the agent has no runtime. UI should
+	// branch on this rather than on RuntimeID being falsy, and must not confuse
+	// it with a bound-but-offline runtime (a different user story: reconnect the
+	// machine vs. pick a new one).
+	RuntimeBound  bool            `json:"runtime_bound"`
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
 	Instructions  string          `json:"instructions"`
@@ -159,6 +168,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
 		RuntimeID:                uuidToString(a.RuntimeID),
+		RuntimeBound:             a.RuntimeID.Valid,
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
@@ -336,6 +346,7 @@ type AgentTaskResponse struct {
 	NewCommentsSince         string                 `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
 	ChatSessionID            string                 `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string                 `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
+	ChatType                 string                 `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
 	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry

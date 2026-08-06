@@ -169,6 +169,10 @@ Self-hosted deployments default to `APP_ENV=production`, which disables fixed ve
 
 Run the commands below on **the computer that runs your AI coding tools**, which is not necessarily the server running Docker.
 
+<Callout type="warning">
+Tasks run with the full permissions of the user running the daemon — they can read and write everything that user can. Run the daemon as a dedicated Unix user, in a container, or in a VM rather than under your personal account. See the [security model](/security-model).
+</Callout>
+
 Install the Multica CLI first:
 
 **macOS / Linux**

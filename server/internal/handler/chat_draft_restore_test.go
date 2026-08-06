@@ -222,17 +222,22 @@ func countDraftRestores(t *testing.T, sessionID string) int {
 }
 
 // DeleteChatSession is not the only way a chat_session dies: it also cascades
-// from agent (migration 033). Hard-deleting a runtime's archived agents drops
-// their sessions silently, and with no FK on chat_draft_restore the pending
-// restores — each holding the user's prompt — would be stranded forever.
-func TestDeleteAgentRuntime_PrunesDraftRestoresOfCascadedSessions(t *testing.T) {
+// from agent (migration 033). Since MUL-5559 a runtime delete only hard-deletes
+// the runtime's SYSTEM agents, so that is the cascade whose draft restores would
+// otherwise be stranded (chat_draft_restore has no FK).
+func TestDeleteAgentRuntime_PrunesDraftRestoresOfSystemAgentSessions(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
 	runtimeID := seedIsolatedRuntime(t, "Runtime With Draft Restore")
-	archivedAgent := seedAgentOnRuntime(t, runtimeID, "Archived Agent With Draft Restore", true)
-	sessionID := createHandlerTestChatSession(t, archivedAgent)
+	systemAgent := seedAgentOnRuntime(t, runtimeID, "System Agent With Draft Restore", false)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent SET kind = 'system', system_key = 'draft_restore_probe' WHERE id = $1`,
+		systemAgent); err != nil {
+		t.Fatalf("make agent a system agent: %v", err)
+	}
+	sessionID := createHandlerTestChatSession(t, systemAgent)
 	seedDraftRestore(t, sessionID, "prompt stranded by the agent cascade", nil)
 
 	w := httptest.NewRecorder()
@@ -242,11 +247,41 @@ func TestDeleteAgentRuntime_PrunesDraftRestoresOfCascadedSessions(t *testing.T) 
 		t.Fatalf("DeleteAgentRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if agentExists(t, archivedAgent) {
-		t.Fatal("archived agent should have been deleted — the cascade under test never ran")
+	if agentExists(t, systemAgent) {
+		t.Fatal("system agent should have been deleted — the cascade under test never ran")
 	}
 	if n := countDraftRestores(t, sessionID); n != 0 {
 		t.Errorf("draft restores of a cascade-deleted session must be pruned, count = %d", n)
+	}
+}
+
+// The mirror case, and the regression for the cleanup scope: an ARCHIVED USER
+// agent is no longer deleted with its runtime, so its session and the pending
+// restore holding the user's prompt must both survive. Pruning by "archived
+// agents on this runtime" — what the old teardown did — would throw away the
+// draft of an agent that is still there.
+func TestDeleteAgentRuntime_KeepsDraftRestoresOfUnboundAgentSessions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := seedIsolatedRuntime(t, "Runtime With Surviving Draft Restore")
+	archivedAgent := seedAgentOnRuntime(t, runtimeID, "Archived Agent With Surviving Draft", true)
+	sessionID := createHandlerTestChatSession(t, archivedAgent)
+	seedDraftRestore(t, sessionID, "prompt that must survive the machine being retired", nil)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodDelete, "/api/runtimes/"+runtimeID, nil), "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DeleteAgentRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if !agentExists(t, archivedAgent) {
+		t.Fatal("archived user agent must survive its runtime as an unbound agent")
+	}
+	if n := countDraftRestores(t, sessionID); n != 1 {
+		t.Errorf("draft restore of a surviving agent must be kept, count = %d", n)
 	}
 }
 

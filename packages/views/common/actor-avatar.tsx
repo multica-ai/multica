@@ -94,10 +94,10 @@ export function ActorAvatar({
     />
   );
 
-  // Optional presence dot overlay. Only meaningful for agents — members have
-  // no presence backbone. Wrapping unconditionally with relative inline-flex
-  // would create extra DOM for every avatar; we only wrap when a dot is asked
-  // for.
+  // Optional presence overlay. Only meaningful for agents — members have no
+  // presence backbone. Wrapping unconditionally with relative inline-flex
+  // would create extra DOM for every avatar; we only wrap when the dot is
+  // asked for.
   const wrapDot = showStatusDot && actorType === "agent";
   const dotted = wrapDot ? (
     <span className="relative inline-flex">

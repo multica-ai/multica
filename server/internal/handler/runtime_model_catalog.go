@@ -92,8 +92,49 @@ type ModelCatalogCache interface {
 // remembering. `supported=false` runtimes have no picker at all, and an empty
 // catalog is treated as a transient failure rather than an authoritative
 // "this runtime has no models".
-func cacheableModelCatalog(models []ModelEntry, supported bool) bool {
-	return supported && len(models) > 0
+//
+// `fallback` closes the hole those two checks left open. Several providers
+// answer a failed discovery with a non-empty static stand-in, which sails past
+// the emptiness check and gets stored as last-known-good — so one transient
+// failure pins a catalog the runtime never advertised for the full 24h serve
+// window. For codebuddy the stand-in does not share a single ID with the real
+// catalog, making every pick an ID the CLI rejects (MUL-5549).
+func cacheableModelCatalog(models []ModelEntry, supported, fallback bool) bool {
+	return supported && !fallback && len(models) > 0
+}
+
+// modelCatalogCacheAction is what a completed discovery report should do to the
+// runtime's cached catalog.
+type modelCatalogCacheAction int
+
+const (
+	// modelCatalogCacheStore writes the report as the new last-known-good.
+	modelCatalogCacheStore modelCatalogCacheAction = iota
+	// modelCatalogCacheDrop discards any snapshot: the report is authoritative
+	// and says this runtime no longer advertises the catalog we held.
+	modelCatalogCacheDrop
+	// modelCatalogCacheKeep leaves the cache untouched: the report is not
+	// authoritative, so it is neither worth storing nor grounds to discard a
+	// real catalog we already have.
+	modelCatalogCacheKeep
+)
+
+// modelCatalogCacheDecision maps a completed report onto its cache action.
+//
+// The fallback case is the MUL-5549 fix and is deliberately Keep, not Drop: a
+// static stand-in tells us nothing about what the runtime supports, so letting
+// it evict a real catalog would turn one transient discovery failure into a
+// downgrade. That matches how a `failed` report is already handled — serving
+// the last known good list through a transient failure is the point of the
+// cache.
+func modelCatalogCacheDecision(models []ModelEntry, supported, fallback bool) modelCatalogCacheAction {
+	if fallback {
+		return modelCatalogCacheKeep
+	}
+	if cacheableModelCatalog(models, supported, fallback) {
+		return modelCatalogCacheStore
+	}
+	return modelCatalogCacheDrop
 }
 
 // cloneModelEntries deep-copies a catalog so the in-memory backend hands out
@@ -161,7 +202,9 @@ func (c *InMemoryModelCatalogCache) Get(_ context.Context, runtimeID string) (*M
 }
 
 func (c *InMemoryModelCatalogCache) Put(_ context.Context, runtimeID string, models []ModelEntry, supported bool) error {
-	if runtimeID == "" || !cacheableModelCatalog(models, supported) {
+	// fallback=false: ReportModelListResult refuses to Put a fallback catalog
+	// at all, so anything reaching a cache backend is a real discovery result.
+	if runtimeID == "" || !cacheableModelCatalog(models, supported, false) {
 		return nil
 	}
 	c.mu.Lock()

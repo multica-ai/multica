@@ -18,8 +18,12 @@ import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
-import { api } from "@multica/core/api";
-import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
+import { api, dispatchReasonCode } from "@multica/core/api";
+import {
+  isAgentRuntimeBound,
+  useAgentPresenceDetail,
+  useWorkspaceAgentAvailability,
+} from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useAppForeground } from "../../common/use-app-foreground";
 import {
@@ -32,6 +36,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
+import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import {
   chatSessionsOptions,
   chatMessagesPageOptions,
@@ -43,16 +48,23 @@ import {
 import {
   useCreateChatSession,
   useMarkChatSessionRead,
+  useRegenerateChatQuickActions,
   useSetChatSessionArchived,
   useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
+import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
+import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
+import { hideQueuedChatMessages } from "@multica/core/chat/pending";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
+import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
+import { ChatQueue } from "./chat-queue";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
@@ -60,10 +72,11 @@ import {
   hasInFlightPendingTask,
   isStillOnComposeTarget,
   planProjectContextChange,
+  seedAcceptedPendingTask,
 } from "./use-chat-controller";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
@@ -107,6 +120,15 @@ export function ChatWindow() {
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(activeSessionId ?? ""),
+  );
+  // Drop a stuck pending marker (dead daemon / failed supplement) so the pill
+  // spinner stops and a later refresh starts clean (MUL-5149).
+  useQuickActionsPendingTimeout(activeSessionId ?? null, quickActionsPending);
+  // Toast when an accepted refresh later fails in the daemon (async half).
+  useQuickActionsFailureToast(activeSessionId ?? null);
+  const regenerateQuickActions = useRegenerateChatQuickActions();
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setOpen = useChatStore((s) => s.setOpen);
@@ -138,24 +160,28 @@ export function ChatWindow() {
   // it starts from a large stable base and only subtracts the count of loaded
   // prepended rows, so concurrent server inserts cannot drift the scroll anchor.
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
-  const messages = [...messagePages].reverse().flatMap((page) => page.messages);
-  const olderMessageCount = messagePages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
-  const firstItemIndex = messages.length > 0
-    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
-    : 0;
+  const allMessages = [...messagePages].reverse().flatMap((page) => page.messages);
   // Skeleton only shows for an un-cached session fetch. Cached switches
   // return data synchronously — no flash. `enabled: false` (new chat)
   // keeps isLoading false so the starter prompts aren't hidden.
-  const showSkeleton = !!activeSessionId && messagesLoading;
-
   // Server-authoritative pending task. Survives refresh / reopen / session
   // switch because it's keyed on sessionId in the Query cache; WS events
   // (chat:message / chat:done / task:*) keep it invalidated in real time.
   //
   // This is the SOLE source for pendingTaskId — no mirror in the store.
-  const { data: pendingTask } = useQuery(
+  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery(
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
+  const showSkeleton =
+    !!activeSessionId && (messagesLoading || pendingTaskLoading);
+  const messages = hideQueuedChatMessages(allMessages, pendingTask);
+  const olderMessageCount = messagePages.slice(1).reduce(
+    (sum, page) => sum + page.messages.length,
+    0,
+  );
+  const firstItemIndex = messages.length > 0
+    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
+    : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
@@ -172,6 +198,13 @@ export function ChatWindow() {
   const appForeground = useAppForeground();
   const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
     useChatDraftRestore(activeSessionId, isOpen && appForeground);
+  const {
+    cancelChatTask,
+    handleEditQueuedTask,
+    handleRemoveQueuedTask,
+    handleClearQueuedTasks,
+    handleSendQueuedTaskNow,
+  } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
   // Nonce handed to ChatInput to pull focus into the compose box: when a new
   // chat starts (⊕ or switching agent), and whenever the window itself opens.
   const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
@@ -227,6 +260,8 @@ export function ChatWindow() {
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
+  const activeAgentRuntimeBound =
+    !!activeAgent && isAgentRuntimeBound(activeAgent);
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
@@ -378,55 +413,6 @@ export function ChatWindow() {
   // remain workspace-scoped drafts — sending is still the point where a
   // session is created (if needed) and attachment_ids bind to the message.
 
-  const cancelChatTask = useCallback(
-    async (
-      taskId: string,
-      sessionId: string,
-      options: { restoreDraftToInput: boolean; source: string },
-    ) => {
-      apiLogger.info("cancelTask.start", {
-        taskId,
-        sessionId,
-        source: options.source,
-      });
-      qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-
-      try {
-        const result = await api.cancelTaskById(taskId);
-        const restored = result.cancelled_chat_message;
-        if (restored?.restore_to_input) {
-          removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
-          if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
-            enqueueLocalRestore({
-              id: restored.message_id,
-              content: restored.content,
-              attachments: restored.attachments,
-              sessionId: restored.chat_session_id,
-            });
-          }
-        }
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        apiLogger.info("cancelTask.success", {
-          taskId,
-          sessionId,
-          restoredToInput: !!restored?.restore_to_input && options.restoreDraftToInput,
-        });
-        return result;
-      } catch (err) {
-        apiLogger.warn("cancelTask.error (task may have already finished)", {
-          taskId,
-          sessionId,
-          err,
-        });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-        return null;
-      }
-    },
-    [qc, enqueueLocalRestore],
-  );
-
   const handleSend = useCallback(
     async (
       content: string,
@@ -448,6 +434,16 @@ export function ChatWindow() {
         });
         return false;
       }
+      if (pendingTaskId && pendingTask?.supports_queue !== true) {
+        apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
+          sessionId: activeSessionId,
+        });
+        return false;
+      }
+      if (!activeAgentRuntimeBound) {
+        toast.error(t(($) => $.input.runtime_required_toast));
+        return false;
+      }
 
       const finalContent = content;
 
@@ -466,7 +462,14 @@ export function ChatWindow() {
         sessionId = await ensureSession(finalContent);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
-        toast.error(t(($) => $.input.send_failed_toast));
+        const reason = dispatchReasonCode(err);
+        toast.error(
+          reason === "invocation_not_allowed"
+            ? t(($) => $.input.send_blocked_toast)
+            : reason === "agent_runtime_required"
+              ? t(($) => $.input.runtime_required_toast)
+              : t(($) => $.input.send_failed_toast),
+        );
         return false;
       }
       if (!sessionId) {
@@ -485,7 +488,14 @@ export function ChatWindow() {
         result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
-        toast.error(t(($) => $.input.send_failed_toast));
+        const reason = dispatchReasonCode(err);
+        toast.error(
+          reason === "invocation_not_allowed"
+            ? t(($) => $.input.send_blocked_toast)
+            : reason === "agent_runtime_required"
+              ? t(($) => $.input.runtime_required_toast)
+              : t(($) => $.input.send_failed_toast),
+        );
         return false;
       }
       apiLogger.info("sendChatMessage.success", {
@@ -518,10 +528,13 @@ export function ChatWindow() {
         chatKeys.messages(sessionId),
         (old) => (old ? [...old, sent] : [sent]),
       );
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
+      seedAcceptedPendingTask(qc, sessionId, {
         task_id: result.task_id,
-        status: "queued",
         created_at: result.created_at,
+        message_id: result.message_id,
+        content: finalContent,
+        supports_queue: result.supports_queue,
+        queued: result.queued,
       });
       // Cache primed → publish the new active session, but only if the user
       // hasn't navigated away mid-send. Compare the live store against the
@@ -567,7 +580,10 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
+      activeAgentRuntimeBound,
       isAgentArchived,
+      pendingTask,
+      pendingTaskId,
       ensureSession,
       cancelChatTask,
       qc,
@@ -732,6 +748,7 @@ export function ChatWindow() {
   };
 
   const contextItems = useChatContextItems(wsId);
+  const queuedTasks = pendingTask?.queued_tasks ?? [];
 
   return (
     <motion.div
@@ -829,6 +846,23 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          onQuickAction={(action) => handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!pendingTaskId ||
+            isSessionArchived ||
+            isAgentArchived ||
+            !activeAgentRuntimeBound ||
+            noAgent
+          }
+          onRegenerateQuickActions={(message) =>
+            activeSessionId
+              ? regenerateQuickActions.mutateAsync({
+                  sessionId: activeSessionId,
+                  messageId: message.id,
+                })
+              : undefined
+          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState
@@ -851,9 +885,23 @@ export function ChatWindow() {
         <NoAgentBanner />
       ) : isAgentArchived ? (
         <ArchivedAgentBanner agentName={activeAgent?.name} />
+      ) : !activeAgentRuntimeBound && activeAgent ? (
+        <RuntimeRequiredBanner
+          agentId={activeAgent.id}
+          agentName={activeAgent.name}
+        />
       ) : (
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
+
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={pendingTask?.status}
+        onSendNow={handleSendQueuedTaskNow}
+        onEdit={handleEditQueuedTask}
+        onRemove={handleRemoveQueuedTask}
+        onClear={handleClearQueuedTasks}
+      />
 
       {/* Input — disabled for legacy archived sessions and for sessions whose
        *  agent has been archived (read-only); locked out entirely when there's
@@ -865,9 +913,13 @@ export function ChatWindow() {
         uploadEnabled={!!activeAgent}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
-        disabled={isSessionArchived || isAgentArchived}
+        allowSubmitWhileRunning={pendingTask?.supports_queue === true}
+        disabled={
+          isSessionArchived || isAgentArchived || !activeAgentRuntimeBound
+        }
         noAgent={noAgent}
         agentArchived={isAgentArchived}
+        agentRuntimeRequired={!activeAgentRuntimeBound}
         agentName={activeAgent?.name}
         projects={projects}
         projectId={activeProjectId}
@@ -1010,9 +1062,15 @@ function AgentPickerItem({
   isCurrent: boolean;
   onSelect: (agent: Agent) => void;
 }) {
+  const { t } = useT("chat");
+  const runtimeBound = isAgentRuntimeBound(agent);
   return (
     <PickerItem
       selected={isCurrent}
+      disabled={!runtimeBound}
+      tooltip={
+        runtimeBound ? undefined : t(($) => $.window.agent_needs_runtime_hint)
+      }
       onClick={() => onSelect(agent)}
     >
       <ActorAvatar
@@ -1023,6 +1081,11 @@ function AgentPickerItem({
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
+      {!runtimeBound && (
+        <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
+          {t(($) => $.window.agent_needs_runtime)}
+        </span>
+      )}
     </PickerItem>
   );
 }

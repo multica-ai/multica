@@ -118,11 +118,15 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIngested:
-		// Only a /issue-created message warrants a confirmation; a plain chat
-		// message stays silent (the agent's own reply lands via EventChatDone).
+		// Only an /issue product result warrants an immediate reply; a plain
+		// chat message stays silent (the agent's own reply lands via ChatDone).
 		if res.IssueID.Valid {
-			if err := r.post(ctx, inst, msg, issueCreatedText(res)); err != nil {
-				r.logger.WarnContext(ctx, "slack replier: issue-created confirmation failed",
+			text := issueCreatedText(res)
+			if res.IssueDuplicate {
+				text = issueDuplicateText(res)
+			}
+			if err := r.post(ctx, inst, msg, text); err != nil {
+				r.logger.WarnContext(ctx, "slack replier: issue outcome reply failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
 		}
@@ -178,13 +182,26 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 }
 
 func issueCreatedText(res engine.Result) string {
-	id := res.IssueIdentifier
-	if id == "" {
-		id = fmt.Sprintf("#%d", res.IssueNumber)
-	}
+	id := issueResultIdentifier(res)
 	title := strings.TrimSpace(res.IssueTitle)
 	if title == "" {
 		return "✅ Created " + id
 	}
 	return "✅ Created " + id + " — " + title
+}
+
+func issueDuplicateText(res engine.Result) string {
+	id := issueResultIdentifier(res)
+	title := strings.TrimSpace(res.IssueTitle)
+	if title == "" {
+		return "⚠️ Not created — active issue " + id + " already exists."
+	}
+	return "⚠️ Not created — active issue " + id + " already exists: " + title
+}
+
+func issueResultIdentifier(res engine.Result) string {
+	if res.IssueIdentifier != "" {
+		return res.IssueIdentifier
+	}
+	return fmt.Sprintf("#%d", res.IssueNumber)
 }

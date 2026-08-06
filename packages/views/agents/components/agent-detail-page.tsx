@@ -22,6 +22,7 @@ import type {
 } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
+  isAgentRuntimeBound,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -134,17 +135,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     // would clobber a concurrent successful mutation if the failing call
     // resolves last (e.g. flipping visibility then runtime simultaneously
     // and only the visibility PATCH fails).
+    const optimisticData =
+      typeof data.runtime_id === "string"
+        ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
+        : data;
     const queryKey = workspaceKeys.agents(wsId);
     const prevAgents = qc.getQueryData<Agent[]>(queryKey);
     const prevAgent = prevAgents?.find((a) => a.id === id);
     const prevFields: Record<string, unknown> = {};
     if (prevAgent) {
-      for (const key of Object.keys(data)) {
+      for (const key of Object.keys(optimisticData)) {
         prevFields[key] = (prevAgent as unknown as Record<string, unknown>)[key];
       }
     }
     qc.setQueryData<Agent[]>(queryKey, (old) =>
-      old?.map((a) => (a.id === id ? ({ ...a, ...data } as Agent) : a)),
+      old?.map((a) =>
+        a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
+      ),
     );
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
@@ -252,7 +259,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   }
 
   const isArchived = !!agent.archived_at;
-  const runtime = agent.runtime_id
+  const runtimeBound = isAgentRuntimeBound(agent);
+  const runtime = runtimeBound
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
   const owner = agent.owner_id
@@ -270,7 +278,20 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       toast.error(t(($) => $.detail.dm_no_permission_toast));
       return;
     }
+    if (!runtimeBound) {
+      toast.error(t(($) => $.detail.runtime_required_toast));
+      return;
+    }
     navigation.push(`${paths.chat()}?agent=${agent.id}`);
+  };
+  const handleAssign = () => {
+    if (!runtimeBound) {
+      toast.error(t(($) => $.detail.runtime_required_toast));
+      return;
+    }
+    useModalStore
+      .getState()
+      .open("quick-create-issue", { agent_id: agent.id });
   };
 
   return (
@@ -284,11 +305,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         canArchive={canEdit.allowed}
         dmPending={permissionsLoading}
         onDm={handleDm}
-        onAssign={() =>
-          useModalStore
-            .getState()
-            .open("quick-create-issue", { agent_id: agent.id })
-        }
+        onAssign={handleAssign}
         onArchive={() => setConfirmArchive(true)}
       />
 
@@ -316,6 +333,25 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               onClick={() => handleRestore(agent.id)}
             >
               {t(($) => $.detail.restore)}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {!isArchived && !runtimeBound && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-caption text-amber-900 dark:text-amber-100">
+          <Server className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">
+            {t(($) => $.detail.runtime_required_banner)}
+          </span>
+          {canEdit.allowed && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 border-amber-500/40 bg-background/70 text-caption"
+              onClick={() => setTabNavIntent("general")}
+            >
+              {t(($) => $.detail.bind_runtime)}
             </Button>
           )}
         </div>

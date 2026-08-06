@@ -38,6 +38,20 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: LockAgentForAutopilotAssignment :one
+-- Serializes creating, retargeting, or resuming an active Autopilot with
+-- Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it
+-- clears runtime_id and pauses matching Autopilots. FOR SHARE also stabilizes
+-- runtime_id and archived_at against concurrent ordinary Agent updates. The
+-- shared lock makes the
+-- two outcomes exhaustive:
+--   * assignment commits first, then teardown sees and pauses it; or
+--   * teardown commits first, then assignment re-reads runtime_id=NULL and
+--     rejects the active Autopilot.
+SELECT * FROM agent
+WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
+FOR SHARE;
+
 -- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
@@ -214,7 +228,7 @@ RETURNING *;
 -- Returns every non-archived agent bound to a runtime. Backs the cascade
 -- delete dialog: when DELETE /api/runtimes/:id refuses with
 -- runtime_has_active_agents, the response carries this list so the front-end
--- can render exactly the agents that will be archived if the user confirms,
+-- can render exactly the agents that will be unbound if the user confirms,
 -- and so the cascade endpoint's expected_active_agent_ids check has a stable
 -- snapshot to compare against. Ordered by name for a deterministic display.
 SELECT * FROM agent
@@ -228,11 +242,21 @@ ORDER BY name ASC;
 -- LockAgentRuntime, which holds the runtime row exclusively to also
 -- block FK-validated INSERTs / runtime_id updates that would otherwise
 -- add a new agent to the runtime mid-cascade. Together they guarantee
--- that the set we compared against expected_active_agent_ids is exactly
--- the set ArchiveAgentsByIDs will operate on — no race window.
+-- that the set we compared against expected_active_agent_ids is stable.
 SELECT * FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC
+FOR UPDATE;
+
+-- name: ListUserAgentsByRuntimeForUpdate :many
+-- Locks active AND archived user agents before a runtime teardown. Locking only
+-- the active snapshot leaves a restore race: an archived row can become active
+-- after confirmation and then be silently unbound. Runtime/profile delete
+-- locks the parent runtime first (blocking new FK references), then calls this
+-- in stable ID order (blocking restore/archive/move on existing rows).
+SELECT * FROM agent
+WHERE runtime_id = $1 AND kind = 'user'
+ORDER BY id
 FOR UPDATE;
 
 -- name: RestoreAgent :one
@@ -539,7 +563,7 @@ WHERE id = (
               )
             )
       )
-    ORDER BY atq.priority DESC, atq.created_at ASC
+    ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
@@ -704,13 +728,21 @@ RETURNING *;
 -- name: GetLastTaskSession :one
 -- Returns the session_id and work_dir from the most recent task for a given
 -- (agent_id, issue_id) pair, used for session resumption on the auto-retry
--- path. We accept both 'completed' and 'failed' tasks: a failed task may
--- have established a real agent session before crashing (orphaned by a
+-- path. We accept 'completed', 'failed' AND 'cancelled' tasks: a failed task
+-- may have established a real agent session before crashing (orphaned by a
 -- daemon restart, runtime offline, or sweeper timeout), and the daemon pins
 -- the resume pointer mid-flight via UpdateAgentTaskSession. Without this,
 -- an auto-retry of a mid-run failure would silently start a fresh
 -- conversation and lose the in-flight context — exactly what MUL-1128's B
 -- branch is meant to fix.
+--
+-- A cancelled task is in exactly the same position, and excluding it was the
+-- issue-side half of GH #6340: the pinned session is real (the provider emitted
+-- it), the user stopped the run rather than the provider rejecting it, and
+-- cancellation records no failure_reason/error for the poison filters below to
+-- match on. So a stop-then-comment-again sequence keeps its context instead of
+-- silently starting cold. A user who wants a clean slate has manual rerun,
+-- which never takes this path (see below).
 --
 -- Manual rerun (TaskService.RerunIssue) does NOT take this path. The claim
 -- handler branches on rerun_of_task_id FIRST and resolves the session/workdir
@@ -725,12 +757,14 @@ RETURNING *;
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon
 -- classifies these failures (iteration_limit, agent_fallback_message,
--- api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow)
+-- api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow,
+-- codex_resume_oversized)
 -- when it detects either an agent fallback marker in the output, an upstream
 -- API 400 that means the conversation history itself is unprocessable
 -- (oversized image, malformed base64, etc.), a Codex semantic inactivity
--- timeout whose recorded session may replay the same stuck state, or a context
--- window overflow that would immediately overflow again on resume. Keep this
+-- timeout whose recorded session may replay the same stuck state, a context
+-- window overflow that would immediately overflow again on resume, or a Codex
+-- thread/resume response too large to read back (MUL-5722). Keep this
 -- list in sync with resumeUnsafeFailureReason and GetLastChatTaskSession.
 --
 -- The error-text ILIKE clause is defense-in-depth for the api_invalid_request
@@ -766,6 +800,15 @@ RETURNING *;
 -- exactly as narrow as classifyPoisonedError and the Kiro detector — an
 -- unrelated error that only mentions image dimensions is NOT excluded.
 --
+-- MUL-5722 needed a different shape, and the reason is worth stating because
+-- the first attempt got it wrong: a row-level guard like the ones above CANNOT
+-- work for an overflowed resume. That failure happens before the turn starts,
+-- so the backend has no session id to report and the row lands with session_id
+-- NULL — which the latest_per_session CTE drops before any filter runs. The
+-- only row naming the oversized thread is the OLDER completed one, which looks
+-- perfectly healthy. Hence resume_overflow_at below: block by TIME, which needs
+-- nothing from the failed row but its existence. See the clause for details.
+--
 -- The final pair of regexes is the provider-agnostic version of the same
 -- guard, and it matters most for self-hosted installs: daemons upgrade on
 -- their own cadence, so a host still running a daemon without
@@ -789,6 +832,15 @@ WITH retired_sessions AS (
     FROM agent_task_queue r
     WHERE r.agent_id = $1 AND r.issue_id = $2
       AND r.retired_session_id IS NOT NULL
+), resume_overflow_at AS (
+    SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
+    FROM agent_task_queue t
+    WHERE t.agent_id = $1 AND t.issue_id = $2
+      AND t.status = 'failed'
+      AND (
+        COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
+        OR (COALESCE(t.error, '') ILIKE '%thread/resume failed%' AND COALESCE(t.error, '') ILIKE '%token too long%')
+      )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
         t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error,
@@ -796,21 +848,32 @@ WITH retired_sessions AS (
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
       AND t.session_id IS NOT NULL
-      AND t.status IN ('completed', 'failed')
+      AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
 SELECT session_id, work_dir, runtime_id FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
-    status = 'completed'
+    status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
                AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
     )
+  )
+  -- MUL-5722: a resume that overflowed the reader names no session, so it can
+  -- only be excluded by time, not by matching the failed row. Drop every
+  -- session whose last terminal activity predates the newest such failure: one
+  -- of them IS the oversized thread, and the row that would tell us which is
+  -- exactly the row that could not be written. Anything that terminated after
+  -- the overflow is the fresh thread that replaced it, so this un-blocks itself
+  -- as soon as one succeeds.
+  AND (
+    (SELECT at FROM resume_overflow_at) IS NULL
+    OR terminal_at > (SELECT at FROM resume_overflow_at)
   )
 ORDER BY terminal_at DESC
 LIMIT 1;
@@ -887,10 +950,23 @@ RETURNING *;
 -- session_id/work_dir on the task row. No-op if the task is no longer
 -- in dispatched/running. waiting_local_directory tasks have no session yet
 -- so this query intentionally skips them.
+--
+-- A row the user just cancelled accepts the pin too, but only while its
+-- session slot is still empty (GH #6340). The pin is asynchronous — for Codex
+-- it waits for the rollout to reach the store — so a cancel landing in that
+-- window used to drop the session id for good, and the cancelled turn's
+-- context with it. Filling an EMPTY slot on the run's own row is exactly what
+-- the mid-flight pin is for; the `session_id IS NULL` guard is what keeps this
+-- from being an overwrite, and completed/failed rows stay untouchable so a
+-- straggler goroutine can never contradict a terminal report.
 UPDATE agent_task_queue
 SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
-WHERE id = $1 AND status IN ('dispatched', 'running');
+WHERE id = $1
+  AND (
+    status IN ('dispatched', 'running')
+    OR (status = 'cancelled' AND session_id IS NULL)
+  );
 
 -- name: RecoverOrphanedTasksForRuntime :many
 -- Called by the daemon at startup. Atomically fails any dispatched/running/
@@ -1016,6 +1092,45 @@ UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
+
+-- name: CancelQueuedAgentTask :one
+-- Queue editing is a compare-and-set: never cancel a task that the daemon
+-- promoted between the user's click and this statement.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE id = sqlc.arg('id')
+  AND chat_session_id = sqlc.arg('chat_session_id')
+  AND status = 'queued'
+RETURNING *;
+
+-- name: CancelQueuedAgentTasksForSession :many
+-- Clear only positional follow-ups. The first visible task is current even
+-- when it has not been claimed yet, so an all-queued session must preserve its
+-- priority/FIFO head. Keep this selector in lockstep with the visible-head
+-- invariant documented above ListChatMessages in chat.sql.
+WITH head AS MATERIALIZED (
+  SELECT candidate.id
+  FROM agent_task_queue AS candidate
+  WHERE candidate.chat_session_id = $1
+    AND candidate.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+    AND candidate.regenerate_quick_actions_for IS NULL
+  ORDER BY
+    CASE
+      WHEN candidate.status IN ('dispatched', 'running', 'waiting_local_directory') THEN 0
+      WHEN candidate.status = 'deferred' THEN 1
+      ELSE 2
+    END,
+    candidate.priority DESC,
+    candidate.created_at ASC,
+    candidate.id ASC
+  LIMIT 1
+)
+UPDATE agent_task_queue AS queued
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE queued.chat_session_id = $1
+  AND queued.status = 'queued'
+  AND queued.id IS DISTINCT FROM (SELECT id FROM head)
+RETURNING queued.*;
 
 -- name: MarkChatFinalizeDeferred :one
 -- Arms the deferred chat-finalize marker for a cancelled chat task whose

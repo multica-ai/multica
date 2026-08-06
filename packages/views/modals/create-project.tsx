@@ -306,7 +306,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-caption">
             <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
+            <ChevronRight className="size-3 text-faint-foreground" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -448,7 +448,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   {leadType && leadId ? (
                     <>
                       <ActorAvatar actorType={leadType} actorId={leadId} size="sm" showStatusDot />
-                      <span>{leadLabel}</span>
+                      <span className="truncate">{leadLabel}</span>
                     </>
                   ) : (
                     <span className="text-muted-foreground">{t(($) => $.create_project.lead)}</span>

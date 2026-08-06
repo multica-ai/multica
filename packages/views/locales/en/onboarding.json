@@ -41,7 +41,8 @@
     "continue": "Continue",
     "skip": "Skip",
     "cancel": "Cancel",
-    "close": "Close"
+    "close": "Close",
+    "log_out": "Log out"
   },
   "source_backfill": {
     "eyebrow": "Quick question",

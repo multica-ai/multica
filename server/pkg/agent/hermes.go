@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -315,8 +314,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -675,26 +673,45 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 // may deliver the final agent_message_chunk after the response; closing stdin
 // or cancelling immediately at that boundary loses the user-visible answer.
 func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(hermesNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(hermesReaderDrainGrace)
-	defer hard.Stop()
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, hermesNotificationQuietTime, hermesReaderDrainGrace)
+}
+
+// acpNotificationQuietTime is the default lull the shared drain waits out
+// before concluding an ACP agent has stopped emitting notifications. It is a
+// protocol-level heuristic rather than a per-backend trait, so backends that
+// have no reason to differ share it; the hard bound stays per-backend.
+const acpNotificationQuietTime = 250 * time.Millisecond
+
+// waitForACPNotificationQuiescence gives the shared ACP stdout reader a
+// bounded chance to consume notifications a backend may emit just after its
+// session/prompt response returns. Closing stdin and cancelling the context at
+// the response boundary otherwise races the reader and silently truncates the
+// final text or usage update.
+//
+// It returns as soon as any of these happens, so an agent that holds stdout
+// open forever cannot stall the turn: no notification arrived for quiet, the
+// reader finished, hard elapsed, or ctx was cancelled.
+func waitForACPNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}, quiet, hard time.Duration) {
+	quietTimer := time.NewTimer(quiet)
+	defer quietTimer.Stop()
+	hardTimer := time.NewTimer(hard)
+	defer hardTimer.Stop()
 
 	for {
 		select {
 		case <-activity:
-			if !quiet.Stop() {
+			if !quietTimer.Stop() {
 				select {
-				case <-quiet.C:
+				case <-quietTimer.C:
 				default:
 				}
 			}
-			quiet.Reset(hermesNotificationQuietTime)
-		case <-quiet.C:
+			quietTimer.Reset(quiet)
+		case <-quietTimer.C:
 			return
 		case <-readerDone:
 			return
-		case <-hard.C:
+		case <-hardTimer.C:
 			return
 		case <-ctx.Done():
 			return
@@ -741,6 +758,15 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// selectPermission lets an ACP dialect narrow the generic headless
+	// permission policy. Reasonix uses this to reject user questions and
+	// fresh-human approvals that also happen to carry allow_once options.
+	// Nil preserves the shared ACP policy for existing backends.
+	selectPermission func(json.RawMessage) (optionID string, grant bool, ok bool)
+	// onNotification observes vendor notifications that are not session/update.
+	// Existing backends leave it nil; the callback must do its own method and
+	// lifecycle filtering.
+	onNotification func(method string, params json.RawMessage)
 	// onActivity observes accepted ACP session updates. Hermes and Grok use it
 	// to retain a short post-response drain window; other ACP backends leave it
 	// nil and keep their existing lifecycle behavior.
@@ -896,7 +922,11 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
-		optionID, grant, ok := selectACPPermissionOption(raw["params"])
+		selector := c.selectPermission
+		if selector == nil {
+			selector = selectACPPermissionOption
+		}
+		optionID, grant, ok := selector(raw["params"])
 		if ok {
 			// Select an offered option — either a safe grant (approve) or,
 			// when no safe grant exists, an offered reject_once (deny THIS
@@ -1081,8 +1111,9 @@ func (e *acpRPCError) Error() string {
 // (Internal error), Kiro puts "No session found with id ..." in
 // `data` under -32603, and kimi-cli raises invalid_params (-32602)
 // with {"session_id": "Session not found"} in `data` for every
-// unknown-session path (src/kimi_cli/acp/server.py) — so neither the
-// code nor the text alone is discriminating and both are matched.
+// unknown-session path (src/kimi_cli/acp/server.py), while Reasonix says
+// "session/resume: unknown session <id>" under -32602 — so neither the
+// code nor one runtime's exact wording is discriminating and both are matched.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
@@ -1093,7 +1124,8 @@ func isACPSessionNotFound(err error) bool {
 	}
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
 	return strings.Contains(text, "session not found") ||
-		strings.Contains(text, "no session found")
+		strings.Contains(text, "no session found") ||
+		strings.Contains(text, "unknown session")
 }
 
 // hermesResumeLostError is the fallback reason for a resumed session Hermes
@@ -1266,6 +1298,9 @@ func parseACPModelIDFromMeta(meta json.RawMessage) string {
 func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+	if c.onNotification != nil {
+		c.onNotification(method, raw["params"])
+	}
 
 	if method != "session/update" && method != "session/notification" {
 		return

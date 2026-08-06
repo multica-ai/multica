@@ -98,6 +98,18 @@ function never<T>() {
   return new Promise<T>(() => {});
 }
 
+/**
+ * Facet requests that are NOT the always-on working-agents count. Every
+ * surface issues that one on mount to label its activity chip; the lazy
+ * submenu-facet contract these tests guard is about everything else.
+ */
+function submenuFacetCalls(mock: { mock: { calls: unknown[][] } }) {
+  return mock.mock.calls.filter(([request]) => {
+    const facets = (request as { facets?: { kind: string }[] } | undefined)?.facets;
+    return !facets?.some((facet) => facet.kind === "working_agents");
+  });
+}
+
 function makeRunningTask(id: string, agentId: string, issueId: string): AgentTask {
   return {
     id,
@@ -142,15 +154,28 @@ describe("useIssueSurfaceController", () => {
   >;
   let listIssueTableRows: ReturnType<typeof vi.fn>;
   let listIssueTableFacets: ReturnType<typeof vi.fn>;
+  // Every row the current fixture holds, kept outside the mocked list endpoint
+  // so the working-agents facet stand-in can read it without registering a
+  // call that Table-isolation tests assert never happens.
+  let fixtureRows: Issue[];
+  let workingAgentFixture: WorkspaceWorkingAgent[];
 
   beforeEach(() => {
+    fixtureRows = [];
+    workingAgentFixture = [];
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     listIssues = vi.fn(() => never<ListIssuesResponse>());
     getAgentTaskSnapshot = vi.fn(() => never<AgentTask[]>());
     getWorkspaceWorkingAgents = vi.fn(() =>
       Promise.resolve([] satisfies WorkspaceWorkingAgent[]),
     );
-    const tableMethods = statusTableMethodsFromLegacy(listIssues);
+    // The working-agents facet is server-side in production; here it reads the
+    // same fixture the working-agents endpoint serves, so a test that moves one
+    // moves both.
+    const tableMethods = statusTableMethodsFromLegacy(listIssues, {
+      rows: () => fixtureRows,
+      agents: () => workingAgentFixture,
+    });
     listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
     listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
     setApiInstance({
@@ -652,10 +677,12 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    expect(listIssueTableFacets).not.toHaveBeenCalled();
+    expect(submenuFacetCalls(listIssueTableFacets)).toHaveLength(0);
     act(() => result.current.setActiveTableFacet({ kind: "status" }));
-    await waitFor(() => expect(listIssueTableFacets).toHaveBeenCalledTimes(1));
-    expect(listIssueTableFacets).toHaveBeenCalledWith(
+    await waitFor(() =>
+      expect(submenuFacetCalls(listIssueTableFacets)).toHaveLength(1),
+    );
+    expect(submenuFacetCalls(listIssueTableFacets)[0]?.[0]).toEqual(
       expect.objectContaining({
         facets: [{ kind: "status" }],
         include_total: false,
@@ -739,12 +766,14 @@ describe("useIssueSurfaceController", () => {
       );
 
       expect(result.current.facetCountsExact).toBe(false);
-      expect(listIssueTableFacets).not.toHaveBeenCalled();
+      expect(submenuFacetCalls(listIssueTableFacets)).toHaveLength(0);
 
       act(() => result.current.setActiveTableFacet({ kind: "priority" }));
 
-      await waitFor(() => expect(listIssueTableFacets).toHaveBeenCalledTimes(1));
-      expect(listIssueTableFacets).toHaveBeenCalledWith(
+      await waitFor(() =>
+        expect(submenuFacetCalls(listIssueTableFacets)).toHaveLength(1),
+      );
+      expect(submenuFacetCalls(listIssueTableFacets)[0]?.[0]).toEqual(
         expect.objectContaining({
           facets: [{ kind: "priority" }],
           include_total: false,
@@ -953,7 +982,7 @@ describe("useIssueSurfaceController", () => {
       const store = getIssueSurfaceViewStore("project:p1");
       store.getState().setViewMode(viewMode);
       store.getState().toggleAgentRunningFilter();
-      getWorkspaceWorkingAgents.mockResolvedValue([
+      mockWorkingAgents([
         makeWorkingAgent("agent-from-working-api", ["issue-from-working-api"]),
       ]);
       // Deliberately contradictory legacy data. It must neither be fetched nor
@@ -991,7 +1020,7 @@ describe("useIssueSurfaceController", () => {
     store.getState().toggleAssigneeFilter({ type: "member", id: "member-1" });
     store.getState().toggleNoAssignee();
     store.getState().toggleAgentRunningFilter();
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-2", ["member-assigned-running-issue"]),
       makeWorkingAgent("agent-3", ["unassigned-running-issue"]),
     ]);
@@ -1125,11 +1154,20 @@ describe("useIssueSurfaceController", () => {
   // and hideable like any other status.
 
   function mockListByStatus(byStatus: Partial<Record<IssueStatus, Issue[]>>) {
+    fixtureRows = Object.values(byStatus).flatMap((issues) => issues ?? []);
     listIssues.mockImplementation((params?: ListIssuesParams) => {
       const status = params?.status as IssueStatus | undefined;
       const issues = (status && byStatus[status]) ?? [];
       return Promise.resolve({ issues, total: issues.length });
     });
+  }
+
+  /** Feeds both the working-agents endpoint and the `working_agents` facet
+   *  stand-in, so a fixture can never say one thing to the filter and another
+   *  to the count. */
+  function mockWorkingAgents(agents: WorkspaceWorkingAgent[]) {
+    workingAgentFixture = agents;
+    getWorkspaceWorkingAgents.mockResolvedValue(agents);
   }
 
   it("fetches and surfaces the cancelled bucket as a default status", async () => {
@@ -1234,10 +1272,12 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
-  // --- working-chip scope (MUL-4884) ------------------------------------
-  // The header chip promises "N issues in progress" where N is the number of
-  // rows clicking it leaves. The working-agents endpoint identifies both the
-  // running agents and the issues referenced by those agents' running tasks.
+  // --- working-chip scope (MUL-4884, MUL-5525) ---------------------------
+  // The header chip promises "N agents working" where N is the number of agents
+  // holding rows that clicking it leaves. The running-issue ids still come from
+  // the working-agents endpoint and go to the server as a filter; the COUNT
+  // comes from the `working_agents` facet over the surface's own compiled
+  // query, so scope and filters can never diverge from the list again.
 
   it("sends working issue ids to the server without reconstructing a local scope", async () => {
     mockListByStatus({
@@ -1247,7 +1287,7 @@ describe("useIssueSurfaceController", () => {
       ],
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-1", ["todo-1"]),
       makeWorkingAgent("agent-2", ["prog-1"]),
     ]);
@@ -1272,20 +1312,29 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
-    // Membership is cursor-paged and server-owned. A partial page cannot
-    // produce the exact activity-chip scope, so it stays explicitly unknown.
-    expect(result.current.workingScopeIssues).toBeUndefined();
+    // Cursor-paged server membership no longer forces an unknown count: the
+    // facet answers over the same compiled query the branches use.
+    await waitFor(() =>
+      expect(result.current.workingAgents).toEqual([
+        { id: "agent-1", running_task_count: 1 },
+        { id: "agent-2", running_task_count: 1 },
+      ]),
+    );
   });
 
-  it("keeps the activity-chip scope unknown before the server filter is enabled", async () => {
+  it("counts the agents a click would leave before the filter is even on", async () => {
     mockListByStatus({
       todo: [
         makeIssue({ id: "todo-1", status: "todo" }),
         makeIssue({ id: "todo-2", status: "todo" }),
       ],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-1", ["todo-1"]),
+      // Working on an issue this project does not contain. The old
+      // workspace-wide chip counted it here and then opened an empty list
+      // (MUL-5525).
+      makeWorkingAgent("agent-elsewhere", ["other-project-1"]),
     ]);
 
     const { result } = renderHook(
@@ -1299,10 +1348,14 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // Filter off: the list still shows both loaded rows, while the exact
-    // post-click membership remains unknown until the backend predicate runs.
+    // Filter off: the list still shows both loaded rows, and the chip already
+    // reports the post-click answer — one agent, not two.
     expect(result.current.issues).toHaveLength(2);
-    expect(result.current.workingScopeIssues).toBeUndefined();
+    await waitFor(() =>
+      expect(result.current.workingAgents).toEqual([
+        { id: "agent-1", running_task_count: 1 },
+      ]),
+    );
   });
 
   it("combines the status and working predicates in the canonical server query", async () => {
@@ -1310,7 +1363,7 @@ describe("useIssueSurfaceController", () => {
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-1", ["todo-1"]),
       makeWorkingAgent("agent-2", ["prog-1"]),
     ]);
@@ -1340,7 +1393,13 @@ describe("useIssueSurfaceController", () => {
     ]);
     expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
-    expect(result.current.workingScopeIssues).toBeUndefined();
+    // agent-2 works only on `prog-1`, which the active status filter hides. The
+    // chip must not count an agent whose rows the list will not show.
+    await waitFor(() =>
+      expect(result.current.workingAgents).toEqual([
+        { id: "agent-1", running_task_count: 1 },
+      ]),
+    );
   });
 
   it("sends the sub-issue display rule to the same server query", async () => {
@@ -1350,7 +1409,7 @@ describe("useIssueSurfaceController", () => {
         makeIssue({ id: "child-1", status: "todo", parent_issue_id: "parent-1" }),
       ],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-1", ["parent-1"]),
     ]);
 
@@ -1369,7 +1428,40 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
-    expect(result.current.workingScopeIssues).toBeUndefined();
+    await waitFor(() =>
+      expect(result.current.workingAgents).toEqual([
+        { id: "agent-1", running_task_count: 1 },
+      ]),
+    );
+  });
+
+  it("drops an agent whose only working row is a hidden sub-issue", async () => {
+    mockListByStatus({
+      todo: [
+        makeIssue({ id: "parent-1", status: "todo" }),
+        makeIssue({ id: "child-1", status: "todo", parent_issue_id: "parent-1" }),
+      ],
+    });
+    mockWorkingAgents([
+      makeWorkingAgent("agent-child", ["child-1"]),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().toggleShowSubIssues());
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
+    await waitFor(() => expect(result.current.workingAgents).toEqual([]));
   });
 
   it("requests issue working agents so chat/autopilot work stays out of scope", async () => {
@@ -1386,7 +1478,7 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.workingScopeIssues).toEqual([]);
+    await waitFor(() => expect(result.current.workingAgents).toEqual([]));
     expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
   });
@@ -1396,7 +1488,7 @@ describe("useIssueSurfaceController", () => {
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-1", ["todo-1"]),
       makeWorkingAgent("agent-2", ["prog-1"]),
     ]);
@@ -1417,9 +1509,14 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    // Like Table/List, the migrated Swimlane owns cursor branches and does
-    // not materialize another complete working-only window for the chip.
-    expect(result.current.workingScopeIssues).toBeUndefined();
+    // Like Table/List, the migrated Swimlane owns cursor branches and never
+    // materializes a second working-only window — the chip's count comes from
+    // the facet, and the active `todo` filter keeps agent-2 out of it.
+    await waitFor(() =>
+      expect(result.current.workingAgents).toEqual([
+        { id: "agent-1", running_task_count: 1 },
+      ]),
+    );
     // Controller-only tests do not mount lane cells, so no row branch should
     // activate merely because its descriptor exists.
     expect(result.current.issues).toEqual([]);
@@ -1476,7 +1573,7 @@ describe("useIssueSurfaceController", () => {
 
   it("filters Gantt by running-task issue ids rather than issue assignees", async () => {
     mockGanttIssues(ganttFixture);
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       // The editing agent deliberately differs from the issue assignee.
       makeWorkingAgent("agent-editor", ["gantt-open"]),
     ]);
@@ -1506,13 +1603,15 @@ describe("useIssueSurfaceController", () => {
     );
 
     // ganttShowCompleted defaults to false, so the done row and the undated
-    // row are not drawn — the chip must not count them either.
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
+    // row are not drawn — the chip must not count their agents either. Gantt
+    // keeps a client-side count because its canvas projection is not
+    // expressible as a Table query spec.
+    expect(result.current.workingAgents).toEqual([
+      { id: "agent-editor", running_task_count: 1 },
+    ]);
+    expect(result.current.filteredGanttIssues.map((i) => i.id)).toEqual([
       "gantt-open",
     ]);
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual(
-      result.current.filteredGanttIssues.map((i) => i.id),
-    );
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
   });
 
@@ -1532,7 +1631,7 @@ describe("useIssueSurfaceController", () => {
     selectedAssigneeId,
   }) => {
     mockGanttIssues(ganttFixture);
-    getWorkspaceWorkingAgents.mockResolvedValue(workingAgents);
+    mockWorkingAgents(workingAgents);
 
     const store = getIssueSurfaceViewStore("project:p1");
     act(() => {
@@ -1573,12 +1672,12 @@ describe("useIssueSurfaceController", () => {
         : undefined,
     );
     expect(result.current.filteredGanttIssues).toEqual([]);
-    expect(result.current.workingScopeIssues).toEqual([]);
+    expect(result.current.workingAgents).toEqual([]);
   });
 
   it("widens the gantt working scope when show-completed is turned on", async () => {
     mockGanttIssues(ganttFixture);
-    getWorkspaceWorkingAgents.mockResolvedValue([
+    mockWorkingAgents([
       makeWorkingAgent("agent-editor", ["gantt-open", "gantt-done"]),
     ]);
 
@@ -1602,15 +1701,15 @@ describe("useIssueSurfaceController", () => {
       expect(result.current.filteredGanttIssues.length).toBe(2),
     );
 
-    // The done row is drawn now, so it counts. The undated one still cannot
-    // be placed, so it still does not.
-    expect(result.current.workingScopeIssues?.map((i) => i.id).sort()).toEqual([
+    // The done row is drawn now, so its task counts. The undated one still
+    // cannot be placed, so it still does not — two rows, one agent, two tasks.
+    expect(result.current.workingAgents).toEqual([
+      { id: "agent-editor", running_task_count: 2 },
+    ]);
+    expect(result.current.filteredGanttIssues.map((i) => i.id).sort()).toEqual([
       "gantt-done",
       "gantt-open",
     ]);
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual(
-      result.current.filteredGanttIssues.map((i) => i.id),
-    );
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,9 @@
     "paths": {
       "@/lib/utils": ["./lib/utils.ts"],
       "@/hooks/*": ["./hooks/*"],
-      "@/components/ui/*": ["./components/ui/*"]
+      "@/components/ui/*": ["./components/ui/*"],
+      "@multica/ui/components": ["./components"],
+      "@multica/ui/lib": ["./lib"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],

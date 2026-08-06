@@ -27,10 +27,11 @@
   "status": {
     "active": "활성",
     "paused": "일시 중지",
+    "paused_runtime_required": "일시 중지됨 — 담당 에이전트에 런타임이 필요합니다",
     "archived": "보관됨"
   },
   "execution_mode": {
-    "create_issue": "이슈 생성",
+    "create_issue": "태스크 생성",
     "run_only": "실행만"
   },
   "relative_date": {
@@ -69,6 +70,8 @@
     "not_found": "오토파일럿을 찾을 수 없습니다",
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
+    "paused_runtime_required": "담당 에이전트의 런타임이 없어 자동화가 일시 중지되었습니다. 런타임을 연결한 후 다시 활성화하세요.",
+    "bind_runtime": "런타임 연결",
     "edit": "수정",
     "run_now": "지금 실행",
     "running": "실행 중...",
@@ -76,6 +79,7 @@
     "toast_trigger_failed": "오토파일럿을 실행하지 못했습니다",
     "run_blocked_invocation_not_allowed": "실행되지 않음 — 이 오토파일럿의 에이전트를 사용할 권한이 없습니다",
     "run_blocked_runtime_offline": "실행되지 않음 — 에이전트의 런타임이 오프라인입니다",
+    "run_blocked_agent_runtime_required": "실행되지 않음 — 에이전트에 런타임이 없습니다. 실행하려면 런타임을 연결하세요",
     "run_blocked_target_unavailable": "실행되지 않음 — 에이전트를 사용할 수 없습니다",
     "run_blocked_attribution": "실행되지 않음 — 실행의 책임 구성원을 확인할 수 없습니다",
     "run_blocked_already_active": "실행되지 않음 — 최근 실행이 이미 이 건을 처리했습니다",
@@ -122,7 +126,7 @@
     "owner_note": "작성자와 워크스페이스 관리자는 항상 접근할 수 있습니다."
   },
   "run_status": {
-    "issue_created": "이슈 생성됨",
+    "issue_created": "태스크 생성됨",
     "running": "실행 중",
     "skipped": "건너뜀",
     "completed": "완료됨",
@@ -135,7 +139,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "이슈 연결됨",
+    "issue_linked": "태스크 연결됨",
     "view_log": "실행 로그 보기",
     "skipped_group": {
       "label": "건너뜀",
@@ -282,7 +286,7 @@
     "section_project": "프로젝트",
     "no_project": "프로젝트 없음",
     "section_subscribers": "구독자",
-    "subscribers_hint": "이 오토파일럿이 만드는 모든 이슈를 자동으로 구독합니다",
+    "subscribers_hint": "이 오토파일럿이 만드는 모든 태스크를 자동으로 구독합니다",
     "subscribers_empty": "구독자가 없습니다. 팀원을 추가하면 매번 알림을 받습니다",
     "subscribers_add": "구독자 추가",
     "subscribers_search_placeholder": "이름으로 멤버 검색…",
@@ -306,14 +310,18 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
     "schedule_disabled_reason": "이 오토파일럿에는 여러 일정이 있습니다. 상세 페이지에서 수정하세요.",
+    "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
+    "schedule_add": "일정 추가",
+    "error_title_required": "오토파일럿 이름을 입력하세요.",
+    "error_assignee_required": "실행할 에이전트 또는 스쿼드를 선택하세요.",
     "output_modes": {
       "create_issue": {
-        "label": "이슈 생성",
-        "description": "실행할 때마다 추적 가능한 이슈를 만듭니다"
+        "label": "태스크 생성",
+        "description": "실행할 때마다 추적 가능한 태스크를 만듭니다"
       },
       "run_only": {
         "label": "실행만",
-        "description": "이슈를 만들지 않고 조용히 실행합니다"
+        "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
     }
   },
@@ -408,7 +416,9 @@
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
     "agents_group": "에이전트",
-    "squads_group": "스쿼드"
+    "squads_group": "스쿼드",
+    "agent_runtime_required": "이 에이전트를 선택하기 전에 런타임을 연결하세요",
+    "squad_runtime_required": "선택하기 전에 이 스쿼드 리더에 런타임을 연결하세요"
   },
   "timezone_picker": {
     "search_placeholder": "시간대 검색..."

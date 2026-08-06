@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Globe, Lock, Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
-import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
+import { RuntimePicker } from "./runtime-picker";
+import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
@@ -324,6 +325,7 @@ export function CreateAgentDialog({
                 name={name}
                 size={64}
                 onUploaded={setAvatarUrl}
+                onEmojiSelected={setAvatarUrl}
                 onClear={() => setAvatarUrl(null)}
               />
               <div className="flex-1 min-w-0 space-y-3">

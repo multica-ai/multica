@@ -27,9 +27,18 @@ const (
 	// ReasonTargetUnavailable: the target cannot run (archived agent, deleted /
 	// archived squad, unresolvable leader, or no assignee).
 	ReasonTargetUnavailable ReasonCode = "target_unavailable"
-	// ReasonRuntimeOffline: the target is permitted but its runtime is not bound
-	// / not online at dispatch time.
+	// ReasonRuntimeOffline: the target is permitted and bound to a runtime, but
+	// that runtime is not online at dispatch time. The task is not lost — the
+	// user's fix is to bring the machine back, and queued work waits for it.
 	ReasonRuntimeOffline ReasonCode = "runtime_offline"
+	// ReasonAgentRuntimeRequired: the target is permitted but bound to no
+	// runtime at all (agent.runtime_id IS NULL), which is where an agent lands
+	// when its runtime is deleted (MUL-5559). Distinct from runtime_offline on
+	// purpose: there is no machine to bring back, nothing will ever claim work
+	// for this agent, and the only fix is binding it to a runtime. Clients that
+	// collapse the two send the user looking for an offline computer that does
+	// not exist.
+	ReasonAgentRuntimeRequired ReasonCode = "agent_runtime_required"
 	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
 	// responsible human for the run, so it was refused.
 	ReasonAttributionBlocked ReasonCode = "attribution_blocked"

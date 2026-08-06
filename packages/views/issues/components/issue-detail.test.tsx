@@ -1,9 +1,10 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
@@ -157,6 +158,11 @@ vi.mock("../../editor", async () => ({
     tryOpen: () => false,
     modal: null,
   }),
+  // Pass-through: the detail page wraps its column in the image-sequence
+  // provider, but paging between images is covered in
+  // image-sequence-context.test.tsx against the real provider.
+  ImageSequenceProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
   isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
@@ -272,6 +278,7 @@ const mockApiObj = vi.hoisted(() => ({
   listIssueSubscribers: vi.fn().mockResolvedValue([]),
   subscribeToIssue: vi.fn().mockResolvedValue(undefined),
   unsubscribeFromIssue: vi.fn().mockResolvedValue(undefined),
+  unsubscribeFromIssueSubtree: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   rerunIssue: vi.fn(),
@@ -316,6 +323,7 @@ vi.mock("@multica/core/issues/config", () => ({
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive", badgeBg: "bg-destructive/10", badgeText: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning", badgeBg: "bg-warning/10", badgeText: "text-warning" },
@@ -846,6 +854,46 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
   });
 
+  it("pins the comment composer to the scroll viewport on a wide screen", async () => {
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    // `bottom-0` is unique to the composer wrapper — the sticky affordances
+    // inside the timeline (comment headers, resolve bars) all pin to `top-0`.
+    expect(container.querySelector(".sticky.bottom-0")).not.toBeNull();
+  });
+
+  it("lets the composer ride the end of the timeline on mobile", async () => {
+    // A pinned composer on a phone sits on the chat launcher's corner at every
+    // scroll position, and the part it covers is its own send button.
+    mockViewport.isMobile = true;
+
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(container.querySelector(".sticky.bottom-0")).toBeNull();
+  });
+
+  it("reserves the chat launcher's corner at the end of the mobile scroll", async () => {
+    mockViewport.isMobile = true;
+
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    // Unpinned, the composer lands in that corner once the reader reaches the
+    // bottom, so the column has to end above the launcher rather than under it.
+    expect(container.querySelector(".max-md\\:pb-chat-launcher")).not.toBeNull();
+  });
+
   it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
     // Metadata is agent-facing; the sidebar only exposes a button that opens
     // the raw JSON on demand. Keys are NOT rendered inline anywhere.
@@ -919,6 +967,38 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Created by")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
     expect(screen.getByText("Updated")).toBeInTheDocument();
+  });
+
+  // Details is creator + immutable timestamps, so it ranks below the
+  // execution log, which is what people actually open the sidebar for.
+  it("orders the Details section after the execution log", async () => {
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-past",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: "2026-06-08T08:00:00Z",
+        completed_at: "2026-06-08T08:05:00Z",
+        result: null,
+        error: null,
+        created_at: "2026-06-08T08:00:00Z",
+        trigger_summary: "Started from comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    const executionLog = await screen.findByText("Execution log");
+    const details = screen.getByText("Details");
+
+    // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
+    expect(
+      executionLog.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows 'not found' message when issue does not exist", async () => {
@@ -1642,6 +1722,332 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");
+    });
+  });
+
+  // Deliberately drives the real Base UI DropdownMenu rather than a stub: the
+  // bug these tests pin (MUL-5710) was a handler wired to `onSelect`, which
+  // typechecks because Menu.Item's props extend the whole div attribute set,
+  // then lands on the DOM as the native text-selection event and never fires.
+  // Only the real menu reproduces that; any hand-rolled mock hides it.
+  describe("unsubscribe menu", () => {
+    const subscribedAsMember = [
+      {
+        issue_id: "issue-1",
+        user_type: "member" as const,
+        user_id: "user-1",
+        reason: "manual" as const,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue(subscribedAsMember);
+      // The menu only exists when there is a sub-tree for its second item to
+      // act on. A childless issue renders a direct button instead — covered
+      // by the "no sub-issues" tests below (MUL-5714).
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [{ ...mockIssue, id: "child-1", parent_issue_id: "issue-1" }],
+      });
+    });
+
+    // Base UI portals the popup onto document.body; RTL unmounts it, but wipe
+    // the body too so a leftover portal can't duplicate menu item names.
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    async function openUnsubscribeMenu() {
+      renderIssueDetail();
+      fireEvent.click(await screen.findByText("Unsubscribe"));
+      return screen.findByRole("menu");
+    }
+
+    it("unsubscribes the current member when the single-issue item is clicked", async () => {
+      await openUnsubscribeMenu();
+
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Unsubscribe from this issue" }),
+      );
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+
+    it("unsubscribes from the whole subtree when the subtree item is clicked", async () => {
+      await openUnsubscribeMenu();
+
+      fireEvent.click(
+        screen.getByRole("menuitem", {
+          name: "Unsubscribe from this issue and its sub-issues",
+        }),
+      );
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssueSubtree).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
+    });
+
+    it("still offers the menu while the child count is unknown", async () => {
+      // Children never resolve, so the component cannot yet tell a childless
+      // issue from one with a sub-tree. The menu is the safe answer: unlike
+      // the direct button it never picks an opt-out scope for the user.
+      mockApiObj.listChildIssues.mockReturnValue(new Promise(() => {}));
+      renderIssueDetail();
+
+      const control = await screen.findByText("Unsubscribe");
+
+      expect(control.getAttribute("aria-haspopup")).toBe("menu");
+    });
+  });
+
+  // The reported bug: on an issue with no sub-issues the only way to leave was
+  // a menu whose second item pointed at a sub-tree that does not exist
+  // (MUL-5714).
+  describe("unsubscribe without sub-issues", () => {
+    const subscribedAsMember = [
+      {
+        issue_id: "issue-1",
+        user_type: "member" as const,
+        user_id: "user-1",
+        reason: "manual" as const,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue(subscribedAsMember);
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    });
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    // The label is the same either way, so aria-haspopup is what separates the
+    // menu trigger from the plain button. The subscribers query resolves first,
+    // so the control is briefly the trigger before the child count settles —
+    // wait for the collapsed form rather than grabbing the first match.
+    async function findDirectUnsubscribeButton() {
+      return waitFor(() => {
+        const el = screen.getByText("Unsubscribe");
+        expect(el.getAttribute("aria-haspopup")).toBeNull();
+        return el;
+      });
+    }
+
+    it("unsubscribes in one click, with no menu", async () => {
+      renderIssueDetail();
+
+      fireEvent.click(await findDirectUnsubscribeButton());
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    // The scope choice, pinned. RemoveIssueSubscriber writes
+    // opt_out_scope='issue'; the subtree route writes 'subtree', which also
+    // blocks FUTURE children from re-subscribing the user. Collapsing the menu
+    // must not quietly upgrade a one-issue opt-out into a whole-tree one
+    // (server/pkg/db/queries/subscriber.sql).
+    it("uses the root-only route, never the subtree one", async () => {
+      renderIssueDetail();
+
+      fireEvent.click(await findDirectUnsubscribeButton());
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalled(),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+
+    it("sends one request for a rapid double-click", async () => {
+      let release: (() => void) | undefined;
+      mockApiObj.unsubscribeFromIssue.mockReturnValue(
+        new Promise<void>((resolve) => {
+          release = () => resolve();
+        }),
+      );
+      renderIssueDetail();
+      const button = await findDirectUnsubscribeButton();
+
+      // Same tick, no await between. React Query flushes isPending in a
+      // microtask, so `disabled` has not landed yet and the second click still
+      // reaches an enabled button — the in-flight guard is what stops it. Two
+      // overlapping toggles is the one case the mutation's whole-list snapshot
+      // cannot survive: the second snapshots the first one's optimistic patch
+      // and rolls back to it (MUL-5714).
+      fireEvent.click(button);
+      fireEvent.click(button);
+
+      // Both handlers already ran synchronously; only the request dispatch is
+      // async. So once any call has landed, the count is final.
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalled(),
+      );
+      expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledTimes(1);
+      release?.();
+    });
+
+    it("disables the button while the toggle is in flight, then reports failure", async () => {
+      let reject: ((err: Error) => void) | undefined;
+      mockApiObj.unsubscribeFromIssue.mockReturnValue(
+        new Promise<void>((_resolve, rej) => {
+          reject = (err) => rej(err);
+        }),
+      );
+      renderIssueDetail();
+      const button = await findDirectUnsubscribeButton();
+
+      fireEvent.click(button);
+
+      await waitFor(() =>
+        expect((button as HTMLButtonElement).disabled).toBe(true),
+      );
+
+      reject?.(new Error("boom"));
+
+      // The optimistic patch rolls itself back, restoring the exact row the
+      // user started from — without this message that is indistinguishable
+      // from a button that never fired.
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          enIssues.detail.subscription_update_failed,
+        ),
+      );
+      await waitFor(() =>
+        expect((button as HTMLButtonElement).disabled).toBe(false),
+      );
+    });
+  });
+
+  // Before the subscribers query resolves the hook's list defaults to empty,
+  // which reads as "not subscribed" for everyone. Rendering that default
+  // showed a Subscribe button to people who were already subscribed, and a
+  // click landing in that window sent a subscribe instead of the unsubscribe
+  // they meant (MUL-5714).
+  describe("subscription state before the query resolves", () => {
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("renders no subscribe control while subscribers are loading", async () => {
+      mockApiObj.listIssueSubscribers.mockReturnValue(new Promise(() => {}));
+      renderIssueDetail();
+
+      // Wait for the issue itself, so this asserts on a rendered page rather
+      // than on the loading skeleton.
+      await screen.findByText("Implement authentication");
+
+      expect(screen.queryByText("Subscribe")).toBeNull();
+      expect(screen.queryByText("Unsubscribe")).toBeNull();
+    });
+
+    it("renders Subscribe once the query says the user is not subscribed", async () => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+      renderIssueDetail();
+
+      expect(await screen.findByText("Subscribe")).toBeTruthy();
+    });
+  });
+
+  // Same cold-cache hazard as the Subscribe button, but worse to act on. Every
+  // checkbox here is drawn from the subscribers list, so an unresolved query
+  // renders everyone — including people who ARE subscribed — as unchecked.
+  // Clicking one of those rows sends an explicit subscribe, which rewrites the
+  // target's reason to 'manual' and clears any opt-out scope
+  // (server/pkg/db/queries/subscriber.sql), discarding a delegated
+  // subscription or a deliberate opt-out (MUL-5714).
+  describe("subscriber picker before the query resolves", () => {
+    // The picker sits next to the subscribe control in the Activity header.
+    // Anchor on the heading, not on that control — the whole point of these
+    // cases is that it is not rendered yet.
+    async function openSubscriberPicker() {
+      const heading = await screen.findByText("Activity");
+      const header = heading.parentElement?.parentElement;
+      const trigger = header?.querySelector('[data-slot="popover-trigger"]');
+      if (!trigger) throw new Error("subscriber picker trigger not found");
+      fireEvent.click(trigger);
+      return waitFor(() => {
+        const content = document.querySelector('[data-slot="popover-content"]');
+        if (!content) throw new Error("picker did not open");
+        return content;
+      });
+    }
+
+    function memberRow(content: Element) {
+      const row = Array.from(
+        content.querySelectorAll('[data-slot="command-item"]'),
+      ).find((el) => el.textContent?.includes("Test User"));
+      if (!row) throw new Error("member row not found");
+      return row;
+    }
+
+    it("disables the rows while subscribers are loading", async () => {
+      mockApiObj.listIssueSubscribers.mockReturnValue(new Promise(() => {}));
+      renderIssueDetail();
+
+      const row = memberRow(await openSubscriberPicker());
+
+      expect(row.getAttribute("data-disabled")).toBe("true");
+
+      fireEvent.click(row);
+
+      expect(mockApiObj.subscribeToIssue).not.toHaveBeenCalled();
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
+    });
+
+    it("disables the rows when the subscribers query failed", async () => {
+      mockApiObj.listIssueSubscribers.mockRejectedValue(new Error("boom"));
+      renderIssueDetail();
+
+      const row = memberRow(await openSubscriberPicker());
+
+      expect(row.getAttribute("data-disabled")).toBe("true");
+
+      fireEvent.click(row);
+
+      expect(mockApiObj.subscribeToIssue).not.toHaveBeenCalled();
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
+    });
+
+    it("enables the rows once the query has a real answer", async () => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+      renderIssueDetail();
+      // Wait for the resolved state before opening, so this is not just the
+      // pending case passing by accident.
+      await screen.findByText("Subscribe");
+
+      const row = memberRow(await openSubscriberPicker());
+
+      expect(row.getAttribute("data-disabled")).not.toBe("true");
+
+      fireEvent.click(row);
+
+      await waitFor(() =>
+        expect(mockApiObj.subscribeToIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
     });
   });
 });

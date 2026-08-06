@@ -76,10 +76,11 @@ func countSkillLabelAssignments(t *testing.T, ctx context.Context, skillID strin
 	return n
 }
 
-// TestDeleteAgentRuntime_CleansAgentLabelAssignments: the strict runtime delete
-// hard-deletes the archived agent bound to the runtime; its label link must go
-// with it in the same transaction.
-func TestDeleteAgentRuntime_CleansAgentLabelAssignments(t *testing.T) {
+// TestDeleteAgentRuntime_KeepsUnboundAgentLabelAssignments: since MUL-5559 the
+// strict runtime delete unbinds the archived agent instead of hard-deleting it,
+// so its label links must SURVIVE. Clearing them by runtime — which is what the
+// old sweep did — would strip labels off an agent that is still there.
+func TestDeleteAgentRuntime_KeepsUnboundAgentLabelAssignments(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -97,18 +98,17 @@ func TestDeleteAgentRuntime_CleansAgentLabelAssignments(t *testing.T) {
 		t.Fatalf("DeleteAgentRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if agentExists(t, agentID) {
-		t.Fatalf("archived agent should have been hard-deleted with its runtime")
+	if !agentExists(t, agentID) {
+		t.Fatalf("archived agent must survive its runtime as an unbound agent")
 	}
-	if n := countAgentLabelAssignments(t, ctx, agentID); n != 0 {
-		t.Fatalf("agent_to_label rows survived runtime delete: %d (orphaned once resource labels ship)", n)
+	if n := countAgentLabelAssignments(t, ctx, agentID); n != 1 {
+		t.Fatalf("agent_to_label rows for a surviving agent: got %d, want 1", n)
 	}
 }
 
-// TestArchiveAgentsAndDeleteRuntime_CleansAgentLabelAssignments: the cascade
-// endpoint archives the active agent and hard-deletes it with the runtime, so
-// the label link must be swept too.
-func TestArchiveAgentsAndDeleteRuntime_CleansAgentLabelAssignments(t *testing.T) {
+// TestUnbindAgentsAndDeleteRuntime_KeepsAgentLabelAssignments: the confirmed
+// endpoint unbinds the active agent, so its labels stay attached too.
+func TestUnbindAgentsAndDeleteRuntime_KeepsAgentLabelAssignments(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -119,23 +119,22 @@ func TestArchiveAgentsAndDeleteRuntime_CleansAgentLabelAssignments(t *testing.T)
 	seedAgentLabel(t, ctx, testWorkspaceID, agentID)
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{agentID}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("ArchiveAgentsAndDeleteRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("UnbindAgentsAndDeleteRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if n := countAgentLabelAssignments(t, ctx, agentID); n != 0 {
-		t.Fatalf("agent_to_label rows survived cascade runtime delete: %d", n)
+	if n := countAgentLabelAssignments(t, ctx, agentID); n != 1 {
+		t.Fatalf("agent_to_label rows for a surviving agent: got %d, want 1", n)
 	}
 }
 
-// TestDeleteRuntimeProfile_CleansAgentLabelAssignments: deleting a runtime
-// profile hard-deletes the archived agents on each of its runtimes; their label
-// links must go with them.
-func TestDeleteRuntimeProfile_CleansAgentLabelAssignments(t *testing.T) {
+// TestDeleteRuntimeProfile_KeepsAgentLabelAssignments: the profile teardown runs
+// the same unbind, so the archived agent and its label links survive there too.
+func TestDeleteRuntimeProfile_KeepsAgentLabelAssignments(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -157,11 +156,46 @@ func TestDeleteRuntimeProfile_CleansAgentLabelAssignments(t *testing.T) {
 		t.Fatalf("DeleteRuntimeProfile: expected 204, got %d: %s", w.Code, w.Body.String())
 	}
 
+	if !agentExists(t, agentID) {
+		t.Fatalf("archived agent must survive its runtime profile as an unbound agent")
+	}
+	if n := countAgentLabelAssignments(t, ctx, agentID); n != 1 {
+		t.Fatalf("agent_to_label rows for a surviving agent: got %d, want 1", n)
+	}
+}
+
+// TestDeleteAgentRuntime_CleansSystemAgentLabelAssignments: system agents are
+// still hard-deleted with their runtime (they are invisible infrastructure with
+// no rebind affordance), so their label links must still be swept — otherwise
+// they become the invisible orphan rows the sweep exists to prevent.
+func TestDeleteAgentRuntime_CleansSystemAgentLabelAssignments(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := seedIsolatedRuntime(t, "Label Cleanup System Runtime")
+	agentID := seedAgentOnRuntime(t, runtimeID, "Label Cleanup System Agent", false)
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent SET kind = 'system', system_key = 'label_cleanup_probe' WHERE id = $1`,
+		agentID); err != nil {
+		t.Fatalf("make agent a system agent: %v", err)
+	}
+	seedAgentLabel(t, ctx, testWorkspaceID, agentID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DeleteAgentRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
 	if agentExists(t, agentID) {
-		t.Fatalf("archived agent should have been hard-deleted with its runtime profile")
+		t.Fatalf("system agent should still be hard-deleted with its runtime")
 	}
 	if n := countAgentLabelAssignments(t, ctx, agentID); n != 0 {
-		t.Fatalf("agent_to_label rows survived runtime-profile delete: %d", n)
+		t.Fatalf("agent_to_label rows survived system-agent delete: %d", n)
 	}
 }
 

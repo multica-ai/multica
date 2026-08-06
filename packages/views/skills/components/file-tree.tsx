@@ -10,6 +10,7 @@ import {
   FolderOpen,
   MoreHorizontal,
   Pencil,
+  PencilLine,
   Trash2,
 } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
@@ -23,11 +24,16 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
 /**
- * What a row may offer beyond selection. Absent for read-only viewers and for
- * the reserved primary file, so the tree never shows an action it would then
- * have to refuse.
+ * What a row may offer beyond selection. Absent for read-only viewers, so the
+ * tree never shows an action it would then have to refuse.
+ *
+ * `reservedPath` narrows the menu rather than removing it: the primary file
+ * cannot be renamed or deleted, but it is edited like any other row, so it
+ * keeps the edit entry and loses the other two.
  */
 export interface FileTreeActions {
+  /** Open the row's file in the editor, caret already in it. */
+  onEdit: (path: string) => void;
   /** Returns an error message, or "" when the path is free to use. */
   validatePath: (path: string, existing: string[]) => string;
   onRename: (from: string, to: string) => void;
@@ -159,7 +165,11 @@ function TreeNodeItem({
   }
 
   const Icon = getFileIcon(node.name);
-  const editable = !!actions && node.path !== actions.reservedPath;
+  // Two different questions: whether the row has a menu at all (any row does,
+  // once the viewer may edit), and whether that menu may offer rename/delete
+  // (the reserved primary file may not).
+  const hasMenu = !!actions;
+  const canModify = !!actions && node.path !== actions.reservedPath;
 
   if (renaming && actions) {
     return (
@@ -185,7 +195,7 @@ function TreeNodeItem({
       // anchors to that button rather than the cursor, which keeps one menu
       // per row instead of a context-menu root beside a dropdown root.
       onContextMenu={
-        editable
+        hasMenu
           ? (event) => {
               event.preventDefault();
               menuButtonRef.current?.click();
@@ -209,7 +219,7 @@ function TreeNodeItem({
         <Icon className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">{node.name}</span>
       </button>
-      {editable && (
+      {actions && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -222,7 +232,17 @@ function TreeNodeItem({
                 // Hidden until the row is hovered or something inside it holds
                 // focus, so a rail of ten files is not a rail of ten buttons.
                 // after:-inset-1 widens the hit area past the 20px glyph.
-                className="mr-1 shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+                //
+                // `relative` is load-bearing, not decoration: it makes THIS
+                // button the containing block for that ::after. Without it the
+                // pseudo-element resolves against the row (the nearest
+                // positioned ancestor), so the invisible hit area covered the
+                // whole row and — being absolutely positioned, hence painted
+                // above the in-flow name button — swallowed every click on the
+                // file name. Selecting a supporting file opened this menu
+                // instead (MUL-5654). opacity-0 does not opt out of hit
+                // testing, so the row was unclickable even before hover.
+                className="relative mr-1 shrink-0 rounded p-0.5 text-faint-foreground opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
                 onClick={(event) => event.stopPropagation()}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
@@ -230,17 +250,25 @@ function TreeNodeItem({
             }
           />
           <DropdownMenuContent align="end" className="w-36">
-            <DropdownMenuItem onClick={() => setRenaming(true)}>
-              <Pencil />
-              {t(($) => $.file_tree.actions.rename)}
+            <DropdownMenuItem onClick={() => actions.onEdit(node.path)}>
+              <PencilLine />
+              {t(($) => $.file_tree.actions.edit)}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => actions.onDelete(node.path)}
-            >
-              <Trash2 />
-              {t(($) => $.file_tree.actions.delete)}
-            </DropdownMenuItem>
+            {canModify && (
+              <>
+                <DropdownMenuItem onClick={() => setRenaming(true)}>
+                  <Pencil />
+                  {t(($) => $.file_tree.actions.rename)}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => actions.onDelete(node.path)}
+                >
+                  <Trash2 />
+                  {t(($) => $.file_tree.actions.delete)}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -335,7 +363,7 @@ export function FileTree({
   if (tree.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-        <FolderOpen className="h-5 w-5 text-muted-foreground/40" />
+        <FolderOpen className="h-5 w-5 text-faint-foreground" />
         <p className="mt-2 text-caption">{t(($) => $.file_tree.no_files)}</p>
       </div>
     );

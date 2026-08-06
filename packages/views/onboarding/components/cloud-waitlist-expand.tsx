@@ -59,9 +59,9 @@ export function CloudWaitlistExpand({
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border bg-muted/40 p-5">
-      <p className="text-label leading-[1.55] text-foreground/85">
+      <p className="text-label leading-[1.55] text-foreground">
         {t(($) => $.cloud_waitlist.intro_main)}{" "}
-        <span className="text-foreground/70">
+        <span className="text-muted-foreground">
           {t(($) => $.cloud_waitlist.intro_warning)}
         </span>
       </p>
@@ -96,7 +96,7 @@ export function CloudWaitlistExpand({
           className="text-caption font-medium text-muted-foreground"
         >
           {t(($) => $.cloud_waitlist.reason_label)}
-          <span className="ml-2 font-normal text-muted-foreground/70">
+          <span className="ml-2 font-normal text-muted-foreground">
             {t(($) => $.cloud_waitlist.optional)}
           </span>
         </Label>

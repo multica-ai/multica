@@ -556,11 +556,11 @@ func (q *Queries) DeleteChannelChatSessionBindingsByInstallation(ctx context.Con
 	return err
 }
 
-const deleteChannelInstallationsByArchivedRuntimeAgents = `-- name: DeleteChannelInstallationsByArchivedRuntimeAgents :exec
+const deleteChannelInstallationsBySystemRuntimeAgents = `-- name: DeleteChannelInstallationsBySystemRuntimeAgents :exec
 WITH doomed AS (
     SELECT id FROM channel_installation
     WHERE agent_id IN (
-        SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+        SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
     )
 ),
 cleared_chat_sessions AS (
@@ -591,15 +591,18 @@ DELETE FROM channel_installation WHERE id IN (SELECT id FROM doomed)
 `
 
 // Application-layer replacement for the (deliberately absent, MUL-3515 §4)
-// workspace/agent ON DELETE CASCADE: on runtime teardown, before the archived
+// workspace/agent ON DELETE CASCADE: on runtime teardown, before the system
 // agents are hard-deleted, remove every channel installation they own — plus all
 // of each installation's dependent rows — so no orphaned installation keeps
 // occupying its bot's (channel_type, app_id) routing slot after its agent is gone
-// (#4810). MUST run in the same tx as, and BEFORE, DeleteArchivedAgentsByRuntime.
-// Mirrors the agent hard-delete predicate (runtime_id, archived_at IS NOT NULL)
-// exactly.
-func (q *Queries) DeleteChannelInstallationsByArchivedRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteChannelInstallationsByArchivedRuntimeAgents, runtimeID)
+// (#4810). MUST run in the same tx as, and BEFORE, DeleteSystemAgentsByRuntime.
+// Mirrors the agent hard-delete predicate (runtime_id, kind = 'system') exactly.
+//
+// Scoped to kind = 'system' since MUL-5559: a user agent now survives its
+// runtime's deletion as an unbound agent, so tearing down its installations
+// here would take a working bot away from an agent that is still there.
+func (q *Queries) DeleteChannelInstallationsBySystemRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelInstallationsBySystemRuntimeAgents, runtimeID)
 	return err
 }
 
@@ -781,6 +784,35 @@ type GetChannelChatSessionBindingBySessionParams struct {
 // chat_session is never treated as a Feishu reply target.
 func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, arg GetChannelChatSessionBindingBySessionParams) (ChannelChatSessionBinding, error) {
 	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySession, arg.ChatSessionID, arg.ChannelType)
+	var i ChannelChatSessionBinding
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChatType,
+		&i.LastMessageID,
+		&i.LastThreadID,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getChannelChatSessionBindingBySessionAny = `-- name: GetChannelChatSessionBindingBySessionAny :one
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
+WHERE chat_session_id = $1
+`
+
+// Channel-agnostic reverse lookup: which channel, if any, is behind this
+// chat_session? UNIQUE (chat_session_id) guarantees at most one row, so a
+// caller that only needs to READ the binding never has to name the channel it
+// is hoping for — and therefore cannot go blind on a channel added later.
+// The channel_type-scoped variant above stays for the outbound senders, which
+// are per-platform by construction and must not deliver into a foreign one.
+func (q *Queries) GetChannelChatSessionBindingBySessionAny(ctx context.Context, chatSessionID pgtype.UUID) (ChannelChatSessionBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySessionAny, chatSessionID)
 	var i ChannelChatSessionBinding
 	err := row.Scan(
 		&i.ID,

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -262,10 +261,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var finalError string
 		usage := make(map[string]TokenUsage)
 
-		scanner := bufio.NewScanner(stdout)
 		// Pi message_update events can be large (they embed the full message
-		// partial on each delta), so give the scanner generous headroom.
-		scanner.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
+		// partial on each delta); the shared stream bound covers that.
+		scanner := newAgentStreamScanner(stdout)
 		var textBuffer strings.Builder
 
 		for scanner.Scan() {

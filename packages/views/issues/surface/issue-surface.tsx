@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ListTodo, Plus } from "lucide-react";
+import { FilterX, ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import {
+  useViewStore,
+  ViewStoreProvider,
+} from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
 import { issueScopeKey } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
@@ -30,12 +33,6 @@ import {
 export interface IssueSurfaceRenderContext {
   controller: IssueSurfaceController;
   issues: Issue[];
-  /** The rows the agents-working filter would leave on screen, with this
-   *  surface's `clientFilter` applied — headers feed it to the working chip
-   *  so the chip's count is the post-click row count (MUL-4884). Undefined
-   *  means the set is UNKNOWN (not materialized by the server-backed Table);
-   *  the chip renders an indeterminate state instead of a number. */
-  workingIssues: Issue[] | undefined;
 }
 
 interface IssueSurfaceComponentProps extends IssueSurfaceProps {
@@ -158,20 +155,9 @@ function IssueSurfaceContent({
         : controller.swimlaneIssues,
     [clientFilter, controller.swimlaneIssues],
   );
-  // Same clientFilter the rendered rows go through, so the chip's promise
-  // survives on surfaces that narrow the list locally (e.g. a search box).
-  // An UNKNOWN scope (undefined) passes through untouched — there is nothing
-  // to filter and the chip must see it as unknown.
-  const workingIssues = useMemo(
-    () =>
-      clientFilter && controller.workingScopeIssues
-        ? controller.workingScopeIssues.filter((issue) => clientFilter(issue))
-        : controller.workingScopeIssues,
-    [clientFilter, controller.workingScopeIssues],
-  );
   const renderContext = useMemo(
-    () => ({ controller, issues, workingIssues }),
-    [controller, issues, workingIssues],
+    () => ({ controller, issues }),
+    [controller, issues],
   );
   const openCreateIssue = useCallback(
     (defaults?: IssueCreateDefaults) => {
@@ -211,6 +197,7 @@ function IssueSurfaceContent({
         ) : (
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
+            workingAgents={controller.workingAgents}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
@@ -227,11 +214,19 @@ function IssueSurfaceContent({
             <IssueSurfaceSkeleton mode={controller.viewMode} />
           )
         ) : controller.isEmpty || shouldShowClientEmpty ? (
-          renderEmpty ? (
+          // A filtered-empty surface is NOT an empty surface. Claiming "no
+          // issues here yet" and offering to create one is wrong when the rows
+          // exist and a filter is hiding them — and it is the state the
+          // agents-working chip drops you into most often (MUL-5525). This
+          // branch precedes `renderEmpty` on purpose: every surface's own empty
+          // copy describes the unfiltered case.
+          controller.hasActiveFilters ? (
+            <FilteredEmptyState />
+          ) : renderEmpty ? (
             renderEmpty(renderContext)
           ) : (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <ListTodo className="h-10 w-10 text-muted-foreground/40" />
+              <ListTodo className="h-10 w-10 text-faint-foreground" />
               <p className="text-body">{t(($) => $.detail.empty_issues_title)}</p>
               <p className="text-caption">{t(($) => $.detail.empty_issues_hint)}</p>
               <Button
@@ -324,6 +319,28 @@ function IssueSurfaceContent({
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
+  );
+}
+
+/**
+ * Shown when the surface has rows but the active filters match none of them.
+ * Shared by every surface, so no caller has to remember that its own empty
+ * copy only describes the unfiltered case. The action clears exactly the
+ * filters this state tests for, so it always restores content.
+ */
+function FilteredEmptyState() {
+  const { t } = useT("issues");
+  const clearFilters = useViewStore((s) => s.clearFilters);
+
+  return (
+    <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
+      <FilterX className="h-10 w-10 text-faint-foreground" />
+      <p className="text-body">{t(($) => $.filtered_empty.title)}</p>
+      <p className="text-caption">{t(($) => $.filtered_empty.hint)}</p>
+      <Button variant="outline" size="sm" className="mt-1" onClick={clearFilters}>
+        {t(($) => $.filtered_empty.clear_button)}
+      </Button>
+    </div>
   );
 }
 

@@ -116,11 +116,11 @@ ${HELPER_DESCRIPTION.zh}
 ${HELPER_INSTRUCTIONS.zh}
 \`\`\`
 
-## 4. 保存 → 分派 issue
+## 4. 保存 → 分派任务
 
 点 **Create**。新 agent 会出现在 workspace 的 agent 列表里。
 
-接着创建一个 issue（或把已有 issue 重新分派）→ 把 assignee 设成 Multica Helper → 状态切到 **todo**。运行时会在几秒内接走任务并开始工作。在 issue 的任务面板里看进度。
+接着创建一个任务（或把已有任务重新分派）→ 把 assignee 设成 Multica Helper → 状态切到 **todo**。运行时会在几秒内接走任务并开始工作。在任务的 task 面板里看进度。
 
 ## 接下来去哪
 
@@ -158,11 +158,11 @@ ${HELPER_DESCRIPTION.ko}
 ${HELPER_INSTRUCTIONS.ko}
 \`\`\`
 
-## 4. 저장 → issue 배정
+## 4. 저장 → 태스크 배정
 
 **Create**를 누릅니다. 새 agent가 워크스페이스 agent 목록에 표시됩니다.
 
-이제 issue를 만들거나 기존 issue를 다시 배정한 뒤 assignee를 Multica Helper로 설정하고 status를 **todo**로 바꾸세요. runtime이 몇 초 안에 작업을 가져가 실행을 시작합니다. 진행 상황은 issue의 task panel에서 볼 수 있습니다.
+이제 태스크를 만들거나 기존 태스크를 다시 배정한 뒤 assignee를 Multica Helper로 설정하고 status를 **todo**로 바꾸세요. runtime이 몇 초 안에 작업을 가져가 실행을 시작합니다. 진행 상황은 태스크의 task panel에서 볼 수 있습니다.
 
 ## 다음에 볼 곳
 
@@ -200,11 +200,11 @@ ${HELPER_DESCRIPTION.ja}
 ${HELPER_INSTRUCTIONS.ja}
 \`\`\`
 
-## 4. 保存 → issue を割り当てる
+## 4. 保存 → タスクを割り当てる
 
 **Create** を押します。新しい agent がワークスペースの agent 一覧に表示されます。
 
-次に issue を作る(または既存の issue を割り当て直す)→ assignee を Multica Helper にする → status を **todo** にします。runtime が数秒以内にタスクを受け取って作業を始めます。進捗は issue の task panel で確認できます。
+次にタスクを作る(または既存のタスクを割り当て直す)→ assignee を Multica Helper にする → status を **todo** にします。runtime が数秒以内にタスクを受け取って作業を始めます。進捗はタスクの task panel で確認できます。
 
 ## 次に見る場所
 

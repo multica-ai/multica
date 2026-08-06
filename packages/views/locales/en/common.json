@@ -4,7 +4,11 @@
     "remove": "Remove",
     "select_image": "Please choose an image file.",
     "updated": "Avatar updated",
-    "failed": "Failed to upload avatar"
+    "failed": "Failed to upload avatar",
+    "upload_image": "Upload image",
+    "emoji_label": "Emoji",
+    "more_emojis": "More emojis…",
+    "emoji_loading": "Loading…"
   },
   "avatar_crop": {
     "title": "Edit avatar",

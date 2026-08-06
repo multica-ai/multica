@@ -334,13 +334,16 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	_, _, replyThread := slackSessionRouting(p.Message)
+	commandText := p.Message.CommandText
+	if commandText == "" {
+		commandText = p.Message.Text
+	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:      p.SessionID,
-		Sender:         p.Sender,
-		InstallationID: p.InstallationID,
-		Body:           p.Message.Text,
-		// Slack text is not enriched, so the command source is the body itself.
-		CommandText:         p.Message.Text,
+		SessionID:           p.SessionID,
+		Sender:              p.Sender,
+		InstallationID:      p.InstallationID,
+		Body:                p.Message.Text,
+		CommandText:         commandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            replyThread,
 		ClaimToken:          p.ClaimToken,

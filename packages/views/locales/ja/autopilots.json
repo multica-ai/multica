@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "まだオートパイロットがありません",
-      "hint": "AI エージェントの繰り返しタスクをスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
+      "hint": "AI エージェントの繰り返し作業をスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
     },
     "scope_all": "すべて",
     "no_matches": "該当する自動化はありません",
@@ -27,10 +27,11 @@
   "status": {
     "active": "アクティブ",
     "paused": "一時停止中",
+    "paused_runtime_required": "一時停止中 — 担当エージェントのランタイムが必要です",
     "archived": "アーカイブ済み"
   },
   "execution_mode": {
-    "create_issue": "イシューを作成",
+    "create_issue": "タスクを作成",
     "run_only": "実行のみ"
   },
   "relative_date": {
@@ -69,6 +70,8 @@
     "not_found": "オートパイロットが見つかりません",
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
+    "paused_runtime_required": "担当エージェントのランタイムが失われたため一時停止しました。ランタイムを設定してから再度有効にしてください。",
+    "bind_runtime": "ランタイムを設定",
     "edit": "編集",
     "run_now": "今すぐ実行",
     "running": "実行中...",
@@ -76,6 +79,7 @@
     "toast_trigger_failed": "オートパイロットを実行できませんでした",
     "run_blocked_invocation_not_allowed": "実行されませんでした — このオートパイロットのエージェントを使用する権限がありません",
     "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
+    "run_blocked_agent_runtime_required": "実行されませんでした — エージェントにランタイムがありません。実行するにはバインドしてください",
     "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
     "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
     "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
@@ -122,7 +126,7 @@
     "owner_note": "作成者とワークスペース管理者は常にアクセスできます。"
   },
   "run_status": {
-    "issue_created": "イシュー作成済み",
+    "issue_created": "タスク作成済み",
     "running": "実行中",
     "completed": "完了",
     "failed": "失敗",
@@ -135,7 +139,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "イシューをリンク済み",
+    "issue_linked": "タスクをリンク済み",
     "view_log": "実行ログを表示",
     "skipped_group": {
       "label": "スキップ済み",
@@ -253,7 +257,7 @@
     "sr_edit": "オートパイロットを編集",
     "header_create": "新規オートパイロット",
     "header_edit": "オートパイロットを編集",
-    "subtitle": "繰り返し実行される AI タスク",
+    "subtitle": "繰り返し実行される AI 作業",
     "expand": "展開",
     "collapse": "折りたたむ",
     "close": "閉じる",
@@ -282,7 +286,7 @@
     "section_project": "プロジェクト",
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",
-    "subscribers_hint": "このオートパイロットが作成するすべてのイシューを自動で購読します",
+    "subscribers_hint": "このオートパイロットが作成するすべてのタスクを自動で購読します",
     "subscribers_empty": "購読者はいません。チームメイトを追加すると、毎回通知されます",
     "subscribers_add": "購読者を追加",
     "subscribers_search_placeholder": "名前でメンバーを検索…",
@@ -306,14 +310,18 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
     "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
+    "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
+    "schedule_add": "スケジュールを追加",
+    "error_title_required": "オートパイロット名を入力してください。",
+    "error_assignee_required": "実行するエージェントまたはスクワッドを選択してください。",
     "output_modes": {
       "create_issue": {
-        "label": "イシューを作成",
-        "description": "実行のたびに追跡可能なイシューを作成します"
+        "label": "タスクを作成",
+        "description": "実行のたびに追跡可能なタスクを作成します"
       },
       "run_only": {
         "label": "実行のみ",
-        "description": "イシューを作成せず、静かに実行します"
+        "description": "タスクを作成せず、静かに実行します"
       }
     }
   },
@@ -408,7 +416,9 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "agents_group": "エージェント",
-    "squads_group": "スクワッド"
+    "squads_group": "スクワッド",
+    "agent_runtime_required": "このエージェントを選択する前にランタイムをバインドしてください",
+    "squad_runtime_required": "選択する前に、このスクワッドのリーダーにランタイムをバインドしてください"
   },
   "timezone_picker": {
     "search_placeholder": "タイムゾーンを検索..."

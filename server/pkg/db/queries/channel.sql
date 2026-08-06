@@ -197,19 +197,22 @@ detached_audit AS (
 )
 SELECT id FROM dead;
 
--- name: DeleteChannelInstallationsByArchivedRuntimeAgents :exec
+-- name: DeleteChannelInstallationsBySystemRuntimeAgents :exec
 -- Application-layer replacement for the (deliberately absent, MUL-3515 §4)
--- workspace/agent ON DELETE CASCADE: on runtime teardown, before the archived
+-- workspace/agent ON DELETE CASCADE: on runtime teardown, before the system
 -- agents are hard-deleted, remove every channel installation they own — plus all
 -- of each installation's dependent rows — so no orphaned installation keeps
 -- occupying its bot's (channel_type, app_id) routing slot after its agent is gone
--- (#4810). MUST run in the same tx as, and BEFORE, DeleteArchivedAgentsByRuntime.
--- Mirrors the agent hard-delete predicate (runtime_id, archived_at IS NOT NULL)
--- exactly.
+-- (#4810). MUST run in the same tx as, and BEFORE, DeleteSystemAgentsByRuntime.
+-- Mirrors the agent hard-delete predicate (runtime_id, kind = 'system') exactly.
+--
+-- Scoped to kind = 'system' since MUL-5559: a user agent now survives its
+-- runtime's deletion as an unbound agent, so tearing down its installations
+-- here would take a working bot away from an agent that is still there.
 WITH doomed AS (
     SELECT id FROM channel_installation
     WHERE agent_id IN (
-        SELECT id FROM agent WHERE runtime_id = sqlc.arg('runtime_id') AND archived_at IS NOT NULL
+        SELECT id FROM agent WHERE runtime_id = sqlc.arg('runtime_id') AND kind = 'system'
     )
 ),
 cleared_chat_sessions AS (
@@ -442,6 +445,16 @@ WHERE installation_id = $1 AND channel_chat_id = $2;
 SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = sqlc.arg('chat_session_id')
   AND channel_type = sqlc.arg('channel_type');
+
+-- name: GetChannelChatSessionBindingBySessionAny :one
+-- Channel-agnostic reverse lookup: which channel, if any, is behind this
+-- chat_session? UNIQUE (chat_session_id) guarantees at most one row, so a
+-- caller that only needs to READ the binding never has to name the channel it
+-- is hoping for — and therefore cannot go blind on a channel added later.
+-- The channel_type-scoped variant above stays for the outbound senders, which
+-- are per-platform by construction and must not deliver into a foreign one.
+SELECT * FROM channel_chat_session_binding
+WHERE chat_session_id = $1;
 
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
 -- Records the most recent inbound trigger message + thread so the decoupled

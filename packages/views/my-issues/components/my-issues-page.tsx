@@ -37,6 +37,7 @@ export function MyIssuesPage() {
           renderHeader={({ controller }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
+              workingAgents={controller.workingAgents}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
@@ -47,7 +48,7 @@ export function MyIssuesPage() {
           )}
           renderEmpty={() => (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <ListTodo className="h-10 w-10 text-muted-foreground/40" />
+              <ListTodo className="h-10 w-10 text-faint-foreground" />
               <p className="text-body">{t(($) => $.page.empty_title)}</p>
               <p className="text-caption">{t(($) => $.page.empty_description)}</p>
             </div>

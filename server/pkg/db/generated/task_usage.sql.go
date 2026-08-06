@@ -139,8 +139,10 @@ type ListDashboardAgentRunTimeRow struct {
 // token cost window (which is anchored on tu.created_at, ~= completion time).
 //
 // No date bucketing, so no @tz — but @since is the viewer's local
-// start-of-day-(N) so the "last N days" window lines up with the per-agent
-// cost card; passed straight through without re-truncation.
+// start-of-day for the EXACT N-day window (parseExactSinceParamInTZ), so the
+// "last N days" window lines up with the per-agent cost card and the daily
+// charts the client trims to the same span; passed straight through without
+// re-truncation.
 func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboardAgentRunTimeParams) ([]ListDashboardAgentRunTimeRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardAgentRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {

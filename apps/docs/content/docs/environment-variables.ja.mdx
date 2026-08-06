@@ -181,7 +181,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | 空 | OpenAI 互換の API key |
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 互換の endpoint |
-| `MULTICA_LLM_DEFAULT_MODEL` | 組み込みデフォルト | リクエストがモデルを指定しない場合に使用 |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | リクエストがモデルを指定しない場合に使用 |
 
 API key と base URL の両方が空の場合、サーバーサイド LLM 生成は無効になり、呼び出し側はローカルのフォールバックロジックを使います。
 

@@ -354,12 +354,12 @@ beforeEach(() => {
 
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   const onSend = props.onSend ?? vi.fn();
-  render(
+  const view = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatInput onSend={onSend} uploadEnabled agentName="Multica" {...props} />
     </I18nProvider>,
   );
-  return { onSend };
+  return { onSend, ...view };
 }
 
 function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
@@ -591,6 +591,91 @@ describe("ChatInput project context", () => {
     expect(projectControl).not.toBeDisabled();
     fireEvent.click(projectControl);
     expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("swaps Stop for Queue Send when the running composer has content", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const onStop = vi.fn();
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "follow-up" },
+    });
+
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    const queueButton = screen.getByRole("button", { name: "Queue message" });
+    expect(queueButton).not.toBeDisabled();
+    fireEvent.click(queueButton);
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Stop available while queued content is uploading", async () => {
+    let resolveUpload!: (value: UploadResult) => void;
+    mockApiUploadFile.mockImplementation(
+      () => new Promise<UploadResult>((resolve) => (resolveUpload = resolve)),
+    );
+    const onStop = vi.fn();
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onStop });
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "follow-up with attachment" },
+    });
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+
+    await act(async () => {
+      dropHandlers.onDrop?.([
+        new File(["x"], "slow.png", { type: "image/png" }),
+      ]);
+      await Promise.resolve();
+    });
+
+    const stopButton = await screen.findByRole("button", { name: "Stop" });
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    fireEvent.click(stopButton);
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveUpload(
+        makeUpload({
+          id: "att-slow-stop",
+          link: "/api/attachments/att-slow-stop/download",
+          filename: "slow.png",
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("button", { name: "Queue message" })).not.toBeDisabled();
+  });
+
+  it("shows only Stop while an older server is running", () => {
+    renderInput({ isRunning: true, onStop: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the composer chrome independent of the queue", () => {
+    // The follow-up queue tucks its bottom edge under the composer, which
+    // therefore ALWAYS paints on top (static z-10) — but the queue's presence
+    // must never restyle the input surface itself.
+    const { container } = renderInput();
+    const surface = container.querySelector('[data-slot="chat-input-surface"]');
+
+    expect(container.firstElementChild).toHaveClass("relative", "z-10");
+    expect(surface).toHaveClass("rounded-lg");
+    expect(surface).not.toHaveClass(
+      "rounded-4xl",
+      "shadow-[var(--menu-shadow)]",
+    );
   });
 
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {

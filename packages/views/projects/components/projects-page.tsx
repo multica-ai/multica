@@ -188,7 +188,7 @@ function columnTrackVars(
 
 function ProgressRing({ project }: { project: Project }) {
   if (project.issue_count === 0) {
-    return <span className="text-caption text-muted-foreground/40">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const pct = Math.round((project.done_count / project.issue_count) * 100);
   return (
@@ -698,7 +698,7 @@ function ProjectBatchToolbar({
 
   return (
     <>
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
           <span className="text-body font-medium">
             {t(($) => $.page.selected, { count: rows.length })}

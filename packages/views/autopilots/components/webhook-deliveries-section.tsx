@@ -487,7 +487,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
       <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-caption font-mono leading-relaxed whitespace-pre-wrap break-all">
         {display}
         {isTruncated && (
-          <span className="block pt-2 text-muted-foreground/70">
+          <span className="block pt-2 text-muted-foreground">
             {t(($) => $.webhook_payload.truncated_marker)}
           </span>
         )}

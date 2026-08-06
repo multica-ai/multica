@@ -458,7 +458,7 @@ function AdditionalMembersPicker({
     <div>
       <Label className="text-caption text-muted-foreground">
         {t(($) => $.create_squad.members_label)}{" "}
-        <span className="text-muted-foreground/60">
+        <span className="text-muted-foreground">
           {t(($) => $.create_squad.members_optional)}
         </span>
       </Label>

@@ -927,6 +927,7 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_CURSOR_PATH",
 		"MULTICA_COPILOT_PATH",
 		"MULTICA_KIMI_PATH",
+		"MULTICA_REASONIX_PATH",
 		"MULTICA_KIRO_PATH",
 		"MULTICA_GROK_PATH",
 	} {

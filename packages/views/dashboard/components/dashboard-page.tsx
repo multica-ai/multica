@@ -284,6 +284,13 @@ export function DashboardPage() {
   const dailyQuery = useQuery(
     dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
+  // The three per-agent rollups carry no date, so `dailyCutoffIso` below
+  // cannot trim them — their window is closed server-side at exactly `days`
+  // calendar buckets (parseExactSinceParamInTZ). Anything derived from these
+  // three is therefore already on the same span as the trimmed daily series;
+  // do NOT put a per-agent rollup back on the N+1 cutoff, or the leaderboard
+  // and the Run time / Tasks KPIs silently widen by one day while the chart
+  // and the Cost / Tokens KPIs beside them do not (MUL-5551).
   const byAgentQuery = useQuery(
     dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
   );
@@ -822,7 +829,7 @@ function TrendBlock({
       <div className="min-h-[240px]">
         {isEmpty ? (
           <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">
-            <BarChart3 className="h-5 w-5 text-muted-foreground/50" />
+            <BarChart3 className="h-5 w-5 text-faint-foreground" />
             <p className="text-caption text-muted-foreground">
               {metric === "errors"
                 ? t(($) => $.errors.no_data)
@@ -1533,7 +1540,7 @@ function DashboardEmpty() {
   const { t } = useT("usage");
   return (
     <div className="flex flex-col items-center rounded-lg border border-dashed py-12 text-center">
-      <BarChart3 className="h-6 w-6 text-muted-foreground/40" />
+      <BarChart3 className="h-6 w-6 text-faint-foreground" />
       <p className="mt-3 text-body font-medium">{t(($) => $.empty.title)}</p>
       <p className="mt-1 max-w-md text-caption text-muted-foreground">
         {t(($) => $.empty.body)}

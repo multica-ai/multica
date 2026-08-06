@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -2192,11 +2193,11 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !agent.RuntimeID.Valid {
-		writeAgentUnavailable(w, "agent has no runtime")
+		writeAgentUnavailable(w, "agent has no runtime", ReasonAgentRuntimeRequired)
 		return
 	}
 	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
-		writeAgentUnavailable(w, "agent's runtime is offline")
+		writeAgentUnavailable(w, "agent's runtime is offline", ReasonRuntimeOffline)
 		return
 	}
 
@@ -2280,12 +2281,17 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 // writeAgentUnavailable returns 422 with a stable error code so the modal
 // can show a "switch agent" hint without parsing the human-readable reason.
-func writeAgentUnavailable(w http.ResponseWriter, reason string) {
+// writeAgentUnavailable refuses a trigger whose agent cannot run. `code` stays
+// agent_unavailable for installed clients; reason_code carries the machine-
+// readable distinction they need to phrase the fix — agent_runtime_required
+// ("bind a runtime") is not runtime_offline ("reconnect the machine").
+func writeAgentUnavailable(w http.ResponseWriter, reason string, reasonCode dispatch.ReasonCode) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	json.NewEncoder(w).Encode(map[string]any{
-		"code":   "agent_unavailable",
-		"reason": reason,
+		"code":        "agent_unavailable",
+		"reason":      reason,
+		"reason_code": reasonCode,
 	})
 }
 

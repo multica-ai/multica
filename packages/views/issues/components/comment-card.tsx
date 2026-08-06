@@ -38,6 +38,7 @@ import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
+import { selectStandaloneAttachments } from "@multica/core/attachments/image-sequence";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
@@ -182,28 +183,11 @@ export function AttachmentList({
   onRemove?: (attachmentId: string) => void;
 }) {
   if (!attachments?.length) return null;
-  // Skip attachments whose URL (stable or legacy) is already referenced
-  // in the markdown content, and duplicates of the same file (same
-  // name/type/size) that are referenced. The dual-shape match is the
-  // MUL-3130 follow-through — a comment can mix the new
-  // /api/attachments/<id>/download URL and the legacy att.url shape.
-  const standalone = content
-    ? attachments.filter((a) => {
-        if (contentReferencesAttachment(content, a)) return false;
-        // Dedup: if another attachment with the same file identity is already
-        // inline in the content, this is a duplicate upload — skip it.
-        const hasSiblingInContent = attachments.some(
-          (other) =>
-            other.id !== a.id &&
-            other.filename === a.filename &&
-            other.content_type === a.content_type &&
-            other.size_bytes === a.size_bytes &&
-            contentReferencesAttachment(content, other),
-        );
-        if (hasSiblingInContent) return false;
-        return true;
-      })
-    : attachments;
+  // Skip attachments whose URL (stable or legacy) is already referenced in the
+  // markdown content, and duplicates of the same file that are referenced.
+  // Shared with the image-sequence builder (MUL-5752) so the cards rendered
+  // here and the images the viewer pages through can't disagree.
+  const standalone = selectStandaloneAttachments(content, attachments);
   if (!standalone.length) return null;
 
   return (
@@ -725,7 +709,7 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="pl-12 pr-4 pt-1 text-body leading-relaxed text-foreground/85">
+          <div className="pl-12 pr-4 pt-1 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
@@ -752,6 +736,13 @@ function CommentRow({
 // ---------------------------------------------------------------------------
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
+
+// A quick action posts an ordinary comment and is rendered as one (MUL-5465).
+// It briefly had a collapsed one-line header that expanded to reveal the
+// prompt, on the theory that repeated runs would bury the discussion. In
+// practice the prompts are short, the header restated what the body already
+// said, and the disclosure only added a click between the reader and the text.
+// Provenance still lives on `quick_action_id`; it is data, not decoration.
 
 function CommentCardImpl({
   issueId,
@@ -1034,7 +1025,7 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-body leading-relaxed text-foreground/85">
+                <div className="pl-10 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />

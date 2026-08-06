@@ -13,12 +13,18 @@ import {
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
+import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
+import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
+import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
+import { useQuery } from "@tanstack/react-query";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
+import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
@@ -27,6 +33,7 @@ import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
+import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -54,6 +61,15 @@ export function ChatPage() {
   const isMobile = useIsMobile();
 
   const c = useChatController({ isActive: true });
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
+  );
+  // Drop a stuck pending marker (dead daemon / failed supplement) so the pill
+  // spinner stops and a later refresh starts clean (MUL-5149).
+  useQuickActionsPendingTimeout(c.activeSessionId ?? null, quickActionsPending);
+  // Toast when an accepted refresh later fails in the daemon (async half).
+  useQuickActionsFailureToast(c.activeSessionId ?? null);
+  const regenerateQuickActions = useRegenerateChatQuickActions();
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -225,6 +241,7 @@ export function ChatPage() {
   // No compose-box agent selector — the agent is fixed when the chat starts.
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
+  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -246,6 +263,23 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
+          onQuickAction={(action) => c.handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!c.pendingTaskId ||
+            c.isSessionArchived ||
+            c.isAgentArchived ||
+            !c.isAgentRuntimeBound ||
+            c.noAgent
+          }
+          onRegenerateQuickActions={(message) =>
+            c.activeSessionId
+              ? regenerateQuickActions.mutateAsync({
+                  sessionId: c.activeSessionId,
+                  messageId: message.id,
+                })
+              : undefined
+          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState agent={c.activeAgent} />
@@ -255,9 +289,23 @@ export function ChatPage() {
         <NoAgentBanner />
       ) : c.isAgentArchived ? (
         <ArchivedAgentBanner agentName={c.activeAgent?.name} />
+      ) : !c.isAgentRuntimeBound && c.activeAgent ? (
+        <RuntimeRequiredBanner
+          agentId={c.activeAgent.id}
+          agentName={c.activeAgent.name}
+        />
       ) : (
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
+
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={c.pendingTask?.status}
+        onSendNow={c.handleSendQueuedTaskNow}
+        onEdit={c.handleEditQueuedTask}
+        onRemove={c.handleRemoveQueuedTask}
+        onClear={c.handleClearQueuedTasks}
+      />
 
       <ChatInput
         onSend={c.handleSend}
@@ -266,9 +314,13 @@ export function ChatPage() {
         uploadEnabled={c.uploadEnabled}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
-        disabled={c.isSessionArchived || c.isAgentArchived}
+        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
+        disabled={
+          c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
+        }
         noAgent={c.noAgent}
         agentArchived={c.isAgentArchived}
+        agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
         projects={c.projects}
         projectId={c.activeProjectId}
@@ -342,7 +394,7 @@ export function ChatPage() {
             conversation
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-              <MessageSquare className="h-10 w-10 text-muted-foreground/30" />
+              <MessageSquare className="h-10 w-10 text-faint-foreground" />
               <p className="text-body">{t(($) => $.page.select_prompt)}</p>
             </div>
           )}

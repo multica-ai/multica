@@ -3,14 +3,31 @@
  * ============================================================================= */
 
 /* The chat launcher overlays the dashboard's bottom-right corner on every
- * workspace page, so a page-level bar that runs to that corner has to stop
- * short of it. Named rather than spelled out at each site: the intent is
- * legible, every site that yields to the launcher is findable by this class,
- * and the distance stays derived from the launcher's own geometry. Centred
- * floating toolbars and dialog footers do not need it — nothing else reaches
- * that corner. */
+ * workspace page, so anything that runs to that corner has to stop short of
+ * it. Named rather than spelled out at each site: the intent is legible, every
+ * site that yields to the launcher is findable by these classes, and the
+ * distance stays derived from the launcher's own geometry.
+ *
+ * Which one to reach for depends on how the site approaches the corner:
+ *  - a full-width bar arrives from the left     -> pe-chat-launcher
+ *  - scrollable content ends there              -> pb-chat-launcher
+ *  - a centred overlay grows into it            -> above-chat-launcher
+ *
+ * A centred toolbar (`left-1/2 -translate-x-1/2`) cannot use the padding
+ * variants: inline padding widens it symmetrically, so it reaches just as far
+ * right as before. It has to clear the launcher vertically instead. On a wide
+ * viewport a centred toolbar never gets near the corner, so its clearance is
+ * usually applied under a `max-md:` variant. */
 @utility pe-chat-launcher {
   padding-inline-end: var(--chat-launcher-clearance);
+}
+
+@utility pb-chat-launcher {
+  padding-bottom: var(--chat-launcher-clearance);
+}
+
+@utility above-chat-launcher {
+  bottom: calc(var(--chat-launcher-clearance) + var(--chat-launcher-inset));
 }
 
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */

@@ -493,6 +493,35 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listAgentBuilderSessions", () => {
+    it("falls back to no drafts when the response is malformed", async () => {
+      stubFetchJson({ unexpected: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      expect(await client.listAgentBuilderSessions()).toEqual([]);
+    });
+
+    // Losing the whole row would lose the conversation. A draft missing its
+    // runtime degrades to "let the user pick one" instead.
+    it("keeps a draft whose runtime the server omitted", async () => {
+      stubFetchJson({
+        sessions: [{ session_id: "s-1", title: "Create an agent" }],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const sessions = await client.listAgentBuilderSessions();
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.session_id).toBe("s-1");
+      expect(sessions[0]?.runtime_id).toBe("");
+    });
+
+    // An installed desktop build can outrun a self-hosted backend. Without this
+    // the Agents page would error instead of simply offering no drafts.
+    it("treats a 404 from an older backend as no drafts", async () => {
+      stubFetchJson({ error: "not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+      expect(await client.listAgentBuilderSessions()).toEqual([]);
+    });
+  });
+
   describe("createAgentFromTemplate", () => {
     it("falls back to an empty agent when the response is malformed", async () => {
       // The agent was created server-side even though the client can't

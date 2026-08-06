@@ -38,6 +38,7 @@
     --color-brand-foreground: var(--brand-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
+    --color-faint-foreground: var(--faint-foreground);
     --color-muted-foreground: var(--muted-foreground);
     --color-muted: var(--muted);
     --color-secondary-foreground: var(--secondary-foreground);
@@ -167,6 +168,18 @@
        worst case at 4.88:1. Raise it and the nav labels fail again. Hue and
        chroma are unchanged so the neutral ramp keeps its cast. */
     --muted-foreground: oklch(0.505 0.016 285.938);
+    /* The quiet step below muted, for marks that are not text: disclosure
+       chevrons, separator glyphs, the em dash standing in for an empty cell,
+       the large icon in an empty state. It exists because the alternative
+       people reached for was alpha — 152 call sites of
+       text-muted-foreground/30..80 — and alpha on light surfaces lands
+       between 1.5:1 and 3.8:1, which fails even the 3:1 floor for non-text.
+       0.606 is the lightest step that still clears 3:1 (WCAG 1.4.11) on every
+       surface, worst case --sidebar-accent at 3.19:1. Deliberately NOT valid
+       for text: text has one floor, --muted-foreground, and there is no room
+       for a third readable step (AA caps a lighter text tone at L 0.523 here,
+       0.018 away from muted — a difference no one can see). */
+    --faint-foreground: oklch(0.606 0.016 285.938);
     --accent: oklch(0.967 0.001 286.375);
     --accent-foreground: oklch(0.21 0.006 285.885);
     --destructive: oklch(0.577 0.245 27.325);
@@ -234,6 +247,11 @@
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.274 0.006 286.033);
     --muted-foreground: oklch(0.705 0.015 286.067);
+    /* Same role as light mode, mirrored: fainter means darker here. 0.60 is
+       the darkest step still clearing 3:1 on every dark surface, worst case
+       --surface-selected at 3.45:1. The step away from muted (0.105 L) matches
+       light mode's, so a chevron reads equally quiet in both themes. */
+    --faint-foreground: oklch(0.60 0.015 286.067);
     --accent: oklch(0.274 0.006 286.033);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);

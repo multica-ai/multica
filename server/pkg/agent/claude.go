@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // claudeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
@@ -173,6 +174,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var finalResultText string
 		sawResult := false
 		resultIsError := false
+		terminalReasonError := ""
 		var sessionID string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
@@ -213,8 +215,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			_ = stdout.Close()
 		}()
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -254,6 +255,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
+				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
@@ -302,11 +304,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			exitErr,
 			sessionID,
 			streamTerminalState{
-				lastAssistantText: lastAssistantText,
-				finalResultText:   finalResultText,
-				sawResult:         sawResult,
-				resultIsError:     resultIsError,
-				scanErr:           scanErr,
+				lastAssistantText:   lastAssistantText,
+				finalResultText:     finalResultText,
+				sawResult:           sawResult,
+				resultIsError:       resultIsError,
+				scanErr:             scanErr,
+				terminalReasonError: terminalReasonError,
 			},
 			completionGuardError,
 		)
@@ -534,12 +537,16 @@ type claudeSDKMessage struct {
 	Model     string          `json:"model,omitempty"`
 
 	// result fields
-	ResultText string                            `json:"result,omitempty"`
-	IsError    bool                              `json:"is_error,omitempty"`
-	DurationMs float64                           `json:"duration_ms,omitempty"`
-	NumTurns   int                               `json:"num_turns,omitempty"`
-	Usage      *claudeUsage                      `json:"usage,omitempty"`
-	ModelUsage map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
+	ResultText string `json:"result,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
+	// TerminalReason is Claude Code's structured statement of why the turn
+	// ended. Read separately from IsError because the CLI computes the two
+	// independently — see claudeTerminalReasonFailure.
+	TerminalReason string                            `json:"terminal_reason,omitempty"`
+	DurationMs     float64                           `json:"duration_ms,omitempty"`
+	NumTurns       int                               `json:"num_turns,omitempty"`
+	Usage          *claudeUsage                      `json:"usage,omitempty"`
+	ModelUsage     map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
@@ -573,6 +580,38 @@ type claudeResultModelUsage struct {
 	OutputTokens             int64 `json:"outputTokens"`
 	CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
 	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+}
+
+// claudeTerminalReasonFailure turns Claude Code's structured terminal_reason
+// into an error string when the reason means the turn did not actually produce
+// an answer, and returns "" when it says nothing of the sort.
+//
+// Only prompt_too_long is recognised, and deliberately so. Every other terminal
+// reason the CLI can report either already arrives with is_error set (api_error,
+// model_error, error_max_turns …) or is a legitimate completion, so widening
+// this would second-guess a contract that works — while prompt_too_long is the
+// one case observed reaching the platform as a clean success (GH #6402). The
+// CLI computes is_error from whether the last message it rendered was an API
+// error and terminal_reason from why the turn stopped; when compaction fails
+// and the run ends on a message that is not itself flagged, the two disagree
+// and only terminal_reason is telling the truth.
+//
+// The returned text quotes the enum token so taskfailure.Classify lands it in
+// agent_error.context_overflow without depending on the CLI's prose, which
+// varies by release and is empty in some shapes. That reason is on the resume
+// blacklist (GetLastTaskSession / GetLastChatTaskSession), so the saturated
+// session is retired and the next task on the issue starts fresh — the
+// automated form of the transcript-archiving workaround #6402 reported.
+func claudeTerminalReasonFailure(terminalReason, resultText string) string {
+	if strings.TrimSpace(terminalReason) != taskfailure.TerminalReasonPromptTooLong {
+		return ""
+	}
+	msg := "claude ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
+		": the session's context window is exhausted and compaction could not recover it"
+	if detail := strings.TrimSpace(resultText); detail != "" {
+		msg += " (" + detail + ")"
+	}
+	return msg
 }
 
 func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]TokenUsage {

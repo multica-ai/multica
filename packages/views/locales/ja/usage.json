@@ -11,8 +11,8 @@
     "tokens_label": "トークン · {{days}}日",
     "tokens_hint": "入力 {{input}} · 出力 {{output}}",
     "run_time_label": "実行時間 · {{days}}日",
-    "run_time_hint": "{{tasks}} 件のタスク全体",
-    "tasks_label": "タスク · {{days}}日",
+    "run_time_hint": "{{tasks}} 件の作業全体",
+    "tasks_label": "作業 · {{days}}日",
     "tasks_hint": "{{failed}} 件失敗"
   },
   "dim": {
@@ -24,12 +24,12 @@
     "title_cost": "日別コスト",
     "title_tokens": "日別トークン",
     "title_time": "日別実行時間",
-    "title_tasks": "日別タスク",
+    "title_tasks": "日別作業",
     "title_errors": "日別エラー",
     "metric_cost": "コスト",
     "metric_tokens": "トークン",
     "metric_time": "時間",
-    "metric_tasks": "タスク",
+    "metric_tasks": "作業",
     "metric_errors": "エラー",
     "no_data": "この期間に使用量はありません。",
     "metric_label": "指標"
@@ -38,7 +38,7 @@
     "title_cost": "週別コスト",
     "title_tokens": "週別トークン",
     "title_time": "週別実行時間",
-    "title_tasks": "週別タスク",
+    "title_tasks": "週別作業",
     "title_errors": "週別エラー",
     "partial_label": "{{range}} (一部 · 7日中 {{covered}}日)"
   },
@@ -85,14 +85,14 @@
     "header_tokens": "トークン",
     "header_cost": "コスト",
     "header_time": "時間",
-    "header_tasks": "タスク",
+    "header_tasks": "作業",
     "show_all": "すべて表示",
     "show_less": "上位 {{count}} 件のみ",
     "no_data": "この期間にエージェントの活動はありません。"
   },
   "empty": {
     "title": "まだ使用量はありません",
-    "body": "ここでエージェントがタスクを実行し始めると、トークンの消費と実行時間がこの画面に表示されます。"
+    "body": "ここでエージェントが作業を実行し始めると、トークンの消費と実行時間がこの画面に表示されます。"
   },
   "duration": {
     "less_than_minute": "1分未満"

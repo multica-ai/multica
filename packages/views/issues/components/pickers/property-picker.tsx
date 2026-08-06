@@ -17,6 +17,15 @@ import { useT } from "../../../i18n";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
+/**
+ * Marks the fixed empty-value row ("No project", "Unassigned", …). The row is
+ * pinned first for the eye, but it is not a search result — typing a query and
+ * pressing Enter must commit the first real match, never clear the field.
+ */
+const EMPTY_ITEM_ATTR = "data-picker-empty";
+
+const isEmptyItem = (el: HTMLButtonElement | undefined) =>
+  el?.hasAttribute(EMPTY_ITEM_ATTR) === true;
 
 /**
  * Default class of the picker popover trigger. Shared with the deferred
@@ -93,6 +102,21 @@ export function PropertyPicker({
     );
   }, []);
 
+  // Typing re-highlights the first *real* match. The index can't be computed
+  // in the input's onChange handler — the filtered list hasn't rendered yet —
+  // so the keystroke raises a flag and this effect resolves it against the
+  // fresh DOM. Guarding on the flag keeps arrow keys free to walk back onto
+  // the empty row: only a keystroke moves the highlight off it.
+  const pendingSearchHighlight = useRef(false);
+  useEffect(() => {
+    if (!pendingSearchHighlight.current) return;
+    pendingSearchHighlight.current = false;
+    const items = getItems();
+    // -1 when the query matches nothing (only the empty row is left), which
+    // leaves Enter inert instead of clearing the field.
+    setHighlightedIndex(items.findIndex((item) => !isEmptyItem(item)));
+  }, [children, getItems]);
+
   // Apply/remove highlight class via DOM when index changes
   useEffect(() => {
     const items = getItems();
@@ -145,8 +169,10 @@ export function PropertyPicker({
         e.preventDefault();
         if (highlightedIndex >= 0 && highlightedIndex < items.length) {
           items[highlightedIndex]?.click();
-        } else if (items.length === 1) {
-          // Auto-select when only one result
+        } else if (items.length === 1 && !isEmptyItem(items[0])) {
+          // Auto-select when only one result. The empty row is excluded: a
+          // query with no matches leaves it as the sole item, and Enter there
+          // would clear the field the user was trying to search in.
           items[0]?.click();
         }
       }
@@ -181,7 +207,7 @@ export function PropertyPicker({
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                setHighlightedIndex(0);
+                pendingSearchHighlight.current = true;
                 onSearchChange?.(e.target.value);
               }}
               onKeyDown={handleKeyDown}
@@ -209,12 +235,23 @@ export function PickerItem({
   onClick,
   hoverClassName,
   tooltip,
+  emptyValue = false,
   children,
 }: {
   selected: boolean;
   disabled?: boolean;
   onClick: () => void;
   hoverClassName?: string;
+  /**
+   * Marks this row as the field's fixed empty value ("No project",
+   * "Unassigned", "No stage"). Such a row is pinned first for the eye but
+   * excluded from search-result keyboard defaults, so typing a query and
+   * pressing Enter commits the first real match instead of clearing the
+   * field. Arrow keys can still reach it. Set this on rows that write
+   * null/undefined — not on a real enum member that happens to read as
+   * "none" (issue priority), which is a value like any other.
+   */
+  emptyValue?: boolean;
   /** Design-system tooltip for the row — useful when truncated content needs
    *  the full string, or when the row carries metadata that doesn't fit on
    *  a single line. Wrapped in a real Tooltip component (200ms delay,
@@ -226,6 +263,7 @@ export function PickerItem({
     <button
       type="button"
       data-picker-item
+      {...(emptyValue ? { [EMPTY_ITEM_ATTR]: "" } : {})}
       disabled={disabled}
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-body ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}

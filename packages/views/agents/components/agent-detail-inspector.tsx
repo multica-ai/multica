@@ -26,7 +26,6 @@ import {
 import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
-import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import {
   buildModelChangeUpdate,
@@ -174,6 +173,7 @@ export function AgentDetailInspector({
                 size={56}
                 disabled={!canEdit}
                 onUploaded={(url) => update({ avatar_url: url })}
+                onEmojiSelected={(value) => update({ avatar_url: value })}
               />
             </div>
           </SettingsRow>
@@ -226,18 +226,6 @@ export function AgentDetailInspector({
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
               />
             </div>
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.labels_label)}
-            description={t(($) => $.inspector.labels_hint)}
-            size="text"
-            align="start"
-          >
-            <ResourceLabelPicker
-              resourceType="agent"
-              resourceId={agent.id}
-              canEdit={canEdit}
-            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>

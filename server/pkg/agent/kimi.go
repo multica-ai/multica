@@ -1,12 +1,12 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,6 +17,11 @@ import (
 var kimiBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
 }
+
+// kimiReaderDrainGrace bounds how long the turn waits for trailing ACP
+// notifications after the session/prompt response. A var, not a const, so
+// tests can shorten it. Mirrors qoderReaderDrainGrace / traecliReaderDrainGrace.
+var kimiReaderDrainGrace = 2 * time.Second
 
 // kimiBackend implements Backend by spawning `kimi acp` and communicating
 // via the ACP (Agent Client Protocol) JSON-RPC 2.0 over stdin/stdout.
@@ -114,8 +119,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// agent_message_chunk type; the tracker keeps only the post-tool-call block
 	// for Result.Output while retaining the full text for error detection.
 	var deliverable acpDeliverableTracker
+	// streamingCurrentTurn gates all session updates so that history replay
+	// (Kimi sends full prior-turn transcripts on session/resume, and may
+	// flush queued chunks before our session/prompt response streams) is
+	// dropped instead of duplicating the previous answer into output. We
+	// flip it to true only after session/prompt is sent.
+	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	// Reuse the hermesClient ACP transport — Kimi speaks the same protocol.
 	c := &hermesClient{
@@ -123,7 +135,19 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		acceptNotification: func(string) bool {
+			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
+		},
 		onMessage: func(msg Message) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			// hermesClient.handleToolCallStart has already mapped
 			// the raw ACP title via hermesToolNameFromTitle — which
 			// covers lowercase hermes-style titles ("read:", "patch
@@ -139,6 +163,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			select {
 			case promptDone <- result:
 			default:
@@ -150,8 +177,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -306,6 +332,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		// 5. Send the prompt and wait for PromptResponse.
+		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
@@ -350,6 +377,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kimiReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)
@@ -362,6 +390,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Ensure the stderr copier has drained before consulting the
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
+		streamingCurrentTurn.Store(false)
 
 		finalOutput, providerErrorOutput := deliverable.result()
 

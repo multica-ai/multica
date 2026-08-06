@@ -279,10 +279,22 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantName: "Kimi Review",
 		},
 		{
+			provider: "reasonix",
+			root:     filepath.Join(".reasonix", "skills"),
+			wantPath: "~/.reasonix/skills/review-helper",
+			wantName: "Reasonix Review",
+		},
+		{
 			provider: "qoder",
 			root:     filepath.Join(".qoder", "skills"),
 			wantPath: "~/.qoder/skills/review-helper",
 			wantName: "Qoder Review",
+		},
+		{
+			provider: "qoderclicn",
+			root:     filepath.Join(".qoder-cn", "skills"),
+			wantPath: "~/.qoder-cn/skills/review-helper",
+			wantName: "Qoder CN Review",
 		},
 		{
 			provider: "qwen",
@@ -307,6 +319,9 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			}
 			if tc.provider == "qwen" {
 				t.Setenv("QWEN_HOME", "")
+			}
+			if tc.provider == "reasonix" {
+				t.Setenv("REASONIX_HOME", "")
 			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{

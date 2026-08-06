@@ -244,7 +244,7 @@ function NameCell({ row }: { row: SkillRow }) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Lock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+              <Lock className="h-3 w-3 shrink-0 text-faint-foreground" />
             }
           />
           <TooltipContent>{t(($) => $.table.lock_tooltip)}</TooltipContent>
@@ -259,7 +259,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
   if (agents.length === 0) {
     return (
       <ListGridCell>
-        <span className="text-caption text-muted-foreground/70">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.table.unused)}
         </span>
       </ListGridCell>

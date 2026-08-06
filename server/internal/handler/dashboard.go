@@ -25,6 +25,15 @@ import (
 // ?project_id=<uuid> to scope the rollup to a single project. With no
 // project_id the data spans the whole workspace.
 //
+// Cutoff convention: the three date-bucketed series use parseSinceParamInTZ
+// (N+1 calendar days, the surplus day trimmed client-side with `-(days-1)`),
+// and the three per-AGENT rollups use parseExactSinceParamInTZ (exactly N).
+// Rows without a date cannot be trimmed client-side, so serving them off the
+// N+1 cutoff makes the leaderboard and the Run time / Tasks KPIs cover one
+// calendar day more than the chart and the Cost / Tokens KPIs beside them —
+// at 1D that let a single agent's row read higher than the workspace total
+// (MUL-5551). Keep the two halves of each pair on matching windows.
+//
 // Cost is computed client-side from a per-model pricing table — the model
 // dimension is intentionally preserved on the wire (same convention as the
 // per-runtime usage endpoints).
@@ -265,9 +274,15 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// "By agent" has no date grouping in the SQL — tz only determines
-	// the cutoff boundary, not the bucket axis.
+	// the cutoff boundary, not the bucket axis. Which is exactly why the
+	// cutoff must be the EXACT N-day one: the client trims the surplus day
+	// `parseSinceParamInTZ` hands back with `-(days-1)`, and a response
+	// carrying no date cannot be trimmed that way. On the N+1 cutoff this
+	// leaderboard covered one calendar day more than the Tokens/Cost KPI and
+	// the chart directly above it, so at 1D a single agent's row could read
+	// higher than the workspace total (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
@@ -377,9 +392,14 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Cutoff in the viewer's tz so the "last N days" window matches the
-	// per-agent cost card (GetDashboardUsageByAgent).
+	// per-agent cost card (GetDashboardUsageByAgent). Exact N-day cutoff for
+	// the same reason: these rows carry no date, so the client cannot trim
+	// the extra calendar day `parseSinceParamInTZ` returns. This response
+	// feeds BOTH the leaderboard's Time/Tasks columns and the Run time /
+	// Tasks KPI tiles, so the N+1 cutoff put those two tiles on a wider
+	// window than the Cost / Tokens tiles beside them (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),

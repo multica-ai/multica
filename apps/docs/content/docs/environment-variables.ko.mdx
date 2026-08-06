@@ -181,7 +181,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | 비어 있음 | OpenAI 호환 API key |
 | `MULTICA_LLM_BASE_URL` | 비어 있음 | OpenAI 호환 endpoint |
-| `MULTICA_LLM_DEFAULT_MODEL` | 내장 기본값 | 요청에 모델이 지정되지 않았을 때 사용 |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 요청에 모델이 지정되지 않았을 때 사용 |
 
 API key와 base URL이 모두 비어 있으면 서버 측 LLM 생성이 꺼지고 호출자가 로컬 fallback 로직을 사용합니다.
 

@@ -43,6 +43,9 @@ const REASON_LABEL: Record<string, string> = {
   "agent_error.runtime_missing_executable": "Runner CLI not installed",
   "agent_error.unknown": "Agent execution error",
 
+  // Provider-specific operational reasons, outside the canonical taxonomy.
+  codex_resume_oversized: "Session too large to resume",
+
   // Pre-MUL-1949 coarse values, still present on historical rows.
   agent_error: "Agent execution error",
   codex_semantic_inactivity: "Codex semantic inactivity timeout",

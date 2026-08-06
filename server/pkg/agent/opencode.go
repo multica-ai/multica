@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -305,8 +304,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	stepHasContinuationTool := false // current step has a local tool result OpenCode must feed back
 	awaitingContinuation := false    // the last step_finish still required another step
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(r)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

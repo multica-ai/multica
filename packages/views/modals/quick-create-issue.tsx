@@ -60,6 +60,7 @@ import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import {
   PropertyPicker,
   PickerItem,
@@ -142,7 +143,10 @@ export function AgentCreatePanel({
   const visibleAgents = useMemo(
     () =>
       agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+        (a) =>
+          !a.archived_at &&
+          isAgentRuntimeBound(a) &&
+          canAssignAgent(a, userId, memberRole),
       ),
     [agents, userId, memberRole],
   );
@@ -545,7 +549,7 @@ export function AgentCreatePanel({
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-caption">
             <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
+            <ChevronRight className="size-3 text-faint-foreground" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
           {/* Native `title` instead of Base UI Tooltip — Tooltip opens on

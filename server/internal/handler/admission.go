@@ -56,6 +56,7 @@ const (
 	ReasonInvocationNotAllowed  = dispatch.ReasonInvocationNotAllowed
 	ReasonTargetUnavailable     = dispatch.ReasonTargetUnavailable
 	ReasonRuntimeOffline        = dispatch.ReasonRuntimeOffline
+	ReasonAgentRuntimeRequired  = dispatch.ReasonAgentRuntimeRequired
 	ReasonAttributionBlocked    = dispatch.ReasonAttributionBlocked
 	ReasonAlreadyActive         = dispatch.ReasonAlreadyActive
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
@@ -115,6 +116,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the target is unavailable"
 	case ReasonRuntimeOffline:
 		return "the target's runtime is offline"
+	case ReasonAgentRuntimeRequired:
+		return "the target needs a runtime"
 	case ReasonAttributionBlocked:
 		return "the run couldn't be attributed to a responsible member"
 	case ReasonAlreadyActive:

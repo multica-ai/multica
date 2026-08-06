@@ -243,6 +243,7 @@ type workspaceState struct {
 
 type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
+	BarePath(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
 	WithRepoLock(barePath string, fn func() error) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
@@ -1913,6 +1914,45 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	return false
 }
 
+// repoBarePathIsLive reports whether some watched workspace still claims the
+// repo cached at barePath, so the GC can refuse to evict it.
+//
+// Answering per-path rather than materializing the whole set lets the GC ask
+// again immediately before it deletes. A snapshot taken once per cycle goes
+// stale while the caller runs git and filesystem work on each repo in turn,
+// which is exactly the window in which a workspace can re-attach one.
+//
+// It mirrors workspaceRepoAllowed by unioning both sources: allowedRepoURLs
+// (workspace-level bindings) and taskRepoURLs (project repos the server
+// surfaced through a task claim, which never appear in GetWorkspaceRepos).
+// Missing the second set would make the GC evict repos that tasks actively
+// check out.
+//
+// Read from in-memory state on purpose. The alternative — asking the server
+// for each workspace's repo list during GC — would make a transient API
+// failure look like "nothing is attached", and this set is what protects
+// caches from deletion.
+func (d *Daemon) repoBarePathIsLive(barePath string) bool {
+	if d.repoCache == nil || barePath == "" {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for workspaceID, ws := range d.workspaces {
+		for url := range ws.allowedRepoURLs {
+			if d.repoCache.BarePath(workspaceID, url) == barePath {
+				return true
+			}
+		}
+		for url := range ws.taskRepoURLs {
+			if d.repoCache.BarePath(workspaceID, url) == barePath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -2922,13 +2962,18 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
 	entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
 
-	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
+	catalog, err := agent.ListModels(ctx, rt.Provider, entry.Path)
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
 		return
+	}
+	models := catalog.Models
+	if catalog.Fallback {
+		d.logger.Warn("model discovery fell back to a static catalog; reporting it as non-authoritative",
+			"runtime_id", rt.ID, "provider", rt.Provider, "path", entry.Path, "count", len(models))
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
@@ -2993,6 +3038,10 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+		// Additive field: the models are still worth rendering, but the server
+		// must not persist them as this runtime's real catalog (MUL-5549).
+		// Older servers ignore it and keep the previous behaviour.
+		"fallback": catalog.Fallback,
 	})
 }
 
@@ -4245,9 +4294,11 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // name when simple title-casing would read awkwardly. Providers not listed
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
 var runtimeDisplayNameOverrides = map[string]string{
-	"traecli": "Trae",
-	"grok":    "Grok",
-	"qwen":    "Qwen Code",
+	"traecli":    "Trae",
+	"grok":       "Grok",
+	"qoderclicn": "Qoder CN",
+	"qwen":       "Qwen Code",
+	"qwenpaw":    "QwenPaw",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -4281,7 +4332,7 @@ func providerDisplayName(name string) string {
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli":
+	case "openclaw", "kimi", "traecli", "qwenpaw":
 		return true
 	default:
 		return false
@@ -5163,18 +5214,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
-	// Redirect HOME/XDG/npm_config_cache to the per-task writable home under the
-	// Linux codex workspace-write sandbox, where the real home is read-only. This
-	// lets tools that write to `~` (npm, Prisma, …) succeed without per-tool env
-	// tweaks. Set before custom_env below so a user override still wins for the
-	// non-blocklisted XDG keys; HOME itself stays blocklisted. Empty TaskHome
-	// (macOS/Windows, non-sandboxed providers) leaves the real HOME untouched
-	// (MUL-4856).
-	if env.TaskHome != "" {
-		for k, v := range execenv.TaskHomeEnv(env.TaskHome) {
-			agentEnv[k] = v
-		}
-	}
+	// HOME and the XDG base dirs are deliberately not touched here: tasks run
+	// with the daemon user's real home on every platform, so host CLI config
+	// and credentials resolve inside a task exactly as they do in the daemon
+	// user's shell (MUL-5578).
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see
 	// layerCustomEnvAndHermesHome.)
@@ -5211,6 +5254,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "reasonix" {
+		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare reasonix state home: %w", err)
+		}
+		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
+	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
@@ -5341,18 +5391,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
 		ResumeSessionID:           task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
-		// resume gates (a dropped resume is surfaced via the brief instead). If it
-		// survived to here, the backend must disclose to the user when the live
+		// resume gates (a dropped resume is surfaced via the prompt instead). If it
+		// survived to here, the backend must disclose the loss when the live
 		// resume still fails — even across the fresh-session retry below, which
 		// clears ResumeSessionID but not this (MUL-4424).
-		ResumeExpected:     task.PriorSessionID != "",
-		ExtraArgs:          extraArgs,
-		CustomArgs:         customArgs,
-		McpConfig:          mcpConfig,
-		ThinkingLevel:      thinkingLevel,
-		ServiceTier:        serviceTier,
-		OpenclawMode:       openclawMode,
-		ClaudeSettingsPath: env.ClaudeSettingsPath,
+		//
+		// What that disclosure SAYS, and whether it addresses the user at all,
+		// depends on whether this surface's conversation is still readable, which
+		// only the daemon knows — hence handing the backend finished text rather
+		// than a flag. Empty when the prompt already carries the notice, so a turn
+		// can never pay for it twice (MUL-5722).
+		ResumeExpected:         task.PriorSessionID != "",
+		ResumeContinuityNotice: backendResumeContinuityNotice(task),
+		ExtraArgs:              extraArgs,
+		CustomArgs:             customArgs,
+		McpConfig:              mcpConfig,
+		ThinkingLevel:          thinkingLevel,
+		ServiceTier:            serviceTier,
+		OpenclawMode:           openclawMode,
+		ClaudeSettingsPath:     env.ClaudeSettingsPath,
+		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -5378,6 +5436,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// context and bloats every turn.
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
+	}
+
+	// A quick-actions refresh task from a server that predates server-side
+	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
+	// it with, and it must NOT fall through to the ordinary chat path below:
+	// the task carries no user message, so the agent would answer a prompt
+	// nobody wrote and that server would persist the result as a real assistant
+	// reply. Complete it empty instead — the same shape the retired pass
+	// produced on this task, which that server writes no row for. The user's
+	// refresh spinner resolves via the client's own timeout.
+	if task.RegenerateQuickActionsFor != "" {
+		taskLog.Warn("refusing quick-actions refresh task from an older server; complete the daemon upgrade by updating the server",
+			"target_task", shortID(task.RegenerateQuickActionsFor),
+		)
+		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
 
 	taskLog.Debug("invoking backend",
@@ -5427,13 +5500,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		//     like Kiro load themselves).
 		//   - clearing task.PriorSessionID rebuilds the prompt on the cold
 		//     comment-reading path instead of the warm resumed one.
-		// The current user prompt is preserved and prefixed with an explicit
-		// context-loss disclosure so the agent re-reads the issue/thread
-		// instead of assuming continuity it no longer has.
+		//   - PriorSessionResumeUnavailable=true makes BuildPrompt append the
+		//     continuity notice for this surface, so the agent knows not to
+		//     assume continuity it no longer has. This is now the ONLY injector
+		//     on the retry path: the backend's own copy is suppressed below,
+		//     because before MUL-5722 both fired and the turn carried the same
+		//     paragraph twice.
 		// task and taskCtx are local (runTask takes task by value), so these
 		// mutations only affect the retry.
 		execOpts.ResumeSessionID = ""
 		task.PriorSessionID = ""
+		task.PriorSessionResumeUnavailable = true
+		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
 		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
@@ -5443,7 +5521,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := freshSessionRetryPrompt(BuildPrompt(task, provider))
+		freshPrompt := BuildPrompt(task, provider)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
@@ -5554,14 +5632,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				FailureReason: reason,
 			}, nil
 		}
-		return TaskResult{
+		taskResult = TaskResult{
 			Status:    "completed",
 			Comment:   result.Output,
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
-		}, nil
+		}
+		return taskResult, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
 		// in sync even when the agent times out after building a session.
@@ -5638,8 +5717,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// conversation permanently blocks the issue: every follow-up
 		// task resumes the same poisoned session and hits the same 400.
 		failureReason, _ := classifyPoisonedError(errMsg)
+		if failureReason == "" {
+			// A resume we could not read back leaves the same oversized thread
+			// recorded as this issue's resume pointer. Reaching here means the
+			// in-turn fresh-session retry did not save the run (it is gated on
+			// tools == 0, and can fail on its own), so classify it to keep the
+			// NEXT task off that thread rather than replaying the overflow
+			// forever (MUL-5722).
+			failureReason, _ = classifyResumeUnsafeTransport(provider, errMsg)
+			if failureReason != "" && retiredSessionID == "" && task.PriorSessionID != "" {
+				// Name the thread explicitly. The failure happens before the
+				// turn starts, so the backend has no session id to report and
+				// this row lands with session_id NULL — which means neither
+				// the reason above nor any error-text filter on this row can
+				// identify WHICH session to avoid. retired_session_id is the
+				// one channel that does not depend on the failed row carrying
+				// the session, and it is what the resume lookups and the chat
+				// pointer cleanup both key off.
+				//
+				// Belt-and-braces, not the live path: an overflowed resume
+				// fails before any tool runs, so shouldRetryWithFreshSession's
+				// tools == 0 gate is always satisfied and the retry above has
+				// already recorded the same id. This covers the case where a
+				// future condition stops the retry from firing, so the session
+				// is still retired rather than silently kept.
+				retiredSessionID = task.PriorSessionID
+			}
+		}
 		if failureReason != "" {
-			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
+			taskLog.Warn("agent failed with a resume-unsafe error, retiring the session",
 				"failure_reason", failureReason,
 			)
 		} else {
@@ -5717,7 +5823,7 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	// why this needs its own branch rather than a phrase added to the
 	// rejection list.
 	//
-	// It applies to all 17 backends, not the ResumeRejectionUndetectable
+	// It applies to all 18 backends, not the ResumeRejectionUndetectable
 	// subset below, and that is deliberate: this is the one failure class
 	// where dropping the session is provably the fix without the backend
 	// having to detect anything. The evidence is in the provider's own error
@@ -6578,7 +6684,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
@@ -6641,6 +6747,49 @@ func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayH
 	}
 }
 
+// prepareReasonixTaskStateHome isolates persisted transcripts and leases per
+// (runtime, agent) while leaving REASONIX_HOME untouched. Current Reasonix
+// reads credentials/config from REASONIX_HOME and state from
+// REASONIX_STATE_HOME, so `reasonix setup` remains the sole credential owner
+// and Multica never copies API keys into task-managed files.
+func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(profileDir, "reasonix-state", runtimeSegment, agentSegment)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func validateReasonixStateSegment(name, value string) (string, error) {
+	if value == "" {
+		return "", fmt.Errorf("%s ID is required", name)
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			continue
+		default:
+			return "", fmt.Errorf("%s ID contains an unsafe path character", name)
+		}
+	}
+	return value, nil
+}
+
 // codexShellAuthorizedCustomEnvNames returns names from the current agent's
 // custom_env that pass the same daemon blocklist used when assembling the child
 // environment. Returning names only keeps credential values out of the managed
@@ -6690,6 +6839,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodebuddyArgs
 	case "qwen":
 		args = cfg.QwenArgs
+	case "qwenpaw":
+		args = cfg.QwenpawArgs
 	default:
 		return nil
 	}

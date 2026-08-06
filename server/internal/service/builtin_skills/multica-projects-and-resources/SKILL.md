@@ -1,6 +1,6 @@
 ---
 name: multica-projects-and-resources
-description: "Use when creating, inspecting, updating, or debugging Multica projects and project resources. Covers durable project context, github_repo and local_directory resources, how resources affect future agent task context, when to bind repos, and when not to mutate resources."
+description: "Use when creating, inspecting, updating, or debugging Multica projects and their resources (github_repo, local_directory)."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -54,6 +54,26 @@ multica project resource remove <project-id> <resource-id> --output json
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
+
+## Referring to a project in a comment
+
+A project has no `MUL-123`-style identifier, so writing its title as prose
+produces dead text — there is nothing for the reader's client to autolink. Use
+the mention-link form instead, with the project UUID from
+`multica project list --output json`:
+
+    [Roadmap](mention://project/<project-id>)
+
+Every client makes it navigable, with different presentation: web and desktop
+render a chip carrying the project's icon and current title, while mobile
+renders an ordinary link that opens the project on tap. Unlike `@agent` /
+`@squad`, it is a pure link: `util.MentionRe` does not even include `project`,
+so it enqueues nothing and notifies nobody — the same no-side-effect contract
+as an `issue` mention.
+
+Prefer this form over pasting the project's URL. Web and desktop do unfurl a
+bare in-app project URL into that same chip, but mobile does not — there a
+pasted URL is handed to the system browser and takes the reader out of the app.
 
 ## When to add a resource
 

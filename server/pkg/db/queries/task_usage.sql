@@ -154,8 +154,10 @@ ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 -- token cost window (which is anchored on tu.created_at, ~= completion time).
 --
 -- No date bucketing, so no @tz — but @since is the viewer's local
--- start-of-day-(N) so the "last N days" window lines up with the per-agent
--- cost card; passed straight through without re-truncation.
+-- start-of-day for the EXACT N-day window (parseExactSinceParamInTZ), so the
+-- "last N days" window lines up with the per-agent cost card and the daily
+-- charts the client trims to the same span; passed straight through without
+-- re-truncation.
 SELECT
     atq.agent_id,
     COALESCE(

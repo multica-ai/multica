@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"runtime"
@@ -173,9 +174,15 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 		},
 		{
 			name: "scanner error fails closed",
-			// The production scanner caps a single event at 10 MiB. A larger
-			// token produces bufio.ErrTooLong while the child still exits 0.
-			scriptBody: `dd if=/dev/zero bs=1048576 count=11 2>/dev/null | tr '\000' x; printf '\n'` + "\n",
+			// The production scanner caps a single event at
+			// agentStreamMaxLineBytes. A larger token produces
+			// bufio.ErrTooLong while the child still exits 0. The count is
+			// derived from the constant so raising the cap cannot silently
+			// turn this case into a plain-oversized-line pass.
+			scriptBody: fmt.Sprintf(
+				`dd if=/dev/zero bs=1048576 count=%d 2>/dev/null | tr '\000' x; printf '\n'`,
+				agentStreamMaxLineBytes/(1024*1024)+1,
+			) + "\n",
 			wantStatus: "failed",
 			wantOutput: "",
 			wantError:  "stdout read error",

@@ -77,14 +77,77 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { useT } from "../../i18n";
-import {
-  ResourceLabelPicker,
-  useResourceLabelsEnabled,
-} from "../../labels/resource-label-picker";
+import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 
 const SKILL_MD = "SKILL.md";
 
 type DraftFile = { id?: string; path: string; content: string };
+
+/** The four editable fields, as one snapshot. */
+type SkillDraft = {
+  name: string;
+  description: string;
+  content: string;
+  files: DraftFile[];
+};
+
+/**
+ * Server skill -> editable draft.
+ *
+ * `name` and `description` are trimmed here because Save trims them too:
+ * normalizing once, at the single seam where server data becomes a draft, is
+ * what lets every later comparison be plain equality. Trimming at comparison
+ * time instead is how the two sides drifted apart in the first place — the
+ * dirty check trimmed one operand and not the other, so a description ending
+ * in a newline (what `description: |` frontmatter yields) never compared equal
+ * to itself and the page opened permanently dirty.
+ *
+ * `content` and file bodies are deliberately NOT normalized: leading and
+ * trailing whitespace in a SKILL.md body is content, not formatting.
+ */
+function toDraft(s: Skill): SkillDraft {
+  return {
+    name: s.name.trim(),
+    description: s.description.trim(),
+    content: s.content,
+    files: (s.files ?? []).map((f: SkillFile) => ({
+      id: f.id,
+      path: f.path,
+      content: f.content,
+    })),
+  };
+}
+
+/**
+ * Order-insensitive snapshot of a file set. The two endpoints that return
+ * files disagree on order — GET sorts by path, PUT echoes request order — and
+ * an order difference is not a content difference.
+ */
+function fileSignature(files: DraftFile[]): string {
+  return JSON.stringify(
+    files
+      .map((f) => ({ path: f.path, content: f.content }))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+  );
+}
+
+/**
+ * Did the USER change anything, measured against the draft we handed them?
+ *
+ * Deliberately not "does the draft differ from the latest server skill": that
+ * question conflates two independent causes — the user typed something, or the
+ * server moved underneath us — and answering it as if only the first existed
+ * is what made every remote update look like a local edit.
+ */
+function hasLocalEdits(draft: SkillDraft, baseline: SkillDraft | null): boolean {
+  if (!baseline) return false;
+  return (
+    draft.name.trim() !== baseline.name ||
+    draft.description.trim() !== baseline.description ||
+    draft.content !== baseline.content ||
+    fileSignature(draft.files) !== fileSignature(baseline.files)
+  );
+}
 
 /**
  * Two tabs, not three. A skill has no settings axis to speak of:
@@ -370,7 +433,6 @@ function OverviewTab({
   onAddToAgents: () => void;
 }) {
   const { t } = useT("skills");
-  const labelsEnabled = useResourceLabelsEnabled();
 
   return (
     <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
@@ -414,15 +476,13 @@ function OverviewTab({
             </p>
           </PropertyRow>
 
-          {labelsEnabled && (
-            <PropertyRow label={t(($) => $.detail.overview.labels)}>
-              <ResourceLabelPicker
-                resourceType="skill"
-                resourceId={skill.id}
-                canEdit={canEdit}
-              />
-            </PropertyRow>
-          )}
+          <PropertyRow label={t(($) => $.detail.overview.labels)}>
+            <ResourceLabelPicker
+              resourceType="skill"
+              resourceId={skill.id}
+              canEdit={canEdit}
+            />
+          </PropertyRow>
         </div>
       </section>
 
@@ -468,6 +528,7 @@ function FilesTab({
   mode,
   canEdit,
   addingFile,
+  focusEditor,
   onSelectPath,
   onModeChange,
   onStartAddFile,
@@ -475,7 +536,9 @@ function FilesTab({
   onCancelAddFile,
   onDeleteFile,
   onRenameFile,
+  onEditFile,
   onContentChange,
+  onFocusHandled,
 }: {
   filePaths: string[];
   selectedPath: string;
@@ -483,6 +546,7 @@ function FilesTab({
   mode: FileMode;
   canEdit: boolean;
   addingFile: boolean;
+  focusEditor: boolean;
   onSelectPath: (path: string) => void;
   onModeChange: (mode: FileMode) => void;
   onStartAddFile: () => void;
@@ -490,16 +554,20 @@ function FilesTab({
   onCancelAddFile: () => void;
   onDeleteFile: (path?: string) => void;
   onRenameFile: (from: string, to: string) => void;
+  onEditFile: (path: string) => void;
   onContentChange: (content: string) => void;
+  onFocusHandled: () => void;
 }) {
   const { t } = useT("skills");
   const validatePath = useValidateNewFilePath();
   const supportingPaths = filePaths.filter((p) => p !== SKILL_MD);
   const isMd = isMarkdownPath(selectedPath);
   // Absent for read-only viewers so the tree never offers an action it would
-  // then refuse. SKILL.md is excluded inside the tree by reservedPath.
+  // then refuse. Both rails get the same object: SKILL.md keeps Edit and loses
+  // rename/delete, which the tree derives from reservedPath.
   const treeActions = canEdit
     ? {
+        onEdit: onEditFile,
         validatePath,
         onRename: onRenameFile,
         onDelete: onDeleteFile,
@@ -522,6 +590,7 @@ function FilesTab({
           {t(($) => $.detail.files.main)}
         </p>
         <FileTree
+          actions={treeActions}
           filePaths={[SKILL_MD]}
           selectedPath={selectedPath}
           onSelect={onSelectPath}
@@ -573,6 +642,11 @@ function FilesTab({
           </span>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {isMd && (
+              // The second segment is named for what it does for THIS viewer:
+              // "Edit" when the pane it opens accepts typing, "Plain text"
+              // when the same pane is read-only. Same mode either way — only
+              // the promise differs, and offering an edit the page would
+              // refuse is the thing this rail is careful not to do.
               <div
                 role="group"
                 aria-label={t(($) => $.detail.files.mode_aria)}
@@ -593,7 +667,9 @@ function FilesTab({
                   >
                     {value === "preview"
                       ? t(($) => $.detail.files.mode_preview)
-                      : t(($) => $.detail.files.mode_raw)}
+                      : canEdit
+                        ? t(($) => $.detail.files.mode_edit)
+                        : t(($) => $.detail.files.mode_raw)}
                   </button>
                 ))}
               </div>
@@ -627,7 +703,9 @@ function FilesTab({
             content={selectedContent}
             mode={mode}
             readOnly={!canEdit}
+            autoFocus={focusEditor}
             onChange={onContentChange}
+            onFocusHandled={onFocusHandled}
           />
         </div>
       </section>
@@ -696,6 +774,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   // and survives switching files. It used to live inside FileViewer, which the
   // per-file `key` remounted — every file switch silently snapped back.
   const [fileMode, setFileMode] = useState<FileMode>("preview");
+  // Which file's editor is waiting for the caret. A path rather than a boolean
+  // so a request raised for one row cannot land in another row's editor if the
+  // selection moves before the effect runs.
+  const [focusPath, setFocusPath] = useState<string | null>(null);
 
   const urlView = navigation.searchParams.get("view");
   const [activeView, setActiveView] = useState<DetailView>(() =>
@@ -726,48 +808,69 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   const seededKeyRef = useRef<string | null>(null);
 
+  /**
+   * The draft this page last handed the user, normalized by `toDraft`. Dirty
+   * state is measured against THIS, never against the latest server skill.
+   *
+   * INVARIANT: `seedFromSkill` is the only writer, and it always writes the
+   * same snapshot it pushes into state. `dirtySummary` is a `useMemo` keyed on
+   * those state values, so every baseline write is paired with the state
+   * change that recomputes it. Assigning this ref anywhere else breaks that
+   * pairing and silently re-opens MUL-5645.
+   */
+  const baselineRef = useRef<SkillDraft | null>(null);
+
+  const seedFromSkill = useCallback((s: Skill) => {
+    const seeded = toDraft(s);
+    setName(seeded.name);
+    setDescription(seeded.description);
+    setContent(seeded.content);
+    setFiles(seeded.files);
+    baselineRef.current = seeded;
+  }, []);
+
+  /**
+   * Adopt a server version wholesale: draft, baseline, seeded key and conflict
+   * flag all move together. Every path that accepts a server version goes
+   * through here — first load, silent refresh, Save, Discard — so the four
+   * pieces can never drift apart.
+   */
+  const adoptServerVersion = useCallback(
+    (s: Skill, resetSelection = false) => {
+      seededKeyRef.current = `${wsId}:${s.id}@${s.updated_at}`;
+      setConflictPending(false);
+      seedFromSkill(s);
+      if (resetSelection) setSelectedPath(SKILL_MD);
+    },
+    [wsId, seedFromSkill],
+  );
+
   useEffect(() => {
     if (!skill) return;
-    const key = `${wsId}:${skill.id}@${skill.updated_at}`;
-    if (seededKeyRef.current === key) return;
+    if (seededKeyRef.current === `${wsId}:${skill.id}@${skill.updated_at}`) {
+      return;
+    }
 
     const sameSkill =
       seededKeyRef.current !== null &&
       seededKeyRef.current.startsWith(`${wsId}:${skill.id}@`);
 
-    if (sameSkill) {
-      const d = draftRef.current;
-      const serverFilesJson = JSON.stringify(
-        (skill.files ?? []).map((f) => ({ path: f.path, content: f.content })),
-      );
-      const draftFilesJson = JSON.stringify(
-        d.files.map((f) => ({ path: f.path, content: f.content })),
-      );
-      const hasEdits =
-        d.name.trim() !== skill.name ||
-        d.description.trim() !== skill.description ||
-        d.content !== skill.content ||
-        draftFilesJson !== serverFilesJson;
-      if (hasEdits) {
-        setConflictPending(true);
-        return;
-      }
+    // Same skill, newer server version. Whether that is a conflict depends on
+    // the local draft alone: with no local edits the user is simply reading
+    // the page, so pull the new version in silently instead of accusing them
+    // of an edit they never made and freezing the editor on stale text.
+    //
+    // Re-run on draft changes, not just on new server versions: a conflict the
+    // user resolves by reverting their own edits has to release the page. The
+    // save bar is dirty-gated, so holding the conflict past that point would
+    // leave the banner above stale text with no Discard left to press.
+    if (sameSkill && hasLocalEdits(draftRef.current, baselineRef.current)) {
+      setConflictPending(true);
+      return;
     }
 
-    seededKeyRef.current = key;
-    setConflictPending(false);
-    setName(skill.name);
-    setDescription(skill.description);
-    setContent(skill.content);
-    setFiles(
-      (skill.files ?? []).map((f: SkillFile) => ({
-        id: f.id,
-        path: f.path,
-        content: f.content,
-      })),
-    );
-    if (!sameSkill) setSelectedPath(SKILL_MD);
-  }, [skill, wsId]);
+    adoptServerVersion(skill, !sameSkill);
+  }, [skill, wsId, adoptServerVersion, name, description, content, files]);
 
   const creator = useMemo<MemberWithUser | null>(
     () =>
@@ -804,48 +907,41 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
   }, [fileMap, selectedPath]);
 
-  // Files are matched by id so a rename counts as one changed file, not a
-  // delete plus an add; SKILL.md is its own entry since it lives in `content`.
+  // Compared against the seeded baseline, not against the latest server skill,
+  // so a remote update can never read as a local edit. Files are matched by id
+  // so a rename counts as one changed file, not a delete plus an add; SKILL.md
+  // is its own entry since it lives in `content`.
   const dirtySummary = useMemo(() => {
-    if (!skill) return { nameChanged: false, descChanged: false, changedFileCount: 0 };
-    const serverFiles: SkillFile[] = skill.files ?? [];
-    const serverById = new Map(serverFiles.map((f) => [f.id, f]));
-    let changedFileCount = content !== skill.content ? 1 : 0;
+    const baseline = baselineRef.current;
+    if (!baseline) {
+      return { nameChanged: false, descChanged: false, changedFileCount: 0 };
+    }
+    const baselineById = new Map(
+      baseline.files.flatMap((f) => (f.id ? [[f.id, f] as const] : [])),
+    );
+    let changedFileCount = content !== baseline.content ? 1 : 0;
     const draftIds = new Set<string>();
     for (const f of files) {
       if (f.id) draftIds.add(f.id);
-      const server = f.id ? serverById.get(f.id) : undefined;
-      if (!server || server.path !== f.path || server.content !== f.content) {
+      const base = f.id ? baselineById.get(f.id) : undefined;
+      if (!base || base.path !== f.path || base.content !== f.content) {
         changedFileCount += 1;
       }
     }
-    for (const f of serverFiles) {
-      if (!draftIds.has(f.id)) changedFileCount += 1;
+    for (const f of baseline.files) {
+      if (f.id && !draftIds.has(f.id)) changedFileCount += 1;
     }
     return {
-      nameChanged: name.trim() !== skill.name,
-      descChanged: description.trim() !== skill.description,
+      nameChanged: name.trim() !== baseline.name,
+      descChanged: description.trim() !== baseline.description,
       changedFileCount,
     };
-  }, [skill, name, description, content, files]);
+  }, [name, description, content, files]);
 
   const isDirty =
     dirtySummary.nameChanged ||
     dirtySummary.descChanged ||
     dirtySummary.changedFileCount > 0;
-
-  const seedFromSkill = (s: Skill) => {
-    setName(s.name);
-    setDescription(s.description);
-    setContent(s.content);
-    setFiles(
-      (s.files ?? []).map((f: SkillFile) => ({
-        id: f.id,
-        path: f.path,
-        content: f.content,
-      })),
-    );
-  };
 
   const handleSave = async () => {
     if (!skill || !canEdit) return;
@@ -861,9 +957,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       };
       const updated = await api.updateSkill(skill.id, payload);
       qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, updated);
-      seedFromSkill(updated);
-      seededKeyRef.current = `${wsId}:${updated.id}@${updated.updated_at}`;
-      setConflictPending(false);
+      adoptServerVersion(updated);
       qc.invalidateQueries({
         queryKey: workspaceKeys.skills(wsId),
         exact: true,
@@ -879,9 +973,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   const handleDiscard = () => {
     if (!skill) return;
-    seedFromSkill(skill);
-    seededKeyRef.current = `${wsId}:${skill.id}@${skill.updated_at}`;
-    setConflictPending(false);
+    adoptServerVersion(skill);
   };
 
   const handleDelete = async () => {
@@ -918,6 +1010,22 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     setFiles((prev) => prev.filter((f) => f.path !== path));
     if (path === selectedPath) setSelectedPath(SKILL_MD);
   };
+
+  // "Edit" from a row menu is one gesture that owes three things: the file is
+  // open, the pane is the editor rather than the preview, and the caret is in
+  // it. Doing fewer would leave the user another click away from typing, which
+  // is the whole reason the entry exists.
+  const handleEditFile = useCallback(
+    (path: string) => {
+      if (!canEdit) return;
+      setSelectedPath(path);
+      setFileMode("raw");
+      setFocusPath(path);
+    },
+    [canEdit],
+  );
+
+  const handleFocusHandled = useCallback(() => setFocusPath(null), []);
 
   const handleRenameFile = (from: string, to: string) => {
     if (from === SKILL_MD) return;
@@ -975,7 +1083,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           </Button>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-          <AlertCircle className="h-8 w-8 text-muted-foreground/40" />
+          <AlertCircle className="h-8 w-8 text-faint-foreground" />
           <p className="text-body font-medium">{t(($) => $.detail.not_found.title)}</p>
           <p className="max-w-xs text-caption text-muted-foreground">
             {error instanceof Error ? error.message : t(($) => $.detail.not_found.fallback)}
@@ -1159,6 +1267,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             mode={fileMode}
             canEdit={canEdit}
             addingFile={addingFile}
+            focusEditor={focusPath === selectedPath}
             onSelectPath={setSelectedPath}
             onModeChange={setFileMode}
             onStartAddFile={() => setAddingFile(true)}
@@ -1166,7 +1275,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             onCancelAddFile={() => setAddingFile(false)}
             onDeleteFile={handleDeleteFile}
             onRenameFile={handleRenameFile}
+            onEditFile={handleEditFile}
             onContentChange={handleFileContentChange}
+            onFocusHandled={handleFocusHandled}
           />
         )}
       </div>
@@ -1178,7 +1289,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         <div
           role="status"
           aria-live="polite"
-          className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 animate-in items-center gap-1 rounded-lg border bg-background px-2 py-1.5 fade-in slide-in-from-bottom-2 shadow-lg"
+          className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 animate-in items-center gap-1 rounded-lg border bg-background px-2 py-1.5 fade-in slide-in-from-bottom-2 shadow-lg max-md:above-chat-launcher"
         >
           <div className="mr-1 flex items-center border-r pl-1 pr-2">
             <span className="whitespace-nowrap text-caption text-muted-foreground">

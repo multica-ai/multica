@@ -58,6 +58,9 @@ func TestInboundFromMessage_DM(t *testing.T) {
 	if msg.Text != "hello bot" {
 		t.Errorf("Text = %q", msg.Text)
 	}
+	if msg.CommandText != "hello bot" {
+		t.Errorf("CommandText = %q, want normalized original text", msg.CommandText)
+	}
 	// team_id must be in Raw so the installation resolver can route.
 	var raw slackRawEvent
 	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
@@ -87,6 +90,9 @@ func TestInboundFromMessage_ChannelMention(t *testing.T) {
 	}
 	if msg.Text != "create an issue" {
 		t.Errorf("Text = %q, want mention stripped", msg.Text)
+	}
+	if msg.CommandText != "create an issue" {
+		t.Errorf("CommandText = %q, want the same pre-rewrite text", msg.CommandText)
 	}
 }
 

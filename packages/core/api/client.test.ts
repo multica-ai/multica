@@ -1183,8 +1183,26 @@ describe("ApiClient", () => {
 
     it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
       const legacy = [
-        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
-        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+        {
+          id: "m1",
+          chat_session_id: "session-1",
+          role: "user",
+          content: "hi",
+          task_id: null,
+          created_at: "2026-06-01T00:00:00Z",
+          quick_actions: [],
+        },
+        {
+          id: "m2",
+          chat_session_id: "session-1",
+          role: "assistant",
+          content: "yo",
+          task_id: "task-1",
+          created_at: "2026-06-01T00:00:01Z",
+          quick_actions: [
+            { label: "Continue", prompt: "Continue with the next step", primary: true },
+          ],
+        },
       ];
       const fetchMock = vi
         .fn()
@@ -1203,6 +1221,36 @@ describe("ApiClient", () => {
         "https://api.example.test/api/chat/sessions/session-1/messages",
       );
       expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+    });
+
+    it("keeps a valid reply when its optional quick actions are malformed", async () => {
+      const malformed = [{
+        id: "m1",
+        chat_session_id: "session-1",
+        role: "assistant",
+        content: "safe reply",
+        task_id: "task-1",
+        created_at: "2026-06-01T00:00:00Z",
+        quick_actions: [{ label: 42, prompt: false }],
+      }];
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listChatMessages("session-1")).resolves.toEqual([
+        expect.objectContaining({ content: "safe reply", quick_actions: [] }),
+      ]);
+    });
+
+    it("falls back to an empty page for a malformed paged response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(jsonResponse({ messages: "broken" }, 200)),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listChatMessagesPage("session-1", { limit: 25 }),
+      ).resolves.toEqual({ messages: [], limit: 25, has_more: false, next_cursor: null });
     });
 
     it("does NOT fall back on a cursor request — a 404 there propagates", async () => {
@@ -1351,6 +1399,26 @@ describe("ApiClient", () => {
       expect(init.headers["X-Client-Capabilities"]).toBe(CHAT_DRAFT_RESTORE_CAPABILITY);
     });
 
+    it("scopes queued edit cancellation to the expected chat session", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(taskResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await new ApiClient("https://api.example.test").cancelTaskById("task-1", {
+        queuedAction: "edit",
+        sessionId: "session-1",
+      });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://api.example.test/api/tasks/task-1/cancel" +
+          "?expected_status=queued&chat_session_id=session-1&queue_action=edit",
+      );
+    });
+
     it("treats a null cancelled chat message as absent", async () => {
       vi.stubGlobal(
         "fetch",
@@ -1404,6 +1472,18 @@ describe("ApiClient", () => {
       expect(result.id).toBe("");
       expect(result.cancelled_chat_message).toBeUndefined();
     });
+  });
+
+  it("clears a chat queue with one session-scoped request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").clearQueuedChatTasks("session-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/chat/sessions/session-1/queued-tasks",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
   describe("chat attachment wiring", () => {
@@ -1472,7 +1552,7 @@ describe("ApiClient", () => {
 
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "" }), {
+        new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {
           status: 201,
           headers: { "Content-Type": "application/json" },
         }),
@@ -1492,7 +1572,7 @@ describe("ApiClient", () => {
     it("sendChatMessage omits attachment_ids when the list is empty or undefined", async () => {
       const fetchMock = vi.fn().mockImplementation(() =>
         Promise.resolve(
-          new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "" }), {
+          new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {
             status: 201,
             headers: { "Content-Type": "application/json" },
           }),
@@ -1506,6 +1586,43 @@ describe("ApiClient", () => {
 
       expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "hello" });
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
+    });
+
+    it("sendChatMessage accepts the server's null attachment_ids for text-only sends", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            message_id: "m1",
+            task_id: "t1",
+            created_at: "2026-08-01T00:00:00Z",
+            attachment_ids: null,
+          }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      await expect(
+        new ApiClient("https://api.example.test").sendChatMessage("session-1", "hello"),
+      ).resolves.toMatchObject({ attachment_ids: undefined });
+    });
+
+    it("sendChatMessage rejects a malformed response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ message_id: "m1", task_id: 42 }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      await expect(
+        new ApiClient("https://api.example.test").sendChatMessage("session-1", "hello"),
+      ).rejects.toThrow();
     });
   });
 });
@@ -1591,5 +1708,70 @@ describe("ApiClient model discovery response schema", () => {
 
     expect(result.supported).toBe(true);
     expect(result.status).toBe("completed");
+  });
+});
+
+/**
+ * Mixed-version contract for subtree unsubscribe (MUL-5483).
+ *
+ * Web/desktop staging deploys on merge while the backend is deployed by hand,
+ * so this client routinely runs against an older server. Subtree unsubscribe
+ * must therefore be carried by its own PATH, never by a body field: Go's JSON
+ * decoder drops unknown fields, so an old server would unsubscribe only the
+ * root and still answer 200 — telling the user the whole tree was muted while
+ * every child kept notifying. An unknown path 404s, which surfaces as a
+ * rejected mutation the user can act on.
+ */
+describe("ApiClient unsubscribe endpoints", () => {
+  function stubOK() {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function requestOf(fetchMock: ReturnType<typeof vi.fn>) {
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    return { url, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> };
+  }
+
+  it("sends the subtree variant to its own endpoint", async () => {
+    const fetchMock = stubOK();
+
+    await new ApiClient("https://api.example.test")
+      .unsubscribeFromIssueSubtree("issue-1", "user-1", "member");
+
+    const { url, body } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/api/issues/issue-1/unsubscribe/subtree");
+    expect(body).toEqual({ user_id: "user-1", user_type: "member" });
+  });
+
+  it("never encodes subtree as a body field on the shared endpoint", async () => {
+    const fetchMock = stubOK();
+
+    await new ApiClient("https://api.example.test")
+      .unsubscribeFromIssue("issue-1", "user-1", "member");
+
+    const { url, body } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/api/issues/issue-1/unsubscribe");
+    // A `subtree` key here would be silently ignored by an older backend,
+    // which is the exact silent-success failure this split exists to prevent.
+    expect(body).not.toHaveProperty("subtree");
+  });
+
+  it("rejects when the backend does not know the subtree route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test")
+        .unsubscribeFromIssueSubtree("issue-1", "user-1", "member"),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });

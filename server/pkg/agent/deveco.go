@@ -27,7 +27,6 @@ package agent
 //     (see packages/core/agents/mcp-support.ts).
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -313,8 +312,7 @@ func (b *devecoBackend) processEvents(r io.Reader, ch chan<- Message) devecoEven
 	finalStatus := "completed"
 	var finalError string
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(r)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

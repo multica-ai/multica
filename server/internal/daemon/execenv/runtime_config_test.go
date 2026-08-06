@@ -47,18 +47,16 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
 			}
 			for _, want := range []string{
-				"**Choosing `--status` when creating sub-issues.**",
-				"`--status todo` = **start now**",
-				"`--status backlog` = **wait**",
-				"`multica issue status <child-id> todo`",
-				"all `--status todo`",
-				"`--status backlog` from the start",
-				// Stage guidance must reach the always-on brief so agents
-				// reach for stages instead of only the manual backlog chain
-				// (MUL-3508 follow-up).
-				"**Ordering with stages.**",
-				"`--stage <N>`",
-				"`multica issue children <id>`",
+				// MUL-5442 demotes the full todo/backlog/stage playbook to the
+				// multica-working-on-issues skill. The brief keeps a one-line
+				// map (all three flags stay discoverable, MUL-3508 follow-up)
+				// plus the skill pointer; the skill side of the contract is
+				// asserted in internal/service
+				// (TestWorkingOnIssuesSkillCoversIssueLoopContracts).
+				"`--status todo` starts an agent-assigned child immediately",
+				"`--status backlog` parks it",
+				"`--stage <N>` groups children into ordered stages",
+				"read the `multica-working-on-issues` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -277,7 +275,6 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
@@ -285,6 +282,11 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 		if !strings.Contains(hint, want) {
 			t.Errorf("resumed/no-delta hint missing %q\n--- output ---\n%s", want, hint)
 		}
+	}
+	// The anchor-restating sentence is gone (MUL-5721 OPT-1): the read command
+	// carries the thread anchor and the reply cookbook carries the trigger id.
+	if strings.Contains(hint, "active thread anchor") {
+		t.Errorf("resumed/no-delta hint must not restate anchors outside the commands, got:\n%s", hint)
 	}
 	if strings.Contains(hint, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta hint must not claim the delta is thread-scoped, got:\n%s", hint)
@@ -303,9 +305,26 @@ func TestSessionContinuityNoticeLivesOutsideBrief(t *testing.T) {
 		"could NOT be restored",
 		"tell the user up front",
 	} {
-		if !strings.Contains(SessionContinuityNotice, want) {
-			t.Errorf("SessionContinuityNotice missing %q", want)
+		if !strings.Contains(SessionContinuityNoticeUnrecoverable, want) {
+			t.Errorf("SessionContinuityNoticeUnrecoverable missing %q", want)
 		}
+	}
+
+	// MUL-5722: the issue variant carries the same heading and the same
+	// "do not assume continuity" job, but must NOT order an announcement. An
+	// issue's discussion lives in its comments, which the agent re-reads every
+	// turn, so telling the user it was lost describes a loss that did not
+	// happen — they hear "the discussion is gone" when every word survives.
+	if !strings.Contains(SessionContinuityNoticeIssue, "## Session Continuity Notice") {
+		t.Error("SessionContinuityNoticeIssue must keep the section heading")
+	}
+	if strings.Contains(SessionContinuityNoticeIssue, "tell the user") {
+		t.Errorf("issue variant must not script an apology:\n%s", SessionContinuityNoticeIssue)
+	}
+	// It still has to say what genuinely went missing, or the agent silently
+	// assumes it remembers work it no longer has.
+	if !strings.Contains(SessionContinuityNoticeIssue, "your own working memory") {
+		t.Errorf("issue variant must state the real loss:\n%s", SessionContinuityNoticeIssue)
 	}
 
 	lost := TaskContextForEnv{
@@ -329,12 +348,20 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		"## Instruction Precedence",
 		"Agent Identity instructions have priority over the issue workflow below.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement",
-		"Before step 4, run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip it.",
-		"Complete the task within your Agent Identity boundaries.",
-		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
-		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip it.",
-		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+		// One enumeration, in Instruction Precedence, covering every action
+		// type Agent Identity can forbid. This and workflow step 4 each used to
+		// carry their own list and the two disagreed (MUL-5442).
+		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
+		// MUL-5442: the forbids-clause is stated once on the Ownership-mode
+		// header instead of once per status bullet.
+		"skip any status call below that your Agent Identity forbids",
+		"Before step 4, run `multica issue status <issue-id> in_progress`.",
+		"Complete the task within your Agent Identity boundaries",
+		// Step 4 keeps only what the enumeration cannot express: a
+		// delegation-only role stops once the delegation is delivered.
+		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
+		"When done, run `multica issue status <issue-id> in_review`.",
+		"If blocked, run `multica issue status <issue-id> blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue brief missing identity-bound workflow text %q\n---\n%s", want, out)
@@ -363,9 +390,12 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Before step 4, run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip it.",
+		"Before step 4, run `multica issue status <issue-id> in_progress`.",
 		"After this initial dispatch, leave the parent issue `in_progress`",
-		"do NOT run `multica issue status " + issueID + " in_review` or `done` on this turn",
+		// The guest-leader contract test (handler side) bans any runnable
+		// in_review command shape from reaching a guest — the dispatch rule
+		// therefore states the prohibition without a command form.
+		"do NOT move it to `in_review` or `done` on this turn",
 		"only then, if the overall goal is met, move the parent to `in_review`",
 	} {
 		if !strings.Contains(out, want) {
@@ -373,7 +403,7 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(out, "When done, run `multica issue status "+issueID+" in_review`") {
+	if strings.Contains(out, "When done, run `multica issue status <issue-id> in_review`") {
 		t.Errorf("squad-leader issue brief must not contain the ordinary-agent completion step\n---\n%s", out)
 	}
 }
@@ -857,6 +887,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"pi", "AGENTS.md"},
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
+		{"reasonix", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1231,6 +1262,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"pi", "AGENTS.md"},
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
+		{"reasonix", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1620,10 +1652,27 @@ func TestInjectRuntimeConfigByteIdenticalAcrossTriggers(t *testing.T) {
 
 	// Non-vacuity guard: the brief must still depend on its stable inputs, or
 	// this whole test would pass on a function that ignores ctx entirely.
-	otherIssue := base
-	otherIssue.IssueID = "99999999-8888-7777-6666-555555555555"
-	if buildMetaSkillContent("claude", base) == buildMetaSkillContent("claude", otherIssue) {
-		t.Fatal("brief does not vary with issue id — byte-identity assertions below would be vacuous")
+	// Since MUL-5442's cross-channel dedup the brief is deliberately
+	// issue-id-independent (the per-turn message carries the ids), so the
+	// guard now varies a different stable input: the agent identity.
+	otherAgent := base
+	otherAgent.AgentName = "Someone Else"
+	if buildMetaSkillContent("claude", base) == buildMetaSkillContent("claude", otherAgent) {
+		t.Fatal("brief does not vary with agent identity — byte-identity assertions below would be vacuous")
+	}
+
+	// The stronger MUL-5442 invariant this PR claims as a design benefit:
+	// with identical stable inputs, two DIFFERENT issue ids must render the
+	// byte-identical brief — this is what makes a cross-issue shared cache
+	// prefix possible. Asserted directly, per provider, so a truncated,
+	// transformed, or id-conditional use of the issue id cannot slip past
+	// the Contains-based negative check.
+	for _, provider := range []string{"claude", "codex"} {
+		otherIssue := base
+		otherIssue.IssueID = "99999999-8888-7777-6666-555555555555"
+		if buildMetaSkillContent(provider, base) != buildMetaSkillContent(provider, otherIssue) {
+			t.Fatalf("%s brief differs across issue ids — the cross-issue cache invariant is broken", provider)
+		}
 	}
 
 	for _, provider := range []string{"claude", "codex"} {
@@ -1740,6 +1789,57 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 					t.Errorf("%s brief differs for variant %q — per-run state leaked into the cached prefix (MUL-5377).\n%s",
 						kindName, v.name, firstBriefDiff(want, got))
 				}
+			}
+		})
+	}
+}
+
+// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
+// index of invocable names, with no descriptions and no per-provider branch.
+//
+// Descriptions were removed because every runtime CLI already builds its own
+// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
+// was the same routing signal paid for twice — ~3,100 tokens per brief on a
+// real task, 40% of the whole brief (MUL-5529).
+//
+// The provider branch was removed because its fallback was wrong: it told
+// providers outside a hardcoded list to look in `.agent_context/skills/`, but
+// the only providers that ever reached it — grok and traecli — have their files
+// written to `.grok/skills` and `.traecli/skills` and discover them natively.
+func TestBriefSkillsListIsNamesOnly(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{
+		IssueID:   "issue-1",
+		AgentName: "Eve",
+		AgentID:   "eve-1",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:        "PR Review",
+				Description: "Use when reviewing a pull request for the Multica project.",
+				Content:     "---\nname: pr-review\n---\n\nbody",
+			},
+		},
+	}
+
+	// grok and traecli are the providers that used to take the removed branch;
+	// the rest are a spread across the native-discovery list.
+	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent(provider, ctx)
+
+			if !strings.Contains(out, "- **pr-review**\n") {
+				t.Errorf("brief does not list the skill by slug:\n%s", out)
+			}
+			if strings.Contains(out, "Use when reviewing a pull request") {
+				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
+			}
+			if strings.Contains(out, ".agent_context/skills/") {
+				t.Errorf("brief still points at the removed fallback path:\n%s", out)
+			}
+			if !strings.Contains(out, "discovered automatically") {
+				t.Errorf("brief lost the native-discovery framing:\n%s", out)
 			}
 		})
 	}

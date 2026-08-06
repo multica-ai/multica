@@ -381,17 +381,23 @@ func TestRequestDaemonPendingWork_PrefersNotifier(t *testing.T) {
 // between warming the cache and dropping a snapshot the runtime no longer
 // advertises.
 func TestCacheableModelCatalog(t *testing.T) {
-	if !cacheableModelCatalog(sampleCatalog(), true) {
+	if !cacheableModelCatalog(sampleCatalog(), true, false) {
 		t.Error("a supported, non-empty catalog must be cacheable")
 	}
-	if cacheableModelCatalog(sampleCatalog(), false) {
+	if cacheableModelCatalog(sampleCatalog(), false, false) {
 		t.Error("a runtime that ignores model selection must not be cached")
 	}
-	if cacheableModelCatalog(nil, true) {
+	if cacheableModelCatalog(nil, true, false) {
 		t.Error("an empty catalog is a transient failure, not a cacheable answer")
 	}
-	if cacheableModelCatalog([]ModelEntry{}, true) {
+	if cacheableModelCatalog([]ModelEntry{}, true, false) {
 		t.Error("an empty (non-nil) catalog is not cacheable either")
+	}
+	// The MUL-5549 hole: a fallback catalog is non-empty and `supported`, so
+	// both checks above pass it. Only the fallback flag keeps a static
+	// stand-in out of the 24h serve window.
+	if cacheableModelCatalog(sampleCatalog(), true, true) {
+		t.Error("a fallback catalog must never be cached as the runtime's real catalog")
 	}
 }
 

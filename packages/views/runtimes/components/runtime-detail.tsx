@@ -45,6 +45,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -147,6 +148,9 @@ export function RuntimeDetail({
   const lastSeen = runtime.last_seen_at
     ? timeAgo(runtime.last_seen_at)
     : t(($) => $.detail.never_seen);
+  const runtimeName = machineLabel
+    ? runtimeRowLabel(runtime, machineLabel)
+    : runtimeDisplayName(runtime);
 
   return (
     <div className="flex h-full flex-col">
@@ -159,7 +163,7 @@ export function RuntimeDetail({
         ]}
         leaf={
           <span className="truncate font-mono text-caption text-foreground">
-            {runtimeDisplayName(runtime)}
+            {runtimeName}
           </span>
         }
         actions={
@@ -182,6 +186,7 @@ export function RuntimeDetail({
           <div className="min-w-0 space-y-5">
             <HeroCard
               runtime={runtime}
+              runtimeName={runtimeName}
               health={health}
               lastSeen={lastSeen}
               ownerMember={ownerMember}
@@ -245,6 +250,7 @@ function parseDeviceInfo(raw: string): { hostname: string; runtime?: string } {
 
 function HeroCard({
   runtime,
+  runtimeName,
   health,
   lastSeen,
   ownerMember,
@@ -252,6 +258,7 @@ function HeroCard({
   daemonShort,
 }: {
   runtime: AgentRuntime;
+  runtimeName: string;
   health: ReturnType<typeof deriveRuntimeHealth>;
   lastSeen: string;
   ownerMember: MemberWithUser | null;
@@ -273,7 +280,7 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-title-sm font-semibold tracking-tight">
-              {runtimeDisplayName(runtime)}
+              {runtimeName}
             </h2>
             <HealthBadge health={health} />
             <span className="text-caption text-muted-foreground">
@@ -406,7 +413,7 @@ function ServingAgentsCard({
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">
-          <Cpu className="h-5 w-5 text-muted-foreground/40" />
+          <Cpu className="h-5 w-5 text-faint-foreground" />
           <p className="mt-2 text-caption text-muted-foreground">
             {t(($) => $.detail.no_agents)}
           </p>
@@ -455,7 +462,7 @@ function ServingAgentsCard({
                     )}
                   </div>
                 </div>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
               </AppLink>
             );
           })}

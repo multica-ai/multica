@@ -27,10 +27,11 @@
   "status": {
     "active": "启用",
     "paused": "已暂停",
+    "paused_runtime_required": "已暂停——执行智能体需绑定运行时",
     "archived": "已归档"
   },
   "execution_mode": {
-    "create_issue": "创建 issue",
+    "create_issue": "创建任务",
     "run_only": "仅运行"
   },
   "relative_date": {
@@ -69,6 +70,8 @@
     "not_found": "未找到该自动化",
     "pause_aria": "暂停自动化",
     "activate_aria": "启用自动化",
+    "paused_runtime_required": "由于执行智能体失去运行时，自动化已暂停。绑定运行时后请重新启用。",
+    "bind_runtime": "绑定运行时",
     "edit": "编辑",
     "run_now": "立即运行",
     "running": "运行中...",
@@ -76,6 +79,7 @@
     "toast_trigger_failed": "触发自动化失败",
     "run_blocked_invocation_not_allowed": "未触发——你没有该自动化所用智能体的使用权限",
     "run_blocked_runtime_offline": "未触发——该智能体的运行时已离线",
+    "run_blocked_agent_runtime_required": "未触发——该智能体未绑定运行时，绑定后才能运行",
     "run_blocked_target_unavailable": "未触发——该智能体不可用",
     "run_blocked_attribution": "未触发——无法确定本次运行的负责成员",
     "run_blocked_already_active": "未触发——最近已有一次运行覆盖了本次",
@@ -122,7 +126,7 @@
     "owner_note": "创建者和工作区管理员始终拥有访问权限。"
   },
   "run_status": {
-    "issue_created": "已创建 issue",
+    "issue_created": "已创建任务",
     "running": "运行中",
     "skipped": "已跳过",
     "completed": "已完成",
@@ -135,7 +139,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "已关联 issue",
+    "issue_linked": "已关联任务",
     "view_log": "查看执行日志",
     "skipped_group": {
       "label": "已跳过",
@@ -283,7 +287,7 @@
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_subscribers": "订阅者",
-    "subscribers_hint": "每次跑出来的 issue 默认订阅",
+    "subscribers_hint": "每次跑出来的任务默认订阅",
     "subscribers_empty": "暂无订阅者——添加成员后，每次触发都会通知到他",
     "subscribers_add": "添加订阅者",
     "subscribers_search_placeholder": "按名称搜索成员……",
@@ -306,14 +310,18 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "只处理匹配这些事件的 webhook。留空则接受所有事件。",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
+    "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
+    "schedule_add": "添加时间表",
+    "error_title_required": "请填写自动化名称。",
+    "error_assignee_required": "请选择运行该自动化的智能体或小队。",
     "output_modes": {
       "create_issue": {
-        "label": "创建 issue",
-        "description": "每次运行都创建一个可追踪的 issue"
+        "label": "创建任务",
+        "description": "每次运行都创建一个可追踪的任务"
       },
       "run_only": {
         "label": "仅运行",
-        "description": "静默运行，不创建 issue"
+        "description": "静默运行，不创建任务"
       }
     }
   },
@@ -408,7 +416,9 @@
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
     "agents_group": "智能体",
-    "squads_group": "小队"
+    "squads_group": "小队",
+    "agent_runtime_required": "请先为该智能体绑定运行时",
+    "squad_runtime_required": "请先为该小队的负责人绑定运行时"
   },
   "timezone_picker": {
     "search_placeholder": "搜索时区..."

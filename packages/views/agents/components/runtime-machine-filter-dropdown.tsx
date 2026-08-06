@@ -68,10 +68,10 @@ export function RuntimeMachineFilterDropdown({
       >
         <Server className="h-3 w-3 text-muted-foreground" />
         <span className="max-w-[12rem] truncate">{triggerLabel}</span>
-        <span className="font-mono tabular-nums text-muted-foreground/70">
+        <span className="font-mono tabular-nums text-muted-foreground">
           {triggerCount}
         </span>
-        <ChevronDown className="h-3 w-3 text-muted-foreground/60" />
+        <ChevronDown className="h-3 w-3 text-faint-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72 p-0">
         <RuntimeMachineFilterMenu
@@ -188,7 +188,7 @@ function RuntimeMachineFilterItem({
           </span>
         )}
       </span>
-      <span className="font-mono tabular-nums text-muted-foreground/70">
+      <span className="font-mono tabular-nums text-muted-foreground">
         {t(($) => $.runtime_filter.agent_count, { count })}
       </span>
     </DropdownMenuItem>

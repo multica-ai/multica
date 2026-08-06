@@ -182,6 +182,35 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// MarkInboxUnread flips a notification back to unread, the inverse of
+// MarkInboxRead. It exists so a user can park something they opened but did not
+// act on: the inbox auto-marks an item read the moment it is selected, which
+// otherwise makes "opened" and "handled" the same signal.
+//
+// Scope is the single item, matching MarkInboxRead — see the query comment.
+func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	item, err := h.Queries.MarkInboxUnread(r.Context(), prev.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark unread")
+		return
+	}
+
+	userID := requestUserID(r)
+	workspaceID := uuidToString(item.WorkspaceID)
+	h.publish(protocol.EventInboxUnread, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)

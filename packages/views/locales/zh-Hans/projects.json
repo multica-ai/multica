@@ -25,7 +25,7 @@
     "progress": "进度",
     "lead": "负责人",
     "created": "创建时间",
-    "issues": "Issue 数"
+    "issues": "任务数"
   },
   "status": {
     "planned": "计划中",
@@ -69,16 +69,17 @@
     "section_description": "描述",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
-    "clear_date": "清除日期",
+    "no_start_date": "无开始日期",
+    "no_due_date": "无截止日期",
     "description_placeholder": "添加描述...",
-    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个任务。",
-    "empty_issues_title": "还没有关联的 issue",
-    "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
-    "empty_issues_new_button": "新建 issue",
-    "no_issues_yet": "目前还没有 issue",
+    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个 task。",
+    "empty_issues_title": "还没有关联的任务",
+    "empty_issues_hint": "新建一个任务，或把已有的任务关联到这个项目。",
+    "empty_issues_new_button": "新建任务",
+    "no_issues_yet": "目前还没有任务",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动 issue 失败"
+    "toast_move_issue_failed": "移动任务失败"
   },
   "resources": {
     "section_header": "资源",
@@ -119,13 +120,12 @@
   },
   "delete_dialog": {
     "title": "删除项目",
-    "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",
+    "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
     "cancel": "取消"
   },
   "picker": {
     "no_project": "无项目",
-    "remove": "从项目移除",
     "empty": "还没有项目",
     "search_placeholder": "搜索项目..."
   },

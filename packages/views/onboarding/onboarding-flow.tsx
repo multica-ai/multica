@@ -20,6 +20,7 @@ import { StepAboutYou } from "./steps/step-about-you";
 import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
+import { OnboardingLogoutButton } from "./components/onboarding-logout-button";
 import { useT } from "../i18n";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
@@ -100,12 +101,7 @@ function mergeQuestionnaire(
  * "what runs in the workspace shell after onboarding" decision is in
  * `packages/views/workspace/welcome-after-onboarding.tsx`.
  */
-export function OnboardingFlow({
-  onComplete,
-  runtimeInstructions,
-  onRuntimeRefresh,
-  runtimesPending,
-}: {
+interface OnboardingFlowProps {
   onComplete: (workspace?: Workspace, issueId?: string) => void;
   runtimeInstructions?: React.ReactNode;
   /** Desktop wires this to restart the bundled daemon so a freshly
@@ -117,7 +113,23 @@ export function OnboardingFlow({
    *  step doesn't flash "no runtime found" while the daemon is still booting
    *  or probing CLI versions (MUL-5119). Web omits it. */
   runtimesPending?: boolean;
-}) {
+}
+
+export function OnboardingFlow(props: OnboardingFlowProps) {
+  return (
+    <>
+      <OnboardingLogoutButton />
+      <OnboardingStepFlow {...props} />
+    </>
+  );
+}
+
+function OnboardingStepFlow({
+  onComplete,
+  runtimeInstructions,
+  onRuntimeRefresh,
+  runtimesPending,
+}: OnboardingFlowProps) {
   const { t } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
   if (!user) {
