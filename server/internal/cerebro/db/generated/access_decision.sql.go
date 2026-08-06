@@ -15,11 +15,11 @@ const appendCerebroAccessDecisionLedger = `-- name: AppendCerebroAccessDecisionL
 INSERT INTO cerebro_access_decision_ledger (
     workspace_id, agent_id, runtime_id, on_behalf_of_user_id, task_id, issue_id,
     observed_tool_name, canonical_capability_id, legacy_decision, legacy_path,
-    shadow_decision, policy_decision, evidence_level, differs, reason
+    shadow_decision, policy_decision, evidence_level, differs, reason_code, reason
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
-    $11, $12, $13, $14, $15
+    $11, $12, $13, $14, $15, $16
 )
 `
 
@@ -38,6 +38,7 @@ type AppendCerebroAccessDecisionLedgerParams struct {
 	PolicyDecision        string      `json:"policy_decision"`
 	EvidenceLevel         string      `json:"evidence_level"`
 	Differs               bool        `json:"differs"`
+	ReasonCode            string      `json:"reason_code"`
 	Reason                string      `json:"reason"`
 }
 
@@ -57,7 +58,64 @@ func (q *Queries) AppendCerebroAccessDecisionLedger(ctx context.Context, arg App
 		arg.PolicyDecision,
 		arg.EvidenceLevel,
 		arg.Differs,
+		arg.ReasonCode,
 		arg.Reason,
 	)
 	return err
+}
+
+const listTaskAccessDecisionDiagnostics = `-- name: ListTaskAccessDecisionDiagnostics :many
+SELECT observed_tool_name,
+       COALESCE(canonical_capability_id, '') AS canonical_capability_id,
+       legacy_decision AS decision,
+       policy_decision,
+       legacy_path,
+       reason_code,
+       reason,
+       created_at
+FROM cerebro_access_decision_ledger
+WHERE task_id = $1
+  AND legacy_decision = 'deny'
+ORDER BY created_at DESC
+LIMIT 50
+`
+
+type ListTaskAccessDecisionDiagnosticsRow struct {
+	ObservedToolName      string             `json:"observed_tool_name"`
+	CanonicalCapabilityID string             `json:"canonical_capability_id"`
+	Decision              string             `json:"decision"`
+	PolicyDecision        string             `json:"policy_decision"`
+	LegacyPath            string             `json:"legacy_path"`
+	ReasonCode            string             `json:"reason_code"`
+	Reason                string             `json:"reason"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListTaskAccessDecisionDiagnostics(ctx context.Context, taskID pgtype.UUID) ([]ListTaskAccessDecisionDiagnosticsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskAccessDecisionDiagnostics, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskAccessDecisionDiagnosticsRow{}
+	for rows.Next() {
+		var i ListTaskAccessDecisionDiagnosticsRow
+		if err := rows.Scan(
+			&i.ObservedToolName,
+			&i.CanonicalCapabilityID,
+			&i.Decision,
+			&i.PolicyDecision,
+			&i.LegacyPath,
+			&i.ReasonCode,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

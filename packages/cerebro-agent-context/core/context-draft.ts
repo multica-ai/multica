@@ -1,5 +1,6 @@
 export interface ContextDraftFields {
   instructions: string;
+  runtimeId: string;
   model: string;
   thinkingLevel: string;
   // FIR-3212 brief-layer modes. Stored inside the agent's runtime_config, but
@@ -11,6 +12,9 @@ export interface ContextDraftFields {
   // runtime's own system prompt, replace it, or splice it into the user
   // message. Stored in runtime_config next to the two brief-layer modes.
   systemPromptMode: string;
+  speedMode: string;
+  maxTurns: string;
+  timeoutMinutes: string;
 }
 
 // FIR-3212: read the system-prompt delivery mode out of runtime_config.
@@ -42,6 +46,22 @@ export function readBriefLayerMode(
   const raw = runtimeConfig?.[key];
   if (typeof raw !== "string" || raw === "full") return "";
   return raw;
+}
+
+export function readSpeedMode(
+  runtimeConfig: Record<string, unknown> | undefined | null,
+): string {
+  return runtimeConfig?.["speed_mode"] === "fast" ? "fast" : "";
+}
+
+export function readPositiveIntegerSetting(
+  runtimeConfig: Record<string, unknown> | undefined | null,
+  key: "max_turns" | "timeout_minutes",
+): string {
+  const value = runtimeConfig?.[key];
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? String(value)
+    : "";
 }
 
 export function bumpPatch(version: string): string {

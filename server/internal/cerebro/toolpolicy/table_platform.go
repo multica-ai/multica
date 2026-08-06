@@ -1,6 +1,6 @@
 package toolpolicy
 
-// table_platform.go appends the Multica platform actions (FIR-2594) to the admin
+// table_platform.go appends the Multica platform actions (FIR-4220) to the admin
 // table. table.go lists the capability-wide rows for every tool a runtime
 // reported into cerebro_capability; table_repo.go adds the per-repo rows. Neither
 // covers the platform's OWN mutating operations — create an issue, add a comment,
@@ -67,21 +67,35 @@ func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs 
 			Source:                platformcatalog.Source,
 			ManagedExternally:     c.ManagedExternally,
 			ExternalSecurityOwner: c.ExternalSecurityOwner,
+			WorkspaceIntakeSwitch: c.WorkspaceIntakeSwitch,
+			CallableIdentities:    append([]string(nil), c.ToolBindings...),
 			Layers:                map[Layer]Setting{},
 			Conditions:            map[Layer]*Condition{},
 		}
 		// Externally enforced capabilities are visible for auditability but never
 		// read a stored policy row. Legacy advisory rows must not make Settings
 		// imply that an Allow/Ask/Deny choice changes the live security boundary.
-		if cell, ok := settings[resourcePolicyKey{toolKey: c.Key}]; ok && !c.ManagedExternally {
-			for l, set := range cell.layers {
-				row.Layers[l] = set
-			}
-			for l, cond := range cell.conditions {
-				row.Conditions[l] = cond
-			}
-			if len(cell.groups) > 0 {
-				row.Layers[LayerGroup] = CombineGroups(cell.groups...)
+		// Exception: a WorkspaceIntakeSwitch capability's workspace-layer row is
+		// read at its intake point (FIR-4220 slice 2), so that one layer shows.
+		if cell, ok := settings[resourcePolicyKey{toolKey: c.Key}]; ok {
+			switch {
+			case !c.ManagedExternally:
+				for l, set := range cell.layers {
+					row.Layers[l] = set
+				}
+				for l, cond := range cell.conditions {
+					row.Conditions[l] = cond
+				}
+				if len(cell.groups) > 0 {
+					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
+				}
+			case c.WorkspaceIntakeSwitch:
+				if set, ok := cell.layers[LayerWorkspace]; ok {
+					row.Layers[LayerWorkspace] = set
+				}
+				if cond, ok := cell.conditions[LayerWorkspace]; ok {
+					row.Conditions[LayerWorkspace] = cond
+				}
 			}
 		}
 		row.Effective, err = s.resolveTablePermission(ctx, in, c.Key, row.Layers)

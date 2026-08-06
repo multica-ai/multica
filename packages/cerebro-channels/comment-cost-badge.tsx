@@ -9,6 +9,7 @@ import {
 import { issueCommentCostsOptions } from "@multica/core/issues/queries";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { formatPromptCacheHitRatio } from "@multica/cerebro-format-cost";
 
 /**
  * FIR-39 — per-comment spend badge shown under an agent comment on an issue
@@ -80,6 +81,8 @@ export function CommentCostBadge({
           <span className="text-right">{formatTokens(cost.cache_read_tokens)}</span>
           <span>Cache write</span>
           <span className="text-right">{formatTokens(cost.cache_write_tokens)}</span>
+          <span>Cache hit ratio</span>
+          <span className="text-right">{formatPromptCacheHitRatio(cost.input_tokens, cost.cache_read_tokens, cost.cache_write_tokens)}</span>
         </div>
       </TooltipContent>
     </Tooltip>

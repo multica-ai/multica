@@ -53,6 +53,7 @@ import { EntityMetaHeader } from "../components/entity-meta-header";
 import { FindReplaceBar } from "../components/find-replace-bar";
 import { FolderSuggestionBanner } from "../components/folder-suggestion-banner";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { EditorFormattingToolbar } from "@multica/cerebro-ui";
 import type { Artifact } from "@multica/core/types";
 
 // The live editor instance ContentEditor hands back via onEditorReady. Derived
@@ -157,6 +158,7 @@ function MarkdownDocumentEditor({
   artifact,
   value,
   remountToken,
+  editor,
   onSave,
   onBodyChange,
   onEditorReady,
@@ -168,6 +170,7 @@ function MarkdownDocumentEditor({
   // inline editor in place.
   value: string;
   remountToken: number;
+  editor: DocumentEditorInstance | null;
   onSave: (body: string) => Promise<void>;
   onBodyChange?: (body: string) => void;
   // FIR-1621 — same select-and-comment bridge the Notes editor uses. onEditorReady
@@ -244,6 +247,10 @@ function MarkdownDocumentEditor({
           )}
         </div>
       </div>
+      <EditorFormattingToolbar
+        editor={editor}
+        onCommentOnSelection={onCommentOnSelection}
+      />
       <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
         <ContentEditor
           key={`${artifact.id}:${remountToken}`}
@@ -251,6 +258,7 @@ function MarkdownDocumentEditor({
           onUpdate={handleUpdate}
           onEditorReady={onEditorReady}
           onCommentOnSelection={onCommentOnSelection}
+          showBubbleMenu={false}
           debounceMs={800}
           placeholder="Just start writing…"
           // FIR-1621 — Documents are full-page surfaces, so the editor fills the
@@ -304,8 +312,20 @@ export function DocumentViewPage({
   // FIR-1621 "marker og kommentér" — same select-and-comment state the Notes
   // editor owns: the live editor (for the anchor highlight), the in-progress
   // selection being commented on, and which existing comment is "active".
-  const [editor, setEditor] = React.useState<DocumentEditorInstance | null>(
-    null,
+  const [editorSlot, setEditorSlot] = React.useState<{
+    artifactId: string;
+    editor: DocumentEditorInstance;
+  } | null>(null);
+  const editor =
+    editorSlot && editorSlot.artifactId === artifact?.id
+      ? editorSlot.editor
+      : null;
+  const handleEditorReady = React.useCallback(
+    (nextEditor: DocumentEditorInstance) => {
+      if (!artifact) return;
+      setEditorSlot({ artifactId: artifact.id, editor: nextEditor });
+    },
+    [artifact],
   );
   const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
   const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(
@@ -332,7 +352,6 @@ export function DocumentViewPage({
     setShowVersions(false);
     setDraftQuote(null);
     setActiveAnchorId(null);
-    setEditor(null);
   }, [artifact?.id]);
   React.useEffect(() => {
     setDocBody(artifact?.body ?? "");
@@ -571,9 +590,10 @@ export function DocumentViewPage({
                   artifact={artifact}
                   value={docBody || artifact.body}
                   remountToken={replaceToken}
+                  editor={editor}
                   onSave={handleSaveMarkdownBody}
                   onBodyChange={setDocBody}
-                  onEditorReady={commentsEnabled ? setEditor : undefined}
+                  onEditorReady={handleEditorReady}
                   onCommentOnSelection={
                     commentsEnabled ? startCommentOnSelection : undefined
                   }

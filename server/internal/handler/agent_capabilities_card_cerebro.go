@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,24 +107,33 @@ const (
 // AgentCapabilityTool is one tool/permission resolved for this agent, with the
 // effective verdict and which layer decided it.
 type AgentCapabilityTool struct {
-	Key               string   `json:"key"`
-	Title             string   `json:"title,omitempty"`
-	Source            string   `json:"source,omitempty"`
-	Category          string   `json:"category,omitempty"`
-	Permission        string   `json:"permission"`           // allow | ask | deny
-	DecidedBy         string   `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
-	Reason            string   `json:"reason,omitempty"`
-	ManagedExternally bool     `json:"managed_externally"`
-	CappedByGroups    []string `json:"capped_by_groups,omitempty"`
+	Key                   string `json:"key"`
+	Title                 string `json:"title,omitempty"`
+	Source                string `json:"source,omitempty"`
+	Category              string `json:"category,omitempty"`
+	DeliveryChannel       string `json:"delivery_channel,omitempty"`
+	Permission            string `json:"permission"`           // allow | ask | deny
+	DecidedBy             string `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
+	Reason                string `json:"reason,omitempty"`
+	ManagedExternally     bool   `json:"managed_externally"`
+	ExternalSecurityOwner string `json:"external_security_owner,omitempty"` // CEREBRO-PATCH(agent-capabilities-external-security-owner): expose the real owner of read-only permissions.
+	// WorkspaceIntakeSwitch marks a managed-external machine-intake boundary
+	// whose workspace-layer policy row is a live off-switch (FIR-4220), so the
+	// card can say WHERE the deciding control lives instead of "not wired".
+	WorkspaceIntakeSwitch bool     `json:"workspace_intake_switch,omitempty"`
+	CappedByGroups        []string `json:"capped_by_groups,omitempty"`
 	// The effective truth model keeps the distinct questions separate: policy,
 	// runtime presence, live enforcement, callability, and observed proof.
-	Allowed       bool   `json:"allowed"`
-	Available     bool   `json:"available"`
-	Enforced      bool   `json:"enforced"`
-	Callable      bool   `json:"callable"`
-	Verified      bool   `json:"verified"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	HowToFix      string `json:"how_to_fix,omitempty"`
+	Allowed             bool                 `json:"allowed"`
+	Available           bool                 `json:"available"`
+	Enforced            bool                 `json:"enforced"`
+	Callable            bool                 `json:"callable"`
+	Verified            bool                 `json:"verified"`
+	BlockedReason       string               `json:"blocked_reason,omitempty"`
+	HowToFix            string               `json:"how_to_fix,omitempty"`
+	Verdict             *taskmandate.Verdict `json:"verdict,omitempty"`
+	CallableIdentities  []string             `json:"callable_identities,omitempty"`
+	AuthorizedCallables []string             `json:"authorized_callables,omitempty"`
 	// CEREBRO-PATCH(agent-capabilities-tool-availability): FIR-3398 — what has
 	// been PROVED about this tool on the agent's runtime. Permission above is
 	// what policy allows; this is whether the capability is really there.
@@ -144,30 +154,32 @@ type AgentCapabilityConnEndpoint struct {
 	// Summary is the endpoint's one-line label captured from the API's OpenAPI
 	// spec at discovery time (e.g. "Execute data source: Orders"); empty when
 	// the spec declared none.
-	Summary       string `json:"summary,omitempty"`
-	Permission    string `json:"permission"`
-	Allowed       bool   `json:"allowed"`
-	Available     bool   `json:"available"`
-	Enforced      bool   `json:"enforced"`
-	Callable      bool   `json:"callable"`
-	Verified      bool   `json:"verified"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	HowToFix      string `json:"how_to_fix,omitempty"`
+	Summary       string               `json:"summary,omitempty"`
+	Permission    string               `json:"permission"`
+	Allowed       bool                 `json:"allowed"`
+	Available     bool                 `json:"available"`
+	Enforced      bool                 `json:"enforced"`
+	Callable      bool                 `json:"callable"`
+	Verified      bool                 `json:"verified"`
+	BlockedReason string               `json:"blocked_reason,omitempty"`
+	HowToFix      string               `json:"how_to_fix,omitempty"`
+	Verdict       *taskmandate.Verdict `json:"verdict,omitempty"`
 }
 
 // AgentCapabilityConnTool is one MCP tool a connection exposes, with this agent's
 // effective permission on it (empty when the tool-policy table has no row).
 type AgentCapabilityConnTool struct {
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Permission    string `json:"permission"`
-	Allowed       bool   `json:"allowed"`
-	Available     bool   `json:"available"`
-	Enforced      bool   `json:"enforced"`
-	Callable      bool   `json:"callable"`
-	Verified      bool   `json:"verified"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	HowToFix      string `json:"how_to_fix,omitempty"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description,omitempty"`
+	Permission    string               `json:"permission"`
+	Allowed       bool                 `json:"allowed"`
+	Available     bool                 `json:"available"`
+	Enforced      bool                 `json:"enforced"`
+	Callable      bool                 `json:"callable"`
+	Verified      bool                 `json:"verified"`
+	BlockedReason string               `json:"blocked_reason,omitempty"`
+	HowToFix      string               `json:"how_to_fix,omitempty"`
+	Verdict       *taskmandate.Verdict `json:"verdict,omitempty"`
 }
 
 // AgentCapabilityConnection is one external system the agent reaches, with the
@@ -373,7 +385,8 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid task scope", http.StatusForbidden)
 			return
 		}
-		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
+		generation, _ := strconv.ParseInt(strings.TrimSpace(r.Header.Get("X-Task-Mandate-Generation")), 10, 64)
+		ApplyTaskMandate(r.Context(), h.taskMandateEnforcementEnabled(r.Context(), workspaceID), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card, generation) // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 keep Capabilities aligned with call-time enforcement.
 	}
 	writeJSON(w, http.StatusOK, card)
 }
@@ -384,34 +397,86 @@ type AgentCapabilityTaskMandate interface {
 	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
 }
 
-// ApplyTaskMandate overlays the immutable task ceiling on a canonical card.
-// Both the HTTP route and Gateway tool call this exact function.
-func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
+type agentCapabilityTaskMandateGeneration interface {
+	AuthorizeClaimGeneration(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, int64, string) error
+}
+
+// ApplyTaskMandate overlays the immutable task ceiling on every callable the
+// capabilities card reports. Platform families resolve through their exact
+// ToolBindings; a broad permission key is never inferred as a callable grant.
+func ApplyTaskMandate(ctx context.Context, enforcementEnabled bool, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities, claimGeneration ...int64) { // CEREBRO-PATCH(task-mandate-capabilities-circuit-breaker): FIR-4289 share the circuit breaker with every capability surface.
 	if !enforcementEnabled || mandates == nil || card == nil || !taskID.Valid {
 		return
 	}
 	for i := range card.Tools {
-		if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, card.Tools[i].Key); err != nil {
-			card.Tools[i].Permission = "deny"
-			card.Tools[i].Reason = fmt.Sprintf("task mandate denied the capability: %v", err)
-			card.Tools[i].Allowed = false
-			card.Tools[i].Callable = false
-			card.Tools[i].BlockedReason = card.Tools[i].Reason
-			card.Tools[i].HowToFix = "Start a new task whose issued mandate includes this capability."
+		tool := &card.Tools[i]
+		capability, ok := platformcatalog.ByKey(tool.Key)
+		if !ok || len(capability.ToolBindings) == 0 {
+			continue
 		}
+		tool.CallableIdentities = append([]string(nil), capability.ToolBindings...)
+		var firstErr error
+		for _, callable := range capability.ToolBindings {
+			if err := authorizeCapabilityTaskMandate(ctx, mandates, taskID, workspaceID, agentID, callable, claimGeneration); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			tool.AuthorizedCallables = append(tool.AuthorizedCallables, callable)
+		}
+		if len(tool.AuthorizedCallables) > 0 {
+			verdict := taskmandate.AllowedVerdict()
+			tool.Verdict = &verdict
+			continue
+		}
+		verdict := taskmandate.VerdictForError(firstErr)
+		tool.Permission = "deny"
+		tool.Allowed = false
+		tool.Callable = false
+		tool.BlockedReason = verdict.Message
+		tool.HowToFix = taskMandateRecoveryCopy(verdict.RecoveryAction)
+		tool.Verdict = &verdict
 	}
 	for i := range card.Connections {
 		for j := range card.Connections[i].Tools {
 			tool := &card.Connections[i].Tools[j]
 			callableName := cerebrotoolpolicy.MCPToolToken(card.Connections[i].Name, tool.Name)
-			if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, callableName); err != nil {
+			if err := authorizeCapabilityTaskMandate(ctx, mandates, taskID, workspaceID, agentID, callableName, claimGeneration); err != nil {
+				verdict := taskmandate.VerdictForError(err)
 				tool.Permission = "deny"
 				tool.Allowed = false
 				tool.Callable = false
-				tool.BlockedReason = fmt.Sprintf("task mandate denied the capability: %v", err)
-				tool.HowToFix = "Start a new task whose issued mandate includes this capability."
+				tool.BlockedReason = verdict.Message
+				tool.HowToFix = taskMandateRecoveryCopy(verdict.RecoveryAction)
+				tool.Verdict = &verdict
 			}
 		}
+	}
+	applyCerebroTaskMandateEndpointLimits(ctx, mandates, taskID, workspaceID, agentID, card, claimGeneration) // CEREBRO-PATCH(task-mandate-api-capability-parity): keep API endpoint capabilities aligned with call-time Task Mandate enforcement.
+}
+
+func authorizeCapabilityTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, callable string, claimGeneration []int64) error {
+	if len(claimGeneration) > 0 {
+		if authorizer, ok := mandates.(agentCapabilityTaskMandateGeneration); ok {
+			return authorizer.AuthorizeClaimGeneration(ctx, taskID, workspaceID, agentID, claimGeneration[0], callable)
+		}
+	}
+	return mandates.Authorize(ctx, taskID, workspaceID, agentID, callable)
+}
+
+func taskMandateRecoveryCopy(action taskmandate.RecoveryAction) string {
+	switch action {
+	case taskmandate.RecoveryRetryClaim:
+		return "Retry the claim before calling this capability."
+	case taskmandate.RecoveryRefreshTaskContext:
+		return "Refresh the task context before calling this capability."
+	case taskmandate.RecoveryFixInventory:
+		return "Fix the callable inventory and issue a new claim."
+	case taskmandate.RecoveryRetry:
+		return "Retry the Task Mandate decision."
+	default:
+		return "Start a new task whose issued mandate includes this capability."
 	}
 }
 
@@ -644,12 +709,18 @@ func mergeCanonicalCapabilityTools(tools []AgentCapabilityTool, provider string)
 			if (tool.Title == "" || tool.Title == tool.Key) && current.Title != "" {
 				tool.Title = current.Title
 			}
+			if tool.DeliveryChannel == "" {
+				tool.DeliveryChannel = current.DeliveryChannel
+			}
 			tool.ManagedExternally = tool.ManagedExternally || current.ManagedExternally
 			out[at] = tool
 			continue
 		}
 		if (current.Title == "" || current.Title == current.Key) && tool.Title != "" {
 			current.Title = tool.Title
+		}
+		if current.DeliveryChannel == "" {
+			current.DeliveryChannel = tool.DeliveryChannel
 		}
 		current.ManagedExternally = current.ManagedExternally || tool.ManagedExternally
 		out[at] = current
@@ -732,20 +803,25 @@ func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow, connectionNames m
 
 func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 	t := AgentCapabilityTool{
-		Key:               row.ToolKey,
-		Title:             row.Title,
-		Source:            row.Source,
-		Category:          row.Category,
-		Permission:        string(row.Effective.Setting),
-		DecidedBy:         string(row.Effective.DecidedBy),
-		Reason:            row.Effective.Reason,
-		ManagedExternally: row.ManagedExternally,
-		Allowed:           row.Effective.Setting == cerebrotoolpolicy.SettingAllow,
-		Enforced:          true,
+		Key:                   row.ToolKey,
+		Title:                 row.Title,
+		Source:                row.Source,
+		Category:              row.Category,
+		Permission:            string(row.Effective.Setting),
+		DecidedBy:             string(row.Effective.DecidedBy),
+		Reason:                row.Effective.Reason,
+		ManagedExternally:     row.ManagedExternally,
+		ExternalSecurityOwner: row.ExternalSecurityOwner, // CEREBRO-PATCH(agent-capabilities-external-security-owner): keep Capabilities aligned with Settings.
+		WorkspaceIntakeSwitch: row.WorkspaceIntakeSwitch,
+		Allowed:               row.Effective.Setting == cerebrotoolpolicy.SettingAllow,
+		Enforced:              true,
 	}
 	if row.Source == platformcatalog.Source {
 		t.Available = true
 		t.Enforced = platformcatalog.Enforced(row.ToolKey)
+		if !row.ManagedExternally {
+			t.DeliveryChannel = "multica"
+		}
 	}
 	t.Callable = t.Allowed && t.Available && t.Enforced
 	setCapabilityBlockExplanation(&t)
@@ -785,6 +861,14 @@ func setCapabilityBlockExplanation(tool *AgentCapabilityTool) {
 			tool.HowToFix = "Change the effective permission at the deciding layer."
 		}
 	case !tool.Enforced:
+		if tool.WorkspaceIntakeSwitch {
+			// FIR-4220: intake boundaries ARE enforced — at the machine-intake
+			// point, by their authenticator plus the workspace-layer off-switch —
+			// they are just not part of an agent's own policy-gated call surface.
+			tool.BlockedReason = "This is a machine-intake boundary authenticated by " + tool.ExternalSecurityOwner + ", not an agent-callable action"
+			tool.HowToFix = "Turn the intake on or off with the workspace-layer decision in Settings → Permissions."
+			return
+		}
 		tool.BlockedReason = "This capability is not wired to a live enforcement point"
 		tool.HowToFix = "Wire the capability to its call-time authorizer before relying on it."
 	case !tool.Available:

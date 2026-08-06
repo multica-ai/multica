@@ -36,6 +36,10 @@ func (s *Store) Append(ctx context.Context, entry Entry) error {
 	if err != nil {
 		return err
 	}
+	reasonCode := entry.ReasonCode
+	if reasonCode == "" {
+		reasonCode = ReasonLegacyUnknown
+	}
 	return s.q.AppendCerebroAccessDecisionLedger(ctx, cerebrodb.AppendCerebroAccessDecisionLedgerParams{
 		WorkspaceID:           workspaceID,
 		AgentID:               agentID,
@@ -54,6 +58,7 @@ func (s *Store) Append(ctx context.Context, entry Entry) error {
 		PolicyDecision: string(entry.PolicyDecision),
 		EvidenceLevel:  string(entry.EvidenceLevel),
 		Differs:        false,
+		ReasonCode:     string(reasonCode),
 		Reason:         entry.Reason,
 	})
 }

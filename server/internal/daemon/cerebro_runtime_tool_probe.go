@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -68,6 +69,27 @@ type providerInventory struct {
 	// the policy chain says. Every entry must cite the live measurement it came
 	// from, so it is evidence rather than a guess.
 	Native []string
+	// Channels are further MEASURED channels the primary probe is structurally
+	// blind to. Native hand-lists names; a channel asks a live server, so it
+	// cannot drift the way a hand-typed list does. Each result is spelled with
+	// the channel's Prefix, because the same server is spelled differently by
+	// different runtimes (Claude Code calls an MCP tool
+	// "mcp__<server>__<tool>", the Pi harness registers it bare). A channel is
+	// best-effort: its failure leaves the primary measurement intact.
+	Channels []toolChannel
+}
+
+// toolChannel is one additional measured source of callable names, with the
+// spelling the runtime uses when it sends that name to /tool-policy/resolve.
+type toolChannel struct {
+	// Probe measures the channel's inventory. Names come back bare.
+	Probe toolProbe
+	// Prefix is prepended to every measured name to produce the call-time
+	// spelling. Empty means the runtime calls the names bare.
+	Prefix string
+	// Reason documents which channel this is and the live measurement it was
+	// added from, so a future reader can re-verify instead of trusting it.
+	Reason string
 }
 
 // providerInventories covers every provider agent.New supports. Keep it in
@@ -76,7 +98,26 @@ var providerInventories = map[string]providerInventory{
 	// Verified: the claude CLI announces its tool list in the system/init line
 	// of its own stream-json output. Live evidence: runtime 3a795630 on
 	// Jespers-MacBook-Pro.local reports discovery_method="probed" with 182 tools.
-	"claude": {Probe: probeClaudeToolNames},
+	//
+	// The claude probe is blind to ONE channel by construction: it runs the CLI
+	// standalone, while the daemon starts a task's claude with an injected
+	// `multica` MCP server (CEREBRO-PATCH(daemon-claude-mcp-self-entry) in
+	// server/pkg/agent/claude.go) plus `--strict-mcp-config`. Multica's own
+	// actions therefore never reach the capability register, never reach the
+	// task mandate, and every mcp__multica__* call is refused with "task mandate
+	// denied the call" — while the 70 platform-catalog rows on the Capabilities
+	// card all read deny with reason "mandate denied capability: tool outside
+	// task mandate". Live evidence, agent Sara (d60e3580) on 2026-07-29: 135
+	// capability rows, 65 reported by the runtime (firtal-browser, hooks,
+	// secret bindings, claude built-ins), 0 spelled mcp__multica__*, and all 70
+	// platform rows callable=false. The Multica channel closes exactly that gap
+	// — measured, not hand-typed, from the same `multica mcp serve` process the
+	// injected server starts.
+	"claude": {Probe: probeClaudeToolNames, Channels: []toolChannel{{
+		Probe:  probeMulticaMCPTools,
+		Prefix: "mcp__multica__",
+		Reason: "daemon injects the multica MCP server at spawn; the standalone claude probe cannot see it (FIR-4047)",
+	}}},
 
 	// Verified 2026-07-26 on Jespers-MacBook-Pro.local: the channel answers
 	// initialize + tools/list in 1.8s with 249 tools. This is not an approximation
@@ -165,10 +206,44 @@ func probeProviderTools(providerType, executable string) (tools []string, ok boo
 	if err != nil || len(measured) == 0 {
 		return nil, false
 	}
-	// Union, never replace: Native covers the second channel the probe is blind
-	// to, so dropping it would re-open the lockout the measurement was added to
-	// close. dedupeToolNames keeps the result stable if a name appears in both.
-	return dedupeToolNames(append(measured, entry.Native...)), true
+	// Union, never replace: Native and Channels cover the further channels the
+	// primary probe is blind to, so dropping them would re-open the lockout the
+	// measurement was added to close. dedupeToolNames keeps the result stable if
+	// a name appears in more than one channel.
+	measured = append(measured, entry.Native...)
+	for _, channel := range entry.Channels {
+		measured = append(measured, probeToolChannel(providerType, executable, channel)...)
+	}
+	return dedupeToolNames(measured), true
+}
+
+// probeToolChannel measures one additional channel. It is deliberately
+// best-effort: a channel that cannot start must never discard the primary
+// measurement, because an empty inventory denies every call the runtime makes.
+// It carries its own budget so a slow primary probe cannot starve it.
+func probeToolChannel(providerType, executable string, channel toolChannel) []string {
+	if channel.Probe == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	names, err := channel.Probe(ctx, executable)
+	if err != nil {
+		slog.Warn("runtime tool channel probe failed",
+			"provider", providerType,
+			"prefix", channel.Prefix,
+			"reason", channel.Reason,
+			"error", err,
+		)
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, channel.Prefix+name)
+		}
+	}
+	return out
 }
 
 // probeClaudeToolNames adapts the existing claude probe to the toolProbe shape.

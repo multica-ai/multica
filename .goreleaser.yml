@@ -66,12 +66,14 @@ brews:
   - name: multica
     ids:
       - versioned
-    # Firtal fork publishes its formula to firtal-group/homebrew-tap so the
-    # fleet self-updates from the fork channel (carrying every cerebro patch),
-    # not upstream multica-ai. Needs the HOMEBREW_TAP_GITHUB_TOKEN secret with
-    # write access to firtal-group/homebrew-tap; when that secret is absent the
-    # release job passes --skip=homebrew (see .github/workflows/release.yml) so
-    # the per-os/arch binaries still ship to the fork's GitHub Release.
+    # This block is EFFECTIVELY UPSTREAM-ONLY now. On the Firtal fork the
+    # release job always passes --skip=homebrew (see
+    # .github/workflows/release.yml), because firtal-group/homebrew-tap
+    # publishes its own formula AND mirrors the CLI assets from its scheduled
+    # workflow (mirror-cli-from-cerebro.yml, every 20 min) using its own
+    # credential. Publishing from here as well duplicated that work and failed
+    # the whole release on a 403 whenever HOMEBREW_TAP_GITHUB_TOKEN lacked
+    # contents:write (FIR-2286, FIR-2107). Kept for upstream multica-ai.
     repository:
       owner: firtal-group
       name: homebrew-tap

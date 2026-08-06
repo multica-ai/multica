@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -189,7 +190,27 @@ func wkService() *Service {
 		Queries: queries,
 		Tasks:   service.NewTaskService(queries, nil, nil, bus),
 		Bus:     bus,
+		Hooks:   wakeupManagedPolicyFixture{},
 	}
+}
+
+type wakeupManagedPolicyFixture struct{}
+
+func (wakeupManagedPolicyFixture) Evaluate(_ context.Context, event workflows.HookEvent) (workflows.HookResult, error) {
+	result := workflows.HookResult{Evaluated: true, Decision: workflows.HookAllow}
+	if event.Type != workflows.HookOnWakeupFireFailure {
+		return result, nil
+	}
+	failure, _ := event.Context["failure"].(map[string]any)
+	reason, _ := failure["reason"].(string)
+	switch reason {
+	case "active_task", postponeReasonOffline, postponeReasonNoRuntime, postponeReasonDisabled:
+		result.Decision = workflows.HookModify
+		result.Modifications = map[string]any{
+			"failure_action": "postpone", "postpone_seconds": 300, "notify_after": 3,
+		}
+	}
+	return result, nil
 }
 
 func TestResolveWakeupParent_RootOrigin(t *testing.T) {
@@ -236,6 +257,23 @@ func TestResolveWakeupParent_CrossIssueRejected(t *testing.T) {
 	got := svc.resolveWakeupParent(ctx, row, wkOtherIssue)
 	if got.Valid {
 		t.Fatalf("parent = %s, want zero (cross-issue rejected, no fallback)", util.UUIDToString(got))
+	}
+}
+
+func TestValidateIssueAndAgentRejectsForeignWorkspaceOrAgent(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("database unavailable")
+	}
+	ctx := context.Background()
+	svc := wkService()
+
+	foreignWorkspace := pgtype.UUID{Bytes: [16]byte{99}, Valid: true}
+	if err := svc.validateIssueAndAgent(ctx, foreignWorkspace, wkIssueID, wkAgentID); err == nil {
+		t.Fatal("foreign workspace must not admit the issue and agent")
+	}
+	foreignAgent := pgtype.UUID{Bytes: [16]byte{98}, Valid: true}
+	if err := svc.validateIssueAndAgent(ctx, wkWorkspaceID, wkIssueID, foreignAgent); err == nil {
+		t.Fatal("unknown agent must not be admitted into a wakeup")
 	}
 }
 
@@ -588,5 +626,51 @@ func TestPostponeEmitsParkedActivityOnceAndResetsOnDispatch(t *testing.T) {
 	}
 	if got := getPostpones(); got != 0 {
 		t.Fatalf("consecutive_postpones after successful dispatch = %d, want 0", got)
+	}
+}
+
+func TestDispatchPostponesInsteadOfCancellingActiveContinuation(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+	var taskID pgtype.UUID
+	if err := wkPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+		VALUES ($1, $2, $3, 'running', 0, '{}'::jsonb)
+		RETURNING id
+	`, wkAgentID, wkRuntimeID, wkOtherIssue).Scan(&taskID); err != nil {
+		t.Fatalf("create active continuation: %v", err)
+	}
+	row, err := svc.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
+		WorkspaceID: wkWorkspaceID, AgentID: wkAgentID, IssueID: wkOtherIssue,
+		Prompt: "resume after current work", TriggerType: TriggerTime,
+		FireAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create wakeup: %v", err)
+	}
+	t.Cleanup(func() {
+		wkPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id=$1`, taskID)
+		wkPool.Exec(context.Background(), `DELETE FROM cerebro_agent_wakeup WHERE id=$1`, row.ID)
+	})
+
+	if err := svc.dispatch(ctx, row); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	var taskStatus, wakeupState string
+	var postpones int32
+	if err := wkPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id=$1`, taskID).Scan(&taskStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := wkPool.QueryRow(ctx, `SELECT state, consecutive_postpones FROM cerebro_agent_wakeup WHERE id=$1`, row.ID).Scan(&wakeupState, &postpones); err != nil {
+		t.Fatal(err)
+	}
+	if taskStatus != "running" {
+		t.Fatalf("active continuation status = %q, want running", taskStatus)
+	}
+	if wakeupState != StatePending || postpones != 1 {
+		t.Fatalf("wakeup state=%q postpones=%d, want pending/1", wakeupState, postpones)
 	}
 }

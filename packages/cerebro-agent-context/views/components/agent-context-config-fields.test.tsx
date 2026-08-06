@@ -12,7 +12,21 @@ import type { Agent } from "@multica/core/types";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: () => ({ queryKey: ["runtimes"], queryFn: async () => [] }),
+  runtimeListOptions: () => {
+    const runtimes = [
+      {
+        id: "runtime-1",
+        name: "Claude workstation",
+        provider: "claude",
+        status: "online",
+      },
+    ];
+    return {
+      queryKey: ["runtimes"],
+      queryFn: async () => runtimes,
+      initialData: runtimes,
+    };
+  },
   runtimeModelsOptions: () => ({
     queryKey: ["runtime-models"],
     queryFn: async () => ({ supported: true, models: [] }),
@@ -49,25 +63,47 @@ function renderFields(overrides: {
   workspaceBriefMode?: string;
   toolsBriefMode?: string;
   systemPromptMode?: string;
+  speedMode?: string;
+  maxTurns?: string;
+  timeoutMinutes?: string;
+  runtimeId?: string;
+  instructions?: string;
+  controlFirst?: boolean;
   onWorkspaceBriefMode?: (v: string) => void;
   onToolsBriefMode?: (v: string) => void;
   onSystemPromptMode?: (v: string) => void;
+  onModel?: (v: string) => void;
+  onThinkingLevel?: (v: string) => void;
+  onSpeedMode?: (v: string) => void;
+  onMaxTurns?: (v: string) => void;
+  onTimeoutMinutes?: (v: string) => void;
+  onRuntimeId?: (v: string) => void;
 } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <AgentContextConfigFields
         agent={agent}
+        runtimeId={overrides.runtimeId ?? agent.runtime_id}
         model=""
         thinkingLevel=""
         workspaceBriefMode={overrides.workspaceBriefMode ?? ""}
         toolsBriefMode={overrides.toolsBriefMode ?? ""}
         systemPromptMode={overrides.systemPromptMode ?? ""}
-        onModel={() => {}}
-        onThinkingLevel={() => {}}
+        speedMode={overrides.speedMode ?? ""}
+        maxTurns={overrides.maxTurns ?? ""}
+        timeoutMinutes={overrides.timeoutMinutes ?? ""}
+        instructions={overrides.instructions}
+        controlFirst={overrides.controlFirst}
+        onModel={overrides.onModel ?? (() => {})}
+        onRuntimeId={overrides.onRuntimeId ?? (() => {})}
+        onThinkingLevel={overrides.onThinkingLevel ?? (() => {})}
         onWorkspaceBriefMode={overrides.onWorkspaceBriefMode ?? (() => {})}
         onToolsBriefMode={overrides.onToolsBriefMode ?? (() => {})}
         onSystemPromptMode={overrides.onSystemPromptMode ?? (() => {})}
+        onSpeedMode={overrides.onSpeedMode ?? (() => {})}
+        onMaxTurns={overrides.onMaxTurns ?? (() => {})}
+        onTimeoutMinutes={overrides.onTimeoutMinutes ?? (() => {})}
       />
     </QueryClientProvider>,
   );
@@ -148,5 +184,100 @@ describe("AgentContextConfigFields brief-layer controls (FIR-3212)", () => {
       target: { value: "" },
     });
     expect(onSystemPromptMode).toHaveBeenCalledWith("");
+  });
+});
+
+describe("AgentContextConfigFields control-first layout (FIR-4000)", () => {
+  it("shows one understandable row per choice instead of generic summary cards", () => {
+    renderFields({
+      controlFirst: true,
+      instructions: "Own customer outcomes.",
+      systemPromptMode: "replace",
+      workspaceBriefMode: "off",
+      toolsBriefMode: "summary",
+      speedMode: "fast",
+      maxTurns: "18",
+      timeoutMinutes: "45",
+    });
+
+    expect(screen.queryByText("At a glance")).toBeNull();
+    expect(screen.getByText("Who this agent is")).toBeTruthy();
+    expect(screen.getByText("What this agent reads before a task")).toBeTruthy();
+    expect(screen.getByText("How this agent runs")).toBeTruthy();
+    expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).value).toBe(
+      "Own customer outcomes.",
+    );
+    expect(screen.getByRole("button", { name: "Drop them" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Skips it" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "One line per connection" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect((screen.getByLabelText("Engine") as HTMLSelectElement).value).toBe(
+      agent.runtime_id,
+    );
+    expect((screen.getByLabelText("Stop after") as HTMLInputElement).value).toBe(
+      "18",
+    );
+    expect((screen.getByLabelText("Give up after") as HTMLInputElement).value).toBe(
+      "45",
+    );
+    expect(
+      screen.getByRole("link", { name: "See the whole thing →" }),
+    ).toHaveAttribute("href", "?tab=production_prompt");
+    expect(screen.getByText("Not on this screen, on purpose.")).toBeTruthy();
+  });
+
+  it("emits every plain-language choice through the versioned controls", () => {
+    const onSystemPromptMode = vi.fn();
+    const onWorkspaceBriefMode = vi.fn();
+    const onToolsBriefMode = vi.fn();
+    const onRuntimeId = vi.fn();
+    const onSpeedMode = vi.fn();
+    const onMaxTurns = vi.fn();
+    const onTimeoutMinutes = vi.fn();
+    renderFields({
+      controlFirst: true,
+      onSystemPromptMode,
+      onWorkspaceBriefMode,
+      onToolsBriefMode,
+      onRuntimeId,
+      onSpeedMode,
+      onMaxTurns,
+      onTimeoutMinutes,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Drop them" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skips it" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "One line per connection" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    fireEvent.change(screen.getByLabelText("Engine"), {
+      target: { value: agent.runtime_id },
+    });
+    fireEvent.change(screen.getByLabelText("Stop after"), {
+      target: { value: "21" },
+    });
+    fireEvent.change(screen.getByLabelText("Give up after"), {
+      target: { value: "50" },
+    });
+
+    expect(onSystemPromptMode).toHaveBeenCalledWith("replace");
+    expect(onWorkspaceBriefMode).toHaveBeenCalledWith("off");
+    expect(onToolsBriefMode).toHaveBeenCalledWith("summary");
+    expect(onSpeedMode).toHaveBeenCalledWith("fast");
+    expect(onRuntimeId).toHaveBeenCalledWith(agent.runtime_id);
+    expect(onMaxTurns).toHaveBeenCalledWith("21");
+    expect(onTimeoutMinutes).toHaveBeenCalledWith("50");
   });
 });

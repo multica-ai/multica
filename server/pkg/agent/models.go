@@ -111,10 +111,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		annotateModelSpeed(models, "claude")
 		return models, nil
 	case "codex":
-		models := codexStaticModels()
-		annotateCodexThinking(ctx, models, executablePath)
-		annotateModelSpeed(models, "codex")
-		return models, nil
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
+			models := discoverCodexModels(ctx, executablePath)
+			annotateModelSpeed(models, "codex")
+			return models, nil
+		})
 	case "gemini":
 		return geminiStaticModels(), nil
 	case "antigravity":
@@ -270,12 +271,11 @@ func claudeStaticModels() []Model {
 
 func codexStaticModels() []Model {
 	return []Model{
-		// CEREBRO-PATCH(codex-gpt-5-6-models): expose OpenAI's GPT-5.6 Codex family in the agent model picker.
+		// CEREBRO-PATCH(codex-supported-models): expose only Codex models supported by ChatGPT-account runtimes.
 		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true},
 		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai"},
 		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai"},
 		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
-		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},

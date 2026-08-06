@@ -16,6 +16,7 @@ export type CatalogApp = {
   deployment_version?: string;
   health?: "healthy" | "failed" | "provisioning" | "disabled" | "not_deployed";
   deployment_error?: string;
+  builtin_update_available?: boolean;
 };
 
 export type AppAdminSummary = {

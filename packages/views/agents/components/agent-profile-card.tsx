@@ -114,7 +114,8 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         </p>
       )}
 
-      {/* Meta rows — runtime, agent settings, skills, owner, and account usage. */}
+      {/* Meta rows — minimal set: runtime (where it lives), skills (what
+          it knows), owner (who manages it). */}
       <div className="flex flex-col gap-1.5 text-xs">
         <RuntimeRow agent={agent} runtime={runtime} />
         <AgentProfileSettings agent={agent} /> {/* CEREBRO-PATCH(profile-card-details): FIR-3660 */}

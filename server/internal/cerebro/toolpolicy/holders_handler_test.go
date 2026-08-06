@@ -85,9 +85,12 @@ func TestHandlerHolders(t *testing.T) {
 		}
 	})
 
-	t.Run("enforced is false for a surfaced-but-unwired key", func(t *testing.T) {
+	t.Run("enforced is false for a still-unwired key", func(t *testing.T) {
+		// All eight enforceable keys flipped to policy enforcement in FIR-4220;
+		// autopilot_webhook is a machine-intake boundary that stays externally
+		// managed (workspace off-switch only).
 		rec := httptest.NewRecorder()
-		h.Holders(rec, holdersRequest("owner", "rerun_issue"))
+		h.Holders(rec, holdersRequest("owner", "autopilot_webhook"))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -96,7 +99,7 @@ func TestHandlerHolders(t *testing.T) {
 			t.Fatalf("decode: %v", err)
 		}
 		if resp.Enforced {
-			t.Fatalf("enforced = true, want false for rerun_issue")
+			t.Fatalf("enforced = true, want false for autopilot_webhook")
 		}
 		// No rows seeded for this tool: holders must be an empty array, never null.
 		if resp.Holders == nil {

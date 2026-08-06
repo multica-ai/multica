@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/cerebro/failrouter"
+	// CEREBRO-PATCH(workflow-failure-classifier-test): FIR-3692 removes assertions against the retired local failure router.
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -171,24 +171,25 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 }
 
 func TestTaskFailureClassifiers(t *testing.T) {
+	// CEREBRO-PATCH(workflow-failure-classifier-cases): FIR-3692 leaves classification here while Workflow owns retry decisions.
 	cases := []struct {
 		reason       string
 		wantType     string
 		wantResumeOK bool
-		wantRetry    bool
 	}{
-		{reason: "timeout", wantType: "timeout", wantResumeOK: true, wantRetry: true},
-		{reason: "codex_semantic_inactivity", wantType: "timeout", wantResumeOK: false, wantRetry: true},
-		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
-		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
-		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
-		{reason: "agent_error.context_overflow", wantType: "agent_error", wantResumeOK: false, wantRetry: true},
-		{reason: "agent_error.empty_or_unparseable_output", wantType: "agent_error", wantResumeOK: false, wantRetry: true},
-		{reason: "agent_error.runtime_missing_executable", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
-		{reason: "agent_error", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		{reason: "timeout", wantType: "timeout", wantResumeOK: true},
+		{reason: "codex_semantic_inactivity", wantType: "timeout", wantResumeOK: false},
+		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true},
+		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false},
+		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false},
+		{reason: "agent_error.context_overflow", wantType: "agent_error", wantResumeOK: false},
+		{reason: "agent_error.empty_or_unparseable_output", wantType: "agent_error", wantResumeOK: false},
+		{reason: "agent_error.runtime_missing_executable", wantType: "agent_error", wantResumeOK: true},
+		{reason: "agent_error", wantType: "agent_error", wantResumeOK: true},
 	}
 
 	for _, tc := range cases {
+		// CEREBRO-PATCH(workflow-failure-classifier-assertions): FIR-3692 keeps only code-owned type and session-safety assertions.
 		t.Run(tc.reason, func(t *testing.T) {
 			if got := taskErrorType(tc.reason); got != tc.wantType {
 				t.Fatalf("taskErrorType(%q) = %q, want %q", tc.reason, got, tc.wantType)
@@ -196,10 +197,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 			if got := !resumeUnsafeFailureReason(tc.reason); got != tc.wantResumeOK {
 				t.Fatalf("resume-safe(%q) = %v, want %v", tc.reason, got, tc.wantResumeOK)
 			}
-			route, _ := failrouter.Lookup(tc.reason)
-			if got := route.Action == failrouter.ActionRetry; got != tc.wantRetry {
-				t.Fatalf("retry route for %q = %v, want %v", tc.reason, got, tc.wantRetry)
-			}
+			// CEREBRO-PATCH(workflow-failure-classifier-assertions): Retry policy is covered by the fork-owned Workflow tests.
 		})
 	}
 }

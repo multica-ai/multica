@@ -40,13 +40,20 @@ test("opens the allergen app as a standalone SDK-powered surface", async ({ page
     const slug = await loginAsDefault(page);
     await page.goto(`/${slug}/apps`);
     await page.getByRole("link", { name: /Allergen Formatter/ }).click();
-    const frame = page.frameLocator(`iframe[title="Allergen Formatter"]`);
-    await frame.getByLabel("Ingredients").fill("wheat flour, milk");
-    await frame.getByRole("button", { name: "Format ingredients" }).click();
-    await expect(frame.locator("#result")).toContainText("WHEAT flour, MILK");
+    const runFormatter = async () => {
+      const frame = page.frameLocator(`iframe[title="Allergen Formatter"]`);
+      await frame.getByLabel("Ingredients").fill("wheat flour, milk");
+      await frame.getByRole("button", { name: "Format ingredients" }).click();
+      await expect(frame.locator("#result")).toContainText("WHEAT flour, MILK");
+    };
+    await runFormatter();
     // The worker reached the gateway on the app's personal key, which only
     // happens when the frontend sent every field the backend requires.
     expect(gateway.calls()).toEqual(["Bearer sk_e2e"]);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await runFormatter();
+    expect(gateway.calls()).toEqual(["Bearer sk_e2e", "Bearer sk_e2e"]);
 
     await expect(page.locator("main").getByText("Workflow", { exact: true })).toHaveCount(0);
   } finally {
@@ -62,8 +69,8 @@ test("keeps the app catalog usable at phone width", async ({ page }) => {
   const api = await createTestApi();
   await api.setWorkspaceFeatureFlag("cerebro_mini_apps", true);
   try {
-    await page.setViewportSize({ width: 390, height: 844 });
     const slug = await loginAsDefault(page);
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/${slug}/apps`);
     await expect(page.getByRole("link", { name: "Build app" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
@@ -76,7 +83,7 @@ async function startAppsRuntime() {
   const { createAppsRuntime } = await import(pathToFileURL(join(process.cwd(), "apps/cerebro-apps-runtime/runtime.mjs")).href);
   const runtime = createAppsRuntime({
     bundleRoot: join(process.cwd(), "apps/cerebro-apps-runtime/fixtures"),
-    frameAncestors: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+    frameAncestors: process.env.PLAYWRIGHT_BASE_URL ?? process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
     workerIsolation: "process",
   });
   const server = createServer(async (req, res) => {

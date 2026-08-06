@@ -57,6 +57,23 @@ describe("AgentCapabilitiesSchema runtime_options", () => {
 });
 
 describe("AgentCapabilitiesSchema availability", () => {
+  it("preserves the security owner for externally managed permissions", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      tools: [
+        {
+          key: "autopilot_webhook",
+          managed_externally: true,
+          external_security_owner: "Autopilot webhook secret",
+        },
+      ],
+    });
+
+    expect(parsed.tools[0]?.managed_externally).toBe(true);
+    expect(parsed.tools[0]?.external_security_owner).toBe(
+      "Autopilot webhook secret",
+    );
+  });
+
   it("parses verified tool evidence and the card summary", () => {
     const parsed = AgentCapabilitiesSchema.parse({
       tools: [
@@ -141,6 +158,7 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
       tools: [
         {
           key: "hooks:write",
+          delivery_channel: "multica",
           permission: "deny",
           allowed: false,
           available: true,
@@ -149,11 +167,20 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
           verified: false,
           blocked_reason: "An explicit agent grant is required",
           how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+          callable_identities: ["create_workflow", "update_workflow"],
+          authorized_callables: ["create_workflow"],
+          verdict: {
+            allowed: true,
+            code: "allowed",
+            recovery_action: "none",
+            message: "The callable is inside the active Task Mandate.",
+          },
         },
       ],
     });
 
     expect(parsed.tools[0]).toMatchObject({
+      delivery_channel: "multica",
       allowed: false,
       available: true,
       enforced: true,
@@ -161,6 +188,12 @@ describe("AgentCapabilitiesSchema effective capability truth", () => {
       verified: false,
       blocked_reason: "An explicit agent grant is required",
       how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+      callable_identities: ["create_workflow", "update_workflow"],
+      authorized_callables: ["create_workflow"],
+      verdict: {
+        code: "allowed",
+        recovery_action: "none",
+      },
     });
   });
 

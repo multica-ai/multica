@@ -37,6 +37,32 @@ func (q *Queries) ApplyRockCheckIn(ctx context.Context, arg ApplyRockCheckInPara
 	return id, err
 }
 
+const assignDefaultVisionPlanSectionPages = `-- name: AssignDefaultVisionPlanSectionPages :exec
+UPDATE cerebro_vision_plan_section section
+SET page_id = page.id, column_index = layout.column_index, position = layout.position
+FROM (VALUES
+    ('core-values', 'vision', 0, 0),
+    ('core-focus', 'vision', 0, 1),
+    ('long-term-target', 'vision', 0, 2),
+    ('marketing-strategy', 'vision', 0, 3),
+    ('three-year-picture', 'vision', 1, 0),
+    ('core-processes', 'vision', 1, 1),
+    ('one-year-plan', 'traction', 0, 0),
+    ('quarterly-goals', 'traction', 0, 1),
+    ('issues-list', 'traction', 2, 0)
+) AS layout(section_key, page_key, column_index, position),
+     cerebro_vision_plan_page page
+WHERE section.workspace_id = $1 AND section.page_id IS NULL
+  AND section.key = layout.section_key
+  AND page.workspace_id = section.workspace_id
+  AND page.key = layout.page_key
+`
+
+func (q *Queries) AssignDefaultVisionPlanSectionPages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, assignDefaultVisionPlanSectionPages, workspaceID)
+	return err
+}
+
 const assignLegacyVisionPlanItems = `-- name: AssignLegacyVisionPlanItems :exec
 UPDATE cerebro_strategy_item item
 SET section_id = section.id
@@ -55,6 +81,25 @@ WHERE item.workspace_id = $1 AND item.section_id IS NULL
 
 func (q *Queries) AssignLegacyVisionPlanItems(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, assignLegacyVisionPlanItems, workspaceID)
+	return err
+}
+
+const assignRemainingVisionPlanSectionPages = `-- name: AssignRemainingVisionPlanSectionPages :exec
+UPDATE cerebro_vision_plan_section section
+SET page_id = page.id, column_index = 0
+FROM cerebro_vision_plan_page page
+WHERE section.workspace_id = $1 AND section.page_id IS NULL
+  AND page.workspace_id = section.workspace_id
+  AND page.id = (
+      SELECT candidate.id FROM cerebro_vision_plan_page candidate
+      WHERE candidate.workspace_id = section.workspace_id
+      ORDER BY candidate.position ASC, candidate.created_at ASC
+      LIMIT 1
+  )
+`
+
+func (q *Queries) AssignRemainingVisionPlanSectionPages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, assignRemainingVisionPlanSectionPages, workspaceID)
 	return err
 }
 
@@ -196,11 +241,10 @@ func (q *Queries) CreateOperatingPeriod(ctx context.Context, arg CreateOperating
 
 const createOrgChartSeat = `-- name: CreateOrgChartSeat :one
 INSERT INTO cerebro_org_chart_seat (
-    workspace_id, parent_id, name, responsibilities, owner_type, owner_id, position
+    workspace_id, parent_id, name, responsibilities, position
 )
-VALUES ($1, $5, $2, $3, $6, $7, $4)
-RETURNING id, workspace_id, parent_id, name, responsibilities, owner_type, owner_id,
-          ''::text AS owner_name, position, created_at, updated_at
+VALUES ($1, $5, $2, $3, $4)
+RETURNING id, workspace_id, parent_id, name, responsibilities, position, created_at, updated_at
 `
 
 type CreateOrgChartSeatParams struct {
@@ -209,49 +253,53 @@ type CreateOrgChartSeatParams struct {
 	Responsibilities []byte      `json:"responsibilities"`
 	Position         int32       `json:"position"`
 	ParentID         pgtype.UUID `json:"parent_id"`
-	OwnerType        pgtype.Text `json:"owner_type"`
-	OwnerID          pgtype.UUID `json:"owner_id"`
 }
 
-type CreateOrgChartSeatRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	ParentID         pgtype.UUID        `json:"parent_id"`
-	Name             string             `json:"name"`
-	Responsibilities []byte             `json:"responsibilities"`
-	OwnerType        pgtype.Text        `json:"owner_type"`
-	OwnerID          pgtype.UUID        `json:"owner_id"`
-	OwnerName        string             `json:"owner_name"`
-	Position         int32              `json:"position"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) CreateOrgChartSeat(ctx context.Context, arg CreateOrgChartSeatParams) (CreateOrgChartSeatRow, error) {
+func (q *Queries) CreateOrgChartSeat(ctx context.Context, arg CreateOrgChartSeatParams) (CerebroOrgChartSeat, error) {
 	row := q.db.QueryRow(ctx, createOrgChartSeat,
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Responsibilities,
 		arg.Position,
 		arg.ParentID,
-		arg.OwnerType,
-		arg.OwnerID,
 	)
-	var i CreateOrgChartSeatRow
+	var i CerebroOrgChartSeat
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.ParentID,
 		&i.Name,
 		&i.Responsibilities,
-		&i.OwnerType,
-		&i.OwnerID,
-		&i.OwnerName,
 		&i.Position,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const createOrgChartSeatOwner = `-- name: CreateOrgChartSeatOwner :exec
+INSERT INTO cerebro_org_chart_seat_owner (seat_id, workspace_id, owner_type, owner_id, position)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (seat_id, owner_type, owner_id) DO UPDATE SET position = EXCLUDED.position
+`
+
+type CreateOrgChartSeatOwnerParams struct {
+	SeatID      pgtype.UUID `json:"seat_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerType   string      `json:"owner_type"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	Position    int32       `json:"position"`
+}
+
+func (q *Queries) CreateOrgChartSeatOwner(ctx context.Context, arg CreateOrgChartSeatOwnerParams) error {
+	_, err := q.db.Exec(ctx, createOrgChartSeatOwner,
+		arg.SeatID,
+		arg.WorkspaceID,
+		arg.OwnerType,
+		arg.OwnerID,
+		arg.Position,
+	)
+	return err
 }
 
 const createRock = `-- name: CreateRock :one
@@ -511,27 +559,95 @@ func (q *Queries) CreateVisionPlanItem(ctx context.Context, arg CreateVisionPlan
 	return i, err
 }
 
+const createVisionPlanPage = `-- name: CreateVisionPlanPage :one
+INSERT INTO cerebro_vision_plan_page (workspace_id, key, name, row_column_counts, position)
+VALUES ($1, 'page-' || gen_random_uuid()::text, $2, $3, $4)
+RETURNING id, workspace_id, key, name, row_column_counts, position, created_at, updated_at
+`
+
+type CreateVisionPlanPageParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Name            string      `json:"name"`
+	RowColumnCounts []byte      `json:"row_column_counts"`
+	Position        int32       `json:"position"`
+}
+
+type CreateVisionPlanPageRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Key             string             `json:"key"`
+	Name            string             `json:"name"`
+	RowColumnCounts []byte             `json:"row_column_counts"`
+	Position        int32              `json:"position"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateVisionPlanPage(ctx context.Context, arg CreateVisionPlanPageParams) (CreateVisionPlanPageRow, error) {
+	row := q.db.QueryRow(ctx, createVisionPlanPage,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.RowColumnCounts,
+		arg.Position,
+	)
+	var i CreateVisionPlanPageRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Key,
+		&i.Name,
+		&i.RowColumnCounts,
+		&i.Position,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createVisionPlanSection = `-- name: CreateVisionPlanSection :one
-INSERT INTO cerebro_vision_plan_section (workspace_id, key, name, section_type, position)
-VALUES ($1, 'custom-' || gen_random_uuid()::text, $2, $3, $4)
-RETURNING id, workspace_id, key, name, section_type, position, created_at, updated_at
+INSERT INTO cerebro_vision_plan_section (workspace_id, key, name, section_type, position, page_id, row_index, column_index)
+SELECT page.workspace_id, 'custom-' || gen_random_uuid()::text,
+       $1, $2, $3, page.id, $4, $5
+FROM cerebro_vision_plan_page page
+WHERE page.id = $6 AND page.workspace_id = $7
+RETURNING id, workspace_id, key, name, section_type, position, page_id, row_index, column_index, created_at, updated_at
 `
 
 type CreateVisionPlanSectionParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
 	SectionType string      `json:"section_type"`
 	Position    int32       `json:"position"`
+	RowIndex    int32       `json:"row_index"`
+	ColumnIndex int32       `json:"column_index"`
+	PageID      pgtype.UUID `json:"page_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) CreateVisionPlanSection(ctx context.Context, arg CreateVisionPlanSectionParams) (CerebroVisionPlanSection, error) {
+type CreateVisionPlanSectionRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	SectionType string             `json:"section_type"`
+	Position    int32              `json:"position"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	RowIndex    int32              `json:"row_index"`
+	ColumnIndex int32              `json:"column_index"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateVisionPlanSection(ctx context.Context, arg CreateVisionPlanSectionParams) (CreateVisionPlanSectionRow, error) {
 	row := q.db.QueryRow(ctx, createVisionPlanSection,
-		arg.WorkspaceID,
 		arg.Name,
 		arg.SectionType,
 		arg.Position,
+		arg.RowIndex,
+		arg.ColumnIndex,
+		arg.PageID,
+		arg.WorkspaceID,
 	)
-	var i CerebroVisionPlanSection
+	var i CreateVisionPlanSectionRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -539,6 +655,9 @@ func (q *Queries) CreateVisionPlanSection(ctx context.Context, arg CreateVisionP
 		&i.Name,
 		&i.SectionType,
 		&i.Position,
+		&i.PageID,
+		&i.RowIndex,
+		&i.ColumnIndex,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -640,6 +759,21 @@ func (q *Queries) DeleteOrgChartSeat(ctx context.Context, arg DeleteOrgChartSeat
 	return result.RowsAffected(), nil
 }
 
+const deleteOrgChartSeatOwners = `-- name: DeleteOrgChartSeatOwners :exec
+DELETE FROM cerebro_org_chart_seat_owner
+WHERE seat_id = $1 AND workspace_id = $2
+`
+
+type DeleteOrgChartSeatOwnersParams struct {
+	SeatID      pgtype.UUID `json:"seat_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteOrgChartSeatOwners(ctx context.Context, arg DeleteOrgChartSeatOwnersParams) error {
+	_, err := q.db.Exec(ctx, deleteOrgChartSeatOwners, arg.SeatID, arg.WorkspaceID)
+	return err
+}
+
 const deleteRock = `-- name: DeleteRock :execrows
 DELETE FROM cerebro_rock
 WHERE id = $1 AND workspace_id = $2
@@ -692,6 +826,25 @@ func (q *Queries) DeleteStrategyItem(ctx context.Context, arg DeleteStrategyItem
 	return result.RowsAffected(), nil
 }
 
+const deleteVisionPlanPage = `-- name: DeleteVisionPlanPage :execrows
+DELETE FROM cerebro_vision_plan_page page
+WHERE page.id = $1 AND page.workspace_id = $2
+  AND (SELECT count(*) FROM cerebro_vision_plan_page other WHERE other.workspace_id = page.workspace_id) > 1
+`
+
+type DeleteVisionPlanPageParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteVisionPlanPage(ctx context.Context, arg DeleteVisionPlanPageParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteVisionPlanPage, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteVisionPlanSection = `-- name: DeleteVisionPlanSection :execrows
 DELETE FROM cerebro_vision_plan_section
 WHERE id = $1 AND workspace_id = $2
@@ -708,6 +861,45 @@ func (q *Queries) DeleteVisionPlanSection(ctx context.Context, arg DeleteVisionP
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const ensureDefaultVisionPlanGoalsBlock = `-- name: EnsureDefaultVisionPlanGoalsBlock :exec
+INSERT INTO cerebro_vision_plan_section (workspace_id, key, name, section_type, position, page_id, column_index)
+SELECT page.workspace_id, 'goals-board', 'Goals', 'goals', 0, page.id, 1
+FROM cerebro_vision_plan_page page
+WHERE page.workspace_id = $1 AND page.key = 'traction'
+  AND NOT EXISTS (
+      SELECT 1 FROM cerebro_vision_plan_section block WHERE block.page_id = page.id
+  )
+ON CONFLICT (workspace_id, key) DO NOTHING
+`
+
+// Runs before the sections are assigned to pages, so "Traction has no blocks"
+// is only true on the first read.
+func (q *Queries) EnsureDefaultVisionPlanGoalsBlock(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, ensureDefaultVisionPlanGoalsBlock, workspaceID)
+	return err
+}
+
+const ensureDefaultVisionPlanPages = `-- name: EnsureDefaultVisionPlanPages :exec
+INSERT INTO cerebro_vision_plan_page (workspace_id, key, name, row_column_counts, position)
+SELECT $1::uuid, defaults.key, defaults.name, defaults.row_column_counts::jsonb, defaults.position
+FROM (VALUES
+    ('vision', 'Vision', '[2]', 0),
+    ('traction', 'Traction', '[3]', 1)
+) AS defaults(key, name, row_column_counts, position)
+WHERE NOT EXISTS (
+    SELECT 1 FROM cerebro_vision_plan_page existing
+    WHERE existing.workspace_id = $1::uuid
+)
+ON CONFLICT (workspace_id, key) DO NOTHING
+`
+
+// Seeded once, on the workspace's first read. A page the workspace deletes
+// afterwards must stay deleted, so this never tops the set back up.
+func (q *Queries) EnsureDefaultVisionPlanPages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, ensureDefaultVisionPlanPages, workspaceID)
+	return err
 }
 
 const ensureDefaultVisionPlanSections = `-- name: EnsureDefaultVisionPlanSections :exec
@@ -1090,53 +1282,79 @@ func (q *Queries) ListOperatingPeriods(ctx context.Context, workspaceID pgtype.U
 	return items, nil
 }
 
+const listOrgChartSeatOwners = `-- name: ListOrgChartSeatOwners :many
+
+SELECT owner.seat_id, owner.owner_type, owner.owner_id,
+       COALESCE(u.name, a.name, '') AS owner_name,
+       owner.position
+FROM cerebro_org_chart_seat_owner owner
+LEFT JOIN member m ON owner.owner_type = 'member' AND m.id = owner.owner_id AND m.workspace_id = owner.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+LEFT JOIN agent a ON owner.owner_type = 'agent' AND a.id = owner.owner_id AND a.workspace_id = owner.workspace_id
+WHERE owner.workspace_id = $1
+ORDER BY owner.seat_id, owner.position ASC, owner.created_at ASC
+`
+
+type ListOrgChartSeatOwnersRow struct {
+	SeatID    pgtype.UUID `json:"seat_id"`
+	OwnerType string      `json:"owner_type"`
+	OwnerID   pgtype.UUID `json:"owner_id"`
+	OwnerName string      `json:"owner_name"`
+	Position  int32       `json:"position"`
+}
+
+// FIR-3589: a seat's owners, several per seat, each resolved to a display name.
+func (q *Queries) ListOrgChartSeatOwners(ctx context.Context, workspaceID pgtype.UUID) ([]ListOrgChartSeatOwnersRow, error) {
+	rows, err := q.db.Query(ctx, listOrgChartSeatOwners, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOrgChartSeatOwnersRow{}
+	for rows.Next() {
+		var i ListOrgChartSeatOwnersRow
+		if err := rows.Scan(
+			&i.SeatID,
+			&i.OwnerType,
+			&i.OwnerID,
+			&i.OwnerName,
+			&i.Position,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgChartSeats = `-- name: ListOrgChartSeats :many
 
 SELECT seat.id, seat.workspace_id, seat.parent_id, seat.name, seat.responsibilities,
-       seat.owner_type, seat.owner_id,
-       COALESCE(u.name, a.name, '') AS owner_name,
        seat.position, seat.created_at, seat.updated_at
 FROM cerebro_org_chart_seat seat
-LEFT JOIN member m ON seat.owner_type = 'member' AND m.id = seat.owner_id AND m.workspace_id = seat.workspace_id
-LEFT JOIN "user" u ON u.id = m.user_id
-LEFT JOIN agent a ON seat.owner_type = 'agent' AND a.id = seat.owner_id AND a.workspace_id = seat.workspace_id
 WHERE seat.workspace_id = $1
 ORDER BY seat.parent_id NULLS FIRST, seat.position ASC, seat.created_at ASC
 `
 
-type ListOrgChartSeatsRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	ParentID         pgtype.UUID        `json:"parent_id"`
-	Name             string             `json:"name"`
-	Responsibilities []byte             `json:"responsibilities"`
-	OwnerType        pgtype.Text        `json:"owner_type"`
-	OwnerID          pgtype.UUID        `json:"owner_id"`
-	OwnerName        string             `json:"owner_name"`
-	Position         int32              `json:"position"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
 // FIR-3421 Stage 4: Org Chart.
-func (q *Queries) ListOrgChartSeats(ctx context.Context, workspaceID pgtype.UUID) ([]ListOrgChartSeatsRow, error) {
+func (q *Queries) ListOrgChartSeats(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroOrgChartSeat, error) {
 	rows, err := q.db.Query(ctx, listOrgChartSeats, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListOrgChartSeatsRow{}
+	items := []CerebroOrgChartSeat{}
 	for rows.Next() {
-		var i ListOrgChartSeatsRow
+		var i CerebroOrgChartSeat
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
 			&i.ParentID,
 			&i.Name,
 			&i.Responsibilities,
-			&i.OwnerType,
-			&i.OwnerID,
-			&i.OwnerName,
 			&i.Position,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1239,7 +1457,7 @@ WITH connected_issue AS (
     JOIN issue i ON c.target_type = 'project' AND i.project_id = c.target_id AND i.workspace_id = c.workspace_id
     WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
 )
-SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title
+SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title, i.parent_issue_id
 FROM connected_issue ci
 JOIN issue i ON i.id = ci.id AND i.workspace_id = $1
 JOIN workspace w ON w.id = i.workspace_id
@@ -1253,12 +1471,13 @@ type ListRockIssuesParams struct {
 }
 
 type ListRockIssuesRow struct {
-	ID           pgtype.UUID `json:"id"`
-	Identifier   string      `json:"identifier"`
-	Title        string      `json:"title"`
-	Status       string      `json:"status"`
-	ProjectID    pgtype.UUID `json:"project_id"`
-	ProjectTitle string      `json:"project_title"`
+	ID            pgtype.UUID `json:"id"`
+	Identifier    string      `json:"identifier"`
+	Title         string      `json:"title"`
+	Status        string      `json:"status"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+	ProjectTitle  string      `json:"project_title"`
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 }
 
 func (q *Queries) ListRockIssues(ctx context.Context, arg ListRockIssuesParams) ([]ListRockIssuesRow, error) {
@@ -1277,6 +1496,7 @@ func (q *Queries) ListRockIssues(ctx context.Context, arg ListRockIssuesParams) 
 			&i.Status,
 			&i.ProjectID,
 			&i.ProjectTitle,
+			&i.ParentIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -1371,7 +1591,7 @@ SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type,
        (SELECT COUNT(*)::integer FROM cerebro_object_connection c
         WHERE c.workspace_id = r.workspace_id AND c.source_type = 'rock'
           AND c.source_id = r.id AND c.target_type = 'project') AS project_count,
-       COALESCE(si.id, '00000000-0000-0000-0000-000000000000'::uuid) AS strategy_item_id,
+       si.id AS strategy_item_id,
        COALESCE(si.title, '') AS strategy_item_title
 FROM cerebro_rock r
 JOIN cerebro_operating_period op ON op.id = r.period_id AND op.workspace_id = r.workspace_id
@@ -1669,22 +1889,132 @@ func (q *Queries) ListVisionPlanItems(ctx context.Context, workspaceID pgtype.UU
 	return items, nil
 }
 
-const listVisionPlanSections = `-- name: ListVisionPlanSections :many
-SELECT id, workspace_id, key, name, section_type, position, created_at, updated_at
-FROM cerebro_vision_plan_section
+const listVisionPlanObjectLinks = `-- name: ListVisionPlanObjectLinks :many
+SELECT c.id, c.source_id AS strategy_item_id, c.target_type, c.target_id,
+       COALESCE(p.title, i.title, '') AS target_title,
+       COALESCE(w.issue_prefix || '-' || i.number, '')::text AS target_identifier
+FROM cerebro_object_connection c
+LEFT JOIN project p ON c.target_type = 'project' AND p.id = c.target_id AND p.workspace_id = c.workspace_id
+LEFT JOIN issue i ON c.target_type = 'issue' AND i.id = c.target_id AND i.workspace_id = c.workspace_id
+LEFT JOIN workspace w ON w.id = c.workspace_id
+WHERE c.workspace_id = $1 AND c.source_type = 'strategy_item'
+  AND c.target_type IN ('project', 'issue')
+ORDER BY c.created_at ASC
+`
+
+type ListVisionPlanObjectLinksRow struct {
+	ID               pgtype.UUID `json:"id"`
+	StrategyItemID   pgtype.UUID `json:"strategy_item_id"`
+	TargetType       string      `json:"target_type"`
+	TargetID         pgtype.UUID `json:"target_id"`
+	TargetTitle      string      `json:"target_title"`
+	TargetIdentifier string      `json:"target_identifier"`
+}
+
+func (q *Queries) ListVisionPlanObjectLinks(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisionPlanObjectLinksRow, error) {
+	rows, err := q.db.Query(ctx, listVisionPlanObjectLinks, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVisionPlanObjectLinksRow{}
+	for rows.Next() {
+		var i ListVisionPlanObjectLinksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StrategyItemID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetTitle,
+			&i.TargetIdentifier,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVisionPlanPages = `-- name: ListVisionPlanPages :many
+SELECT id, workspace_id, key, name, row_column_counts, position, created_at, updated_at
+FROM cerebro_vision_plan_page
 WHERE workspace_id = $1
 ORDER BY position ASC, created_at ASC
 `
 
-func (q *Queries) ListVisionPlanSections(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroVisionPlanSection, error) {
+type ListVisionPlanPagesRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Key             string             `json:"key"`
+	Name            string             `json:"name"`
+	RowColumnCounts []byte             `json:"row_column_counts"`
+	Position        int32              `json:"position"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListVisionPlanPages(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisionPlanPagesRow, error) {
+	rows, err := q.db.Query(ctx, listVisionPlanPages, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVisionPlanPagesRow{}
+	for rows.Next() {
+		var i ListVisionPlanPagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Key,
+			&i.Name,
+			&i.RowColumnCounts,
+			&i.Position,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVisionPlanSections = `-- name: ListVisionPlanSections :many
+SELECT id, workspace_id, key, name, section_type, position, page_id, row_index, column_index, created_at, updated_at
+FROM cerebro_vision_plan_section
+WHERE workspace_id = $1
+ORDER BY row_index ASC, column_index ASC, position ASC, created_at ASC
+`
+
+type ListVisionPlanSectionsRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	SectionType string             `json:"section_type"`
+	Position    int32              `json:"position"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	RowIndex    int32              `json:"row_index"`
+	ColumnIndex int32              `json:"column_index"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListVisionPlanSections(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisionPlanSectionsRow, error) {
 	rows, err := q.db.Query(ctx, listVisionPlanSections, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CerebroVisionPlanSection{}
+	items := []ListVisionPlanSectionsRow{}
 	for rows.Next() {
-		var i CerebroVisionPlanSection
+		var i ListVisionPlanSectionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -1692,6 +2022,9 @@ func (q *Queries) ListVisionPlanSections(ctx context.Context, workspaceID pgtype
 			&i.Name,
 			&i.SectionType,
 			&i.Position,
+			&i.PageID,
+			&i.RowIndex,
+			&i.ColumnIndex,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1799,13 +2132,10 @@ UPDATE cerebro_org_chart_seat
 SET parent_id = $6,
     name = $3,
     responsibilities = $4,
-    owner_type = $7,
-    owner_id = $8,
     position = $5,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, parent_id, name, responsibilities, owner_type, owner_id,
-          ''::text AS owner_name, position, created_at, updated_at
+RETURNING id, workspace_id, parent_id, name, responsibilities, position, created_at, updated_at
 `
 
 type UpdateOrgChartSeatParams struct {
@@ -1815,25 +2145,9 @@ type UpdateOrgChartSeatParams struct {
 	Responsibilities []byte      `json:"responsibilities"`
 	Position         int32       `json:"position"`
 	ParentID         pgtype.UUID `json:"parent_id"`
-	OwnerType        pgtype.Text `json:"owner_type"`
-	OwnerID          pgtype.UUID `json:"owner_id"`
 }
 
-type UpdateOrgChartSeatRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	ParentID         pgtype.UUID        `json:"parent_id"`
-	Name             string             `json:"name"`
-	Responsibilities []byte             `json:"responsibilities"`
-	OwnerType        pgtype.Text        `json:"owner_type"`
-	OwnerID          pgtype.UUID        `json:"owner_id"`
-	OwnerName        string             `json:"owner_name"`
-	Position         int32              `json:"position"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) UpdateOrgChartSeat(ctx context.Context, arg UpdateOrgChartSeatParams) (UpdateOrgChartSeatRow, error) {
+func (q *Queries) UpdateOrgChartSeat(ctx context.Context, arg UpdateOrgChartSeatParams) (CerebroOrgChartSeat, error) {
 	row := q.db.QueryRow(ctx, updateOrgChartSeat,
 		arg.ID,
 		arg.WorkspaceID,
@@ -1841,19 +2155,14 @@ func (q *Queries) UpdateOrgChartSeat(ctx context.Context, arg UpdateOrgChartSeat
 		arg.Responsibilities,
 		arg.Position,
 		arg.ParentID,
-		arg.OwnerType,
-		arg.OwnerID,
 	)
-	var i UpdateOrgChartSeatRow
+	var i CerebroOrgChartSeat
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.ParentID,
 		&i.Name,
 		&i.Responsibilities,
-		&i.OwnerType,
-		&i.OwnerID,
-		&i.OwnerName,
 		&i.Position,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2094,11 +2403,63 @@ func (q *Queries) UpdateVisionPlanItem(ctx context.Context, arg UpdateVisionPlan
 	return i, err
 }
 
-const updateVisionPlanSection = `-- name: UpdateVisionPlanSection :one
-UPDATE cerebro_vision_plan_section
-SET name = $3, section_type = $4, position = $5, updated_at = now()
+const updateVisionPlanPage = `-- name: UpdateVisionPlanPage :one
+UPDATE cerebro_vision_plan_page
+SET name = $3, row_column_counts = $4, position = $5, updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, key, name, section_type, position, created_at, updated_at
+RETURNING id, workspace_id, key, name, row_column_counts, position, created_at, updated_at
+`
+
+type UpdateVisionPlanPageParams struct {
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Name            string      `json:"name"`
+	RowColumnCounts []byte      `json:"row_column_counts"`
+	Position        int32       `json:"position"`
+}
+
+type UpdateVisionPlanPageRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Key             string             `json:"key"`
+	Name            string             `json:"name"`
+	RowColumnCounts []byte             `json:"row_column_counts"`
+	Position        int32              `json:"position"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateVisionPlanPage(ctx context.Context, arg UpdateVisionPlanPageParams) (UpdateVisionPlanPageRow, error) {
+	row := q.db.QueryRow(ctx, updateVisionPlanPage,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.RowColumnCounts,
+		arg.Position,
+	)
+	var i UpdateVisionPlanPageRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Key,
+		&i.Name,
+		&i.RowColumnCounts,
+		&i.Position,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateVisionPlanSection = `-- name: UpdateVisionPlanSection :one
+UPDATE cerebro_vision_plan_section section
+SET name = $3, section_type = $4, position = $5, page_id = $6, row_index = $7, column_index = $8, updated_at = now()
+WHERE section.id = $1 AND section.workspace_id = $2
+  AND EXISTS (
+      SELECT 1 FROM cerebro_vision_plan_page page
+      WHERE page.id = $6 AND page.workspace_id = section.workspace_id
+  )
+RETURNING id, workspace_id, key, name, section_type, position, page_id, row_index, column_index, created_at, updated_at
 `
 
 type UpdateVisionPlanSectionParams struct {
@@ -2107,17 +2468,37 @@ type UpdateVisionPlanSectionParams struct {
 	Name        string      `json:"name"`
 	SectionType string      `json:"section_type"`
 	Position    int32       `json:"position"`
+	PageID      pgtype.UUID `json:"page_id"`
+	RowIndex    int32       `json:"row_index"`
+	ColumnIndex int32       `json:"column_index"`
 }
 
-func (q *Queries) UpdateVisionPlanSection(ctx context.Context, arg UpdateVisionPlanSectionParams) (CerebroVisionPlanSection, error) {
+type UpdateVisionPlanSectionRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	SectionType string             `json:"section_type"`
+	Position    int32              `json:"position"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	RowIndex    int32              `json:"row_index"`
+	ColumnIndex int32              `json:"column_index"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateVisionPlanSection(ctx context.Context, arg UpdateVisionPlanSectionParams) (UpdateVisionPlanSectionRow, error) {
 	row := q.db.QueryRow(ctx, updateVisionPlanSection,
 		arg.ID,
 		arg.WorkspaceID,
 		arg.Name,
 		arg.SectionType,
 		arg.Position,
+		arg.PageID,
+		arg.RowIndex,
+		arg.ColumnIndex,
 	)
-	var i CerebroVisionPlanSection
+	var i UpdateVisionPlanSectionRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -2125,6 +2506,9 @@ func (q *Queries) UpdateVisionPlanSection(ctx context.Context, arg UpdateVisionP
 		&i.Name,
 		&i.SectionType,
 		&i.Position,
+		&i.PageID,
+		&i.RowIndex,
+		&i.ColumnIndex,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

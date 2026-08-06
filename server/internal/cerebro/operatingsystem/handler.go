@@ -30,6 +30,9 @@ type handlerService interface {
 	UpdateStrategyItem(context.Context, pgtype.UUID, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	DeleteStrategyItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	ListVisionPlan(context.Context, pgtype.UUID) (VisionPlanResponse, error)
+	CreateVisionPlanPage(context.Context, pgtype.UUID, VisionPlanPageInput) (VisionPlanPageResponse, error)
+	UpdateVisionPlanPage(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanPageInput) (VisionPlanPageResponse, error)
+	DeleteVisionPlanPage(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	CreateVisionPlanSection(context.Context, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
 	UpdateVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
 	DeleteVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
@@ -95,6 +98,9 @@ func (h *Handler) MountRoutes(r chi.Router) {
 	r.Get("/api/cerebro/strategy-history", h.ListStrategyHistory)
 	r.Route("/api/cerebro/vision-plan", func(r chi.Router) {
 		r.Get("/", h.ListVisionPlan)
+		r.Post("/pages", h.CreateVisionPlanPage)
+		r.Put("/pages/{id}", h.UpdateVisionPlanPage)
+		r.Delete("/pages/{id}", h.DeleteVisionPlanPage)
 		r.Post("/sections", h.CreateVisionPlanSection)
 		r.Put("/sections/{id}", h.UpdateVisionPlanSection)
 		r.Delete("/sections/{id}", h.DeleteVisionPlanSection)
@@ -288,6 +294,49 @@ func (h *Handler) ListVisionPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.service.ListVisionPlan(r.Context(), ws)
 	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) CreateVisionPlanPage(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input VisionPlanPageInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateVisionPlanPage(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateVisionPlanPage(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input VisionPlanPageInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateVisionPlanPage(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteVisionPlanPage(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteVisionPlanPage(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
 }
 
 func (h *Handler) CreateVisionPlanSection(w http.ResponseWriter, r *http.Request) {

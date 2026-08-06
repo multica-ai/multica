@@ -35,14 +35,26 @@ The chain is:
 
 ## CLI
 
+<!-- CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 documents the read-only operator path. -->
 ```bash
 multica runtime list --output json
+multica runtime diagnostics <runtime-id> --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
 ```
+
+`runtime diagnostics` reads the shared provider capability probe and MCP
+`tools/list` report. Its `state`, `affected_capability`, `source_policy`,
+`version`, and `recovery_action` fields explain discovery; they never grant or
+deny access. The equivalent MCP tool is `get_runtime_access_diagnostics`.
+
+Provider and MCP content versions are independent. A healthy provider probe
+does not prove MCP discovery, and an MCP success does not prove that Settings →
+Permissions allows a capability. Use the reported recovery action before
+changing Runtime or Connection configuration.
 
 `runtime update` is a write. `repo checkout` creates a git worktree in the task working directory.
 

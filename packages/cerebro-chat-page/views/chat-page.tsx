@@ -9,7 +9,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { ArrowLeft, MessageSquare } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import type { Channel } from "@multica/core/types";
@@ -24,11 +24,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { Button } from "@multica/ui/components/ui/button";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import { ChannelDetail } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
-import { PageHeader, MobileSidebarTrigger } from "@multica/views/layout/page-header";
+import { PageHeader } from "@multica/views/layout/page-header";
 import {
   ChatPlacementSettings,
   showsInChat,
@@ -107,6 +108,10 @@ export function ChatPage() {
       showSectionControls
       showRemove={false}
       showAgentsToggle={false}
+      // FIR-4350 — the rail IS this page's left column, not a card inside the
+      // inbox: no rounded border, no drag-handle inset, and the control header
+      // stays pinned while the list scrolls under it.
+      flush
       onCreate={openCreate}
       onOpenSettings={() => setSettingsOpen(true)}
       onRemove={NOOP}
@@ -123,41 +128,52 @@ export function ChatPage() {
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Chat settings</DialogTitle>
+          {/* Same name as the menu item that opens it ("Chat placement…"), so
+              one control is not called two different things. */}
+          <DialogTitle>Chat placement</DialogTitle>
         </DialogHeader>
         <ChatPlacementSettings />
       </DialogContent>
     </Dialog>
   );
 
+  // FIR-4350 — the page's own chrome. Every other page in the app owns a
+  // PageHeader (classic inbox) or an equivalent bar (dynamic inbox); without one
+  // the Chat page opened into a bare split with nothing naming it. PageHeader
+  // also carries the mobile hamburger, so Chat is not a dead end on a phone.
+  const header = (
+    <PageHeader>
+      <h1 className="truncate text-sm font-semibold">Chat</h1>
+    </PageHeader>
+  );
+
   if (isMobile) {
     // Single column: the rail until something is picked, then the conversation.
-    // Both views carry the Multica mobile chrome — the top bar with the
-    // hamburger that opens the sidebar menu — so Chat is not a dead end (the
-    // inbox does the same via PageHeader / SidebarTrigger). FIR-4350.
     return (
       <div className="flex h-full min-h-0 flex-col">
         {settingsDialog}
         {selection ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
-              <MobileSidebarTrigger />
-              <button
-                type="button"
+            {/* Same PageHeader as the list, so the bar does not change height,
+                background or padding when a conversation opens. */}
+            <PageHeader>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
                 onClick={clearSelection}
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+                aria-label="Back to conversations"
+                title="Back to conversations"
               >
-                Back
-              </button>
-            </div>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            </PageHeader>
             <div className="flex min-h-0 flex-1 flex-col">{detail}</div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <PageHeader>
-              <h1 className="truncate text-sm font-semibold">Chat</h1>
-            </PageHeader>
-            <div className="min-h-0 flex-1 overflow-y-auto">{rail}</div>
+            {header}
+            <div className="flex min-h-0 flex-1 flex-col">{rail}</div>
           </div>
         )}
       </div>
@@ -165,18 +181,19 @@ export function ChatPage() {
   }
 
   return (
-    <>
+    <div className="flex h-full min-h-0 flex-col">
       {settingsDialog}
-      <ResizablePanelGroup orientation="horizontal">
+      {header}
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel id="chat-rail" defaultSize={340} minSize={260} className="flex flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto">{rail}</div>
+          <div className="flex min-h-0 flex-1 flex-col">{rail}</div>
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel id="chat-detail" minSize="40%" className="flex flex-col">
           {detail ?? <EmptyDetail />}
         </ResizablePanel>
       </ResizablePanelGroup>
-    </>
+    </div>
   );
 }
 
@@ -223,7 +240,7 @@ function EmptyRail({ onOpenSettings }: { onOpenSettings: () => void }) {
         onClick={onOpenSettings}
         className="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
       >
-        Chat settings
+        Chat placement
       </button>
     </div>
   );

@@ -387,6 +387,7 @@ type appResponse struct {
 	DeploymentVersion string    `json:"deployment_version,omitempty"`
 	Health            string    `json:"health,omitempty"`
 	DeploymentError   string    `json:"deployment_error,omitempty"`
+	BuiltinUpdate     bool      `json:"builtin_update_available,omitempty"`
 }
 
 type appVersionResponse struct {
@@ -604,6 +605,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read apps")
 			return
 		}
+		app.BuiltinUpdate = app.Slug == "allergen-formatter" && app.DeploymentVersion != allergenFormatterVersion
 		apps = append(apps, app)
 	}
 	var canManage bool

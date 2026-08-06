@@ -1,0 +1,58 @@
+name: Cerebro post-deploy live Runtime tools
+
+on:
+  push:
+    branches: [main, production]
+
+concurrency:
+  group: cerebro-post-deploy-live-runtime-tools-${{ github.ref_name }}
+  # Every deployed commit earns its own live verdict. A newer push must not
+  # cancel evidence for a commit that may already be serving.
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  # CEREBRO-PATCH(post-deploy-runtime-tool-gate-sliplane): FIR-4220 verifies
+  # the deployed Sliplane commit and its live workspace after every rollout.
+  post-deploy-live-runtime-tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: ${{ github.ref_name == 'production' && 'production' || 'staging' }}
+    env:
+      MULTICA_TOKEN: ${{ secrets.MULTICA_TOKEN }}
+      MULTICA_SERVER_URL: ${{ vars.MULTICA_SERVER_URL }}
+      MULTICA_WORKSPACE_ID: ${{ vars.MULTICA_WORKSPACE_ID }}
+      MULTICA_APP_URL: ${{ vars.MULTICA_APP_URL }}
+      CEREBRO_CF_ACCESS_CLIENT_ID: ${{ secrets.CEREBRO_CF_ACCESS_CLIENT_ID }}
+      CEREBRO_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CEREBRO_CF_ACCESS_CLIENT_SECRET }}
+      MULTICA_POST_DEPLOY_CLI: ${{ github.workspace }}/server/bin/multica
+      MULTICA_POST_DEPLOY_PROFILE: live
+      MULTICA_POST_DEPLOY_GRACE: 120
+      MULTICA_POST_DEPLOY_TIMEOUT: 900
+      MULTICA_POST_DEPLOY_INTERVAL: 10
+      MULTICA_POST_DEPLOY_EXPECTED_COMMIT: ${{ github.sha }}
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Require live workspace configuration
+        shell: bash
+        run: |
+          : "${MULTICA_TOKEN:?environment secret MULTICA_TOKEN is required}"
+          : "${MULTICA_SERVER_URL:?environment variable MULTICA_SERVER_URL is required}"
+          : "${MULTICA_WORKSPACE_ID:?environment variable MULTICA_WORKSPACE_ID is required}"
+          : "${MULTICA_APP_URL:?environment variable MULTICA_APP_URL is required}"
+          echo "MULTICA_POST_DEPLOY_VERSION_URL=${MULTICA_APP_URL%/}/version" >> "$GITHUB_ENV"
+
+      - name: Build deployed Multica CLI
+        run: cd server && go build -o bin/multica ./cmd/multica
+
+      - name: Verify deployed commit and live Runtime tool offers
+        run: scripts/cerebro/check-live-runtime-tools-post-deploy.sh

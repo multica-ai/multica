@@ -352,10 +352,19 @@ function credentialTitle(c: AgentCapabilityCredential): string {
 
 function toolTitle(t: AgentCapabilityTool): string {
   const parts = [t.permission || "unknown"];
+  if (t.delivery_channel) parts.push(`delivery: ${t.delivery_channel}`);
   if (t.decided_by) parts.push(`via ${t.decided_by}`);
   if (t.reason) parts.push(t.reason);
+  if (t.managed_externally)
+    parts.push(`managed by ${t.external_security_owner || "an external security gate"}`);
   if (t.capped_by_groups.length > 0)
     parts.push(`capped by ${t.capped_by_groups.join(", ")}`);
+  if (t.callable_identities.length > 0)
+    parts.push(`exact callables: ${t.callable_identities.join(", ")}`);
+  if (t.authorized_callables.length > 0)
+    parts.push(`authorized callables: ${t.authorized_callables.join(", ")}`);
+  if (t.verdict)
+    parts.push(`Task Mandate: ${t.verdict.code} · recovery: ${t.verdict.recovery_action}`);
   // FIR-3398: fold the tool's runtime-availability proof into the tooltip, so a
   // reviewer hovering a pill sees whether the granted tool is actually present on
   // the agent's runtime — not just that policy allows it.
@@ -444,6 +453,11 @@ function ToolPill({ tool }: { tool: AgentCapabilityTool }) {
       title={toolTitle(tool)}
     >
       {tool.title || tool.key}
+      {tool.managed_externally && (
+        <span className="text-muted-foreground">
+          · managed by {tool.external_security_owner || "external security gate"}
+        </span>
+      )}
       {truthPresent && (
         <span className="text-muted-foreground">
           · {tool.callable ? "callable" : "blocked"}
@@ -547,6 +561,7 @@ function connectionActionTitle(action: {
   verified?: boolean;
   blocked_reason?: string;
   how_to_fix?: string;
+  verdict?: { code: string; recovery_action: string };
   description?: string;
   summary?: string;
 }): string {
@@ -561,6 +576,7 @@ function connectionActionTitle(action: {
   if (action.description || action.summary) lines.push(action.description || action.summary || "");
   if (action.blocked_reason) lines.push(`Blocked: ${action.blocked_reason}`);
   if (action.how_to_fix) lines.push(`How to fix: ${action.how_to_fix}`);
+  if (action.verdict) lines.push(`Task Mandate: ${action.verdict.code} · recovery: ${action.verdict.recovery_action}`);
   return lines.join("\n");
 }
 

@@ -5,6 +5,7 @@ import {
   Markdown as MarkdownBase,
   type MarkdownProps as MarkdownBaseProps,
   type RenderMode,
+  isIssueIdentifier,
 } from "@multica/ui/markdown";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
@@ -14,6 +15,7 @@ import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { CommentMentionLink } from "../issues/components/cerebro-comment-mention-link";
 // CEREBRO-PATCH(artifact-mention-markdown): FIR-1800 render `mention://artifact/<id>` as a white card.
 import { ArtifactMentionChip } from "@multica/cerebro-artifact-mention";
+import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
 import { AppLink } from "../navigation";
 import {
@@ -55,6 +57,29 @@ function ProjectMentionCard({ projectId }: { projectId: string }): React.ReactNo
   );
 }
 
+/**
+ * Autolinked bare identifier (e.g. `MUL-123`) routed through
+ * `mention://issue/<identifier>`. Resolves the identifier to a real issue in
+ * the current workspace. The resolved link deliberately keeps the same text
+ * footprint as the unresolved identifier: expanding it into an IssueChip
+ * after the Inbox target scroll moved that target when content above it grew
+ * (FIR-4188).
+ */
+function AutolinkedIssueMention({ identifier }: { identifier: string }): React.ReactNode {
+  // CEREBRO-PATCH(inbox-trigger-stable-scroll): keep async issue resolution from changing message height (FIR-4188).
+  const issue = useResolveIssueIdentifier(identifier);
+  const p = useWorkspacePaths();
+  if (!issue) return identifier;
+  return (
+    <AppLink
+      href={p.issueDetail(issue.id)}
+      className="not-prose inline text-inherit underline decoration-dotted underline-offset-2"
+    >
+      {identifier}
+    </AppLink>
+  );
+}
+
 function defaultRenderMention({
   type,
   id,
@@ -63,6 +88,11 @@ function defaultRenderMention({
   id: string;
 }): React.ReactNode {
   if (type === "issue") {
+    // A bare identifier (from the autolink preprocessor) is carried as the id
+    // segment; a real mention carries a UUID. Dispatch on the id shape.
+    if (isIssueIdentifier(id)) {
+      return <AutolinkedIssueMention identifier={id} />;
+    }
     return <IssueMentionCard issueId={id} />;
   }
   // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 moved-comment breadcrumb → in-issue jump link.
@@ -138,6 +168,7 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
         renderFileCard={renderFileCard}
         renderCodeBlock={renderCodeBlock}
         cdnDomain={cdnDomain}
+        autolinkIssueIdentifiers
         {...rest}
       />
     </AttachmentDownloadProvider>

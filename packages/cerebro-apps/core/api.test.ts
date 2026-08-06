@@ -17,6 +17,28 @@ describe("mini apps API boundary", () => {
     await expect(listApps()).resolves.toEqual({ apps: [], can_manage: false });
   });
 
+  it("preserves the managed built-in update signal from the catalog", async () => {
+    cerebroRequest.mockResolvedValue({
+      can_manage: true,
+      apps: [{
+        id: "app-1",
+        slug: "allergen-formatter",
+        name: "Allergen Formatter",
+        description: "Format ingredients",
+        icon: "blocks",
+        folder: "Operations",
+        current_version: "1.0.2",
+        status: "published",
+        builtin_update_available: true,
+      }],
+    });
+
+    await expect(listApps("firtal")).resolves.toMatchObject({
+      can_manage: true,
+      apps: [{ builtin_update_available: true }],
+    });
+  });
+
   it("sends worker calls through the member-bound Cerebro invoke endpoint", async () => {
     cerebroRequest.mockResolvedValue({ formatted: "MILK" });
 

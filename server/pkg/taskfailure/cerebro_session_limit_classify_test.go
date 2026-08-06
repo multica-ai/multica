@@ -3,7 +3,7 @@ package taskfailure
 // CEREBRO-PATCH(taskfailure-session-limit): FIR-3651 regression cover for the
 // verbatim provider strings that fell through to ReasonAgentUnknown in
 // production between 28 June and 22 July 2026. Unknown is the one bucket
-// failrouter never retries, so each of these died on first contact instead of
+// Workflow never retries, so each of these died on first contact instead of
 // pausing until the stated reset time.
 
 import "testing"

@@ -5,6 +5,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
+	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
 // fakeEvidence is a ledger stand-in keyed by canonical capability ID. Only the
@@ -59,9 +60,8 @@ func TestAvailabilityMarksProvenToolVerified(t *testing.T) {
 	}
 }
 
-// A granted tool nobody probed is the Kristian case: configuration says yes and
-// the runtime may have nothing to call. It must read as NOT proven, with the
-// reason visible — never as a capability the agent has.
+// A granted tool nobody probed keeps its policy verdict while availability and
+// callability report the missing runtime implementation separately.
 func TestAvailabilityMarksUnprobedToolNotProven(t *testing.T) {
 	tools, summary := applyAgentCapabilityAvailability(
 		[]AgentCapabilityTool{builtinTool("get_agent_capabilities")},
@@ -80,11 +80,11 @@ func TestAvailabilityMarksUnprobedToolNotProven(t *testing.T) {
 	if summary.Verified != 0 || summary.Unproven != 1 {
 		t.Errorf("summary = %+v, want 0 verified / 1 unproven", summary)
 	}
-	if tools[0].Permission != "deny" {
-		t.Errorf("permission = %q, want deny when the access engine rejects missing runtime evidence", tools[0].Permission)
+	if tools[0].Permission != "allow" {
+		t.Errorf("permission = %q, want the effective policy verdict preserved", tools[0].Permission)
 	}
-	if tools[0].Allowed || tools[0].Callable {
-		t.Errorf("effective truth = %+v, want denied and not callable", tools[0])
+	if !tools[0].Allowed || tools[0].Available || tools[0].Callable {
+		t.Errorf("effective truth = %+v, want allowed policy with unavailable and non-callable runtime implementation", tools[0])
 	}
 }
 
@@ -93,8 +93,44 @@ func TestAvailabilityUsesPlatformCatalogRowsAsCanonicalCapabilities(t *testing.T
 		[]AgentCapabilityTool{{Key: "create_workflow_hook", Source: platformcatalog.Source, Permission: "allow", Allowed: true, Available: true, Enforced: true}},
 		availabilityevidence.RuntimeFirtalGateway, fakeEvidence{})
 
-	if tools[0].Permission != "deny" || tools[0].Allowed || tools[0].Callable {
-		t.Fatalf("platform catalog row escaped missing-evidence gate: %+v", tools[0])
+	if tools[0].Permission != "allow" || !tools[0].Allowed || !tools[0].Available || !tools[0].Callable {
+		t.Fatalf("platform command lost its independent policy or delivery truth: %+v", tools[0])
+	}
+}
+
+func TestLocalCodexPlatformCommandsUseMulticaDelivery(t *testing.T) {
+	for _, key := range []string{"read_issues", "add_comment"} {
+		t.Run(key, func(t *testing.T) {
+			tool := capabilityToolFromRow(cerebrotoolpolicy.TableRow{
+				ToolKey: key,
+				Source:  platformcatalog.Source,
+				Effective: cerebrotoolpolicy.Effective{
+					Setting:   cerebrotoolpolicy.SettingAllow,
+					DecidedBy: cerebrotoolpolicy.LayerWorkspace,
+				},
+			})
+
+			tools, _ := applyAgentCapabilityAvailabilityForProvider(
+				[]AgentCapabilityTool{tool},
+				availabilityevidence.RuntimeLocal,
+				"codex",
+				fakeEvidence{},
+			)
+
+			got := tools[0]
+			if got.Permission != "allow" || !got.Allowed {
+				t.Fatalf("policy truth = %+v, want effective Allow preserved", got)
+			}
+			if got.DeliveryChannel != "multica" {
+				t.Fatalf("delivery_channel = %q, want multica", got.DeliveryChannel)
+			}
+			if !got.Available || !got.Enforced || !got.Callable {
+				t.Fatalf("multica-delivered capability = %+v, want usable", got)
+			}
+			if got.Availability.Level != string(availabilityevidence.LevelDeclared) {
+				t.Fatalf("direct-runtime availability = %+v, want stale direct evidence kept separate", got.Availability)
+			}
+		})
 	}
 }
 

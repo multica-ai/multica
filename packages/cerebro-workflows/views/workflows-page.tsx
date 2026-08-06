@@ -32,7 +32,6 @@ import type { CerebroWorkflow } from "../core/types";
 export function WorkflowsPage() {
   const enabled = useFeatureFlag("cerebro_workflows");
   const evalsEnabled = useFeatureFlag("cerebro_evals");
-  const hooksEnabled = useFeatureFlag("cerebro_workflow_hooks");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -93,13 +92,13 @@ export function WorkflowsPage() {
               Eval catalog
             </Button>
           )}
-          {hooksEnabled && <Button
+          <Button
             size="sm"
             variant="outline"
             onClick={() => navigation.push(`/${workspace.slug}/workflows/hooks`)}
           >
             Hook library
-          </Button>}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -113,7 +112,7 @@ export function WorkflowsPage() {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/commands`)}>Command library</DropdownMenuItem>
               {evalsEnabled && <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/evals`)}>Eval catalog</DropdownMenuItem>}
-              {hooksEnabled && <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/hooks`)}>Hook library</DropdownMenuItem>}
+              <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/hooks`)}>Hook library</DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/runs`)}>Workflow log</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

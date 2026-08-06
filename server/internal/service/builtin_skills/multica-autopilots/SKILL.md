@@ -7,6 +7,8 @@ allowed-tools: Bash(multica *)
 
 # Multica Autopilots
 
+<!-- CEREBRO-PATCH(autopilot-permissions): document canonical Autopilot permission enforcement (FIR-4359). -->
+
 ## Quick start
 
 Autopilots are durable automations. Read before mutating:
@@ -34,6 +36,14 @@ Execution modes:
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
 ## CLI
+
+Autopilot mutations use the existing Permissions hierarchy. `create_autopilot`
+governs create, update, delete, and trigger configuration;
+`trigger_autopilot` governs manual runs; `autopilot_scope` governs non-default
+scope. A policy Allow never widens `personal`, `group`, `is_private`, workspace
+membership, private-assignee, or Task Mandate ceilings. Diagnose the current
+decision with the existing `get_agent_capabilities` / Settings → Permissions
+surfaces; do not infer access from a visible control.
 
 ```bash
 multica autopilot list --output json

@@ -20,8 +20,8 @@ var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
 	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
-	"--dangerously-skip-permissions": blockedStandalone, // CEREBRO-PATCH(opencode-permission-flag): daemon manages non-interactive permission prompts using the installed CLI contract.
-	"--auto":                         blockedStandalone, // CEREBRO-PATCH(opencode-permission-flag): reject the unsupported legacy flag from custom_args.
+	"--auto":                         blockedStandalone, // CEREBRO-PATCH(opencode-permission-flag): the daemon picks the permission flag from the installed CLI; block both spellings so custom_args cannot pin the wrong one.
+	"--dangerously-skip-permissions": blockedStandalone, // CEREBRO-PATCH(opencode-permission-flag): pre-1.18 spelling of the same flag.
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -50,7 +50,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"} // CEREBRO-PATCH(opencode-permission-flag): use the installed runtime's real non-interactive flag.
+	args := []string{"run", "--format", "json", opencodePermissionFlag(execPath, b.cfg.Logger)} // CEREBRO-PATCH(opencode-permission-flag): read the non-interactive flag off the installed CLI; 1.14 and 1.18 spell it differently and both are live.
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
 	// back to PWD (inherited from the daemon process) or process.cwd(), which

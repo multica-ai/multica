@@ -27,6 +27,13 @@
 > orphaned, and unused access by severity. The Permission
 > audit read model exposes and sorts by the same explicit severity concept.
 
+> **FIR-4293 diagnostic projection.** `accessdiagnostics` is one read-only wire
+> contract for provider probes, MCP/API discovery, and frozen Task Mandate
+> observations. REST, CLI, MCP, Runtime, Connection Test & discover, and the
+> task transcript consume that projection. It is neither a sixth permission
+> interface nor an authorizer: `cerebro_tool_policy` remains the live authored
+> source, and the Task Mandate remains the immutable per-run ceiling.
+
 > **FIR-4012 system-authored capability rules.** The `driftwatch` sweeper is a
 > second, non-human writer into `cerebro_tool_policy`. When
 > `cerebro_capability_auto_permission` is ON (default OFF) it calls `Store.Set`
@@ -92,6 +99,21 @@ Workspace/runtime/agent/group/user choices are authored only in
   Direct Agent rules remain a tighten-only ceiling over a Role, and the
   explanation carries Role name + version provenance.
 - **Task Mandate is a run snapshot, not a second policy store.** It freezes the
+  exact allowed-tool envelope when a task is claimed and is checked again before
+  every managed or local-runtime call. The task transcript and
+  `multica permissions task <id>` expose that historical snapshot. The
+  transcript's diagnostics can explain partial, stale, empty, unavailable, or
+  denied results and cite the source policy, but cannot change the snapshot.
+  A later Deny or safety ceiling in Settings → Permissions can tighten an
+  active run at call time. A later Allow cannot widen the frozen Task Mandate;
+  newly allowed access requires a newly claimed task.
+- **Runtime and Connection diagnostics are evidence projections, not policy.**
+  `GET /api/runtimes/{runtimeId}/access-diagnostics` separates provider probe
+  evidence from MCP `tools/list` evidence and versions their content
+  independently. `multica runtime diagnostics <runtime-id>` and
+  `get_runtime_access_diagnostics` call that same route. Connection Test &
+  discover uses the same shape for MCP or OpenAPI results. None of these paths
+  write `cerebro_tool_policy`, issue a Task Mandate, or admit a call.
   exact allowed-tool envelope when a task is claimed. The task transcript and
   `multica permissions task <id>` expose that historical snapshot.
   `cerebro_task_mandate_enforcement` controls whether managed and local runtimes
@@ -233,7 +255,7 @@ engine-owned; the other entries name the external access gate that owns their en
 | Runtimes | `manage_runtime`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
 | Groups | `manage_group`, `manage_group_members` |
 | Permissions | `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval`, `manage_credential_access`, `manage_group_overrides`, `manage_workspace_overrides`, `manage_collections` |
-| Projects | `manage_project`, `manage_project_access` ⚠, `manage_status_models`, `manage_project_sprints` |
+| Projects | `manage_project`, `manage_project_access`, `manage_status_models`, `manage_project_sprints` |
 | Workspace | `manage_entity_folders`, `manage_workspace_members`, `manage_workspace_settings`, `delete_workspace`, `manage_integrations`, `manage_analytics`, `manage_model_registry` |
 | Skills | `manage_skills` |
 | Squads | `manage_squad` |
@@ -241,15 +263,24 @@ engine-owned; the other entries name the external access gate that owns their en
 | Credentials | `manage_credentials` |
 | Workflows | `manage_workflows`, `hooks:read`, `hooks:write`, `hooks:enforce`, `hooks:manage_managed` |
 | Channels | `manage_channels`, `gateway_channel_delivery` ⚠ |
-| Read access | `read_issues` ⚠, `read_projects` ⚠ |
+| Read access | `read_issues`, `read_projects` |
 
 (`manage_share_tokens` was removed with the share-token feature and no longer exists; drop it if
 you find it cited elsewhere.)
 
-⚠ = `ManagedExternally: true` (6 total: `autopilot_webhook`, `daemon_runtime_callback`,
-`manage_project_access`, `read_issues`, `read_projects`, `gateway_channel_delivery`). For these the tool-policy gate is
-**not** the enforcement point — they are listed for visibility only and a policy row on them
-does nothing. They are a permanent code-only set, not a backlog item.
+⚠ = `ManagedExternally: true` (3 total after FIR-4220: `autopilot_webhook`,
+`daemon_runtime_callback`, `gateway_channel_delivery`). These are machine-intake boundaries —
+authenticated by webhook secret, daemon token, and gateway service token respectively — with no
+person or agent for Allow/Ask/Deny to judge. Each carries `WorkspaceIntakeSwitch: true`: its
+workspace-layer policy row IS read at the intake point (`platformaction.IntakeAllowed`) as a live
+off-switch (Deny/Disable turns the intake off; lookup errors fail open), and Settings accepts
+workspace-layer writes only. Every other formerly-advisory platform key (`rerun_issue`,
+`create_autopilot`, `trigger_autopilot`, `autopilot_scope`, `schedule_agent_wakeup`, `use_other_runtime`,
+`manage_project_access`, `read_issues`, `read_projects`) is enforced by the tool-policy engine
+since FIR-4220/FIR-4359 — a policy row on them is the real gate, with the pre-existing code checks kept as
+tighten-only ceilings. Autopilot management is the member-aware exception: members use the same
+workspace/group/user resolver and no separate grant or check path. `catalog_advisory_tripwire_test.go` pins this exact 3-key set so a new
+advisory row cannot appear silently.
 
 **Two dimensions, do not confuse them:**
 
@@ -257,7 +288,7 @@ Workflow Hook capabilities are independent of `manage_workflows`. `platformcatal
 
 Workflow, Command, and Eval mutations under `/api/cerebro/workflows*`, `/api/cerebro/commands*`, and `/api/cerebro/evals*` share one agent enforcement boundary: `handler.RequireManageWorkflows` always checks `PlatformActionGate` against `manage_workflows` and also checks Task Mandate while `cerebro_task_mandate_enforcement` is on before the route handler can mutate state. Reads and member behavior remain unchanged, and the independent `/api/cerebro/workflow-hooks*` family keeps its `hooks:*` contracts. Settings → Permissions is therefore the only authoring surface for `manage_workflows`; CLI/MCP wrappers inherit the HTTP decision.
 
-Externally managed catalog rows remain read-only and render `external_security_owner` inline beside `Managed externally` in both permission catalog presentations. An older response without an owner renders `Security owner not specified`, so the management location never depends on hover or disappears silently.
+The three intake rows render `Governed by: <external_security_owner> · Workspace off-switch` in both permission catalog presentations, with the decision control enabled on the workspace page only (`isRowSettable` in `packages/cerebro-tool-policy/core/tool-policy.ts`, mirroring the server's `externallyManagedWriteError`). An older response without an owner renders `Security owner not specified`, so the management location never depends on hover or disappears silently.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
   permissions, keyed on action.
 - **Runtime tool capabilities** — the per-tool dimension keyed on `tool_key` values like
@@ -330,7 +361,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 | **web_fetch host policy** | `webfetchpolicy/policy.go:73,156`; gate `firtal_gateway_tools_extended.go:830` | which hosts `web_fetch` reaches | allow-list `{firtal.com, docs.anthropic.com}` | `cerebro_web_fetch_policy` table |
 | **firtal_registry scope** | `runtime/firtal_gateway_tools_extended.go` + `toolpolicy.chainGateDataSource` | data-source/app/write scope | **deny-by-default** for resource rows; write is never implied by read | canonical `cerebro_tool_policy` resource rows plus server-owned Registry connection configuration |
 | **agentvault** | `agentvault/store.go` `ListForAgent`/`SetAccess`, reconciled via `mirror.go` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
-| **autopilot scope** | `access/autopilot_scope.go:118,150,179` `CanSee/Edit/Trigger` | autopilot visibility/edit/trigger | unknown scope → **fail closed**; private → creator-only | `autopilot.scope` columns |
+| **autopilot scope** | `access/autopilot_scope.go:118,150,179` `CanSee/Edit/Trigger` | autopilot visibility/edit/trigger after the canonical Permissions decision | unknown scope → **fail closed**; private → creator-only; workspace edit → admitted member | `autopilot.scope` columns |
 | **sandbox profile** (OS wall) | `sandboxprofile/profile.go:91-139`; `daemon/sandbox.go:98` | network mode, writable/denied paths, shell deny, keychain | empty → Developer (open); ReadOnly → DenyShell; keychain **deny-by-default** for new agents | hardcoded preset → `sandbox_policy` jsonb |
 | **commentguard** | `commentguard/guard.go` | reject agent comment with no recipient + sub-issue rules | **flags default OFF**; DB err → fail-open | feature flags |
 | **Firtal Gateway tool exposure** | `runtime.policyDecisionTools` / `runtime.guardToolCall` | which tools a Gateway agent is handed and may call (empty/error → chat-only) | **fail closed** through the Policy Decision Service; no cascade or `agent_tool_grant` fallback | live per-task registry + canonical capability catalog + `cerebro_tool_policy`; availability-card verification remains reporting-only |

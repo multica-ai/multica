@@ -21,10 +21,6 @@ func isManageWorkflowsMutation(method string) bool {
 // agent mutations while preserving existing member and read behavior.
 func (h *Handler) RequireManageWorkflows(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isManageWorkflowsMutation(r.Method) {
-			next.ServeHTTP(w, r)
-			return
-		}
 		workspaceID := h.resolveWorkspaceID(r)
 		userID := requestUserID(r)
 		workspaceUUID, err := util.ParseUUID(workspaceID)
@@ -33,6 +29,22 @@ func (h *Handler) RequireManageWorkflows(next http.Handler) http.Handler {
 			return
 		}
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		if !isManageWorkflowsMutation(r.Method) {
+			if actorType == "agent" {
+				agentUUID, parseErr := util.ParseUUID(actorID)
+				if parseErr != nil {
+					writePlatformAction(w, manageWorkflowsPlatformAction, platformActionAnswer{Reason: "platform action gate unavailable"})
+					return
+				}
+				answer := h.authorizeExactPlatformTaskMandate(r.Context(), r, workspaceUUID, agentUUID, manageWorkflowsPlatformAction, true)
+				if !answer.Allowed {
+					writePlatformAction(w, manageWorkflowsPlatformAction, answer)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		answer := h.authorizePlatformAction(
 			r.Context(),
 			r,

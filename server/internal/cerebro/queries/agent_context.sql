@@ -29,6 +29,10 @@ SELECT ar.provider FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
 WHERE a.id = $1;
 
+-- name: GetAgentContextRuntimeProvider :one
+SELECT provider FROM agent_runtime
+WHERE id = $1 AND workspace_id = $2;
+
 -- ListAgentSkillIDsForContext returns the skill ids currently bound to the
 -- agent, in a stable order so two snapshots of the same binding set compare
 -- equal byte-for-byte.
@@ -64,7 +68,8 @@ UPDATE agent SET
     mcp_config      = $6,
     custom_args     = $7,
     runtime_config  = $8,
-    context_version = $9,
+    runtime_id      = COALESCE(sqlc.narg(runtime_id)::uuid, runtime_id),
+    context_version = sqlc.arg(context_version),
     updated_at      = now()
 WHERE id = $1
 RETURNING *;

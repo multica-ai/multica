@@ -17,6 +17,13 @@ interface SearchSelectBaseProps {
   disabled?: boolean;
   compact?: boolean;
   className?: string;
+  /**
+   * Short field name kept visible inside the control even once a value is
+   * picked, so a filled field still says what it is (FIR-3589 item 3).
+   * Without it the selected value replaces the placeholder and the field
+   * loses its name.
+   */
+  fieldLabel?: string;
   /** Static action rendered at the bottom of the list, e.g. "Plan next period". */
   actionLabel?: string;
   onAction?: (query: string) => void;
@@ -38,7 +45,7 @@ interface MultiSearchSelectProps extends SearchSelectBaseProps {
 export type SearchSelectProps = SingleSearchSelectProps | MultiSearchSelectProps;
 
 export function SearchSelect(props: SearchSelectProps) {
-  const { label, options, placeholder = "Select…", disabled, compact, className = "", actionLabel, onAction } = props;
+  const { label, options, placeholder = "Select…", disabled, compact, className = "", fieldLabel, actionLabel, onAction } = props;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -104,13 +111,22 @@ export function SearchSelect(props: SearchSelectProps) {
         className={`flex w-full items-center justify-between gap-1.5 rounded-md border bg-background text-left disabled:opacity-50 ${compact ? "h-8 px-2 text-xs" : "h-10 px-3 text-sm"}`}
       >
         <span className={`flex min-w-0 items-center gap-1.5 ${summary ? "" : "text-muted-foreground"}`}>
+          {fieldLabel && <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{fieldLabel}</span>}
           {summaryColor && <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: summaryColor }} />}
           <span className="truncate">{summary || placeholder}</span>
         </span>
         <span aria-hidden className="shrink-0 text-muted-foreground">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-full min-w-56 rounded-md border bg-popover p-1 shadow-md" onClick={(event) => event.stopPropagation()}>
+        <div className="absolute left-0 top-full z-30 mt-1 w-full min-w-56 max-w-[calc(100vw-2rem)] rounded-md border bg-popover p-1 shadow-md" onClick={(event) => event.stopPropagation()}>
+          {/* The picker names itself and offers an explicit way out, so a phone
+              user is never stuck having to tap outside to close it (FIR-3589 item 11). */}
+          <div className="flex items-center justify-between gap-2 px-1 pb-1">
+            <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{fieldLabel ?? label}</span>
+            <button type="button" aria-label={`Close ${label}`} onClick={close} className="-mr-1 grid size-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
+              <span aria-hidden>✕</span>
+            </button>
+          </div>
           <input
             ref={inputRef}
             aria-label={`Search ${label}`}
@@ -147,6 +163,11 @@ export function SearchSelect(props: SearchSelectProps) {
             <button type="button" onClick={() => { onAction(query.trim()); close(); }} className="mt-1 flex w-full items-center gap-1.5 rounded border-t px-2 py-1.5 text-left text-sm font-medium text-primary hover:bg-muted">
               ＋ {actionLabel ?? `Create "${query.trim()}"`}
             </button>
+          )}
+          {/* Picking several values keeps the list open, so it needs its own
+              "I am finished" button rather than only a tap outside. */}
+          {props.multiple && (
+            <button type="button" onClick={close} className="mt-1 min-h-9 w-full rounded border-t text-sm font-medium hover:bg-muted">Done</button>
           )}
         </div>
       )}

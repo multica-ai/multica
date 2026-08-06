@@ -6,6 +6,12 @@ export const RECURRENCE_MODES: RecurrenceMode[] = ["running_doc", "new_note"];
 export type CadenceUnit = "manual" | "day" | "week" | "month" | "quarter";
 export const CADENCE_UNITS: CadenceUnit[] = ["manual", "day", "week", "month", "quarter"];
 
+// FIR-3589: a recurring note (a cycle) can carry the people and agents who attend.
+export interface NoteTypeParticipant {
+  type: "member" | "agent";
+  id: string;
+}
+
 export interface NoteType {
   id: string;
   workspace_id: string;
@@ -21,9 +27,14 @@ export interface NoteType {
   numbering_enabled: boolean;
   next_number: number;
   anchor_weekday: number | null;
+  // FIR-3589: for a monthly cadence, the ordinal week-of-month (1..5, or -1 for
+  // "last") the type anchors to, combined with anchor_weekday to schedule e.g.
+  // the 3rd Monday of every month. null for every other cadence.
+  anchor_week_of_month: number | null;
   // FIR-2810: notes materialised from this type start with the "stamp the
   // writer's member code on every line" toggle switched on.
   author_codes: boolean;
+  participants: NoteTypeParticipant[];
   created_at: string;
   updated_at: string;
 }
@@ -40,7 +51,9 @@ export interface NoteTypeWriteInput {
   numbering_enabled?: boolean;
   next_number?: number;
   anchor_weekday?: number | null;
+  anchor_week_of_month?: number | null;
   author_codes?: boolean;
+  participants?: NoteTypeParticipant[];
 }
 
 export interface NoteTypeRunResult {

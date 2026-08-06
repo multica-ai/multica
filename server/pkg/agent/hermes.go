@@ -177,7 +177,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
+	// CEREBRO-PATCH(hermes-global-args-before-acp): hermes' argparse only accepts
+	// --provider/--model/--skills/... on the top-level parser, so custom args must
+	// precede the `acp` subcommand or hermes exits with "unrecognized arguments".
+	hermesArgs := append(filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger), "acp")
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)

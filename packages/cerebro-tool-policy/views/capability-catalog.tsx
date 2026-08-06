@@ -235,7 +235,7 @@ export function CapabilityCatalog({
                             {row.tool_key}
                           </span>
                           {row.managed_externally ? (
-                            <ExternalSecurityOwner owner={row.external_security_owner} />
+                            <ExternalSecurityOwner row={row} />
                           ) : null}
                         </span>
                       </button>
@@ -254,7 +254,7 @@ export function CapabilityCatalog({
                             {row.tool_key}
                           </span>
                           {row.managed_externally ? (
-                            <ExternalSecurityOwner owner={row.external_security_owner} />
+                            <ExternalSecurityOwner row={row} />
                           ) : null}
                         </span>
                         <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
@@ -272,7 +272,7 @@ export function CapabilityCatalog({
                             : row.tool_key}
                         </div>
                         {row.managed_externally ? (
-                          <ExternalSecurityOwner owner={row.external_security_owner} />
+                          <ExternalSecurityOwner row={row} />
                         ) : null}
                       </div>
                     )}
@@ -308,8 +308,26 @@ export function CapabilityCatalog({
   );
 }
 
-function ExternalSecurityOwner({ owner }: { owner?: string }) {
+// Mirrors ManagedExternallyTag in tool-policy-table.tsx (FIR-4220): an intake
+// off-switch row says WHERE it is governed and that the workspace-layer
+// decision is live; any other managed-external row keeps the read-only wording.
+function ExternalSecurityOwner({ row }: { row: ToolPolicyRow }) {
+  const owner = row.external_security_owner;
   const ownerLabel = owner || "Security owner not specified";
+  if (row.workspace_intake_switch) {
+    return (
+      <Badge
+        variant="outline"
+        className="mt-1 h-auto max-w-full shrink flex-wrap justify-start border-dashed font-normal whitespace-normal text-muted-foreground"
+        title={`Machine intake authenticated by ${ownerLabel}. The Workspace-layer decision is a live off-switch: Deny or Disable turns this intake off.`}
+      >
+        <span>Governed by</span>
+        <span>{ownerLabel}</span>
+        <span aria-hidden="true">·</span>
+        <span>Workspace off-switch</span>
+      </Badge>
+    );
+  }
   const detail = owner
     ? `Access is enforced by ${owner}, not by the tool-policy gate. Settings cannot change this permission.`
     : "Access is governed outside the tool-policy gate. Settings cannot change this permission.";

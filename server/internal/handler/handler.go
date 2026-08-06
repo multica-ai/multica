@@ -166,11 +166,16 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
 	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
-	CommentTargetGuard  CommentTargetGuardInvoker
-	CommentSessionMode  CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
-	SessionModeProfiles interface {
+	CommentTargetGuard CommentWorkflowGateInvoker
+	// CEREBRO-PATCH(handler-issue-status-workflow-gate): FIR-3692 routes
+	// status changes for active Chain v2 issues through Workflow Hooks.
+	IssueStatusWorkflowGate IssueStatusWorkflowGateInvoker
+	RuntimeHookEvents       RuntimeHookEventEvaluator // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 daemon-to-server hook event channel.
+	CommentSessionMode      CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
+	SessionModeProfiles     interface {
 		Active(context.Context, pgtype.UUID, sessionmode.Mode) (sessionmode.Config, error)
 	} // CEREBRO-PATCH(session-mode-config): claim-time published snapshot resolver.
+	SessionModeEvalRunner SessionModeEvalRunner // CEREBRO-PATCH(session-mode-evals): FIR-4047 runs a Mode's evaluations at task completion.
 	RoundReplyObserver RoundReplyObserver // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
@@ -218,8 +223,6 @@ type Handler struct {
 	DuplicateCheckJudger *duplicatecheck.Judger
 	// CEREBRO-PATCH(handler-custom-status-resolver): FIR-1550 v2b — resolver invoked from UpdateIssue.
 	CustomStatusResolver CustomStatusResolver
-	// CEREBRO-PATCH(handler-issue-status-gate): FIR-3659 — before.issue.status_change hook gate for agent actors; see cerebro_issue_status_gate.go.
-	IssueStatusGate IssueStatusChangeGate
 	// CEREBRO-PATCH(handler-identity-provisioner): FIR-2523 Google Workspace
 	// auto-membership hook. Wired by the router; nil = no auto-provisioning.
 	IdentityProvisioner IdentityProvisionerInvoker
@@ -427,17 +430,39 @@ type MentionTriggerGateInvoker interface {
 	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
 }
 
-// CommentTargetGuardInvoker is the upstream-side seam for Cerebro's "no agent
-// comment without a target" guard (FIR-2674). RejectComment returns
-// (message, ok=false) when an agent-authored comment references no target and
-// must be rejected; ok=true means it passes. A nil invoker disables the guard.
+// CommentWorkflowGateInvoker is the upstream-side seam for Cerebro's
+// before.message.send Workflow hook. Production wiring must provide it.
 //
 // CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674 + TECH-3099.
-type CommentTargetGuardInvoker interface {
-	// CEREBRO-PATCH(handler-comment-target-guard-iface): TECH-3099 adds isSubIssue,
-	// ownerUserIDs, taskPostedOnParent for the three new sub-issue checks;
-	// TECH-3761 adds agentHasActiveWakeup for the wakeup exemption.
-	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, authorID, content string, isSubIssue bool, ownerUserIDs []string, taskPostedOnParent bool, agentHasActiveWakeup bool) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 + TECH-3099 + TECH-3761.
+type CommentWorkflowGateInvoker interface {
+	EvaluateComment(ctx context.Context, input CommentWorkflowGateInput) (CommentWorkflowGateResult, error)
+}
+
+// CommentWorkflowGateInput is the data-only boundary between the shared
+// comment handler and Cerebro's Workflow engine.
+type CommentWorkflowGateInput struct {
+	WorkspaceID          pgtype.UUID
+	IssueID              string
+	TaskID               string
+	SessionID            string
+	AuthorType           string
+	AuthorID             string
+	Content              string
+	ParentID             string
+	RequiredParentID     string
+	ThreadRequired       bool
+	NoAction             bool
+	IsSubIssue           bool
+	OwnerUserIDs         []string
+	TaskPostedOnParent   bool
+	AgentHasActiveWakeup bool
+}
+
+type CommentWorkflowGateResult struct {
+	Allowed    bool
+	ParentID   string
+	Message    string
+	StatusCode int
 }
 
 // ChannelCreateGuardInvoker is the upstream-side seam for Cerebro's

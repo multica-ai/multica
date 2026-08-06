@@ -108,6 +108,10 @@ export type CerebroFlagKey =
   //   - interim single-writer edit lock (stops two people overwriting each
   //     other until full live co-editing lands).
   | "cerebro_note_lock"
+  // FIR-1317: live co-editing — several people type in the same note at
+  // once and see each other's caret. Replaces the single-writer lock and
+  // the conflict dialog while it is on. Default off until QA'd on staging.
+  | "cerebro_note_live_collab"
   // TECH-3690 (Jesper): clicking a note in the inbox Notes box opens it in the
   // same detail pane messages use, with an "Åbn fuldt" button to the full Notes
   // surface — instead of navigating straight away. Default on; off reverts to
@@ -175,6 +179,8 @@ export type CerebroFlagKey =
   | "cerebro_workflows"
   | "cerebro_workflows_engine"
   | "cerebro_evals"
+  // FIR-3692: Workflow owns every agent-loop code gate. ON by default; a
+  // workspace can switch the decision engine off without a deploy.
   | "cerebro_workflow_hooks"
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
@@ -192,8 +198,10 @@ export type CerebroFlagKey =
   // turns it on, and access is deny-by-default until a box is granted.
   | "cerebro_credentials_per_actor"
   | "cerebro_web_fetch_policy"
+  | "cerebro_task_mandate_diagnostics"
   | "cerebro_task_mandate_enforcement"
   | "cerebro_task_scope_enforcement"
+  | "cerebro_access_diagnostics"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
@@ -216,6 +224,9 @@ export type CerebroFlagKey =
   | "cerebro_disable_onboarding"
   // FIR-2504: show similar open issues + LLM verdict when creating an issue.
   | "cerebro_duplicate_check_on_create"
+  // FIR-4183: check for an existing issue on the same matter when an issue is
+  // handed to an agent.
+  | "cerebro_related_check_on_assign"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
   // FIR-2580: per-workspace logo (upload + sidebar/breadcrumbs + web favicon + desktop dock icon).
@@ -279,14 +290,6 @@ export type CerebroFlagKey =
   // fired reminder only lives in its own Reminders box, not in two places.
   // Opt-in per user; OFF by default (reminders show in All messages).
   | "cerebro_inbox_hide_reminders"
-  // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
-  | "cerebro_comment_target_guard"
-  // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
-  // the recipient requirement when it already has an active wakeup on the issue.
-  | "cerebro_comment_target_guard_wakeup_exempt"
-  // FIR-3308: reject an agent comment that promises the agent will carry on
-  // while no wakeup is scheduled to deliver it. Independent of the target guard.
-  | "cerebro_comment_no_unbacked_promise"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
   // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
@@ -322,6 +325,8 @@ export type CerebroFlagKey =
   | "cerebro_interactive_terminal"
   // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
   | "cerebro_connections"
+  // FIR-3924: temporary read-only Company Brain migration census. Default OFF.
+  | "cerebro_company_brain_migration_census"
   // FIR-2273: expose api-type connection endpoints as agent-callable tools
   // (dispatched server-side so credentials stay on the backend). Default OFF.
   | "cerebro_api_connection_tools"
@@ -330,11 +335,6 @@ export type CerebroFlagKey =
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
   | "cerebro_skill_learning"
-  // TECH-3099: sub-issue comment guard — three checks extending cerebro_comment_target_guard.
-  // All default OFF; each is independently toggled so workspaces can adopt them one by one.
-  | "cerebro_sub_issue_no_owner_mention"
-  | "cerebro_sub_issue_require_agent_tag"
-  | "cerebro_sub_issue_no_split_session"
   // FIR-2563/FIR-3403: per-workspace toggle for the approval inbox. When off,
   // Ask remains blocked but no inbox request is opened. Allow / Ask / Block
   // access itself is always enforced by the Policy Decision Service.
@@ -349,10 +349,6 @@ export type CerebroFlagKey =
   | "cerebro_wakeup_time"
   | "cerebro_wakeup_issue_status"
   | "cerebro_wakeup_github_ci"
-  // FIR-2679: loop-guard — cap how many self-wakeups an agent may chain on one
-  // issue without objective progress. The cap itself is a per-workspace number
-  // setting; this flag turns the guard on/off.
-  | "cerebro_wakeup_loop_guard"
   // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
   // mirroring the running banner (live countdown / waited-for status / CI).
   | "cerebro_wakeup_bar"
@@ -542,6 +538,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2697 part 4: attach ⇒ always has a folder + card links to it — off until QA'd.
   cerebro_attachment_folder: false,
   cerebro_note_lock: false,
+  // FIR-1317: OFF until live co-editing is verified with two browsers on staging.
+  cerebro_note_live_collab: false,
   // TECH-3690: on by default — only takes effect where cerebro_notes is on.
   cerebro_note_inbox_pane: true,
   // FIR-1621: ON (FIR-1647) — coupling + send-to-agent flow shipped.
@@ -588,7 +586,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_workflows: false,
   cerebro_workflows_engine: false,
   cerebro_evals: false,
-  cerebro_workflow_hooks: false,
+  // FIR-3692: ON. Workflow is the only decision path for the agent loop's
+  // code gates, so it stays on until a workspace turns it off.
+  cerebro_workflow_hooks: true,
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
@@ -600,12 +600,19 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // until an admin turns it on and grants a box to an actor.
   cerebro_credentials_per_actor: false,
   cerebro_web_fetch_policy: true,
+  // FIR-4293: read-only rollout evidence. This remains independently
+  // switchable from call-time enforcement so operators can prove parity first.
+  cerebro_task_mandate_diagnostics: true,
   // FIR-4220: kill switch for call-time Task Mandate enforcement. Keep OFF
   // until mandate generation covers every callable offered to the agent.
   cerebro_task_mandate_enforcement: false,
   // FIR-4076: default ON preserves the task-bound issue, agent, and workspace
   // route matchers. OFF bypasses only those three matchers as an incident switch.
   cerebro_task_scope_enforcement: true,
+  // FIR-4293: one rollout gate for Runtime, Connection and Task access
+  // diagnostics. Keep separate from enforcement so operators can validate
+  // observation-only evidence before call-time denials are enabled.
+  cerebro_access_diagnostics: false,
   // FIR-4220 (formerly miscited as FIR-2594): surface the Multica platform
   // actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
@@ -656,6 +663,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // of duplicating. Defaults ON so the feature lands behind the standard
   // workspace/user override (Off restores upstream create flow).
   cerebro_duplicate_check_on_create: true,
+  // FIR-4183: the same question, asked at hand-over instead of at creation —
+  // an agent picking up an issue gets told when the work already exists.
+  // Defaults ON: with no workflow-hook policy bound to before.issue.assigned
+  // nothing fires automatically, so the flag only opens the manual
+  // `multica issue check-related` route until a workspace binds a policy.
+  cerebro_related_check_on_assign: true,
   // FIR-2523: Auth & Permissions tab + Google Workspace auto-membership.
   // Default ON for the cerebro fork (Jesper, 2026-05-30): firtal.com auto-
   // signup is the launch feature, and the table starts empty so a fresh
@@ -756,22 +769,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // to hide reminder rows from "All messages" so they only appear in the
   // standalone Reminders box (no duplicate across two boxes).
   cerebro_inbox_hide_reminders: false,
-  // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
-  // no target at all (no person, agent, or issue) is rejected by the server
-  // with a 422 telling the agent to add one. Members are never affected. Off
-  // restores the prior behaviour (comments with no target allowed).
-  cerebro_comment_target_guard: false,
-  // TECH-3761: OFF by default. When on (and the base guard is on), an agent
-  // that already has an active wakeup scheduled on the issue is exempt from the
-  // recipient requirement — the wakeup is the follow-up action, so the comment
-  // need not also tag a human. Off keeps the base guard's behaviour unchanged.
-  cerebro_comment_target_guard_wakeup_exempt: false,
-  // FIR-3308: OFF by default. When on, an agent comment that says the agent
-  // itself will continue — while it has no active wakeup on the issue — is
-  // rejected with a message telling it to schedule the wakeup first or to state
-  // a delivered result instead. Independent of cerebro_comment_target_guard.
-  // Members are never affected. Off restores the prior behaviour.
-  cerebro_comment_no_unbacked_promise: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
   // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
@@ -820,6 +817,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3108: ON by default — feature shipped and QA done. TECH-3209: switching
   // to true-default so admins don't lose access when personal/workspace override is cleared.
   cerebro_connections: true,
+  // FIR-3924: OFF until an admin explicitly opens the credential-backed
+  // migration diagnostic for a workspace.
+  cerebro_company_brain_migration_census: false,
   // FIR-2273: OFF by default — exposing api-type connection endpoints as agent
   // tools opens external endpoints (with server-side credentials) to agents, so
   // it stays opt-in per workspace. Matches the backend default.
@@ -831,10 +831,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
   cerebro_skill_learning: false,
-  // TECH-3099: sub-issue comment guard checks — all OFF by default.
-  cerebro_sub_issue_no_owner_mention: false,
-  cerebro_sub_issue_require_agent_tag: false,
-  cerebro_sub_issue_no_split_session: false,
   // FIR-3403: ON by default. Turning it off disables inbox requests without
   // disabling access enforcement; Ask remains blocked.
   cerebro_approval_gate: true,
@@ -846,9 +842,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_wakeup_time: true,
   cerebro_wakeup_issue_status: true,
   cerebro_wakeup_github_ci: true,
-  // FIR-2679: ON by default — cap consecutive self-wakeups per issue. Off lets an
-  // agent chain self-wakeups without the loop guard.
-  cerebro_wakeup_loop_guard: true,
   // FIR-1521: ON by default — additive top-of-issue banner. Off restores the
   // sidebar-only wakeup list with no banner.
   cerebro_wakeup_bar: true,
@@ -1421,7 +1414,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Workflow hooks",
     group: "workspace",
     description:
-      "Enable reusable trigger, scope, filter, decision, and action hooks inside the Workflow engine. Server-side enforcement additionally requires CEREBRO_WORKFLOW_HOOKS_ENABLED.",
+      "Let the Workflow engine own the agent loop's code gates: handoff, task completion, task failure, tool failure, and issue status change. ON by default. Turn it off for this workspace to run the loop with no Workflow decision. The server-wide emergency stop is CEREBRO_WORKFLOW_HOOKS_ENABLED.",
   },
   {
     key: "cerebro_workflow_step_model_override",
@@ -1459,6 +1452,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let workspace admins control which URLs agents may fetch with the web_fetch tool. Choose a mode — allow-list (only listed hosts) or disallow-list (everything except listed hosts) — and manage the host rules (github.com, *.github.com). The active list is shown to agents so they can explain to the user when a host is blocked. When off, the legacy hardcoded allow-list applies. Default ON. TECH-3522.",
   },
   {
+    key: "cerebro_task_mandate_diagnostics",
+    label: "Task Mandate diagnostics",
+    group: "permissions",
+    description:
+      "Show read-only provider/MCP diagnostics on Runtime pages and historical Task access diagnostics in the Task transcript. This does not enable call-time enforcement. FIR-4293.",
+  },
+  {
     key: "cerebro_task_mandate_enforcement",
     label: "Task Mandate enforcement",
     group: "permissions",
@@ -1470,7 +1470,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Task scope enforcement",
     group: "permissions",
     description:
-       "Require task tokens to match their bound issue, agent, and workspace on routes guarded by AllowTaskScopeForIssue, AllowTaskScopeForAgent, or AllowTaskScopeForWorkspace. Off bypasses only those three route matchers; Permissions, approvals, credentials, Connections, sandbox, repository, and every other security boundary remain active. Default ON. FIR-4076.",
+      "Require task tokens to match their bound issue, agent, and workspace on routes guarded by AllowTaskScopeForIssue, AllowTaskScopeForAgent, or AllowTaskScopeForWorkspace. Off bypasses only those three route matchers; Permissions, approvals, credentials, Connections, sandbox, repository, and every other security boundary remain active. Default ON. FIR-4076.",
+  },
+  {
+    key: "cerebro_access_diagnostics",
+    label: "Access diagnostics",
+    group: "permissions",
+    description:
+      "Show the shared provider, discovery and Task access diagnostics on Runtime, Connection and transcript surfaces. This is observation-only and does not enable Task Mandate enforcement. FIR-4293.",
   },
   {
     key: "cerebro_approvals",
@@ -1491,7 +1498,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Move comments to a new thread",
     group: "issues",
     description:
-      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
+      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread — 'Select all after this' takes the anchor and everything below it in one click — and lift them into a new thread on the same issue. The comments are moved, not copied: they keep their author, timestamps, attachments and reactions, and no breadcrumb is left behind. JEH-2488, FIR-3880.",
   },
   {
     key: "cerebro_skill_ownership",
@@ -1579,20 +1586,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
   },
   {
-    key: "cerebro_comment_target_guard",
-    label: "Require a recipient on agent comments",
-    group: "issues",
-    description:
-      "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
-  },
-  {
-    key: "cerebro_comment_target_guard_wakeup_exempt",
-    label: "Exempt agents with a scheduled wakeup",
-    group: "issues",
-    description:
-      "Sub-setting of 'Require a recipient on agent comments'. When on, an agent that has already scheduled an active wakeup on this issue may post without naming a recipient — the wakeup is the follow-up action, so a human tag is not also required. Only the recipient requirement is waived; the sub-issue checks still apply. Requires 'Require a recipient on agent comments' to be on. Off keeps every agent comment subject to the recipient rule. TECH-3761.",
-  },
-  {
     key: "cerebro_firtal_welcome",
     label: "Firtal-branded welcome page",
     group: "onboarding",
@@ -1612,6 +1605,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
+  },
+  {
+    key: "cerebro_related_check_on_assign",
+    label: "Find similar at hand-over",
+    group: "issues",
+    description:
+      "Ask the same question when an issue is handed to an agent instead of when it is created: search the workspace for open issues about the same matter, link every match as related on both issues, and post one comment naming them. Bind the issue.check_related action to the before.issue.assigned workflow hook to run it. Requires the Firtal AI Gateway credentials. FIR-4183.",
   },
   {
     key: "cerebro_google_identity",
@@ -1880,27 +1880,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to blocked. Off silences the notification for the effective flag scope. TECH-3006.",
   },
   {
-    key: "cerebro_sub_issue_no_owner_mention",
-    label: "Block on-behalf-of user @mention on sub-issues",
-    group: "issues",
-    description:
-      "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-  },
-  {
-    key: "cerebro_sub_issue_require_agent_tag",
-    label: "Require parent-agent tag on sub-issues",
-    group: "issues",
-    description:
-      "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-  },
-  {
-    key: "cerebro_sub_issue_no_split_session",
-    label: "Block split-session across parent and sub-issue",
-    group: "issues",
-    description:
-      "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-  },
-  {
     key: "cerebro_display_currency",
     label: "Display currency",
     group: "workspace",
@@ -1914,6 +1893,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+  },
+  {
+    key: "cerebro_company_brain_migration_census",
+    label: "Company Brain migration census",
+    group: "agents",
+    description:
+      "Enable the temporary read-only Company Brain identity and policy census for connection managers. Calls remain subject to the requesting member's connection-tool permissions. FIR-3924.",
   },
   // FIR-2273: surface api-type connection endpoints as agent-callable tools.
   {
@@ -2007,13 +1993,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
-  },
-  {
-    key: "cerebro_wakeup_loop_guard",
-    label: "Wakeup: loop guard",
-    group: "agents",
-    description:
-      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply or issue status/progress event resets the count; ordinary agent comments and pull-request updates do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
   },
   {
     key: "cerebro_wakeup_bar",
@@ -2152,8 +2131,10 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_tool_policy: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
   cerebro_web_fetch_permissions: "tool_permissions",
+  cerebro_task_mandate_diagnostics: "tool_permissions",
   cerebro_task_mandate_enforcement: "tool_permissions",
   cerebro_task_scope_enforcement: "tool_permissions",
+  cerebro_access_diagnostics: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_policy_cel: "tool_permissions",

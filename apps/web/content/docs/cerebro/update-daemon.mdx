@@ -1,0 +1,83 @@
+---
+title: Switch to Firtal's Multica build
+description: Replace the public Multica CLI with Firtal's build so your Runtime receives Firtal features and updates.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Firtal Runtimes update automatically after they use Firtal's Multica build. The public `multica-ai/tap` package follows a different release channel and does not include Firtal features such as the interactive terminal.
+
+<Callout type="info">
+For a new machine, follow [Connect your machine to Cerebro](/docs/cerebro/daemon-setup) instead. That guide installs Firtal's build from the start.
+</Callout>
+
+## Check whether you need to switch
+
+Run:
+
+```bash
+type -a multica
+printf 'Homebrew path: %s/bin/multica\n' "$(brew --prefix)"
+brew tap | grep -E '^(firtal-group/tap|multica-ai/tap)$'
+```
+
+If the tap output only shows `firtal-group/tap` and the first executable matches the printed Homebrew path, you already use the correct release channel. Continue below if the output shows `multica-ai/tap`, no tap, or another executable first. If no tap is shown, skip step 1 and start at step 2.
+
+## 1. Remove the public build
+
+```bash
+brew uninstall multica
+brew untap multica-ai/tap
+```
+
+If Homebrew reports that `multica-ai/tap` is not installed, continue to the next step.
+
+## 2. Install Firtal's build
+
+```bash
+brew install firtal-group/tap/multica
+hash -r
+```
+
+## 3. Restart and verify the Runtime
+
+```bash
+multica --version
+multica daemon restart
+multica daemon status
+```
+
+`multica daemon status` must show the daemon as running and list your Runtimes. This build supports the interactive terminal when the workspace feature and the Runtime's presentation mode are enabled. It will receive future Firtal updates automatically while it is online and idle.
+
+## Troubleshooting
+
+**The old version still runs after installation.**
+
+List every installed `multica` executable:
+
+```bash
+type -a multica
+```
+
+Then relink the Homebrew version and refresh the shell:
+
+```bash
+brew link --overwrite firtal-group/tap/multica
+eval "$(brew shellenv)"
+hash -r
+command -v multica
+multica --version
+```
+
+`command -v multica` must now print the Homebrew path shown by `brew --prefix`, followed by `/bin/multica`. This changes which executable the shell uses without deleting the shadowing file.
+
+**A macOS background daemon does not restart.**
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+multica daemon status
+```
+
+**`brew` is not available.**
+
+Install Homebrew from [brew.sh](https://brew.sh), then repeat this guide.

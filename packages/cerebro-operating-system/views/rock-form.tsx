@@ -75,10 +75,6 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
 
   return (
     <form onSubmit={submit} className="grid gap-4 rounded-xl border bg-card p-5 sm:grid-cols-2">
-      <div className="sm:col-span-2">
-        <h2 className="text-lg font-semibold">{rock ? `Edit ${terminology.rock}` : `New ${terminology.rock}`}</h2>
-        <p className="text-sm text-muted-foreground">Define the outcome first. Connections to Projects and Issues are optional.</p>
-      </div>
       <label className="grid gap-1 text-sm sm:col-span-2">{terminology.rock} title
         <input aria-label={`${terminology.rock} title`} required value={title} onChange={(event) => setTitle(event.target.value)} className="h-10 rounded-md border bg-background px-3" />
       </label>

@@ -4,9 +4,20 @@ import {
   formatCostCents,
   formatCostUsd,
   formatCostWithOriginal,
+  formatPromptCacheHitRatio,
   isSupportedCurrency,
   normalizeCurrency,
 } from "./index";
+
+describe("formatPromptCacheHitRatio", () => {
+  it("uses all input-side tokens as the denominator", () => {
+    expect(formatPromptCacheHitRatio(100, 800, 100)).toBe("80%");
+  });
+
+  it("handles empty usage safely", () => {
+    expect(formatPromptCacheHitRatio(0, 0, 0)).toBe("—");
+  });
+});
 
 // Independent reference formatter, so the conversion-math assertions don't
 // depend on hardcoded locale glyphs/separators that vary by ICU version.

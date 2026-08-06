@@ -36,12 +36,21 @@ type DB interface {
 // It is also the read model shown to operators, so the human and the running
 // agent can inspect the same exact allowlist that call-time enforcement uses.
 type Snapshot struct {
-	TaskID       pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	AgentID      pgtype.UUID
-	AllowedTools []string
-	IssuedAt     time.Time
-	ExpiresAt    time.Time
+	TaskID               pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	AgentID              pgtype.UUID
+	AllowedTools         []string
+	IssuedAt             time.Time
+	ExpiresAt            time.Time
+	ClaimGeneration      int64
+	Producer             *string
+	Finalizer            *string
+	LifecycleState       ClaimLifecycleState
+	InventoryVersion     *string
+	DiscoveryVersion     *string
+	FinalizedGrantDigest *string
+	OfferedCount         int
+	AuthorizedCount      int
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -61,7 +70,10 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 		raw      []byte
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT task_id, workspace_id, agent_id, allowed_tools, issued_at, expires_at
+		SELECT task_id, workspace_id, agent_id, allowed_tools, issued_at, expires_at,
+		       COALESCE(claim_generation, 0), producer, finalizer,
+		       COALESCE(NULLIF(lifecycle_state, ''), 'legacy'),
+		       inventory_version, discovery_version, finalized_grant_digest
 		FROM cerebro_task_mandate
 		WHERE task_id=$1 AND workspace_id=$2 AND agent_id=$3`,
 		taskID, workspaceID, agentID,
@@ -72,6 +84,13 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 		&raw,
 		&snapshot.IssuedAt,
 		&snapshot.ExpiresAt,
+		&snapshot.ClaimGeneration,
+		&snapshot.Producer,
+		&snapshot.Finalizer,
+		&snapshot.LifecycleState,
+		&snapshot.InventoryVersion,
+		&snapshot.DiscoveryVersion,
+		&snapshot.FinalizedGrantDigest,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Snapshot{}, ErrMissing
@@ -85,40 +104,48 @@ func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUI
 	if snapshot.AllowedTools == nil {
 		snapshot.AllowedTools = []string{}
 	}
+	for _, identity := range snapshot.AllowedTools {
+		if !IsAuthorizationScope(identity) {
+			snapshot.OfferedCount++
+			snapshot.AuthorizedCount++
+		}
+	}
 	return snapshot, nil
 }
 
-// Issue snapshots the exact tools a task may call. Re-issuing for the same task
-// replaces the snapshot atomically, which supports a task being reclaimed.
+func IsAuthorizationScope(identity string) bool {
+	return strings.HasPrefix(identity, "connection:") || strings.HasSuffix(identity, "__*")
+}
+
+// Issue snapshots the exact tools a task may call through the immutable claim
+// finalizer. It remains as the compatibility entry point for existing callers.
 func (s *Store) Issue(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tools []string, expiresAt time.Time) error {
-	if s == nil || s.db == nil || !taskID.Valid || !workspaceID.Valid || !agentID.Valid {
-		return fmt.Errorf("task mandate: invalid issue input")
-	}
-	if !expiresAt.After(s.now()) {
-		return ErrExpired
-	}
-	if tools == nil {
-		tools = []string{}
-	}
-	raw, err := json.Marshal(tools)
+	input, err := newContractInput(
+		taskID,
+		workspaceID,
+		agentID,
+		tools,
+		nil,
+		"taskmandate:v1",
+	)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `
-		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
-		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (task_id) DO UPDATE SET
-		  workspace_id=EXCLUDED.workspace_id,
-		  agent_id=EXCLUDED.agent_id,
-		  allowed_tools=EXCLUDED.allowed_tools,
-		  issued_at=now(),
-		  expires_at=EXCLUDED.expires_at`, taskID, workspaceID, agentID, raw, expiresAt)
+	_, err = s.FinalizeClaim(ctx, input, "taskmandate.Store", "taskmandate.Store", expiresAt)
 	return err
 }
 
 // Authorize is intentionally a fresh database read on every tool call. Expiry
 // therefore bites at the call itself, even for a task that started earlier.
 func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tool string) error {
+	// The self-only capability lookup diagnoses the current policy/mandate
+	// intersection. Keeping it behind the snapshot it explains creates a
+	// circular lockout: a malformed or incomplete mandate would prevent the
+	// agent from discovering that exact fault. The ordinary policy gate and the
+	// tool's self-only actor check still apply after this ceiling.
+	if IsSelfCapabilityLookup(tool) {
+		return nil
+	}
 	if s == nil || s.db == nil || !taskID.Valid {
 		return ErrMissing
 	}
@@ -132,6 +159,21 @@ func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgty
 		taskID, workspaceID, agentID, tool, serverWildcard,
 	).Scan(&expiresAt, &contains)
 	if errors.Is(err, pgx.ErrNoRows) {
+		var storedWorkspaceID, storedAgentID pgtype.UUID
+		identityErr := s.db.QueryRow(ctx, `
+			SELECT workspace_id, agent_id
+			FROM cerebro_task_mandate
+			WHERE task_id=$1`, taskID,
+		).Scan(&storedWorkspaceID, &storedAgentID)
+		if errors.Is(identityErr, pgx.ErrNoRows) {
+			return ErrMissing
+		}
+		if identityErr != nil {
+			return identityErr
+		}
+		if storedWorkspaceID != workspaceID || storedAgentID != agentID {
+			return ErrIdentityMismatch
+		}
 		return ErrMissing
 	}
 	if err != nil {
@@ -144,6 +186,72 @@ func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgty
 		return ErrToolDeny
 	}
 	return nil
+}
+
+// AuthorizeClaimGeneration applies the same fresh-read authorization check as
+// Authorize while requiring the caller's immutable claim generation. Legacy
+// rows remain readable through Authorize, but cannot be confused with a
+// finalized generation by a generation-aware caller.
+func (s *Store) AuthorizeClaimGeneration(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, generation int64, tool string) error {
+	if IsSelfCapabilityLookup(tool) {
+		return nil
+	}
+	if s == nil || s.db == nil || !taskID.Valid {
+		return ErrMissing
+	}
+	if generation <= 0 {
+		return ErrStaleClaimGeneration
+	}
+	var (
+		storedWorkspaceID, storedAgentID pgtype.UUID
+		storedGeneration                 int64
+		lifecycle                        ClaimLifecycleState
+		expiresAt                        time.Time
+		contains                         bool
+		identityMatches                  bool
+		generationMatches                bool
+	)
+	serverWildcard := MCPServerWildcard(tool)
+	err := s.db.QueryRow(ctx, `
+		SELECT workspace_id, agent_id, claim_generation, lifecycle_state,
+		       expires_at, allowed_tools ? $5 OR ($6 <> '' AND allowed_tools ? $6),
+		       workspace_id = $2 AND agent_id = $3, claim_generation = $4
+		FROM cerebro_task_mandate
+		WHERE task_id=$1`,
+		taskID, workspaceID, agentID, generation, tool, serverWildcard,
+	).Scan(&storedWorkspaceID, &storedAgentID, &storedGeneration, &lifecycle, &expiresAt, &contains, &identityMatches, &generationMatches)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrMissing
+	}
+	if err != nil {
+		return err
+	}
+	if !identityMatches || storedWorkspaceID != workspaceID || storedAgentID != agentID {
+		return ErrIdentityMismatch
+	}
+	if !generationMatches || storedGeneration != generation || lifecycle != ClaimLifecycleFinalized {
+		return ErrStaleClaimGeneration
+	}
+	if !expiresAt.After(s.now()) {
+		return ErrExpired
+	}
+	if !contains {
+		return ErrToolDeny
+	}
+	return nil
+}
+
+// IsSelfCapabilityLookup recognizes the callable and canonical spellings used
+// by the Gateway, local MCP providers, and the capability catalog.
+func IsSelfCapabilityLookup(tool string) bool {
+	switch strings.TrimSpace(tool) {
+	case "get_agent_capabilities",
+		"mcp__multica__get_agent_capabilities",
+		"platform:get_agent_capabilities":
+		return true
+	default:
+		return false
+	}
 }
 
 // MCPServerWildcard is the immutable task capability for one raw MCP server.

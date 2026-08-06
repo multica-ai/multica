@@ -60,6 +60,7 @@ import {
   type TriggerFrequency,
 } from "@multica/views/autopilots/components/trigger-config";
 import { useT } from "@multica/views/i18n";
+import { useAutopilotControlPermissions } from "@multica/views/autopilots/components";
 
 // ---------------------------------------------------------------------------
 // Template pre-fill data (mirrors autopilots-page.tsx templates)
@@ -667,6 +668,7 @@ function AutopilotFormBody({
   const router = useNavigation();
   const workspaceName = useCurrentWorkspace()?.name;
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { canManage, isLoading: permissionsLoading } = useAutopilotControlPermissions(wsId);
 
   const isCreate = mode === "create";
 
@@ -706,7 +708,8 @@ function AutopilotFormBody({
   const updateTrigger = useUpdateAutopilotTrigger();
   const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = title.trim().length > 0 && assigneeId.length > 0 && !submitting;
+  const canSubmit = canManage && !permissionsLoading && title.trim().length > 0 && assigneeId.length > 0 && !submitting;
+  const permissionTitle = permissionsLoading || !canManage ? "Blocked by Permissions" : undefined;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -825,7 +828,7 @@ function AutopilotFormBody({
           <Button size="sm" variant="outline" onClick={onCancel} disabled={submitting}>
             {t(($) => $.dialog.cancel)}
           </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
+          <Button size="sm" onClick={handleSubmit} disabled={!canSubmit} title={permissionTitle}>
             {submitting
               ? isCreate
                 ? t(($) => $.dialog.creating)

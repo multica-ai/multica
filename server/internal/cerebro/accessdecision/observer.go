@@ -2,10 +2,12 @@ package accessdecision
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -54,10 +56,11 @@ type Call struct {
 // canonical policy with live runtime evidence and records each enforced
 // decision.
 type Service struct {
-	policy   PolicyResolver
-	evidence EvidenceLookup
-	writer   Writer
-	mandates MandateAuthorizer
+	policy             PolicyResolver
+	evidence           EvidenceLookup
+	writer             Writer
+	mandates           MandateAuthorizer
+	mandateEnforcement func(context.Context, pgtype.UUID) bool
 }
 
 func NewService(policy PolicyResolver, evidence EvidenceLookup, writer Writer) *Service {
@@ -69,13 +72,28 @@ func (s *Service) WithMandates(m MandateAuthorizer) *Service {
 	return s
 }
 
+func (s *Service) WithMandateEnforcement(enabled func(context.Context, pgtype.UUID) bool) *Service {
+	s.mandateEnforcement = enabled
+	return s
+}
+
 // Decide returns the authoritative fail-closed decision for one Gateway call.
 // Policy lookup failures, missing canonical identities, absent runtime
 // capabilities, Ask, and Deny all become Deny. Ledger persistence is
 // best-effort and never changes the returned decision.
 func (s *Service) Decide(ctx context.Context, call Call) Entry {
 	policyDecision := PolicyError
-	mandateDenied := call.TaskID.Valid && (s == nil || s.mandates == nil || s.mandates.Authorize(ctx, call.TaskID, call.WorkspaceID, call.AgentID, call.ObservedToolName) != nil)
+	mandateEnforced := s != nil && s.mandateEnforcement != nil && s.mandateEnforcement(ctx, call.WorkspaceID)
+	var mandateVerdict *taskmandate.Verdict
+	if mandateEnforced && call.TaskID.Valid {
+		if s.mandates == nil {
+			verdict := taskmandate.VerdictForError(taskmandate.ErrMissing)
+			mandateVerdict = &verdict
+		} else if err := s.mandates.Authorize(ctx, call.TaskID, call.WorkspaceID, call.AgentID, call.ObservedToolName); err != nil {
+			verdict := taskmandate.VerdictForError(err)
+			mandateVerdict = &verdict
+		}
+	}
 	// Never resolve a policy for an uncanonicalized input. For a known
 	// capability, ObservedToolName is the catalog-validated policy form used by
 	// the existing table; the stable capability ID remains the decision key.
@@ -122,12 +140,46 @@ func (s *Service) Decide(ctx context.Context, call Call) Entry {
 		PolicyDecision:        policyDecision,
 		EvidenceLevel:         evidenceLevel,
 	})
-	if mandateDenied {
+	if mandateVerdict != nil {
 		entry.Decision = DecisionDeny
-		entry.Reason = "task mandate denied the call"
+		entry.ReasonCode = ReasonCode(mandateVerdict.Code)
+		entry.Reason = mandateVerdict.Message
 	}
 	if s != nil && s.writer != nil {
-		_ = s.writer.Append(ctx, entry)
+		if err := s.writer.Append(ctx, entry); err != nil {
+			slog.ErrorContext(ctx, "append access decision ledger entry", "error", err, "task_id", entry.TaskID, "tool", entry.ObservedToolName)
+		}
+	}
+	return entry
+}
+
+// RecordTaskMandateDenial appends the exact call-time mandate verdict before
+// policy resolution. It is observability only: the caller has already denied
+// the call, and a ledger write failure cannot alter that verdict.
+func (s *Service) RecordTaskMandateDenial(ctx context.Context, call Call, verdict taskmandate.Verdict) Entry {
+	evidenceLevel := call.EvidenceLevel
+	if evidenceLevel == "" {
+		evidenceLevel = availabilityevidence.LevelDeclared
+	}
+	entry := NewEntry(Observation{
+		WorkspaceID:           util.UUIDToString(call.WorkspaceID),
+		AgentID:               util.UUIDToString(call.AgentID),
+		RuntimeID:             util.UUIDToString(call.RuntimeID),
+		OnBehalfOfUserID:      util.UUIDToString(call.OnBehalfOfID),
+		TaskID:                util.UUIDToString(call.TaskID),
+		IssueID:               util.UUIDToString(call.IssueID),
+		ObservedToolName:      call.ObservedToolName,
+		CanonicalCapabilityID: call.CanonicalCapabilityID,
+		PolicyDecision:        PolicyError,
+		EvidenceLevel:         evidenceLevel,
+	})
+	entry.Decision = DecisionDeny
+	entry.ReasonCode = ReasonCode(verdict.Code)
+	entry.Reason = verdict.Message
+	if s != nil && s.writer != nil {
+		if err := s.writer.Append(ctx, entry); err != nil {
+			slog.ErrorContext(ctx, "append task mandate denial ledger entry", "error", err, "task_id", entry.TaskID, "tool", entry.ObservedToolName)
+		}
 	}
 	return entry
 }

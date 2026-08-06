@@ -1,0 +1,50 @@
+---
+title: "Multica v1.23.0"
+description: "29 release bullets: 7 new, 14 fixed, 1 improved, plus 7 more."
+date: 2026-07-31
+---
+
+**Release summary:** 29 release bullets: 7 new, 14 fixed, 1 improved, plus 7 more.
+
+Changes since [v1.22.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.22.0...v1.23.0) — bump: **minor**
+
+## New
+
+- Enforce workflow permissions (FIR-4196)
+- EOS round-3 feedback — headers, scrolling, roles, row layout and cycles (FIR-3589) [#2813](https://github.com/firtal-group/firtal-cerebro/pull/2813)
+- Folder visibility, workspace search, column control and a Google Docs-leaning Documents list (FIR-4163)
+- State auto-created capability rules on the digest card (FIR-4012) [#2830](https://github.com/firtal-group/firtal-cerebro/pull/2830)
+- Float the comment composer next to the marked text [#2824](https://github.com/firtal-group/firtal-cerebro/pull/2824)
+- One repliable capability digest per workspace (FIR-4012)
+- Make agent configuration human-readable
+
+## Fixed
+
+- Report an offline recipient, and unbreak the core-only guard (FIR-4217)
+- Use narrow lookups for the runtime preflight (FIR-4217)
+- Check runtime before handoff (FIR-4217)
+- Keep reused agent runs working during updates
+- Keep inbox trigger scroll stable
+- A Mode carries evaluations, not skills; no new Plan permission
+- Make Mode config fields mean what they say
+- Enforce issue action authorization (FIR-4076)
+- Make the failed-run alert openable and name the run [#2823](https://github.com/firtal-group/firtal-cerebro/pull/2823)
+- Carry always_on into the agent LIST response (FIR-4002) [#2820](https://github.com/firtal-group/firtal-cerebro/pull/2820)
+- Measure the Multica MCP channel for claude runtimes [#2817](https://github.com/firtal-group/firtal-cerebro/pull/2817)
+- Follow workspace back route in verifier (FIR-1317) [#2816](https://github.com/firtal-group/firtal-cerebro/pull/2816)
+- Harden Company Brain migration census [#2808](https://github.com/firtal-group/firtal-cerebro/pull/2808)
+- Make agent configuration evidence understandable
+
+## Improved
+
+- Record that a session Mode grants nothing at runtime
+
+## Other changes
+
+- FIR-3986: add the missing runtime-brief test [#2821](https://github.com/firtal-group/firtal-cerebro/pull/2821)
+- FIR-4073: failed-run notice folds into the alert layer and clears with the latest run [#2812](https://github.com/firtal-group/firtal-cerebro/pull/2812)
+- FIR-4076: restore task-token platform actions [#2814](https://github.com/firtal-group/firtal-cerebro/pull/2814)
+- Fix agent prompt mobile test coverage
+- FIR-4020: add --endpoint to the connection CLI [#2806](https://github.com/firtal-group/firtal-cerebro/pull/2806)
+- FIR-4028 add configurable editor toolbar
+- Runtime brief: names are copied, never translated

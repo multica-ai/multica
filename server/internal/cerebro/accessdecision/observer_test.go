@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -31,12 +32,9 @@ func (p observerPolicy) ResolvePermission(_ context.Context, q toolpolicy.Query,
 	return toolpolicy.Effective{Setting: p.settings[q.AgentID.Bytes]}, nil
 }
 
-// Resolve is the actor-less half of toolaccess.PolicyResolver, which
-// live_permission_contract_test.go exercises through toolaccess.New. It shares
-// ResolvePermission's behaviour so a fixture set up for one path answers the
-// other identically.
+// CEREBRO-PATCH(permission-contract-test-resolver): keep the cross-surface permission test on the full resolver contract.
 func (p observerPolicy) Resolve(ctx context.Context, q toolpolicy.Query) (toolpolicy.Effective, error) {
-	return p.ResolvePermission(ctx, q, platformaccess.Actor{})
+	return p.ResolvePermission(ctx, q, platformaccess.Actor{Authenticated: true, Agent: q.AgentID.Valid})
 }
 
 type observerEvidence map[string]availabilityevidence.Evidence
@@ -59,6 +57,16 @@ type observerWriter struct {
 	err     error
 }
 
+type observerMandates struct {
+	calls int
+	err   error
+}
+
+func (m *observerMandates) Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error {
+	m.calls++
+	return m.err
+}
+
 func (w *observerWriter) Append(_ context.Context, entry Entry) error {
 	w.entries = append(w.entries, entry)
 	return w.err
@@ -69,6 +77,32 @@ func observerUUID(b byte) pgtype.UUID {
 	id.Valid = true
 	id.Bytes[0] = b
 	return id
+}
+
+func TestDecisionServiceRecordsExactTaskMandateDenialForTranscriptDiagnostics(t *testing.T) {
+	writer := &observerWriter{}
+	service := NewService(nil, nil, writer)
+	entry := service.RecordTaskMandateDenial(context.Background(), Call{
+		WorkspaceID:           observerUUID(1),
+		AgentID:               observerUUID(2),
+		RuntimeID:             observerUUID(3),
+		TaskID:                observerUUID(4),
+		ObservedToolName:      "mcp__company-brain__search",
+		CanonicalCapabilityID: "connection:company-brain/search",
+	}, taskmandate.Verdict{
+		Code:           taskmandate.VerdictStaleGeneration,
+		RecoveryAction: taskmandate.RecoveryRetryClaim,
+		Message:        "The task claim generation is stale.",
+	})
+
+	if entry.Decision != DecisionDeny || entry.PolicyDecision != PolicyError {
+		t.Fatalf("entry = %#v", entry)
+	}
+	if len(writer.entries) != 1 ||
+		writer.entries[0].ReasonCode != ReasonCode("task_generation_stale") ||
+		writer.entries[0].Reason != "The task claim generation is stale." {
+		t.Fatalf("ledger = %#v", writer.entries)
+	}
 }
 
 func TestDecisionServiceRecordsCanonicalOutcomesForDifferentAgents(t *testing.T) {
@@ -187,6 +221,42 @@ func TestPolicyDecisionServiceUsesDeclaredPermissionContract(t *testing.T) {
 	if entry.PolicyDecision != PolicyAllow || entry.Decision != DecisionAllow {
 		t.Fatalf("declared contract decision = %+v, want allow", entry)
 	}
+}
+
+func TestDecisionServiceTaskMandateCircuitBreaker(t *testing.T) {
+	allow := toolpolicy.SettingAllow
+	call := Call{
+		WorkspaceID:           observerUUID(9),
+		AgentID:               observerUUID(1),
+		TaskID:                observerUUID(7),
+		CanonicalCapabilityID: "platform:web_fetch",
+		ObservedToolName:      "web_fetch",
+		EvidenceLevel:         availabilityevidence.LevelVerified,
+	}
+
+	t.Run("default off preserves the policy decision", func(t *testing.T) {
+		mandates := &observerMandates{err: errors.New("task mandate missing")}
+		service := NewService(observerPolicy{declared: &allow}, nil, nil).WithMandates(mandates)
+
+		entry := service.Decide(context.Background(), call)
+
+		if entry.Decision != DecisionAllow || mandates.calls != 0 {
+			t.Fatalf("default-off decision = %q and calls = %d, want allow and zero mandate calls", entry.Decision, mandates.calls)
+		}
+	})
+
+	t.Run("explicit on enforces the Task Mandate", func(t *testing.T) {
+		mandates := &observerMandates{err: errors.New("task mandate missing")}
+		service := NewService(observerPolicy{declared: &allow}, nil, nil).
+			WithMandates(mandates).
+			WithMandateEnforcement(func(context.Context, pgtype.UUID) bool { return true })
+
+		entry := service.Decide(context.Background(), call)
+
+		if entry.Decision != DecisionDeny || mandates.calls != 1 || entry.ReasonCode != ReasonCode(taskmandate.VerdictInternalError) {
+			t.Fatalf("enforced decision = %q, reason code = %q and calls = %d, want deny/internal error and one mandate call", entry.Decision, entry.ReasonCode, mandates.calls)
+		}
+	})
 }
 
 func TestDecisionServiceFailsClosedOnUnknownCapabilityAndPolicyError(t *testing.T) {

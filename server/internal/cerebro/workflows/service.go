@@ -52,12 +52,6 @@ type Service struct {
 	// Keyed by workspace UUID bytes ([16]byte) -> engineFlagEntry.
 	engineFlagCache sync.Map
 
-	// gateEval decides OpCheckPasses (loop delivery gate) conditions. Optional
-	// and nil-safe: without it an OpCheckPasses gate fails closed. Wired via
-	// WithGateEvaluator (see check_gate.go) so the loops adapter plugs in
-	// without workflows importing loops.
-	gateEval GateEvaluator
-
 	// sessionStamper badges the session thread a phase dispatch opens
 	// ("Plan"/"Build") the moment it is dispatched. Optional and nil-safe:
 	// without it the completion-time fallback (SessionPhaseStamper wired on
@@ -487,8 +481,8 @@ func commentMentionMatches(cfg TriggerConfigCommentMention, te TriggerEvent) boo
 //
 // Phase-2 ext (JEH-1114, PR 2): the `evidence_present` op needs DB access
 // (it scans the issue's recent comments + attachments), so this is now a
-// Service method. Pure ops flow through evaluate() and are decided BEFORE
-// the DB-backed/side-effecting ops (evidence_present, check_passes) run.
+// Service method. Pure ops flow through evaluate() and are decided before
+// the DB-backed evidence_present operation runs.
 // DB lookup failures fail CLOSED (return false) — for evidence-presence
 // specifically, firing a `set_status: done` workflow without confirmed
 // evidence is much worse than skipping a run we'll see again on the next
@@ -506,18 +500,12 @@ func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEve
 		return true
 	}
 
-	// Pure conditions (field/op/value against the event payload) must be
-	// decided FIRST: evidence_present hits the DB and check_passes is
-	// side-effecting (EvaluateCheckGate materializes gate state, check runs,
-	// and human approvals for this issue+gate). Evaluating those before the
-	// pure `issue.id eq` scope filter made every issue-scoped delivery gate
-	// in the workspace open a gate round on ANY issue entering the trigger
-	// status (FIR-2283: N stale gates → N duplicate approvals + N check
-	// tasks per in_review event).
+	// Pure conditions are decided first so evidence_present never performs a
+	// database read for a workflow whose ordinary scope does not match.
 	pure := make([]Condition, 0, len(conds))
 	deferred := make([]Condition, 0, 2)
 	for _, c := range conds {
-		if c.Op == OpEvidencePresent || c.Op == OpCheckPasses {
+		if c.Op == OpEvidencePresent {
 			deferred = append(deferred, c)
 			continue
 		}
@@ -541,29 +529,6 @@ func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEve
 				return false
 			}
 			continue
-		}
-		// OpCheckPasses — loop delivery gate. Fail closed when no evaluator
-		// is wired or the decision errors — advancing a `set_status: done`
-		// gate without a confirmed green check is exactly the untrustworthy
-		// outcome the gate exists to prevent.
-		if s.gateEval == nil {
-			slog.Warn("workflow conditions: check_passes has no gate evaluator wired",
-				"workflow_id", uuidString(wf.id),
-				"issue_id", te.IssueID,
-			)
-			return false
-		}
-		ok, err := s.gateEval.EvaluateCheckGate(ctx, te.IssueID, uuidString(wf.id), c.Value)
-		if err != nil {
-			slog.Warn("workflow conditions: check_passes eval failed",
-				"workflow_id", uuidString(wf.id),
-				"issue_id", te.IssueID,
-				"error", err,
-			)
-			return false
-		}
-		if !ok {
-			return false
 		}
 	}
 	return true

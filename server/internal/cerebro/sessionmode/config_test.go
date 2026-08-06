@@ -32,14 +32,38 @@ func TestConfigProfileConvertsRuntimeLimits(t *testing.T) {
 		MaxTurns:       12,
 		AllowsWrite:    false,
 		AllowedTools:   []string{"read_file"},
-		EvalSkillIDs:   []string{"eval-1"},
+		EvalIDs:        []string{"7e767171-6a19-41d5-b3e6-edfdc97eedf7"},
 	}
 	profile := config.Profile()
 	if profile.Mode != Plan || profile.Version != "3" || profile.Timeout != 25*time.Minute || profile.MaxTurns != 12 {
 		t.Fatalf("profile = %+v", profile)
 	}
-	if profile.Model != "gpt-5.4" || len(profile.AllowedTools) != 1 || len(profile.EvalSkillIDs) != 1 {
+	if profile.Model != "gpt-5.4" || len(profile.AllowedTools) != 1 || len(profile.EvalIDs) != 1 {
 		t.Fatalf("profile lost configured fields: %+v", profile)
+	}
+}
+
+// FIR-4047: a Mode's evaluations are rows in the workspace eval catalog, so an
+// ID that cannot name a row must never reach a published version.
+func TestValidateConfigRejectsNonUUIDEvalIDs(t *testing.T) {
+	config := DefaultConfigs()[Plan]
+	config.EvalIDs = []string{"skill-1"}
+	if err := ValidateConfig(config); err == nil {
+		t.Fatal("expected a non-UUID eval id to be rejected")
+	}
+	config.EvalIDs = []string{"7e767171-6a19-41d5-b3e6-edfdc97eedf7"}
+	if err := ValidateConfig(config); err != nil {
+		t.Fatalf("a catalog eval id must be accepted: %v", err)
+	}
+}
+
+// No default Mode ships with evaluations: which checks matter is a workspace
+// decision, and a default that ran something would run it for every workspace.
+func TestDefaultModesShipWithoutEvaluations(t *testing.T) {
+	for mode, config := range DefaultConfigs() {
+		if len(config.EvalIDs) != 0 {
+			t.Fatalf("%q ships with evaluations: %+v", mode, config.EvalIDs)
+		}
 	}
 }
 

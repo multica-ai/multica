@@ -93,7 +93,8 @@ standard way to change an agent's instructions/skills. The proposal is reviewed
 by the context owner/approvers; on approval it is applied atomically and
 snapshotted as a new version. Nothing changes until approved.
 
-You may either edit individual fields (instructions, model, thinking_level,
+You may either edit individual fields (instructions, runtime_id, model, thinking_level,
+system_prompt_mode, speed_mode, max_turns, timeout_minutes,
 workspace_brief_mode, tools_brief_mode, skill_ids, mcp_config)
 which are merged onto the agent's current context, OR pass a full
 proposed_snapshot object. proposed_version must be a semver X.Y.Z strictly
@@ -107,8 +108,29 @@ greater than the agent's current context_version.`,
 				"description":      map[string]any{"type": "string", "description": "What changed and why"},
 				"proposed_version": map[string]any{"type": "string", "description": "New semver X.Y.Z, greater than current"},
 				"instructions":     map[string]any{"type": "string", "description": "Full replacement instructions (persona/rules text)"},
+				"runtime_id":       map[string]any{"type": "string", "description": "Engine runtime UUID. Versioned and applied only after approval."},
 				"model":            map[string]any{"type": "string", "description": "Model override"},
 				"thinking_level":   map[string]any{"type": "string", "description": "Thinking level override"},
+				"system_prompt_mode": map[string]any{
+					"type":        "string",
+					"enum":        []string{"", "append", "replace", "prepend"},
+					"description": "How the agent's instructions join the engine system prompt. Empty restores the engine default.",
+				},
+				"speed_mode": map[string]any{
+					"type":        "string",
+					"enum":        []string{"", "standard", "fast"},
+					"description": "Response tier. Empty or standard restores the engine default.",
+				},
+				"max_turns": map[string]any{
+					"type":        "integer",
+					"minimum":     0,
+					"description": "Stop after this many agent turns. Zero inherits the selected session Mode profile.",
+				},
+				"timeout_minutes": map[string]any{
+					"type":        "integer",
+					"minimum":     0,
+					"description": "Give up after this many minutes. Zero inherits the selected session Mode profile.",
+				},
 				"workspace_brief_mode": map[string]any{
 					"type":        "string",
 					"enum":        []string{"", "full", "off"},
@@ -156,11 +178,19 @@ greater than the agent's current context_version.`,
 		if v, ok := args["instructions"].(string); ok {
 			body["instructions"] = v
 		}
+		if v, ok := args["runtime_id"].(string); ok {
+			body["runtime_id"] = v
+		}
 		if v, ok := args["model"].(string); ok {
 			body["model"] = v
 		}
 		if v, ok := args["thinking_level"].(string); ok {
 			body["thinking_level"] = v
+		}
+		for _, field := range []string{"system_prompt_mode", "speed_mode", "max_turns", "timeout_minutes"} {
+			if v, ok := args[field]; ok {
+				body[field] = v
+			}
 		}
 		// FIR-3212 brief-layer modes. Forwarded verbatim when present (including
 		// the empty string, which resets to the full default) so the MCP, CLI

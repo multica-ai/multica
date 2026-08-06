@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type capabilitiesCardProvider struct {
@@ -34,7 +36,7 @@ func (m rejectingTaskMandates) Authorize(_ context.Context, _, _, _ pgtype.UUID,
 	return nil
 }
 
-func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
+func TestGetAgentCapabilitiesKeepsPlatformPermissionsAndAppliesConnectionTaskMandate(t *testing.T) {
 	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	tool := FirtalGetAgentCapabilitiesTool{
 		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Tools: []handler.AgentCapabilityTool{
@@ -53,6 +55,12 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 					{Name: "whoami", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
 				},
 			},
+			{
+				Name: "infisical-admin",
+				Endpoints: []handler.AgentCapabilityConnEndpoint{
+					{Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+				},
+			},
 		}}},
 		tctx: ToolContext{
 			AgentID:                id,
@@ -60,8 +68,9 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 			TaskID:                 id,
 			TaskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
 			TaskMandates: rejectingTaskMandates{rejected: map[string]bool{
-				"rejected_tool":              true,
-				"mcp__company-brain__whoami": true,
+				"rejected_tool":                true,
+				"mcp__company-brain__whoami":   true,
+				"infisical_admin__get_secrets": true,
 			}},
 		},
 	}
@@ -77,14 +86,11 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	if got := card.Tools[0].Permission; got != "allow" {
 		t.Errorf("allowed tool permission = %q, want allow", got)
 	}
-	if got := card.Tools[1].Permission; got != "deny" {
-		t.Errorf("rejected tool permission = %q, want deny", got)
+	if got := card.Tools[1].Permission; got != "allow" {
+		t.Errorf("platform tool permission = %q, want allow", got)
 	}
-	if card.Tools[1].Reason == "" {
-		t.Error("rejected task mandate must explain the denial")
-	}
-	if card.Tools[1].Allowed || card.Tools[1].Callable || card.Tools[1].BlockedReason == "" || card.Tools[1].HowToFix == "" {
-		t.Fatalf("rejected task mandate left a positive or unexplained truth verdict: %+v", card.Tools[1])
+	if !card.Tools[1].Allowed || !card.Tools[1].Callable || card.Tools[1].BlockedReason != "" {
+		t.Fatalf("task mandate changed a platform permission after the FIR-4076 rollback: %+v", card.Tools[1])
 	}
 	if got := card.Connections[0].Tools[0].Permission; got != "allow" {
 		t.Errorf("mandate-allowed connection tool permission = %q, want allow", got)
@@ -92,6 +98,52 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	rejectedConnectionTool := card.Connections[1].Tools[0]
 	if rejectedConnectionTool.Permission != "deny" || rejectedConnectionTool.Allowed || rejectedConnectionTool.Callable || rejectedConnectionTool.BlockedReason == "" {
 		t.Fatalf("rejected connection tool left a positive or unexplained verdict: %+v", rejectedConnectionTool)
+	}
+	rejectedEndpoint := card.Connections[2].Endpoints[0]
+	if rejectedEndpoint.Permission != "deny" || rejectedEndpoint.Allowed || rejectedEndpoint.Callable || rejectedEndpoint.BlockedReason == "" || rejectedEndpoint.HowToFix == "" {
+		t.Fatalf("rejected API endpoint left a positive or unexplained verdict: %+v", rejectedEndpoint)
+	}
+}
+
+// The agent must receive the same result in its self-service Capabilities card
+// that the gateway returns when it tries the call: a mandate-denied API endpoint
+// is visible as blocked with a remedy, and the executor rejects it before any
+// connection dispatch can happen.
+func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	const endpoint = "infisical_admin__get_secrets"
+	mandates := rejectingTaskMandates{rejected: map[string]bool{endpoint: true}}
+	lookup := FirtalGetAgentCapabilitiesTool{
+		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Connections: []handler.AgentCapabilityConnection{{
+			Name: "infisical-admin",
+			Endpoints: []handler.AgentCapabilityConnEndpoint{{
+				Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true,
+			}},
+		}}}},
+		tctx: ToolContext{AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates, TaskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true }},
+	}
+
+	raw, err := lookup.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("capabilities lookup: %v", err)
+	}
+	var card handler.AgentCapabilities
+	if err := json.Unmarshal([]byte(raw), &card); err != nil {
+		t.Fatalf("decode capabilities card: %v", err)
+	}
+	capability := card.Connections[0].Endpoints[0]
+	if capability.Permission != "deny" || capability.Allowed || capability.Callable || capability.BlockedReason == "" || capability.HowToFix == "" {
+		t.Fatalf("Capabilities must expose the mandate denial: %+v", capability)
+	}
+
+	reg := NewRegistry(nil)
+	reg.Register(&APIConnectionTool{toolName: endpoint, connName: "infisical-admin", method: "GET", path: "/secrets"})
+	executor := (&FirtalGatewayExecutor{
+		taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
+	}).SetTaskMandates(mandates)
+	allowed, reason := executor.guardToolCall(context.Background(), id, id, endpoint, nil, reg, GatewayRequestMeta{TaskID: util.UUIDToString(id)})
+	if allowed || !strings.Contains(reason, "outside the issued task mandate") {
+		t.Fatalf("gateway call = (%v, %q), want the same mandate denial", allowed, reason)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,11 +17,13 @@ import (
 )
 
 type PostgresHookRepository struct {
-	db cerebrodb.DBTX
+	db                cerebrodb.DBTX
+	managedMu         sync.Mutex
+	managedWorkspaces map[string]struct{}
 }
 
 func NewPostgresHookRepository(db cerebrodb.DBTX) *PostgresHookRepository {
-	return &PostgresHookRepository{db: db}
+	return &PostgresHookRepository{db: db, managedWorkspaces: make(map[string]struct{})}
 }
 
 const hookPolicyColumns = `id, family_id, workspace_id, name, description, policy_version,
@@ -30,6 +33,9 @@ created_by_id, created_by_type, published_by_id, created_at, updated_at`
 func (r *PostgresHookRepository) List(ctx context.Context, workspaceID string) ([]HookPolicy, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.ensureManagedPolicies(ctx, workspaceID, wsID); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+hookPolicyColumns+` FROM (
@@ -66,6 +72,109 @@ func (r *PostgresHookRepository) List(ctx context.Context, workspaceID string) (
 	return policies, nil
 }
 
+func (r *PostgresHookRepository) ensureManagedPolicies(ctx context.Context, workspaceID string, wsID pgtype.UUID) error {
+	r.managedMu.Lock()
+	defer r.managedMu.Unlock()
+	if _, ensured := r.managedWorkspaces[workspaceID]; ensured {
+		return nil
+	}
+
+	var ownerID pgtype.UUID
+	if err := r.db.QueryRow(ctx, `
+		SELECT user_id
+		FROM member
+		WHERE workspace_id=$1
+		ORDER BY
+			CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+			created_at
+		LIMIT 1
+	`, wsID).Scan(&ownerID); err != nil {
+		return fmt.Errorf("find managed hook policy owner: %w", err)
+	}
+
+	for _, definition := range managedHookPolicies(workspaceID) {
+		policy := definition.Policy
+		policyID, err := util.ParseUUID(policy.ID)
+		if err != nil {
+			return fmt.Errorf("parse managed hook policy %q: %w", definition.Key, err)
+		}
+		events, conditions, modifications, actions := managedPolicyJSON(policy)
+		handler := policy.Handlers[0]
+		if _, err := r.db.Exec(ctx, `
+			INSERT INTO cerebro_workflow_hook_policy (
+				id, family_id, workspace_id, name, description, policy_version,
+				mode, fail_mode, event_types, conditions, published_at,
+				created_by_id, created_by_type, published_by_id
+			) VALUES ($1,$1,$2,$3,$4,1,'managed','closed',$5,$6,now(),$7,'member',$7)
+			ON CONFLICT (id) DO UPDATE SET
+				name=EXCLUDED.name,
+				description=EXCLUDED.description,
+				policy_version=1,
+				mode='managed',
+				fail_mode='closed',
+				event_types=EXCLUDED.event_types,
+				conditions=EXCLUDED.conditions,
+				published_at=COALESCE(cerebro_workflow_hook_policy.published_at, EXCLUDED.published_at),
+				published_by_id=COALESCE(cerebro_workflow_hook_policy.published_by_id, EXCLUDED.published_by_id),
+				updated_at=now()
+			WHERE (
+				cerebro_workflow_hook_policy.name,
+				cerebro_workflow_hook_policy.description,
+				cerebro_workflow_hook_policy.policy_version,
+				cerebro_workflow_hook_policy.mode,
+				cerebro_workflow_hook_policy.fail_mode,
+				cerebro_workflow_hook_policy.event_types,
+				cerebro_workflow_hook_policy.conditions
+			) IS DISTINCT FROM (
+				EXCLUDED.name,
+				EXCLUDED.description,
+				EXCLUDED.policy_version,
+				EXCLUDED.mode,
+				EXCLUDED.fail_mode,
+				EXCLUDED.event_types,
+				EXCLUDED.conditions
+			)
+		`, policyID, wsID, policy.Name, policy.Description, events, conditions, ownerID); err != nil {
+			return fmt.Errorf("upsert managed hook policy %q: %w", definition.Key, err)
+		}
+
+		binding := policy.Bindings[0]
+		if _, err := r.db.Exec(ctx, `
+			INSERT INTO cerebro_workflow_hook_binding (policy_id, scope_kind, scope_id, priority)
+			VALUES ($1,$2,$3,$4)
+			ON CONFLICT (policy_id, scope_kind, scope_id) DO UPDATE SET priority=EXCLUDED.priority
+			WHERE cerebro_workflow_hook_binding.priority IS DISTINCT FROM EXCLUDED.priority
+		`, policyID, binding.Kind, binding.ID, binding.Priority); err != nil {
+			return fmt.Errorf("upsert managed hook binding %q: %w", definition.Key, err)
+		}
+		if _, err := r.db.Exec(ctx, `
+			INSERT INTO cerebro_workflow_hook_handler (
+				id, policy_id, position, decision, requirement, modifications, actions
+			) VALUES ($1,$2,0,$3,$4,$5,$6)
+			ON CONFLICT (policy_id, position) DO UPDATE SET
+				decision=EXCLUDED.decision,
+				requirement=EXCLUDED.requirement,
+				modifications=EXCLUDED.modifications,
+				actions=EXCLUDED.actions
+			WHERE (
+				cerebro_workflow_hook_handler.decision,
+				cerebro_workflow_hook_handler.requirement,
+				cerebro_workflow_hook_handler.modifications,
+				cerebro_workflow_hook_handler.actions
+			) IS DISTINCT FROM (
+				EXCLUDED.decision,
+				EXCLUDED.requirement,
+				EXCLUDED.modifications,
+				EXCLUDED.actions
+			)
+		`, optionalHookUUID(handler.ID), policyID, handler.Decision, handler.Requirement, modifications, actions); err != nil {
+			return fmt.Errorf("upsert managed hook handler %q: %w", definition.Key, err)
+		}
+	}
+	r.managedWorkspaces[workspaceID] = struct{}{}
+	return nil
+}
+
 func (r *PostgresHookRepository) Get(ctx context.Context, workspaceID, id string) (HookPolicy, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
@@ -100,6 +209,9 @@ func (r *PostgresHookRepository) Update(ctx context.Context, workspaceID string,
 	if err != nil {
 		return HookPolicy{}, err
 	}
+	if isBuiltInManagedHookPolicy(workspaceID, current.ID) {
+		return HookPolicy{}, ErrManagedHookLocked
+	}
 	if current.Mode == HookModeManaged && !actor.IsOwner {
 		return HookPolicy{}, ErrManagedHookLocked
 	}
@@ -115,6 +227,9 @@ func (r *PostgresHookRepository) Disable(ctx context.Context, workspaceID string
 	current, err := r.Get(ctx, workspaceID, id)
 	if err != nil {
 		return HookPolicy{}, err
+	}
+	if isBuiltInManagedHookPolicy(workspaceID, current.ID) {
+		return HookPolicy{}, ErrManagedHookLocked
 	}
 	if current.Mode == HookModeManaged && !actor.IsOwner {
 		return HookPolicy{}, ErrManagedHookLocked
@@ -133,6 +248,9 @@ func (r *PostgresHookRepository) Delete(ctx context.Context, workspaceID string,
 	current, err := r.Get(ctx, workspaceID, id)
 	if err != nil {
 		return err
+	}
+	if isBuiltInManagedHookPolicy(workspaceID, current.ID) {
+		return ErrManagedHookLocked
 	}
 	if current.Mode == HookModeManaged && !actor.IsOwner {
 		return ErrManagedHookLocked

@@ -114,3 +114,49 @@ describe("always-on skills as its own snapshot field", () => {
     expect(field?.value).toBe("issue-forstaaelse-rubrik");
   });
 });
+
+describe("versioned runtime settings as labelled snapshot fields", () => {
+  const from = {
+    runtime_id: "runtime-1",
+    runtime_config: {
+      system_prompt_mode: "append",
+      speed_mode: "fast",
+      max_turns: 12,
+      timeout_minutes: 30,
+      openclaw_mode: "pro",
+    },
+    skill_ids: [],
+  } as unknown as AgentContextSnapshot;
+
+  it("renders governed controls separately and keeps only the rest in the raw field", () => {
+    const fields = snapshotToFields(from);
+    expect(fields.find((field) => field.key === "system_prompt_mode")?.value).toBe("append");
+    expect(fields.find((field) => field.key === "runtime_id")?.value).toBe("runtime-1");
+    expect(fields.find((field) => field.key === "speed_mode")?.value).toBe("fast");
+    expect(fields.find((field) => field.key === "max_turns")?.value).toBe("12");
+    expect(fields.find((field) => field.key === "timeout_minutes")?.value).toBe("30");
+    expect(fields.find((field) => field.key === "runtime_config")?.value).toBe(
+      JSON.stringify({ openclaw_mode: "pro" }, null, 2),
+    );
+  });
+
+  it("reports a single labelled key instead of a generic runtime_config change", () => {
+    const to = {
+      ...from,
+      runtime_config: {
+        system_prompt_mode: "append",
+        speed_mode: "fast",
+        max_turns: 18,
+        timeout_minutes: 30,
+        openclaw_mode: "pro",
+      },
+    } as AgentContextSnapshot;
+    expect(changedSnapshotKeys(from, to)).toEqual(["max_turns"]);
+  });
+
+  it("reports Engine as a governed snapshot change", () => {
+    expect(changedSnapshotKeys(from, { ...from, runtime_id: "runtime-2" })).toEqual([
+      "runtime_id",
+    ]);
+  });
+});

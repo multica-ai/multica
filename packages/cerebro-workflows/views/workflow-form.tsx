@@ -85,10 +85,6 @@ export interface FormState extends WorkflowPhase3FormFields {
   // Phase 2 ext (JEH-1114, escalate_to_owner).
   escalateMaxAgeHours: string; // textbox value; parsed as int at save-time
   escalateContentTemplate: string;
-  // Loop settings (FIR-2283). Only relevant when actionType === "run_skill".
-  // Stored as loop_planning in the action_config JSON; consumed by the loop
-  // compiler to prepend a planning-dispatch rule before the build phase.
-  loopPlanningMode: boolean;
 }
 
 export const EMPTY_FORM: FormState = {
@@ -118,7 +114,6 @@ export const EMPTY_FORM: FormState = {
   conditionsJSON: "[]",
   escalateMaxAgeHours: "12",
   escalateContentTemplate: "",
-  loopPlanningMode: false,
 };
 
 interface WorkflowFormProps {
@@ -608,24 +603,6 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           )}
         </Section>
 
-        {form.actionType === "run_skill" && (
-          <Section title="Loop settings">
-            <Field label="Planning mode">
-              <Switch
-                checked={form.loopPlanningMode}
-                onCheckedChange={(v) => setForm({ ...form, loopPlanningMode: v === true })}
-                data-testid="loop-planning-mode"
-              />
-            </Field>
-            <p className="text-[11px] text-muted-foreground">
-              When enabled, the agent must produce and post a plan before the
-              build phase begins. The agent advances to{" "}
-              <code>in_progress</code> manually when it is satisfied with the
-              plan. Disable to start building immediately.
-            </p>
-          </Section>
-        )}
-
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
             {error}
@@ -751,7 +728,6 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
       typeof ac.assignee_id === "string" && input.action_type === "reassign_issue"
         ? (ac.assignee_id as string)
         : EMPTY_FORM.reassignAssigneeId,
-    loopPlanningMode: ac.loop_planning === true,
   };
 }
 
@@ -853,7 +829,6 @@ export function buildPayload(f: FormState): WorkflowWriteInput {
       skill_name: f.skillName,
       agent_id: f.skillAgentId,
       skill_input: safeParseJSON(f.skillInputJSON),
-      ...(f.loopPlanningMode ? { loop_planning: true } : {}),
     };
   } else if (f.actionType === "comment_on_issue") {
     actionConfig = {

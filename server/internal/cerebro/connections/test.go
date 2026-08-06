@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdiagnostics"
 )
 
 const testTimeout = 15 * time.Second
@@ -36,9 +38,10 @@ type testConnectionResult struct {
 	Tools      []toolInfo `json:"tools,omitempty"`
 	// ScopeSuggestions are high-confidence ScopableArg candidates derived from
 	// MCP input schemas. They are advisory only: the admin must accept and save.
-	ScopeSuggestions []ScopableArg        `json:"scope_suggestions,omitempty"`
-	Endpoints        []discoveredEndpoint `json:"endpoints,omitempty"`
-	Error            string               `json:"error,omitempty"`
+	ScopeSuggestions []ScopableArg                  `json:"scope_suggestions,omitempty"`
+	Endpoints        []discoveredEndpoint           `json:"endpoints,omitempty"`
+	Error            string                         `json:"error,omitempty"`
+	Diagnostics      []accessdiagnostics.Diagnostic `json:"diagnostics"`
 }
 
 type toolInfo struct {
@@ -59,10 +62,35 @@ type mcpDiscoveredTool struct {
 func doTestConnection(ctx context.Context, req testConnectionRequest) testConnectionResult {
 	url := strings.TrimRight(req.URL, "/")
 	client := &http.Client{Timeout: testTimeout}
+	var result testConnectionResult
 	if req.Type == TypeMCPHTTP {
-		return testMCPConnection(ctx, client, url, req.AuthConfig)
+		result = testMCPConnection(ctx, client, url, req.AuthConfig)
+	} else {
+		result = testAPIConnection(ctx, client, url, req.AuthConfig, req.SpecURL, req.SpecContent)
 	}
-	return testAPIConnection(ctx, client, url, req.AuthConfig, req.SpecURL, req.SpecContent)
+	toolNames := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		toolNames = append(toolNames, tool.Name)
+	}
+	endpointNames := make([]string, 0, len(result.Endpoints))
+	for _, endpoint := range result.Endpoints {
+		if len(endpoint.Methods) == 0 {
+			endpointNames = append(endpointNames, endpoint.Path)
+			continue
+		}
+		for _, method := range endpoint.Methods {
+			endpointNames = append(endpointNames, method+" "+endpoint.Path)
+		}
+	}
+	result.Diagnostics = accessdiagnostics.BuildConnectionDiagnostics(accessdiagnostics.ConnectionInput{
+		ConnectionType: req.Type,
+		Reachable:      result.Reachable,
+		ToolNames:      toolNames,
+		EndpointNames:  endpointNames,
+		Error:          result.Error,
+		Now:            time.Now(),
+	})
+	return result
 }
 
 func addAuthHeaders(httpReq *http.Request, auth AuthConfig) {

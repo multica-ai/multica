@@ -126,19 +126,6 @@ func (s *IssueLoopColumnStore) Set(ctx context.Context, id pgtype.UUID, workflow
 	return nil
 }
 
-// SetGeneratedFrom marks a row as one of parentID's compiled child rules —
-// the PROJECT-WIDE compile of the recipe (generated_for_issue_id stays NULL).
-// Use SetGeneratedFromForIssue for a per-issue activation.
-func (s *IssueLoopColumnStore) SetGeneratedFrom(ctx context.Context, id, parentID pgtype.UUID) error {
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE cerebro_workflow SET generated_from_workflow_id = $2 WHERE id = $1`,
-		id, parentID,
-	); err != nil {
-		return fmt.Errorf("set generated-from-workflow-id: %w", err)
-	}
-	return nil
-}
-
 // SetGeneratedFromForIssue marks a row as one of parentID's compiled child
 // rules for one specific issue activation (FIR-2283 v2 point 8) — the same
 // recipe compiled again for a DIFFERENT issue gets its own independent set
@@ -151,36 +138,6 @@ func (s *IssueLoopColumnStore) SetGeneratedFromForIssue(ctx context.Context, id,
 		return fmt.Errorf("set generated-from-workflow-id for issue: %w", err)
 	}
 	return nil
-}
-
-// GeneratedChildIDByName returns the id of one of parentID's PROJECT-WIDE
-// generated child rules by its rule name (e.g. "loop:delivery-gate") — this
-// IS the "gate" key loops.GateEvaluator uses (gate = the delivery-gate child
-// workflow's own id), so the control strip and the approve-human-check
-// endpoint resolve it once per request rather than the client having to know
-// or store it. Use GeneratedChildIDByNameForIssue for a per-issue activation.
-func (s *IssueLoopColumnStore) GeneratedChildIDByName(ctx context.Context, parentID pgtype.UUID, name string) (pgtype.UUID, error) {
-	var id pgtype.UUID
-	if err := s.pool.QueryRow(ctx,
-		`SELECT id FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id IS NULL AND name = $2 LIMIT 1`,
-		parentID, name,
-	).Scan(&id); err != nil {
-		return pgtype.UUID{}, fmt.Errorf("find generated child %q: %w", name, err)
-	}
-	return id, nil
-}
-
-// GeneratedChildIDByNameForIssue mirrors GeneratedChildIDByName, scoped to
-// one issue's activation of the recipe.
-func (s *IssueLoopColumnStore) GeneratedChildIDByNameForIssue(ctx context.Context, parentID, issueID pgtype.UUID, name string) (pgtype.UUID, error) {
-	var id pgtype.UUID
-	if err := s.pool.QueryRow(ctx,
-		`SELECT id FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id = $2 AND name = $3 LIMIT 1`,
-		parentID, issueID, name,
-	).Scan(&id); err != nil {
-		return pgtype.UUID{}, fmt.Errorf("find generated child %q for issue: %w", name, err)
-	}
-	return id, nil
 }
 
 // DeleteGeneratedChildren removes every PROJECT-WIDE row previously

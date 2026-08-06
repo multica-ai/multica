@@ -12,9 +12,9 @@ const options: SearchSelectOption[] = [
   { value: "member-1", label: "Jesper", group: "Members" },
 ];
 
-function SingleHarness({ onAction }: { onAction?: (query: string) => void }) {
+function SingleHarness({ onAction, fieldLabel }: { onAction?: (query: string) => void; fieldLabel?: string }) {
   const [value, setValue] = useState("");
-  return <SearchSelect label="Period" options={options} value={value} onChange={setValue} clearLabel="All periods" actionLabel="Plan next period" onAction={onAction} />;
+  return <SearchSelect label="Period" fieldLabel={fieldLabel} options={options} value={value} onChange={setValue} clearLabel="All periods" actionLabel="Plan next period" onAction={onAction} />;
 }
 
 function MultiHarness({ onValuesChange }: { onValuesChange: (values: string[]) => void }) {
@@ -58,6 +58,35 @@ describe("SearchSelect", () => {
     render(<SingleHarness />);
     fireEvent.click(screen.getByRole("button", { name: "Period" }));
     expect(screen.getByText("Members")).toBeInTheDocument();
+  });
+
+  // FIR-3589 item 3: picking a value must not wipe out the field's own name.
+  it("keeps the field label visible after a value is picked", () => {
+    render(<SingleHarness fieldLabel="Period" />);
+    const trigger = screen.getByRole("button", { name: "Period" });
+    expect(trigger).toHaveTextContent("Period");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: /Q4 2026/ }));
+    expect(trigger).toHaveTextContent("Period");
+    expect(trigger).toHaveTextContent("Q4 2026");
+  });
+
+  // FIR-3589 item 11: on a phone there is no "click outside" affordance.
+  it("closes from the explicit close control", () => {
+    render(<SingleHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Period" }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Period" }));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("closes a multi-select from Done", () => {
+    render(<MultiHarness onValuesChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    fireEvent.click(screen.getByRole("option", { name: /Q3 2026/ }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("fires the bottom action with the current query", () => {

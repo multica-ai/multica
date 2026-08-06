@@ -49,6 +49,9 @@ type gatewayMCPTool struct {
 
 func (t *gatewayMCPTool) Name() string        { return t.exposedName }
 func (t *gatewayMCPTool) Description() string { return t.description }
+func (t *gatewayMCPTool) ConnectionName() string {
+	return t.connectionName
+}
 
 func (t *gatewayMCPTool) InputSchema() map[string]any {
 	if t.inputSchema != nil {

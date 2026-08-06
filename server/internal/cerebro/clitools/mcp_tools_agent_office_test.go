@@ -89,3 +89,41 @@ func TestAgentContextProposeBriefModesOmittedWhenAbsentForwardedWhenEmpty(t *tes
 		t.Fatalf("tools_brief_mode should be absent when not supplied, got %v", gotBody["tools_brief_mode"])
 	}
 }
+
+func TestAgentContextProposeForwardsVersionedRuntimeSettings(t *testing.T) {
+	var gotBody map[string]any
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cr-1","status":"pending"}`))
+	}))
+	defer remote.Close()
+
+	server := mcp.NewServer("test", "1")
+	registerAgentOfficeTools(server, cli.NewAPIClient(remote.URL, "workspace-1", "mat_task-token"))
+	result, err := server.Call(context.Background(), "agent_context_propose", map[string]any{
+		"agent_id":           "agent-1",
+		"title":              "Bound the next run",
+		"proposed_version":   "1.3.0",
+		"runtime_id":         "runtime-2",
+		"system_prompt_mode": "replace",
+		"speed_mode":         "fast",
+		"max_turns":          18,
+		"timeout_minutes":    42,
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("agent_context_propose failed: err=%v result=%+v", err, result)
+	}
+	for key, want := range map[string]any{
+		"runtime_id":         "runtime-2",
+		"system_prompt_mode": "replace",
+		"speed_mode":         "fast",
+		"max_turns":          float64(18),
+		"timeout_minutes":    float64(42),
+	} {
+		if gotBody[key] != want {
+			t.Errorf("%s = %v, want %v", key, gotBody[key], want)
+		}
+	}
+}

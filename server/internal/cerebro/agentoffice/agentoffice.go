@@ -55,6 +55,7 @@ func New(cerebro *cerebrodb.Queries, tx TxStarter, bus *events.Bus) *Service {
 type ContextSnapshot struct {
 	Instructions  string          `json:"instructions"`
 	Description   string          `json:"description"`
+	RuntimeID     string          `json:"runtime_id,omitempty"`
 	Model         string          `json:"model"`
 	ThinkingLevel string          `json:"thinking_level"`
 	McpConfig     json.RawMessage `json:"mcp_config"`
@@ -88,6 +89,7 @@ func ComposeCurrentSnapshot(agent cerebrodb.Agent, bindings []cerebrodb.ListAgen
 	return ContextSnapshot{
 		Instructions:  agent.Instructions,
 		Description:   agent.Description,
+		RuntimeID:     util.UUIDToString(agent.RuntimeID),
 		Model:         agent.Model.String,
 		ThinkingLevel: agent.ThinkingLevel.String,
 		McpConfig:     rawOrEmpty(agent.McpConfig),
@@ -185,6 +187,14 @@ func textOrNull(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+func uuidOrNull(s string) pgtype.UUID {
+	id, err := util.ParseUUID(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
+}
+
 // sortStrings is a tiny insertion sort to avoid pulling in sort just for key
 // ordering (keeps the dependency surface small and deterministic).
 func sortStrings(s []string) {
@@ -211,6 +221,7 @@ func (s *Service) ApplySnapshotTx(ctx context.Context, qtx *cerebrodb.Queries, a
 		McpConfig:      jsonOrEmpty(snap.McpConfig),
 		CustomArgs:     jsonOrEmpty(snap.CustomArgs),
 		RuntimeConfig:  jsonOrEmpty(snap.RuntimeConfig),
+		RuntimeID:      uuidOrNull(snap.RuntimeID),
 		ContextVersion: newVersion,
 	})
 	if err != nil {
@@ -273,6 +284,7 @@ func DiffSnapshots(base, proposed ContextSnapshot) string {
 // show up as a change.
 func RenderSnapshot(s ContextSnapshot) string {
 	var b strings.Builder
+	fmt.Fprintf(&b, "runtime_id: %s\n", s.RuntimeID)
 	fmt.Fprintf(&b, "model: %s\n", s.Model)
 	fmt.Fprintf(&b, "thinking_level: %s\n", s.ThinkingLevel)
 	// Lifted out of the runtime_config blob below: a knob that changes how the
@@ -283,6 +295,10 @@ func RenderSnapshot(s ContextSnapshot) string {
 	// whole sections of what the agent reads must be legible to a reviewer.
 	fmt.Fprintf(&b, "workspace_brief_mode: %s\n", WorkspaceBriefModeOf(s))
 	fmt.Fprintf(&b, "tools_brief_mode: %s\n", ToolsBriefModeOf(s))
+	runSettings := RuntimeSettingsOf(s)
+	fmt.Fprintf(&b, "speed_mode: %s\n", runSettings.SpeedMode)
+	fmt.Fprintf(&b, "max_turns: %d\n", runSettings.MaxTurns)
+	fmt.Fprintf(&b, "timeout_minutes: %d\n", runSettings.TimeoutMinutes)
 	fmt.Fprintf(&b, "skills: %s\n", strings.Join(s.SkillIDs, ", "))
 	// FIR-3805: rendered on its own line so flipping "always on" for one skill
 	// shows up in review as its own change, not as noise inside the skills line.
@@ -290,7 +306,7 @@ func RenderSnapshot(s ContextSnapshot) string {
 	fmt.Fprintf(&b, "custom_env_keys: %s\n", strings.Join(s.CustomEnvKeys, ", "))
 	fmt.Fprintf(&b, "mcp_config: %s\n", compactJSON(s.McpConfig))
 	fmt.Fprintf(&b, "custom_args: %s\n", compactJSON(s.CustomArgs))
-	fmt.Fprintf(&b, "runtime_config: %s\n", compactJSON(s.RuntimeConfig))
+	fmt.Fprintf(&b, "runtime_config: %s\n", compactJSON(RuntimeConfigRest(s)))
 	fmt.Fprintf(&b, "--- instructions ---\n%s\n", s.Instructions)
 	return b.String()
 }

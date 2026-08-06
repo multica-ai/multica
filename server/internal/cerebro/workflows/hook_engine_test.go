@@ -256,6 +256,25 @@ func TestHookEngineModifyOnlyAllowsDeclaredFields(t *testing.T) {
 	}
 }
 
+func TestHookEngineResolvesEventBackedModification(t *testing.T) {
+	policy := newTestHookPolicy("correct-thread", HookModify, HookModeManaged, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
+	policy.Events = []HookEventType{HookBeforeMessageSend}
+	policy.Handlers[0].Modifications = map[string]any{"parent_id": "$event.message.required_parent_id"}
+	result, err := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy})).Evaluate(context.Background(), HookEvent{
+		EventID: "message-thread", Type: HookBeforeMessageSend, WorkspaceID: "ws-1",
+		MutableFields: []string{"parent_id"},
+		Context: map[string]any{"message": map[string]any{
+			"required_parent_id": "comment-1",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Evaluated || !reflect.DeepEqual(result.Modifications, map[string]any{"parent_id": "comment-1"}) {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestHookEngineManagedPolicyCannotBeLoosened(t *testing.T) {
 	managed := newTestHookPolicy("managed", HookBlock, HookModeManaged, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
 	allow := newTestHookPolicy("issue-allow", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeIssue, ID: "issue-1"})
@@ -313,6 +332,47 @@ func TestHookEngineTimeoutUsesExplicitFailMode(t *testing.T) {
 	}
 	if result.Decision != HookBlock || !result.TimedOut {
 		t.Fatalf("fail-closed timeout result = %#v", result)
+	}
+}
+
+func TestHookEngineStopsRemainingActionsAfterRequiredActionFails(t *testing.T) {
+	first := newTestHookPolicy("required-actions", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
+	first.FailMode = HookFailClosed
+	first.Handlers[0].Actions = []HookAction{{Type: "required.fail"}, {Type: "must.not.run"}}
+
+	second := newTestHookPolicy("later-policy", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeWorkspace, ID: "ws-1"})
+	second.Handlers[0].Actions = []HookAction{{Type: "later.must.not.run"}}
+
+	registry := NewActionRegistry()
+	var calls []string
+	registry.Register("required.fail", func(context.Context, ActionInvocation) (map[string]any, error) {
+		calls = append(calls, "required.fail")
+		return nil, errors.New("required action failed")
+	})
+	for _, name := range []string{"must.not.run", "later.must.not.run"} {
+		name := name
+		registry.Register(name, func(context.Context, ActionInvocation) (map[string]any, error) {
+			calls = append(calls, name)
+			return nil, nil
+		})
+	}
+
+	result, err := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{first, second})).
+		WithActionRegistry(registry).
+		Evaluate(context.Background(), HookEvent{
+			EventID: "required-action-stop", Type: HookBeforeTaskComplete, WorkspaceID: "ws-1",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(calls, []string{"required.fail"}) {
+		t.Fatalf("executed actions = %#v, want only the failed required action", calls)
+	}
+	if result.Decision != HookBlock {
+		t.Fatalf("decision = %q, want block", result.Decision)
+	}
+	if len(result.ActionResults) != 1 || result.ActionResults[0].Status != HookActionFailed {
+		t.Fatalf("action results = %#v", result.ActionResults)
 	}
 }
 

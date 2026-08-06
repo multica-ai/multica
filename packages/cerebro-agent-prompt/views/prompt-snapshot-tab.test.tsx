@@ -34,7 +34,7 @@ const baseAgent: Agent = {
   instructions: "",
   avatar_url: null,
   runtime_mode: "cloud",
-  runtime_config: {},
+  runtime_config: { max_turns: 12, timeout_minutes: 30 },
   custom_args: [],
   custom_env_redacted: false,
   visibility: "workspace",
@@ -96,6 +96,11 @@ function renderTab() {
   );
 }
 
+async function openTechnicalEvidence() {
+  const summary = await screen.findByText(/Technical evidence/i);
+  await userEvent.click(summary);
+}
+
 beforeEach(() => {
   mockCerebroRequest.mockReset();
 });
@@ -110,9 +115,42 @@ function mockHappyPath() {
 }
 
 describe("CerebroAgentPromptSnapshotTab", () => {
+  it("opens on the recorded parts, exact selected text and direct control links", async () => {
+    mockHappyPath();
+    renderTab();
+
+    expect(
+      await screen.findByRole("region", { name: "Prompt evidence" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("The parts it is made of"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Role & instructions").length).toBeGreaterThan(0);
+    expect(screen.getByText(/You are Kathrine\./)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Edit instructions" }),
+    ).toHaveAttribute("href", "?tab=context#agent-instructions");
+    expect(
+      screen.getByRole("link", { name: "Change tool wording" }),
+    ).toHaveAttribute("href", "?tab=context#ac-tools-brief");
+    expect(screen.getByRole("link", { name: "Change skills" })).toHaveAttribute(
+      "href",
+      "?tab=skills",
+    );
+    expect(
+      screen.getByRole("link", { name: "Change shared brief" }),
+    ).toHaveAttribute("href", "?tab=context#ac-workspace-brief");
+    expect(
+      screen.getByRole("link", { name: "Change run controls" }),
+    ).toHaveAttribute("href", "?tab=context#how-agent-runs");
+    expect(screen.getByText("Not configuration.")).toBeInTheDocument();
+    expect(screen.queryByText("Included in the run.")).toBeNull();
+  });
+
   it("renders provenance for the recorded run", async () => {
     mockHappyPath();
     renderTab();
+    await openTechnicalEvidence();
 
     // Provider + runtime version + config version + hash provenance.
     expect(await screen.findByText(/claude 2\.1\.209/)).toBeInTheDocument();
@@ -128,6 +166,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("shows the run the snapshot was captured from", async () => {
     mockHappyPath();
     renderTab();
+    await openTechnicalEvidence();
 
     // Provenance is only checkable if the reader can tell WHICH run produced
     // this prompt. Without the run id the header describes an anonymous blob.
@@ -138,6 +177,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("shows prompt size in tokens alongside bytes", async () => {
     mockHappyPath();
     renderTab();
+    await openTechnicalEvidence();
 
     await screen.findByText(/claude 2\.1\.209/);
     // 93153 recorded bytes / 3.8 chars-per-token ≈ 24514 tokens, always
@@ -148,22 +188,23 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("lists layers with byte sizes and shows layer content with line numbers", async () => {
     mockHappyPath();
     renderTab();
+    await openTechnicalEvidence();
 
-    expect((await screen.findAllByText("agent_identity")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("task_prompt").length).toBeGreaterThan(0);
-    // Layer content is rendered.
+    expect((await screen.findAllByText("Role & instructions")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Case itself").length).toBeGreaterThan(0);
     expect(screen.getByText(/You are Kathrine\./)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /case itself/i }));
     expect(screen.getByText(/Fix the login redirect\./)).toBeInTheDocument();
   });
 
   it("marks user-prompt delivery honestly (no native system prompt claim)", async () => {
     mockHappyPath();
     renderTab();
+    await openTechnicalEvidence();
 
-    await screen.findAllByText("task_prompt");
-    // The user_prompt delivery is labelled as delivered user text, not as a
-    // native system prompt.
-    expect(screen.getAllByText(/user text/i).length).toBeGreaterThan(0);
+    await screen.findAllByText("Case itself");
+    await userEvent.click(screen.getByRole("button", { name: /case itself/i }));
+    expect(screen.getAllByText(/user message/i).length).toBeGreaterThan(0);
   });
 
   it("renders an honest empty state when no snapshots exist", async () => {
@@ -171,27 +212,30 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     renderTab();
 
     expect(
-      await screen.findByText(/no prompt snapshots recorded/i),
+      await screen.findByText(/no recorded run exists yet/i),
     ).toBeInTheDocument();
   });
 
-  it("keeps After proposal and Diff honest while preview is not built", async () => {
+  it("keeps pending comparison honest when no proposal exists", async () => {
     mockHappyPath();
     renderTab();
 
-    await screen.findAllByText("agent_identity");
-    const afterTab = screen.getByRole("button", { name: /after proposal/i });
+    await screen.findAllByText("Role & instructions");
+    const afterTab = screen.getByRole("button", {
+      name: /if the pending change is approved/i,
+    });
     await userEvent.click(afterTab);
     expect(
-      screen.getByText(/preview of a pending proposal is not available yet/i),
+      screen.getByText(/no pending configuration change exists/i),
     ).toBeInTheDocument();
   });
 
   it("shows redaction provenance with both hashes when redacted", async () => {
     mockHappyPath();
     renderTab();
+    await openTechnicalEvidence();
 
-    await screen.findAllByText("agent_identity");
+    await screen.findAllByText("Role & instructions");
     // Both hashes are distinguishable: original vs redacted view.
     expect(screen.getByText(/original/i)).toBeInTheDocument();
     await waitFor(() =>

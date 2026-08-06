@@ -26,6 +26,7 @@ import {
 import type { Autopilot, AutopilotStatus, AutopilotExecutionMode } from "@multica/core/types";
 import type { TriggerFrequency } from "./trigger-config";
 import { useT } from "../../i18n";
+import { useAutopilotControlPermissions } from "./autopilot-control-permissions";
 
 // Template-id keyed lookup for the i18n labels. Prompts stay raw English
 // because they're injected directly into the agent's task input — translating
@@ -208,6 +209,8 @@ export function AutopilotsPage() {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const { data: autopilots = [], isLoading } = useQuery(autopilotListOptions(wsId));
+  const { canManage, isLoading: permissionsLoading } = useAutopilotControlPermissions(wsId);
+  const createBlocked = permissionsLoading || !canManage;
   // CEREBRO-PATCH(autopilot-list-nav-state): navigate to full-page create instead of dialog (JEH-1766)
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
@@ -241,7 +244,7 @@ export function AutopilotsPage() {
           {/* CEREBRO-PATCH(autopilot-folders-mobile): FIR-1772 — mobile folder drawer trigger; inline sidebar is hidden under md. */}
           {folderView.mobileTrigger}
         </div>
-        <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotNew())}> {/* CEREBRO-PATCH(autopilot-list-nav-button): JEH-1766 */}
+        <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotNew())} disabled={createBlocked} title={createBlocked ? "Blocked by Permissions" : undefined}> {/* CEREBRO-PATCH(autopilot-list-nav-button): JEH-1766 */}
           <Plus className="h-3.5 w-3.5 mr-1" />
           {t(($) => $.page.new_autopilot)}
         </Button>
@@ -284,6 +287,8 @@ export function AutopilotsPage() {
                     type="button"
                     className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
                     onClick={() => router.push(`${wsPaths.autopilotNew()}?template=${tpl.id}`)} // CEREBRO-PATCH(autopilot-list-nav-template): JEH-1766
+                    disabled={createBlocked}
+                    title={createBlocked ? "Blocked by Permissions" : undefined}
                   >
                     <Icon className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
                     <div className="min-w-0">
@@ -298,7 +303,7 @@ export function AutopilotsPage() {
                 );
               })}
             </div>
-            <Button size="sm" variant="outline" className="mt-4" onClick={() => router.push(wsPaths.autopilotNew())}> {/* CEREBRO-PATCH(autopilot-list-nav-blank): JEH-1766 */}
+            <Button size="sm" variant="outline" className="mt-4" onClick={() => router.push(wsPaths.autopilotNew())} disabled={createBlocked} title={createBlocked ? "Blocked by Permissions" : undefined}> {/* CEREBRO-PATCH(autopilot-list-nav-blank): JEH-1766 */}
               <Plus className="h-3.5 w-3.5 mr-1" />
               {t(($) => $.page.start_blank)}
             </Button>

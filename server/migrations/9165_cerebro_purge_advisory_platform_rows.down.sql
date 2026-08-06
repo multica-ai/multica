@@ -1,0 +1,2 @@
+-- Deleted advisory rows were never read at call time; there is nothing to
+-- restore.

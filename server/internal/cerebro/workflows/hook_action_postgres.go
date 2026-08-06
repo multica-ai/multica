@@ -164,6 +164,9 @@ SELECT i.id, i.workspace_id, $3, $4, $5, 'comment' FROM issue i WHERE i.id=$1 AN
 RETURNING id`, issueID, workspaceID, authorType, authorID, body).Scan(&id)
 		return hookIDResult(id), err
 
+	case "issue.check_related":
+		return e.checkRelated(ctx, workspaceID, policy, event, action.Config)
+
 	case "issue.status":
 		issueID := optionalHookUUID(hookConfigString(action.Config, "issue_id", event.IssueID))
 		if !issueID.Valid {

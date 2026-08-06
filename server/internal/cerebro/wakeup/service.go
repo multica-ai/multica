@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/autopilotmodel"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -62,6 +63,7 @@ const (
 	// timeline can render a human cause instead of a silent retry.
 	postponeReasonOffline   = "offline"    // runtime exists but is not online
 	postponeReasonNoRuntime = "no_runtime" // agent has no runtime at all
+	postponeReasonDisabled  = "trigger_disabled"
 )
 
 var ErrNotFound = errors.New("wakeup not found")
@@ -71,6 +73,7 @@ type Service struct {
 	Queries *db.Queries
 	Tasks   *service.TaskService
 	Bus     *events.Bus
+	Hooks   workflows.HookEvaluator
 }
 
 type CreateRequest struct {
@@ -98,6 +101,11 @@ type CreateRequest struct {
 
 func New(cerebro *cerebrodb.Queries, queries *db.Queries, tasks *service.TaskService, bus *events.Bus) *Service {
 	return &Service{Cerebro: cerebro, Queries: queries, Tasks: tasks, Bus: bus}
+}
+
+func (s *Service) WithHooks(hooks workflows.HookEvaluator) *Service {
+	s.Hooks = hooks
+	return s
 }
 
 func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) (cerebrodb.CerebroAgentWakeup, error) {
@@ -148,35 +156,6 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		if !req.FireAt.Valid {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("fire_at is required for time wakeups")
 		}
-		// The from-now floor comes from the workspace setting
-		// (wakeup_min_interval_minutes), not a hardcoded constant, so a
-		// workspace can let a fast loop check more often. minWakeupIntervalFloor
-		// keeps it above the sweeper cadence.
-		_, minInterval := s.selfWakeupLimits(ctx, workspaceID)
-		if minInterval < minWakeupIntervalFloor {
-			minInterval = minWakeupIntervalFloor
-		}
-		minIntervalMin := int32(minInterval.Minutes())
-		// Enforce minimum interval: reject if fire_at is too soon.
-		minAllowed := time.Now().Add(minInterval)
-		if req.FireAt.Time.Before(minAllowed) {
-			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
-				"fire_at must be at least %d minutes from now (got %s)",
-				minIntervalMin, req.FireAt.Time.Format(time.RFC3339),
-			)
-		}
-		// Enforce min interval: reject if there is already a pending wakeup
-		// for this agent+issue created within the last minInterval.
-		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, cerebrodb.HasRecentPendingWakeupForAgentIssueParams{
-			AgentID:            req.AgentID,
-			IssueID:            req.IssueID,
-			MinIntervalMinutes: minIntervalMin,
-		}); err == nil && recent {
-			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
-				"a wakeup for this agent+issue was already created within the last %d minutes; wait before creating another",
-				minIntervalMin,
-			)
-		}
 	case TriggerIssueStatus:
 		if !req.WatchIssueID.Valid || !req.WatchStatus.Valid || strings.TrimSpace(req.WatchStatus.String) == "" {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("watch_issue_id and watch_status are required for issue_status wakeups")
@@ -196,25 +175,10 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("unsupported trigger_type %q", req.TriggerType)
 	}
 
-	// TECH-3176: refuse to create a wakeup whose trigger type is disabled for
-	// this workspace, so the agent gets immediate, clear feedback instead of a
-	// pending row that never fires.
-	if !s.triggerTypeEnabled(ctx, workspaceID, req.TriggerType) {
-		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("wakeup trigger_type %q is disabled for this workspace", req.TriggerType)
-	}
-
-	// TECH-3298: enforce the per-workspace self-wakeup limits so a single agent
-	// can't flood one issue with rapid self-wakeups.
-	if err := s.enforceSelfWakeupLimits(ctx, workspaceID, req); err != nil {
+	if err := s.beforeWakeupCreate(ctx, workspaceID, req); err != nil {
 		return cerebrodb.CerebroAgentWakeup{}, err
 	}
-
-	// FIR-2679 Spor 1a: loop-guard. Stop an agent from chaining self-wakeups on
-	// the same issue without objective progress (worst observed: 18 re-arms in
-	// 22h). The streak resets on a member reply or issue status/progress event.
-	// Pull-request churn does not count as progress. Gated by the
-	// cerebro_wakeup_loop_guard flag (default ON); a cap of 0 disables it.
-	if err := s.enforceLoopGuard(ctx, workspaceID, req); err != nil {
+	if err := s.enforceAbsoluteCreateFloors(ctx, workspaceID, req); err != nil {
 		return cerebrodb.CerebroAgentWakeup{}, err
 	}
 
@@ -307,17 +271,22 @@ func (s *Service) Dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	// wakeup was claimed, do not fire. Release it back to pending so it resumes
 	// the moment the type is re-enabled.
 	if !s.triggerTypeEnabled(ctx, row.WorkspaceID, row.TriggerType) {
-		if err := s.Cerebro.ReleaseWakeupToPending(context.Background(), row.ID); err != nil {
-			slog.Error("cerebro wakeup release-on-disabled failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
+		if err := s.handleWakeupFireFailure(ctx, row, wakeupDispatchFailure{
+			Reason: postponeReasonDisabled,
+			Err:    fmt.Errorf("wakeup trigger type %q is disabled", row.TriggerType),
+		}); err != nil {
+			slog.Error("cerebro wakeup disabled-trigger handling failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
 		}
 		return
 	}
 	if err := s.dispatch(ctx, row); err != nil {
-		slog.Error("cerebro wakeup dispatch failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
-		_ = s.Cerebro.MarkWakeupFailed(context.Background(), cerebrodb.MarkWakeupFailedParams{
-			ID:      row.ID,
-			Failure: pgtype.Text{String: truncateFailure(err.Error()), Valid: true},
-		})
+		failure := wakeupDispatchFailure{Reason: "dispatch_error", Err: err}
+		if typed, ok := err.(wakeupDispatchFailure); ok {
+			failure = typed
+		}
+		if handleErr := s.handleWakeupFireFailure(ctx, row, failure); handleErr != nil {
+			slog.Error("cerebro wakeup failure handling failed", "wakeup_id", util.UUIDToString(row.ID), "error", handleErr)
+		}
 	}
 }
 
@@ -330,23 +299,19 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		return fmt.Errorf("issue workspace mismatch")
 	}
 
-	// Phase 1: clean up hanging running/dispatched tasks for this agent+issue
-	// so the new wakeup task can actually be claimed by the daemon.
-	if cancelled, cancelErr := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
-		IssueID: issue.ID,
-		AgentID: row.AgentID,
-	}); cancelErr != nil {
-		slog.Warn("cerebro wakeup: could not cancel hanging tasks",
-			"wakeup_id", util.UUIDToString(row.ID),
-			"agent_id", util.UUIDToString(row.AgentID),
-			"issue_id", util.UUIDToString(issue.ID),
-			"error", cancelErr,
-		)
-	} else if len(cancelled) > 0 {
-		slog.Info("cerebro wakeup: cancelled hanging tasks before dispatch",
-			"wakeup_id", util.UUIDToString(row.ID),
-			"cancelled", len(cancelled),
-		)
+	activeTasks, activeErr := s.Queries.ListActiveTasksByIssue(ctx, issue.ID)
+	if activeErr != nil {
+		return fmt.Errorf("load active issue tasks: %w", activeErr)
+	}
+	if activeTaskForAgent(activeTasks, row.AgentID) {
+		failure := wakeupDispatchFailure{
+			Reason: "active_task", Issue: issue,
+			Err: fmt.Errorf("agent already has an active continuation on this issue"),
+		}
+		if err := s.handleWakeupFireFailure(ctx, row, failure); err != nil {
+			return fmt.Errorf("handle active-task wakeup: %w", err)
+		}
+		return nil
 	}
 
 	// Postpone if the agent has no runtime or the runtime is currently offline.
@@ -359,7 +324,14 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 			"wakeup_id", util.UUIDToString(row.ID),
 			"agent_id", util.UUIDToString(row.AgentID),
 		)
-		return s.postpone(ctx, row, issue, postponeReasonNoRuntime)
+		failure := wakeupDispatchFailure{
+			Reason: postponeReasonNoRuntime, Issue: issue,
+			Err: fmt.Errorf("agent has no runtime"),
+		}
+		if err := s.handleWakeupFireFailure(ctx, row, failure); err != nil {
+			return fmt.Errorf("handle no-runtime wakeup: %w", err)
+		}
+		return nil
 	}
 	rt, rtErr := s.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
 	if rtErr != nil || rt.Status != "online" {
@@ -368,7 +340,14 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 			"agent_id", util.UUIDToString(row.AgentID),
 			"runtime_id", util.UUIDToString(agent.RuntimeID),
 		)
-		return s.postpone(ctx, row, issue, postponeReasonOffline)
+		failure := wakeupDispatchFailure{
+			Reason: postponeReasonOffline, Issue: issue,
+			Err: fmt.Errorf("agent runtime is offline"),
+		}
+		if err := s.handleWakeupFireFailure(ctx, row, failure); err != nil {
+			return fmt.Errorf("handle offline wakeup: %w", err)
+		}
+		return nil
 	}
 
 	// TECH-3487: wakeups are system activity, not user-visible synthetic
@@ -571,69 +550,6 @@ func (s *Service) maxConsecutiveWakeupLoops(ctx context.Context, workspaceID pgt
 	return int(settings.WakeupMaxConsecutiveLoops)
 }
 
-// enforceLoopGuard blocks a new wakeup once an agent has already chained the
-// configured number of self-wakeups on this issue without objective progress.
-// The error is actionable and surfaces to the create handler as a 400. Off when the
-// cerebro_wakeup_loop_guard flag is disabled or the cap is 0.
-func (s *Service) enforceLoopGuard(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) error {
-	if !s.loopGuardEnabled(ctx, workspaceID) {
-		return nil
-	}
-	loopCap := s.maxConsecutiveWakeupLoops(ctx, workspaceID)
-	if loopCap <= 0 {
-		return nil
-	}
-	count, err := s.Cerebro.CountConsecutiveSelfWakeupsForAgentIssue(ctx, cerebrodb.CountConsecutiveSelfWakeupsForAgentIssueParams{
-		WorkspaceID: workspaceID,
-		AgentID:     req.AgentID,
-		IssueID:     req.IssueID,
-	})
-	if err != nil {
-		// Never block a wakeup on a transient count failure.
-		return nil
-	}
-	if int(count) >= loopCap {
-		return fmt.Errorf(
-			"wakeup loop guard: this agent has already scheduled %d wakeups on this issue without objective progress (max %d in a row). Post a result or question to the human instead of scheduling another wakeup; a member reply or issue status/progress event resets the limit. Pull-request updates alone do not count.",
-			count, loopCap,
-		)
-	}
-	return nil
-}
-
-// enforceSelfWakeupLimits caps how many wakeups an agent may stack on one issue
-// and the minimum gap between two time-based wakeups. Errors here surface to the
-// agent as a 400 from the create handler, so the messages are plain and actionable.
-func (s *Service) enforceSelfWakeupLimits(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) error {
-	maxPerIssue, minInterval := s.selfWakeupLimits(ctx, workspaceID)
-
-	count, err := s.Cerebro.CountActiveWakeupsForAgentIssue(ctx, cerebrodb.CountActiveWakeupsForAgentIssueParams{
-		WorkspaceID: workspaceID,
-		AgentID:     req.AgentID,
-		IssueID:     req.IssueID,
-	})
-	if err == nil && int(count) >= maxPerIssue {
-		return fmt.Errorf("wakeup limit reached: this agent already has %d wakeups on this issue (max %d per issue)", count, maxPerIssue)
-	}
-
-	// The minimum gap only applies to time wakeups (the only type with a
-	// schedulable fire time). status/CI wakeups fire on external events.
-	if req.TriggerType == TriggerTime && req.FireAt.Valid && minInterval > 0 {
-		lastFire, err := s.Cerebro.MaxActiveTimeWakeupFireAtForAgentIssue(ctx, cerebrodb.MaxActiveTimeWakeupFireAtForAgentIssueParams{
-			WorkspaceID: workspaceID,
-			AgentID:     req.AgentID,
-			IssueID:     req.IssueID,
-		})
-		if err == nil && lastFire.Valid {
-			earliest := lastFire.Time.Add(minInterval)
-			if req.FireAt.Time.Before(earliest) {
-				return fmt.Errorf("wakeups must be at least %d minutes apart: this agent already has a wakeup at %s on this issue", int(minInterval.Minutes()), lastFire.Time.UTC().Format(time.RFC3339))
-			}
-		}
-	}
-	return nil
-}
-
 // postpone parks a wakeup that cannot fire because the agent runtime is offline
 // or missing: it pushes fire_at out by postponeDelay and increments the postpone
 // counter. The returned count drives two anti-flood gates so a runtime that
@@ -641,11 +557,11 @@ func (s *Service) enforceSelfWakeupLimits(ctx context.Context, workspaceID pgtyp
 // of each every 5 minutes:
 //   - count == 1: this is the transition into the parked state, so record the
 //     wakeup_parked system activity (with the human reason + next attempt time).
-//   - count == WakeupMaxConsecutivePostpones: the streak crossed the loop
-//     threshold, so notify the issue owner once. The counter keeps climbing and
-//     only resets on a successful dispatch, so this fires exactly once per streak.
-func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue, reason string) error {
-	nextAttempt := time.Now().Add(postponeDelay)
+//   - count == notifyAfter: the streak crossed the Workflow-selected threshold,
+//     so notify the issue owner once. The counter keeps climbing and only resets
+//     on a successful dispatch, so this fires exactly once per streak.
+func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue, reason string, delay time.Duration, notifyAfter int32) error {
+	nextAttempt := time.Now().Add(delay)
 	count, err := s.Cerebro.PostponeWakeup(ctx, cerebrodb.PostponeWakeupParams{
 		ID:     row.ID,
 		FireAt: pgtype.Timestamptz{Time: nextAttempt, Valid: true},
@@ -656,7 +572,7 @@ func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	if count == 1 {
 		s.recordWakeupParkedActivity(ctx, row, reason, nextAttempt)
 	}
-	if count == WakeupMaxConsecutivePostpones {
+	if notifyAfter > 0 && count == notifyAfter {
 		s.sendPostponeNotification(ctx, row, issue, count, reason)
 	}
 	return nil
@@ -733,12 +649,16 @@ func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.Ce
 		"issue_id":          util.UUIDToString(issue.ID),
 		"consecutive_count": consecutiveCount,
 		"prompt":            row.Prompt,
-		"max_postpones":     WakeupMaxConsecutivePostpones,
+		"max_postpones":     consecutiveCount,
 		"reason":            reason,
 	})
-	cause := "agentens runtime er offline"
+	cause := "the agent runtime is offline"
 	if reason == postponeReasonNoRuntime {
-		cause = "agenten har ingen runtime"
+		cause = "the agent has no runtime"
+	} else if reason == "active_task" {
+		cause = "the agent already has an active continuation"
+	} else if reason == postponeReasonDisabled {
+		cause = "the wakeup trigger is disabled"
 	}
 	_, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		WorkspaceID:   row.WorkspaceID,
@@ -747,10 +667,10 @@ func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.Ce
 		Type:          "wakeup_loop",
 		Severity:      "action_required",
 		IssueID:       issue.ID,
-		Title:         fmt.Sprintf(`Wakeup parkeret på "%s"`, issue.Title),
+		Title:         fmt.Sprintf(`Wakeup postponed on "%s"`, issue.Title),
 		Body: pgtype.Text{
 			String: fmt.Sprintf(
-				`Dette wakeup er blevet parkeret %d gange i træk, fordi %s: "%s". Start runtimen, så det kan køre.`,
+				`This wakeup has been postponed %d times because %s: "%s". Resolve the cause to resume it.`,
 				consecutiveCount, cause, row.Prompt,
 			),
 			Valid: true,

@@ -557,15 +557,6 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 		"loop_phase":               phase,
 		"session_mode":             phase,
 	}
-	// FIR-3052 step hook: a plan-phase run carries the statuses the loop must
-	// advance through when it completes, so LoopPhaseAdvancer can move the issue
-	// PlanningStatus -> BuildStatus (firing loop:dispatch-build) without the plan
-	// agent flipping the status by hand. Only stamped for the plan phase; the
-	// build phase has no further step to auto-advance to here.
-	if phase == "plan" && cfg.AdvanceToStatus != "" {
-		phaseContext["loop_advance_from_status"] = cfg.AdvanceFromStatus
-		phaseContext["loop_advance_to_status"] = cfg.AdvanceToStatus
-	}
 	taskContext := mustJSON(phaseContext)
 	task, err := s.issues.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,

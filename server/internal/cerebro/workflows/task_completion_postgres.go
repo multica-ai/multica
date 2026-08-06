@@ -19,29 +19,10 @@ func NewPostgresTaskCompletionStore(db cerebrodb.DBTX) *PostgresTaskCompletionSt
 	return &PostgresTaskCompletionStore{db: db}
 }
 
-// WorkflowHooksEnabled resolves the workspace-level rollout switch without
-// joining the agent table. A missing task, issue, flag, or lookup failure is
-// handled by the gate as disabled/fail-open so an experimental feature cannot
-// stop unrelated task completion.
+// WorkflowHooksEnabled reports whether the task's workspace still runs the
+// Workflow completion gate, per the cerebro_workflow_hooks flag.
 func (s *PostgresTaskCompletionStore) WorkflowHooksEnabled(ctx context.Context, taskID pgtype.UUID) (bool, error) {
-	var workspaceID pgtype.UUID
-	if err := s.db.QueryRow(ctx, `
-SELECT i.workspace_id
-FROM agent_task_queue t
-JOIN issue i ON i.id=t.issue_id
-WHERE t.id=$1`, taskID).Scan(&workspaceID); err != nil {
-		return false, err
-	}
-	flags, err := cerebrodb.New(s.db).ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
-	if err != nil {
-		return false, err
-	}
-	for _, flag := range flags {
-		if flag.FlagKey == "cerebro_workflow_hooks" {
-			return flag.Enabled, nil
-		}
-	}
-	return false, nil
+	return workflowHooksFlagForTask(ctx, s.db, taskID)
 }
 
 func (s *PostgresTaskCompletionStore) LoadTaskCompletionContext(ctx context.Context, taskID pgtype.UUID) (TaskCompletionContext, error) {

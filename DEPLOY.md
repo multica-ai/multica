@@ -1,95 +1,146 @@
-# Deploy — firtal-cerebro
+# DEPLOY — firtal-cerebro
 
-## Miljøer
+**This file is the single source of truth for how this repository reaches
+staging and production.** CLAUDE.md points here and does not restate it.
 
-| Miljø | URL | Gren | Platform |
+It covers the mechanics and the approval routing for this repository. The
+cross-cutting process that is not repository-specific — how to wait for a
+deploy, escalation, rollback decision-making — lives in the `deploy` skill,
+which defers to this file whenever the two describe the same mechanic.
+
+## Environments
+
+| Environment | URL | Branch | Platform |
 |---|---|---|---|
-| Staging | `https://cerebro.firtal.com` | `main` | Sliplane (Docker-containers) |
-| Produktion | `https://Multica.firtal.com` | `production` | Sliplane (Docker-containers) |
-| Lokal dev | `http://localhost:3000` | din branch | — |
+| Local dev | `http://localhost:3000` | your branch | — |
+| Staging | `https://cerebro.firtal.com` | `main` | Sliplane (Docker containers) |
+| Production | `https://Multica.firtal.com` | `production` | Sliplane (Docker containers) |
 
-- **`main`** deployer løbende til staging (`cerebro.firtal.com`) via Sliplane — bygger automatisk ved push.
-- **`production`** deployer til produktion (`Multica.firtal.com`) via Sliplane — kræver godkendt release-issue.
+- **`main`** deploys continuously to staging. Sliplane rebuilds on every push.
+- **`production`** deploys to production. Sliplane rebuilds on every push to
+  that branch, and the merge into it requires an approved release-issue.
 
-## Hvad der trigger et deploy
+## What triggers a deploy
 
-**Merge til `main` deployer til staging, ikke produktion.** Produktion opdateres først når `main` flettes ind på grenen `production`, og den fletning kræver en `approve`-kommentar på et release-issue i Multicas "Deployments"-projekt.
+**Merging to `main` deploys to staging, not to production.** Production only
+moves when `main` is merged into `production`, and that merge requires an
+`approve` comment on a release-issue in the Multica "Deployments" project.
 
-**Stående regel:** Merge til `main` så snart CI er grøn — vent ikke. Staging opdateres automatisk, og deploy-godkendelse til produktion kræver alligevel et separat skridt (release-issue).
+Standing rule: merge to `main` as soon as CI is green — do not wait. Staging
+updates itself, and production still requires the separate release-issue step.
 
-Det automatiske flow (`auto-deploy-trigger` autopilot) opretter release-issuet for dig — du skal kun godkende. Sliplane bygger og deployer automatisk når `production` modtager et push.
+## Deploy flow — step by step
 
-## Deploy-flowet — trin for trin
+1. A PR merges into `main` (continuously, all day). Staging
+   (`cerebro.firtal.com`) rebuilds automatically.
+2. The `auto-deploy-trigger` autopilot fires from a GitHub webhook, with a
+   scheduled fallback that polls `main` against `production`. It looks the app
+   up in `registry.firtal.com`, runs the `release-review` checklist over the
+   `main..production` diff, and creates **one** release-issue in the
+   Deployments project (`ecb4fb83-0995-48a5-97d2-3adce73aa800`) per pending
+   release wave. Later merges update the same issue (idempotent on repository
+   plus main-head-sha), so five PRs in ten minutes become one approval, not
+   five.
+3. The app owner comments `approve` on the release-issue and tags the agent.
+   The agent merges the standing `main → production` PR through the GitHub API.
+   Approval happens as that comment in Multica — never as a button or a direct
+   merge in the GitHub UI.
+4. The push to `origin/production` makes Sliplane rebuild and roll out the
+   production containers behind `Multica.firtal.com`.
 
-1. PR flettes til `main` (sker løbende, hele dagen). Staging (`cerebro.firtal.com`) opdateres automatisk.
-2. `auto-deploy-trigger`-autopiloten fyrer (GitHub-webhook ind i Multica, med en planlagt fallback der hver X. minut sammenligner `main` mod `production`). Den slår appen op i `registry.firtal.com`, kører `release-review`-tjeklisten på diffen `main..production`, og opretter ÉT release-issue i Deployments-projektet (`ecb4fb83-0995-48a5-97d2-3adce73aa800`) pr. ventende udgivelses-vindue. Næste push på samme vindue opdaterer SAMME issue (idempotent på repo + main-head-sha) — 5 PR'er på 10 min = 1 godkendelse, ikke 5.
-3. App-ejeren (eller Jesper) kommenterer `approve` + tagger agenten på release-issuet. Agenten fletter den stående `main → production`-PR via GitHub-API'en.
-4. Push til `origin/production` trigger Sliplane til at bygge nye Docker-containers og deploye til `Multica.firtal.com`.
+## Who approves
 
-## Hvem godkender?
-
-| Ændringstype | Reviewer | Godkender merge |
+| Change | Reviewer | Approves the merge |
 |---|---|---|
-| Lille (< 3 filer, ingen brugervendt impact) | — | Dig selv |
-| Mellemstor (feature, UI, API) | Tine (QA) | Du efter Tines godkendelse |
-| Høj risiko (auth, prod-data, betaling, breaking) | Tine (QA) | Sara — vent på eksplicit go |
+| Small (< 3 files, no user-facing impact) | — | Yourself |
+| Medium (feature, UI, API) | Tine (QA) | You, after Tine has approved |
+| High risk (auth, production data, payment, breaking) | Tine (QA) | Sara — wait for an explicit go |
 
-Godkendelse sker som en `approve`-kommentar på release-issuet i Multica (Deployments-projektet) — IKKE som en knap eller direkte merge i GitHub-UI.
+**Never deploy on a Friday** without Sara's explicit approval.
 
-**Aldrig deploy fredag** uden Saras eksplicitte godkendelse.
+**CLI release is not a production deploy.** Cutting a `v0.x.y` tag publishes
+binaries to GitHub Releases and Homebrew only. Production always runs
+`origin/production` regardless of the newest CLI tag. See CLAUDE.md, "CLI
+Release (binary distribution)".
 
-## PR-labels: `staging-only` vs `prod-ready`
+## PR labels: `staging-only` vs `prod-ready`
 
-Hver PR til `main` skal have ÉT af to labels: `staging-only` eller `prod-ready`. Det er labelet, der afgør om en flettet PR rejser et `deploy_review` (= flytter ændringen videre til produktion) — se `docs/agents/production-gate.md` for de tekniske detaljer.
+Every PR to `main` carries exactly ONE of `staging-only` or `prod-ready`. The
+label decides whether a merged PR raises a `deploy_review` — that is, whether
+the change moves on toward production. See `docs/agents/production-gate.md`
+for the technical detail.
 
-**Reglen:** Alle PR-forfattere (mennesker OG agenter) må selv sætte `prod-ready` på deres egen PR, **når de selv vurderer ændringen er klar, med grøn CI som minimum**. Grøn CI er gulvet — ikke selve triggeren. Du må gerne vente længere end "CI gik grøn" hvis du vil; du må ikke flippe før.
+Any PR author, human or agent, may set `prod-ready` on their own PR once they
+judge the change ready, with green CI as the floor. Green CI is the minimum,
+not the trigger — waiting longer is allowed, flipping earlier is not.
 
-- **Åbn med `staging-only`** mens CI stadig kører, eller hvis nogen tjek fejler.
-- **Flip til `prod-ready` når CI er helt grøn OG du vurderer ændringen er klar** til produktion. "Klar" er forfatterens skøn — for en triviel 1-linjes rettelse er det med det samme CI går grøn; for en større ændring må du gerne re-læse din egen diff, soak'e den på staging et stykke tid, eller vente på endnu et øje først. Grøn CI er minimum, ikke en knap der presser sig selv.
-- **Brug `staging-only` bevidst** når du IKKE vil have ændringen overvejet til produktion i dag — work-in-progress, eksperimenter, eller noget der skal soak'e i staging et stykke tid først.
+- **Open with `staging-only`** while CI is still running, or if any check fails.
+- **Flip to `prod-ready`** when CI is fully green and you judge the change
+  ready for production. A trivial one-line fix qualifies the moment CI goes
+  green; for a larger change, re-reading your own diff, soaking on staging, or
+  waiting for a second pair of eyes first is all reasonable.
 
-**Hvorfor grøn CI er minimum:** CI-pipen (typecheck, unit-tests, Go-tests, build) er den automatiske bekræftelse vi accepterer som "forfatter har testet". Det egentlige menneskelige tjek sker som `deploy_review`-godkendelse på release-issuet i Multica — det er DER nogen kigger på ændringen før den faktisk går mod produktion.
+`staging-only` does not mean work-in-progress — it means "not yet cleared for
+production".
 
-## Verificering efter deploy
+## Verifying a deploy
 
-**Staging (`main` → `cerebro.firtal.com`):**
-1. Åbn `https://cerebro.firtal.com` og tjek at appen loader
-2. Tjek Sliplane's deploy-log for fejl (projektet "Multica Staging")
+Staging (`cerebro.firtal.com`): open the URL, confirm the app loads, and check
+the Sliplane deploy log for the service.
 
-**Produktion (`production` → `Multica.firtal.com`):**
-1. Åbn `https://Multica.firtal.com` og tjek at appen loader
-2. Tjek Sliplane's deploy-log for fejl
+Production (`Multica.firtal.com`): open the URL, confirm the app loads, check
+the Sliplane deploy log for errors, and compare the serving commit with the
+release merge commit. The server exposes `/version` (commit SHA) for
+programmatic checks. The full production proof is
+`multica agent-browser internal-verify --app multica` — see VERIFY.md, §3.
+
+Every push to the Sliplane deploy branches also starts
+`.github/workflows/cerebro-post-deploy-live-runtime-tools.yml`. It waits until
+the environment's `/version` reports the pushed commit, then fails if the live
+workspace has no verifiable online Runtime or any online Runtime has an empty
+`capabilities` report. The `staging` and `production` GitHub environments must
+provide the authenticated URLs and token documented in
+`docs/agents/task-mandate-rollout.md`. A failed live Runtime tool gate means the
+deployment is not accepted; inspect the workflow and Sliplane logs, keep the
+affected feature flag off, and follow the rollback order below.
 
 ## Rollback
 
-Brug denne rækkefølge, hvis en ændring fejler efter deploy:
+Use this order when a change fails after deploy:
 
-1. Slå det berørte feature-flag fra, hvis ændringen er beskyttet af et flag.
-2. Brug fix-forward til en lille, isoleret fejl, der kan rettes og verificeres med det samme.
-3. Revert ellers ændringen på `production`-grenen og lad Sliplane deploye den tidligere version igen.
-4. Hvis den nye container ikke starter, vælg den seneste fungerende deployment i Sliplane-dashboardet, og verificér derefter `https://Multica.firtal.com` samt Sliplane-loggen.
+1. Turn off the affected feature flag, if the change is behind one.
+2. Fix forward for a small, isolated fault you can fix and verify immediately.
+3. Otherwise revert the change on the `production` branch and let Sliplane
+   deploy the previous version again.
+4. If the new container will not start, select the last working deployment in
+   the Sliplane dashboard, then verify `https://Multica.firtal.com` and the
+   Sliplane log.
 
-## Staging-services (Sliplane — projektet "Multica Staging")
+## Sliplane services
 
-Disse containere kører staging-miljøet (`cerebro.firtal.com`) fra `main`-grenen:
+Staging (Sliplane project "Multica Staging"), running `main`:
 
-- `multica-staging-web` — Next.js web-app (`Dockerfile.web`)
-- `multica-staging-backend` — Go API-server (`Dockerfile`)
-- `multica-staging-postgres` — staging-database
-- `multica-staging-cloudflared` — Cloudflare-tunnel
+- `multica-staging-web` — Next.js web app (`Dockerfile.web`)
+- `multica-staging-backend` — Go API server (`Dockerfile`)
+- `multica-staging-postgres` — staging database
+- `multica-staging-cloudflared` — Cloudflare tunnel
 
-Web og backend har autoDeploy på `main`: et push bygger og udruller automatisk.
+Web and backend have autoDeploy on `main`: a push builds and rolls out by
+itself.
 
-## Manuel fallback (staging)
+**Manual fallback.** If an automatic build does not fire, trigger a new deploy
+from the Sliplane dashboard on that service.
 
-Hvis en automatisk bygning ikke fyrer, trigges et nyt deploy fra Sliplane-dashboardet
-på den pågældende service (projektet "Multica Staging").
+## Local runtime host
+
+`.deploy/` holds the launchd scripts that run the stack on a single Mac for the
+local agent runtime. It is cerebro-specific and separate from the Sliplane
+deploy above. See `.deploy/README.md`.
 
 ## Changelog
 
-Deploy-logbogen for dette repo ligger i **Multica**, ikke i denne fil:
-**Changelogs → firtal-cerebro → "Changelog — firtal-cerebro"**.
+The deploy logbook for this repository lives in **Multica**, not in this file:
+**Changelogs → firtal-cerebro**.
 
-Log ALDRIG en udrulning som en commit i `DEPLOY.md` — en doc-only commit
-udløser et helt deploy-review for ingenting (FIR-1773). Efter hver udrulning
-tilføjes én linje i Multica-dokumentet i stedet (se `deploy`-skillen, trin 2.4a).
+Never record a deploy as a commit in `DEPLOY.md` — a docs-only commit creates
+another deploy-review (FIR-1773). Write the entry in the Multica document.

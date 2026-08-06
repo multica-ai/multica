@@ -41,20 +41,41 @@ import { Badge } from "@multica/ui/components/ui/badge";
 // than crashing (enum drift downgrades, not crashes).
 const NO_EFFECT_REASONS: Record<string, string> = {
   ignored_silent:
-    "This engine drops it without a trace — nothing in the log will tell you it did not land.",
-  ignored_logged: "This engine logs that it ignored the setting.",
+    "The selected engine will ignore this setting and will not leave a warning.",
+  ignored_logged:
+    "The selected engine will ignore this setting and record a warning.",
 };
 
 const DELIVERY_NOTES: Record<string, string> = {
   prepended:
-    "This engine has no system-prompt channel: the new instruction is spliced into the task message and no longer carries system-prompt semantics.",
-  ignored: "This engine discards a custom system prompt entirely.",
+    "The selected engine receives the role as part of the task instead of as a high-priority instruction.",
+  ignored: "The selected engine cannot use this custom role.",
 };
 
 const CONSEQUENCE_NOTES: Record<string, string> = {
-  no_runtime_effect: "Reaches no run — it is a label on the agent.",
-  unknown_field: "We have no mapping for this field, so we cannot say.",
+  no_runtime_effect: "This is descriptive only and does not change a run.",
+  unknown_field: "We cannot yet confirm how this changes a run.",
 };
+
+const FIELD_LABELS: Record<string, string> = {
+  instructions: "Role and instructions",
+  runtime_id: "Where it runs",
+  model: "Model",
+  thinking_level: "Reasoning effort",
+  workspace_brief_mode: "Workspace guidance",
+  tools_brief_mode: "Tool descriptions",
+  system_prompt_mode: "Instruction delivery",
+  speed_mode: "Response speed",
+  max_turns: "Maximum steps",
+  timeout_minutes: "Time limit",
+  description: "Internal description",
+  skills: "Skills",
+  allowed_secret_names: "Secrets",
+};
+
+function fieldLabel(field: string): string {
+  return FIELD_LABELS[field] ?? field.replaceAll("_", " ");
+}
 
 export function AgentContextApprovalImpact({
   agent,
@@ -83,15 +104,15 @@ export function AgentContextApprovalImpact({
   if (isLoading) {
     return (
       <p className="text-xs text-muted-foreground">
-        Checking what this changes…
+        Checking what will change after approval…
       </p>
     );
   }
   if (isError || !data) {
     return (
       <p className="text-xs text-muted-foreground">
-        What this changes is unavailable right now — the field diff above still
-        applies.
+        The outcome summary is unavailable right now. The exact change is still
+        shown above.
       </p>
     );
   }
@@ -101,9 +122,8 @@ export function AgentContextApprovalImpact({
   if (impact.status !== "known") {
     return (
       <p className="text-xs text-muted-foreground">
-        We cannot confirm what this engine does with these settings — it has no
-        authoritative support entry. Unknown is not the same as ineffective:
-        nothing is claimed to land, and nothing is claimed to be dropped.
+        We cannot confirm how the selected engine handles these settings. This
+        does not mean the change will fail; it means the outcome is not known.
       </p>
     );
   }
@@ -132,22 +152,26 @@ export function AgentContextApprovalImpact({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">
-          What approving this changes
-        </span>
-        <span>on</span>
-        <Badge variant="outline">{impact.provider}</Badge>
-        {runtime.cli_version ? (
-          <Badge variant="outline">{runtime.cli_version}</Badge>
-        ) : null}
+      <div>
+        <p className="text-sm font-semibold">What changes after approval</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {effective.length}{" "}
+          {effective.length === 1 ? "change takes" : "changes take"} effect on
+          the next run
+          {ineffective.length > 0
+            ? `; ${ineffective.length} ${
+                ineffective.length === 1 ? "change does" : "changes do"
+              } not`
+            : ""}
+          .
+        </p>
       </div>
 
       {ineffective.length > 0 && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5">
           <div className="flex items-center gap-1.5 text-xs font-medium">
             <TriangleAlert className="size-3.5 text-amber-600" />
-            Will not take effect on {impact.provider}
+            Will not work on the selected engine
           </div>
           <div className="mt-2 space-y-2">
             {ineffective.map((row) => (
@@ -160,7 +184,7 @@ export function AgentContextApprovalImpact({
       {deliveryNote && (
         <div className="rounded-md border p-2.5">
           <div className="mb-1 text-xs font-medium text-muted-foreground">
-            System prompt
+            How the role is delivered
           </div>
           <p className="text-xs text-muted-foreground">{deliveryNote}</p>
         </div>
@@ -169,7 +193,7 @@ export function AgentContextApprovalImpact({
       {effective.length > 0 && (
         <div>
           <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-            Takes effect on the next run
+            Changes on the next run
           </div>
           <div className="space-y-1.5">
             {effective.map((row) => (
@@ -186,10 +210,25 @@ export function AgentContextApprovalImpact({
           className="flex items-center gap-1.5 text-xs text-muted-foreground"
         >
           <Info className="size-3.5 shrink-0" />
-          <span className="font-medium text-foreground">{row.field}</span>
+          <span className="font-medium text-foreground">
+            {fieldLabel(row.field)}
+          </span>
           {CONSEQUENCE_NOTES[row.consequence] ?? "We cannot say."}
         </p>
       ))}
+
+      <details className="rounded-md border border-dashed px-3 py-2">
+        <summary className="cursor-pointer text-xs font-medium">
+          Advanced details
+        </summary>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>Engine</span>
+          <Badge variant="outline">{impact.provider}</Badge>
+          {runtime.cli_version ? (
+            <Badge variant="outline">{runtime.cli_version}</Badge>
+          ) : null}
+        </div>
+      </details>
     </div>
   );
 }
@@ -209,11 +248,11 @@ function IneffectiveField({
         {row.silent && (
           <ShieldAlert className="size-3.5 shrink-0 text-amber-600" />
         )}
-        <span className="font-medium">{row.field}</span>
+        <span className="font-medium">{fieldLabel(row.field)}</span>
       </div>
       <p className="mt-0.5 text-muted-foreground">
         {NO_EFFECT_REASONS[row.handling] ??
-          "This engine does not act on the setting."}
+          "The selected engine does not use this setting."}
       </p>
     </div>
   );
@@ -232,11 +271,11 @@ function EffectiveField({
     >
       <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
       <div>
-        <span className="font-medium">{row.field}</span>
+        <span className="font-medium">{fieldLabel(row.field)}</span>
         <p className="text-muted-foreground">
           {row.delivered_by === "multica"
-            ? "Multica applies this itself, on every engine."
-            : "This engine acts on it."}
+            ? "Multica applies this on every engine."
+            : "The selected engine applies this."}
         </p>
       </div>
     </div>

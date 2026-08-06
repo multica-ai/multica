@@ -52,6 +52,7 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 	`, fx.LeaderID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("create running squad leader task: %v", err)
 	}
+	issueHandlerTestTaskMandate(t, taskID, fx.LeaderID, "add_comment")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})
@@ -168,6 +169,21 @@ func TestCreateComment_SquadLeaderNoActionRejectsComment(t *testing.T) {
 
 	fx := newRunningSquadLeaderTaskFixture(t)
 	recordSquadLeaderEvaluationForTask(t, fx, "no_action")
+
+	// CEREBRO-PATCH(squad-no-action-workflow-test): FIR-3692 verifies the handler passes the stored no_action fact to Workflow and applies its block result.
+	originalGate := testHandler.CommentTargetGuard
+	t.Cleanup(func() { testHandler.CommentTargetGuard = originalGate })
+	testHandler.CommentTargetGuard = commentWorkflowGateFunc(func(_ context.Context, input CommentWorkflowGateInput) (CommentWorkflowGateResult, error) {
+		if !input.NoAction {
+			t.Fatalf("Workflow input NoAction = false, want true")
+		}
+		return CommentWorkflowGateResult{
+			Allowed:    false,
+			ParentID:   input.ParentID,
+			StatusCode: http.StatusConflict,
+			Message:    "comment blocked after no_action",
+		}, nil
+	})
 
 	w := httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+fx.IssueID+"/comments", map[string]any{

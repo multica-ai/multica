@@ -622,6 +622,16 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err.StatusCode, err.Message)
 		return
 	}
+	// CEREBRO-PATCH(autopilot-squad-private-leader-update): preserve the existing private-agent ceiling after workspace editing moves to Permissions (FIR-4359).
+	if _, typeSent := rawFields["assignee_type"]; typeSent || rawFields["assignee_id"] != nil {
+		nextType := prev.AssigneeType
+		if params.AssigneeType.Valid {
+			nextType = params.AssigneeType.String
+		}
+		if !h.validateAutopilotAssignee(w, r, nextType, params.AssigneeID, prev.WorkspaceID) {
+			return
+		}
+	}
 
 	autopilot, err := h.Queries.UpdateAutopilot(r.Context(), params)
 	if err != nil {
@@ -713,6 +723,10 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-permissions): trigger configuration keeps the existing autopilot scope ceiling (FIR-4359).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, ap) {
 		return
 	}
 
@@ -900,9 +914,8 @@ func isAllowedWebhookProvider(p string) bool {
 	}
 }
 
-
-
 func isValidAutopilotAssigneeType(t string) bool {
+	// CEREBRO-PATCH(autopilot-permissions): nearby trigger guards preserve this upstream validation seam (FIR-4359).
 	switch t {
 	case "agent", "squad":
 		return true
@@ -974,14 +987,18 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-
 func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request) {
+	// CEREBRO-PATCH(autopilot-permissions): trigger mutations compose canonical Permissions with scope (FIR-4359).
 	autopilotID := chi.URLParam(r, "id")
 	triggerID := chi.URLParam(r, "triggerId")
 	workspaceID := h.resolveWorkspaceID(r)
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-permissions): trigger configuration keeps the existing autopilot scope ceiling (FIR-4359).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, ap) {
 		return
 	}
 
@@ -1119,11 +1136,16 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+	ap, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
 		ID:          autopilotUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	// CEREBRO-PATCH(autopilot-permissions): trigger configuration keeps the existing autopilot scope ceiling (FIR-4359).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, ap) {
 		return
 	}
 
@@ -1161,6 +1183,10 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-permissions): webhook credentials keep the existing autopilot scope ceiling (FIR-4359).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, ap) {
 		return
 	}
 
@@ -1227,6 +1253,10 @@ func (h *Handler) SetAutopilotTriggerSigningSecret(w http.ResponseWriter, r *htt
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-permissions): webhook credentials keep the existing autopilot scope ceiling (FIR-4359).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, ap) {
 		return
 	}
 	triggerUUID, ok := parseUUIDOrBadRequest(w, triggerID, "trigger id")

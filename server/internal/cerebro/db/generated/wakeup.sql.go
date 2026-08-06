@@ -277,7 +277,7 @@ FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND agent_id = $2
   AND issue_id = $3
-  AND state <> 'cancelled'
+  AND state IN ('pending', 'claimed')
 `
 
 type CountActiveWakeupsForAgentIssueParams struct {
@@ -287,9 +287,9 @@ type CountActiveWakeupsForAgentIssueParams struct {
 }
 
 // Cerebro agent wakeups: agent-requested future re-entry points.
-// TECH-3298: how many non-cancelled wakeups this agent already has on this
-// issue. Dispatched (already-fired) ones count toward the budget so the cap is
-// "how many times total an agent may wake itself on one issue".
+// TECH-3298: how many wakeups this agent currently has waiting or claimed on
+// this issue. Historical dispatched wakeups are governed by the separate
+// progress policy and do not consume the active budget forever.
 func (q *Queries) CountActiveWakeupsForAgentIssue(ctx context.Context, arg CountActiveWakeupsForAgentIssueParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveWakeupsForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
 	var count int64
@@ -677,4 +677,66 @@ WHERE id = $1
 func (q *Queries) ResetWakeupPostpones(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, resetWakeupPostpones, id)
 	return err
+}
+
+const wakeupProgressCounters = `-- name: WakeupProgressCounters :one
+SELECT
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(c.created_at) FROM comment c
+      WHERE c.issue_id = $3 AND c.author_type = 'member'
+    ), '-infinity'::timestamptz)
+  ) AS since_member_reply,
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(c.created_at) FROM comment c
+      WHERE c.issue_id = $3 AND c.type = 'status_change'
+    ), '-infinity'::timestamptz)
+  ) AS since_status_change,
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(c.created_at) FROM comment c
+      WHERE c.issue_id = $3 AND c.type = 'progress_update'
+    ), '-infinity'::timestamptz)
+  ) AS since_progress_update,
+  count(*) FILTER (
+    WHERE w.created_at > COALESCE((
+      SELECT max(pr.pr_updated_at)
+      FROM issue_pull_request link
+      JOIN github_pull_request pr ON pr.id = link.pull_request_id
+      WHERE link.issue_id = $3
+    ), '-infinity'::timestamptz)
+  ) AS since_pull_request_update
+FROM cerebro_agent_wakeup w
+WHERE w.workspace_id = $1
+  AND w.agent_id = $2
+  AND w.issue_id = $3
+  AND w.state <> 'cancelled'
+`
+
+type WakeupProgressCountersParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+type WakeupProgressCountersRow struct {
+	SinceMemberReply       int64 `json:"since_member_reply"`
+	SinceStatusChange      int64 `json:"since_status_change"`
+	SinceProgressUpdate    int64 `json:"since_progress_update"`
+	SincePullRequestUpdate int64 `json:"since_pull_request_update"`
+}
+
+// Workflow receives separate counters so the policy, rather than this query,
+// decides which observable signals reset a self-wakeup chain.
+func (q *Queries) WakeupProgressCounters(ctx context.Context, arg WakeupProgressCountersParams) (WakeupProgressCountersRow, error) {
+	row := q.db.QueryRow(ctx, wakeupProgressCounters, arg.WorkspaceID, arg.AgentID, arg.IssueID)
+	var i WakeupProgressCountersRow
+	err := row.Scan(
+		&i.SinceMemberReply,
+		&i.SinceStatusChange,
+		&i.SinceProgressUpdate,
+		&i.SincePullRequestUpdate,
+	)
+	return i, err
 }

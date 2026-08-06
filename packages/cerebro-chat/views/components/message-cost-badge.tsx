@@ -9,6 +9,7 @@ import {
 import { chatSessionMessageCostsOptions } from "@multica/core/chat/queries";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { formatPromptCacheHitRatio } from "@multica/cerebro-format-cost";
 
 /**
  * FIR-31 — per-reply spend badge shown under an assistant chat message, beside
@@ -69,6 +70,8 @@ export function MessageCostBadge({
           <span className="text-right">{formatTokens(cost.cache_read_tokens)}</span>
           <span>Cache write</span>
           <span className="text-right">{formatTokens(cost.cache_write_tokens)}</span>
+          <span>Cache hit ratio</span>
+          <span className="text-right">{formatPromptCacheHitRatio(cost.input_tokens, cost.cache_read_tokens, cost.cache_write_tokens)}</span>
         </div>
       </TooltipContent>
     </Tooltip>

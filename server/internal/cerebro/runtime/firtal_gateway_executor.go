@@ -21,6 +21,7 @@ import (
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
@@ -86,9 +87,8 @@ type FirtalGatewayExecutor struct {
 
 	attachmentStorage storage.Storage
 
-	// CEREBRO-PATCH(executor-loopstore): FIR-2283 — loop check outcome store wired
-	// into ToolContext so worker agents can call report_loop_check to report exit
-	// codes back to the delivery gate. Nil disables the tool.
+	// CEREBRO-PATCH(executor-loopstore): Chain v2 store wired into ToolContext
+	// so an authorized block can call open_loop_step.
 	loopStore *cerebroloops.Store
 
 	// capabilitiesProvider builds the agent self-lookup card (FIR-3398). Wired
@@ -100,6 +100,7 @@ type FirtalGatewayExecutor struct {
 	// for every Gateway list and call decision. nil fails closed.
 	accessDecisions *accessdecision.Service
 	taskMandates    taskMandateStore
+	sessionModes    sessionModeAllowedToolsResolver
 	// taskMandateEnforcement is a test seam for the workspace circuit breaker.
 	// Production resolves the shared default-off flag from e.cerebro.
 	taskMandateEnforcement func(context.Context, pgtype.UUID) bool
@@ -115,6 +116,18 @@ type FirtalGatewayExecutor struct {
 type taskMandateStore interface {
 	Issue(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time) error
 	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
+}
+
+type taskMandateFinalizer interface {
+	FinalizeTaskClaim(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time, string) (taskmandate.ClaimGeneration, error)
+}
+
+type taskMandateGenerationAuthorizer interface {
+	AuthorizeClaimGeneration(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, int64, string) error
+}
+
+type sessionModeAllowedToolsResolver interface {
+	SessionModeAllowedToolsForTask(context.Context, *db.AgentTaskQueue, pgtype.UUID) ([]string, error)
 }
 
 // SetPlatformActionGate wires the always-on server floor for Multica platform mutations.
@@ -154,9 +167,8 @@ func (e *FirtalGatewayExecutor) SetAttachmentStorage(s storage.Storage) {
 	}
 }
 
-// CEREBRO-PATCH(executor-loopstore): FIR-2283 — SetLoopStore wires the loop
-// check store so worker agents can call report_loop_check to report check exit
-// codes back to the delivery gate. Nil keeps the tool absent (safe default).
+// CEREBRO-PATCH(executor-loopstore): SetLoopStore wires the Chain v2 store used
+// by open_loop_step. Nil keeps that tool absent.
 func (e *FirtalGatewayExecutor) SetLoopStore(s *cerebroloops.Store) *FirtalGatewayExecutor {
 	if e != nil {
 		e.loopStore = s
@@ -186,6 +198,13 @@ func (e *FirtalGatewayExecutor) SetAccessDecisionService(service *accessdecision
 func (e *FirtalGatewayExecutor) SetTaskMandates(store taskMandateStore) *FirtalGatewayExecutor {
 	if e != nil {
 		e.taskMandates = store
+	}
+	return e
+}
+
+func (e *FirtalGatewayExecutor) SetSessionModeAllowedToolsResolver(resolver sessionModeAllowedToolsResolver) *FirtalGatewayExecutor {
+	if e != nil {
+		e.sessionModes = resolver
 	}
 	return e
 }
@@ -494,6 +513,14 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(parent, cfg.TaskTimeout)
 		defer cancel()
+	}
+	if e.sessionModes != nil {
+		allowedTools, resolveErr := e.sessionModes.SessionModeAllowedToolsForTask(runCtx, &task, plan.workspaceID)
+		if resolveErr != nil {
+			e.failTask(parent, task, "failed to resolve SessionModeConfig.AllowedTools: "+resolveErr.Error(), "agent_error")
+			return
+		}
+		runCtx = withGatewayAllowedTools(runCtx, allowedTools)
 	}
 	meta := GatewayRequestMeta{
 		TaskID:         taskID,
@@ -925,10 +952,10 @@ func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Re
 	sort.Strings(names)
 
 	allowed := make([]Tool, 0, len(names))
-	issuanceMeta := meta
-	issuanceMeta.TaskID = ""
+	decisionMeta := meta
+	decisionMeta.TaskID = ""
 	for _, name := range names {
-		entry := e.decideAccess(ctx, agentID, workspaceID, name, reg, issuanceMeta, gatewayPolicyRequestContext(name, nil))
+		entry := e.decideAccess(ctx, agentID, workspaceID, name, reg, decisionMeta, gatewayPolicyRequestContext(name, nil))
 		if entry.PolicyDecision != accessdecision.PolicyAllow &&
 			entry.PolicyDecision != accessdecision.PolicyAsk {
 			continue
@@ -945,20 +972,36 @@ func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Re
 		return nil
 	}
 	allowed = e.filterConnectionDenied(ctx, allowed, workspaceID, agent.RuntimeID, agentID, agent.OwnerID)
-	if meta.TaskID != "" {
-		taskID := optionalGatewayUUID(meta.TaskID)
-		if e.taskMandates == nil || !taskID.Valid {
-			return nil
-		}
-		toolNames := make([]string, 0, len(allowed))
-		for _, tool := range allowed {
-			toolNames = append(toolNames, tool.Name())
-		}
-		if err := e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, time.Now().Add(2*time.Hour)); err != nil {
-			return nil
-		}
-	}
 	return allowed
+}
+
+// finalizeTaskMandate snapshots the exact Gateway tool list only after every
+// task-scoped and dynamic source has been added and the provider limit has been
+// applied. A task with an invalid or unavailable mandate store fails closed.
+func (e *FirtalGatewayExecutor) finalizeTaskMandate(ctx context.Context, meta GatewayRequestMeta, workspaceID, agentID pgtype.UUID, tools []Tool) (taskmandate.ClaimGeneration, bool) {
+	if meta.TaskID == "" {
+		return taskmandate.ClaimGeneration{}, true
+	}
+	taskID := optionalGatewayUUID(meta.TaskID)
+	if e.taskMandates == nil || !taskID.Valid {
+		return taskmandate.ClaimGeneration{}, false
+	}
+	_, toolNames, err := compileGatewayAdmissionSurface(tools, gatewayAllowedTools(ctx))
+	if err != nil {
+		if e.logger != nil {
+			e.logger.Error("task mandate admission compilation failed", "task_id", meta.TaskID, "error", err)
+		}
+		return taskmandate.ClaimGeneration{}, false
+	}
+	expiresAt := time.Now().Add(2 * time.Hour)
+	if finalizer, ok := e.taskMandates.(taskMandateFinalizer); ok {
+		generation, err := finalizer.FinalizeTaskClaim(ctx, taskID, workspaceID, agentID, toolNames, expiresAt, "firtal-gateway:v1")
+		return generation, err == nil
+	}
+	if err := e.taskMandates.Issue(ctx, taskID, workspaceID, agentID, toolNames, expiresAt); err != nil {
+		return taskmandate.ClaimGeneration{}, false
+	}
+	return taskmandate.ClaimGeneration{Generation: 1}, true
 }
 
 // filterConnectionDenied drops tools whose workspace-connection verdict is Deny,
@@ -1018,7 +1061,8 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// FIR-2668: carry the calling agent to API-connection dispatch so
 	// on_behalf_of-enabled connections stamp the agent's delegated identity.
 	ctx = WithConnectionAgent(ctx, meta.AgentID)
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available. FIR-3398/FIR-4289: thread the self-lookup card provider, mandate, and circuit breaker.
+	var taskMandateGeneration int64
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester, CapabilitiesProvider: e.capabilitiesProvider, TaskMandates: e.taskMandates, TaskMandateEnforcement: e.taskMandateEnforcementEnabled, TaskMandateGeneration: &taskMandateGeneration} // CEREBRO-PATCH(executor-loopstore): thread the Chain v2 store into tctx for open_loop_step. FIR-3398/FIR-4289: thread the self-lookup card provider, mandate generation, and circuit breaker.
 	if taskID, err := util.ParseUUID(meta.TaskID); err == nil {
 		tctx.TaskID = taskID
 		if e.queries != nil {
@@ -1073,21 +1117,6 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		// The Policy Decision Service is the single source for Gateway exposure.
 		// An empty or failing decision set is authoritative and stays empty.
 		enabledTools = e.policyDecisionTools(ctx, taskRegistry, agentID, workspaceID, meta)
-		if tctx.LoopStep != nil {
-			if tool, ok := taskRegistry.Get("open_loop_step"); ok {
-				enabledTools = append([]Tool{tool}, enabledTools...)
-			}
-		}
-		enabledTools = limitFirtalGatewayTools(enabledTools)
-		if len(enabledTools) > 0 {
-			// Also register the MCP-backed tools (get_issue, list_comments,
-			// add_comment) that the Registry wraps via its Call method.
-			// For backward compat, create an MCP server and also expose its
-			// tools — the registry dispatch handles the extended tools.
-			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-			activeRegistry = taskRegistry
-			useRegistry = true
-		}
 		// FIR-2166 C PR2 / FIR-2388: expose every enabled API-type connection's
 		// allowed endpoints as server-side-dispatched tools when the workspace flag
 		// cerebro_api_connection_tools is on (default off). Additive — the tools are
@@ -1140,10 +1169,6 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 					taskRegistry.Register(t)
 				}
 				enabledTools = e.policyDecisionTools(ctx, taskRegistry, agentID, workspaceID, meta)
-				enabledTools = limitFirtalGatewayTools(enabledTools)
-				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-				activeRegistry = taskRegistry
-				useRegistry = true
 			}
 		}
 		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — additive, like the
@@ -1158,11 +1183,42 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 					taskRegistry.Register(t)
 				}
 				enabledTools = e.policyDecisionTools(ctx, taskRegistry, agentID, workspaceID, meta)
-				enabledTools = limitFirtalGatewayTools(enabledTools)
-				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-				activeRegistry = taskRegistry
-				useRegistry = true
 			}
+		}
+		// Task-scoped tools are derived from the trusted task context, not the
+		// authored policy cascade. Add them only after every dynamic source has
+		// rebuilt the policy list, then apply the provider limit exactly once.
+		if tctx.LoopStep != nil {
+			if tool, ok := taskRegistry.Get("open_loop_step"); ok && !toolsContainName(enabledTools, tool.Name()) {
+				enabledTools = append([]Tool{tool}, enabledTools...)
+			}
+		}
+		enabledTools = limitFirtalGatewayTools(enabledTools)
+		compiledTools, _, compileErr := compileGatewayAdmissionSurface(enabledTools, gatewayAllowedTools(ctx))
+		if compileErr != nil {
+			return GatewayCompletion{}, fmt.Errorf("compile SessionModeConfig.AllowedTools: %w", compileErr)
+		}
+		enabledTools = compiledTools
+		if len(enabledTools) > 0 {
+			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+			activeRegistry = taskRegistry
+			useRegistry = true
+		}
+	}
+	// Registry transports may discover a provider-compatible core fallback only
+	// after the first tool request is accepted. Their finalization happens inside
+	// runGatewayCompatRegistryToolLoop after that exact list is known. Other
+	// transports have no such retry surface and finalize here.
+	if !useRegistry {
+		generation, finalized := e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, enabledTools)
+		if !finalized {
+			anthropicTools = nil
+			enabledTools = nil
+			activeRegistry = nil
+			useRegistry = false
+		} else {
+			meta.TaskMandateGeneration = generation.Generation
+			taskMandateGeneration = generation.Generation
 		}
 	}
 	// The compat tool-loop transports serialize GatewayMessage over the OpenAI
@@ -1174,7 +1230,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 
 	if useRegistry && activeRegistry != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use the provider-compatible tool loop as the primary path for enabled registry tools; prod Anthropic-native failures did not reliably lift Kristian into fallback.
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, &taskMandateGeneration, pruneOn)
 	}
 	if toolSrv != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
@@ -1194,12 +1250,21 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		"error", err,
 	)
 	if useRegistry && activeRegistry != nil {
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, &taskMandateGeneration, pruneOn)
 	}
 	if toolSrv != nil {
 		return e.runToolLoopWithServer(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 	return completion, err
+}
+
+func toolsContainName(tools []Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 // foldGatewayCompatAttachmentBlocks rewrites messages for the OpenAI-compat
@@ -1528,6 +1593,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	agentID, workspaceID pgtype.UUID,
 	registry *Registry,
 	tools []Tool,
+	claimGeneration *int64,
 	pruneOn bool,
 ) (GatewayCompletion, error) {
 	history := withRegistryToolUsageHint(ctx, initialMessages, tools)
@@ -1557,6 +1623,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	}
 
 	retriedCoreTools := false
+	mandateFinalized := false
 	for round := 0; round < maxRounds; round++ {
 		completion, err := e.completeGatewayWithTools(ctx, cfg, agent.Model.String, history, toolDefs, meta)
 		if err != nil {
@@ -1580,6 +1647,17 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				}
 			}
 			return GatewayCompletion{}, err
+		}
+		if !mandateFinalized {
+			generation, finalized := e.finalizeTaskMandate(ctx, meta, workspaceID, agentID, tools)
+			if !finalized {
+				return GatewayCompletion{}, errors.New("firtal gateway task mandate finalization failed")
+			}
+			meta.TaskMandateGeneration = generation.Generation
+			if claimGeneration != nil {
+				*claimGeneration = generation.Generation
+			}
+			mandateFinalized = true
 		}
 		accumulate(completion)
 		// FIR-2639: compound the prune saving — this call's prompt omitted every

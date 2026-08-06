@@ -142,7 +142,7 @@ func CanSee(view AutopilotView, viewer Viewer) bool {
 
 // CanEdit gates Update / Delete. Plan §Visibility-regler:
 //
-//	workspace → admin/owner, or the member who created the autopilot (FIR-4359).
+//	workspace → members admitted by the canonical Permissions gate.
 //	personal  → owner only.
 //	group     → group members (until group roles land — JEH-721 follow-up —
 //	            members can edit) + workspace admins.
@@ -152,15 +152,7 @@ func CanEdit(view AutopilotView, viewer Viewer) bool {
 	}
 	switch view.Scope {
 	case ScopeWorkspace, "":
-		// CEREBRO-PATCH(autopilot-creator-edit): FIR-4359 — workspace creator may
-		// pause/edit/delete their own autopilot; admins retain full edit rights.
-		// Production does not yet carry the main-branch Permissions route gate for
-		// create_autopilot, so the creator check lives here (not return-true +
-		// RequirePlatformCapability).
-		if viewer.IsAdmin {
-			return true
-		}
-		return view.CreatedByType == "member" && uuidEqual(view.CreatedByID, viewer.UserID)
+		return true
 	case ScopePersonal:
 		return uuidEqual(view.OwnerUserID, viewer.UserID)
 	case ScopeGroup:

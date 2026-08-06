@@ -9,13 +9,16 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -28,6 +31,7 @@ type ToolExecutorInvoker struct {
 	Pool      *pgxpool.Pool
 	Policy    *toolpolicy.Store
 	LoopStore *cerebroloops.Store
+	Hooks     workflows.HookEvaluator
 }
 
 // compile-time interface check
@@ -40,8 +44,10 @@ var _ handler.ToolExecutorInvoker = (*ToolExecutorInvoker)(nil)
 // is task.OriginalUserID, and for user tokens it equals userID.
 func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID, taskID pgtype.UUID, toolName string, args map[string]any) (string, error) {
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, UserID: userID, TaskID: taskID, LoopStore: e.LoopStore}
+	var task db.AgentTaskQueue
 	if taskID.Valid && e.Queries != nil {
-		if task, err := e.Queries.GetAgentTask(ctx, taskID); err == nil && task.AgentID == agentID {
+		if loaded, err := e.Queries.GetAgentTask(ctx, taskID); err == nil && loaded.AgentID == agentID {
+			task = loaded
 			tctx.LoopStep = loopStepCapabilityFromTask(task)
 		}
 	}
@@ -82,8 +88,64 @@ func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, 
 	}
 
 	result, err := reg.Call(ctx, toolName, args)
-	if err != nil {
-		return "", fmt.Errorf("tool %q: %w", toolName, err)
+	if err == nil {
+		return result, nil
 	}
-	return result, nil
+
+	// Workflow, not this seam, decides what a failed tool call does next.
+	decision := e.decideToolFailure(ctx, task, agentID, workspaceID, toolName, args, err, 1)
+	if decision.Action == workflows.ToolFailureRetry {
+		for retry := 1; retry <= decision.RetryLimit; retry++ {
+			retried, retryErr := reg.Call(ctx, toolName, args)
+			if retryErr == nil {
+				return retried, nil
+			}
+			err = retryErr
+			decision = e.decideToolFailure(ctx, task, agentID, workspaceID, toolName, args, err, retry+1)
+			if decision.Action != workflows.ToolFailureRetry {
+				break
+			}
+		}
+	}
+	if decision.Action == workflows.ToolFailureStop {
+		return "", fmt.Errorf("tool %q: %w", toolName, decision.StopError())
+	}
+	return "", fmt.Errorf("tool %q: %w", toolName, err)
+}
+
+// decideToolFailure raises on.tool.failure and returns Workflow's decision.
+// A missing evaluator or an evaluation error keeps today's behaviour: surface
+// the raw tool error to the agent.
+func (e *ToolExecutorInvoker) decideToolFailure(ctx context.Context, task db.AgentTaskQueue, agentID, workspaceID pgtype.UUID, toolName string, args map[string]any, toolErr error, call int) workflows.ToolFailureDecision {
+	surface := workflows.ToolFailureDecision{Action: workflows.ToolFailureSurface}
+	if e == nil || e.Hooks == nil {
+		return surface
+	}
+	argumentKeys := make([]string, 0, len(args))
+	for key := range args {
+		argumentKeys = append(argumentKeys, key)
+	}
+	sort.Strings(argumentKeys)
+	attempt := int(task.Attempt)
+	result, err := e.Hooks.Evaluate(ctx, workflows.HookEvent{
+		EventID:     fmt.Sprintf("%s:tool-failure:%s:%d:%d", util.UUIDToString(task.ID), toolName, attempt, call),
+		Type:        workflows.HookOnToolFailure,
+		WorkspaceID: util.UUIDToString(workspaceID),
+		AgentID:     util.UUIDToString(agentID),
+		IssueID:     util.UUIDToString(task.IssueID),
+		SessionID:   task.SessionID.String,
+		Attempt:     attempt,
+		Context: map[string]any{
+			"tool": map[string]any{
+				"name": toolName, "argument_keys": argumentKeys, "error": toolErr.Error(),
+				"call": call,
+			},
+			"task": map[string]any{"id": util.UUIDToString(task.ID), "status": task.Status},
+		},
+		MutableFields: workflows.ToolFailureMutableFields,
+	})
+	if err != nil {
+		return surface
+	}
+	return workflows.ToolFailureDecisionFrom(result)
 }

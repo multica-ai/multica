@@ -22,3 +22,13 @@ export { useStickyBottom } from "./hooks/use-sticky-bottom";
 export { useHighlightCommentScroll } from "./hooks/use-highlight-comment-scroll";
 export { useNavScrollState } from "./hooks/use-nav-scroll-state";
 export { useComposerHeight, type ComposerHeight } from "./hooks/use-composer-height";
+export { EditorFormattingToolbar } from "./components/editor-formatting-toolbar";
+export { EditorToolbarSettings } from "./components/editor-toolbar-settings";
+export { AccessDiagnostics } from "./components/access-diagnostics";
+export { TaskAccessDisclosure } from "./components/task-access-disclosure";
+export {
+  DEFAULT_EDITOR_TOOLBAR_ORDER,
+  EDITOR_TOOLBAR_ORDER_KEY,
+  readEditorToolbarOrder,
+  type EditorToolbarActionId,
+} from "./components/editor-toolbar-preferences";

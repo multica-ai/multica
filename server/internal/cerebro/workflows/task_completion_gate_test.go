@@ -59,18 +59,32 @@ func TestTaskCompletionGateDryRunAuditsWithoutBlocking(t *testing.T) {
 	}
 }
 
-func TestTaskCompletionGateFailsOpenWhenContextCannotBeLoaded(t *testing.T) {
+func TestTaskCompletionGateFailsClosedWhenContextCannotBeLoaded(t *testing.T) {
 	store := &fakeCompletionContextStore{loadErr: errors.New("agent lookup failed")}
 	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookBlock}}
 	gate := NewTaskCompletionGate(store, evaluator)
 	input := []byte(`{"output":"done"}`)
 
 	got, err := gate.BeforeComplete(context.Background(), pgtype.UUID{Bytes: [16]byte{6}, Valid: true}, input)
-	if err != nil {
-		t.Fatalf("experimental hook gate blocked completion on context lookup failure: %v", err)
+	if !errors.Is(err, ErrTaskCompletionContextUnavailable) {
+		t.Fatalf("context lookup error = %v", err)
 	}
 	if evaluator.calls != 0 || string(got) != string(input) {
 		t.Fatalf("lookup failure evaluated=%d result=%s", evaluator.calls, got)
+	}
+}
+
+func TestTaskCompletionGateFailsClosedWhenFeatureLookupFails(t *testing.T) {
+	store := &fakeCompletionContextStore{featureErr: errors.New("workspace lookup failed")}
+	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookAllow}}
+	gate := NewTaskCompletionGate(store, evaluator)
+
+	_, err := gate.BeforeComplete(context.Background(), pgtype.UUID{Bytes: [16]byte{9}, Valid: true}, nil)
+	if !errors.Is(err, ErrTaskCompletionContextUnavailable) {
+		t.Fatalf("feature lookup error = %v", err)
+	}
+	if store.loadCalls != 0 || evaluator.calls != 0 {
+		t.Fatalf("feature failure loaded context=%d evaluated=%d", store.loadCalls, evaluator.calls)
 	}
 }
 
@@ -120,18 +134,15 @@ func TestTaskCompletionGateEmitsAgentStopAndTaskCompleteThroughTheSameAttemptCei
 	}
 }
 
-func TestTaskCompletionGateThirdRemediationEscalatesInsteadOfLooping(t *testing.T) {
+func TestTaskCompletionGateNeverTurnsFailedRemediationIntoCompletion(t *testing.T) {
 	store := &fakeCompletionContextStore{context: nonTerminalCompletionContext()}
 	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookBlock}}
 	gate := NewTaskCompletionGate(store, evaluator)
 	taskID := pgtype.UUID{Bytes: [16]byte{4}, Valid: true}
-	for attempt := 1; attempt <= 2; attempt++ {
+	for attempt := 1; attempt <= 4; attempt++ {
 		if _, err := gate.BeforeComplete(context.Background(), taskID, nil); !errors.Is(err, ErrTaskContinuationRequired) {
 			t.Fatalf("attempt %d error = %v", attempt, err)
 		}
-	}
-	if _, err := gate.BeforeComplete(context.Background(), taskID, nil); err != nil {
-		t.Fatalf("third attempt should escalate, got %v", err)
 	}
 }
 
@@ -142,6 +153,7 @@ type fakeCompletionContextStore struct {
 	loadCalls       int
 	featureCalls    int
 	featureDisabled bool
+	featureErr      error
 }
 
 func (s *fakeCompletionContextStore) LoadTaskCompletionContext(context.Context, pgtype.UUID) (TaskCompletionContext, error) {
@@ -151,7 +163,7 @@ func (s *fakeCompletionContextStore) LoadTaskCompletionContext(context.Context, 
 
 func (s *fakeCompletionContextStore) WorkflowHooksEnabled(context.Context, pgtype.UUID) (bool, error) {
 	s.featureCalls++
-	return !s.featureDisabled, nil
+	return !s.featureDisabled, s.featureErr
 }
 
 func (s *fakeCompletionContextStore) ResolveContinuation(context.Context, TaskCompletionContext) (*TaskContinuation, error) {

@@ -11,6 +11,20 @@ import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const featureFlags = vi.hoisted(() => ({ accessDiagnostics: false }));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) =>
+    key === "cerebro_access_diagnostics" ? featureFlags.accessDiagnostics : false,
+  useFlagValue: (key: string) =>
+    key === "cerebro_access_diagnostics" ? featureFlags.accessDiagnostics : false,
+}));
+
+vi.mock("@multica/cerebro-ui", () => ({
+  TaskAccessDisclosure: ({ taskId }: { taskId: string }) => (
+    <div data-testid="task-access-disclosure">{taskId}</div>
+  ),
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: {
@@ -287,6 +301,7 @@ function renderDialog(
 
 beforeEach(() => {
   cleanup();
+  featureFlags.accessDiagnostics = false;
   copyTextMock.mockClear();
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
   useTranscriptViewStore.setState({
@@ -303,6 +318,19 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("keeps Task access hidden while the operator diagnostics gate is off", () => {
+    renderDialog();
+
+    expect(screen.queryByTestId("task-access-disclosure")).not.toBeInTheDocument();
+  });
+
+  it("shows Task access when the operator diagnostics gate is on", () => {
+    featureFlags.accessDiagnostics = true;
+    renderDialog();
+
+    expect(screen.getByTestId("task-access-disclosure")).toHaveTextContent(baseTask.id);
+  });
+
   it("explains unavailable live events for an empty Antigravity transcript", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 

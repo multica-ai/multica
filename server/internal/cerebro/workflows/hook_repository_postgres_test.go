@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -29,11 +30,78 @@ func TestPostgresHookRepositoryListReturnsOnlyLatestPolicyVersionPerFamily(t *te
 	if err != nil {
 		t.Fatalf("list policies: %v", err)
 	}
-	if len(policies) != 1 {
-		t.Fatalf("effective policies = %d, want only the latest family version", len(policies))
+	var versioned []HookPolicy
+	for _, policy := range policies {
+		if policy.Name == "Versioned policy" {
+			versioned = append(versioned, policy)
+		}
 	}
-	if policies[0].Version != 2 || policies[0].Mode != HookModeDryRun {
-		t.Fatalf("effective policy = version %d mode %q, want version 2 dry_run", policies[0].Version, policies[0].Mode)
+	if len(versioned) != 1 {
+		t.Fatalf("versioned policies = %d, want only the latest family version", len(versioned))
+	}
+	if versioned[0].Version != 2 || versioned[0].Mode != HookModeDryRun {
+		t.Fatalf("effective policy = version %d mode %q, want version 2 dry_run", versioned[0].Version, versioned[0].Mode)
+	}
+}
+
+func TestPostgresHookRepositoryEnsuresManagedMessagePolicies(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	fixture := setupWorkflowIntegrationFixture(t, pool)
+	repo := NewPostgresHookRepository(pool)
+	workspaceID := uuidString(fixture.workspaceID)
+
+	for call := 0; call < 2; call++ {
+		policies, err := repo.List(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("list policies call %d: %v", call+1, err)
+		}
+		var managed []HookPolicy
+		for _, policy := range policies {
+			if policy.Mode == HookModeManaged {
+				managed = append(managed, policy)
+			}
+		}
+		if len(managed) != len(managedHookPolicies(workspaceID)) {
+			t.Fatalf("managed policies after call %d = %d, want %d", call+1, len(managed), len(managedHookPolicies(workspaceID)))
+		}
+		for _, policy := range managed {
+			if policy.FailMode != HookFailClosed || len(policy.Bindings) != 1 || policy.Bindings[0].Kind != HookScopeWorkspace || policy.Bindings[0].ID != workspaceID || len(policy.Handlers) != 1 {
+				t.Fatalf("managed policy is incomplete: %#v", policy)
+			}
+		}
+	}
+}
+
+func TestPostgresHookRepositoryLocksBuiltInManagedPoliciesForOwners(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	fixture := setupWorkflowIntegrationFixture(t, pool)
+	repo := NewPostgresHookRepository(pool)
+	workspaceID := uuidString(fixture.workspaceID)
+	policies, err := repo.List(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list policies: %v", err)
+	}
+	var managed HookPolicy
+	for _, policy := range policies {
+		if isBuiltInManagedHookPolicy(workspaceID, policy.ID) {
+			managed = policy
+			break
+		}
+	}
+	if managed.ID == "" {
+		t.Fatal("built-in managed policy was not created")
+	}
+	owner := HookPermissionActor{Type: "member", ID: uuidString(fixture.userID), IsOwner: true}
+	if _, err := repo.Update(ctx, workspaceID, owner, managed.ID, managed); !errors.Is(err, ErrManagedHookLocked) {
+		t.Fatalf("owner update error = %v, want ErrManagedHookLocked", err)
+	}
+	if _, err := repo.Disable(ctx, workspaceID, owner, managed.ID); !errors.Is(err, ErrManagedHookLocked) {
+		t.Fatalf("owner disable error = %v, want ErrManagedHookLocked", err)
+	}
+	if err := repo.Delete(ctx, workspaceID, owner, managed.ID); !errors.Is(err, ErrManagedHookLocked) {
+		t.Fatalf("owner delete error = %v, want ErrManagedHookLocked", err)
 	}
 }
 

@@ -26,6 +26,13 @@ export interface RuntimeDevice {
   workspace_id: string;
   daemon_id: string | null;
   name: string;
+  /**
+   * Optional user-set display name override (MUL-4217). Overrides `name` for
+   * display; the daemon never writes it, so it survives heartbeats. Older
+   * backends omit the field — consumers must treat missing / empty as "use
+   * name" (see runtimeDisplayName).
+   */
+  custom_name?: string | null;
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;
@@ -216,13 +223,65 @@ export interface AgentTask {
 // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot.
 // Immutable tool allowlist issued when a task starts. This is the same
 // snapshot enforced at every tool call, exposed for the transcript and CLI.
+// CEREBRO-PATCH(task-mandate-read-model): FIR-4292 additive generation, source, count, digest, and verdict diagnostics.
+export interface TaskMandateVerdict {
+  allowed: boolean;
+  code: string;
+  recovery_action: string;
+  message: string;
+}
+
+// CEREBRO-PATCH(runtime-access-diagnostics): FIR-4293 shared operator diagnostic types.
+export type AccessDiagnosticState =
+  | "success"
+  | "info"
+  | "partial"
+  | "stale"
+  | "empty"
+  | "denied"
+  | "unavailable"
+  | "error";
+
+export interface AccessDiagnostic {
+  code: string;
+  state: AccessDiagnosticState;
+  title: string;
+  message: string;
+  affected_capability?: string;
+  source_policy: string;
+  recovery_action: string;
+  version?: string;
+  count?: number;
+  observed_at?: string;
+}
+
+export interface RuntimeAccessDiagnostics {
+  runtime_id: string;
+  provider: string;
+  status: string;
+  diagnostics: AccessDiagnostic[];
+}
+
 export interface TaskAccessSnapshot {
+	/** False means the snapshot is diagnostic only; call-time enforcement is disabled. */
+	enforcement_enabled: boolean;
   task_id: string;
   agent_id: string;
   allowed_tools: string[];
   issued_at: string;
   expires_at: string;
   status: "active" | "expired";
+  claim_generation?: number;
+  lifecycle_state?: "legacy" | "draft" | "finalized";
+  producer?: string;
+  finalizer?: string;
+  inventory_version?: string;
+  discovery_version?: string;
+  offered_count?: number;
+  authorized_count?: number;
+  grant_digest?: string;
+  verdict?: TaskMandateVerdict;
+  diagnostics?: AccessDiagnostic[];
 }
 
 export interface WorkSession {

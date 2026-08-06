@@ -2,6 +2,8 @@
 
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import type { AgentTask } from "@multica/core/types/agent";
 import { renderWithI18n } from "../../test/i18n";
 import { TranscriptButton } from "./transcript-button";
@@ -15,6 +17,15 @@ const mockApi = vi.hoisted(() => ({
 
 vi.mock("@multica/core/api", () => ({
   api: mockApi,
+}));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => key === "cerebro_access_diagnostics",
+  useFlagValue: (key: string) => key === "cerebro_access_diagnostics",
 }));
 
 vi.mock("../actor-avatar", () => ({
@@ -78,6 +89,13 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   };
 }
 
+function renderTranscript(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithI18n(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+}
+
 describe("TranscriptButton", () => {
   beforeEach(() => {
     mockApi.listTaskMessages.mockResolvedValue([
@@ -99,12 +117,47 @@ describe("TranscriptButton", () => {
     mockApi.getAgent.mockResolvedValue({ id: "agent-1", name: "Charlene" });
     mockApi.listRuntimes.mockResolvedValue([]);
     mockApi.getTaskAccess.mockResolvedValue({
+      enforcement_enabled: true,
       task_id: "task-1",
       agent_id: "agent-1",
       allowed_tools: ["tools:Read", "firtal_registry"],
       issued_at: "2026-06-05T19:02:00Z",
       expires_at: "2026-06-05T20:02:00Z",
       status: "expired",
+      claim_generation: 3,
+      lifecycle_state: "finalized",
+      producer: "daemon-claim:v1",
+      finalizer: "task-claim",
+      inventory_version: "daemon-claim:v1",
+      discovery_version: "runtime-scan:42",
+      offered_count: 4,
+      authorized_count: 2,
+      verdict: {
+        allowed: false,
+        code: "task_mandate_expired",
+        recovery_action: "start_new_task",
+        message: "The Task Mandate run window has ended.",
+      },
+      diagnostics: [
+        {
+          code: "task_mandate_expired",
+          state: "denied",
+          title: "Task Mandate denied access",
+          message: "The Task Mandate run window has ended.",
+          affected_capability: "task:*",
+          source_policy: "Task Mandate",
+          recovery_action: "Start a new task to receive a current Task Mandate.",
+        },
+        {
+          code: "task_partial",
+          state: "partial",
+          title: "Partial task access",
+          message: "2 offered capabilities were removed before the Task Mandate was finalized.",
+          affected_capability: "2 capabilities",
+          source_policy: "Task Mandate",
+          recovery_action: "Review Settings → Permissions and start a new task after changing access.",
+        },
+      ],
     });
   });
 
@@ -117,7 +170,7 @@ describe("TranscriptButton", () => {
     const stopPropagation = vi.fn();
     const preventDefault = vi.fn();
 
-    renderWithI18n(
+    renderTranscript(
       <div onClick={stopPropagation}>
         <TranscriptButton
           task={makeTask()}
@@ -137,10 +190,38 @@ describe("TranscriptButton", () => {
     expect(await screen.findByRole("dialog", { name: "Agent Execution Transcript" })).toBeInTheDocument();
     expect(screen.getByText("Starter run")).toBeInTheDocument();
     expect(screen.getByText("Command failed with exit code 1")).toBeInTheDocument();
-    expect(await screen.findByText("Task access · 2 allowed")).toBeInTheDocument();
+    expect(await screen.findByText("Task access")).toBeInTheDocument();
+    expect(screen.getByText("2 capabilities · ended")).toBeInTheDocument();
     expect(stopPropagation).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("Task access · 2 allowed"));
     expect(await screen.findByText("tools:Read")).toBeInTheDocument();
-    expect(screen.getByText(/Every tool call is checked against this exact list/)).toBeInTheDocument();
+    expect(screen.getByText("Generation 3")).toBeInTheDocument();
+    expect(screen.getByText("4 offered")).toBeInTheDocument();
+    expect(screen.getByText("Task Mandate denied access")).toBeInTheDocument();
+    expect(screen.getByText("Partial task access")).toBeInTheDocument();
+    expect(screen.getByText("Start a new task to receive a current Task Mandate.")).toBeInTheDocument();
+    expect(screen.getByText(/a later Deny or safety ceiling can still tighten this run/)).toBeInTheDocument();
+    expect(screen.getByText(/a later Allow cannot widen its frozen Task Mandate/)).toBeInTheDocument();
+  });
+
+  it("labels a stored snapshot as diagnostic when enforcement is off", async () => {
+    mockApi.getTaskAccess.mockResolvedValue({
+      enforcement_enabled: false,
+      task_id: "task-1",
+      agent_id: "agent-1",
+      allowed_tools: ["tools:Read"],
+      issued_at: "2026-06-05T19:02:00Z",
+      expires_at: "2026-06-05T20:02:00Z",
+      status: "active",
+      authorized_count: 1,
+    });
+
+    renderTranscript(<TranscriptButton task={makeTask()} agentName="Charlene" title="Vis run-detaljer" />);
+    fireEvent.click(screen.getByRole("button", { name: "Vis run-detaljer" }));
+
+    expect(await screen.findAllByText("Observation only")).toHaveLength(2);
+    expect(mockApi.getTaskAccess).toHaveBeenCalledWith("task-1");
+    expect(screen.getByText(/Task Mandate enforcement is off/)).toBeInTheDocument();
+    expect(screen.getByText(/This snapshot cannot reject calls/)).toBeInTheDocument();
+    expect(screen.getByText(/a later Allow cannot widen its frozen Task Mandate/)).toBeInTheDocument();
   });
 });

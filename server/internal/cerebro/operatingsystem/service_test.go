@@ -38,22 +38,51 @@ func TestValidateStrategyInput(t *testing.T) {
 	}
 }
 
+const pageUUID = "550e8400-e29b-41d4-a716-446655440000"
+
 func TestValidateVisionPlanSectionInput(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   VisionPlanSectionInput
 		wantErr bool
 	}{
-		{name: "list", input: VisionPlanSectionInput{Name: "Core Values", SectionType: "list"}},
-		{name: "structured", input: VisionPlanSectionInput{Name: "Marketing Strategy", SectionType: "structured"}},
-		{name: "process", input: VisionPlanSectionInput{Name: "Core Processes", SectionType: "process"}},
-		{name: "missing name", input: VisionPlanSectionInput{SectionType: "list"}, wantErr: true},
-		{name: "invalid type", input: VisionPlanSectionInput{Name: "Custom", SectionType: "cards"}, wantErr: true},
+		{name: "list", input: VisionPlanSectionInput{Name: "Core Values", SectionType: "list", PageID: pageUUID}},
+		{name: "structured", input: VisionPlanSectionInput{Name: "Marketing Strategy", SectionType: "structured", PageID: pageUUID}},
+		{name: "process", input: VisionPlanSectionInput{Name: "Core Processes", SectionType: "process", PageID: pageUUID}},
+		{name: "goals", input: VisionPlanSectionInput{Name: "Goals", SectionType: "goals", PageID: pageUUID, ColumnIndex: 2}},
+		{name: "missing name", input: VisionPlanSectionInput{SectionType: "list", PageID: pageUUID}, wantErr: true},
+		{name: "invalid type", input: VisionPlanSectionInput{Name: "Custom", SectionType: "cards", PageID: pageUUID}, wantErr: true},
+		{name: "missing page", input: VisionPlanSectionInput{Name: "Custom", SectionType: "list"}, wantErr: true},
+		{name: "second row", input: VisionPlanSectionInput{Name: "Custom", SectionType: "list", PageID: pageUUID, RowIndex: 1, ColumnIndex: 1}},
+		{name: "column out of range", input: VisionPlanSectionInput{Name: "Custom", SectionType: "list", PageID: pageUUID, ColumnIndex: 4}, wantErr: true},
+		{name: "row out of range", input: VisionPlanSectionInput{Name: "Custom", SectionType: "list", PageID: pageUUID, RowIndex: 12}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := ValidateVisionPlanSectionInput(tt.input); (err != nil) != tt.wantErr {
 				t.Fatalf("ValidateVisionPlanSectionInput(%#v) error = %v", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateVisionPlanPageInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   VisionPlanPageInput
+		wantErr bool
+	}{
+		{name: "one row of three columns", input: VisionPlanPageInput{Name: "Traction", RowColumnCounts: []int32{3}}},
+		{name: "a wide row over a narrow one", input: VisionPlanPageInput{Name: "Vision", RowColumnCounts: []int32{3, 1, 2}}},
+		{name: "missing name", input: VisionPlanPageInput{RowColumnCounts: []int32{2}}, wantErr: true},
+		{name: "no rows", input: VisionPlanPageInput{Name: "Traction"}, wantErr: true},
+		{name: "a row with no columns", input: VisionPlanPageInput{Name: "Traction", RowColumnCounts: []int32{2, 0}}, wantErr: true},
+		{name: "a row with too many columns", input: VisionPlanPageInput{Name: "Traction", RowColumnCounts: []int32{5}}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateVisionPlanPageInput(tt.input); (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateVisionPlanPageInput(%#v) error = %v", tt.input, err)
 			}
 		})
 	}
@@ -117,11 +146,19 @@ func TestValidateOrgChartSeatInput(t *testing.T) {
 	if err := ValidateOrgChartSeatInput(valid); err != nil {
 		t.Fatalf("valid seat rejected: %v", err)
 	}
+	// FIR-3589: a seat may be held by several owners at once.
+	shared := OrgChartSeatInput{Name: "Web Development", Owners: []OrgChartSeatOwnerInput{
+		{Type: "member", ID: testMemberID},
+		{Type: "agent", ID: testAgentID},
+	}}
+	if err := ValidateOrgChartSeatInput(shared); err != nil {
+		t.Fatalf("shared seat rejected: %v", err)
+	}
 	invalid := []OrgChartSeatInput{
 		{Name: ""},
-		{Name: "Operations", OwnerType: "member"},
-		{Name: "Operations", OwnerType: "team", OwnerID: testMemberID},
-		{Name: "Operations", OwnerType: "member", OwnerID: "not-a-uuid"},
+		{Name: "Operations", Owners: []OrgChartSeatOwnerInput{{Type: "team", ID: testMemberID}}},
+		{Name: "Operations", Owners: []OrgChartSeatOwnerInput{{Type: "member", ID: "not-a-uuid"}}},
+		{Name: "Operations", Owners: []OrgChartSeatOwnerInput{{Type: "member", ID: testMemberID}, {Type: "member", ID: testMemberID}}},
 	}
 	for _, input := range invalid {
 		if err := ValidateOrgChartSeatInput(input); err == nil {

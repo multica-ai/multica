@@ -1,30 +1,36 @@
 "use client";
 
-import { useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCorners, useDroppable, useSensor, useSensors,
   type CollisionDetection, type DragEndEvent, type DragStartEvent,
 } from "@dnd-kit/core";
 import {
-  SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
+  SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueListOptions } from "@multica/core/issues/queries";
+import { projectListOptions } from "@multica/core/projects";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { ChevronDown, ChevronUp, GripVertical, ListTodo, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, FolderKanban, GripVertical, ListTodo, Plus, Settings2, Trash2 } from "lucide-react";
 import { DEFAULT_TERMINOLOGY } from "../core/api-schemas";
 import {
   periodsOptions, rocksOptions, settingsOptions, useCreateConnection, useCreateVisionPlanItem,
-  useCreateVisionPlanSection, useDeleteConnection, useDeleteVisionPlanItem, useDeleteVisionPlanSection,
-  useSaveRock, useUpdateVisionPlanItem, useUpdateVisionPlanSection, visionPlanOptions,
+  useCreateVisionPlanPage, useCreateVisionPlanSection, useDeleteConnection, useDeleteVisionPlanItem,
+  useDeleteVisionPlanPage, useDeleteVisionPlanSection, useSaveRock, useUpdateVisionPlanItem,
+  useUpdateVisionPlanPage, useUpdateVisionPlanSection, visionPlanOptions,
 } from "../core/queries";
-import { moveItem, moveSection } from "../core/strategy-board";
-import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanSection } from "../core/types";
+import { clampSectionsToLayout, columnSections, moveItem, moveSection } from "../core/strategy-board";
+import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanObjectLink, VisionPlanPage, VisionPlanSection } from "../core/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
+import { OsPageShell } from "./os-page-shell";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
-import { TractionBoard, VisionBoard, extraSections } from "./vto-board";
+import {
+  COLUMN_PREFIX, GoalsBlockBody, ITEM_PREFIX, ITEM_ZONE_PREFIX, PageBoard, SECTION_PREFIX, parseColumnId,
+} from "./plan-board";
 
 // The named blanks each V/TO block asks for, offered as one-click chips so the
 // page fills in like the paper organiser instead of an empty list.
@@ -37,9 +43,18 @@ const WIREFRAME_PARTS: Record<string, string[]> = {
 
 const usesPartLabels = (section: VisionPlanSection) => section.section_type === "structured" || Boolean(WIREFRAME_PARTS[section.key]);
 
-const SECTION_PREFIX = "section-";
-const ITEM_PREFIX = "item-";
-const COLUMN_PREFIX = "column-";
+// A textarea that always grows to fit its content, so context text is never
+// clipped or scrolled out of view (FIR-3589). No fixed row count, no scrollbar.
+function AutoTextarea({ value, ...props }: ComponentProps<"textarea">) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return <textarea ref={ref} value={value} rows={1} {...props} />;
+}
 
 const itemInput = (item: VisionPlanItem, overrides: Partial<VisionPlanItemInput> = {}): VisionPlanItemInput => ({
   section_id: item.section_id, title: item.title, description: item.description,
@@ -47,9 +62,25 @@ const itemInput = (item: VisionPlanItem, overrides: Partial<VisionPlanItemInput>
   position: item.position, state: item.state, ...overrides,
 });
 
-const sectionInputFrom = (section: VisionPlanSection, position: number) => ({
-  name: section.name, section_type: section.section_type, position,
+const sectionInputFrom = (section: VisionPlanSection, overrides: Partial<VisionPlanSection> = {}) => ({
+  name: overrides.name ?? section.name,
+  section_type: overrides.section_type ?? section.section_type,
+  position: overrides.position ?? section.position,
+  page_id: overrides.page_id ?? section.page_id,
+  row_index: overrides.row_index ?? section.row_index,
+  column_index: overrides.column_index ?? section.column_index,
 });
+
+const pageInputFrom = (page: VisionPlanPage, overrides: Partial<VisionPlanPage> = {}) => ({
+  name: overrides.name ?? page.name,
+  row_column_counts: overrides.row_column_counts ?? page.row_column_counts,
+  position: overrides.position ?? page.position,
+});
+
+// A link is addressed by "<target_type>:<target_id>" so Projects and Issues can
+// share one picker without colliding on id.
+const linkValue = (link: VisionPlanObjectLink) => `${link.target_type}:${link.target_id}`;
+const linkLabel = (link: VisionPlanObjectLink) => (link.identifier ? `${link.identifier} · ${link.title}` : link.title || link.target_id);
 
 interface PlanItemProps {
   item: VisionPlanItem;
@@ -59,11 +90,12 @@ interface PlanItemProps {
   wsId: string;
   goals: Rock[];
   ownerOptions: SearchSelectOption[];
+  linkOptions: SearchSelectOption[];
   currentPeriodId?: string;
   allowGoalConnections: boolean;
 }
 
-function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, currentPeriodId, allowGoalConnections }: PlanItemProps) {
+function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, linkOptions, currentPeriodId, allowGoalConnections }: PlanItemProps) {
   const update = useUpdateVisionPlanItem(wsId);
   const remove = useDeleteVisionPlanItem(wsId);
   const connect = useCreateConnection(wsId);
@@ -89,6 +121,19 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
     }
   }
 
+  function changeLinks(values: string[]) {
+    const existing = new Map(item.links.map((link) => [linkValue(link), link.connection_id]));
+    for (const value of values) {
+      if (existing.has(value)) continue;
+      const [targetType, targetId] = value.split(":");
+      if (!targetType || !targetId) continue;
+      connect.mutate({ source_type: "strategy_item", source_id: item.id, target_type: targetType, target_id: targetId, relationship_type: "relates_to", provenance: "manual" });
+    }
+    for (const [value, connectionId] of existing) {
+      if (!values.includes(value)) disconnect.mutate(connectionId);
+    }
+  }
+
   function createLinkedGoal(query: string) {
     if (!currentPeriodId) return;
     saveGoal.mutate({ input: {
@@ -104,6 +149,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
     update.mutate({ id: other.id, input: itemInput(other, { position: item.position }) });
   }
 
+  const selectedLinks = item.links.map(linkValue);
   const selectedGoals = item.goal_connections.map((connection) => connection.goal_id);
   const connectedGoals = selectedGoals.map((goalId) => goals.find((goal) => goal.id === goalId)).filter((goal): goal is Rock => Boolean(goal));
   const style = { transform: CSS.Transform.toString(transform), transition };
@@ -116,7 +162,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
             <input aria-label={`${item.title} part`} value={partLabel} onChange={(event) => setPartLabel(event.target.value)} onBlur={() => save()} placeholder="Part label" className="mb-1 w-full bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none" />
           )}
           <input aria-label={`${item.title} title`} value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => save()} className="w-full bg-transparent text-sm font-medium outline-none focus:ring-1 focus:ring-ring" />
-          <textarea aria-label={`${item.title} description`} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => save()} rows={description ? 2 : 1} placeholder="Add context…" className="mt-1 w-full resize-none bg-transparent text-xs leading-relaxed text-muted-foreground outline-none focus:ring-1 focus:ring-ring" />
+          <AutoTextarea aria-label={`${item.title} description`} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => save()} placeholder="Add context…" className="mt-1 w-full resize-none overflow-hidden bg-transparent text-xs leading-relaxed text-muted-foreground outline-none focus:ring-1 focus:ring-ring" />
         </div>
         <div className="flex shrink-0 items-start opacity-60 group-hover:opacity-100">
           <button type="button" aria-label={`Move ${item.title} up`} disabled={itemIndex === 0} onClick={() => move(-1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronUp aria-hidden className="size-4" /></button>
@@ -125,14 +171,30 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
         </div>
       </div>
       {section.section_type === "process" && (
-        <SearchSelect compact label={`${item.title} owner`} options={ownerOptions} value={item.owner_id ? `${item.owner_type}:${item.owner_id}` : ""} onChange={(value) => {
+        <SearchSelect compact fieldLabel="Owner" label={`${item.title} owner`} options={ownerOptions} value={item.owner_id ? `${item.owner_type}:${item.owner_id}` : ""} onChange={(value) => {
           const [ownerType, ownerId] = value.split(":");
           save({ owner_type: ownerId ? ownerType as "member" | "agent" : undefined, owner_id: ownerId || undefined });
-        }} clearLabel="No owner" placeholder="Process owner" />
+        }} clearLabel="No owner" placeholder="Unassigned" />
       )}
+      <div className="grid gap-1.5">
+        <SearchSelect compact multiple fieldLabel="Linked" label={`${item.title} Projects and Issues`} options={linkOptions} values={selectedLinks} onValuesChange={changeLinks} placeholder="Connect Project or Issue" />
+        {item.links.length > 0 && (
+          <ul aria-label={`${item.title} connected Projects and Issues`} className="flex flex-wrap gap-1.5">
+            {item.links.map((link) => (
+              <li key={link.connection_id}>
+                <button type="button" aria-label={`Disconnect ${linkLabel(link)}`} onClick={() => changeLinks(selectedLinks.filter((value) => value !== linkValue(link)))} className="flex max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs">
+                  {link.target_type === "project" ? <FolderKanban aria-hidden className="size-3 shrink-0 text-muted-foreground" /> : <ListTodo aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
+                  <span className="truncate">{linkLabel(link)}</span>
+                  <span aria-hidden className="text-muted-foreground">×</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {allowGoalConnections && (
         <div className="grid gap-1.5">
-          <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
+          <SearchSelect compact multiple fieldLabel="Goals" label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
           {connectedGoals.length > 0 && (
             <ul aria-label={`${item.title} connected Goals`} className="flex flex-wrap gap-1.5">
               {connectedGoals.map((goal) => (
@@ -156,16 +218,19 @@ interface SectionBodyProps {
   section: VisionPlanSection;
   wsId: string;
   goals: Rock[];
+  rocksLabel: string;
   ownerOptions: SearchSelectOption[];
+  linkOptions: SearchSelectOption[];
   currentPeriodId?: string;
+  onOpenRock: (rockId: string) => void;
 }
 
-// The contents of one V/TO block: its cards, the named blanks it still wants,
-// and the add row. Shared by the board cells and the extra-section columns.
-function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: SectionBodyProps) {
+// The contents of one block: its cards, the named blanks it still wants, and the
+// add row. A Goals block shows the current period's goals instead of items.
+function SectionBody({ section, wsId, goals, rocksLabel, ownerOptions, linkOptions, currentPeriodId, onOpenRock }: SectionBodyProps) {
   const createItem = useCreateVisionPlanItem(wsId);
   const [newItem, setNewItem] = useState("");
-  const { setNodeRef: setDropRef } = useDroppable({ id: `${COLUMN_PREFIX}${section.id}` });
+  const { setNodeRef: setDropRef } = useDroppable({ id: `${ITEM_ZONE_PREFIX}${section.id}` });
 
   function addItem(title: string, partLabel?: string) {
     if (!title.trim()) return;
@@ -177,6 +242,10 @@ function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: Se
     if (event.key === "Enter") { event.preventDefault(); addItem(newItem); }
   }
 
+  if (section.section_type === "goals") {
+    return <GoalsBlockBody rocks={goals} rocksLabel={rocksLabel} onOpenRock={onOpenRock} />;
+  }
+
   const parts = WIREFRAME_PARTS[section.key] ?? (section.section_type === "structured" ? WIREFRAME_PARTS["marketing-strategy"] ?? [] : []);
   const missingParts = parts.filter((part) => !section.items.some((item) => item.part_label === part));
   const activeItems = section.items.filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
@@ -185,7 +254,7 @@ function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: Se
   return (
     <div ref={setDropRef} className="grid flex-1 content-start gap-2">
       <SortableContext items={activeItems.map((item) => `${ITEM_PREFIX}${item.id}`)} strategy={verticalListSortingStrategy}>
-        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
+        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} linkOptions={linkOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
       </SortableContext>
       {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="flex min-h-8 items-center gap-1 rounded-full border border-dashed px-3 text-xs text-muted-foreground hover:border-foreground hover:text-foreground"><Plus aria-hidden className="size-3.5" />{part}</button>)}</div>}
       <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="min-h-11 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
@@ -195,35 +264,43 @@ function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: Se
 
 interface PlanSectionProps extends SectionBodyProps {
   index: number;
-  sections: VisionPlanSection[];
+  siblings: VisionPlanSection[];
 }
 
-// A standalone, reorderable column — used for the sections that sit outside the
-// six fixed V/TO slots (Core Processes, Quarterly Goals, anything custom).
-function PlanSection({ section, index, sections, ...body }: PlanSectionProps) {
+// One building block on a page: a titled card the workspace can rename, reorder
+// inside its column, drag to another column or page, and delete.
+function PlanSection({ section, index, siblings, ...body }: PlanSectionProps) {
   const updateSection = useUpdateVisionPlanSection(body.wsId);
   const deleteSection = useDeleteVisionPlanSection(body.wsId);
   const [name, setName] = useState(section.name);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `${SECTION_PREFIX}${section.id}` });
 
   function move(direction: -1 | 1) {
-    const other = sections[index + direction];
+    const other = siblings[index + direction];
     if (!other) return;
-    updateSection.mutate({ id: section.id, input: sectionInputFrom(section, other.position) });
-    updateSection.mutate({ id: other.id, input: sectionInputFrom(other, section.position) });
+    updateSection.mutate({ id: section.id, input: sectionInputFrom(section, { position: other.position }) });
+    updateSection.mutate({ id: other.id, input: sectionInputFrom(other, { position: section.position }) });
   }
 
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
-    <section ref={setNodeRef} style={style} className={`flex w-full shrink-0 flex-col rounded-xl border bg-card p-4 shadow-sm md:w-80 ${isDragging ? "opacity-50" : ""}`}>
-      <header className="flex items-center gap-1 border-b pb-3">
+    <section ref={setNodeRef} style={style} aria-label={section.name} className={`flex min-w-0 flex-col rounded-xl border bg-card shadow-sm ${isDragging ? "opacity-50" : ""}`}>
+      <header className="flex items-center gap-1 border-b bg-muted/60 px-2 py-2">
         <button type="button" aria-label={`Reorder ${section.name}`} className="grid size-8 shrink-0 cursor-grab touch-none place-items-center rounded text-muted-foreground hover:bg-muted" {...attributes} {...listeners}><GripVertical aria-hidden className="size-4" /></button>
-        <input aria-label={`${section.name} section name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updateSection.mutate({ id: section.id, input: sectionInputFrom({ ...section, name: name.trim() || section.name }, section.position) })} className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none focus:ring-1 focus:ring-ring" />
+        <input aria-label={`${section.name} block name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updateSection.mutate({ id: section.id, input: sectionInputFrom(section, { name: name.trim() || section.name }) })} className="min-w-0 flex-1 bg-transparent text-sm font-semibold uppercase tracking-wide outline-none focus:ring-1 focus:ring-ring" />
         <button type="button" aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => move(-1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronUp aria-hidden className="size-4" /></button>
-        <button type="button" aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => move(1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronDown aria-hidden className="size-4" /></button>
-        <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+        <button type="button" aria-label={`Move ${section.name} down`} disabled={index === siblings.length - 1} onClick={() => move(1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronDown aria-hidden className="size-4" /></button>
+        {confirmingDelete ? (
+          <span className="flex items-center gap-1">
+            <button type="button" aria-label={`Confirm delete ${section.name} block`} onClick={() => deleteSection.mutate(section.id)} className="h-8 rounded bg-destructive px-2 text-xs font-medium text-destructive-foreground">Delete</button>
+            <button type="button" aria-label={`Cancel delete ${section.name} block`} onClick={() => setConfirmingDelete(false)} className="h-8 rounded border px-2 text-xs">Cancel</button>
+          </span>
+        ) : (
+          <button type="button" aria-label={`Delete ${section.name} block`} onClick={() => setConfirmingDelete(true)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+        )}
       </header>
-      <div className="mt-3 flex flex-1 flex-col"><SectionBody section={section} {...body} /></div>
+      <div className="flex flex-1 flex-col p-3"><SectionBody section={section} {...body} /></div>
     </section>
   );
 }
@@ -233,10 +310,94 @@ const boardCollision: CollisionDetection = (args) => {
   const isSection = activeId.startsWith(SECTION_PREFIX);
   const droppableContainers = args.droppableContainers.filter((container) => {
     const id = String(container.id);
-    return isSection ? id.startsWith(SECTION_PREFIX) : id.startsWith(ITEM_PREFIX) || id.startsWith(COLUMN_PREFIX);
+    return isSection
+      ? id.startsWith(SECTION_PREFIX) || id.startsWith(COLUMN_PREFIX)
+      : id.startsWith(ITEM_PREFIX) || id.startsWith(ITEM_ZONE_PREFIX);
   });
   return closestCorners({ ...args, droppableContainers });
 };
+
+// Adds a block to one column of the open page.
+function AddBlock({ pageId, rowIndex, columnIndex, blockCount, wsId }: { pageId: string; rowIndex: number; columnIndex: number; blockCount: number; wsId: string }) {
+  const createSection = useCreateVisionPlanSection(wsId);
+  const [name, setName] = useState("");
+
+  function add() {
+    if (!name.trim()) return;
+    createSection.mutate({ name: name.trim(), section_type: "list", position: blockCount, page_id: pageId, row_index: rowIndex, column_index: columnIndex });
+    setName("");
+  }
+
+  return (
+    <input
+      aria-label={`Add block to row ${rowIndex + 1} column ${columnIndex + 1}`}
+      value={name}
+      onChange={(event) => setName(event.target.value)}
+      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }}
+      onBlur={add}
+      placeholder="+ Add block and press Enter"
+      className="min-h-11 rounded-xl border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground"
+    />
+  );
+}
+
+/**
+ * Rename the open page, lay out its rows, or delete it. The layout controls sit
+ * behind a Layout toggle rather than on screen at all times (FIR-3589 item 4) —
+ * they are set once and then in the way. The last page is never deletable, so
+ * there is always somewhere to put a block.
+ */
+function PageToolbar({ page, pageCount, wsId }: { page: VisionPlanPage; pageCount: number; wsId: string }) {
+  const updatePage = useUpdateVisionPlanPage(wsId);
+  const deletePage = useDeleteVisionPlanPage(wsId);
+  const [name, setName] = useState(page.name);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showLayout, setShowLayout] = useState(false);
+  const rows = page.row_column_counts;
+
+  function saveRows(next: number[]) {
+    updatePage.mutate({ id: page.id, input: pageInputFrom(page, { row_column_counts: next }) });
+  }
+
+  return (
+    <div className="grid gap-2 rounded-xl border bg-card p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input aria-label={`${page.name} page name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updatePage.mutate({ id: page.id, input: pageInputFrom(page, { name: name.trim() || page.name }) })} className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3 text-sm font-medium" />
+        <button type="button" aria-label={`${page.name} layout settings`} aria-expanded={showLayout} onClick={() => setShowLayout(!showLayout)} className={`flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${showLayout ? "border-foreground" : "text-muted-foreground"}`}>
+          <Settings2 aria-hidden className="size-4" />Layout
+        </button>
+        {pageCount > 1 && (confirmingDelete ? (
+          <span className="flex items-center gap-1">
+            <button type="button" aria-label={`Confirm delete ${page.name} page`} onClick={() => deletePage.mutate(page.id)} className="h-9 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground">Delete page</button>
+            <button type="button" aria-label={`Cancel delete ${page.name} page`} onClick={() => setConfirmingDelete(false)} className="h-9 rounded-md border px-3 text-xs">Cancel</button>
+          </span>
+        ) : (
+          <button type="button" aria-label={`Delete ${page.name} page`} onClick={() => setConfirmingDelete(true)} className="grid size-9 place-items-center rounded-md border text-muted-foreground hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+        ))}
+      </div>
+
+      {showLayout && (
+        <div aria-label={`${page.name} layout`} className="grid gap-2 rounded-lg border border-dashed bg-background p-2">
+          <p className="text-xs text-muted-foreground">How many columns each row has, from the top down.</p>
+          {rows.map((columnCount, rowIndex) => (
+            <div key={rowIndex} className="flex flex-wrap items-center gap-2">
+              <span className="w-14 text-xs font-medium text-muted-foreground">Row {rowIndex + 1}</span>
+              <div role="group" aria-label={`Row ${rowIndex + 1} columns`} className="flex items-center gap-1">
+                {[1, 2, 3, 4].map((count) => (
+                  <button key={count} type="button" aria-label={`Row ${rowIndex + 1}: ${count} column layout`} aria-pressed={columnCount === count} onClick={() => saveRows(rows.map((current, index) => index === rowIndex ? count : current))} className={`size-9 rounded-md border text-sm ${columnCount === count ? "border-foreground font-semibold" : "text-muted-foreground"}`}>{count}</button>
+                ))}
+              </div>
+              {rows.length > 1 && (
+                <button type="button" aria-label={`Remove row ${rowIndex + 1}`} onClick={() => saveRows(rows.filter((_, index) => index !== rowIndex))} className="grid size-9 place-items-center rounded-md border text-muted-foreground hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+              )}
+            </div>
+          ))}
+          <button type="button" aria-label="Add row" disabled={rows.length >= 12} onClick={() => saveRows([...rows, 1])} className="min-h-9 w-fit rounded-md border border-dashed px-3 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-40">+ Add row</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function StrategyPage() {
   const enabled = useFeatureFlag("cerebro_operating_system");
@@ -247,11 +408,14 @@ export function StrategyPage() {
   const periods = useQuery(periodsOptions(wsId));
   const members = useQuery(memberListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
-  const createSection = useCreateVisionPlanSection(wsId);
+  const projects = useQuery(projectListOptions(wsId));
+  const issues = useQuery(issueListOptions(wsId));
+  const createPage = useCreateVisionPlanPage(wsId);
   const updateSection = useUpdateVisionPlanSection(wsId);
   const updateItem = useUpdateVisionPlanItem(wsId);
-  const [addingSection, setAddingSection] = useState(false);
-  const [sectionName, setSectionName] = useState("");
+  const [addingPage, setAddingPage] = useState(false);
+  const [pageName, setPageName] = useState("");
+  const [openPageId, setOpenPageId] = useState<string>();
   const [dragLabel, setDragLabel] = useState<string>();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -260,18 +424,24 @@ export function StrategyPage() {
   if (!enabled) return null;
 
   const terminology = settings.data?.terminology ?? DEFAULT_TERMINOLOGY;
-  const sections = [...(plan.data?.sections ?? [])].sort((a, b) => a.position - b.position);
+  const pages = [...(plan.data?.pages ?? [])].sort((a, b) => a.position - b.position);
+  const sections = plan.data?.sections ?? [];
   const goals = rocks.data?.rocks ?? [];
   const allItems = sections.flatMap((section) => section.items);
+  const activePageId = openPageId && pages.some((page) => page.id === openPageId) ? openPageId : pages[0]?.id;
   const ownerOptions: SearchSelectOption[] = [
     ...(members.data ?? []).map((member) => ({ value: `member:${member.id}`, label: member.name, group: "Members" })),
     ...(agents.data ?? []).map((agent) => ({ value: `agent:${agent.id}`, label: agent.name, group: "Agents" })),
   ];
+  const linkOptions: SearchSelectOption[] = [
+    ...(projects.data ?? []).map((project) => ({ value: `project:${project.id}`, label: project.title, group: "Projects" })),
+    ...(issues.data ?? []).map((issue) => ({ value: `issue:${issue.id}`, label: `${issue.identifier} · ${issue.title}`, group: "Issues" })),
+  ];
 
-  function addSection() {
-    if (!sectionName.trim()) return;
-    createSection.mutate({ name: sectionName.trim(), section_type: "list", position: sections.length });
-    setSectionName(""); setAddingSection(false);
+  function addPage() {
+    if (!pageName.trim()) return;
+    createPage.mutate({ name: pageName.trim(), row_column_counts: [3], position: pages.length });
+    setPageName(""); setAddingPage(false);
   }
 
   function openRock(rockId: string) {
@@ -281,13 +451,23 @@ export function StrategyPage() {
     window.location.assign(target);
   }
 
-  function itemTarget(overId: string): { columnId: string; beforeItemId?: string } | null {
-    if (overId.startsWith(COLUMN_PREFIX)) return { columnId: overId.slice(COLUMN_PREFIX.length) };
-    if (overId.startsWith(SECTION_PREFIX)) return { columnId: overId.slice(SECTION_PREFIX.length) };
+  function itemTarget(overId: string): { sectionId: string; beforeItemId?: string } | null {
+    if (overId.startsWith(ITEM_ZONE_PREFIX)) return { sectionId: overId.slice(ITEM_ZONE_PREFIX.length) };
     if (overId.startsWith(ITEM_PREFIX)) {
       const itemId = overId.slice(ITEM_PREFIX.length);
-      const column = sections.find((section) => section.items.some((item) => item.id === itemId));
-      if (column) return { columnId: column.id, beforeItemId: itemId };
+      const owner = sections.find((section) => section.items.some((item) => item.id === itemId));
+      if (owner) return { sectionId: owner.id, beforeItemId: itemId };
+    }
+    return null;
+  }
+
+  function blockTarget(overId: string): { pageId: string; rowIndex: number; columnIndex: number; beforeSectionId?: string } | null {
+    const cell = parseColumnId(overId);
+    if (cell) return cell;
+    if (overId.startsWith(SECTION_PREFIX)) {
+      const sectionId = overId.slice(SECTION_PREFIX.length);
+      const target = sections.find((section) => section.id === sectionId);
+      if (target) return { pageId: target.page_id, rowIndex: target.row_index, columnIndex: target.column_index, beforeSectionId: sectionId };
     }
     return null;
   }
@@ -307,10 +487,11 @@ export function StrategyPage() {
     if (activeId === overId) return;
 
     if (activeId.startsWith(SECTION_PREFIX)) {
-      if (!overId.startsWith(SECTION_PREFIX)) return;
-      for (const change of moveSection(sections, activeId.slice(SECTION_PREFIX.length), overId.slice(SECTION_PREFIX.length))) {
+      const target = blockTarget(overId);
+      if (!target) return;
+      for (const change of moveSection(sections, activeId.slice(SECTION_PREFIX.length), target.pageId, target.rowIndex, target.columnIndex, target.beforeSectionId)) {
         const section = sections.find((candidate) => candidate.id === change.id);
-        if (section) updateSection.mutate({ id: section.id, input: sectionInputFrom(section, change.position) });
+        if (section) updateSection.mutate({ id: section.id, input: sectionInputFrom(section, { page_id: change.page_id, row_index: change.row_index, column_index: change.column_index, position: change.position }) });
       }
       return;
     }
@@ -318,7 +499,7 @@ export function StrategyPage() {
     if (activeId.startsWith(ITEM_PREFIX)) {
       const target = itemTarget(overId);
       if (!target) return;
-      for (const change of moveItem(sections, activeId.slice(ITEM_PREFIX.length), target.columnId, target.beforeItemId)) {
+      for (const change of moveItem(sections, activeId.slice(ITEM_PREFIX.length), target.sectionId, target.beforeItemId)) {
         const item = allItems.find((candidate) => candidate.id === change.id);
         if (item) updateItem.mutate({ id: item.id, input: itemInput(item, { section_id: change.section_id, position: change.position }) });
       }
@@ -326,45 +507,43 @@ export function StrategyPage() {
   }
 
   const currentPeriodId = periods.data?.periods[0]?.id;
-  const extras = extraSections(sections);
-  const renderSection = (section: VisionPlanSection) => <SectionBody section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />;
+  const bodyProps = { wsId, goals, rocksLabel: terminology.rocks, ownerOptions, linkOptions, currentPeriodId, onOpenRock: openRock };
 
   return (
-    <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
-      <div className="flex w-full min-w-0 flex-col gap-5 p-4 sm:p-6">
-        <header className="flex flex-wrap items-end justify-between gap-4 border-b pb-5">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Vision/Traction Organizer</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.strategy_map}</h1><p className="mt-1 text-sm text-muted-foreground">Connect long-term direction to current {terminology.rocks.toLowerCase()} in one scan.</p></div>
-          <button type="button" aria-label="Add section" onClick={() => setAddingSection(true)} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add section</button>
-        </header>
+    <OsPageShell
+      title={terminology.strategy_map}
+      subtitle={`Vision/Traction Organizer · connect long-term direction to current ${terminology.rocks.toLowerCase()}`}
+      headerActions={<button type="button" aria-label="Add page" onClick={() => setAddingPage(true)} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted">+ Add page</button>}
+    >
+      <div className="flex w-full min-w-0 flex-col gap-5 bg-muted/20 p-4 sm:p-6">
+        {addingPage && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New page name" value={pageName} onChange={(event) => setPageName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addPage(); }} placeholder="Page name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addPage} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingPage(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
 
-        {addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
-
-        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : (
+        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : pages.length === 0 ? <p className="text-sm text-muted-foreground">No pages yet. Add one to start building.</p> : (
           <DndContext sensors={sensors} collisionDetection={boardCollision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragLabel(undefined)}>
-            <Tabs defaultValue="vision" className="gap-4">
+            <Tabs value={activePageId} onValueChange={setOpenPageId} className="gap-4">
               <TabsList>
-                <TabsTrigger value="vision">Vision</TabsTrigger>
-                <TabsTrigger value="traction">Traction</TabsTrigger>
+                {pages.map((page) => <TabsTrigger key={page.id} value={page.id}>{page.name}</TabsTrigger>)}
               </TabsList>
-              <TabsContent value="vision"><VisionBoard sections={sections} renderSection={renderSection} /></TabsContent>
-              <TabsContent value="traction"><TractionBoard sections={sections} rocks={goals} rocksLabel={terminology.rocks} renderSection={renderSection} onOpenRock={openRock} /></TabsContent>
+              {pages.map((page) => (
+                <TabsContent key={page.id} value={page.id} className="grid gap-4">
+                  <PageToolbar page={page} pageCount={pages.length} wsId={wsId} />
+                  <PageBoard
+                    page={page}
+                    sections={clampSectionsToLayout(sections, page.id, page.row_column_counts)}
+                    renderSection={(section) => {
+                      const siblings = columnSections(clampSectionsToLayout(sections, page.id, page.row_column_counts), page.id, section.row_index, section.column_index);
+                      return <PlanSection key={section.id} section={section} index={siblings.findIndex((candidate) => candidate.id === section.id)} siblings={siblings} {...bodyProps} />;
+                    }}
+                    renderColumnFooter={(rowIndex, columnIndex) => <AddBlock key={`add-${rowIndex}-${columnIndex}`} pageId={page.id} rowIndex={rowIndex} columnIndex={columnIndex} blockCount={columnSections(clampSectionsToLayout(sections, page.id, page.row_column_counts), page.id, rowIndex, columnIndex).length} wsId={wsId} />}
+                  />
+                </TabsContent>
+              ))}
             </Tabs>
 
-            {extras.length > 0 && (
-              <section aria-label="Other sections" className="grid gap-3">
-                <h2 className="text-sm font-semibold">Other sections</h2>
-                <SortableContext items={extras.map((section) => `${SECTION_PREFIX}${section.id}`)} strategy={horizontalListSortingStrategy}>
-                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:overflow-x-auto md:pb-2">
-                    {extras.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={extras} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />)}
-                  </div>
-                </SortableContext>
-              </section>
-            )}
-
-            <DragOverlay>{dragLabel ? <div className="rounded-lg border bg-card px-3 py-2 text-sm font-medium shadow-lg">{dragLabel}</div> : null}</DragOverlay>
+            <DragOverlay dropAnimation={null}>{dragLabel ? <div className="rounded-lg border bg-card px-3 py-2 text-sm font-medium shadow-lg">{dragLabel}</div> : null}</DragOverlay>
           </DndContext>
         )}
       </div>
-    </main>
+    </OsPageShell>
   );
 }

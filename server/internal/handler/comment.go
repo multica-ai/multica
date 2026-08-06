@@ -16,8 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated" // CEREBRO-PATCH(sub-issue-guard-prefetch): TECH-3099.
-	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"       // CEREBRO-PATCH(mention-missing-human-approval): TECH-3629.
+	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin" // CEREBRO-PATCH(mention-missing-human-approval): TECH-3629.
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1034,12 +1033,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "comment"
 	}
-	selectedMode, modeErr := normalizeNewThreadSessionMode(req.SessionMode, req.ParentID != nil) // CEREBRO-PATCH(new-thread-mode-validate): FIR-3111 validate before creating the comment.
-	if modeErr != nil {
-		writeError(w, http.StatusBadRequest, modeErr.Error())
-		return
-	} // CEREBRO-PATCH(new-thread-mode-validate): FIR-3111 root-only visible modes.
-
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
 	if req.ParentID != nil {
@@ -1065,94 +1058,55 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-
-	// Defense against resumed-session drift: when an agent posts from inside a
-	// comment-triggered task AND the comment is being posted on that same
-	// issue, the parent_id must exactly match the task's trigger comment.
-	// Resumed Claude sessions otherwise carry forward a previous turn's
-	// --parent UUID and silently misplace the reply.
-	//
-	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
-	// request, so an agent legitimately commenting on a different issue must
-	// not be blocked by its current task's trigger. Assignment-triggered
-	// tasks (no TriggerCommentID) are also unaffected.
-	if authorType == "agent" {
-		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
-			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
-			if parseErr == nil {
-				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-					if task.TriggerCommentID.Valid {
-						if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
-							writeError(w, http.StatusConflict,
-								"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
-							return
-						}
-					}
-					noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
-					if checkErr != nil {
-						slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
-							"error", checkErr,
-							"task_id", taskIDHeader,
-							"issue_id", issueID,
-						)...)
-					} else if noAction {
-						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
-						return
-					}
-				}
-			}
-		}
+	if answer := h.authorizePlatformAction(r.Context(), r, issue.WorkspaceID, authorType, authorID, addCommentPlatformAction, "rest_api", map[string]any{"issue_id": uuidToString(issue.ID)}, req, false); !answer.Allowed { // CEREBRO-PATCH(comment-create-platform-action): FIR-4076 require Task Mandate + Permissions before agent mutation.
+		writePlatformAction(w, addCommentPlatformAction, answer)
+		return
 	}
 
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
-	if h.CommentTargetGuard != nil { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 reject agent comments with no target.
-		// CEREBRO-PATCH(sub-issue-guard-prefetch): TECH-3099 — collect sub-issue context for the three new checks.
-		isSubIssue := issue.ParentIssueID.Valid
-		var ownerUserIDs []string
-		var taskPostedOnParent bool
-		// CEREBRO-PATCH(comment-target-guard-wakeup-exempt): TECH-3761 — does this agent already have a still-active wakeup on this issue? The guard waives the recipient requirement when it does and the exemption flag is on.
-		var agentHasActiveWakeup bool
-		if authorType == "agent" && h.CerebroQueries != nil {
-			if agentUUID, err := util.ParseUUID(authorID); err == nil {
-				if active, err := h.CerebroQueries.HasActiveWakeupForAgentIssue(r.Context(), cerebrodb.HasActiveWakeupForAgentIssueParams{WorkspaceID: issue.WorkspaceID, AgentID: agentUUID, IssueID: issue.ID}); err == nil {
-					agentHasActiveWakeup = active
-				}
-			}
+	// CEREBRO-PATCH(comment-workflow-gate): FIR-3692 routes every agent-comment
+	// decision through before.message.send; data collection lives in the
+	// fork-owned comment_workflow_gate_cerebro.go adapter.
+	gateResult, gateErr := h.evaluateCommentWorkflowGate(
+		r.Context(), r, issue, authorType, authorID, req.Content, uuidToString(parentID),
+	)
+	if gateErr != nil {
+		slog.Error("comment workflow gate failed", append(logger.RequestAttrs(r), "error", gateErr)...)
+		writeError(w, http.StatusServiceUnavailable, "comment workflow evaluation failed")
+		return
+	}
+	if !gateResult.Allowed {
+		status := gateResult.StatusCode
+		if status == 0 {
+			status = http.StatusUnprocessableEntity
 		}
-		if isSubIssue && authorType == "agent" {
-			// CEREBRO-PATCH(sub-issue-on-behalf-of): TECH-3099 fix — use task.OriginalUserID (the user the task was started for) instead of workspace role "owner", so the guard blocks the actual triggering human regardless of workspace role.
-			if taskIDHdr := r.Header.Get("X-Task-ID"); taskIDHdr != "" {
-				if taskUUID, err := util.ParseUUID(taskIDHdr); err == nil {
-					if task, err := h.Queries.GetAgentTask(r.Context(), taskUUID); err == nil && task.OriginalUserID.Valid {
-						ownerUserIDs = []string{uuidToString(task.OriginalUserID)}
-					}
-					if h.CerebroQueries != nil {
-						posted, err := h.CerebroQueries.HasTaskPostedOnIssue(r.Context(), cerebrodb.HasTaskPostedOnIssueParams{TaskID: taskUUID, IssueID: issue.ParentIssueID})
-						if err == nil {
-							taskPostedOnParent = posted
-						}
-					}
-				}
+		writeError(w, status, gateResult.Message)
+		return
+	}
+	if gateResult.ParentID != uuidToString(parentID) {
+		parentID = pgtype.UUID{}
+		parentComment = nil
+		if gateResult.ParentID != "" {
+			parentID, ok = parseUUIDOrBadRequest(w, gateResult.ParentID, "parent_id")
+			if !ok {
+				return
 			}
-			// Fall back to workspace owners when no task context is available.
-			if len(ownerUserIDs) == 0 {
-				if members, err := h.Queries.ListMembers(r.Context(), issue.WorkspaceID); err == nil {
-					for _, m := range members {
-						if m.Role == "owner" {
-							ownerUserIDs = append(ownerUserIDs, uuidToString(m.UserID))
-						}
-					}
-				}
+			parent, err := h.Queries.GetComment(r.Context(), parentID)
+			if err != nil || uuidToString(parent.IssueID) != uuidToString(issue.ID) {
+				writeError(w, http.StatusBadRequest, "invalid parent comment")
+				return
 			}
-		}
-		if msg, ok := h.CommentTargetGuard.RejectComment(r.Context(), issue.WorkspaceID, authorType, authorID, req.Content, isSubIssue, ownerUserIDs, taskPostedOnParent, agentHasActiveWakeup); !ok { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 + TECH-3099 + TECH-3761.
-			writeError(w, http.StatusUnprocessableEntity, msg)
-			return
+			parentComment = &parent
 		}
 	}
+
+	selectedMode, modeErr := normalizeNewThreadSessionMode(req.SessionMode, parentID.Valid) // CEREBRO-PATCH(new-thread-mode-validate): FIR-3111 validate after Workflow may correct the reply target.
+	if modeErr != nil {
+		writeError(w, http.StatusBadRequest, modeErr.Error())
+		return
+	} // CEREBRO-PATCH(new-thread-mode-validate): FIR-3111 root-only visible modes.
 
 	// NOTE: Comment content is stored as Markdown source. XSS is handled at the
 	// rendering layer (rehype-sanitize) and at the editor layer

@@ -458,9 +458,9 @@
     {
       "key": "cerebro_workflow_hooks",
       "label": "Workflow hooks",
-      "description": "Enable reusable trigger, scope, filter, decision, and action hooks inside the Workflow engine. Server-side enforcement additionally requires CEREBRO_WORKFLOW_HOOKS_ENABLED.",
+      "description": "Let the Workflow engine own the agent loop's code gates: handoff, task completion, task failure, tool failure, and issue status change. ON by default. Turn it off for this workspace to run the loop with no Workflow decision. The server-wide emergency stop is CEREBRO_WORKFLOW_HOOKS_ENABLED.",
       "group": "workspace",
-      "default": false
+      "default": true
     },
     {
       "key": "cerebro_workflow_step_model_override",
@@ -498,6 +498,13 @@
       "default": true
     },
     {
+      "key": "cerebro_task_mandate_diagnostics",
+      "label": "Task Mandate diagnostics",
+      "description": "Show read-only provider/MCP diagnostics on Runtime pages and historical Task access diagnostics in the Task transcript. This does not enable call-time enforcement. FIR-4293.",
+      "group": "permissions",
+      "default": true
+    },
+    {
       "key": "cerebro_task_mandate_enforcement",
       "label": "Task Mandate enforcement",
       "description": "Enforce the immutable Task Mandate on every local and Firtal Gateway call. Keep this off while validating that every callable offered to an agent is present in the same mandate generation. FIR-4220.",
@@ -510,6 +517,13 @@
       "description": "Require task tokens to match their bound issue, agent, and workspace on routes guarded by AllowTaskScopeForIssue, AllowTaskScopeForAgent, or AllowTaskScopeForWorkspace. Off bypasses only those three route matchers; Permissions, approvals, credentials, Connections, sandbox, repository, and every other security boundary remain active. Default ON. FIR-4076.",
       "group": "permissions",
       "default": true
+    },
+    {
+      "key": "cerebro_access_diagnostics",
+      "label": "Access diagnostics",
+      "description": "Show the shared provider, discovery and Task access diagnostics on Runtime, Connection and transcript surfaces. This is observation-only and does not enable Task Mandate enforcement. FIR-4293.",
+      "group": "permissions",
+      "default": false
     },
     {
       "key": "cerebro_approvals",
@@ -528,7 +542,7 @@
     {
       "key": "cerebro_move_comment_to_thread",
       "label": "Move comments to a new thread",
-      "description": "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
+      "description": "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread — 'Select all after this' takes the anchor and everything below it in one click — and lift them into a new thread on the same issue. The comments are moved, not copied: they keep their author, timestamps, attachments and reactions, and no breadcrumb is left behind. JEH-2488, FIR-3880.",
       "group": "issues",
       "default": true
     },
@@ -617,20 +631,6 @@
       "default": true
     },
     {
-      "key": "cerebro_comment_target_guard",
-      "label": "Require a recipient on agent comments",
-      "description": "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
-      "group": "issues",
-      "default": false
-    },
-    {
-      "key": "cerebro_comment_target_guard_wakeup_exempt",
-      "label": "Exempt agents with a scheduled wakeup",
-      "description": "Sub-setting of 'Require a recipient on agent comments'. When on, an agent that has already scheduled an active wakeup on this issue may post without naming a recipient — the wakeup is the follow-up action, so a human tag is not also required. Only the recipient requirement is waived; the sub-issue checks still apply. Requires 'Require a recipient on agent comments' to be on. Off keeps every agent comment subject to the recipient rule. TECH-3761.",
-      "group": "issues",
-      "default": false
-    },
-    {
       "key": "cerebro_firtal_welcome",
       "label": "Firtal-branded welcome page",
       "description": "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
@@ -648,6 +648,13 @@
       "key": "cerebro_duplicate_check_on_create",
       "label": "Find similar at create",
       "description": "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_related_check_on_assign",
+      "label": "Find similar at hand-over",
+      "description": "Ask the same question when an issue is handed to an agent instead of when it is created: search the workspace for open issues about the same matter, link every match as related on both issues, and post one comment naming them. Bind the issue.check_related action to the before.issue.assigned workflow hook to run it. Requires the Firtal AI Gateway credentials. FIR-4183.",
       "group": "issues",
       "default": true
     },
@@ -918,27 +925,6 @@
       "default": true
     },
     {
-      "key": "cerebro_sub_issue_no_owner_mention",
-      "label": "Block on-behalf-of user @mention on sub-issues",
-      "description": "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-      "group": "issues",
-      "default": false
-    },
-    {
-      "key": "cerebro_sub_issue_require_agent_tag",
-      "label": "Require parent-agent tag on sub-issues",
-      "description": "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-      "group": "issues",
-      "default": false
-    },
-    {
-      "key": "cerebro_sub_issue_no_split_session",
-      "label": "Block split-session across parent and sub-issue",
-      "description": "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
-      "group": "issues",
-      "default": false
-    },
-    {
       "key": "cerebro_display_currency",
       "label": "Display currency",
       "description": "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
@@ -951,6 +937,13 @@
       "description": "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
       "group": "agents",
       "default": true
+    },
+    {
+      "key": "cerebro_company_brain_migration_census",
+      "label": "Company Brain migration census",
+      "description": "Enable the temporary read-only Company Brain identity and policy census for connection managers. Calls remain subject to the requesting member's connection-tool permissions. FIR-3924.",
+      "group": "agents",
+      "default": false
     },
     {
       "key": "cerebro_api_connection_tools",
@@ -1033,13 +1026,6 @@
       "key": "cerebro_wakeup_github_ci",
       "label": "Wakeup: on GitHub CI",
       "description": "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
-      "group": "agents",
-      "default": true
-    },
-    {
-      "key": "cerebro_wakeup_loop_guard",
-      "label": "Wakeup: loop guard",
-      "description": "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply or issue status/progress event resets the count; ordinary agent comments and pull-request updates do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
       "group": "agents",
       "default": true
     },

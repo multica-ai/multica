@@ -53,6 +53,26 @@ test("Settings Permissions writes the canonical policy and persists after reload
       "e2e@multica.ai",
     ])
   ).rows[0].id as string;
+  const runtimeId = (
+    await database.query(
+      `INSERT INTO agent_runtime (
+         workspace_id, name, runtime_mode, provider, status, device_info,
+         metadata, last_seen_at
+       ) VALUES ($1, $2, 'cloud', 'firtal-gateway', 'online', $2, '{}'::jsonb, now())
+       RETURNING id`,
+      [workspaceId, `FIR 3388 Permissions runtime ${Date.now()}`],
+    )
+  ).rows[0].id as string;
+  const agentId = (
+    await database.query(
+      `INSERT INTO agent (
+         workspace_id, name, runtime_mode, runtime_config, runtime_id,
+         visibility, max_concurrent_tasks, owner_id
+       ) VALUES ($1, $2, 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
+       RETURNING id`,
+      [workspaceId, `FIR 3388 Permissions agent ${Date.now()}`, runtimeId, userId],
+    )
+  ).rows[0].id as string;
 
   try {
     for (const flagKey of flagKeys) {
@@ -69,11 +89,23 @@ test("Settings Permissions writes the canonical policy and persists after reload
     );
 
     await preventAttributionSurvey(page, userId);
-    const workspaceSlug = await loginAsDefault(page);
+    const workspaceSlug = await loginAsDefault(page, {
+      workspaceReadyTimeout: 60_000,
+    });
     await page.goto(`/${workspaceSlug}/settings?tab=permissions`, {
       waitUntil: "domcontentloaded",
     });
     await dismissAttributionSurvey(page);
+
+    await expect(
+      page.getByRole("heading", { name: "How access is decided" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Settings → Permissions is the live authoring source. A task freezes its Task Mandate when the run starts. A later Deny or safety ceiling can tighten the active run, but a later Allow never widens its frozen Task Mandate. Start a new task to capture newly allowed access.",
+        { exact: true },
+      ),
+    ).toBeVisible();
 
     const row = page.getByTestId(`tool-card-${toolKey}`);
     await expect(row).toBeVisible();
@@ -100,7 +132,33 @@ test("Settings Permissions writes the canonical policy and persists after reload
       page
         .getByTestId(`tool-card-${toolKey}`)
         .getByRole("button", { name: "Decision: Deny" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
+
+    // The same Settings decision must reach the agent's own Capabilities card
+    // with an actionable denial. This joins authoring, the visible agent view,
+    // and the error wording in one browser journey instead of testing each
+    // surface in isolation.
+    await page.goto(`/${workspaceSlug}/agents/${agentId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(async () => {
+      await page.getByRole("button", { name: "Capabilities" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Tools", exact: true }),
+      ).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
+    const toolsSection = page
+      .getByRole("heading", { name: "Tools", exact: true })
+      .locator("..")
+      .locator("..");
+    const deniedCapability = toolsSection
+      .locator("span[title]")
+      .filter({ hasText: new RegExp(`^${title}\\s*·\\s*blocked$`) });
+    await expect(deniedCapability).toHaveCount(1);
+    await expect(deniedCapability).toHaveAttribute(
+      "title",
+      /deny.*allowed: no.*callable: no.*blocked:/i,
+    );
 
     const evidencePath =
       process.env.PLAYWRIGHT_EVIDENCE_PATH ??
@@ -124,6 +182,8 @@ test("Settings Permissions writes the canonical policy and persists after reload
         WHERE workspace_id = $1 AND capability_key = $2`,
       [workspaceId, toolKey],
     );
+    await database.query(`DELETE FROM agent WHERE id = $1`, [agentId]);
+    await database.query(`DELETE FROM agent_runtime WHERE id = $1`, [runtimeId]);
     await database.query(
       `DELETE FROM cerebro_feature_flags
         WHERE workspace_id = $1
@@ -146,7 +206,7 @@ test("Settings Permissions writes the canonical policy and persists after reload
   }
 });
 
-test("Settings identifies externally enforced permissions without offering an advisory change", async ({
+test("Settings identifies workspace-governed machine intake and keeps its off-switch authorable", async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -162,19 +222,17 @@ test("Settings identifies externally enforced permissions without offering an ad
     await dismissAttributionSurvey(page);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const row = page.getByTestId("tool-card-rerun_issue");
+    const row = page.getByTestId("tool-card-autopilot_webhook");
     await expect(row).toBeVisible();
-    await expect(row.getByText("Managed externally", { exact: true })).toBeVisible();
-    const owner = row.getByText(
-      "Issue access and task ownership gates",
-      { exact: true },
-    );
+    await expect(row.getByText("Governed by", { exact: true })).toBeVisible();
+    const owner = row.getByText("Autopilot webhook secret", { exact: true });
     await expect(owner).toBeVisible();
+    await expect(row.getByText("Workspace off-switch", { exact: true })).toBeVisible();
     const [ownerBox, rowBox] = await Promise.all([owner.boundingBox(), row.boundingBox()]);
     expect(ownerBox).not.toBeNull();
     expect(rowBox).not.toBeNull();
     expect(ownerBox!.x + ownerBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
-    await expect(row.getByRole("button", { name: /^Decision:/ })).toBeDisabled();
+    await expect(row.getByRole("button", { name: /^Decision:/ })).toBeEnabled();
   } finally {
     await api.cleanup();
   }
@@ -292,6 +350,11 @@ test("Permission profiles are separated, explained, assigned, and enforced throu
 
     const editor = page.getByRole("dialog", { name: "Create profile" });
     await expect(editor).toBeVisible({ timeout: 15_000 });
+    await expect(
+      editor.getByText("No permission overrides yet.", { exact: true }),
+    ).toBeVisible();
+    await expect(editor.getByRole("combobox", { name: / decision$/ })).toHaveCount(0);
+    expect((await editor.boundingBox())?.width).toBeGreaterThan(640);
     await editor.getByLabel("Name", { exact: true }).fill(roleName);
     await editor
       .getByLabel("Description", { exact: true })
@@ -301,6 +364,17 @@ test("Permission profiles are separated, explained, assigned, and enforced throu
       .getByRole("combobox", { name: `${toolTitle} decision`, exact: true })
       .click();
     await page.getByRole("option", { name: "Deny", exact: true }).click();
+    await editor.getByLabel("Search permissions").fill("");
+    await expect(
+      editor.getByRole("combobox", { name: `${toolTitle} decision`, exact: true }),
+    ).toContainText(/deny/i);
+    const desktopEditorScreenshot = await page.screenshot({
+      path: test.info().outputPath("permission-profile-editor-desktop.png"),
+    });
+    await test.info().attach("permission-profile-editor-desktop", {
+      body: desktopEditorScreenshot,
+      contentType: "image/png",
+    });
     await dismissAttributionSurvey(page);
     await editor.getByRole("button", { name: "Save version", exact: true }).click();
 
@@ -350,6 +424,24 @@ test("Permission profiles are separated, explained, assigned, and enforced throu
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const mobileEditor = page.getByRole("dialog", { name: `Edit ${roleName}` });
+    await expect(mobileEditor).toBeVisible();
+    await expect(mobileEditor).toHaveCSS("opacity", "1");
+    expect((await mobileEditor.boundingBox())?.height).toBeLessThanOrEqual(844);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    const mobileEditorScreenshot = await mobileEditor.screenshot({
+      path: test.info().outputPath("permission-profile-editor-mobile.png"),
+    });
+    await test.info().attach("permission-profile-editor-mobile", {
+      body: mobileEditorScreenshot,
+      contentType: "image/png",
+    });
+    await mobileEditor.getByRole("button", { name: "Cancel", exact: true }).click();
 
     await page.goto(
       `/${workspaceSlug}/cerebro/permissions/${encodeURIComponent(toolKey)}`,

@@ -127,7 +127,8 @@ WHERE agent_id = $1 AND skill_id = $2;
 DELETE FROM agent_skill WHERE agent_id = $1;
 
 -- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+-- CEREBRO-PATCH(skill-always-on): FIR-4002 the agent page reads its skill rows from this batch query, so the per-binding flag must travel with them.
+SELECT ask.agent_id, s.id, s.name, s.description, ask.always_on
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1

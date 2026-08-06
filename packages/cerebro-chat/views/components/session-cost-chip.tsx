@@ -9,6 +9,7 @@ import {
 import { chatSessionUsageOptions } from "@multica/core/chat/queries";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { formatPromptCacheHitRatio } from "@multica/cerebro-format-cost";
 
 /**
  * FIR-31 — accumulated session-total cost chip for the top of the chat.
@@ -56,6 +57,8 @@ export function SessionCostChip({ sessionId }: { sessionId: string | null }) {
           <span className="text-right">{formatTokens(usage.total_cache_read_tokens)}</span>
           <span>Cache write</span>
           <span className="text-right">{formatTokens(usage.total_cache_write_tokens)}</span>
+          <span>Cache hit ratio</span>
+          <span className="text-right">{formatPromptCacheHitRatio(usage.total_input_tokens, usage.total_cache_read_tokens, usage.total_cache_write_tokens)}</span>
           <span>Runs</span>
           <span className="text-right">{usage.task_count}</span>
         </div>
