@@ -213,7 +213,8 @@ export default function SkillsPage() {
     refetch: refetchList,
   } = useQuery(skillListOptions(wsId));
   const { data: agents = [], error: agentsError } = useQuery(
-    agentListOptions(wsId),
+    // CEREBRO-PATCH(list-agents-slim): FIR-4359 selectSkillAssignments reads agent.skills.
+    agentListOptions(wsId, { full: true }),
   );
   const { data: members = [], error: membersError } = useQuery(
     memberListOptions(wsId),
