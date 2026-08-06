@@ -495,3 +495,77 @@ func TestKimiBackendDropsHistoryReplayOnResume(t *testing.T) {
 		}
 	}
 }
+
+// fakeKimiACPUsageScript impersonates `kimi acp` for a single turn and
+// reports cache usage in the session/prompt result, the way a real kimi
+// turn that hits a prompt cache does. The backend must carry
+// cachedReadTokens through into Result.Usage the same way the hermes and
+// traecli backends do; before the fix kimi.go accumulated only
+// InputTokens/OutputTokens and dropped the cache field (see #6448).
+func fakeKimiACPUsageScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1000,"outputTokens":200,"cachedReadTokens":500}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendAccumulatesCacheReadTokens pins the fix for #6448: the
+// session/prompt result's cachedReadTokens must reach Result.Usage. The
+// hermes and traecli backends accumulate CacheReadTokens at the prompt
+// merge point; kimi had been the lone ACP backend dropping it, so cache
+// reads stayed invisible on the usage dashboard.
+func TestKimiBackendAccumulatesCacheReadTokens(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPUsageScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+
+	usage, ok := result.Usage["unknown"]
+	if !ok {
+		t.Fatalf("expected usage keyed by model, got %v", result.Usage)
+	}
+	if usage.InputTokens != 1000 {
+		t.Errorf("inputTokens: got %d, want 1000", usage.InputTokens)
+	}
+	if usage.OutputTokens != 200 {
+		t.Errorf("outputTokens: got %d, want 200", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 500 {
+		t.Errorf("cacheReadTokens: got %d, want 500", usage.CacheReadTokens)
+	}
+}
