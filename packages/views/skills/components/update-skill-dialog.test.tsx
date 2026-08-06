@@ -143,6 +143,38 @@ describe("UpdateSkillDialog", () => {
     expect(onUpdated).not.toHaveBeenCalled();
   });
 
+  // The batch is sent in chunks (UPDATE_BATCH_CONCURRENCY = 4), so 6 rows span
+  // two chunks. Nothing may be dropped at the boundary, and a failure in the
+  // first chunk must not stop the second from being sent.
+  it("processes every row across chunk boundaries despite an early failure", async () => {
+    mockReimportSkill.mockClear();
+    mockToast.warning.mockClear();
+    mockReimportSkill.mockImplementation((id: string) =>
+      id === "s2" ? Promise.reject(new Error("boom")) : Promise.resolve({}),
+    );
+    const ids = ["s1", "s2", "s3", "s4", "s5", "s6"];
+    const qc = new QueryClient();
+    render(
+      <UpdateSkillDialog
+        rows={ids.map((id) => row(id))}
+        ctx={ctx}
+        open
+        onOpenChange={() => {}}
+      />,
+      { wrapper: wrap(qc) },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(mockToast.warning).toHaveBeenCalled());
+    expect(mockReimportSkill).toHaveBeenCalledTimes(ids.length);
+    for (const id of ids) {
+      expect(mockReimportSkill).toHaveBeenCalledWith(id);
+    }
+    expect(mockToast.warning).toHaveBeenCalledWith(
+      "Updated 5 of 6 skills from source; 1 failed",
+    );
+  });
+
   it("does not invalidate when every skill in a batch fails", async () => {
     mockReimportSkill.mockClear();
     mockToast.error.mockClear();
