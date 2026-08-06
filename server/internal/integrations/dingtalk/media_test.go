@@ -124,12 +124,16 @@ func mediaFixture(resources ...dingtalkMediaResource) (engine.ResolvedInstallati
 		ID: instID, WorkspaceID: ws,
 		Platform: db.ChannelInstallation{Config: cfg},
 	}
-	return inst, messageID, channel.InboundMessage{MessageID: "dt-msg", Type: channel.MsgTypeImage, Text: "[Image]", Raw: raw}
+	body := strings.TrimSpace(strings.Repeat("[Image]\n", len(resources)))
+	return inst, messageID, channel.InboundMessage{MessageID: "dt-msg", Type: channel.MsgTypeImage, Text: body, Raw: raw}
 }
 
 func TestMediaResolver_HappyPathAndIntentLedger(t *testing.T) {
 	env := newMediaTestEnv(t, map[string][]byte{"c1": pngBytes, "c2": jpegBytes})
-	inst, messageID, msg := mediaFixture(dingtalkMediaResource{Ref: "c1"}, dingtalkMediaResource{Ref: "c2"})
+	inst, messageID, msg := mediaFixture(
+		dingtalkMediaResourceAt("c1", "", 0),
+		dingtalkMediaResourceAt("c2", "", 1),
+	)
 	if !env.resolver.HasMedia(msg) {
 		t.Fatal("HasMedia=false")
 	}
@@ -139,6 +143,10 @@ func TestMediaResolver_HappyPathAndIntentLedger(t *testing.T) {
 	}
 	if got.MediaRefs[0].MimeType != "image/png" || got.MediaRefs[1].MimeType != "image/jpeg" {
 		t.Fatalf("mime types = %q/%q", got.MediaRefs[0].MimeType, got.MediaRefs[1].MimeType)
+	}
+	if got.MediaRefs[0].InlinePlaceholder != "[Image]" || got.MediaRefs[0].InlineIndex != 0 ||
+		got.MediaRefs[1].InlinePlaceholder != "[Image]" || got.MediaRefs[1].InlineIndex != 1 {
+		t.Fatalf("inline positions = %+v", got.MediaRefs)
 	}
 	if len(env.ledger.records) != 2 || len(env.store.uploads) != 2 {
 		t.Fatalf("intents/uploads = %d/%d", len(env.ledger.records), len(env.store.uploads))
@@ -150,12 +158,51 @@ func TestMediaResolver_HappyPathAndIntentLedger(t *testing.T) {
 	}
 }
 
+func TestMediaResolver_PreservesInboundPositionPastUserPlaceholder(t *testing.T) {
+	env := newMediaTestEnv(t, map[string][]byte{"c1": pngBytes})
+	cb := textCallback(convTypeP2P, false)
+	cb.Msgtype = "richText"
+	cb.Content = json.RawMessage(`{"richText":[
+		{"text":"Use [Image] literally"},
+		{"type":"picture","downloadCode":"c1"}
+	]}`)
+	msg, ok := inboundFromCallback(cb, "app-key")
+	if !ok {
+		t.Fatal("expected richText message")
+	}
+	inst, messageID, _ := mediaFixture()
+	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, messageID, msg)
+	if len(got.MediaRefs) != 1 {
+		t.Fatalf("media refs = %+v", got.MediaRefs)
+	}
+	if ref := got.MediaRefs[0]; ref.InlinePlaceholder != dingtalkImagePlaceholder || ref.InlineIndex != 1 {
+		t.Fatalf("inline position = %+v, want generated marker occurrence 1", ref)
+	}
+}
+
 func TestMediaResolver_AltFallback(t *testing.T) {
 	env := newMediaTestEnv(t, map[string][]byte{"alt": pngBytes})
 	inst, messageID, msg := mediaFixture(dingtalkMediaResource{Ref: "expired", Alt: "alt"})
 	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, messageID, msg)
 	if len(got.MediaRefs) != 1 || env.resolves.Load() != 2 {
 		t.Fatalf("refs/resolves = %d/%d", len(got.MediaRefs), env.resolves.Load())
+	}
+}
+
+func TestMediaResolver_PartialFailurePreservesOriginalInlineIndex(t *testing.T) {
+	env := newMediaTestEnv(t, map[string][]byte{"second": pngBytes})
+	inst, messageID, msg := mediaFixture(
+		dingtalkMediaResourceAt("missing", "", 1),
+		dingtalkMediaResourceAt("second", "", 3),
+	)
+	msg.Text = "literal [Image]\n[Image]\nanother literal [Image]\n[Image]"
+	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, messageID, msg)
+	if len(got.MediaRefs) != 1 {
+		t.Fatalf("media refs = %+v, want only the successful image", got.MediaRefs)
+	}
+	ref := got.MediaRefs[0]
+	if ref.InlinePlaceholder != "[Image]" || ref.InlineIndex != 3 {
+		t.Fatalf("successful second image position = %+v, want occurrence 3", ref)
 	}
 }
 

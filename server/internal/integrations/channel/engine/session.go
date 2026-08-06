@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -46,6 +48,7 @@ type SessionQueries interface {
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 	ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error
 	LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error)
+	UpdateChatMessageContentForChannelMedia(ctx context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error)
 	CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error)
 	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error)
@@ -83,6 +86,9 @@ func (a dbSessionQueries) ClearChatMessageChannelMediaPending(ctx context.Contex
 }
 func (a dbSessionQueries) LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error) {
 	return a.q.LockIssueForChannelMediaBind(ctx, arg)
+}
+func (a dbSessionQueries) UpdateChatMessageContentForChannelMedia(ctx context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error) {
+	return a.q.UpdateChatMessageContentForChannelMedia(ctx, arg)
 }
 func (a dbSessionQueries) CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
 	return a.q.CreateAttachment(ctx, arg)
@@ -283,6 +289,7 @@ type BindMediaInput struct {
 	WorkspaceID pgtype.UUID
 	Sender      pgtype.UUID
 	IssueID     pgtype.UUID
+	Body        string
 	MediaRefs   []channel.MediaRef
 }
 
@@ -459,6 +466,11 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 	for _, k := range claimedKeys {
 		claimed[k] = true
 	}
+	type createdMedia struct {
+		id  pgtype.UUID
+		ref channel.MediaRef
+	}
+	created := make([]createdMedia, 0, len(in.MediaRefs))
 	ids := make([]pgtype.UUID, 0, len(in.MediaRefs))
 	for _, ref := range in.MediaRefs {
 		if !claimed[ref.StorageKey] {
@@ -498,24 +510,125 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 			return fmt.Errorf("create channel attachment: %w", err)
 		}
 		ids = append(ids, att.ID)
+		created = append(created, createdMedia{id: att.ID, ref: ref})
 	}
-	if len(ids) == 0 {
+	if len(ids) == 0 || in.IssueID.Valid {
 		return nil
 	}
-	if in.IssueID.Valid {
-		return nil
-	}
-	if _, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
+	linkedIDs, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
 		ChatMessageID: in.MessageID,
 		ChatSessionID: in.SessionID,
 		WorkspaceID:   in.WorkspaceID,
 		UploaderType:  "member",
 		UploaderID:    in.Sender,
 		AttachmentIds: ids,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("link chat attachments: %w", err)
 	}
+
+	linked := make(map[pgtype.UUID]bool, len(linkedIDs))
+	for _, id := range linkedIDs {
+		linked[id] = true
+	}
+	replacements := make([]inlineMediaReplacement, 0, len(created))
+	for _, media := range created {
+		if !linked[media.id] || media.ref.InlinePlaceholder == "" {
+			continue
+		}
+		replacements = append(replacements, inlineMediaReplacement{
+			placeholder: media.ref.InlinePlaceholder,
+			index:       media.ref.InlineIndex,
+			markdown:    inlineAttachmentMarkdown(media.ref, media.id),
+		})
+	}
+	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
+		rows, err := qtx.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
+			ID:            in.MessageID,
+			ChatSessionID: in.SessionID,
+			Content:       body,
+		})
+		if err != nil {
+			return fmt.Errorf("update chat message inline media: %w", err)
+		}
+		if rows != 1 {
+			return fmt.Errorf("update chat message inline media: updated %d rows", rows)
+		}
+	}
 	return nil
+}
+
+type inlineMediaReplacement struct {
+	placeholder string
+	index       int
+	markdown    string
+}
+
+type inlineMediaEdit struct {
+	start int
+	end   int
+	text  string
+}
+
+func composeInlineMediaBody(body string, replacements []inlineMediaReplacement) (string, bool) {
+	edits := make([]inlineMediaEdit, 0, len(replacements))
+	for _, replacement := range replacements {
+		if replacement.placeholder == "" || replacement.index < 0 || replacement.markdown == "" {
+			continue
+		}
+		start := nthSubstringIndex(body, replacement.placeholder, replacement.index)
+		if start < 0 {
+			continue
+		}
+		edits = append(edits, inlineMediaEdit{
+			start: start,
+			end:   start + len(replacement.placeholder),
+			text:  replacement.markdown,
+		})
+	}
+	if len(edits) == 0 {
+		return body, false
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	var out strings.Builder
+	last := 0
+	for _, edit := range edits {
+		if edit.start < last {
+			continue
+		}
+		out.WriteString(body[last:edit.start])
+		out.WriteString(edit.text)
+		last = edit.end
+	}
+	out.WriteString(body[last:])
+	return out.String(), true
+}
+
+func nthSubstringIndex(body, marker string, target int) int {
+	offset := 0
+	for index := 0; ; index++ {
+		found := strings.Index(body[offset:], marker)
+		if found < 0 {
+			return -1
+		}
+		found += offset
+		if index == target {
+			return found
+		}
+		offset = found + len(marker)
+	}
+}
+
+func inlineAttachmentMarkdown(ref channel.MediaRef, id pgtype.UUID) string {
+	downloadPath := "/api/attachments/" + uuid.UUID(id.Bytes).String() + "/download"
+	if ref.Type == channel.MsgTypeImage {
+		return "![](" + downloadPath + ")"
+	}
+	label := strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]").Replace(ref.Filename)
+	if label == "" {
+		label = "attachment"
+	}
+	return "[" + label + "](" + downloadPath + ")"
 }
 
 func defaultMediaFilename(kind channel.MsgType, id, contentType string) string {

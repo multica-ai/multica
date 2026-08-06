@@ -562,6 +562,7 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 		WorkspaceID: inst.WorkspaceID,
 		Sender:      identity.UserID,
 		IssueID:     issue.ID,
+		Body:        resolved.Text,
 		MediaRefs:   resolved.MediaRefs,
 	})
 	if bindErr != nil {

@@ -133,6 +133,7 @@ type BindMediaParams struct {
 	WorkspaceID pgtype.UUID
 	Sender      pgtype.UUID
 	IssueID     pgtype.UUID
+	Body        string
 	MediaRefs   []channel.MediaRef
 }
 

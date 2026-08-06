@@ -97,6 +97,13 @@ type MediaRef struct {
 	MimeType string
 	// SizeBytes is the object size in bytes, or 0 when unknown.
 	SizeBytes int64
+	// InlinePlaceholder is an optional exact marker in the durable message
+	// body that this attachment should replace with a stable Markdown link.
+	// Empty keeps the attachment standalone and preserves existing platform
+	// behavior. InlineIndex is the zero-based occurrence of that marker, so a
+	// partial media failure cannot shift later attachments into the wrong place.
+	InlinePlaceholder string
+	InlineIndex       int
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.

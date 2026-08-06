@@ -227,6 +227,7 @@ func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaP
 		WorkspaceID: p.WorkspaceID,
 		Sender:      p.Sender,
 		IssueID:     p.IssueID,
+		Body:        p.Body,
 		MediaRefs:   p.MediaRefs,
 	})
 }

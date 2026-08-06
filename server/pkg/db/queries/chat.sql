@@ -397,6 +397,18 @@ UPDATE chat_message
 SET channel_media_pending_until = NULL
 WHERE id = $1 AND chat_session_id = $2;
 
+-- name: UpdateChatMessageContentForChannelMedia :execrows
+-- Channel messages are immutable user turns. Media resolution may finish after
+-- the initial append, so materialize stable inline attachment references in the
+-- same transaction that binds those attachments. The provenance and role guards
+-- prevent this narrow post-append path from rewriting ordinary web/agent rows.
+UPDATE chat_message
+SET content = sqlc.arg(content)
+WHERE id = sqlc.arg(id)
+  AND chat_session_id = sqlc.arg(chat_session_id)
+  AND role = 'user'
+  AND channel_ingested;
+
 -- name: LinkChatMessageToTask :exec
 UPDATE chat_message
 SET task_id = $2
