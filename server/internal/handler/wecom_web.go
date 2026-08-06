@@ -239,7 +239,7 @@ func (h *Handler) wecomInstallService() *wecom.InstallationService {
 	if !ok || res == nil || res.Box == nil {
 		return nil
 	}
-	svc, err := wecom.NewInstallationService(h.Queries, res.Box)
+	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box)
 	if err != nil {
 		return nil
 	}

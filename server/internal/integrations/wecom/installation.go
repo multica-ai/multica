@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -43,17 +44,19 @@ type InstallationParams struct {
 // plaintext storage — the same invariant lark.InstallationService enforces.
 type InstallationService struct {
 	store *Store
+	tx    engine.TxStarter
 	box   *secretbox.Box
 }
 
-// NewInstallationService binds the service to a queries handle and a
-// secretbox keyed for at-rest encryption. Returns an error when the box
-// is nil; callers should surface it (do not fall back to plaintext).
-func NewInstallationService(queries *db.Queries, box *secretbox.Box) (*InstallationService, error) {
+// NewInstallationService binds the service to a queries handle, a transaction
+// starter (so the reclaim-then-upsert runs atomically), and a secretbox keyed
+// for at-rest encryption. Returns an error when the box is nil; callers should
+// surface it (do not fall back to plaintext).
+func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secretbox.Box) (*InstallationService, error) {
 	if box == nil {
 		return nil, errors.New("wecom: InstallationService requires a non-nil secretbox.Box")
 	}
-	return &InstallationService{store: NewStore(queries), box: box}, nil
+	return &InstallationService{store: NewStore(queries), tx: tx, box: box}, nil
 }
 
 // Upsert creates or refreshes an installation row. The conflict key on
@@ -77,7 +80,41 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		return Installation{}, err
 	}
 
-	row, err := s.store.Queries.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
+	// Reclaim-then-upsert, atomically. UpsertChannelInstallation conflicts on
+	// (workspace_id, agent_id, channel_type), but the (channel_type, app_id)
+	// slot is guarded by idx_channel_installation_type_appid. Disconnect only
+	// flips status to 'revoked' — it does not free the row — so without a
+	// reclaim step a bot revoked from agent A can never be connected to agent
+	// B: the upsert misses its ON CONFLICT and trips the unique index, and the
+	// admin is told to "disconnect it there first" for a bot that is already
+	// disconnected and has no UI control to free it. ReclaimDeadChannelInstalla-
+	// tionByAppID deletes any DEAD owner of this bot's slot (a revoked row held
+	// by a DIFFERENT (workspace, agent), or an orphan whose workspace/agent was
+	// deleted) and clears its dependent rows in the same statement, while
+	// leaving a LIVE owner (active or archived agent) in place to trip the
+	// index below — which botOwnerConflictErr turns into an accurate 409.
+	// Mirrors slack/install.go's persistInstall.
+	if s.tx == nil {
+		return Installation{}, errors.New("wecom: InstallationService requires a transaction starter")
+	}
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return Installation{}, fmt.Errorf("wecom: begin install tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.store.WithTx(tx)
+
+	if _, err := qtx.Queries.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
+		ChannelType: channelTypeWecom,
+		AppID:       p.BotID,
+		WorkspaceID: p.WorkspaceID,
+		AgentID:     p.AgentID,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// pgx.ErrNoRows just means nothing was dead — a no-op, not a failure.
+		return Installation{}, fmt.Errorf("wecom: reclaim dead installation: %w", err)
+	}
+
+	row, err := qtx.Queries.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
 		WorkspaceID:     p.WorkspaceID,
 		AgentID:         p.AgentID,
 		ChannelType:     channelTypeWecom,
@@ -87,9 +124,14 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			// A LIVE owner still holds the slot. Read the owner on the
+			// non-tx connection (this tx is now in aborted state) to name it.
 			return Installation{}, s.botOwnerConflictErr(ctx, p.WorkspaceID, p.BotID)
 		}
 		return Installation{}, fmt.Errorf("wecom: upsert installation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Installation{}, fmt.Errorf("wecom: commit install tx: %w", err)
 	}
 	return installationFromRow(row)
 }
