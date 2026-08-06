@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -26,11 +28,18 @@ const (
 
 // OutboundReplier implements engine.OutboundReplier for WeCom.
 type OutboundReplier struct {
-	binding     *BindingTokenService
+	binding     binder
 	senders     *sendersRegistry
 	appURL      string
 	bindingPath string
 	logger      *slog.Logger
+}
+
+// binder is the slice of BindingTokenService sendBindingPrompt needs, declared
+// as an interface so the group-vs-private routing can be exercised with a fake
+// (no DB-backed token mint). *BindingTokenService is the production value.
+type binder interface {
+	Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, wecomUserID string) (BindingToken, error)
 }
 
 // OutboundReplierConfig configures the replier. Binding + AppURL are
@@ -69,13 +78,20 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 	if !strings.HasPrefix(bindingPath, "/") {
 		bindingPath = "/" + bindingPath
 	}
-	return &OutboundReplier{
-		binding:     cfg.Binding,
+	r := &OutboundReplier{
 		senders:     cfg.Senders,
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
 		logger:      logger,
 	}
+	// Assign through the interface only when non-nil: a nil *BindingTokenService
+	// stored in the binder interface would be a non-nil interface value holding
+	// a typed nil, defeating the `r.binding == nil` guard in sendBindingPrompt
+	// and panicking on Mint.
+	if cfg.Binding != nil {
+		r.binding = cfg.Binding
+	}
+	return r
 }
 
 // Reply routes each outcome to its user-visible message. Errors are
