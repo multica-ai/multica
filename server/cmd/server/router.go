@@ -712,13 +712,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
 				// inbox pushes) is delivered only by the replica holding each
 				// bot's in-process WebSocket lease. On a multi-replica
-				// deployment (REDIS_URL set → Redis relay), an event published
-				// on another replica cannot reach the lease holder, so those
-				// replies are dropped. Warn loudly until cross-replica outbound
-				// routing lands. See wecom/outbound.go's header.
-				if os.Getenv("REDIS_URL") != "" {
-					slog.Warn("wecom integration: multi-replica deployment detected (REDIS_URL set) — WeCom agent replies and inbox pushes are only delivered by the replica holding each bot's WebSocket lease, so responses produced on other replicas will be dropped. Run the WeCom-enabled backend as a single replica until cross-replica outbound routing is implemented.")
-				}
+				// deployment, an EventChatDone/EventInboxNew published on another
+				// replica cannot reach the lease holder, so those replies are
+				// dropped. This is stated conditionally rather than gated on a
+				// replica-count signal: the server has no reliable count here,
+				// and REDIS_URL means "Redis configured" (it also gates rate
+				// limiting), not "more than one replica". See wecom/outbound.go
+				// and SELF_HOSTING.md. Remove once outbound routes to the lease
+				// holder.
+				slog.Warn("wecom integration: WeCom agent replies and inbox pushes are delivered only by the replica holding each bot's WebSocket lease. If you run more than one backend replica, responses produced on a replica that does not hold the lease will be dropped — run the WeCom-enabled backend as a single replica until cross-replica outbound routing is implemented.")
 			}
 		}
 	} else {
