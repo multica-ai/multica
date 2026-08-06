@@ -51,11 +51,9 @@ test.describe("PWA", () => {
   test("status bar colour tracks the app theme, not the OS", async ({ page }) => {
     const workspaceSlug = await loginAsDefault(page);
 
-    // What the status bar should be: the colour resolved from the page token.
+    // What the status bar should be: the colour the page actually paints.
     const paintedBackground = () =>
-      page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue("--background").trim(),
-      );
+      page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
     // Media-scoped metas follow the OS and would shadow the dynamic one, so
     // exactly one unconditional meta should survive hydration.
@@ -66,7 +64,9 @@ test.describe("PWA", () => {
       return metas.getAttribute("content");
     };
 
-    expect(await themeColor()).toBe(await paintedBackground());
+    const light = await themeColor();
+    expect(light).toBe(await paintedBackground());
+    expect(light).toMatch(/^rgba?\(/);
 
     await page.goto(`/${workspaceSlug}/settings?tab=preferences`, {
       waitUntil: "domcontentloaded",
@@ -80,7 +80,9 @@ test.describe("PWA", () => {
 
     // Retinted in place: no reload happened between the two reads.
     const dark = await paintedBackground();
-    await expect(page.locator("meta[name='theme-color']")).toHaveAttribute("content", dark);
+    const meta = page.locator("meta[name='theme-color']");
+    await expect(meta).toHaveAttribute("content", dark);
+    await expect(meta).toHaveAttribute("content", /^rgba?\(/);
   });
 
   test("no service worker registers on the marketing page", async ({ page }) => {

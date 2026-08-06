@@ -5,9 +5,7 @@ import { useEffect } from "react";
 export function ThemeColorMeta() {
   useEffect(() => {
     const sync = () => {
-      const color = getComputedStyle(document.documentElement)
-        .getPropertyValue("--background")
-        .trim();
+      const color = getComputedStyle(document.body).backgroundColor.trim();
       if (!color) return;
 
       const metas = document.head.querySelectorAll<HTMLMetaElement>("meta[name='theme-color']");
