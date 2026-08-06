@@ -1,26 +1,19 @@
 /**
  * Workspace switcher — presented as a formSheet by the parent Stack.
  *
- * Reached from the More popover's WorkspaceCard (collapsed single-row entry).
- * Lists every workspace the user belongs to, current one disabled with a
- * checkmark. Tapping a non-current row triggers an iOS-native `Alert.alert`
- * confirm — only after the user confirms do we dismiss the sheet and
- * `router.replace` to the target slug.
+ * Reached from the header's WorkspaceSwitcherButton (the always-visible
+ * current-workspace avatar) and the More popover's WorkspaceCard. Lists every
+ * workspace the user belongs to, current one disabled with a checkmark.
+ * Tapping a non-current row switches immediately — no confirm gate: this is a
+ * dedicated full-sheet list of clearly-labelled rows, so an accidental tap
+ * isn't a real risk, and a confirm on every switch is friction.
  *
- * Why a confirm step:
- *   The previous flow ("popover → tap row → instant switch") had no friction
- *   against fat-finger taps in the cramped popover, and the user lost their
- *   entire navigation context (tabs, scroll position) with one accidental
- *   tap. iOS Alert is the platform-correct gate (mobile/CLAUDE.md Principle
- *   3 — iOS native > RNR > discuss).
- *
- * Switching itself stays minimal: `router.dismiss()` to close this sheet,
- * then `router.replace(/${slug}/inbox)`. The downstream WorkspaceRouteLayout
+ * Switching stays minimal: `router.dismiss()` to close this sheet, then
+ * `router.replace(/${slug}/inbox)`. The downstream WorkspaceRouteLayout
  * handles `setCurrentWorkspace(slug, uuid)` on mount.
  */
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   View,
@@ -45,20 +38,11 @@ export default function SwitchWorkspaceRoute() {
 
   const onSelect = (ws: Workspace) => {
     if (ws.slug === activeSlug) return;
-    Alert.alert(
-      "Switch workspace",
-      `Switch to "${ws.name}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Switch",
-          onPress: () => {
-            router.dismiss();
-            router.replace(`/${ws.slug}/inbox`);
-          },
-        },
-      ],
-    );
+    // Switch immediately — no confirm. This is a dedicated full-sheet list of
+    // clearly-labelled rows (not the old cramped popover), so an accidental
+    // tap isn't a real risk, and a confirm gate on every switch is friction.
+    router.dismiss();
+    router.replace(`/${ws.slug}/inbox`);
   };
 
   return (
