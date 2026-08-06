@@ -7415,7 +7415,11 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 	if taskID == "" {
 		return "", errors.New("task id is empty")
 	}
-	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), "multica-task-")
+	base, err := taskTempBaseDir()
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(base, "multica-task-")
 	if err != nil {
 		return "", err
 	}
@@ -7423,6 +7427,31 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 		return "", err
 	}
 	return dir, nil
+}
+
+// taskTempBaseDir resolves the parent directory for private per-task temp
+// dirs. The daemon operator can relocate it with MULTICA_AGENT_TEMP_BASE,
+// which must be an absolute path to an existing directory; an invalid value
+// fails task startup instead of silently falling back. Unset keeps the
+// platform default exactly as before. Operators should pick a short path:
+// child tools may bind AF_UNIX sockets under $TMPDIR (sun_path is 108 bytes
+// on Linux, 104 on macOS).
+func taskTempBaseDir() (string, error) {
+	base := strings.TrimSpace(os.Getenv("MULTICA_AGENT_TEMP_BASE"))
+	if base == "" {
+		return socketSafeTempBaseDir(), nil
+	}
+	if !filepath.IsAbs(base) {
+		return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE must be an absolute path, got %q", base)
+	}
+	info, err := os.Stat(base)
+	if err != nil {
+		return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE is not a directory: %q", base)
+	}
+	return base, nil
 }
 
 func socketSafeTempBaseDir() string {
