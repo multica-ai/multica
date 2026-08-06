@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault } from "./helpers";
+import { loginAsDefault, waitForPageText } from "./helpers";
 
 interface ManifestIcon {
   src: string;
@@ -46,6 +46,48 @@ test.describe("PWA", () => {
       () => navigator.serviceWorker.controller?.scriptURL ?? null,
     );
     expect(scriptURL).toContain("/sw.js");
+  });
+
+  test("status bar colour tracks the app theme, not the OS", async ({ page }) => {
+    const workspaceSlug = await loginAsDefault(page);
+
+    // What the status bar should be: the colour <body> paints, as sRGB bytes.
+    const paintedBackground = () =>
+      page.evaluate(() => {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d")!;
+        context.fillStyle = getComputedStyle(document.body).backgroundColor;
+        context.fillRect(0, 0, 1, 1);
+        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+        return `#${[red, green, blue].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+      });
+
+    // Media-scoped metas follow the OS and would shadow the dynamic one, so
+    // exactly one unconditional meta should survive hydration.
+    const themeColor = async () => {
+      const metas = page.locator("meta[name='theme-color']");
+      await expect(metas).toHaveCount(1);
+      await expect(metas).not.toHaveAttribute("media", /.*/);
+      return metas.getAttribute("content");
+    };
+
+    expect(await themeColor()).toBe(await paintedBackground());
+
+    await page.goto(`/${workspaceSlug}/settings?tab=preferences`, {
+      waitUntil: "domcontentloaded",
+    });
+    await waitForPageText(page, "Theme");
+
+    // Force the app dark while the OS stays light. A static prefers-color-scheme
+    // meta cannot follow this — that is the bug this test exists for.
+    await page.getByRole("combobox", { name: "Theme" }).click();
+    await page.getByRole("option", { name: "Dark", exact: true }).click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+
+    // Retinted in place: no reload happened between the two reads.
+    const dark = await paintedBackground();
+    await expect(page.locator("meta[name='theme-color']")).toHaveAttribute("content", dark);
   });
 
   test("no service worker registers on the marketing page", async ({ page }) => {

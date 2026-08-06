@@ -2,12 +2,14 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeColorMeta } from "@/components/theme-color-meta";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import { THEME_COLOR_FALLBACK } from "@/lib/theme-color";
 import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
@@ -65,9 +67,13 @@ const sourceSerif = Source_Serif_4({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // First paint only. The server cannot know the stored theme, and next-themes
+  // defaults to "system", so the OS media query is the best guess available
+  // before hydration — <ThemeColorMeta> replaces both entries with the resolved
+  // app theme's real painted colour as soon as React mounts.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#05070b" },
+    { media: "(prefers-color-scheme: light)", color: THEME_COLOR_FALLBACK.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLOR_FALLBACK.dark },
   ],
 };
 
@@ -154,6 +160,7 @@ export default async function RootLayout({
           />
         )}
         <ThemeProvider>
+          <ThemeColorMeta />
           <WebProviders
             locale={locale}
             resources={resources}
