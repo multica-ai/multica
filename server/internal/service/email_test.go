@@ -728,3 +728,39 @@ func TestSendSMTP_LoginAuthRejectsUnencryptedRemote(t *testing.T) {
 		t.Errorf("expected 'unencrypted connection' error, got: %v", err)
 	}
 }
+
+func TestNewEmailSender_DefaultsToEmailService(t *testing.T) {
+	sender := NewEmailSender()
+	if _, ok := sender.(*EmailService); !ok {
+		t.Fatalf("expected *EmailService when EMAIL_PROVIDER unset, got %T", sender)
+	}
+}
+
+func TestNewEmailSender_SES(t *testing.T) {
+	t.Setenv("EMAIL_PROVIDER", "SES") // case-insensitive
+	sender := NewEmailSender()
+	if _, ok := sender.(*sesSender); !ok {
+		t.Fatalf("expected *sesSender when EMAIL_PROVIDER=SES, got %T", sender)
+	}
+}
+
+func TestVerificationHTML_ContainsCode(t *testing.T) {
+	body := verificationHTML("123456")
+	if !strings.Contains(body, "123456") {
+		t.Error("verificationHTML should contain the code")
+	}
+}
+
+func TestInvitationHTML_EscapesHTML(t *testing.T) {
+	body := invitationHTML("<script>alert(1)</script>", "Acme", "https://example.com/invite/1")
+	if strings.Contains(body, "<script>") {
+		t.Error("invitationHTML should escape HTML in inviter name")
+	}
+}
+
+func TestInvitationSubject_SanitizesFields(t *testing.T) {
+	subject := invitationSubject("Bob\r\nInjected", "Acme")
+	if strings.ContainsAny(subject, "\r\n") {
+		t.Errorf("invitationSubject should strip control characters, got %q", subject)
+	}
+}
