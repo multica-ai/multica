@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, MessagesSquare, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
+import { WecomMark } from "./wecom-mark";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -340,7 +341,7 @@ export function WecomAgentBindButton({
         }
         data-testid="wecom-agent-connect"
       >
-        <MessagesSquare className="h-3 w-3" />
+        <WecomMark className="h-3 w-3" />
         {t(($) => $.wecom.bind_button)}
       </Button>
 
