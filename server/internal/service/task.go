@@ -3893,6 +3893,16 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	if strings.Contains(lower, "400") && strings.Contains(lower, "invalid_request_error") {
 		return true
 	}
+	// Provider credential-resolution failures are deterministic on resume: the
+	// missing api_key / auth_token / auth header is baked into the session's
+	// provider state, so a rerun must start fresh instead of replaying the same
+	// auth error on the recorded (agent, issue) session. taskfailure.Classify
+	// now labels new failures agent_error.missing_config, but this text guard is
+	// what also catches pre-fix rows already tagged agent_error.unknown — keep it
+	// in sync with the GetLastTaskSession / GetLastChatTaskSession resume queries.
+	if strings.Contains(lower, "could not resolve authentication method") {
+		return true
+	}
 	// Same defense-in-depth for the provider-agnostic empty-message shape:
 	// a daemon too old to carry classifyPoisonedError's new branch reports
 	// agent_error.unknown, and without this the manual-retry path would

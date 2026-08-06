@@ -4995,3 +4995,22 @@ func TestExecuteAndDrain_RedactsNestedToolInputBeforeSending(t *testing.T) {
 		t.Fatalf("redaction destroyed the change metadata: %s", blob)
 	}
 }
+
+// TestFreshSessionMayHelp pins the verdict for the Hermes auth-resolution
+// failure this PR treats as session poison, so the "fresh session is the
+// answer" gate can't be flipped by a future classifier change. The error is
+// session-shaped (a fresh session resolves it), yet it must NOT count as one
+// of the "fresh session is not the answer" buckets — in particular not
+// missing-config — or the in-turn fresh-session retry on the five
+// ResumeRejectionUndetectable backends (antigravity, copilot, cursor, deveco,
+// opencode) would silently stop firing and the dead session would be resumed
+// into the same provider error forever.
+func TestFreshSessionMayHelp(t *testing.T) {
+	t.Parallel()
+
+	const hermesAuth = "hermes provider error: \"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the X-Api-Key or Authorization headers to be explicitly omitted\""
+	if !freshSessionMayHelp(hermesAuth) {
+		t.Fatalf("freshSessionMayHelp(auth-resolution error) = false; a fresh session cures this failure, it must report session-fixable")
+	}
+}
+
