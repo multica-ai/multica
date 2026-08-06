@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -374,6 +378,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
+				// kimi-code 0.33.0 sends no usage at all on this path,
+				// so these two are inert today; they exist so a future
+				// kimi that does populate the ACP result is billed
+				// correctly instead of silently dropping its cache
+				// split. scanKimiSessionUsage below is the live path.
+				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
 				c.usageMu.Unlock()
 			default:
 			}
@@ -407,6 +418,26 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		c.usageMu.Lock()
 		u := c.usage
 		c.usageMu.Unlock()
+
+		// Fallback: kimi-code 0.33.0 exports no token counters over ACP.
+		// Its session/prompt result carries only stopReason, and its
+		// `usage_update` notification carries only {used,size} — context
+		// window occupancy, not billing. Verified against the CLI Multica's
+		// own onboarding installs. Without this scan every kimi task lands
+		// on the usage dashboard with no row at all (MUL-5773 / #6448).
+		//
+		// The counters do exist in kimi's per-session wire log, so read
+		// them from there, the same way codex.go falls back to Codex
+		// rollouts. Bound by sessionID so a concurrent kimi session is
+		// never billed to this task.
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+			if scanned, scannedModel := scanKimiSessionUsage(startTime, b.cfg.Env["KIMI_CODE_HOME"], sessionID, opts.ResumeSessionID != ""); acpTokenUsagePresent(scanned) {
+				u = scanned
+				if scannedModel != "" && opts.Model == "" {
+					opts.Model = scannedModel
+				}
+			}
+		}
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
@@ -476,4 +507,178 @@ func kimiToolNameFromTitle(title string) string {
 
 	// Fallback: snake_case the title so the UI gets a stable identifier.
 	return strings.ReplaceAll(lower, " ", "_")
+}
+
+// kimiUsageRecordType is the wire-log entry kimi-code writes after every LLM
+// call. Its sibling `step.end` loop event repeats the same numbers, so only
+// this type may be summed — counting both double-bills every turn.
+const kimiUsageRecordType = "usage.record"
+
+// kimiWireUsage is one `usage.record` entry from a kimi session wire log.
+//
+// The buckets are mutually exclusive: on a verified two-turn session the
+// records read {inputOther:7694, inputCacheRead:14848, output:21} and
+// {inputOther:49, inputCacheRead:22528, output:21}, and each turn's three
+// fields sum exactly to the `used` figure kimi reports over ACP (22563 and
+// 22598). So `inputOther` is uncached input only and maps straight onto
+// TokenUsage.InputTokens with no cached-prefix subtraction — unlike the ACP
+// `inputTokens` case excludeACPCachedInput exists to correct.
+type kimiWireUsage struct {
+	Type string `json:"type"`
+	// Time is the record's epoch-millisecond write time. It is what keeps a
+	// resumed session from being billed twice: kimi appends to the same wire
+	// log across resumes, so the file still holds the previous task's
+	// records.
+	Time  int64  `json:"time"`
+	Model string `json:"model"`
+	Usage struct {
+		InputOther         int64 `json:"inputOther"`
+		Output             int64 `json:"output"`
+		InputCacheRead     int64 `json:"inputCacheRead"`
+		InputCacheCreation int64 `json:"inputCacheCreation"`
+	} `json:"usage"`
+}
+
+// scanKimiSessionUsage sums the usage records kimi-code wrote for sessionID
+// and returns them with the model that produced them.
+//
+// Records are per-LLM-call and incremental, never cumulative: a verified
+// two-step turn logged one record per `llm.request`, with the second call's
+// uncached input far below the first's as the prefix moved into cache. So the
+// total for a task is the plain sum over every record in the session.
+//
+// Subagent turns get their own `agents/<name>/wire.jsonl`, hence the wildcard:
+// billing only `agents/main` would silently undercount delegated work.
+//
+// resumed marks a turn that continued an existing kimi session. Those append
+// to the wire log the previous task already billed, so records are filtered by
+// their own timestamp, not just by the file's mtime.
+func scanKimiSessionUsage(startTime time.Time, kimiHome, sessionID string, resumed bool) (TokenUsage, string) {
+	root := kimiSessionRoot(kimiHome)
+	sessionID = strings.TrimSpace(sessionID)
+	if root == "" || sessionID == "" {
+		return TokenUsage{}, ""
+	}
+	// sessionID comes from the agent, so keep it out of the glob pattern:
+	// a stray `*` or `[` would silently widen the match to another session.
+	matches, err := filepath.Glob(filepath.Join(root, "*", "*", "agents", "*", "wire.jsonl"))
+	if err != nil {
+		return TokenUsage{}, ""
+	}
+
+	var total TokenUsage
+	var model string
+	for _, path := range matches {
+		if !kimiWirePathOwnedBy(path, root, sessionID) {
+			continue
+		}
+		// A wire log untouched since before the turn began belongs to an
+		// earlier run of a resumed session; billing it would re-charge
+		// tokens the previous task already reported.
+		if info, err := os.Stat(path); err != nil || info.ModTime().Before(startTime) {
+			continue
+		}
+		usage, recordModel := parseKimiWireUsage(path, startTime, resumed)
+		total.InputTokens += usage.InputTokens
+		total.OutputTokens += usage.OutputTokens
+		total.CacheReadTokens += usage.CacheReadTokens
+		total.CacheWriteTokens += usage.CacheWriteTokens
+		if recordModel != "" {
+			model = recordModel
+		}
+	}
+	return total, model
+}
+
+// kimiWirePathOwnedBy reports whether a wire log sits under sessionID's
+// directory. kimi names that directory with the ACP session id verbatim
+// (`<root>/<workspace>/<sessionID>/agents/<name>/wire.jsonl`), so an exact
+// path-segment comparison is the ownership test.
+func kimiWirePathOwnedBy(path, root, sessionID string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	// <workspace>/<sessionID>/agents/<name>/wire.jsonl
+	return len(parts) == 5 && parts[1] == sessionID
+}
+
+// parseKimiWireUsage sums the usage records in a single wire log. A malformed
+// or truncated line is skipped rather than failing the scan: the log is
+// appended to live, so the tail can be a partial write, and reporting the
+// records we could read beats reporting nothing.
+func parseKimiWireUsage(path string, startTime time.Time, resumed bool) (TokenUsage, string) {
+	file, err := os.Open(path)
+	if err != nil {
+		return TokenUsage{}, ""
+	}
+	defer file.Close()
+
+	var total TokenUsage
+	var model string
+	scanner := newAgentStreamScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytes.Contains(line, []byte(kimiUsageRecordType)) {
+			continue
+		}
+		var record kimiWireUsage
+		if err := json.Unmarshal(line, &record); err != nil || record.Type != kimiUsageRecordType {
+			continue
+		}
+		if !kimiWireRecordInTurn(record.Time, startTime, resumed) {
+			continue
+		}
+		total.InputTokens += record.Usage.InputOther
+		total.OutputTokens += record.Usage.Output
+		total.CacheReadTokens += record.Usage.InputCacheRead
+		total.CacheWriteTokens += record.Usage.InputCacheCreation
+		if record.Model != "" {
+			model = record.Model
+		}
+	}
+	return total, model
+}
+
+// kimiWireRecordInTurn reports whether a usage record belongs to the turn that
+// started at startTime.
+//
+// kimi-code 0.33.0 stamps every usage record, so the untimed case is only a
+// guard against a future format change. There it errs toward billing on a
+// fresh session (whose records are all ours anyway) and toward dropping on a
+// resume, where counting an untimed record risks charging a user twice for
+// tokens the earlier task already reported.
+func kimiWireRecordInTurn(recordTimeMillis int64, startTime time.Time, resumed bool) bool {
+	if recordTimeMillis <= 0 {
+		return !resumed
+	}
+	if startTime.IsZero() {
+		return true
+	}
+	return recordTimeMillis >= startTime.UnixMilli()
+}
+
+// kimiSessionRoot resolves kimi's session directory: KIMI_CODE_HOME when the
+// daemon isolates a task's kimi home, then ~/.kimi-code. Mirrors
+// codexSessionRoot, including the stat check — an env var pointing somewhere
+// without a sessions directory falls through to the default rather than
+// disabling the scan.
+func kimiSessionRoot(kimiHome string) string {
+	if kimiHome = strings.TrimSpace(kimiHome); kimiHome != "" {
+		dir := filepath.Join(kimiHome, "sessions")
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".kimi-code", "sessions")
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return dir
+	}
+	return ""
 }
