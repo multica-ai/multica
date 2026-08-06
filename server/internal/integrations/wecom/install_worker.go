@@ -330,51 +330,18 @@ func (w *InstallWorker) finalizeSuccess(ctx context.Context, row db.WecomInstall
 	defer tx.Rollback(ctx)
 	qtx := w.svc.store.WithTx(tx)
 
-	// Locale snapshot from the initiator's user.language. Failure to load
-	// degrades to default locale — an install must not be denied because
-	// the initiator picked an unsupported language.
-	locale := DefaultLocale
-	if user, err := qtx.GetUser(ctx, row.InitiatorUserID); err == nil {
-		locale = NormalizeLocale(user.Language.String)
-	}
-
-	// Reclaim any dead installation holding this botid so the upsert below
-	// cannot trip the (channel_type, app_id) unique index on a revoked
-	// ghost owner.
-	if _, err := qtx.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
-		ChannelType: string(TypeWecom),
-		AppID:       bot.BotID,
-		WorkspaceID: row.WorkspaceID,
-		AgentID:     row.AgentID,
-	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("finalize: reclaim dead: %w", err)
-	}
-	if _, err := qtx.DeleteRevokedChannelInstallationForReplacement(ctx, db.DeleteRevokedChannelInstallationForReplacementParams{
-		WorkspaceID: row.WorkspaceID,
-		AgentID:     row.AgentID,
-		ChannelType: string(TypeWecom),
-		NewAppID:    bot.BotID,
-	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("finalize: delete revoked replacement: %w", err)
-	}
-
-	cfgBytes, err := (InstallationConfig{
-		AppID:           bot.BotID,
-		SecretEncrypted: sealedB64,
-		Locale:          locale,
-	}).Marshal()
-	if err != nil {
-		return fmt.Errorf("finalize: marshal config: %w", err)
-	}
-
-	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
+	inst, err := w.svc.bindBot(ctx, qtx, bindBotParams{
 		WorkspaceID:     row.WorkspaceID,
 		AgentID:         row.AgentID,
-		ChannelType:     string(TypeWecom),
-		Config:          cfgBytes,
 		InstallerUserID: row.InitiatorUserID,
+		BotID:           bot.BotID,
+		SecretEncrypted: sealedB64,
 	})
 	if err != nil {
+		var upsertErr *bindUpsertError
+		if !errors.As(err, &upsertErr) {
+			return fmt.Errorf("finalize: %w", err)
+		}
 		w.svc.cfg.Logger.Warn("wecom finalize: upsert failed",
 			"session_id", util.UUIDToString(row.ID), "err", err)
 		// Rollback via defer, then flip session to error (outside the

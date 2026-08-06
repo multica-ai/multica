@@ -26,6 +26,7 @@ const ApiError = vi.hoisted(() => {
 
 const mockBeginInstall = vi.hoisted(() => vi.fn());
 const mockGetStatus = vi.hoisted(() => vi.fn());
+const mockManualInstall = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 const idempotencyKeysRef = vi.hoisted(() => ({ current: [] as string[] }));
 
@@ -39,6 +40,7 @@ const installationsRef = vi.hoisted(() => ({
     installations: [] as unknown[],
     configured: true,
     install_supported: true,
+    manual_install_supported: true,
   },
 }));
 
@@ -101,6 +103,7 @@ vi.mock("@multica/core/api", () => ({
       return mockBeginInstall(...args);
     },
     getWecomInstallStatus: mockGetStatus,
+    manualWecomInstall: mockManualInstall,
     deleteWecomInstallation: vi.fn(),
   },
   ApiError,
@@ -162,6 +165,7 @@ function resetFixtures() {
     installations: [],
     configured: true,
     install_supported: true,
+    manual_install_supported: true,
   };
 }
 
@@ -284,5 +288,207 @@ describe("WecomInstallDialog", () => {
     const secondKey = idempotencyKeysRef.current[1];
     expect(secondKey).toBeTruthy();
     expect(secondKey).not.toBe(firstKey);
+  });
+});
+
+// The manual path exists so a bot that already lives in WeCom can be connected
+// at all: scan-code always provisions a BRAND NEW bot, and it needs a
+// provisioned WeCom scan source that self-hosted deployments may not have.
+describe("WecomInstallDialog manual entry", () => {
+  beforeEach(() => {
+    cleanup();
+    resetFixtures();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockBeginInstall.mockResolvedValue({
+      session_id: "sess-1",
+      status: "creating",
+      poll_interval_seconds: 1,
+    });
+    mockGetStatus.mockResolvedValue({
+      status: "pending",
+      qr_code_url: "https://work.weixin.qq.com/wework_admin/frame#qr/abc",
+      poll_interval_seconds: 2,
+    });
+    mockManualInstall.mockResolvedValue({
+      installation_id: "inst-1",
+      bot_id: "bot-1",
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderBindButton() {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    return user;
+  }
+
+  async function openManualForm() {
+    const user = renderBindButton();
+    await user.click(screen.getByRole("button", { name: /Bind to WeCom/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId("wecom-install-switch-manual")).toBeTruthy();
+    });
+    await user.click(screen.getByTestId("wecom-install-switch-manual"));
+    await waitFor(() => {
+      expect(screen.getByTestId("wecom-manual-install-form")).toBeTruthy();
+    });
+    return user;
+  }
+
+  it("defaults to scanning and only shows the manual form after opting in", async () => {
+    const user = renderBindButton();
+    await user.click(screen.getByRole("button", { name: /Bind to WeCom/i }));
+
+    // Scan is the default: begin runs immediately, no form is rendered.
+    await waitFor(() => {
+      expect(mockBeginInstall).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId("wecom-manual-install-form")).toBeNull();
+
+    await user.click(screen.getByTestId("wecom-install-switch-manual"));
+    await waitFor(() => {
+      expect(screen.getByTestId("wecom-manual-install-form")).toBeTruthy();
+    });
+  });
+
+  it("stops polling the scan session after switching to manual entry", async () => {
+    const user = await openManualForm();
+    const callsAtSwitch = mockGetStatus.mock.calls.length;
+
+    // Well past the 2s poll interval the pending status asked for.
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(mockGetStatus.mock.calls.length).toBe(callsAtSwitch);
+    expect(user).toBeTruthy();
+  });
+
+  it("submits the trimmed credentials and refreshes the installation list", async () => {
+    const user = await openManualForm();
+
+    await user.type(screen.getByLabelText(/Bot ID/i), "  bot-1  ");
+    await user.type(screen.getByLabelText(/^Secret$/i), " sec-1 ");
+    await user.click(screen.getByRole("button", { name: /Connect bot/i }));
+
+    await waitFor(() => {
+      expect(mockManualInstall).toHaveBeenCalledWith(
+        "workspace-1",
+        "agent-1",
+        "bot-1",
+        "sec-1",
+      );
+    });
+    await waitFor(() => {
+      expect(mockInvalidate).toHaveBeenCalled();
+    });
+  });
+
+  it("keeps the submit button disabled until both fields are filled", async () => {
+    const user = await openManualForm();
+    const submit = screen.getByRole("button", { name: /Connect bot/i });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    await user.type(screen.getByLabelText(/Bot ID/i), "bot-1");
+    expect(screen.getByRole("button", { name: /Connect bot/i }).hasAttribute("disabled")).toBe(
+      true,
+    );
+
+    await user.type(screen.getByLabelText(/^Secret$/i), "sec-1");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Connect bot/i }).hasAttribute("disabled"),
+      ).toBe(false);
+    });
+  });
+
+  it("localizes the rejected-credentials code instead of showing the raw error", async () => {
+    mockManualInstall.mockRejectedValue(
+      new ApiError("invalid_bot_credentials", 400, "Bad Request"),
+    );
+    const user = await openManualForm();
+
+    await user.type(screen.getByLabelText(/Bot ID/i), "bot-1");
+    await user.type(screen.getByLabelText(/^Secret$/i), "wrong");
+    await user.click(screen.getByRole("button", { name: /Connect bot/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/WeCom rejected these credentials/i),
+      ).toBeTruthy();
+    });
+    // The stable code is an internal contract, not user-facing copy.
+    expect(screen.queryByText("invalid_bot_credentials")).toBeNull();
+    // The form stays up so the user can fix the typo.
+    expect(screen.getByTestId("wecom-manual-install-form")).toBeTruthy();
+  });
+
+  it("distinguishes a bot id taken in this workspace from one taken elsewhere", async () => {
+    mockManualInstall.mockRejectedValue(
+      new ApiError("bot_id_owned_in_this_workspace", 409, "Conflict"),
+    );
+    const user = await openManualForm();
+
+    await user.type(screen.getByLabelText(/Bot ID/i), "bot-1");
+    await user.type(screen.getByLabelText(/^Secret$/i), "sec-1");
+    await user.click(screen.getByRole("button", { name: /Connect bot/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/already connected to another agent in this workspace/i),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/another Multica workspace/i)).toBeNull();
+  });
+
+  it("does not report an unreachable WeCom as a bad secret", async () => {
+    mockManualInstall.mockRejectedValue(
+      new ApiError("verify_unavailable", 502, "Bad Gateway"),
+    );
+    const user = await openManualForm();
+
+    await user.type(screen.getByLabelText(/Bot ID/i), "bot-1");
+    await user.type(screen.getByLabelText(/^Secret$/i), "sec-1");
+    await user.click(screen.getByRole("button", { name: /Connect bot/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not reach WeCom to verify/i)).toBeTruthy();
+    });
+    expect(screen.queryByText(/WeCom rejected these credentials/i)).toBeNull();
+  });
+
+  it("opens straight into manual entry when scan install is unsupported", async () => {
+    installationsRef.current = {
+      installations: [],
+      configured: true,
+      install_supported: false,
+      manual_install_supported: true,
+    };
+    const user = renderBindButton();
+    await user.click(screen.getByRole("button", { name: /Bind to WeCom/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wecom-manual-install-form")).toBeTruthy();
+    });
+    // No scan session may be opened against a deployment that cannot scan, and
+    // there is no scan view to go back to.
+    expect(mockBeginInstall).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("wecom-install-switch-scan")).toBeNull();
+  });
+
+  it("hides the bind entry point entirely when neither path is supported", async () => {
+    installationsRef.current = {
+      installations: [],
+      configured: true,
+      install_supported: false,
+      manual_install_supported: false,
+    };
+    render(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    expect(screen.queryByTestId("wecom-agent-bind-button")).toBeNull();
   });
 });

@@ -156,6 +156,7 @@ import type {
   RedeemLarkBindingTokenResponse,
   ListWecomInstallationsResponse,
   BeginWecomInstallResponse,
+  ManualWecomInstallResponse,
   WecomInstallStatusResponse,
   RedeemWecomBindingResponse,
   ComposioToolkit,
@@ -339,6 +340,8 @@ import {
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   BeginWecomInstallResponseSchema,
   MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+  ManualWecomInstallResponseSchema,
+  MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE,
   WecomInstallStatusResponseSchema,
   MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
   RedeemWecomBindingResponseSchema,
@@ -3445,6 +3448,33 @@ export class ApiClient {
       BeginWecomInstallResponseSchema,
       MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
       { endpoint: "POST /api/workspaces/:id/wecom/install/begin" },
+    );
+  }
+
+  /** Connects an EXISTING WeCom bot from hand-entered credentials, as the
+   * alternative to the scan flow (which always provisions a brand new bot).
+   * Synchronous: the server verifies the credentials against WeCom before
+   * writing, so a rejected secret surfaces as an ApiError whose `message` is a
+   * stable ManualWecomInstallErrorCode. */
+  async manualWecomInstall(
+    workspaceId: string,
+    agentId: string,
+    botId: string,
+    secret: string,
+  ): Promise<ManualWecomInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/manual?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bot_id: botId, secret }),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      ManualWecomInstallResponseSchema,
+      MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/wecom/install/manual" },
     );
   }
 

@@ -8,6 +8,8 @@ import { QRCode } from "react-qr-code";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -271,6 +273,7 @@ export function WecomAgentBindButton({
     enabled: !!wsId,
   });
   const installSupported = listing?.install_supported === true;
+  const manualInstallSupported = listing?.manual_install_supported === true;
 
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
@@ -300,7 +303,10 @@ export function WecomAgentBindButton({
     );
   }
 
-  if (!installSupported) return null;
+  // Scan and manual entry are independently available: manual needs only the
+  // secretbox key, so a deployment without a provisioned WeCom scan source can
+  // still connect a bot by hand.
+  if (!installSupported && !manualInstallSupported) return null;
 
   return (
     <>
@@ -325,6 +331,8 @@ export function WecomAgentBindButton({
           wsId={wsId}
           agentId={agentId}
           agentName={agentName}
+          scanSupported={installSupported}
+          manualSupported={manualInstallSupported}
           onClose={() => setDialogOpen(false)}
         />
       )}
@@ -447,11 +455,15 @@ function WecomInstallDialog({
   wsId,
   agentId,
   agentName,
+  scanSupported,
+  manualSupported,
   onClose,
 }: {
   wsId: string;
   agentId: string;
   agentName?: string;
+  scanSupported: boolean;
+  manualSupported: boolean;
   onClose: () => void;
 }) {
   const { t } = useT("settings");
@@ -460,6 +472,12 @@ function WecomInstallDialog({
   const idempotencyKeyRef = useRef(crypto.randomUUID());
   const closedRef = useRef(false);
 
+  // Scan is the default; manual entry is the opt-in for connecting a bot that
+  // already exists in WeCom. When scan is unavailable on this deployment the
+  // dialog opens straight into the manual form.
+  const [mode, setMode] = useState<"scan" | "manual">(
+    scanSupported ? "scan" : "manual",
+  );
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [qrCodeURL, setQrCodeURL] = useState<string | null>(null);
   const [status, setStatus] = useState<WecomInstallStatusResponse["status"]>("creating");
@@ -537,7 +555,7 @@ function WecomInstallDialog({
 
   useEffect(() => {
     closedRef.current = false;
-    void beginSession();
+    if (mode === "scan") void beginSession();
     return () => {
       closedRef.current = true;
     };
@@ -545,6 +563,9 @@ function WecomInstallDialog({
   }, []);
 
   useEffect(() => {
+    // No session to poll in manual mode, and a stale scan session must stop
+    // polling the moment the user switches away from it.
+    if (mode !== "scan") return;
     if (!sessionId || status === "success" || status === "error") return;
 
     const intervalMs = Math.max(1000, pollIntervalSeconds * 1000);
@@ -604,15 +625,52 @@ function WecomInstallDialog({
       if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, status]);
+  }, [sessionId, status, mode]);
 
   function handleRetry() {
     idempotencyKeyRef.current = crypto.randomUUID();
     void beginSession();
   }
 
-  const showCreating = beginning || status === "creating";
-  const showQr = status === "pending" && !!qrCodeURL;
+  // switchMode clears the previous mode's outcome so a failed scan does not
+  // leave its error banner sitting above the manual form (and vice versa).
+  function switchMode(next: "scan" | "manual") {
+    setErrorReason(null);
+    setErrorMessage(null);
+    setMode(next);
+    if (next === "scan") {
+      idempotencyKeyRef.current = crypto.randomUUID();
+      void beginSession();
+    }
+  }
+
+  async function handleManualSubmit(botId: string, secret: string) {
+    setErrorReason(null);
+    setErrorMessage(null);
+    try {
+      await api.manualWecomInstall(wsId, agentId, botId, secret);
+      if (closedRef.current) return;
+      await qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
+      setStatus("success");
+      toast.success(t(($) => $.wecom.install_success_toast));
+      setTimeout(() => {
+        if (!closedRef.current) onClose();
+      }, 800);
+    } catch (e) {
+      if (closedRef.current) return;
+      // ApiError.message is the server's stable code, which the switch below
+      // localizes. Anything else is an unexpected failure.
+      setStatus("error");
+      setErrorReason(e instanceof ApiError ? e.message : "internal_error");
+      if (!(e instanceof ApiError)) {
+        setErrorMessage(e instanceof Error ? e.message : String(e));
+      }
+      throw e;
+    }
+  }
+
+  const showCreating = mode === "scan" && (beginning || status === "creating");
+  const showQr = mode === "scan" && status === "pending" && !!qrCodeURL;
 
   return (
     <Dialog
@@ -625,9 +683,11 @@ function WecomInstallDialog({
         <DialogHeader>
           <DialogTitle>{t(($) => $.wecom.install_dialog_title)}</DialogTitle>
           <DialogDescription>
-            {agentName
-              ? t(($) => $.wecom.install_dialog_description_for_agent, { agent: agentName })
-              : t(($) => $.wecom.install_dialog_description)}
+            {mode === "manual"
+              ? t(($) => $.wecom.manual_dialog_description)
+              : agentName
+                ? t(($) => $.wecom.install_dialog_description_for_agent, { agent: agentName })
+                : t(($) => $.wecom.install_dialog_description)}
           </DialogDescription>
         </DialogHeader>
 
@@ -680,6 +740,18 @@ function WecomInstallDialog({
                       return t(($) => $.wecom.install_error_session_lost);
                     case "forbidden":
                       return t(($) => $.wecom.install_error_forbidden);
+                    case "bot_credentials_required":
+                      return t(($) => $.wecom.manual_error_credentials_required);
+                    case "invalid_bot_credentials":
+                      return t(($) => $.wecom.manual_error_invalid_credentials);
+                    case "verify_unavailable":
+                      return t(($) => $.wecom.manual_error_verify_unavailable);
+                    case "bot_id_owned_by_another_workspace":
+                      return t(($) => $.wecom.manual_error_bot_id_other_workspace);
+                    case "bot_id_owned_in_this_workspace":
+                      return t(($) => $.wecom.manual_error_bot_id_this_workspace);
+                    case "bot_id_owned_by_archived_agent":
+                      return t(($) => $.wecom.manual_error_bot_id_archived_agent);
                     default:
                       return t(($) => $.wecom.install_error_generic);
                   }
@@ -692,10 +764,41 @@ function WecomInstallDialog({
               )}
             </div>
           )}
+
+          {mode === "manual" && status !== "success" && (
+            <WecomManualInstallForm onSubmit={handleManualSubmit} />
+          )}
+
+          {status !== "success" && (
+            <>
+              {mode === "scan" && manualSupported && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-caption"
+                  onClick={() => switchMode("manual")}
+                  data-testid="wecom-install-switch-manual"
+                >
+                  {t(($) => $.wecom.manual_switch_cta)}
+                </Button>
+              )}
+              {mode === "manual" && scanSupported && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-caption"
+                  onClick={() => switchMode("scan")}
+                  data-testid="wecom-install-switch-scan"
+                >
+                  {t(($) => $.wecom.manual_back_to_scan_cta)}
+                </Button>
+              )}
+            </>
+          )}
         </div>
 
         <DialogFooter>
-          {status === "error" ? (
+          {status === "error" && mode === "scan" ? (
             <>
               <Button variant="outline" size="sm" onClick={onClose}>
                 {t(($) => $.wecom.install_close)}
@@ -713,5 +816,81 @@ function WecomInstallDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// WecomManualInstallForm collects an existing bot's credentials. The secret is
+// masked and never echoed back by the server, so there is no "current value"
+// to prefill on a retry — a failed submit keeps what the user typed so they can
+// fix a typo instead of re-entering both fields.
+function WecomManualInstallForm({
+  onSubmit,
+}: {
+  onSubmit: (botId: string, secret: string) => Promise<void>;
+}) {
+  const { t } = useT("settings");
+  const [botId, setBotId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const canSubmit = botId.trim() !== "" && secret.trim() !== "" && !submitting;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(botId.trim(), secret.trim());
+    } catch {
+      // The dialog owns error display; the form only needs to re-enable.
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form
+      className="w-full space-y-3"
+      onSubmit={handleSubmit}
+      data-testid="wecom-manual-install-form"
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="wecom-manual-bot-id">
+          {t(($) => $.wecom.manual_bot_id_label)}
+        </Label>
+        <Input
+          id="wecom-manual-bot-id"
+          value={botId}
+          onChange={(e) => setBotId(e.target.value)}
+          placeholder={t(($) => $.wecom.manual_bot_id_placeholder)}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={submitting}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="wecom-manual-secret">
+          {t(($) => $.wecom.manual_secret_label)}
+        </Label>
+        <Input
+          id="wecom-manual-secret"
+          type="password"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          placeholder={t(($) => $.wecom.manual_secret_placeholder)}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={submitting}
+        />
+      </div>
+      <p className="text-micro text-muted-foreground">
+        {t(($) => $.wecom.manual_hint)}
+      </p>
+      <Button type="submit" size="sm" className="w-full" disabled={!canSubmit}>
+        {submitting
+          ? t(($) => $.wecom.manual_submitting)
+          : t(($) => $.wecom.manual_submit)}
+      </Button>
+    </form>
   );
 }

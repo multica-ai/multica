@@ -186,6 +186,8 @@ export type {
   BeginWecomInstallResponse,
   WecomInstallStatusResponse,
   RedeemWecomBindingResponse,
+  ManualWecomInstallResponse,
+  ManualWecomInstallErrorCode,
 } from "./wecom";
 export type {
   ComposioToolkit,

@@ -63,6 +63,11 @@ type fakeInstallStore struct {
 	failedRows    int64
 
 	reclaimCalled bool
+
+	// byAppID / ownerByAppID back the manual-install bot-id conflict checks,
+	// keyed by app_id. A missing key means the routing slot is free.
+	byAppID      map[string]db.ChannelInstallation
+	ownerByAppID map[string]db.GetChannelInstallationOwnerByAppIDRow
 }
 
 func newFakeStore() *fakeInstallStore {
@@ -71,6 +76,8 @@ func newFakeStore() *fakeInstallStore {
 		byRequestHash:  map[string]db.WecomInstallSession{},
 		pendingByAgent: map[string]db.WecomInstallSession{},
 		activeByAgent:  map[string]db.ChannelInstallation{},
+		byAppID:        map[string]db.ChannelInstallation{},
+		ownerByAppID:   map[string]db.GetChannelInstallationOwnerByAppIDRow{},
 	}
 }
 
@@ -246,6 +253,20 @@ func (f *fakeInstallStore) GetUser(context.Context, pgtype.UUID) (db.User, error
 func (f *fakeInstallStore) ReclaimDeadChannelInstallationByAppID(context.Context, db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error) {
 	f.reclaimCalled = true
 	return pgtype.UUID{}, pgx.ErrNoRows
+}
+
+func (f *fakeInstallStore) GetChannelInstallationByAppID(_ context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
+	if row, ok := f.byAppID[arg.AppID]; ok {
+		return row, nil
+	}
+	return db.ChannelInstallation{}, pgx.ErrNoRows
+}
+
+func (f *fakeInstallStore) GetChannelInstallationOwnerByAppID(_ context.Context, arg db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error) {
+	if row, ok := f.ownerByAppID[arg.AppID]; ok {
+		return row, nil
+	}
+	return db.GetChannelInstallationOwnerByAppIDRow{}, pgx.ErrNoRows
 }
 
 func (f *fakeInstallStore) DeleteRevokedChannelInstallationForReplacement(context.Context, db.DeleteRevokedChannelInstallationForReplacementParams) (pgtype.UUID, error) {

@@ -33,15 +33,16 @@ func TestListWecomInstallations_NotConfiguredReturnsEmpty(t *testing.T) {
 		t.Fatalf("expected Cache-Control=no-store, got %q", got)
 	}
 	var resp struct {
-		Installations    []map[string]any `json:"installations"`
-		Configured       bool             `json:"configured"`
-		InstallSupported bool             `json:"install_supported"`
+		Installations          []map[string]any `json:"installations"`
+		Configured             bool             `json:"configured"`
+		InstallSupported       bool             `json:"install_supported"`
+		ManualInstallSupported bool             `json:"manual_install_supported"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Configured || resp.InstallSupported {
-		t.Fatalf("expected configured=false and install_supported=false, got %+v", resp)
+	if resp.Configured || resp.InstallSupported || resp.ManualInstallSupported {
+		t.Fatalf("expected configured / install_supported / manual_install_supported all false, got %+v", resp)
 	}
 	if len(resp.Installations) != 0 {
 		t.Fatalf("expected empty installations, got %d", len(resp.Installations))
@@ -59,6 +60,28 @@ func TestBeginWecomInstall_NotConfigured(t *testing.T) {
 	}
 	if got := w.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("expected Cache-Control=no-store, got %q", got)
+	}
+}
+
+// TestManualWecomInstall_NotConfigured: manual entry needs the secretbox key
+// to seal the submitted secret, so with no install service wired the endpoint
+// refuses rather than writing a plaintext credential.
+func TestManualWecomInstall_NotConfigured(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/x/wecom/install/manual?agent_id=y",
+		strings.NewReader(`{"bot_id":"b","secret":"s"}`))
+	w := httptest.NewRecorder()
+	h.ManualWecomInstall(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected Cache-Control=no-store, got %q", got)
+	}
+	// A refused request must not echo the submitted secret back.
+	if strings.Contains(w.Body.String(), "s") && strings.Contains(w.Body.String(), "secret") {
+		t.Fatalf("response mentions the submitted secret: %s", w.Body.String())
 	}
 }
 

@@ -23,6 +23,10 @@ export interface ListWecomInstallationsResponse {
   /** Whether new scan-to-bind installs can complete end-to-end. Optional
    * so older desktop builds default to `undefined`, treated as unsupported. */
   install_supported?: boolean;
+  /** Whether hand-entered bot credentials can be installed. Needs only the
+   * secretbox key, so it can be true while `install_supported` is false on a
+   * deployment that never provisioned a WeCom scan source. */
+  manual_install_supported?: boolean;
 }
 
 /** Begin opens or resumes an install session. The response is always 202;
@@ -56,3 +60,22 @@ export interface RedeemWecomBindingResponse {
   workspace_id: string;
   installation_id: string;
 }
+
+/** Result of connecting an existing bot from hand-entered credentials. The
+ * endpoint is synchronous — it verifies the credentials against WeCom before
+ * writing — so there is no session to poll. */
+export interface ManualWecomInstallResponse {
+  installation_id: string;
+  bot_id: string;
+}
+
+/** Stable error codes `POST /wecom/install/manual` returns in the `error`
+ * field. The UI localizes these; it must not pattern-match prose. */
+export type ManualWecomInstallErrorCode =
+  | "bot_credentials_required"
+  | "invalid_bot_credentials"
+  | "verify_unavailable"
+  | "installation_conflict"
+  | "bot_id_owned_by_another_workspace"
+  | "bot_id_owned_in_this_workspace"
+  | "bot_id_owned_by_archived_agent";

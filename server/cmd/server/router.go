@@ -731,7 +731,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				SourceID: sourceID,
 				Box:      box,
 				Provider: provider,
-				Logger:   slog.Default(),
+				// Manual install probes the long connection to verify
+				// hand-entered credentials. Overridable for a private
+				// deployment; empty falls back to wecom.DefaultDialURL.
+				DialURL: strings.TrimSpace(os.Getenv("MULTICA_WECOM_DIAL_URL")),
+				Logger:  slog.Default(),
 			}, nil)
 			h.WecomInstall = installSvc
 			h.WecomOutboundReconciler = wecom.NewOutboundReconciler(wecom.OutboundReconcilerConfig{
@@ -1227,6 +1231,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/wecom/installations", h.ListWecomInstallations)
 					r.Post("/wecom/install/begin", h.BeginWecomInstall)
+					// Manual install opens an outbound long connection to
+					// verify the submitted credentials, so it gets its own
+					// per-IP budget on top of the auth + canManageAgent
+					// checks. A nil rdb makes the middleware a pass-through.
+					r.With(middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_WECOM_MANUAL_INSTALL", 10), time.Minute, trustedProxies)).
+						Post("/wecom/install/manual", h.ManualWecomInstall)
 					r.Get("/wecom/install/{sessionId}/status", h.GetWecomInstallStatus)
 					r.Delete("/wecom/installations/{installationId}", h.RevokeWecomInstallation)
 				})
