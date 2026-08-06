@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 const (
@@ -367,18 +368,29 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 				}
 			}
 		}
-		bus.Publish(events.Event{
+		payload := map[string]any{
+			"task_id":        util.UUIDToString(t.ID),
+			"agent_id":       util.UUIDToString(t.AgentID),
+			"issue_id":       util.UUIDToString(t.IssueID),
+			"status":         "failed",
+			"failure_reason": failureReason,
+			"retry_pending":  false,
+		}
+		if t.Error.Valid && t.Error.String != "" {
+			payload["error"] = redact.Text(t.Error.String)
+		}
+		e := events.Event{
 			Type:        protocol.EventTaskFailed,
 			WorkspaceID: workspaceID,
 			ActorType:   "system",
-			Payload: map[string]any{
-				"task_id":        util.UUIDToString(t.ID),
-				"agent_id":       util.UUIDToString(t.AgentID),
-				"issue_id":       util.UUIDToString(t.IssueID),
-				"status":         "failed",
-				"failure_reason": failureReason,
-			},
-		})
+			TaskID:      util.UUIDToString(t.ID),
+			Payload:     payload,
+		}
+		if t.ChatSessionID.Valid {
+			e.ChatSessionID = util.UUIDToString(t.ChatSessionID)
+			payload["chat_session_id"] = e.ChatSessionID
+		}
+		bus.Publish(e)
 		affectedAgents[util.UUIDToString(t.AgentID)] = t.AgentID
 	}
 	for _, agentID := range affectedAgents {

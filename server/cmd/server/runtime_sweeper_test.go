@@ -215,6 +215,15 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 			if e.WorkspaceID != testWorkspaceID {
 				t.Fatalf("expected WorkspaceID %s, got %s", testWorkspaceID, e.WorkspaceID)
 			}
+			if e.TaskID != taskID {
+				t.Fatalf("expected envelope TaskID %s, got %s", taskID, e.TaskID)
+			}
+			if payload["error"] != "task timed out" {
+				t.Fatalf("expected deliverable error %q, got %v", "task timed out", payload["error"])
+			}
+			if payload["failure_reason"] != "timeout" || payload["retry_pending"] != false {
+				t.Fatalf("unexpected failure metadata: reason=%v retry_pending=%v", payload["failure_reason"], payload["retry_pending"])
+			}
 			foundEvent = true
 			break
 		}

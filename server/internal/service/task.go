@@ -3979,8 +3979,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
-	// Broadcast
-	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+	// Broadcast. Channel subscribers need the same redacted failure text that
+	// was persisted in the chat transcript. A retry-pending attempt stays silent
+	// because its child reports the eventual terminal outcome.
+	s.broadcastTaskFailedEvent(ctx, task, errMsg, failureReason, retried != nil)
 
 	return &task, nil
 }
@@ -4481,7 +4483,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
+		retryPending := false
 		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+			retryPending = true
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
@@ -4536,20 +4540,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			workspaceID = s.ResolveTaskWorkspaceID(ctx, t)
 		}
 
-		if workspaceID != "" {
-			s.Bus.Publish(events.Event{
-				Type:        protocol.EventTaskFailed,
-				WorkspaceID: workspaceID,
-				ActorType:   "system",
-				Payload: map[string]any{
-					"task_id":        util.UUIDToString(t.ID),
-					"agent_id":       util.UUIDToString(t.AgentID),
-					"issue_id":       util.UUIDToString(t.IssueID),
-					"status":         "failed",
-					"failure_reason": failureReason,
-				},
-			})
-		}
+		s.publishTaskFailedEvent(workspaceID, t, t.Error.String, failureReason, retryPending)
 
 		affectedAgents[util.UUIDToString(t.AgentID)] = t.AgentID
 	}
@@ -4895,27 +4886,73 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	})
 }
 
-func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue) {
-	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
-	if workspaceID == "" {
-		return
-	}
+// taskEvent builds the shared task-lifecycle event contract. Scope hints are
+// duplicated on the envelope intentionally: current listeners remain
+// compatible with the payload map, while the realtime layer can route without
+// decoding it once per-resource fanout is enabled.
+func taskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...map[string]any) events.Event {
 	payload := map[string]any{
 		"task_id":  util.UUIDToString(task.ID),
 		"agent_id": util.UUIDToString(task.AgentID),
 		"issue_id": util.UUIDToString(task.IssueID),
 		"status":   task.Status,
 	}
-	if task.ChatSessionID.Valid {
-		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
-	}
-	s.Bus.Publish(events.Event{
+	e := events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
 		ActorType:   "system",
 		ActorID:     "",
+		TaskID:      util.UUIDToString(task.ID),
 		Payload:     payload,
-	})
+	}
+	if task.ChatSessionID.Valid {
+		chatSessionID := util.UUIDToString(task.ChatSessionID)
+		payload["chat_session_id"] = chatSessionID
+		e.ChatSessionID = chatSessionID
+	}
+	for _, fields := range extra {
+		for key, value := range fields {
+			payload[key] = value
+		}
+	}
+	return e
+}
+
+func (s *TaskService) publishTaskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...map[string]any) {
+	if workspaceID == "" {
+		return
+	}
+	s.Bus.Publish(taskEvent(eventType, workspaceID, task, extra...))
+}
+
+func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue, extra ...map[string]any) {
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	s.publishTaskEvent(eventType, workspaceID, task, extra...)
+}
+
+// taskFailedFields adds the terminal failure context required by channel
+// outbounds without changing the long-standing map payload used by existing
+// task event consumers. Error text is redacted and omitted while an automatic
+// retry is pending, so consumers can distinguish an intermediate failed
+// attempt from a user-visible terminal failure.
+func taskFailedFields(errMsg, failureReason string, retryPending bool) map[string]any {
+	fields := map[string]any{
+		"failure_reason": failureReason,
+		"retry_pending":  retryPending,
+	}
+	if errMsg != "" && !retryPending {
+		fields["error"] = redact.Text(errMsg)
+	}
+	return fields
+}
+
+func (s *TaskService) publishTaskFailedEvent(workspaceID string, task db.AgentTaskQueue, errMsg, failureReason string, retryPending bool) {
+	s.publishTaskEvent(protocol.EventTaskFailed, workspaceID, task, taskFailedFields(errMsg, failureReason, retryPending))
+}
+
+func (s *TaskService) broadcastTaskFailedEvent(ctx context.Context, task db.AgentTaskQueue, errMsg, failureReason string, retryPending bool) {
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	s.publishTaskFailedEvent(workspaceID, task, errMsg, failureReason, retryPending)
 }
 
 // ResolveTaskWorkspaceID determines the workspace ID for a task.
