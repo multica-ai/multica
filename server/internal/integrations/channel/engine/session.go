@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -49,6 +50,7 @@ type SessionQueries interface {
 	ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error
 	LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error)
 	UpdateChatMessageContentForChannelMedia(ctx context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error)
+	MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg db.MaterializeIssueChannelMediaMarkdownParams) (db.Issue, error)
 	CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error)
 	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error)
@@ -89,6 +91,9 @@ func (a dbSessionQueries) LockIssueForChannelMediaBind(ctx context.Context, arg 
 }
 func (a dbSessionQueries) UpdateChatMessageContentForChannelMedia(ctx context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error) {
 	return a.q.UpdateChatMessageContentForChannelMedia(ctx, arg)
+}
+func (a dbSessionQueries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg db.MaterializeIssueChannelMediaMarkdownParams) (db.Issue, error) {
+	return a.q.MaterializeIssueChannelMediaMarkdown(ctx, arg)
 }
 func (a dbSessionQueries) CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
 	return a.q.CreateAttachment(ctx, arg)
@@ -281,16 +286,21 @@ type AppendInput struct {
 }
 
 // BindMediaInput links already-uploaded media to either an /issue target or a
-// durable chat message in a short database-only transaction. Remote downloads/
-// uploads happen before this call and outside the connector ACK path.
+// durable chat message in a short database-only transaction. A valid
+// IssueDescriptionBase permits inline replacement only while the issue still
+// has its exact creation-time description; otherwise issue media appends as a
+// concurrency-safe fallback. Remote downloads/uploads happen before this call
+// and outside the connector ACK path.
 type BindMediaInput struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	IssueID     pgtype.UUID
-	Body        string
-	MediaRefs   []channel.MediaRef
+	MessageID            pgtype.UUID
+	SessionID            pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sender               pgtype.UUID
+	IssueID              pgtype.UUID
+	IssueDescriptionBase pgtype.Text
+	IssueCommandText     string
+	Body                 string
+	MediaRefs            []channel.MediaRef
 }
 
 // channelCommandMessageKind marks a visible user turn handled synchronously by
@@ -467,8 +477,9 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		claimed[k] = true
 	}
 	type createdMedia struct {
-		id  pgtype.UUID
-		ref channel.MediaRef
+		id       pgtype.UUID
+		ref      channel.MediaRef
+		filename string
 	}
 	created := make([]createdMedia, 0, len(in.MediaRefs))
 	ids := make([]pgtype.UUID, 0, len(in.MediaRefs))
@@ -510,9 +521,52 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 			return fmt.Errorf("create channel attachment: %w", err)
 		}
 		ids = append(ids, att.ID)
-		created = append(created, createdMedia{id: att.ID, ref: ref})
+		created = append(created, createdMedia{id: att.ID, ref: ref, filename: filename})
 	}
-	if len(ids) == 0 || in.IssueID.Valid {
+	if len(ids) == 0 {
+		return nil
+	}
+	if in.IssueID.Valid {
+		issueMarkdown := make([]string, 0, len(created))
+		replacements := make([]inlineMediaReplacement, 0, len(created))
+		for _, media := range created {
+			block := channelmedia.Block(
+				uuid.UUID(media.id.Bytes).String(),
+				media.filename,
+				media.ref.Type == channel.MsgTypeImage,
+			)
+			issueMarkdown = append(issueMarkdown, block)
+			if media.ref.InlinePlaceholder != "" {
+				replacements = append(replacements, inlineMediaReplacement{
+					placeholder: media.ref.InlinePlaceholder,
+					index:       media.ref.InlineIndex,
+					markdown:    block,
+				})
+			}
+		}
+
+		base := pgtype.Text{}
+		description := pgtype.Text{}
+		if in.IssueDescriptionBase.Valid {
+			if composed, changed := composeIssueCommandMediaDescription(
+				in.Body,
+				in.IssueCommandText,
+				replacements,
+				in.IssueDescriptionBase.String,
+			); changed {
+				base = in.IssueDescriptionBase
+				description = pgtype.Text{String: composed, Valid: true}
+			}
+		}
+		if _, err := qtx.MaterializeIssueChannelMediaMarkdown(ctx, db.MaterializeIssueChannelMediaMarkdownParams{
+			ID:              in.IssueID,
+			WorkspaceID:     in.WorkspaceID,
+			BaseDescription: base,
+			Description:     description.String,
+			Markdown:        pgtype.Text{String: strings.Join(issueMarkdown, "\n\n"), Valid: true},
+		}); err != nil {
+			return fmt.Errorf("materialize issue channel media markdown: %w", err)
+		}
 		return nil
 	}
 	linkedIDs, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
@@ -602,6 +656,59 @@ func composeInlineMediaBody(body string, replacements []inlineMediaReplacement) 
 	}
 	out.WriteString(body[last:])
 	return out.String(), true
+}
+
+// composeIssueCommandMediaDescription materializes media in the same positions
+// as the normalized inbound body, then removes the /issue directive line. Only
+// resolved media before the command is retained from the prefix; adapter-added
+// quoted context remains excluded from the issue description contract.
+func composeIssueCommandMediaDescription(body, commandText string, replacements []inlineMediaReplacement, fallback string) (string, bool) {
+	commandStart, _, ok := issueCommandLineBounds(body, commandText)
+	if !ok {
+		return fallback, false
+	}
+
+	type positionedMarkdown struct {
+		start    int
+		markdown string
+	}
+	prefix := make([]positionedMarkdown, 0, len(replacements))
+	for _, replacement := range replacements {
+		start := nthSubstringIndex(body, replacement.placeholder, replacement.index)
+		if start >= 0 && start < commandStart {
+			prefix = append(prefix, positionedMarkdown{start: start, markdown: replacement.markdown})
+		}
+	}
+	sort.Slice(prefix, func(i, j int) bool { return prefix[i].start < prefix[j].start })
+
+	composed, changed := composeInlineMediaBody(body, replacements)
+	if !changed {
+		return fallback, false
+	}
+	_, commandEnd, ok := issueCommandLineBounds(composed, commandText)
+	if !ok {
+		return fallback, false
+	}
+
+	parts := make([]string, 0, len(prefix)+1)
+	for _, item := range prefix {
+		if markdown := strings.TrimSpace(item.markdown); markdown != "" {
+			parts = append(parts, markdown)
+		}
+	}
+	if suffix := strings.TrimSpace(composed[commandEnd:]); suffix != "" {
+		parts = append(parts, suffix)
+	}
+	description := strings.Join(parts, "\n\n")
+	for _, replacement := range replacements {
+		if replacement.markdown != "" && strings.Contains(description, replacement.markdown) {
+			return description, true
+		}
+	}
+	// A malformed adapter layout placed every matched marker inside the command
+	// line that is removed above. Fall back to append so attachments never become
+	// invisible merely to preserve an unusable inline layout.
+	return fallback, false
 }
 
 func nthSubstringIndex(body, marker string, target int) int {

@@ -66,16 +66,17 @@ func TestSessionBinder_MapsMediaBodyAndIssueTarget(t *testing.T) {
 	message.Bytes[0], session.Bytes[0], workspace.Bytes[0], sender.Bytes[0], issue.Bytes[0] = 1, 2, 3, 4, 5
 	message.Valid, session.Valid, workspace.Valid, sender.Valid, issue.Valid = true, true, true, true, true
 	ref := channel.MediaRef{Type: channel.MsgTypeImage, InlinePlaceholder: "[Image]", InlineIndex: 0}
+	base := pgtype.Text{String: "[Image]\nfix login", Valid: true}
 	capture := &captureChatSession{}
 	binder := &sessionBinder{session: capture}
 	if err := binder.BindMedia(context.Background(), engine.BindMediaParams{
 		MessageID: message, SessionID: session, WorkspaceID: workspace, Sender: sender,
-		IssueID: issue, Body: "[Image]\nfix login", MediaRefs: []channel.MediaRef{ref},
+		IssueID: issue, IssueDescriptionBase: base, IssueCommandText: "/issue fix login", Body: "[Image]\nfix login", MediaRefs: []channel.MediaRef{ref},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	got := capture.media
-	if got.MessageID != message || got.SessionID != session || got.WorkspaceID != workspace || got.Sender != sender || got.IssueID != issue || got.Body != "[Image]\nfix login" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+	if got.MessageID != message || got.SessionID != session || got.WorkspaceID != workspace || got.Sender != sender || got.IssueID != issue || got.IssueDescriptionBase != base || got.IssueCommandText != "/issue fix login" || got.Body != "[Image]\nfix login" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
 		t.Fatalf("mapped media input = %+v", got)
 	}
 }

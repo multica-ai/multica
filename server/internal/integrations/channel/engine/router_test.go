@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -247,7 +248,7 @@ type fakeIssues struct {
 	opts               service.IssueCreateOpts
 	result             service.IssueCreateResult
 	err                error
-	attachmentsChanged int
+	attachmentsChanged atomic.Int64
 }
 
 func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o service.IssueCreateOpts) (service.IssueCreateResult, error) {
@@ -257,8 +258,8 @@ func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o se
 	return f.result, f.err
 }
 
-func (f *fakeIssues) PublishAttachmentsChanged(db.Issue, pgtype.UUID) {
-	f.attachmentsChanged++
+func (f *fakeIssues) PublishAttachmentsChanged(context.Context, db.Issue, pgtype.UUID) {
+	f.attachmentsChanged.Add(1)
 }
 
 type fakeTasks struct {
@@ -922,48 +923,74 @@ func TestRouter_IssueCommand_InfrastructureFailureRemainsError(t *testing.T) {
 }
 
 func TestRouter_IssueCommand_MediaTargetsCreatedIssue(t *testing.T) {
-	h := newHarness(t)
-	issueID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
-	issueTaskID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
-	h.binder.appendResult = AppendResult{
-		MessageID:   uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
-		DedupMarked: true,
-		IssueCommand: &IssueCommand{
-			Title: "Fix broken layout",
-		},
-	}
-	h.issues.result = service.IssueCreateResult{
-		Issue:          db.Issue{ID: issueID, Number: 42, Title: "Fix broken layout"},
-		AssignedTaskID: issueTaskID,
-	}
+	for _, tc := range []struct {
+		name        string
+		text        string
+		commandText string
+		title       string
+		description string
+	}{
+		{name: "image before command", text: "[Image]\n/issue 解读该架构图", commandText: "/issue 解读该架构图", title: "解读该架构图", description: ""},
+		{name: "command before image", text: "/issue 解读这个架构图\n[Image]", commandText: "/issue 解读这个架构图", title: "解读这个架构图", description: "[Image]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			issueID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+			issueTaskID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
+			h.binder.parseIssue = true
+			h.binder.appendResult = AppendResult{
+				MessageID:   uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
+				DedupMarked: true,
+			}
+			h.issues.result = service.IssueCreateResult{
+				Issue:          db.Issue{ID: issueID, Number: 42, Title: tc.title},
+				AssignedTaskID: issueTaskID,
+			}
+			msg := p2pMessage(t)
+			msg.Type = channel.MsgTypeImage
+			msg.Text = tc.text
+			// DingTalk omits its adapter-generated image marker from the command
+			// source, regardless of whether the image precedes or follows the text.
+			msg.CommandText = tc.commandText
 
-	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
-		t.Fatalf("resolved media not bound: %+v", h.binder.boundMedia())
-	}
-	if got := h.binder.boundMedia().IssueID; got != issueID {
-		t.Fatalf("media target issue = %v, want %v", got, issueID)
-	}
-	if h.issues.opts.AssignedAgentRunFireAt.IsZero() {
-		t.Fatal("media-backed /issue must defer its assigned-agent task")
-	}
-	if !waitFor(time.Second, func() bool {
-		h.tasks.mu.Lock()
-		defer h.tasks.mu.Unlock()
-		return len(h.tasks.issueTaskPromotions) == 1
-	}) {
-		t.Fatal("deferred issue task was not promoted after media binding")
-	}
-	h.tasks.mu.Lock()
-	gotTaskID := h.tasks.issueTaskPromotions[0]
-	h.tasks.mu.Unlock()
-	if gotTaskID != issueTaskID {
-		t.Fatalf("promoted issue task = %v, want %v", gotTaskID, issueTaskID)
-	}
-	if h.issues.attachmentsChanged != 1 {
-		t.Fatalf("attachment change events = %d, want 1", h.issues.attachmentsChanged)
+			if err := h.router.Handle(context.Background(), msg); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if h.issues.params.Title != tc.title {
+				t.Fatalf("created issue title = %q, want %q", h.issues.params.Title, tc.title)
+			}
+			if h.issues.params.Description.String != tc.description || h.issues.params.Description.Valid != (tc.description != "") {
+				t.Fatalf("created issue description = %#v, want %q", h.issues.params.Description, tc.description)
+			}
+			if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+				t.Fatalf("resolved media not bound: %+v", h.binder.boundMedia())
+			}
+			if got := h.binder.boundMedia().IssueID; got != issueID {
+				t.Fatalf("media target issue = %v, want %v", got, issueID)
+			}
+			if got := h.binder.boundMedia().IssueDescriptionBase; !got.Valid || got.String != tc.description {
+				t.Fatalf("media description base = %#v, want valid %q", got, tc.description)
+			}
+			if h.issues.opts.AssignedAgentRunFireAt.IsZero() {
+				t.Fatal("media-backed /issue must defer its assigned-agent task")
+			}
+			if !waitFor(time.Second, func() bool {
+				h.tasks.mu.Lock()
+				defer h.tasks.mu.Unlock()
+				return len(h.tasks.issueTaskPromotions) == 1
+			}) {
+				t.Fatal("deferred issue task was not promoted after media binding")
+			}
+			h.tasks.mu.Lock()
+			gotTaskID := h.tasks.issueTaskPromotions[0]
+			h.tasks.mu.Unlock()
+			if gotTaskID != issueTaskID {
+				t.Fatalf("promoted issue task = %v, want %v", gotTaskID, issueTaskID)
+			}
+			if !waitFor(time.Second, func() bool { return h.issues.attachmentsChanged.Load() == 1 }) {
+				t.Fatalf("attachment change events = %d, want 1", h.issues.attachmentsChanged.Load())
+			}
+		})
 	}
 }
 
@@ -1019,8 +1046,8 @@ func TestRouter_IssueCommand_BindFailurePromotesDeferredTaskWithoutAttachmentEve
 	}) {
 		t.Fatal("failed attachment bind left the issue task deferred")
 	}
-	if h.issues.attachmentsChanged != 0 {
-		t.Fatalf("attachment change events after failed bind = %d, want 0", h.issues.attachmentsChanged)
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("attachment change events after failed bind = %d, want 0", h.issues.attachmentsChanged.Load())
 	}
 }
 

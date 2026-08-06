@@ -125,16 +125,20 @@ type AppendResult struct {
 // BindMediaParams carries stored media references to the post-append
 // attachment transaction. MessageID is the durable chat_message whose pending
 // marker the binder clears. IssueID selects issue ownership for an /issue turn;
-// otherwise the references bind to MessageID. Media downloads must never run
-// inside this transaction.
+// otherwise the references bind to MessageID. IssueDescriptionBase is valid
+// only for an issue created by this turn and lets the binder replace inline
+// placeholders iff nobody edited the description first. Media downloads must
+// never run inside this transaction.
 type BindMediaParams struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	IssueID     pgtype.UUID
-	Body        string
-	MediaRefs   []channel.MediaRef
+	MessageID            pgtype.UUID
+	SessionID            pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sender               pgtype.UUID
+	IssueID              pgtype.UUID
+	IssueDescriptionBase pgtype.Text
+	IssueCommandText     string
+	Body                 string
+	MediaRefs            []channel.MediaRef
 }
 
 // IssueCommand is the parsed /issue command.
@@ -317,7 +321,7 @@ type ResolverSet struct {
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
-	PublishAttachmentsChanged(issue db.Issue, actorID pgtype.UUID)
+	PublishAttachmentsChanged(ctx context.Context, issue db.Issue, actorID pgtype.UUID)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to

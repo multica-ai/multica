@@ -161,18 +161,19 @@ func TestFeishuSessionBinder_BindMediaMapping(t *testing.T) {
 	b := &feishuSessionBinder{session: f}
 	ref := channel.MediaRef{Type: channel.MsgTypeImage, StorageURL: "https://cdn.example.test/image.png"}
 	if err := b.BindMedia(context.Background(), engine.BindMediaParams{
-		MessageID:   binderUUID(4),
-		SessionID:   binderUUID(1),
-		WorkspaceID: binderUUID(2),
-		Sender:      binderUUID(7),
-		IssueID:     binderUUID(8),
-		Body:        "[Image]",
-		MediaRefs:   []channel.MediaRef{ref},
+		MessageID:        binderUUID(4),
+		SessionID:        binderUUID(1),
+		WorkspaceID:      binderUUID(2),
+		Sender:           binderUUID(7),
+		IssueID:          binderUUID(8),
+		IssueCommandText: "/issue Real intent",
+		Body:             "[Image]",
+		MediaRefs:        []channel.MediaRef{ref},
 	}); err != nil {
 		t.Fatalf("BindMedia: %v", err)
 	}
 	got := f.mediaIn
-	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || got.IssueID != binderUUID(8) || got.Body != "[Image]" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || got.IssueID != binderUUID(8) || got.IssueCommandText != "/issue Real intent" || got.Body != "[Image]" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
 		t.Fatalf("media mapping wrong: %+v", got)
 	}
 }

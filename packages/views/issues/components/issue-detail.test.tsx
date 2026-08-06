@@ -180,6 +180,7 @@ vi.mock("../../editor", async () => ({
   ) {
     const initialValue = syncedValue ?? defaultValue ?? "";
     const valueRef = useRef(initialValue);
+    const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
     useEffect(() => {
       contentEditorMounts.count += 1;
@@ -189,6 +190,7 @@ vi.mock("../../editor", async () => ({
     useEffect(() => {
       if (syncedValue === undefined) return;
       valueRef.current = syncedValue;
+      baseRef.current = syncedValue;
       setEditorValue(syncedValue);
     }, [syncedValue]);
     useImperativeHandle(ref, () => ({
@@ -213,7 +215,7 @@ vi.mock("../../editor", async () => ({
         onChange={(e) => {
           valueRef.current = e.target.value;
           setEditorValue(e.target.value);
-          onUpdate?.(e.target.value);
+          onUpdate?.(e.target.value, baseRef.current);
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
@@ -1589,7 +1591,10 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
         "issue-1",
-        expect.objectContaining({ description: "" }),
+        expect.objectContaining({
+          description: "",
+          description_base: "Add JWT auth to the backend",
+        }),
       );
     });
   });

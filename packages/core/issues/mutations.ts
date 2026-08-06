@@ -239,10 +239,18 @@ export function useUpdateIssue() {
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
       // suppress_run / handoff_note are write-time control fields, not Issue
-      // columns — they steer enqueue/injection on the server and must never be
-      // written into the query cache (MUL-3375). Strip them from the patch; the
-      // mutationFn above still sends the full payload to the API.
-      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = data;
+      // columns. description_base is merge metadata, while description itself
+      // is resolved against that base on the server and therefore is not safe
+      // to predict optimistically. Keep the authoritative raw description in
+      // cache so hidden channel-media markers remain available as the base for
+      // a rapid follow-up edit. mutationFn still sends the full payload.
+      const {
+        suppress_run: _suppressRun,
+        handoff_note: _handoffNote,
+        description: _description,
+        description_base: _descriptionBase,
+        ...patch
+      } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
       // cache update happens in the same tick as mutate(). Awaiting would
       // yield to the event loop, letting @dnd-kit reset its visual state
@@ -338,6 +346,7 @@ export function useUpdateIssue() {
       const {
         suppress_run: _suppressRun,
         handoff_note: _handoffNote,
+        description_base: _descriptionBase,
         move_intent: _moveIntent,
         id: _id,
         ...intent
@@ -510,9 +519,17 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
-      // Control fields steer the server; they are not Issue columns and must
-      // not enter the cache (MUL-3375). mutationFn still sends them.
-      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = updates;
+      // Control and description-merge fields are not safe optimistic cache
+      // patches. The server resolves description against description_base, so
+      // preserve the authoritative raw description (including media markers)
+      // until a refetch returns the committed result.
+      const {
+        suppress_run: _suppressRun,
+        handoff_note: _handoffNote,
+        description: _description,
+        description_base: _descriptionBase,
+        ...patch
+      } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });

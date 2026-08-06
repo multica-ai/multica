@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -273,6 +274,14 @@ func TestBindMediaRefs_IssueAttachmentSurvivesChatSessionDeletion(t *testing.T) 
 	if gotIssueID != issueID || chatSessionID.Valid || chatMessageID.Valid {
 		t.Fatalf("attachment ownership = issue:%v session:%v message:%v", gotIssueID, chatSessionID, chatMessageID)
 	}
+	var description string
+	if err := pool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&description); err != nil {
+		t.Fatalf("load issue description: %v", err)
+	}
+	wantDescription := channelmedia.Block(uuidString(attachmentID), "issue-image.png", true)
+	if description != wantDescription {
+		t.Fatalf("issue description = %q, want %q", description, wantDescription)
+	}
 
 	if _, err := pool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, fixture.sessionID); err != nil {
 		t.Fatalf("delete chat session: %v", err)
@@ -283,6 +292,155 @@ func TestBindMediaRefs_IssueAttachmentSurvivesChatSessionDeletion(t *testing.T) 
 	}
 	if remaining != 1 {
 		t.Fatalf("issue attachment rows after chat deletion = %d, want 1", remaining)
+	}
+}
+
+func TestBindMediaRefs_MaterializesIssueImagesInOriginalRichTextOrder(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.Type("dingtalk"), SessionTitles{})
+	ctx := context.Background()
+	body := "/issue explain below questions\nWhat is this?\n[Image]\nAnd what is this?\n[Image]"
+	commandText := "/issue explain below questions\nWhat is this?And what is this?"
+	base := issueDescriptionFromCommandBody(body, commandText, "")
+
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                body,
+		CommandText:         commandText,
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, description, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'explain below questions', $2, 'todo', 'none', 'member', $3, 4)
+		RETURNING id
+	`, fixture.workspaceID, base, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	const firstKey = "workspaces/ws/dingtalk/issue-first"
+	const secondKey = "workspaces/ws/dingtalk/issue-second"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, firstKey, "https://cdn.example.test/issue-first", "pending")
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, secondKey, "https://cdn.example.test/issue-second", "pending")
+	if err := session.BindMediaRefs(ctx, BindMediaInput{
+		MessageID:            appendRes.MessageID,
+		SessionID:            fixture.sessionID,
+		WorkspaceID:          fixture.workspaceID,
+		Sender:               fixture.userID,
+		IssueID:              issueID,
+		IssueDescriptionBase: pgtype.Text{String: base, Valid: true},
+		IssueCommandText:     commandText,
+		Body:                 body,
+		MediaRefs: []channel.MediaRef{
+			{
+				Type: channel.MsgTypeImage, StorageKey: firstKey, StorageURL: "https://cdn.example.test/issue-first",
+				Filename: "first.png", MimeType: "image/png", InlinePlaceholder: "[Image]", InlineIndex: 0,
+			},
+			{
+				Type: channel.MsgTypeImage, StorageKey: secondKey, StorageURL: "https://cdn.example.test/issue-second",
+				Filename: "second.png", MimeType: "image/png", InlinePlaceholder: "[Image]", InlineIndex: 1,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT filename, id::text
+		FROM attachment
+		WHERE issue_id = $1
+	`, issueID)
+	if err != nil {
+		t.Fatalf("list issue attachments: %v", err)
+	}
+	defer rows.Close()
+	ids := map[string]string{}
+	for rows.Next() {
+		var filename, id string
+		if err := rows.Scan(&filename, &id); err != nil {
+			t.Fatalf("scan issue attachment: %v", err)
+		}
+		ids[filename] = id
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate issue attachments: %v", err)
+	}
+
+	var description string
+	if err := pool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&description); err != nil {
+		t.Fatalf("load issue description: %v", err)
+	}
+	want := "What is this?\n" + channelmedia.Block(ids["first.png"], "first.png", true) +
+		"\nAnd what is this?\n" + channelmedia.Block(ids["second.png"], "second.png", true)
+	if description != want {
+		t.Fatalf("issue description = %q, want %q", description, want)
+	}
+}
+
+func TestMaterializeIssueChannelMediaMarkdownPreservesEditedDescription(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, description, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Keep description', 'Reproduction steps', 'todo', 'none', 'member', $2, 2)
+		RETURNING id
+	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	const markdown = "![](/api/attachments/22222222-2222-4222-8222-222222222222/download)"
+	issue, err := db.New(pool).MaterializeIssueChannelMediaMarkdown(ctx, db.MaterializeIssueChannelMediaMarkdownParams{
+		ID:              issueID,
+		WorkspaceID:     fixture.workspaceID,
+		BaseDescription: pgtype.Text{String: "creation base", Valid: true},
+		Description:     "inline layout",
+		Markdown:        pgtype.Text{String: markdown, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeIssueChannelMediaMarkdown: %v", err)
+	}
+	want := "Reproduction steps\n\n" + markdown
+	if !issue.Description.Valid || issue.Description.String != want {
+		t.Fatalf("issue description = %#v, want %q", issue.Description, want)
+	}
+}
+
+func TestMaterializeIssueChannelMediaMarkdownReplacesUnchangedBase(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+
+	const base = "What is this?\n[Image]\nAnd what is this?\n[Image]"
+	const composed = "What is this?\n![](first)\n\nAnd what is this?\n![](second)"
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, description, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Keep layout', $2, 'todo', 'none', 'member', $3, 3)
+		RETURNING id
+	`, fixture.workspaceID, base, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	issue, err := db.New(pool).MaterializeIssueChannelMediaMarkdown(ctx, db.MaterializeIssueChannelMediaMarkdownParams{
+		ID:              issueID,
+		WorkspaceID:     fixture.workspaceID,
+		BaseDescription: pgtype.Text{String: base, Valid: true},
+		Description:     composed,
+		Markdown:        pgtype.Text{String: "fallback", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeIssueChannelMediaMarkdown: %v", err)
+	}
+	if !issue.Description.Valid || issue.Description.String != composed {
+		t.Fatalf("issue description = %#v, want %q", issue.Description, composed)
 	}
 }
 
