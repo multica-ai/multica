@@ -60,6 +60,17 @@ UPDATE inbox_item SET read = true
 WHERE id = $1
 RETURNING *;
 
+-- name: MarkInboxUnread :one
+-- Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+-- the inbox renders one row per issue carrying that group's NEWEST item, and
+-- the group's read state is that item's read state. Flipping the whole group
+-- unread would resurrect older siblings the user already dealt with and
+-- inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+-- UI shows.
+UPDATE inbox_item SET read = false
+WHERE id = $1
+RETURNING *;
+
 -- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1

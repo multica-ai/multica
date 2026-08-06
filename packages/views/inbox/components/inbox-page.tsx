@@ -16,6 +16,7 @@ import {
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
+  useMarkInboxUnread,
   useArchiveInbox,
   useUnarchiveInbox,
   useMarkAllInboxRead,
@@ -59,6 +60,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
+import { InboxContextMenuProvider } from "./inbox-context-menu";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
@@ -204,6 +206,7 @@ export function InboxPage() {
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const markUnreadMutation = useMarkInboxUnread();
   const archiveMutation = useArchiveInbox();
   const unarchiveMutation = useUnarchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
@@ -213,6 +216,13 @@ export function InboxPage() {
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
 
+
+  // An explicit "mark as unread" on the row that is currently open has to
+  // survive the auto-read effect below, which would otherwise fire on the very
+  // next commit and silently undo it. Holds that one item's id, and only while
+  // it stays selected: moving the selection elsewhere releases the guard, so
+  // re-opening the row later marks it read again like any other open.
+  const manualUnreadIdRef = useRef<string | null>(null);
 
   // Auto-mark-read whenever a selected item is unread — covers both click-
   // to-select and URL-param-select (e.g. OS notification click on desktop).
@@ -224,6 +234,7 @@ export function InboxPage() {
   const selectedRead = selected?.read;
   useEffect(() => {
     if (!selectedId || selectedRead) return;
+    if (manualUnreadIdRef.current === selectedId) return;
     markReadMutate(selectedId, {
       onError: (err) =>
         toast.error(
@@ -234,8 +245,43 @@ export function InboxPage() {
     });
   }, [selectedId, selectedRead, markReadMutate, t]);
 
+  // Release the guard as soon as the selection moves off the parked row.
+  useEffect(() => {
+    if (manualUnreadIdRef.current && manualUnreadIdRef.current !== selectedId) {
+      manualUnreadIdRef.current = null;
+    }
+  }, [selectedId]);
+
   const handleSelect = (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
+  };
+
+  const handleMarkRead = (id: string) => {
+    // Reading it back explicitly cancels an earlier park on the same row.
+    if (manualUnreadIdRef.current === id) manualUnreadIdRef.current = null;
+    markReadMutation.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_read_failed),
+        ),
+    });
+  };
+
+  const handleMarkUnread = (id: string) => {
+    // Only the open row needs the guard — the auto-read effect never touches
+    // the others, and arming it for a background row would suppress the very
+    // first open of that row later.
+    if (selected?.id === id) manualUnreadIdRef.current = id;
+    markUnreadMutation.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_unread_failed),
+        ),
+    });
   };
 
   // Both archive and unarchive remove the row from the list it was actioned
@@ -332,14 +378,14 @@ export function InboxPage() {
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
-        <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
+        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
           <NumberFlow
             value={unreadCount}
             animated={false}
             format={{ maximumFractionDigits: 0 }}
             aria-label={String(unreadCount)}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           />
         )}
       </div>
@@ -390,11 +436,11 @@ export function InboxPage() {
     <button
       type="button"
       onClick={() => setView("inbox")}
-      className="flex w-full shrink-0 items-center gap-1.5 border-b px-3 py-2 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex w-full shrink-0 items-center gap-1.5 border-b px-3 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate">{t(($) => $.list.archived_title)}</span>
-      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
         {archivedItems.length}
       </span>
     </button>
@@ -403,20 +449,29 @@ export function InboxPage() {
   const list = archivedError && isArchivedView ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Archive className="mb-3 h-8 w-8 text-muted-foreground/50" />
-        <p className="text-sm">{t(($) => $.errors.archived_load_failed)}</p>
+        <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
+        <p className="text-body">{t(($) => $.errors.archived_load_failed)}</p>
       </div>
     </div>
   ) : (
-    <InboxList
-      items={visibleItems}
+    <InboxContextMenuProvider
       view={view}
-      selectedKey={selectedKey}
-      archivedCount={archivedItems.length}
-      onSelect={handleSelect}
-      onAction={isArchivedView ? handleUnarchive : handleArchive}
-      onOpenArchived={openArchived}
-    />
+      actions={{
+        onMarkRead: handleMarkRead,
+        onMarkUnread: handleMarkUnread,
+        onAction: isArchivedView ? handleUnarchive : handleArchive,
+      }}
+    >
+      <InboxList
+        items={visibleItems}
+        view={view}
+        selectedKey={selectedKey}
+        archivedCount={archivedItems.length}
+        onSelect={handleSelect}
+        onAction={isArchivedView ? handleUnarchive : handleArchive}
+        onOpenArchived={openArchived}
+      />
+    </InboxContextMenuProvider>
   );
 
   const listPanel = (
@@ -427,18 +482,57 @@ export function InboxPage() {
     </>
   );
 
+  // Phone only: the detail fills the screen there, so the trip back to the list
+  // has to live inside it. On desktop the list is still on screen in the left
+  // panel and needs no back control at all.
+  //
+  // The detail owns the whole phone screen in four states — loaded, loading,
+  // not-found and crashed — so this control is threaded into all four below.
+  // Miss one and that state strands the reader with no way out.
+  const mobileBackAction = isMobile ? (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => setSelectedKey("")}
+      className="-ml-2 shrink-0 gap-1.5 text-muted-foreground"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      {/* Back goes to the list the user came FROM, so the label has to
+          name it — "Inbox" here would be a lie about the destination. */}
+      {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.back)}
+    </Button>
+  ) : undefined;
+
+  const mobileBackBar = mobileBackAction ? (
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">{mobileBackAction}</div>
+  ) : null;
+
   const detailContent = selected?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
     // newest one — keying on its id would remount IssueDetail on every event,
     // wiping the comment composer draft and resetting scroll position.
-    <ErrorBoundary resetKeys={[selected.issue_id]}>
+    <ErrorBoundary
+      resetKeys={[selected.issue_id]}
+      // The default fallback is a bare message card. On a phone it would be the
+      // only thing on screen, so it has to carry the way back too — the bar is
+      // the point here, the message is whatever the boundary caught.
+      fallback={mobileBackAction ? ({ error }) => (
+        <div className="flex flex-1 min-h-0 flex-col">
+          {mobileBackBar}
+          <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
+            {error.message}
+          </div>
+        </div>
+      ) : undefined}
+    >
       <IssueDetail
         key={selected.issue_id}
         issueId={selected.issue_id}
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={selected.details?.comment_id ?? undefined}
+        leadingAction={mobileBackAction}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -453,21 +547,21 @@ export function InboxPage() {
     </ErrorBoundary>
   ) : selected ? (
     <div className="p-6">
-      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
+      <h2 className="text-title font-semibold">{getInboxDisplayTitle(selected)}</h2>
+      <p className="mt-1 text-body text-muted-foreground">
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
       </p>
       {selected.body && (
-        <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+        <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {selected.body}
         </div>
       )}
       {isQuickCreateOutcome(selected.type) && selected.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
-          <p className="text-xs font-medium text-muted-foreground">
+          <p className="text-caption font-medium text-muted-foreground">
             {t(($) => $.detail.original_input)}
           </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
+          <p className="mt-1 whitespace-pre-wrap text-body">{selected.details.original_prompt}</p>
         </div>
       )}
       <div className="mt-4 flex gap-2">
@@ -481,7 +575,7 @@ export function InboxPage() {
               // candidate (still editable).
               const prompt = selected.details?.original_prompt ?? "";
               const agentId = selected.details?.agent_id;
-              useIssueDraftStore.getState().setDraft({
+              useIssueDraftStore.getState().setManual({
                 description: prompt,
                 ...(agentId
                   ? { assigneeType: "agent" as const, assigneeId: agentId }
@@ -542,28 +636,29 @@ export function InboxPage() {
       );
     }
 
-    // Mobile: show detail full-screen when an item is selected
+    // Mobile: show detail full-screen when an item is selected. The two kinds
+    // of selection get their chrome from different places, so they render
+    // differently — `InboxItem.issue_id` is nullable and a null one is a plain
+    // notification (a failed quick-create, say), not an issue.
+    if (selected?.issue_id) {
+      // No scroll container and no back bar of our own: `IssueDetail` owns
+      // both, and takes the way back through `leadingAction`. Wrapping it in
+      // an `overflow-y-auto` used to collapse its inner scroller to content
+      // height, which took its header (and the done/pin/more/sidebar actions
+      // in it) out of the pinned position, made `position: sticky` inside it a
+      // no-op, and pointed both scroll restoration and the timeline
+      // virtualizer at an element that never scrolls. This wrapper only has to
+      // give the detail a definite height to fill.
+      return <div className="flex flex-1 flex-col min-h-0">{detailContent}</div>;
+    }
+
     if (selected) {
+      // A notification body is a plain block with no header to host a leading
+      // slot and no scroller of its own, so this branch keeps supplying both.
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedKey("")}
-              className="gap-1.5 text-muted-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {/* Back goes to the list the user came FROM, so the label has to
-                  name it — "Inbox" here would be a lie about the destination. */}
-              {isArchivedView
-                ? t(($) => $.list.archived_title)
-                : t(($) => $.page.back)}
-            </Button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {detailContent}
-          </div>
+          {mobileBackBar}
+          <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
         </div>
       );
     }
@@ -618,8 +713,8 @@ export function InboxPage() {
       <div className="flex flex-col min-h-0 h-full">
         {detailContent ?? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm">
+            <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+            <p className="text-body">
               {visibleItems.length === 0
                 ? t(($) => $.detail.empty)
                 : t(($) => $.detail.select_prompt)}

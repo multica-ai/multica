@@ -1,6 +1,6 @@
 ---
 name: multica-creating-agents
-description: "Use when creating, inspecting, or debugging a Multica agent through the `multica agent` CLI or `POST /api/agents` — what each field is, its persisted shape, whether it is metadata-only or consumed by the daemon at claim time, which inputs are validated/rejected, how custom_env secrets are gated, and how skill binding behaves. Not for assigning issues to existing agents or for runtime task prompts."
+description: "Use when creating, inspecting, or debugging a Multica agent definition via the `multica agent` CLI or POST /api/agents. Not for assigning issues to agents that already exist, and not for runtime task prompts."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -20,8 +20,15 @@ These commands read state and have no side effects:
 ```bash
 multica agent get <agent-id> --output json      # full persisted agent record
 multica agent skills list <agent-id> --output json   # current skill bindings
-multica agent env get <agent-id> --output json  # plaintext env (owner/admin only, agents denied)
+multica agent env get <agent-id> --output json  # plaintext env (agent owner or ws owner/admin; agents denied)
 ```
+
+An agent can also be **unbound**: `runtime_id` is `NULL` (served as `""` with
+`runtime_bound: false`) after its runtime was deleted, which unbinds instead of
+deleting its agents (MUL-5559). An unbound agent keeps everything it owns and
+stays editable, but no trigger path will run it — they all refuse with
+`agent_runtime_required` — until `agent update <id> --runtime-id <runtime-id>` binds
+it again. Unbound is orthogonal to archived.
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
 `thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
@@ -58,8 +65,10 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
 adds a key when its flag was provided — `description`/`instructions` on a
 non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`thinking-level`, `service-tier`, `visibility`, …) on the flag being `Changed` — so omitted
-flags fall through to server defaults rather than sending empty strings.
+`thinking-level`, `service-tier`, `visibility`, …) on the flag being `Changed`
+— so omitted flags fall through to server defaults rather than sending empty
+strings. `--max-concurrent-tasks` is validated as 1–50 before the request is
+sent.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
@@ -85,6 +94,10 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
   `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
   `max_concurrent_tasks`, invocation permission (`permission_mode` +
   allow-list), and assigned workspace skills.
+- A copied `max_concurrent_tasks` is included only when the source value is
+  within 1–50. Historical out-of-range values are omitted so the new agent
+  receives the server default (`6`); an explicit out-of-range
+  `--max-concurrent-tasks` override is rejected before any API request.
 - Runtime-specific fields (`model`, `thinking_level`, `service_tier`) are copied
   ONLY when the target runtime is unchanged. `--runtime-id` selecting a
   different runtime drops them and REQUIRES `--model` (pass `--model ""` to
@@ -104,23 +117,30 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `description` | `agent.description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
-| `runtime_id` | `agent.runtime_id` | required (400) + must resolve to a runtime in this workspace | selects runtime/provider |
+| `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
-| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
+| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400. A runtime with no reasoning control (e.g. `hermes`) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
 | `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
-| `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
+| `max_concurrent_tasks` | `agent.max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
 
-Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
+Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
+Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 `custom_args` → `[]`, `avatar_url` → a random `emoji:<glyph>`, `visibility` →
-`private`, `max_concurrent_tasks` → `6`
+`private`
 (all materialized server-side before the insert). `custom_args`/`runtime_config`
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
+
+The 1–50 concurrency range applies consistently to manual create, update, and
+the create-from-template HTTP path. On create paths, an omitted field defaults
+to 6 while an explicitly supplied 0 is rejected; on update, omission preserves
+the current value. The CLI performs the same range check before sending create
+or update requests.
 
 `thinking_level` is validated only at the provider level: fixed-catalog
 providers reject an unrecognized literal, while dynamic-catalog providers such
@@ -176,14 +196,15 @@ Read-side facts (these are the wrong assumptions to avoid):
   list/get/create/update` and WS events return only `has_custom_env` (bool) and
   `custom_env_key_count` (int).
 - Reading plaintext values requires the dedicated `GET /api/agents/{id}/env`
-  endpoint (`multica agent env get`). It is gated to workspace **owner/admin**
-  members, and **agent actors are denied** regardless of the backing member's
-  role — a running agent cannot read another agent's secrets.
+  endpoint (`multica agent env get`). It is gated to the **agent's own human
+  owner** or a workspace **owner/admin**, and **agent actors are denied**
+  regardless of the backing member's role — a running agent cannot read another
+  agent's secrets, not even one its own human owns.
 - Writing values after creation does NOT go through `agent update`. The generic
   update handler rejects any `custom_env` field with a 400 ("use PUT
   /api/agents/{id}/env"). Plaintext env writes are handled by
-  `PUT /api/agents/{id}/env` (`multica agent env set`), which is owner/admin-only
-  and writes an audit row.
+  `PUT /api/agents/{id}/env` (`multica agent env set`), which carries the same
+  gate and writes an audit row.
 
 ### mcp_config
 

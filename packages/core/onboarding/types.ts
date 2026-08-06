@@ -61,8 +61,7 @@ export type UseCase =
  * for clean self-reported-attribution math (the array shape is
  * preserved for back-compat with v2 multi-select rows; the client
  * now always commits a one-element array), and `role` stays single
- * because downstream personalization (the Helper "About me" context)
- * wants a primary identity.
+ * because downstream personalization wants a primary identity.
  *
  * `role` / `use_case` are collected in-flow on the About-you step;
  * `source` is no longer asked during onboarding — it is collected

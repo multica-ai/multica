@@ -97,7 +97,56 @@ type AttachmentResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+// attachmentURLMode selects how DownloadURL is rendered on a response.
+//
+// MUL-5372 / GitHub #5999. A CloudFront-signed DownloadURL is ~800 chars, of
+// which ~630 are a Policy+Signature pair that is re-minted on every request
+// (the policy embeds now+TTL at second granularity). Emitting it for every
+// attachment of every list response is expensive three times over: raw payload,
+// a fresh RSA sign per attachment per request, and — because the bytes differ on
+// each read — it defeats any cache keyed on response content. Agents pay all
+// three and use none of it: they fetch files through the single-attachment
+// endpoint, which needs only the id.
+//
+// The mode is a caller capability declaration, never a server-side default
+// flip, so a client that does not know about it is served byte-identically to
+// before. See attachmentURLModeFromRequest.
+type attachmentURLMode int
+
+const (
+	// attachmentURLModeSigned pre-binds authorization into DownloadURL so the
+	// caller can hand it straight to a native resource load (browser <img>,
+	// Linking.openURL) that cannot attach an Authorization header. This is the
+	// default for every caller that does not opt out.
+	attachmentURLModeSigned attachmentURLMode = iota
+	// attachmentURLModeStable renders DownloadURL as the stable
+	// /api/attachments/{id}/download path. That endpoint re-signs and 302s on
+	// every hit, so the value stays correct forever and costs ~95 chars instead
+	// of ~800. Callers that pick this mode must be able to follow an
+	// authenticated redirect, or fetch a fresh signature from the
+	// single-attachment endpoint before handing a URL to a native loader.
+	attachmentURLModeStable
+)
+
+// ClientCapabilityStableAttachmentURLs is the X-Client-Capabilities token a
+// caller advertises to receive stable attachment paths instead of pre-signed
+// URLs in bulk responses. Reusing the existing capability header (rather than a
+// query parameter) keeps the declaration client-wide: it is a property of what
+// the caller can process, not of the resource being requested.
+const ClientCapabilityStableAttachmentURLs = "stable_attachment_urls"
+
+// attachmentURLModeFromRequest resolves the mode a request asked for. Absent or
+// unrecognized declarations resolve to attachmentURLModeSigned, which is what
+// makes this change safe to ship ahead of any client: the server default never
+// moves, callers migrate on their own release cadence.
+func attachmentURLModeFromRequest(r *http.Request) attachmentURLMode {
+	if r != nil && requestHasClientCapability(r, ClientCapabilityStableAttachmentURLs) {
+		return attachmentURLModeStable
+	}
+	return attachmentURLModeSigned
+}
+
+func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) AttachmentResponse {
 	id := uuidToString(a.ID)
 	resp := AttachmentResponse{
 		ID:           id,
@@ -112,7 +161,10 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	if h.CFSigner != nil {
+	// Only CloudFront mode overrides the stable path here; the presign and proxy
+	// modes already leave DownloadURL as the stable path and resolve it at
+	// download time, so stable mode is a no-op for them.
+	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
 	if a.IssueID.Valid {
@@ -277,10 +329,11 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 		slog.Error("failed to load attachments for comments", "error", err)
 		return nil
 	}
+	mode := attachmentURLModeFromRequest(r)
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
-		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a, mode))
 	}
 	return grouped
 }
@@ -304,7 +357,7 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
 	for _, a := range attachments {
 		mid := uuidToString(a.ChatMessageID)
-		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a, attachmentURLModeSigned))
 	}
 	return grouped
 }
@@ -507,7 +560,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+			writeJSON(w, http.StatusOK, h.attachmentToResponse(att, attachmentURLModeFromRequest(r)))
 			return
 		}
 
@@ -554,9 +607,10 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := attachmentURLModeFromRequest(r)
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
-		resp[i] = h.attachmentToResponse(a)
+		resp[i] = h.attachmentToResponse(a, mode)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -571,7 +625,12 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := h.attachmentToResponse(att)
+	// Always signed, regardless of what the caller advertised: this endpoint is
+	// the single source of fresh, natively-loadable URLs. Stable-mode callers
+	// (CLI `attachment download`, the web inline-media re-sign hook) exchange a
+	// stable path for a signature HERE, so honoring the capability would break
+	// the very flow that makes stable mode safe elsewhere.
+	resp := h.attachmentToResponse(att, attachmentURLModeSigned)
 	// Token-mode clients use this authenticated endpoint to replace the
 	// auth-gated API path with a URL that native media elements can load.
 	// Assert the same storage.DownloadPresigner that resolveAttachmentDownloadMode
@@ -580,7 +639,8 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	// stored Content-Disposition (inline for media, attachment otherwise), which
 	// keeps images renderable inline while preserving the original download
 	// filename.
-	if h.CFSigner == nil && h.resolveAttachmentDownloadMode(att.Url) == attachmentDownloadModePresign {
+	switch mode := h.resolveAttachmentDownloadMode(att.Url); {
+	case h.CFSigner == nil && mode == attachmentDownloadModePresign:
 		if presigner, ok := h.Storage.(storage.DownloadPresigner); ok {
 			key := h.Storage.KeyFromURL(att.Url)
 			signedURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), "")
@@ -590,6 +650,24 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 				resp.DownloadURL = signedURL
 			}
 		}
+	case h.CFSigner == nil && mode == attachmentDownloadModeProxy:
+		// Proxy mode has no signed storage URL to offer, so this response
+		// would otherwise hand back the auth-gated API path — which a
+		// native download on a token-mode client cannot authenticate,
+		// leaving the user with no file (MUL-5292). Mint a
+		// single-attachment, 60-second capability instead, so the same
+		// "replace the auth-gated path with something a native loader can
+		// fetch" contract holds in all three modes.
+		//
+		// Only here, never in attachmentToResponse: list responses are held
+		// far longer than the TTL, so a capability embedded in one would be
+		// expired by the time anything used it.
+		//
+		// Gated on CFSigner being nil for the same reason as the presign
+		// branch above: when a signer is configured attachmentToResponse has
+		// already produced a credential-free signed URL, which solves the
+		// native-download problem without a capability.
+		resp.DownloadURL = attachmentCapabilityPath(resp.ID, time.Now())
 	}
 
 	writeJSON(w, http.StatusOK, resp)

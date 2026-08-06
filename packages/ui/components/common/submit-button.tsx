@@ -62,13 +62,12 @@ function SubmitButton({
         <Square className="fill-current" aria-hidden="true" />
       </Button>
     );
-    if (!stopTooltip) return stopButton;
-    return (
+    return stopTooltip ? (
       <Tooltip>
         <TooltipTrigger render={stopButton} />
         <TooltipContent side="top">{stopTooltip}</TooltipContent>
       </Tooltip>
-    );
+    ) : stopButton;
   }
 
   const submitButton = (
@@ -77,24 +76,31 @@ function SubmitButton({
       className="rounded-full"
       disabled={disabled || loading || busy}
       aria-disabled={busy || undefined}
-      aria-busy={busy || undefined}
+      aria-busy={loading || busy || undefined}
       onClick={onClick}
       aria-label={ariaLabel}
     >
-      {loading ? (
+      {loading || busy ? (
+        // `busy` spins too, not just greys out: an upload can be running with
+        // nothing else on screen to explain the disabled control (a reopened
+        // composer is still rebuilding its placeholder, or the user deleted
+        // it). A spinner says "waiting on something" without a hover; the
+        // tooltip says what.
         <Loader2 className="animate-spin" aria-hidden="true" />
       ) : (
         <ArrowUp aria-hidden="true" />
       )}
     </Button>
   );
-  if (!tooltip) return submitButton;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={submitButton} />
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
+  const submitControl = !tooltip
+    ? submitButton
+    : (
+        <Tooltip>
+          <TooltipTrigger render={submitButton} />
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      );
+  return submitControl;
 }
 
 export { SubmitButton, type SubmitButtonProps };

@@ -16,7 +16,11 @@ import {
   computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
   formatDuration,
+  hasRateSample,
+  isSyntheticAgentRow,
   mergeAgentDashboardRows,
+  RESTRICTED_AGENTS_ROW_ID,
+  sortAgentFailures,
 } from "./utils";
 
 describe("aggregateDailyCost", () => {
@@ -287,6 +291,40 @@ describe("bucketUnknownAgentRows", () => {
     const out = bucketUnknownAgentRows([live, deletedA], null);
     expect(out.map((r) => r.agentId)).toEqual(["live", "deleted-a"]);
   });
+
+  // MUL-5409: the server folds agents the viewer may not see onto its own
+  // sentinel. That row is not in `knownAgentIds` either, and sweeping it into
+  // the "Deleted agents" bucket is exactly the lie the issue was filed for —
+  // those agents are alive.
+  it("keeps the server's restricted bucket out of the deleted bucket", () => {
+    const restricted = {
+      agentId: RESTRICTED_AGENTS_ROW_ID,
+      tokens: 70,
+      cost: 0.7,
+      seconds: 42,
+      taskCount: 3,
+    };
+    const out = bucketUnknownAgentRows(
+      [live, restricted, deletedA],
+      new Set(["live"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual([
+      "live",
+      RESTRICTED_AGENTS_ROW_ID,
+      DELETED_AGENTS_ROW_ID,
+    ]);
+    // It passes through whole: unlike a deleted agent it really ran, so its
+    // Time / Tasks columns carry real numbers.
+    expect(out.find((r) => r.agentId === RESTRICTED_AGENTS_ROW_ID)).toEqual(
+      restricted,
+    );
+  });
+
+  it("classifies both bucket ids as synthetic and real agents as not", () => {
+    expect(isSyntheticAgentRow(DELETED_AGENTS_ROW_ID)).toBe(true);
+    expect(isSyntheticAgentRow(RESTRICTED_AGENTS_ROW_ID)).toBe(true);
+    expect(isSyntheticAgentRow("live")).toBe(false);
+  });
 });
 
 describe("formatDuration", () => {
@@ -526,7 +564,7 @@ describe("aggregateFailureClasses / aggregateFailureReasons", () => {
 });
 
 describe("aggregateAgentFailures", () => {
-  it("ranks by failure count, carries the rate, and names the dominant class", () => {
+  it("ranks by failure count, carries the rate, and splits failures by class", () => {
     const result = aggregateAgentFailures([
       { agent_id: "a", failure_reason: "", task_count: 90 },
       { agent_id: "a", failure_reason: "timeout", task_count: 10 },
@@ -537,16 +575,62 @@ describe("aggregateAgentFailures", () => {
 
     // `a` fails 10% of the time, `b` fails 80% — but `a` is the bigger
     // absolute problem, so it ranks first and the rate rides along.
-    expect(result).toEqual([
-      { agentId: "a", failed: 10, total: 100, rate: 0.1, topClass: "timeout" },
-      { agentId: "b", failed: 4, total: 5, rate: 0.8, topClass: "runtime" },
+    expect(result.map((r) => [r.agentId, r.failed, r.total, r.rate])).toEqual([
+      ["a", 10, 100, 0.1],
+      ["b", 4, 5, 0.8],
     ]);
+    // The whole composition, not just the heaviest class: `b` failing two
+    // ways is the thing that decides whether to look at the agent or at the
+    // platform, and a single dominant-class label hid it.
+    expect(result[1]?.classes).toMatchObject({ runtime: 3, timeout: 1, auth: 0 });
   });
 
   it("drops agents with no failures — the list is triage, not a census", () => {
     expect(
       aggregateAgentFailures([{ agent_id: "clean", failure_reason: "", task_count: 42 }]),
     ).toEqual([]);
+  });
+});
+
+describe("sortAgentFailures", () => {
+  // `busy` is the workspace's biggest absolute problem; `flaky` is the least
+  // healthy per run; `once` is the small-sample trap — a single failed run is
+  // a 100% rate and would win the Rate ranking outright.
+  const rows = aggregateAgentFailures([
+    { agent_id: "busy", failure_reason: "", task_count: 900 },
+    { agent_id: "busy", failure_reason: "timeout", task_count: 100 },
+    { agent_id: "flaky", failure_reason: "", task_count: 80 },
+    { agent_id: "flaky", failure_reason: "runtime_offline", task_count: 20 },
+    { agent_id: "once", failure_reason: "timeout", task_count: 1 },
+  ]);
+
+  it("ranks by absolute failures by default", () => {
+    expect(sortAgentFailures(rows, "failed").map((r) => r.agentId)).toEqual([
+      "busy",
+      "flaky",
+      "once",
+    ]);
+  });
+
+  it("ranks by rate, with too-small samples demoted rather than dropped", () => {
+    // `once` is 100% and `flaky` only 20%, but one run is not evidence. The
+    // row still renders — the list has to reconcile with the workspace
+    // failure count above it.
+    expect(sortAgentFailures(rows, "rate").map((r) => r.agentId)).toEqual([
+      "flaky",
+      "busy",
+      "once",
+    ]);
+  });
+
+  it("marks which rows have enough runs for their rate to mean anything", () => {
+    expect(rows.map((r) => hasRateSample(r))).toEqual([true, true, false]);
+  });
+
+  it("leaves the input array untouched", () => {
+    const before = rows.map((r) => r.agentId);
+    sortAgentFailures(rows, "rate");
+    expect(rows.map((r) => r.agentId)).toEqual(before);
   });
 });
 
@@ -580,17 +664,17 @@ describe("anonymizeUnresolvedAgentRows", () => {
     expect(result.map((r) => r.task_count)).toEqual([5, 5, 6, 5, 10]);
   });
 
-  it("keeps the bucket's dominant class honest across merged agents", () => {
+  it("keeps the bucket's class split honest across merged agents", () => {
     // This is why the rewrite happens on RAW rows. private-a is auth-dominant
     // (6 vs 5) and private-b is timeout-only (10). Merging AFTER aggregation
-    // would see only each agent's top class and its total failure count —
-    // auth 11, timeout 10 — and label the bucket Auth. The true composition
-    // is timeout 15 / auth 6, so it must read Timeout.
+    // would see only each agent's dominant class and its total failure count —
+    // auth 11, timeout 10 — while the true composition is timeout 15 / auth 6.
     const bucket = aggregateAgentFailures(
       anonymizeUnresolvedAgentRows(rows, new Set(["visible"])),
     ).find((r) => r.agentId === UNRESOLVED_AGENTS_ROW_ID);
 
-    expect(bucket).toMatchObject({ failed: 21, total: 21, topClass: "timeout" });
+    expect(bucket).toMatchObject({ failed: 21, total: 21 });
+    expect(bucket?.classes).toMatchObject({ timeout: 15, auth: 6 });
   });
 
   it("anonymizes everything while the agent list is still loading", () => {

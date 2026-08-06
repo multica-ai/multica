@@ -87,10 +87,10 @@ export function RenameMachineDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pb-4 pt-5">
-          <h2 className="text-base font-semibold">
+          <h2 className="text-title-sm font-semibold">
             {t(($) => $.machine.rename_dialog.title)}
           </h2>
-          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+          <p className="mt-1 text-body leading-5 text-muted-foreground">
             {t(($) => $.machine.rename_dialog.description)}
           </p>
 
@@ -108,7 +108,7 @@ export function RenameMachineDialog({
               }
             }}
           />
-          <p className="mt-1.5 text-xs text-muted-foreground">
+          <p className="mt-1.5 text-caption text-muted-foreground">
             {t(($) => $.machine.rename_dialog.hint)}
           </p>
         </div>

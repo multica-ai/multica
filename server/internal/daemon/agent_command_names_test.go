@@ -16,16 +16,24 @@ import (
 // TestDefaultAgentCommandNamesCoversAllProbes guards the invariant documented
 // on defaultAgentCommandNames: the shell-fallback resolver only pre-fetches
 // canonical paths for the bare command names in that list, so every agent the
-// LoadConfig probe loop tries must appear there. A GUI/Launchpad-started
-// daemon does not inherit the interactive shell PATH, so an agent missing from
-// this list is undetectable when its binary lives only on the login-shell PATH
-// (e.g. an `npm install -g` global). This test parses config.go's probe(...)
-// calls so a new probe can't silently diverge from the fallback list.
+// probe loop tries must appear there. A GUI/Launchpad-started daemon does not
+// inherit the interactive shell PATH, so an agent missing from this list is
+// undetectable when its binary lives only on the login-shell PATH (e.g. an
+// `npm install -g` global). This test parses the probe(...) calls so a new
+// probe can't silently diverge from the fallback list.
+//
+// It parses agents_probe.go, which is where probeAgentCLIs now lives. It used
+// to parse config.go and silently degraded into a no-op when the probe loop
+// moved out of that file — which is how the missing "qodercli" entry survived
+// (MUL-5524). probeSourceFile is asserted to actually contain probe() calls so
+// a future move fails loudly instead of vacuously passing.
+const probeSourceFile = "agents_probe.go"
+
 func TestDefaultAgentCommandNamesCoversAllProbes(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "config.go", nil, 0)
+	file, err := parser.ParseFile(fset, probeSourceFile, nil, 0)
 	if err != nil {
-		t.Fatalf("parse config.go: %v", err)
+		t.Fatalf("parse %s: %v", probeSourceFile, err)
 	}
 
 	known := make(map[string]bool, len(defaultAgentCommandNames))
@@ -34,6 +42,7 @@ func TestDefaultAgentCommandNamesCoversAllProbes(t *testing.T) {
 	}
 
 	var missing []string
+	var probeCalls int
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -52,6 +61,7 @@ func TestDefaultAgentCommandNamesCoversAllProbes(t *testing.T) {
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
+		probeCalls++
 		name := lit.Value
 		if len(name) >= 2 {
 			name = name[1 : len(name)-1] // strip surrounding quotes
@@ -61,6 +71,15 @@ func TestDefaultAgentCommandNamesCoversAllProbes(t *testing.T) {
 		}
 		return true
 	})
+
+	// Without this the whole test passes vacuously the moment probeAgentCLIs
+	// moves to another file, which is exactly how this guard failed before.
+	if probeCalls < len(defaultAgentCommandNames) {
+		t.Fatalf("found only %d probe() call(s) with a literal command name in %s, "+
+			"expected at least %d (one per default agent command); "+
+			"did the probe loop move, or is a provider probed without probe()?",
+			probeCalls, probeSourceFile, len(defaultAgentCommandNames))
+	}
 
 	if len(missing) > 0 {
 		sort.Strings(missing)
@@ -90,9 +109,6 @@ func TestAgentCLIGuardCoversDefaultCommands(t *testing.T) {
 		if !guarded[name] {
 			t.Errorf("default agent command %q is not covered by the test guard", name)
 		}
-	}
-	if !guarded["qodercli"] {
-		t.Error("default qoder command \"qodercli\" is not covered by the test guard")
 	}
 }
 

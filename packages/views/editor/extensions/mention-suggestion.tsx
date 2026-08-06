@@ -16,6 +16,7 @@ import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { isImeComposing } from "@multica/core/utils";
 import type {
@@ -31,6 +32,11 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import type { IssueStatus, ProjectStatus } from "@multica/core/types";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
@@ -42,7 +48,15 @@ import {
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import {
+  createSuggestionPopupRender,
+} from "./suggestion-popup";
+import {
+  isPickerAcceptKey,
+  pickerNavigationDirection,
+} from "../../common/picker-keys";
+import { isTriggerArmedAt } from "./suggestion-trigger-arming";
+import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +76,8 @@ export interface MentionItem {
   icon?: string | null;
   /** Project status snapshot for recent/current project rendering */
   projectStatus?: ProjectStatus;
+  /** Present when the target should remain discoverable but cannot be selected. */
+  disabledReason?: "agent_runtime_required";
 }
 
 interface MentionListProps {
@@ -252,18 +268,23 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     // yet, fall back to the first row. This self-heals across reorders and
     // async result arrival without ever force-resetting an active selection.
     const selectedIndex = useMemo(() => {
-      if (selectedKey === null) return 0;
+      const firstSelectable = orderedItems.findIndex((item) => !item.disabledReason);
+      if (selectedKey === null) return firstSelectable;
       const i = orderedItems.findIndex((it) => mentionItemKey(it) === selectedKey);
-      return i === -1 ? 0 : i;
+      return i === -1 || orderedItems[i]?.disabledReason
+        ? firstSelectable
+        : i;
     }, [orderedItems, selectedKey]);
 
     useEffect(() => {
-      itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
+      if (selectedIndex >= 0) {
+        itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
+      }
     }, [selectedIndex]);
 
     const selectItem = useCallback(
       (item: MentionItem | undefined) => {
-        if (!item) return;
+        if (!item || item.disabledReason) return;
         const wsId = getCurrentWsId();
         if (wsId) recordMentionUsage(wsId, item);
         command(item);
@@ -276,22 +297,29 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // IME is composing — don't intercept Enter/Arrow as picker actions;
         // those keys belong to the IME (Enter commits composition, etc).
         if (isImeComposing(event)) return false;
-        if (event.key === "ArrowUp") {
-          if (orderedItems.length === 0) return true;
-          const next = (selectedIndex + orderedItems.length - 1) % orderedItems.length;
-          setSelectedKey(mentionItemKey(orderedItems[next]!));
-          return true;
-        }
-        if (event.key === "ArrowDown") {
-          if (orderedItems.length === 0) return true;
-          const next = (selectedIndex + 1) % orderedItems.length;
+        // Arrow keys plus the Ctrl+N/J/P/K aliases the command bar accepts —
+        // see pickerNavigationDirection.
+        const direction = pickerNavigationDirection(event);
+        if (direction !== null) {
+          const selectableIndexes = orderedItems.flatMap((item, index) =>
+            item.disabledReason ? [] : [index],
+          );
+          if (selectableIndexes.length === 0) return true;
+          const current = selectableIndexes.indexOf(selectedIndex);
+          const delta =
+            direction === "next" ? 1 : selectableIndexes.length - 1;
+          const next =
+            selectableIndexes[
+              ((current === -1 ? 0 : current) + delta) %
+                selectableIndexes.length
+            ]!;
           setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
         // Enter is the canonical accept; plain Tab is an additive alias (see
         // isPickerAcceptKey). Shift/modifier+Tab fall through to focus nav.
         if (isPickerAcceptKey(event)) {
-          if (orderedItems.length === 0) return true;
+          if (selectedIndex < 0) return true;
           selectItem(orderedItems[selectedIndex]);
           return true;
         }
@@ -305,7 +333,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         (isSearching || searchedQuery !== normalizedQuery);
 
       return (
-        <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
+        <div className="rounded-md border bg-popover p-2 text-caption text-muted-foreground shadow-md">
           {isWaitingForServer
             ? t(($) => $.mention.searching)
             : t(($) => $.mention.no_results)}
@@ -365,7 +393,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       >
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+            <div className="px-3 py-2 text-micro font-semibold uppercase tracking-wide text-muted-foreground">
               {groupLabel(group.label)}
             </div>
             {renderRows(group)}
@@ -392,6 +420,7 @@ function MentionRow({
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   const { t } = useT("editor");
+  const { t: issuesT } = useT("issues");
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
@@ -400,7 +429,7 @@ function MentionRow({
       <button
         type="button"
         ref={buttonRef}
-        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-caption transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         } ${isClosed ? "opacity-60" : ""}`}
         onClick={onSelect}
@@ -434,7 +463,7 @@ function MentionRow({
       <button
         type="button"
         ref={buttonRef}
-        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-caption transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         }`}
         onClick={onSelect}
@@ -457,13 +486,20 @@ function MentionRow({
     );
   }
 
-  return (
+  const disabledMessage = item.disabledReason
+    ? blockedReasonLabel(item.disabledReason, issuesT)
+    : null;
+  const button = (
     <button
       type="button"
       ref={buttonRef}
-      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
-        selected ? "bg-accent" : "hover:bg-accent/50"
-      }`}
+      aria-disabled={disabledMessage ? true : undefined}
+      aria-label={
+        disabledMessage ? `${item.label}: ${disabledMessage}` : undefined
+      }
+      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-caption transition-colors ${
+        selected ? "bg-accent" : disabledMessage ? "" : "hover:bg-accent/50"
+      } ${disabledMessage ? "cursor-not-allowed opacity-50" : ""}`}
       onClick={onSelect}
     >
       <ActorAvatar
@@ -478,14 +514,25 @@ function MentionRow({
       {item.type === "agent" && (
         // "Agent" is a glossary-protected product term — kept un-translated.
         // eslint-disable-next-line i18next/no-literal-string
-        <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
+        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">Agent</Badge>
       )}
       {item.type === "squad" && (
         // "Squad" is a glossary-protected product term — kept un-translated.
         // eslint-disable-next-line i18next/no-literal-string
-        <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Squad</Badge>
+        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">Squad</Badge>
       )}
     </button>
+  );
+
+  if (!disabledMessage) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={button} />
+      <TooltipContent side="top" className="max-w-72 text-caption">
+        {disabledMessage}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -586,11 +633,35 @@ export function createMentionSuggestion(
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
       )
-      .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
+      .map((a) => ({
+        id: a.id,
+        label: a.name,
+        type: "agent" as const,
+        disabledReason: isAgentRuntimeBound(a)
+          ? undefined
+          : ("agent_runtime_required" as const),
+      }));
+    const activeAgentRuntimeBinding = new Map(
+      agents
+        .filter((agent) => !agent.archived_at)
+        .map((agent) => [agent.id, isAgentRuntimeBound(agent)]),
+    );
 
     const squadItems: MentionItem[] = squads
-      .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
-      .map((s) => ({ id: s.id, label: s.name, type: "squad" as const }));
+      .filter(
+        (s) =>
+          !s.archived_at &&
+          (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)),
+      )
+      .map((s) => ({
+        id: s.id,
+        label: s.name,
+        type: "squad" as const,
+        disabledReason:
+          activeAgentRuntimeBinding.get(s.leader_id) === false
+            ? ("agent_runtime_required" as const)
+            : undefined,
+      }));
 
     // Members and agents share a single ranked list — recently mentioned
     // targets come first regardless of type, with an alphabetical fallback
@@ -617,6 +688,10 @@ export function createMentionSuggestion(
   return {
     pluginKey,
     allowSpaces: true,
+    // Only open over an `@` the user actually typed. Tiptap matches on document
+    // content alone, so without this a pasted, dropped, undone or server-loaded
+    // `@` opens the picker just as readily (MUL-5429).
+    shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();

@@ -96,14 +96,38 @@ function clip(value: string, max: number): string {
 }
 
 /**
+ * Localizable phrasing the presenter cannot produce on its own. This module
+ * stays free of React and i18n so it remains unit-testable in isolation, so the
+ * caller injects the wording instead. Omitting it falls back to English, which
+ * keeps the fallback safe rather than blank.
+ */
+export interface TraceSummaryLabels {
+  /**
+   * Phrase a multi-file patch, e.g. `src/a.go +2 more`.
+   *
+   * `extraCount` is the number of files *beyond* the named one, not the total.
+   * Translations must say "and N more", not "N files in total" — the two read
+   * almost the same in English and diverge in other languages.
+   */
+  morePaths?: (path: string, extraCount: number) => string;
+}
+
+/**
  * The single most informative argument of a tool call, as one line. Preference
  * order matches what a reviewer scans for first, falling back to the first
  * short string value.
  */
-export function traceToolArgSummary(input: Record<string, unknown> | undefined): string {
+export function traceToolArgSummary(
+  input: Record<string, unknown> | undefined,
+  labels?: TraceSummaryLabels,
+): string {
   if (!input) return "";
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
   if (str(input.query)) return str(input.query);
+  // A multi-file patch has no single path field; without this the row's
+  // summary would fall through to the generic scan and come back empty.
+  const patch = readPatchSummary(input, labels);
+  if (patch) return patch;
   if (str(input.file_path)) return shortenTracePath(str(input.file_path));
   if (str(input.path)) return shortenTracePath(str(input.path));
   if (str(input.pattern)) return str(input.pattern);
@@ -131,14 +155,16 @@ function collapseWhitespace(value: string | undefined): string {
 }
 
 /** One-line summary for the collapsed row — never contains a newline. */
-export function traceEventSummary(event: TraceEvent): string {
+export function traceEventSummary(event: TraceEvent, labels?: TraceSummaryLabels): string {
   switch (traceEventKind(event)) {
     case "thinking":
       return clip(firstLine(event.content), 200);
     case "tool_use":
-      return traceToolArgSummary(event.input);
+      return traceToolArgSummary(event.input, labels);
     case "tool_result":
-      return clip(collapseWhitespace(event.output), 200);
+      // Unwrap first: the collapsed row is the one people read without
+      // clicking, so it must not show transport escaping.
+      return clip(collapseWhitespace(unwrapToolOutput(event.output ?? "")), 200);
     default:
       return firstLine(event.content ?? event.output);
   }
@@ -158,7 +184,9 @@ export function traceEventCopyText(event: TraceEvent): string {
       body = event.input ? JSON.stringify(event.input, null, 2) : "";
       break;
     case "tool_result":
-      body = event.output ?? "";
+      // Match what the row displays, so copied evidence reads like the
+      // terminal output rather than its transport encoding.
+      body = unwrapToolOutput(event.output ?? "");
       break;
     default:
       body = event.content ?? "";
@@ -166,6 +194,355 @@ export function traceEventCopyText(event: TraceEvent): string {
   const date = event.created_at ? new Date(event.created_at) : null;
   const timestamp = date && !Number.isNaN(date.getTime()) ? `[${date.toISOString()}] ` : "";
   return body ? `${timestamp}[${label}] ${body}` : `${timestamp}[${label}]`;
+}
+
+/**
+ * Tool output is persisted JSON-encoded, so a result arrives as a quoted string
+ * whose newlines are escaped. Decode exactly one layer so it reads as the
+ * terminal output it was. Anything that is not a wrapped string — a bare JSON
+ * document, plain prose, a truncated body — is returned untouched.
+ */
+export function unwrapToolOutput(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length < 2 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return raw;
+  try {
+    const decoded: unknown = JSON.parse(trimmed);
+    return typeof decoded === "string" ? decoded : raw;
+  } catch {
+    return raw;
+  }
+}
+
+export type TraceDiffLineKind = "add" | "remove" | "context" | "gap";
+
+export interface TraceDiffLine {
+  kind: TraceDiffLineKind;
+  text: string;
+  /** Number of context lines a `gap` stands in for. Absent on other kinds. */
+  hidden?: number;
+}
+
+/**
+ * Expanded-row body. A replacement reads as a diff; a whole-file write reads as
+ * plain content, because nothing was compared — marking all of it `+` adds
+ * noise, not information. A patch carries one entry per file, since a single
+ * Codex `patch_apply` routinely touches several. Everything else is text.
+ */
+export type TraceEventDetail =
+  | { kind: "diff"; path: string; lines: TraceDiffLine[] }
+  | { kind: "file"; path: string; text: string; lineCount: number }
+  | { kind: "patch"; files: TracePatchFile[]; truncated: boolean }
+  | { kind: "text"; text: string };
+
+/** Body of one file inside a multi-file patch. */
+export type TracePatchBody =
+  | { kind: "diff"; lines: TraceDiffLine[] }
+  | { kind: "file"; text: string; lineCount: number }
+  /** Path and kind are known but the body was dropped by the size budget. */
+  | { kind: "none" };
+
+export interface TracePatchFile {
+  path: string;
+  /** `add` | `delete` | `update`, verbatim from the provider when reported. */
+  changeKind?: string;
+  /** Rename destination, when the change moved the file. */
+  movePath?: string;
+  /** True when this file's body was trimmed to fit the payload budget. */
+  truncated?: boolean;
+  body: TracePatchBody;
+}
+
+/** An empty body is zero lines, not one blank line — a pure deletion has no `+`. */
+function toLines(value: string): string[] {
+  return value.length === 0 ? [] : value.split("\n");
+}
+
+// Above this product the LCS table costs more than the readability is worth, so
+// the change degrades to a plain replacement block instead of a minimal diff.
+const MAX_DIFF_CELLS = 250_000;
+
+/** Minimal line diff. Removals precede additions inside a change block. */
+export function diffTraceLines(before: string[], after: string[]): TraceDiffLine[] {
+  const n = before.length;
+  const m = after.length;
+  const out: TraceDiffLine[] = [];
+
+  if (n * m > MAX_DIFF_CELLS) {
+    for (const text of before) out.push({ kind: "remove", text });
+    for (const text of after) out.push({ kind: "add", text });
+    return out;
+  }
+
+  // Flat (n+1) x (m+1) table: lcs[i][j] is the longest common subsequence of
+  // before[i:] and after[j:]. Typed-array cells stay `number` under
+  // noUncheckedIndexedAccess, and one allocation beats n+1 of them.
+  const width = m + 1;
+  const lcs = new Int32Array((n + 1) * width);
+  const at = (i: number, j: number): number => lcs[i * width + j] ?? 0;
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i * width + j] =
+        before[i] === after[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
+    }
+  }
+
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    const beforeLine = before[i] ?? "";
+    const afterLine = after[j] ?? "";
+    if (beforeLine === afterLine) {
+      out.push({ kind: "context", text: beforeLine });
+      i++;
+      j++;
+    } else if (at(i + 1, j) >= at(i, j + 1)) {
+      out.push({ kind: "remove", text: beforeLine });
+      i++;
+    } else {
+      out.push({ kind: "add", text: afterLine });
+      j++;
+    }
+  }
+  while (i < n) out.push({ kind: "remove", text: before[i++] ?? "" });
+  while (j < m) out.push({ kind: "add", text: after[j++] ?? "" });
+  return out;
+}
+
+/** Context lines kept either side of a change before a run is collapsed. */
+const DIFF_CONTEXT_LINES = 3;
+
+/**
+ * Collapse long unchanged stretches into a single `gap` row. A replacement can
+ * carry a large `old_string` for a one-line change; without this the change is
+ * buried in context that never moved. Runs short enough that collapsing would
+ * not save a line are left alone.
+ */
+export function collapseDiffContext(
+  lines: readonly TraceDiffLine[],
+  contextLines: number = DIFF_CONTEXT_LINES,
+): TraceDiffLine[] {
+  const out: TraceDiffLine[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (line === undefined) break;
+    if (line.kind !== "context") {
+      out.push(line);
+      index++;
+      continue;
+    }
+
+    let end = index;
+    while (end < lines.length && lines[end]?.kind === "context") end++;
+    const run = lines.slice(index, end);
+    // A leading/trailing run only needs context on the side facing a change.
+    const head = index === 0 ? 0 : contextLines;
+    const tail = end === lines.length ? 0 : contextLines;
+
+    if (run.length <= head + tail + 1) {
+      out.push(...run);
+    } else {
+      out.push(...run.slice(0, head));
+      out.push({ kind: "gap", text: "", hidden: run.length - head - tail });
+      out.push(...run.slice(run.length - tail));
+    }
+    index = end;
+  }
+  return out;
+}
+
+/**
+ * A file mutation is identified by the *shape* of its input, never by tool name:
+ * providers call this Edit, patch_apply, str_replace, write_file… and the
+ * presenter's contract is to keep provider-native names verbatim.
+ */
+type FileMutation =
+  | { mode: "replace"; path: string; before: string[]; after: string[] }
+  | { mode: "write"; path: string; content: string };
+
+/**
+ * Parse a ready-made unified diff into diff rows.
+ *
+ * Codex reports an updated file as a unified diff rather than a before/after
+ * pair, so there is nothing to compare — recomputing a diff would mean first
+ * reconstructing both sides from the diff itself. Hunk headers become `gap`
+ * rows, which is exactly what they denote: skipped, unchanged content.
+ */
+export function parseUnifiedDiff(diff: string): TraceDiffLine[] {
+  const raw = diff.split("\n");
+  // `split` on a trailing newline yields a phantom final element; a genuinely
+  // empty trailing context line would have been " ", not "".
+  if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
+
+  const out: TraceDiffLine[] = [];
+  // File headers only exist ahead of the first hunk. Past that point every
+  // line belongs to the file, and "---"/"+++" are ordinary changed lines whose
+  // content happens to start with a dash or plus — a Markdown rule, a nested
+  // patch, a comment banner. Treating them as headers anywhere deleted real
+  // content from the diff.
+  let inHunk = false;
+  for (const line of raw) {
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      out.push({ kind: "gap", text: line });
+      continue;
+    }
+    if (!inHunk) {
+      if (
+        line.startsWith("diff --git") ||
+        line.startsWith("index ") ||
+        line.startsWith("--- ") ||
+        line.startsWith("+++ ") ||
+        line === "---" ||
+        line === "+++"
+      ) {
+        continue;
+      }
+    }
+    // "\ No newline at end of file" is metadata, not a line of the file: a
+    // real line starting with a backslash carries a +/-/space prefix first.
+    if (line.startsWith("\\")) continue;
+    if (line.startsWith("+")) {
+      out.push({ kind: "add", text: line.slice(1) });
+      continue;
+    }
+    if (line.startsWith("-")) {
+      out.push({ kind: "remove", text: line.slice(1) });
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      out.push({ kind: "context", text: line.slice(1) });
+      continue;
+    }
+    // Tolerate a context line that lost its leading space rather than dropping
+    // content on the floor.
+    out.push({ kind: "context", text: line });
+  }
+  return out;
+}
+
+/**
+ * Read the normalized multi-file patch payload that the Codex adapter records:
+ * `{ changes: [{ path, kind, diff?, content?, move_path? }], truncated? }`.
+ *
+ * Returns null for anything that is not this shape, so an unrecognised payload
+ * falls back to pretty JSON instead of rendering as an empty patch.
+ */
+function readPatchChanges(input: Record<string, unknown>): TracePatchFile[] | null {
+  if (!Array.isArray(input.changes)) return null;
+
+  const files: TracePatchFile[] = [];
+  for (const entry of input.changes) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const rec = entry as Record<string, unknown>;
+    const path = typeof rec.path === "string" ? rec.path : "";
+    if (path.length === 0) continue;
+
+    const file: TracePatchFile = { path, body: { kind: "none" } };
+    if (typeof rec.kind === "string" && rec.kind.length > 0) file.changeKind = rec.kind;
+    if (typeof rec.move_path === "string" && rec.move_path.length > 0) {
+      file.movePath = rec.move_path;
+    }
+    if (rec.truncated === true) file.truncated = true;
+
+    if (typeof rec.diff === "string" && rec.diff.length > 0) {
+      file.body = { kind: "diff", lines: parseUnifiedDiff(rec.diff) };
+    } else if (typeof rec.content === "string") {
+      // An added file can legitimately be empty, so this keys on the field
+      // being present rather than on the content being non-empty.
+      if (file.changeKind === "delete") {
+        // The legacy protocol reports a deletion as the whole outgoing file.
+        // All-removals states that; a green "+N" would say the opposite.
+        file.body = {
+          kind: "diff",
+          lines: toLines(rec.content).map((text) => ({ kind: "remove" as const, text })),
+        };
+      } else {
+        file.body = {
+          kind: "file",
+          text: rec.content,
+          lineCount: toLines(rec.content).length,
+        };
+      }
+    }
+    files.push(file);
+  }
+
+  return files.length > 0 ? files : null;
+}
+
+/** First path plus a count, for the collapsed one-line summary. */
+function readPatchSummary(
+  input: Record<string, unknown> | undefined,
+  labels?: TraceSummaryLabels,
+): string {
+  if (!input) return "";
+  const files = readPatchChanges(input);
+  if (files === null) return "";
+  const first = files[0];
+  if (first === undefined) return "";
+  const head = shortenTracePath(first.path);
+  if (files.length === 1) return head;
+  const extraCount = files.length - 1;
+  return labels?.morePaths?.(head, extraCount) ?? `${head} +${extraCount} more`;
+}
+
+function readFileMutation(input: Record<string, unknown>): FileMutation | null {
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  const path = str(input.file_path) ?? str(input.path);
+  if (path === null) return null;
+
+  const oldString = str(input.old_string);
+  const newString = str(input.new_string);
+  if (oldString !== null && newString !== null) {
+    return { mode: "replace", path, before: toLines(oldString), after: toLines(newString) };
+  }
+
+  // Keyed on `content`, not on "the before side is empty": an edit whose
+  // old_string is empty is an insertion into an existing file, which still
+  // reads best as a diff.
+  const content = str(input.content);
+  if (content !== null) return { mode: "write", path, content };
+
+  return null;
+}
+
+/**
+ * Structured body for the expanded row. Edits become a diff so a reviewer sees
+ * what changed rather than two escaped string literals; results are unwrapped;
+ * every other tool call falls back to pretty JSON.
+ */
+export function traceEventDetail(event: TraceEvent): TraceEventDetail {
+  switch (traceEventKind(event)) {
+    case "tool_use": {
+      if (!event.input) return { kind: "text", text: "" };
+      const patch = readPatchChanges(event.input);
+      if (patch !== null) {
+        return { kind: "patch", files: patch, truncated: event.input.truncated === true };
+      }
+      const mutation = readFileMutation(event.input);
+      if (mutation?.mode === "replace") {
+        return {
+          kind: "diff",
+          path: mutation.path,
+          lines: collapseDiffContext(diffTraceLines(mutation.before, mutation.after)),
+        };
+      }
+      if (mutation?.mode === "write") {
+        return {
+          kind: "file",
+          path: mutation.path,
+          text: mutation.content,
+          lineCount: toLines(mutation.content).length,
+        };
+      }
+      return { kind: "text", text: JSON.stringify(event.input, null, 2) };
+    }
+    case "tool_result":
+      return { kind: "text", text: unwrapToolOutput(event.output ?? "") };
+    default:
+      return { kind: "text", text: event.content ?? "" };
+  }
 }
 
 export function traceEventHasDetail(event: TraceEvent): boolean {

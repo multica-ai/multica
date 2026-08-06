@@ -163,8 +163,8 @@ export function InvitationsPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <Mail className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold">{t(($) => $.batch.empty_title)}</h2>
-            <p className="text-sm text-muted-foreground text-center">
+            <h2 className="text-title font-semibold">{t(($) => $.batch.empty_title)}</h2>
+            <p className="text-body text-muted-foreground text-center">
               {t(($) => $.batch.empty_hint)}
             </p>
             <Button onClick={() => push(paths.onboarding())}>
@@ -190,10 +190,10 @@ export function InvitationsPage() {
               <Users className="h-6 w-6 text-primary" />
             </div>
             <div className="space-y-1">
-              <h2 className="text-xl font-semibold">
+              <h2 className="text-title-lg font-semibold">
                 {t(($) => $.batch.title)}
               </h2>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body text-muted-foreground">
                 {t(($) => $.batch.subtitle)}
               </p>
             </div>
@@ -219,7 +219,7 @@ export function InvitationsPage() {
           </Button>
 
           {error && (
-            <p className="text-sm text-destructive text-center">{error}</p>
+            <p className="text-body text-destructive text-center">{error}</p>
           )}
         </CardContent>
       </Card>
@@ -259,7 +259,7 @@ function InvitationRow({
           <div className="font-medium truncate">
             {invitation.workspace_name ?? t(($) => $.batch.row_workspace_fallback)}
           </div>
-          <div className="text-xs text-muted-foreground truncate">
+          <div className="text-caption text-muted-foreground truncate">
             {roleLine}
           </div>
         </div>

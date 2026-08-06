@@ -1,0 +1,199 @@
+---
+title: Contributing
+description: Set up a local Multica development environment, run tests, and submit changes using the repository conventions.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica is a Go backend and pnpm monorepo. The simplest way to start locally is `make dev`; it prepares the environment, database, and migrations for the current checkout, then starts Web and API.
+
+## Requirements
+
+- Node.js 22
+- pnpm 10.28.2
+- Go 1.26.1
+- Docker Engine or Docker Desktop
+- Git and Make
+
+Treat the root `package.json`, `server/go.mod`, and CI workflows as the source of truth for versions.
+
+## First start
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make dev
+```
+
+The primary checkout uses `.env`. If the file does not exist, `make dev` creates it from `.env.example`, then starts the shared PostgreSQL instance, installs dependencies, runs migrations, and starts API and Web.
+
+Default addresses:
+
+```text
+Web: http://localhost:3000
+API: http://localhost:8080
+```
+
+The fixed local verification code comes from the development configuration. Do not use a local `.env` for an internet-facing deployment.
+
+## Developing in a worktree
+
+The repository supports running the primary checkout and multiple worktrees at the same time. They share one PostgreSQL container but use separate databases and ports.
+
+```bash
+git worktree add ../multica-feature -b feat/my-change main
+cd ../multica-feature
+make setup-worktree
+make start-worktree
+```
+
+`make setup-worktree` generates `.env.worktree`; the database name and ports are derived from the path. To start it again:
+
+```bash
+make start-worktree
+```
+
+To stop Web and API for the current worktree:
+
+```bash
+make stop-worktree
+```
+
+You may also run `make dev` directly. The script detects a worktree through its `.git` file and selects `.env.worktree`.
+
+<Callout type="info">
+Different worktrees share the PostgreSQL container, not the database. Do not start a new Compose project for every worktree. Check `POSTGRES_DB`, `PORT`, and `FRONTEND_PORT` in `.env.worktree` first.
+</Callout>
+
+## Common commands
+
+### Full workflow
+
+```bash
+make dev              # Prepare and start the current checkout
+make start            # Start API and Web with the existing environment
+make stop             # Stop processes for the current checkout
+make check            # Run the complete local verification workflow
+make build            # Build the server, CLI, and migrate binaries
+```
+
+### Frontend
+
+```bash
+pnpm install
+pnpm dev:web
+pnpm dev:desktop
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+Root commands exclude Mobile by default. Mobile has separate scripts and CI; read `apps/mobile/CLAUDE.md` before changing it.
+
+### Backend
+
+```bash
+make server
+make daemon
+make test
+make migrate-up
+make migrate-down
+make sqlc
+```
+
+To run a CLI command from source:
+
+```bash
+make cli ARGS="issue list"
+```
+
+## Changing frontend features
+
+Place features needed by both Web and Desktop according to responsibility:
+
+1. Put API types, queries, mutations, and platform-independent logic in `packages/core/`.
+2. Put foundational UI in `packages/ui/`; it must not depend on business code.
+3. Put business pages and components in `packages/views/`.
+4. Keep Next.js, Electron, and routing adapters in the corresponding app.
+5. Wire shared pages into both Web and Desktop.
+
+TanStack Query owns server data. Zustand owns client state such as filters, drafts, and layout. See [Project architecture](/developers/architecture) and the root `CLAUDE.md` for the exact boundary.
+
+When adding or changing an API, update the zod schema in `packages/core/api/` and add parsing tests for missing fields, unknown enum values, and malformed data.
+
+## Changing the database
+
+Migrations live in `server/migrations/`, and queries live in `server/pkg/db/queries/`.
+
+1. Use the next unused numeric prefix and create both `.up.sql` and `.down.sql`.
+2. Do not add database foreign keys, cascade deletes, or cascade updates. Enforce relationships and cleanup in the application layer.
+3. Every new index must use `CREATE INDEX CONCURRENTLY` or `CREATE UNIQUE INDEX CONCURRENTLY`.
+4. Put each concurrent index in a migration file containing only that statement.
+5. Run `make sqlc` after changing queries and commit the generated changes in `server/pkg/db/generated/`.
+6. Do not edit sqlc-generated files directly.
+
+Use an application transaction in the service layer when multiple writes must succeed or roll back together.
+
+## Test locations
+
+| Change | Test location |
+| --- | --- |
+| Shared business logic, queries, stores | `packages/core/*.test.ts` |
+| Shared pages and components | `packages/views/*.test.tsx` |
+| Web or Desktop platform wiring | Corresponding `apps/*` directory |
+| End-to-end workflows | `e2e/*.spec.ts` |
+| Backend | `*_test.go` in the relevant Go package |
+
+Run the check closest to the change first, then expand the scope. For a Docs-only change:
+
+```bash
+pnpm --filter @multica/docs typecheck
+```
+
+For shared frontend changes:
+
+```bash
+pnpm typecheck
+pnpm test
+```
+
+For backend changes:
+
+```bash
+make test
+```
+
+Before submitting:
+
+```bash
+make check
+```
+
+`make check` runs TypeScript typechecking and unit tests, Go tests, and Playwright E2E. CI also builds and lints according to the changed scope and runs platform- or installer-specific tests.
+
+## Resetting the current development database
+
+When you need clean data, reset the database named by the **current checkout's environment file**:
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+`make db-reset` drops and recreates the current `POSTGRES_DB` and refuses to connect to a remote database. Before running it, check `.env` or `.env.worktree` and confirm the target database.
+
+## Before submitting
+
+- Read the root `CLAUDE.md` and relevant nested instructions.
+- Change only the scope required by the task.
+- Write code comments in English.
+- Do not commit `.env`, tokens, build artifacts, or local paths.
+- Use conventional commits such as `feat(scope)`, `fix(scope)`, or `docs`.
+- Describe behavior changes and the verification commands actually run in the PR.
+
+## Next steps
+
+- [Development conventions](/developers/conventions) — Repository contracts for naming, terminology, and Chinese copy.
+- [Project architecture](/developers/architecture) — Layers, shared packages, and the code path for one execution.

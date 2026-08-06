@@ -34,10 +34,10 @@ export function AgentOverviewSummary({
   return (
     <aside className="self-start rounded-xl border border-surface-border bg-surface p-5 shadow-[var(--surface-shadow)] xl:sticky xl:top-6">
       <section>
-        <h2 className="text-sm font-medium">
+        <h2 className="text-body font-medium">
           {t(($) => $.overview.agent_context)}
         </h2>
-        <dl className="mt-4 space-y-3 text-xs">
+        <dl className="mt-4 space-y-3 text-caption">
           {owner && (
             <SummaryRow label={t(($) => $.inspector.prop_owner)}>
               <span className="flex min-w-0 items-center gap-1.5">
@@ -87,10 +87,10 @@ export function AgentOverviewSummary({
 
       <section className="mt-5 border-t pt-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-body font-medium">
             {t(($) => $.inspector.section_skills)}
           </h2>
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {agent.skills.length}
           </span>
         </div>
@@ -99,14 +99,14 @@ export function AgentOverviewSummary({
             {agent.skills.map((skill) => (
               <span
                 key={skill.id}
-                className="max-w-full truncate rounded-md border border-surface-border bg-surface-hover px-2 py-1 text-xs text-muted-foreground"
+                className="max-w-full truncate rounded-md border border-surface-border bg-surface-hover px-2 py-1 text-caption text-muted-foreground"
               >
                 {skill.name}
               </span>
             ))}
           </div>
         ) : (
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-3 text-caption text-muted-foreground">
             {t(($) => $.tab_body.skills.empty_title)}
           </p>
         )}

@@ -99,7 +99,7 @@ function ChangeList({ items }: { items: string[] }) {
       {items.map((change) => (
         <li
           key={change}
-          className="flex items-start gap-2.5 text-[14px] leading-[1.7] text-[#0a0d12]/60 sm:text-[15px]"
+          className="flex items-start gap-2.5 text-body leading-[1.7] text-[#0a0d12]/60 sm:text-body-lg"
         >
           <span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-[#0a0d12]/30" />
           {change}
@@ -190,7 +190,7 @@ export function ChangelogPageClient() {
                 aria-label={t.changelog.toc}
                 className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-8 pr-2"
               >
-                <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0a0d12]/50">
+                <h3 className="text-micro font-semibold uppercase tracking-[0.14em] text-[#0a0d12]/50">
                   {t.changelog.toc}
                 </h3>
 
@@ -203,7 +203,7 @@ export function ChangelogPageClient() {
                   <ol className="space-y-5">
                     {groups.map((group) => (
                       <li key={group.key}>
-                        <p className="ml-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#0a0d12]/45">
+                        <p className="ml-6 text-micro font-semibold uppercase tracking-[0.12em] text-[#0a0d12]/45">
                           {monthYearLabel(group.year, group.month, locale)}
                         </p>
 
@@ -219,7 +219,7 @@ export function ChangelogPageClient() {
                                   onClick={jumpTo(release.version)}
                                   aria-current={isActive ? "true" : undefined}
                                   className={[
-                                    "group relative flex items-center gap-3 rounded-md py-1 pr-2 text-[13px] transition-colors",
+                                    "group relative flex items-center gap-3 rounded-md py-1 pr-2 text-label transition-colors",
                                     isActive
                                       ? "text-[#0a0d12]"
                                       : "text-[#0a0d12]/55 hover:text-[#0a0d12]/80",
@@ -244,7 +244,7 @@ export function ChangelogPageClient() {
                                   >
                                     {day}
                                   </span>
-                                  <span className="tabular-nums text-[11px] text-[#0a0d12]/35">
+                                  <span className="tabular-nums text-micro text-[#0a0d12]/35">
                                     v{release.version}
                                   </span>
                                 </a>
@@ -260,10 +260,10 @@ export function ChangelogPageClient() {
             </aside>
 
             <div className="mx-auto min-w-0 max-w-[720px] lg:mx-0">
-              <h1 className="font-[family-name:var(--font-serif)] text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
+              <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
                 {t.changelog.title}
               </h1>
-              <p className="mt-4 text-[15px] leading-7 text-[#0a0d12]/60 sm:text-[16px]">
+              <p className="mt-4 text-body-lg leading-7 text-[#0a0d12]/60 sm:text-title-sm">
                 {t.changelog.subtitle}
               </p>
 
@@ -279,14 +279,14 @@ export function ChangelogPageClient() {
                       className="relative scroll-mt-28"
                     >
                       <div className="flex items-baseline gap-3">
-                        <span className="text-[13px] font-semibold tabular-nums">
+                        <span className="text-label font-semibold tabular-nums">
                           v{release.version}
                         </span>
-                        <span className="text-[13px] text-[#0a0d12]/40">
+                        <span className="text-label text-[#0a0d12]/40">
                           {fullDateLabel(release.date, locale)}
                         </span>
                       </div>
-                      <h2 className="mt-2 text-[20px] font-semibold leading-snug sm:text-[22px]">
+                      <h2 className="mt-2 text-title-lg font-semibold leading-snug sm:text-display-sm">
                         {release.title}
                       </h2>
 
@@ -294,7 +294,7 @@ export function ChangelogPageClient() {
                         <div className="mt-4 space-y-5">
                           {release.features && release.features.length > 0 && (
                             <div>
-                              <h3 className="text-[13px] font-semibold uppercase tracking-wide text-[#0a0d12]/50">
+                              <h3 className="text-label font-semibold uppercase tracking-wide text-[#0a0d12]/50">
                                 {categoryLabels.features}
                               </h3>
                               <ChangeList items={release.features} />
@@ -303,7 +303,7 @@ export function ChangelogPageClient() {
                           {release.improvements &&
                             release.improvements.length > 0 && (
                               <div>
-                                <h3 className="text-[13px] font-semibold uppercase tracking-wide text-[#0a0d12]/50">
+                                <h3 className="text-label font-semibold uppercase tracking-wide text-[#0a0d12]/50">
                                   {categoryLabels.improvements}
                                 </h3>
                                 <ChangeList items={release.improvements} />
@@ -311,7 +311,7 @@ export function ChangelogPageClient() {
                             )}
                           {release.fixes && release.fixes.length > 0 && (
                             <div>
-                              <h3 className="text-[13px] font-semibold uppercase tracking-wide text-[#0a0d12]/50">
+                              <h3 className="text-label font-semibold uppercase tracking-wide text-[#0a0d12]/50">
                                 {categoryLabels.fixes}
                               </h3>
                               <ChangeList items={release.fixes} />

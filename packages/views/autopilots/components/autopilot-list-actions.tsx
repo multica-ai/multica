@@ -81,7 +81,7 @@ export function DeleteAutopilotsDialog({
             })}
           </DialogDescription>
         </DialogHeader>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.actions.delete_dialog.warning)}
         </p>
         <DialogFooter>
@@ -224,9 +224,9 @@ export function AutopilotBatchToolbar({
     <>
       {/* Anchored to the page root (relative), NOT the viewport — see the
           skills batch toolbar for the rationale. */}
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-sm font-medium">
+          <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
           <button

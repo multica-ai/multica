@@ -5,10 +5,22 @@ import (
 	"testing"
 )
 
-func TestResourceLabelsReleaseFlagDefaultsToOff(t *testing.T) {
-	ctx := context.Background()
-	if ResourceLabelsEnabled(ctx, nil) {
-		t.Fatal("resource labels release flag must default to off")
+func TestResourceLabelsCompatDecisionStaysEnabled(t *testing.T) {
+	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
+	if !flags[resourceLabelsCompat] {
+		t.Fatal("resource labels must stay enabled for installed clients")
+	}
+}
+
+// MUL-5345: hang stack capture is gone from this build, but v0.4.13–v0.4.18 are
+// installed and still hold a debugger channel open on every renderer whenever
+// this key arrives as `true`. Those clients are fail-closed on absence, so NOT
+// publishing the key is what disarms them — re-adding it would put a flag flip
+// back within reach of a fleet that can no longer produce a usable stack.
+func TestDesktopHangStackCaptureIsNotPublished(t *testing.T) {
+	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
+	if _, published := flags["desktop_hang_stack_capture"]; published {
+		t.Fatal("hang stack capture must stay unpublished so installed clients keep their debugger channels closed")
 	}
 }
 

@@ -267,6 +267,34 @@ describe("useDownloadAttachment (desktop)", () => {
     );
   });
 
+  // MUL-5292: in proxy mode the backend now answers with a capability URL —
+  // still server-relative, but carrying `?exp=&sig=`. The query is what makes
+  // the request authenticate itself, so it must survive the resolve step and
+  // reach the native downloader intact.
+  it("preserves the capability query when resolving a relative proxy-mode download_url", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url: "/api/attachments/att-1/signed-download?exp=1800000060&sig=deadbeef",
+      filename: "file.md",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(downloadURL).toHaveBeenCalledWith(
+      "https://api.example.test/api/attachments/att-1/signed-download?exp=1800000060&sig=deadbeef",
+    );
+  });
+
   it("trims a trailing slash on the API base when resolving a relative download_url", async () => {
     const downloadURL = vi.fn();
     (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {

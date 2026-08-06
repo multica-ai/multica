@@ -6,32 +6,6 @@ import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
 
-/**
- * Keys that accept the currently highlighted suggestion row.
- *
- * `Enter` is the canonical accept (WAI-ARIA combobox guidance). Plain `Tab` is
- * an additive convenience that matches terminal / CLI / editor completion
- * muscle memory (MUL-3685). `Shift+Tab` and any `Ctrl/Cmd/Alt + Tab` are
- * deliberately NOT accept keys: they stay reverse focus navigation / OS window
- * switching, so standard keyboard accessibility is preserved.
- *
- * Centralizing the rule here keeps every picker built on
- * `createSuggestionPopupRender` (mention, slash-skill, builtin command, and any
- * future suggestion list) consistent instead of each list re-deciding what
- * counts as "accept". Callers use it in place of a bare `event.key === "Enter"`
- * check, so `Tab` becomes a strict alias of `Enter` inside their accept branch.
- */
-export function isPickerAcceptKey(event: KeyboardEvent): boolean {
-  if (event.key === "Enter") return true;
-  return (
-    event.key === "Tab" &&
-    !event.shiftKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey
-  );
-}
-
 interface SuggestionPopupRenderOptions<
   TItem,
   TSelected = TItem,
@@ -216,7 +190,19 @@ export function createSuggestionPopupRender<
       },
 
       onKeyDown: (props: SuggestionKeyDownProps) => {
-        if (props.event.key === "Escape") {
+        // `Esc` is the legacy alias the suggestion plugin also matches on.
+        if (props.event.key === "Escape" || props.event.key === "Esc") {
+          // Escape while a picker is open must close ONLY the picker. Returning
+          // true makes ProseMirror call preventDefault(), but ProseMirror never
+          // stops propagation, and Base UI's dismiss layer listens for Escape on
+          // `document` in the bubble phase without consulting defaultPrevented.
+          // Without stopPropagation the same keypress that closes this popup
+          // also closes the host Dialog and discards the draft (MUL-5429).
+          // This handler is the only layer that knows a picker is open, so
+          // stopping here fixes every host at once (create-issue dialog, chat
+          // input, comment composer).
+          props.event.preventDefault();
+          props.event.stopPropagation();
           cleanup();
           return true;
         }

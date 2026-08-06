@@ -15,6 +15,7 @@ import {
   Tags,
   Keyboard,
   ListTodo,
+  Zap,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -35,6 +36,7 @@ import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { PropertiesTab } from "./properties-tab";
+import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { useT } from "../../i18n";
 
@@ -58,6 +60,7 @@ const WORKSPACE_TAB_KEYS = [
   "members",
   "labels",
   "properties",
+  "quick_actions",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
@@ -68,6 +71,7 @@ const WORKSPACE_TAB_VALUES = {
   members: "members",
   labels: "labels",
   properties: "properties",
+  quick_actions: "quick-actions",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
@@ -78,6 +82,7 @@ const WORKSPACE_TAB_ICONS = {
   members: Users,
   labels: Tags,
   properties: SlidersHorizontal,
+  quick_actions: Zap,
 } as const;
 
 const DEFAULT_TAB = "profile";
@@ -152,13 +157,13 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           tab merges into the card top, and a tinted panel under the first tabs
           breaks that seam (MUL-4439). Zoning comes from the divider instead. */}
       <div className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
-        <h1 className="sr-only text-sm font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
+        <h1 className="sr-only text-body font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
         <TabsList
           variant="line"
           className="flex w-max min-w-full flex-row items-center gap-1 p-0 md:w-full md:flex-col md:items-stretch"
         >
           {/* My Account group */}
-          <span className="hidden px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground md:block">
+          <span className="hidden px-2 pb-1 pt-2 text-caption font-medium text-muted-foreground md:block">
             {t(($) => $.page.my_account)}
           </span>
           {ACCOUNT_TAB_KEYS.map((key) => {
@@ -186,7 +191,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           ))}
 
           {/* Workspace group */}
-          <span className="hidden truncate px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground md:block">
+          <span className="hidden truncate px-2 pb-1 pt-4 text-caption font-medium text-muted-foreground md:block">
             {workspaceName ?? t(($) => $.page.workspace_fallback)}
           </span>
           {WORKSPACE_TAB_KEYS.map((key) => {
@@ -207,7 +212,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
       {/* Right content */}
       <div className="min-w-0 flex-1 md:overflow-y-auto">
-        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" ? "max-w-5xl" : "max-w-3xl"}`}>
+        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" || activeTab === "quick-actions"
+              ? "max-w-5xl"
+              : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
           <TabsContent value="shortcuts"><KeyboardShortcutsTab /></TabsContent>
@@ -223,6 +230,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="members"><MembersTab /></TabsContent>
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="properties"><PropertiesTab /></TabsContent>
+          <TabsContent value="quick-actions"><QuickActionsTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -10,9 +10,16 @@ import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
 import enEditor from "../../locales/en/editor.json";
+import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings, editor: enEditor },
+  en: {
+    common: enCommon,
+    auth: enAuth,
+    settings: enSettings,
+    editor: enEditor,
+    issues: enIssues,
+  },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -49,6 +56,12 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: { getState: () => authState },
 }));
 
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({ actorId }: { actorId: string }) => (
+    <span data-testid={`actor-${actorId}`} />
+  ),
+}));
+
 import {
   createMentionSuggestion,
   MentionList,
@@ -62,6 +75,8 @@ function fakeQc(data: {
     id: string;
     name: string;
     archived_at: string | null;
+    runtime_id?: string;
+    runtime_bound?: boolean;
     visibility?: "workspace" | "private";
     owner_id?: string | null;
     permission_mode?: "private" | "public_to";
@@ -74,6 +89,7 @@ function fakeQc(data: {
     id: string;
     name: string;
     archived_at: string | null;
+    leader_id: string;
   }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
@@ -86,6 +102,8 @@ function fakeQc(data: {
   // private + no targets otherwise) unless a fixture sets them explicitly.
   const agentsWithPermissions = (data.agents ?? []).map((a) => ({
     ...a,
+    runtime_id: a.runtime_id ?? "runtime-1",
+    runtime_bound: a.runtime_bound ?? true,
     permission_mode:
       a.permission_mode ?? (a.visibility === "private" ? "private" : "public_to"),
     invocation_targets:
@@ -179,6 +197,68 @@ describe("createMentionSuggestion", () => {
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "Alice")).toBe(true);
     expect(items.some((i) => i.type === "agent" && i.label === "Aegis")).toBe(true);
+  });
+
+  it("keeps an unbound agent discoverable but marks it as unselectable", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        {
+          id: "a1",
+          name: "Aegis",
+          archived_at: null,
+          runtime_id: "",
+          runtime_bound: false,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("a")) as MentionItem[];
+
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        type: "agent",
+        id: "a1",
+        disabledReason: "agent_runtime_required",
+      }),
+    );
+  });
+
+  it("does not select a runtime-required mention row by click or keyboard", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    render(
+      <I18nWrapper>
+        <MentionList
+          ref={ref}
+          items={[
+            {
+              id: "a1",
+              label: "Aegis",
+              type: "agent",
+              disabledReason: "agent_runtime_required",
+            },
+          ]}
+          query=""
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const row = screen.getByRole("button", {
+      name: "Aegis: This target has no runtime — bind one to run it",
+    });
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(row);
+    expect(
+      ref.current?.onKeyDown({
+        event: new KeyboardEvent("keydown", { key: "Enter" }),
+      }),
+    ).toBe(true);
+    expect(command).not.toHaveBeenCalled();
   });
 
   it("loads server issue matches into the popup when the list cache misses", async () => {
@@ -362,6 +442,86 @@ describe("createMentionSuggestion", () => {
     expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
   });
 
+  // MUL-5495: the command bar (cmdk) navigates on Ctrl+N/J and Ctrl+P/K as well
+  // as the arrows. The mention picker used to accept arrows only, so the same
+  // muscle memory silently did nothing here.
+  it("navigates with Ctrl+N/J and Ctrl+P/K, like the command bar", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+      { id: "i-3", label: "MUL-3", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+    let handled: boolean | undefined;
+    const press = (init: KeyboardEventInit) =>
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+
+    expect(highlightedLabel()).toBe("MUL-1");
+
+    press({ key: "n", ctrlKey: true });
+    expect(handled).toBe(true);
+    expect(highlightedLabel()).toBe("MUL-2");
+
+    press({ key: "j", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-3");
+
+    press({ key: "p", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-2");
+
+    press({ key: "k", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-1");
+
+    // The highlight the aliases moved is the row Enter commits.
+    press({ key: "n", ctrlKey: true });
+    press({ key: "Enter" });
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
+  });
+
+  // Without Ctrl these letters are ordinary query characters; swallowing them
+  // would make "@nick" unsearchable.
+  it("leaves bare n/j/p/k to the query instead of moving the highlight", () => {
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={vi.fn()} />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+
+    for (const key of ["n", "j", "p", "k"]) {
+      let handled: boolean | undefined;
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key }) });
+      });
+      expect(handled).toBe(false);
+    }
+    expect(highlightedLabel()).toBe("MUL-1");
+  });
+
   it("hides personal agents owned by someone else from a regular member", () => {
     const qc = fakeQc({
       members: [
@@ -530,13 +690,37 @@ describe("createMentionSuggestion", () => {
     expect(screen.getByText("Roadmap")).toBeInTheDocument();
   });
 
-  it("includes all non-archived squads in the mention list", () => {
+  it("includes squads with a runnable leader in the mention list", () => {
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        {
+          id: "leader-1",
+          name: "Leader",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
       squads: [
-        { id: "s1", name: "Jiayuan's Coding Team", archived_at: null },
-        { id: "s2", name: "独立团", archived_at: null },
-        { id: "s3", name: "Archived Squad", archived_at: "2026-01-01T00:00:00Z" },
+        {
+          id: "s1",
+          name: "Jiayuan's Coding Team",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+        {
+          id: "s2",
+          name: "独立团",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+        {
+          id: "s3",
+          name: "Archived Squad",
+          archived_at: "2026-01-01T00:00:00Z",
+          leader_id: "leader-1",
+        },
       ],
     });
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
@@ -549,6 +733,90 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "squad" && i.label === "Jiayuan's Coding Team")).toBe(true);
     expect(items.some((i) => i.type === "squad" && i.label === "独立团")).toBe(true);
     expect(items.some((i) => i.type === "squad" && i.label === "Archived Squad")).toBe(false);
+  });
+
+  it("keeps a squad with an unbound leader discoverable but unselectable", () => {
+    const qc = fakeQc({
+      agents: [
+        {
+          id: "leader-1",
+          name: "Leader",
+          archived_at: null,
+          runtime_id: "",
+          runtime_bound: false,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+      squads: [
+        {
+          id: "s1",
+          name: "Unrunnable Squad",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("")) as MentionItem[];
+
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        type: "squad",
+        id: "s1",
+        disabledReason: "agent_runtime_required",
+      }),
+    );
+  });
+
+  it("keeps squads discoverable while the agents cache is not ready", () => {
+    const qc = fakeQc({
+      squads: [
+        {
+          id: "s1",
+          name: "Cold Cache Squad",
+          archived_at: null,
+          leader_id: "leader-not-cached",
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("")) as MentionItem[];
+    const squad = items.find((item) => item.type === "squad" && item.id === "s1");
+
+    expect(squad).toBeDefined();
+    expect(squad?.disabledReason).toBeUndefined();
+  });
+
+  it("keeps a squad with an archived leader discoverable", () => {
+    const qc = fakeQc({
+      agents: [
+        {
+          id: "leader-1",
+          name: "Archived Leader",
+          archived_at: "2026-01-01T00:00:00Z",
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+      squads: [
+        {
+          id: "s1",
+          name: "Archived Leader Squad",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("")) as MentionItem[];
+    const squad = items.find((item) => item.type === "squad" && item.id === "s1");
+
+    expect(squad).toBeDefined();
+    expect(squad?.disabledReason).toBeUndefined();
   });
 
   it("returns no squads when the squads cache is empty (not yet fetched)", () => {

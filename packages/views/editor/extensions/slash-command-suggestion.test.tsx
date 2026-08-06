@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -44,6 +44,8 @@ import {
   type SlashCommandItem,
   buildBuiltinCommandItems,
   BUILTIN_COMMANDS,
+  createBuiltinCommandSuggestion,
+  QUICK_ACTION_ITEM_PREFIX,
 } from "./slash-command-suggestion";
 
 function agent(overrides: Partial<Agent>): Agent {
@@ -315,6 +317,60 @@ describe("SlashCommandList keyboard handling", () => {
     expect(command).toHaveBeenCalledWith(selectableItems[0]);
   });
 
+  // MUL-5495: same Ctrl aliases the command bar (cmdk) accepts, so the slash
+  // picker navigates like every other list in the product.
+  it("navigates with Ctrl+N/J and Ctrl+P/K, and leaves the bare letters alone", () => {
+    const ref = createRef<SlashCommandListRef>();
+    const command = vi.fn();
+    const selectableItems: SlashCommandItem[] = [
+      { id: "s1", label: "deploy", description: "Ship changes" },
+      { id: "s2", label: "review", description: "Review code" },
+      { id: "s3", label: "note", description: "Leave a note" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <SlashCommandList
+          ref={ref}
+          items={selectableItems}
+          query=""
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+    let handled: boolean | undefined;
+    const press = (init: KeyboardEventInit) =>
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+
+    press({ key: "n", ctrlKey: true });
+    expect(handled).toBe(true);
+    expect(highlightedLabel()).toContain("/review");
+
+    press({ key: "j", ctrlKey: true });
+    expect(highlightedLabel()).toContain("/note");
+
+    press({ key: "p", ctrlKey: true });
+    expect(highlightedLabel()).toContain("/review");
+
+    press({ key: "k", ctrlKey: true });
+    expect(highlightedLabel()).toContain("/deploy");
+
+    // Bare letters stay query characters — "/note" must remain typeable.
+    press({ key: "n" });
+    expect(handled).toBe(false);
+    expect(highlightedLabel()).toContain("/deploy");
+
+    press({ key: "Enter" });
+    expect(command).toHaveBeenCalledWith(selectableItems[0]);
+  });
+
   // MUL-3685: plain Tab accepts the highlighted item like Enter; Shift+Tab and
   // modifier+Tab fall through so reverse focus / OS switching are preserved.
   it("accepts the highlighted item on plain Tab, ignoring Shift/modifier+Tab", () => {
@@ -436,5 +492,125 @@ describe("SlashCommandList built-in command rendering", () => {
     expect(
       getByText("Add a note — won't trigger any agents"),
     ).toBeInTheDocument();
+  });
+});
+
+
+// Async quick-action rendering in the `/` menu (MUL-5465, review finding #4).
+//
+// The render request resolves after an arbitrary delay, during which the user
+// keeps typing. Three behaviours have to hold, and each one was a real bug at
+// some point in this PR:
+//   - a rejection must not destroy what the user typed
+//   - a success must replace the ORIGINAL command, not wherever the caret is
+//   - a command edited mid-flight must be left alone, not overwritten
+describe("builtin `/` menu — async quick action rendering", () => {
+  // Minimal editor stand-in: enough ProseMirror surface for the command to
+  // read the range text and issue its chain.
+  function fakeEditor(text: string) {
+    const calls: { from: number; to: number; content: string; contentType?: string }[] = [];
+    let docText = text;
+    const chain = {
+      focus: () => chain,
+      insertContentAt: (
+        range: { from: number; to: number },
+        content: string,
+        opts?: { contentType?: string },
+      ) => {
+        calls.push({ from: range.from, to: range.to, content, contentType: opts?.contentType });
+        return chain;
+      },
+      insertContent: (content: string) => {
+        calls.push({ from: -1, to: -1, content });
+        return chain;
+      },
+      deleteRange: () => chain,
+      run: () => true,
+    };
+    return {
+      calls,
+      setText: (next: string) => {
+        docText = next;
+      },
+      editor: {
+        chain: () => chain,
+        state: {
+          doc: {
+            get content() {
+              return { size: docText.length + 1 };
+            },
+            textBetween: (from: number, to: number) => docText.slice(from, to),
+          },
+        },
+        view: { state: { selection: { $to: { nodeAfter: null } } } },
+      },
+    };
+  }
+
+  const range = { from: 0, to: 7 };
+  const item = { id: `${QUICK_ACTION_ITEM_PREFIX}qa-1`, label: "review" };
+
+  it("leaves the typed command intact and reports the failure when render rejects", async () => {
+    const { editor, calls } = fakeEditor("/review");
+    const onRenderError = vi.fn();
+    const suggestion = createBuiltinCommandSuggestion({
+      renderQuickAction: () => Promise.reject(new Error("boom")),
+      onRenderError,
+    });
+
+    suggestion.command!({ editor, range, props: item } as never);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(onRenderError).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces the original range once a delayed render resolves", async () => {
+    const { editor, calls } = fakeEditor("/review");
+    let resolve!: (v: string) => void;
+    const suggestion = createBuiltinCommandSuggestion({
+      renderQuickAction: () => new Promise<string>((r) => { resolve = r; }),
+    });
+
+    suggestion.command!({ editor, range, props: item } as never);
+    expect(calls).toHaveLength(0); // nothing destroyed while in flight
+
+    await act(async () => {
+      resolve("rendered body");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // contentType must be "markdown": inserted as a plain string, the
+    // server-rendered `[@Name](mention://…)` lands as literal text and
+    // serialises back out with escaped brackets, so the mention never becomes
+    // a node and renders as raw markup in the thread.
+    expect(calls).toEqual([
+      { from: 0, to: 7, content: "rendered body", contentType: "markdown" },
+    ]);
+  });
+
+  it("abandons the insert when the command was edited while the request was open", async () => {
+    const { editor, calls, setText } = fakeEditor("/review");
+    let resolve!: (v: string) => void;
+    const suggestion = createBuiltinCommandSuggestion({
+      renderQuickAction: () => new Promise<string>((r) => { resolve = r; }),
+    });
+
+    suggestion.command!({ editor, range, props: item } as never);
+    // The user rewrites the command; a prefix-only check would still see a
+    // leading "/" here and clobber it.
+    setText("/fixnow");
+
+    await act(async () => {
+      resolve("rendered body");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(calls).toHaveLength(0);
   });
 });

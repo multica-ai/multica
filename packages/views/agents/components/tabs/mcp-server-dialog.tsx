@@ -276,7 +276,7 @@ export function McpServerDialog({
 
           <TabsContent value="form" className="space-y-5 pt-2">
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">
+              <legend className="text-body font-medium">
                 {t(($) => $.tab_body.mcp_config.dialog_type_label)}
               </legend>
               <div className="grid grid-cols-2 gap-2">
@@ -366,7 +366,7 @@ export function McpServerDialog({
 
           <TabsContent value="json" className="space-y-2 pt-2">
             {server?.container === "mcp" && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.tab_body.mcp_config.dialog_native_json_hint)}
               </p>
             )}
@@ -379,7 +379,7 @@ export function McpServerDialog({
               autoComplete="off"
               spellCheck={false}
               rows={12}
-              className="min-h-64 resize-y font-mono text-xs"
+              className="min-h-64 resize-y font-mono text-caption"
               value={jsonText}
               onChange={(event) => setJsonText(event.target.value)}
               aria-invalid={!jsonResult.ok || undefined}
@@ -389,7 +389,7 @@ export function McpServerDialog({
         </Tabs>
 
         {errorMessage && (
-          <p className="text-xs text-destructive" aria-live="polite">
+          <p className="text-caption text-destructive" aria-live="polite">
             {errorMessage}
           </p>
         )}
@@ -430,7 +430,7 @@ function StringListEditor({
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{label}</legend>
+      <legend className="text-body font-medium">{label}</legend>
       {values.map((value, index) => (
         <div key={index} className="flex gap-2">
           <Input
@@ -479,7 +479,7 @@ function KeyValueEditor({
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{label}</legend>
+      <legend className="text-body font-medium">{label}</legend>
       {rows.map((row, index) => (
         <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
           <Input

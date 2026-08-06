@@ -134,7 +134,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 					{"id": "agent-2", "name": "Claude"},
 				},
 			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/archive-agents-and-delete":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/unbind-agents-and-delete":
 			cascadeCount++
 			var body struct {
 				ExpectedActiveAgentIDs []string `json:"expected_active_agent_ids"`
@@ -145,7 +145,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 			gotExpectedIDs = body.ExpectedActiveAgentIDs
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":          "ok",
-				"agents_archived": 2,
+				"agents_unbound": 2,
 				"tasks_cancelled": 1,
 			})
 		default:
@@ -175,7 +175,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON %q: %v", out, err)
 	}
-	if got["id"] != "rt-1" || got["deleted"] != true || got["agents_archived"] != float64(2) {
+	if got["id"] != "rt-1" || got["deleted"] != true || got["agents_unbound"] != float64(2) {
 		t.Fatalf("stdout = %#v, want cascade result", got)
 	}
 }

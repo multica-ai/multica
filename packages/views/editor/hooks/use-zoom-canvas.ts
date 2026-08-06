@@ -47,6 +47,13 @@ import {
 interface UseZoomCanvasOptions {
   /** Natural (unscaled) size of the content, or null while it is unknown. */
   content: Size | null;
+  /**
+   * Whether Left/Right pan the canvas. Set false when the surrounding viewer
+   * binds those keys itself — image-sequence prev/next (MUL-5752) — so the two
+   * handlers can't both fire on one press. Up/Down keep panning either way,
+   * and drag / wheel still pan horizontally.
+   */
+  horizontalArrowPan?: boolean;
 }
 
 export interface ZoomCanvasApi {
@@ -89,7 +96,10 @@ function nearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.5;
 }
 
-export function useZoomCanvas({ content }: UseZoomCanvasOptions): ZoomCanvasApi {
+export function useZoomCanvas({
+  content,
+  horizontalArrowPan = true,
+}: UseZoomCanvasOptions): ZoomCanvasApi {
   const [viewportNode, setViewportNode] = useState<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState<Size>(EMPTY_SIZE);
   const [transform, setTransform] = useState<ZoomTransform>(IDENTITY);
@@ -143,22 +153,29 @@ export function useZoomCanvas({ content }: UseZoomCanvasOptions): ZoomCanvasApi 
     return () => observer.disconnect();
   }, [viewportNode]);
 
-  // Fit once, on first open. Deliberately not re-fitting on later viewport
-  // changes: a theme switch re-renders the content at the same size, and
-  // silently snapping the user's zoom back to fit would lose their place.
-  useEffect(() => {
+  // Fit once, on first open — a layout effect, so the first painted frame is
+  // already fitted. Deliberately not re-fitting on later viewport changes: a
+  // theme switch re-renders the content at the same size, and silently
+  // snapping the user's zoom back to fit would lose their place.
+  useLayoutEffect(() => {
     if (!ready || hasFittedRef.current) return;
     hasFittedRef.current = true;
     setTransform(computeFitTransform(contentSize, viewport));
   }, [ready, contentSize, viewport]);
 
-  // Genuinely different content (new natural size) starts fresh.
+  // Genuinely different content (new natural size) starts fresh. Also a
+  // layout effect, and never eased: swapping to another image (sequence
+  // navigation) is content replacement, not a camera move on the same
+  // content. The new frame must paint already fitted — a plain effect would
+  // paint it once under the previous image's pan/zoom, and a leftover
+  // `isAnimated` from the last discrete control would ease the correction.
   const contentKey = `${contentSize.width}x${contentSize.height}`;
   const previousContentKeyRef = useRef(contentKey);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousContentKeyRef.current === contentKey) return;
     previousContentKeyRef.current = contentKey;
     if (!ready) return;
+    setIsAnimated(false);
     setTransform(computeFitTransform(contentSize, viewport));
   }, [contentKey, ready, contentSize, viewport]);
 
@@ -345,6 +362,10 @@ export function useZoomCanvas({ content }: UseZoomCanvasOptions): ZoomCanvasApi 
           return;
         case "ArrowLeft":
         case "ArrowRight":
+          // Left to the viewer (image sequence prev/next) when it owns them.
+          // No preventDefault, so the event keeps bubbling to its handler.
+          if (!horizontalArrowPan) return;
+        // fallthrough
         case "ArrowUp":
         case "ArrowDown": {
           event.preventDefault();
@@ -360,7 +381,7 @@ export function useZoomCanvas({ content }: UseZoomCanvasOptions): ZoomCanvasApi 
         default:
       }
     },
-    [zoomIn, zoomOut, fit],
+    [zoomIn, zoomOut, fit, horizontalArrowPan],
   );
 
   // Double-click toggles fit <-> 100%, anchored under the cursor on the way in.

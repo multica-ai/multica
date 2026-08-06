@@ -12,11 +12,11 @@ export function StatusHeading({
   const { t } = useT("issues");
   return (
     <div className="flex items-center gap-2">
-      <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
+      <span className="inline-flex items-center gap-1.5 text-caption font-semibold">
         <StatusIcon status={status} className="h-3 w-3" />
         {t(($) => $.status[status])}
       </span>
-      <span className="text-xs text-muted-foreground">{count}</span>
+      <span className="text-caption text-muted-foreground">{count}</span>
     </div>
   );
 }

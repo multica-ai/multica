@@ -152,10 +152,10 @@ func (q *Queries) DeleteAgentLabelAssignmentsByLabel(ctx context.Context, labelI
 	return err
 }
 
-const deleteAgentLabelAssignmentsByRuntime = `-- name: DeleteAgentLabelAssignmentsByRuntime :exec
+const deleteAgentLabelAssignmentsBySystemRuntimeAgents = `-- name: DeleteAgentLabelAssignmentsBySystemRuntimeAgents :exec
 
 DELETE FROM agent_to_label
-WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1)
+WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system')
 `
 
 // The single-entity cleanups above cover one agent/skill at a time. The runtime
@@ -163,11 +163,12 @@ WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1)
 // owning agents disappear without passing through a per-entity delete.
 // Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
 // workspace's existing multi-table teardown.
-// Runtime teardown hard-deletes every agent bound to the runtime (archived and
-// system; active agents are refused by a 409 guard). Clear their label links by
-// runtime so none survive the agent hard-delete.
-func (q *Queries) DeleteAgentLabelAssignmentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByRuntime, runtimeID)
+// Runtime teardown hard-deletes the system agents bound to the runtime (user
+// agents are unbound and kept since MUL-5559). Clear only those agents' label
+// links so none survive the agent hard-delete — a surviving unbound agent must
+// keep its labels.
+func (q *Queries) DeleteAgentLabelAssignmentsBySystemRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsBySystemRuntimeAgents, runtimeID)
 	return err
 }
 

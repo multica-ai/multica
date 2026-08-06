@@ -982,6 +982,33 @@ func TestOpencodeProcessEventsToolErrorThenCleanFinish(t *testing.T) {
 	}
 
 	close(ch)
+	var msgs []Message
+	for msg := range ch {
+		msgs = append(msgs, msg)
+	}
+
+	var toolUses, toolResults int
+	var failedToolResult *Message
+	for i := range msgs {
+		switch msgs[i].Type {
+		case MessageToolUse:
+			toolUses++
+		case MessageToolResult:
+			toolResults++
+			if msgs[i].CallID == "functions.read:1" {
+				failedToolResult = &msgs[i]
+			}
+		}
+	}
+	if toolUses != 2 || toolResults != 2 {
+		t.Fatalf("tool messages are not paired: tool_use=%d tool_result=%d (%+v)", toolUses, toolResults, msgs)
+	}
+	if failedToolResult == nil {
+		t.Fatal("missing tool_result for failed read tool")
+	}
+	if failedToolResult.Output != "File not found: /nonexistent-path-xyz/also-missing.md" {
+		t.Errorf("failed tool output: got %q", failedToolResult.Output)
+	}
 }
 
 // ── Windows native-binary resolution tests ──
@@ -1220,6 +1247,68 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(gotPWD)); got != workDir {
 		t.Errorf("child PWD = %q, want %q", got, workDir)
+	}
+}
+
+// TestOpencodeBackendNeverEmitsPromptFlag pins MUL-5392: `opencode run` has no
+// --prompt flag, so emitting one makes the real CLI exit 1 with a usage dump
+// before a single token is sent. The backend carried that dead branch from the
+// day OpenCode was added (#341); it never fired because the daemon leaves
+// SystemPrompt empty for opencode, which is the correct delivery path — the
+// runtime brief reaches the agent through the workdir AGENTS.md instead. This
+// test exists so re-adding the flag fails here rather than in production.
+func TestOpencodeBackendNeverEmitsPromptFlag(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"OPENCODE_ARGS_FILE": argsFile},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// SystemPrompt is set deliberately; the backend must NOT forward it.
+	const brief = "the entire multica runtime brief"
+	session, err := backend.Execute(ctx, "do the thing", ExecOptions{
+		Cwd:          workDir,
+		SystemPrompt: brief,
+		Timeout:      5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if containsString(args, "--prompt") {
+		t.Errorf("argv must NOT contain --prompt (OpenCode's run has no such flag): %v", args)
+	}
+	if containsString(args, brief) {
+		t.Errorf("SystemPrompt leaked into argv: %v", args)
+	}
+	// The user prompt is still the final positional arg.
+	if len(args) == 0 || args[len(args)-1] != "do the thing" {
+		t.Errorf("expected prompt as final positional arg, got %v", args)
 	}
 }
 

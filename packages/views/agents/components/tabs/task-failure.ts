@@ -23,6 +23,7 @@ const REASON_LABEL: Record<string, string> = {
   iteration_limit: "Hit the iteration limit",
   agent_blocked: "Waiting on human input",
   api_invalid_request: "Rejected by the model API",
+  skill_bundle_unavailable: "Couldn't download the agent's skills",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access": "Provider auth failed",
@@ -41,6 +42,9 @@ const REASON_LABEL: Record<string, string> = {
   "agent_error.runtime_version_unsupported": "Runner CLI version unsupported",
   "agent_error.runtime_missing_executable": "Runner CLI not installed",
   "agent_error.unknown": "Agent execution error",
+
+  // Provider-specific operational reasons, outside the canonical taxonomy.
+  codex_resume_oversized: "Session too large to resume",
 
   // Pre-MUL-1949 coarse values, still present on historical rows.
   agent_error: "Agent execution error",

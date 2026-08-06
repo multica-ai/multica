@@ -20,10 +20,12 @@ WHERE workspace_id = $1 AND user_id = $2 AND agent_id = $3;
 DELETE FROM chat_pinned_agent
 WHERE workspace_id = $1;
 
--- name: DeleteChatPinnedAgentsByArchivedRuntimeAgents :exec
+-- name: DeleteChatPinnedAgentsBySystemRuntimeAgents :exec
+-- Scoped to the system agents a runtime delete hard-deletes. User agents keep
+-- their pins: since MUL-5559 they survive their runtime as unbound agents.
 DELETE FROM chat_pinned_agent
 WHERE agent_id IN (
-    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+    SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
 );
 
 -- name: GetMaxChatPinnedAgentPosition :one

@@ -288,17 +288,17 @@ function TimezoneRow() {
       >
         <SelectTrigger
           size="sm"
-          className="w-full font-mono text-xs"
+          className="w-full font-mono text-caption"
           aria-label={t(($) => $.preferences.timezone.title)}
         >
           <SelectValue>{formatTZLabel(value)}</SelectValue>
         </SelectTrigger>
         <SelectContent align="end" className="max-h-72">
-          <SelectItem value={BROWSER_TZ_VALUE} className="font-mono text-xs">
+          <SelectItem value={BROWSER_TZ_VALUE} className="font-mono text-caption">
             {formatTZLabel(BROWSER_TZ_VALUE)}
           </SelectItem>
           {options.map((timezone) => (
-            <SelectItem key={timezone} value={timezone} className="font-mono text-xs">
+            <SelectItem key={timezone} value={timezone} className="font-mono text-caption">
               {formatTZLabel(timezone)}
             </SelectItem>
           ))}

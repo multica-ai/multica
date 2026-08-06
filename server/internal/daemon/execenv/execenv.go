@@ -126,12 +126,12 @@ type TaskContextForEnv struct {
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
-	// "feishu"); empty for a web/mobile chat. The brief reads it for DELIVERY
-	// policy only: any non-empty value means the reply leaves Multica for an
-	// external channel, so `multica attachment upload` cannot deliver a file and
-	// the Output section says text-only instead (MUL-4899). The orthogonal
-	// history-command policy is Slack-only and lives in the per-turn chat prompt
-	// (daemon/prompt.go) — the server has no Feishu history reader.
+	// "feishu", "wecom"); empty for a web/mobile chat. Any non-empty value
+	// means the reply leaves Multica for an external channel, so `multica
+	// attachment upload` cannot deliver a file and the Output section says
+	// text-only instead (MUL-4899). The orthogonal audience and history policies
+	// live in the per-turn chat prompt (daemon/prompt.go) — the server has no
+	// history reader for any other channel.
 	ChatChannelType         string
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
@@ -203,14 +203,6 @@ type Environment struct {
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
 	// disabled runtime-skill policy without mutating the user's Claude config.
 	ClaudeSettingsPath string
-	// TaskHome is the per-task writable HOME directory (set only for the codex
-	// provider on Linux, where the workspace-write Landlock sandbox makes the
-	// real HOME read-only). When non-empty the daemon redirects
-	// HOME/XDG/npm_config_cache here so tools that write to `~` (npm, Prisma, …)
-	// land in a sandbox-writable location. Empty on macOS/Windows and for
-	// non-sandboxed providers, where the real HOME stays in place. See
-	// task_home.go and MUL-4856.
-	TaskHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
 	// config (set only for openclaw provider). The daemon exports this as
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
@@ -239,6 +231,13 @@ type Environment struct {
 	// .agent_context/skills/ fallback was never read (issue #5242). See
 	// hermes_home.go.
 	HermesHome string
+	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
+	// (set only for the qwenpaw provider). It is populated with the bound skills
+	// and their skill.json manifest with enabled: true, so the skills are
+	// immediately effective. The daemon passes --workspace <dir> to
+	// `qwenpaw acp` so the QwenPaw agent discovers the skills natively.
+	// See qwenpaw_workspace.go.
+	QwenpawWorkspace string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -344,15 +343,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		// Under the Linux workspace-write sandbox the real HOME is read-only;
-		// give the task a writable HOME and grant write access to it in the
-		// Codex config so npm/Prisma can write their caches (MUL-4856).
-		taskHome, writableRoots, err := prepareCodexSandboxHome(envRoot, "", params.CodexVersion, logger)
-		if err != nil {
-			return nil, fmt.Errorf("execenv: prepare task home: %w", err)
-		}
-		env.TaskHome = taskHome
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots, CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
@@ -381,6 +372,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
 		env.HermesHome = hermesHome
+	}
+	if params.Provider == "qwenpaw" {
+		qwenpawWorkspace := filepath.Join(envRoot, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare qwenpaw workspace: %w", err)
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
 	// For Cursor, materialize managed MCP into project-local config and use
@@ -568,15 +566,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		// Refresh the per-task writable HOME (re-seed credential symlinks in
-		// case the user's real home changed) and recompute the sandbox
-		// writable_roots on reuse, mirroring the fresh Prepare path (MUL-4856).
-		taskHome, writableRoots, err := prepareCodexSandboxHome(env.RootDir, "", params.CodexVersion, logger)
-		if err != nil {
-			logger.Warn("execenv: refresh task home failed", "error", err)
-		}
-		env.TaskHome = taskHome
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots, CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
@@ -593,6 +583,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		} else {
 			env.ClaudeSettingsPath = settingsPath
 		}
+	}
+
+	// Refresh (or tear down) the per-task QwenPaw workspace on reuse.
+	// Rebuild the workspace so an added/removed/edited skill is reflected.
+	if params.Provider == "qwenpaw" && env.RootDir != "" {
+		qwenpawWorkspace := filepath.Join(env.RootDir, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			logger.Warn("execenv: refresh qwenpaw workspace failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
 	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills

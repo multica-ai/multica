@@ -63,7 +63,7 @@ func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(rawError)
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
-		// but that bucket is not part of the canonical 21. In-flight
+		// but that bucket is not part of the canonical 22. In-flight
 		// callers should never hand us empty input — if they do, the
 		// safest landing is the catchall.
 		return ReasonAgentUnknown
@@ -81,6 +81,7 @@ func Classify(rawError string) Reason {
 		"prompt is too long",
 		"context size has been exceeded",
 	),
+		containsAny(lower, contextWindowExceededWitnesses...),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
 		// approximate with both substrings present, which catches
 		// "token limit", "tokens per minute limit", etc., without the
@@ -167,6 +168,16 @@ func Classify(rawError string) Reason {
 	//    instead of falling through to agent_error.unknown / process_failure
 	//    and terminating the task (MUL-4910). Checked before rule 13 so the
 	//    "... exited with error: exit status N ..." variant still routes here.
+	//
+	//    "deadline exceeded" covers every Go-side context deadline that
+	//    reaches the classifier as text — `context deadline exceeded` from a
+	//    cancelled request, and net/http's `Client.Timeout exceeded while
+	//    awaiting headers` variant. Before MUL-5370 these all landed in
+	//    agent_error.unknown, which is not on the retry allowlist, so a
+	//    transient stall became a terminal failure with no usable label.
+	//    Note this only catches deadlines that arrive as a bare string;
+	//    callers holding the error value should classify structurally
+	//    instead (see taskRunFailureReason in daemon/daemon.go).
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
@@ -179,6 +190,8 @@ func Classify(rawError string) Reason {
 		"connectionrefused",
 		"dns",
 		"i/o timeout",
+		"deadline exceeded",
+		"timeout exceeded while awaiting",
 	):
 		return ReasonAgentProviderNetwork
 
@@ -240,6 +253,106 @@ func Classify(rawError string) Reason {
 	}
 
 	return ReasonAgentUnknown
+}
+
+// contextWindowExceededWitnesses are the two wordings for an overflow reported
+// on the RESPONSE rather than as a 400 on the request: the provider accepts the
+// call and ends the turn with stop_reason "model_context_window_exceeded", which
+// Claude Code 2.1.x surfaces verbatim as "API Error: The model has reached its
+// context window limit." (GH #6360). Both are matched so a backend forwarding
+// the raw stop reason classifies the same way as one forwarding the CLI's copy.
+//
+// Neither carries "token" nor any of rule 1's other phrases, so before this the
+// failure landed in agent_error.unknown — a reason no resume blacklist covers,
+// which left the over-full session pinned as the resume pointer and made every
+// later comment on that issue replay the same overflow.
+//
+// Each is an unambiguous witness on its own, which is what lets
+// NormalizeDaemonReason reuse them to upgrade an older daemon's catchall
+// server-side. Matched against pre-lowercased text.
+// Mirror these substrings into the MUL-1949 offline backfill SQL.
+//
+// terminal_reason=prompt_too_long joins them for GH #6402: it is the structured
+// enum value Claude Code puts on the result frame when the turn ended because
+// the context window is full, and the daemon quotes it verbatim into the error
+// it reports (see claudeTerminalReasonFailure in pkg/agent/claude.go). Being an
+// enum token rather than prose, it is at least as unambiguous as the two above
+// — no free-form provider message produces it by accident — so a run classified
+// from it lands in context_overflow even when the CLI's accompanying copy is
+// empty or reworded between releases.
+var contextWindowExceededWitnesses = []string{
+	"context window limit",
+	"model_context_window_exceeded",
+	TerminalReasonPromptTooLong,
+}
+
+// legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
+// failed skill-bundle download. It is an unambiguous witness: no other code
+// path ever produced it, and a current daemon writes "skill bundle
+// unavailable: ..." instead.
+const legacySkillBundlePrefix = "resolve skill bundles:"
+
+// legacySkillBundleReasons are the buckets an older daemon's own classifier
+// could land that failure in. All three mean "we only knew it was some
+// transport fault": agent_error.unknown from a daemon predating the deadline
+// rule, agent_error.provider_network from one that has it, and the
+// pre-MUL-1949 coarse agent_error. None of them carries information that
+// upgrading would discard.
+var legacySkillBundleReasons = map[string]bool{
+	string(ReasonAgentUnknown):         true,
+	string(ReasonAgentProviderNetwork): true,
+	"agent_error":                      true,
+}
+
+// legacyContextOverflowReasons are the buckets an older daemon lands the
+// response-side context overflow in: agent_error.unknown from its own
+// classifier (its rule 1 predates contextWindowExceededWitnesses) and the
+// pre-MUL-1949 coarse agent_error.
+//
+// Deliberately narrower than legacySkillBundleReasons. A refined reason means
+// the old daemon matched an earlier rule on the same text — process_failure on
+// a crash marker, provider_network on a stream cut — and that says more about
+// what actually ended the run than a witness appearing somewhere in the same
+// blob does. Upgrading those would discard information; leaving them alone
+// costs at most the pre-existing behaviour.
+var legacyContextOverflowReasons = map[string]bool{
+	string(ReasonAgentUnknown): true,
+	"agent_error":              true,
+}
+
+// NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
+// onto the taxonomy this server understands, using the raw error text as the
+// witness. It returns the reason unchanged when nothing applies.
+//
+// Why this exists (MUL-5370): installed daemons upgrade on their own cadence,
+// so a fix that only labels a failure correctly on the daemon side reaches
+// nobody until every host updates. The daemon reports a non-empty reason, so
+// FailTask's "classify when empty" guard does not fire, and the server would
+// persist the stale label — no auto-retry, and the chat bubble falls back to
+// generic copy. Recognising the wire shape an old daemon produces closes that
+// gap the moment the server deploys.
+//
+// This is a boundary compatibility shim, not internal fallback logic: each rule
+// can be deleted once no daemon old enough to produce its wire shape is still
+// reporting.
+func NormalizeDaemonReason(reason, rawError string) Reason {
+	if legacySkillBundleReasons[reason] &&
+		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
+		return ReasonSkillBundleUnavailable
+	}
+	// GH #6360: the same mixed-version gap, on a failure where waiting for
+	// every host to update is more expensive. A daemon whose rule 1 predates
+	// contextWindowExceededWitnesses reports the catchall, and the catchall is
+	// on no resume blacklist — so the over-full session stays pinned as the
+	// resume pointer and every later comment on that issue replays the same
+	// overflow. One un-upgraded host means a permanently stuck (agent, issue)
+	// pair, not just a missing label; upgrading here retires the session the
+	// moment the server deploys.
+	if legacyContextOverflowReasons[reason] &&
+		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
+		return ReasonAgentContextOverflow
+	}
+	return Reason(reason)
 }
 
 // containsAny reports whether s contains any of the supplied substrings.

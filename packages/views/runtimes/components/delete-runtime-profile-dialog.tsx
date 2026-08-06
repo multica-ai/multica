@@ -88,10 +88,10 @@ export function DeleteRuntimeProfileDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pb-4 pt-5">
-          <AlertDialogTitle className="font-sans text-base font-semibold">
+          <AlertDialogTitle className="font-sans text-title-sm font-semibold">
             {t(($) => $.profiles.delete_dialog.title)}
           </AlertDialogTitle>
-          <AlertDialogDescription className="mt-1 text-left text-sm leading-5 text-pretty">
+          <AlertDialogDescription className="mt-1 text-left text-body leading-5 text-pretty">
             {t(($) => $.profiles.delete_dialog.description, {
               name: profile.display_name,
             })}
@@ -99,7 +99,7 @@ export function DeleteRuntimeProfileDialog({
           {boundMessage && (
             <div
               role="alert"
-              className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+              className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-caption"
             >
               <AlertTriangle
                 aria-hidden="true"

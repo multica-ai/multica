@@ -14,7 +14,21 @@
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
 # Frontend: http://localhost:${FRONTEND_PORT:-3000}
-# Backend:  http://localhost:${BACKEND_PORT:-8080}
+# Backend:  http://localhost:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}
+#
+# The published values above are HOST ports; the containers always listen on
+# 8080 / 3000 internally, so changing them never needs a rebuild. PORT is the
+# variable to edit; BACKEND_PORT, API_PORT and SERVER_PORT are optional aliases
+# that override it in that order. Keep this alias order identical to Makefile
+# and scripts/local-env.sh. The web dev fallback intentionally omits PORT
+# because Next uses that variable for its own frontend listener.
+#
+# Note that *which source* wins differs per entry point — Compose lets the
+# calling environment outrank this file, while make lets the included env file
+# outrank the environment. Nothing re-derives the published port from the inputs
+# any more: `make selfhost` (via scripts/selfhost-wait.sh) and both installers
+# read it back with `docker compose port`, so the health check and the printed
+# URL always match what was actually published.
 
 name: multica
 
@@ -44,7 +58,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+      - "127.0.0.1:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:

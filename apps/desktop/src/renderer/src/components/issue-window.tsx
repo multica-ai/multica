@@ -98,8 +98,8 @@ function IssueWindowUnavailable() {
           <AlertTriangle className="size-6" aria-hidden="true" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-lg font-semibold">Issue unavailable</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-title font-semibold">Issue unavailable</h1>
+          <p className="text-body text-muted-foreground">
             This workspace is no longer available in your account.
           </p>
         </div>
@@ -125,8 +125,8 @@ function IssueWindowRouteError() {
           <AlertTriangle className="size-6" aria-hidden="true" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-lg font-semibold">Something went wrong</h1>
-          <p className="max-w-lg truncate text-sm text-muted-foreground">
+          <h1 className="text-title font-semibold">Something went wrong</h1>
+          <p className="max-w-lg truncate text-body text-muted-foreground">
             {message}
           </p>
         </div>

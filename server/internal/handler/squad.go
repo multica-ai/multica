@@ -58,14 +58,14 @@ type SquadMemberResponse struct {
 
 // ── Converters ──────────────────────────────────────────────────────────────
 
-func squadToResponse(s db.Squad) SquadResponse {
+func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 	return SquadResponse{
 		ID:            uuidToString(s.ID),
 		WorkspaceID:   uuidToString(s.WorkspaceID),
 		Name:          s.Name,
 		Description:   s.Description,
 		Instructions:  s.Instructions,
-		AvatarURL:     textToPtr(s.AvatarUrl),
+		AvatarURL:     h.resolveAvatarURLPtr(textToPtr(s.AvatarUrl)),
 		LeaderID:      uuidToString(s.LeaderID),
 		CreatorID:     uuidToString(s.CreatorID),
 		CreatedAt:     timestampToString(s.CreatedAt),
@@ -175,7 +175,7 @@ func (h *Handler) loadSquadMemberSummary(ctx context.Context, squadID pgtype.UUI
 }
 
 func (h *Handler) squadToResponseWithPreview(ctx context.Context, squad db.Squad) (SquadResponse, error) {
-	resp := squadToResponse(squad)
+	resp := h.squadToResponse(squad)
 	summary, err := h.loadSquadMemberSummary(ctx, squad.ID)
 	if err != nil {
 		return resp, err
@@ -216,7 +216,7 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]SquadResponse, len(squads))
 	for i, s := range squads {
-		resp[i] = squadToResponse(s)
+		resp[i] = h.squadToResponse(s)
 		applySquadMemberSummary(&resp[i], summaries[uuidToString(s.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -278,7 +278,11 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 
 	avatarURL := pgtype.Text{}
 	if req.AvatarURL != nil {
-		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
+		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, "")
+		if !ok {
+			return
+		}
+		avatarURL = pgtype.Text{String: accepted, Valid: true}
 	}
 
 	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
@@ -373,16 +377,45 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
 	}
 	if req.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
+		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, squad.AvatarUrl.String)
+		if !ok {
+			return
+		}
+		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
 	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Autopilot assignment takes FOR SHARE on the squad before locking its
+	// leader Agent. Take the exclusive side in the same order so leader
+	// rotation and active Autopilot saves cannot leave an automation pointing
+	// at an unbound effective Agent.
+	if _, err := qtx.LockSquadForUpdate(r.Context(), db.LockSquadForUpdateParams{
+		ID:          squad.ID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+
+	newLeaderRuntimeBound := true
 	if req.LeaderID != nil {
 		lid, ok := parseUUIDOrBadRequest(w, *req.LeaderID, "leader_id")
 		if !ok {
 			return
 		}
-		// Validate new leader is an agent in workspace.
-		newLeader, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID: lid, WorkspaceID: wsUUID,
+		// Stabilize runtime_id through commit. Runtime teardown takes FOR UPDATE
+		// on this row and follows the same Agent→Autopilot lock order, so
+		// whichever operation starts first produces a complete result.
+		newLeader, err := qtx.LockAgentForAutopilotAssignment(r.Context(), db.LockAgentForAutopilotAssignmentParams{
+			ID:          lid,
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
@@ -394,19 +427,39 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Ensure new leader is a squad member; auto-add if not.
-		isMember, _ := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
+		isMember, err := qtx.IsSquadMember(r.Context(), db.IsSquadMemberParams{
 			SquadID: squad.ID, MemberType: "agent", MemberID: lid,
 		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update squad")
+			return
+		}
 		if !isMember {
-			h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
+			if _, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
 				SquadID: squad.ID, MemberType: "agent", MemberID: lid, Role: "leader",
-			})
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update squad")
+				return
+			}
 		}
 		params.LeaderID = lid
+		newLeaderRuntimeBound = newLeader.RuntimeID.Valid
 	}
 
-	updated, err := h.Queries.UpdateSquad(r.Context(), params)
+	updated, err := qtx.UpdateSquad(r.Context(), params)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+	var pausedAutopilots []db.Autopilot
+	if req.LeaderID != nil && !newLeaderRuntimeBound {
+		pausedAutopilots, err = qtx.PauseAutopilotsByUnrunnableSquad(r.Context(), squad.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update squad")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update squad")
 		return
 	}
@@ -417,6 +470,11 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
+	for _, autopilot := range pausedAutopilots {
+		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+			"autopilot": autopilotToResponse(autopilot, nil),
+		})
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

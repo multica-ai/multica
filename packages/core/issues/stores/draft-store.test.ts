@@ -2,6 +2,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { useIssueDraftStore } from "./draft-store";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
+import { resetAllRegisteredDrafts } from "../../drafts/cleanup-registry";
+import { clearWorkspaceStorage } from "../../platform/storage-cleanup";
+import { defaultStorage } from "../../platform/storage";
 
 const flush = () => new Promise((resolve) => queueMicrotask(() => resolve(null)));
 
@@ -26,18 +29,28 @@ beforeAll(() => {
 
 const RESET_STATE = {
   draft: {
-    title: "",
-    description: "",
-    status: "todo" as const,
-    priority: "none" as const,
-    assigneeType: undefined,
-    assigneeId: undefined,
-    projectId: undefined,
-    startDate: null,
-    dueDate: null,
-    labelIds: [],
-    propertyValues: {},
-    attachments: [],
+    shared: {
+      projectId: undefined,
+      priority: "none" as const,
+      dueDate: null,
+      attachments: [],
+    },
+    manual: {
+      title: "",
+      description: "",
+      status: "todo" as const,
+      startDate: null,
+      assigneeType: undefined,
+      assigneeId: undefined,
+      labelIds: [],
+      propertyValues: {},
+    },
+    agent: {
+      prompt: "",
+      actorType: undefined,
+      actorId: undefined,
+    },
+    activeMode: "manual" as const,
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
@@ -48,77 +61,92 @@ describe("issue draft store — last assignee", () => {
     useIssueDraftStore.setState(RESET_STATE);
   });
 
-  it("clearDraft prefills the next draft with the remembered assignee", () => {
-    const { setDraft, setLastAssignee, clearDraft } =
+  it("clearDraft prefills the next manual draft with the remembered assignee", () => {
+    const { setManual, setLastAssignee, clearDraft } =
       useIssueDraftStore.getState();
 
-    setDraft({ title: "first", assigneeType: "member", assigneeId: "alice" });
+    setManual({ title: "first", assigneeType: "member", assigneeId: "alice" });
     setLastAssignee("member", "alice");
     clearDraft();
 
     const { draft } = useIssueDraftStore.getState();
-    expect(draft.title).toBe("");
-    expect(draft.assigneeType).toBe("member");
-    expect(draft.assigneeId).toBe("alice");
+    expect(draft.manual.title).toBe("");
+    expect(draft.manual.assigneeType).toBe("member");
+    expect(draft.manual.assigneeId).toBe("alice");
   });
 
   it("clearDraft yields an empty assignee when none has ever been remembered", () => {
-    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+    const { setManual, clearDraft } = useIssueDraftStore.getState();
 
-    setDraft({ title: "first" });
+    setManual({ title: "first" });
     clearDraft();
 
     const { draft } = useIssueDraftStore.getState();
-    expect(draft.assigneeType).toBeUndefined();
-    expect(draft.assigneeId).toBeUndefined();
+    expect(draft.manual.assigneeType).toBeUndefined();
+    expect(draft.manual.assigneeId).toBeUndefined();
   });
 
-  it("clearDraft removes persisted draft attachments", () => {
-    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+  it("clearDraft removes persisted shared attachments", () => {
+    const { setShared, clearDraft } = useIssueDraftStore.getState();
 
-    setDraft({
-      title: "first",
+    setShared({
       attachments: [
         {
-          id: "11111111-2222-3333-4444-555555555555",
-          workspace_id: "ws-1",
-          issue_id: null,
-          comment_id: null,
-          chat_session_id: null,
-          chat_message_id: null,
-          uploader_type: "member",
-          uploader_id: "alice",
+          clientUploadId: "11111111-2222-3333-4444-555555555555",
+          status: "uploaded",
           filename: "shot.png",
-          url: "https://cdn.example.test/shot.png",
-          download_url: "https://cdn.example.test/shot.png",
-          markdown_url: "https://app.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download",
-          content_type: "image/png",
-          size_bytes: 123,
-          created_at: "2026-06-12T00:00:00Z",
+          size: 123,
+          contentType: "image/png",
+          attachment: {
+            id: "11111111-2222-3333-4444-555555555555",
+            workspace_id: "ws-1",
+            issue_id: null,
+            comment_id: null,
+            chat_session_id: null,
+            chat_message_id: null,
+            uploader_type: "member",
+            uploader_id: "alice",
+            filename: "shot.png",
+            url: "https://cdn.example.test/shot.png",
+            download_url: "https://cdn.example.test/shot.png",
+            markdown_url: "https://app.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download",
+            content_type: "image/png",
+            size_bytes: 123,
+            created_at: "2026-06-12T00:00:00Z",
+          },
         },
       ],
     });
     clearDraft();
 
-    expect(useIssueDraftStore.getState().draft.attachments).toEqual([]);
+    expect(useIssueDraftStore.getState().draft.shared.attachments).toEqual([]);
   });
 
   it("clearDraft removes persisted custom property values", () => {
-    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+    const { setManual, clearDraft } = useIssueDraftStore.getState();
 
-    setDraft({ propertyValues: { "property-1": "option-1" } });
+    setManual({ propertyValues: { "property-1": "option-1" } });
     clearDraft();
 
-    expect(useIssueDraftStore.getState().draft.propertyValues).toEqual({});
+    expect(useIssueDraftStore.getState().draft.manual.propertyValues).toEqual({});
   });
 
   it("clearDraft removes the persisted project selection", () => {
-    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+    const { setShared, clearDraft } = useIssueDraftStore.getState();
 
-    setDraft({ projectId: "project-1" });
+    setShared({ projectId: "project-1" });
     clearDraft();
 
-    expect(useIssueDraftStore.getState().draft.projectId).toBeUndefined();
+    expect(useIssueDraftStore.getState().draft.shared.projectId).toBeUndefined();
+  });
+
+  it("clearDraft removes the persisted agent prompt", () => {
+    const { setAgent, clearDraft } = useIssueDraftStore.getState();
+
+    setAgent({ prompt: "Investigate the regression" });
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.agent.prompt).toBe("");
   });
 
   it("setLastAssignee(undefined) lets the user opt back out of a default", () => {
@@ -126,12 +154,36 @@ describe("issue draft store — last assignee", () => {
 
     setLastAssignee("member", "alice");
     clearDraft();
-    expect(useIssueDraftStore.getState().draft.assigneeId).toBe("alice");
+    expect(useIssueDraftStore.getState().draft.manual.assigneeId).toBe("alice");
 
     setLastAssignee(undefined, undefined);
     clearDraft();
-    expect(useIssueDraftStore.getState().draft.assigneeId).toBeUndefined();
-    expect(useIssueDraftStore.getState().draft.assigneeType).toBeUndefined();
+    expect(useIssueDraftStore.getState().draft.manual.assigneeId).toBeUndefined();
+    expect(useIssueDraftStore.getState().draft.manual.assigneeType).toBeUndefined();
+  });
+});
+
+describe("issue draft store — mode switch preserves both sides", () => {
+  beforeEach(() => {
+    useIssueDraftStore.setState(RESET_STATE);
+  });
+
+  it("keeps the manual slot untouched when the agent slot is filled and vice versa", () => {
+    const { setManual, setAgent, setShared } = useIssueDraftStore.getState();
+
+    setManual({ title: "Manual title", description: "Manual body" });
+    setShared({ projectId: "project-1", priority: "high" });
+    // Switching to agent seeds the agent slot but must not clear manual.
+    setAgent({ prompt: "Agent prompt", actorType: "agent", actorId: "agent-1" });
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.manual.title).toBe("Manual title");
+    expect(draft.manual.description).toBe("Manual body");
+    expect(draft.agent.prompt).toBe("Agent prompt");
+    expect(draft.agent.actorId).toBe("agent-1");
+    // Shared fields are visible to both sides.
+    expect(draft.shared.projectId).toBe("project-1");
+    expect(draft.shared.priority).toBe("high");
   });
 });
 
@@ -145,7 +197,7 @@ describe("issue draft store — legacy rehydrate", () => {
     setCurrentWorkspace(null, null);
   });
 
-  it("backfills attachments and custom properties for legacy drafts", async () => {
+  it("migrates a pre-MUL-5181 flat draft into the shared/manual slots", async () => {
     localStorage.setItem(
       "multica_issue_draft:acme",
       JSON.stringify({
@@ -154,9 +206,12 @@ describe("issue draft store — legacy rehydrate", () => {
             title: "legacy",
             description: "body",
             status: "todo",
-            priority: "none",
+            priority: "high",
+            projectId: "project-1",
             startDate: null,
-            dueDate: null,
+            dueDate: "2026-08-01",
+            labelIds: ["label-1"],
+            propertyValues: { "property-1": "option-1" },
             // no `attachments` — written by a build that predates the field
           },
         },
@@ -169,9 +224,181 @@ describe("issue draft store — legacy rehydrate", () => {
     await flush();
 
     const { draft } = useIssueDraftStore.getState();
-    expect(draft.title).toBe("legacy");
-    expect(draft.projectId).toBeUndefined();
-    expect(draft.attachments).toEqual([]);
-    expect(draft.propertyValues).toEqual({});
+    // Manual-only fields land in the manual slot.
+    expect(draft.manual.title).toBe("legacy");
+    expect(draft.manual.description).toBe("body");
+    expect(draft.manual.status).toBe("todo");
+    expect(draft.manual.labelIds).toEqual(["label-1"]);
+    expect(draft.manual.propertyValues).toEqual({ "property-1": "option-1" });
+    // Shared fields land in the shared slot, with attachments backfilled.
+    expect(draft.shared.projectId).toBe("project-1");
+    expect(draft.shared.priority).toBe("high");
+    expect(draft.shared.dueDate).toBe("2026-08-01");
+    expect(draft.shared.attachments).toEqual([]);
+    // A legacy draft had no agent prompt (it lived in a separate store).
+    expect(draft.agent.prompt).toBe("");
+    expect(draft.activeMode).toBe("manual");
+  });
+
+  it("backfills missing sub-fields on an already-nested persisted draft", async () => {
+    localStorage.setItem(
+      "multica_issue_draft:beta",
+      JSON.stringify({
+        state: {
+          draft: {
+            // A build that shipped the nested shape but predated a later field.
+            shared: { projectId: "project-2", priority: "urgent" },
+            manual: { title: "kept" },
+            agent: { prompt: "keep me" },
+            activeMode: "agent",
+          },
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    await flush();
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.shared.projectId).toBe("project-2");
+    expect(draft.shared.priority).toBe("urgent");
+    expect(draft.shared.dueDate).toBeNull();
+    expect(draft.shared.attachments).toEqual([]);
+    expect(draft.manual.title).toBe("kept");
+    expect(draft.manual.status).toBe("todo");
+    expect(draft.agent.prompt).toBe("keep me");
+    expect(draft.activeMode).toBe("agent");
+  });
+
+  it("normalizes pre-L2 shared attachments and drops stale uploading placeholders", async () => {
+    localStorage.setItem(
+      "multica_issue_draft:gamma",
+      JSON.stringify({
+        state: {
+          draft: {
+            shared: {
+              attachments: [
+                // Pre-L2 build persisted a bare Attachment row.
+                {
+                  id: "att-1",
+                  filename: "old.png",
+                  url: "https://cdn.example.test/old.png",
+                  size_bytes: 7,
+                  content_type: "image/png",
+                },
+                // An upload that was still in flight when the app closed.
+                {
+                  clientUploadId: "c-flight",
+                  status: "uploading",
+                  filename: "mid.png",
+                  size: 9,
+                },
+              ],
+            },
+            manual: {},
+            agent: {},
+            activeMode: "manual",
+          },
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("gamma", "ws_c");
+    await flush();
+    await flush();
+
+    const { attachments } = useIssueDraftStore.getState().draft.shared;
+    // The legacy row is adopted; the in-flight one is dropped — it can neither
+    // resume nor be shown, so keeping it would only bloat the draft.
+    expect(attachments.map((u) => u.status)).toEqual(["uploaded"]);
+    expect(attachments[0]?.filename).toBe("old.png");
+  });
+});
+
+describe("issue draft store — hasDraft upload semantics", () => {
+  beforeEach(() => {
+    useIssueDraftStore.setState(RESET_STATE);
+  });
+
+  const placeholder = (status: "uploading" | "uploaded" | "failed" | "interrupted") =>
+    ({
+      clientUploadId: `c-${status}`,
+      status,
+      filename: "f.png",
+      size: 1,
+      ...(status === "uploaded"
+        ? {
+            attachment: {
+              id: "att-1",
+              filename: "f.png",
+              url: "https://cdn.example.test/f.png",
+            },
+          }
+        : {}),
+    }) as never;
+
+  it("counts uploaded and uploading entries as recoverable draft intent", () => {
+    const { setShared, hasDraft } = useIssueDraftStore.getState();
+    setShared({ attachments: [placeholder("uploading")] });
+    expect(hasDraft()).toBe(true);
+    setShared({ attachments: [placeholder("uploaded")] });
+    expect(hasDraft()).toBe(true);
+  });
+
+  it("ignores failed/interrupted remnants so they cannot pin the sidebar dot", () => {
+    const { setShared, hasDraft } = useIssueDraftStore.getState();
+    setShared({ attachments: [placeholder("failed"), placeholder("interrupted")] });
+    expect(hasDraft()).toBe(false);
+  });
+});
+
+describe("issue draft store — logout cleanup", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setCurrentWorkspace(null, null);
+    useIssueDraftStore.setState(RESET_STATE);
+  });
+
+  afterEach(() => {
+    setCurrentWorkspace(null, null);
+  });
+
+  it("registered reset wipes the last-assignee preference, not just the draft", () => {
+    const { setManual, setLastAssignee } = useIssueDraftStore.getState();
+    setManual({ title: "wip", assigneeType: "member", assigneeId: "alice" });
+    setLastAssignee("member", "alice");
+
+    resetAllRegisteredDrafts();
+
+    const state = useIssueDraftStore.getState();
+    expect(state.lastAssigneeType).toBeUndefined();
+    expect(state.lastAssigneeId).toBeUndefined();
+    // clearDraft() would have re-seeded the manual slot from lastAssignee —
+    // the logout reset must not hand the next login a previous user's pick.
+    expect(state.draft.manual.assigneeType).toBeUndefined();
+    expect(state.draft.manual.assigneeId).toBeUndefined();
+  });
+
+  it("logout sequence (reset in-memory, then clear storage) leaves no persisted key", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    await flush();
+
+    const { setManual, setLastAssignee } = useIssueDraftStore.getState();
+    setManual({ title: "secret wip" });
+    setLastAssignee("member", "alice");
+    expect(localStorage.getItem("multica_issue_draft:acme")).not.toBeNull();
+
+    // use-logout's order: reset first (each reset is a setState, and persist
+    // writes the new state back to storage under the still-active slug), THEN
+    // remove the keys. The reverse order resurrects the key with the previous
+    // user's lastAssignee inside.
+    resetAllRegisteredDrafts();
+    clearWorkspaceStorage(defaultStorage, "acme");
+
+    expect(localStorage.getItem("multica_issue_draft:acme")).toBeNull();
   });
 });

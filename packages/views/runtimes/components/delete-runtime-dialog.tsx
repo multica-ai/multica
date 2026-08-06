@@ -9,7 +9,7 @@ import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import {
   useDeleteRuntime,
-  useArchiveAgentsAndDeleteRuntime,
+  useUnbindAgentsAndDeleteRuntime,
 } from "@multica/core/runtimes/mutations";
 import {
   agentListOptions,
@@ -35,7 +35,12 @@ import { isSelfHealingRuntime } from "../utils";
 // deletion across the list-page kebab and the detail-page Diagnostics
 // card. It runs in two modes that share the same shell — light when no
 // agents are bound (matches the legacy "are you sure" prompt) and
-// cascade when active agents would be archived as part of the delete.
+// cascade when active agents would be unbound as part of the delete.
+//
+// "Unbound" is the load-bearing word (MUL-5559): the agents are kept, with
+// their instructions, chats and task history, and only lose their runtime —
+// they cannot run until bound to another one. The dialog used to say those
+// agents would be "archived" while the server hard-deleted them.
 //
 // Mode is decided dynamically:
 //   1. Initial: peek at the cached agent list and pick light vs cascade
@@ -115,7 +120,7 @@ export function DeleteRuntimeDialog({
   }, [open, cachedActiveAgents]);
 
   const lightMutation = useDeleteRuntime(wsId);
-  const cascadeMutation = useArchiveAgentsAndDeleteRuntime(wsId);
+  const cascadeMutation = useUnbindAgentsAndDeleteRuntime(wsId);
 
   const handleConfirm = async () => {
     setSubmitting(true);
@@ -240,7 +245,7 @@ function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
     return (
       <div
         role="status"
-        className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+        className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-caption"
       >
         <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <span>{t(($) => $.detail.delete_dialog.profile_backed_notice)}</span>
@@ -251,7 +256,7 @@ function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
   return (
     <div
       role="status"
-      className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+      className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-caption"
     >
       <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
       <span>{t(($) => $.detail.delete_dialog.self_heal_notice)}</span>
@@ -280,10 +285,10 @@ function LightBody({
   return (
     <>
       <div className="px-5 pb-4 pt-5">
-        <h2 className="text-base font-semibold">
+        <h2 className="text-title-sm font-semibold">
           {t(($) => $.detail.delete_dialog.light.title)}
         </h2>
-        <p className="mt-1 text-sm leading-5 text-muted-foreground">
+        <p className="mt-1 text-body leading-5 text-muted-foreground">
           {t(($) => $.detail.delete_dialog.light.description, {
             name: runtimeDisplayLabel(runtime),
           })}
@@ -355,10 +360,10 @@ function CascadeBody({
   return (
     <>
       <div className="px-5 pb-4 pt-5">
-        <h2 className="text-base font-semibold">
+        <h2 className="text-title-sm font-semibold">
           {t(($) => $.detail.delete_dialog.cascade.title, { count })}
         </h2>
-        <p className="mt-1 text-sm leading-5 text-muted-foreground">
+        <p className="mt-1 text-body leading-5 text-muted-foreground">
           {t(($) => $.detail.delete_dialog.cascade.description, {
             name: runtimeDisplayLabel(runtime),
           })}
@@ -370,7 +375,7 @@ function CascadeBody({
             half before they scan the agent table. */}
         <div
           role="alert"
-          className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-caption text-destructive"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           <span>{t(($) => $.detail.delete_dialog.cascade.warning)}</span>
@@ -379,7 +384,7 @@ function CascadeBody({
         {planChangedNotice && (
           <div
             role="status"
-            className="mt-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-foreground"
+            className="mt-2 rounded-md border bg-muted/40 px-3 py-2 text-caption text-foreground"
           >
             {planChangedNotice}
           </div>
@@ -394,7 +399,7 @@ function CascadeBody({
       </div>
 
       <div className="border-t bg-muted/25 px-5 py-4">
-        <label className="flex cursor-pointer items-start gap-2 text-sm text-foreground">
+        <label className="flex cursor-pointer items-start gap-2 text-body text-foreground">
           <Checkbox
             className="mt-0.5"
             checked={confirmed}
@@ -456,7 +461,7 @@ function AgentPlanTable({
 
   return (
     <div className="mt-3 overflow-hidden rounded-md border">
-      <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] gap-3 border-b bg-muted/40 px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] gap-3 border-b bg-muted/40 px-3 py-2 text-micro uppercase tracking-wide text-muted-foreground">
         <span>{t(($) => $.detail.delete_dialog.cascade.table.header_agent)}</span>
         <span>{t(($) => $.detail.delete_dialog.cascade.table.header_owner)}</span>
         <span>{t(($) => $.detail.delete_dialog.cascade.table.header_status)}</span>
@@ -479,7 +484,7 @@ function AgentPlanTable({
           return (
             <div
               key={agent.id}
-              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] items-center gap-3 px-3 py-2 text-xs"
+              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] items-center gap-3 px-3 py-2 text-caption"
             >
               <span className="inline-flex min-w-0 items-center gap-2">
                 <ActorAvatar
@@ -522,7 +527,7 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
   const { t } = useT("runtimes");
   if (!presence) {
     return (
-      <span className="text-muted-foreground/60">
+      <span className="text-muted-foreground">
         {t(($) => $.detail.delete_dialog.cascade.table.presence_unknown)}
       </span>
     );
@@ -556,7 +561,7 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
           t(($) => $.detail.delete_dialog.cascade.table.workload_queued)}
       </span>
       {counts && (
-        <span className="font-mono tabular-nums text-muted-foreground/80">
+        <span className="font-mono tabular-nums text-muted-foreground">
           {counts}
         </span>
       )}

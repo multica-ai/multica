@@ -73,7 +73,10 @@ vi.mock("../editor/link-hover-card", () => ({
   LinkHoverCard: () => null,
 }));
 
-vi.mock("../editor/utils/link-handler", () => ({
+// Partial: only navigation is stubbed. The pure URL predicates stay real so
+// the sanitize contract is asserted against the renderer's real dispatch.
+vi.mock("../editor/utils/link-handler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../editor/utils/link-handler")>()),
   openLink: vi.fn(),
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
 }));

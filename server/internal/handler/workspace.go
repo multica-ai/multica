@@ -48,7 +48,7 @@ type WorkspaceResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
-func workspaceToResponse(w db.Workspace) WorkspaceResponse {
+func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	var settings any
 	if w.Settings != nil {
 		json.Unmarshal(w.Settings, &settings)
@@ -72,7 +72,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
-		AvatarURL:   textToPtr(w.AvatarUrl),
+		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
@@ -110,7 +110,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = workspaceToResponse(ws)
+		resp[i] = h.workspaceToResponse(ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -128,7 +128,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
 }
 
 type CreateWorkspaceRequest struct {
@@ -238,7 +238,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.notifyDaemonWorkspacesChanged(userID)
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
-	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
+	writeJSON(w, http.StatusCreated, h.workspaceToResponse(ws))
 }
 
 type UpdateWorkspaceRequest struct {
@@ -341,7 +341,18 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
+		// Read the stored value so an unchanged re-send skips revalidation —
+		// this handler is the one avatar writer that doesn't already have the
+		// row in hand.
+		var current string
+		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+			current = existing.AvatarUrl.String
+		}
+		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, current)
+		if !ok {
+			return
+		}
+		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
@@ -353,7 +364,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
 	if req.Name != nil {
 		if members, err := h.Queries.ListMembers(r.Context(), ws.ID); err == nil {
 			userIDs := make([]string, 0, len(members))
@@ -364,7 +375,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
@@ -422,7 +433,7 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:   timestampToString(m.CreatedAt),
 			Name:        m.UserName,
 			Email:       m.UserEmail,
-			AvatarURL:   textToPtr(m.UserAvatarUrl),
+			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
 	}
 
@@ -434,7 +445,7 @@ type CreateMemberRequest struct {
 	Role  string `json:"role"`
 }
 
-func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
+func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
 	return MemberWithUserResponse{
 		ID:          uuidToString(member.ID),
 		WorkspaceID: uuidToString(member.WorkspaceID),
@@ -443,7 +454,7 @@ func memberWithUserResponse(member db.Member, user db.User) MemberWithUserRespon
 		CreatedAt:   timestampToString(member.CreatedAt),
 		Name:        user.Name,
 		Email:       user.Email,
-		AvatarURL:   textToPtr(user.AvatarUrl),
+		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(user.AvatarUrl)),
 	}
 }
 
@@ -525,14 +536,14 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)
-	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
+	eventPayload := map[string]any{"member": h.memberWithUserResponse(member, user)}
 	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
 	h.publish(protocol.EventMemberAdded, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 	h.notifyDaemonWorkspacesChanged(uuidToString(user.ID))
 
-	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
+	writeJSON(w, http.StatusCreated, h.memberWithUserResponse(member, user))
 }
 
 type UpdateMemberRequest struct {
@@ -609,10 +620,10 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": memberWithUserResponse(updatedMember, user),
+		"member": h.memberWithUserResponse(updatedMember, user),
 	})
 
-	writeJSON(w, http.StatusOK, memberWithUserResponse(updatedMember, user))
+	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -783,18 +794,112 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := qtx.DeleteChatPinnedAgentsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("delete workspace chat pins failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
-		return
+	// Keep the relationship graph in the application layer. Each step is a
+	// set-based delete scoped by workspace_id; the legacy cascades remain only
+	// as an expand-phase safety net until a later schema contract.
+	ctx := r.Context()
+	deleteSteps := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "set teardown mode",
+			run:  func() error { return qtx.SetWorkspaceTeardownMode(ctx) },
+		},
+		{
+			name: "prepare relationship graph",
+			run:  func() error { return qtx.PrepareWorkspaceDeletionLinks(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete chat pins",
+			run:  func() error { return qtx.DeleteChatPinnedAgentsByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
+			// This is the first stage that touches usage rollups. Keep the
+			// global rollup lock out of relationship preparation so unrelated
+			// workspaces skip the shortest possible rollup window.
+			name: "lock task usage rollup",
+			run:  func() error { return qtx.LockTaskUsageRollupForWorkspaceDelete(ctx) },
+		},
+		{
+			name: "delete leaf data",
+			run:  func() error { return qtx.DeleteWorkspaceLeafData(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilot runs",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilotRuns(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete tasks",
+			run:  func() error { return qtx.DeleteWorkspaceTasks(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete chat messages",
+			run:  func() error { return qtx.DeleteWorkspaceChatMessages(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete communication roots",
+			run:  func() error { return qtx.DeleteWorkspaceCommunicationRoots(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete comments",
+			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete issue roots",
+			run:  func() error { return qtx.DeleteWorkspaceIssueRoots(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilot children",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilotChildren(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilots",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilots(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete pull requests",
+			run:  func() error { return qtx.DeleteWorkspacePullRequests(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete integrations",
+			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete squads and skills",
+			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete agents",
+			run:  func() error { return qtx.DeleteWorkspaceAgents(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete runtimes and projects",
+			run:  func() error { return qtx.DeleteWorkspaceRuntimesAndProjects(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete administration data",
+			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
+		},
+		{
+			// At this point workspaceMember has resolved → workspaceID is a
+			// valid UUID, so reuse the resolved value. The existing final
+			// statement also sweeps any expand-phase compatibility leftovers.
+			name: "delete workspace",
+			run:  func() error { return qtx.DeleteWorkspace(ctx, requester.WorkspaceID) },
+		},
 	}
-
-	// At this point workspaceMember has resolved → workspaceID is a valid UUID
-	// (the lookup would have errored otherwise), so reuse the resolved value.
-	if err := qtx.DeleteWorkspace(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
-		return
+	for _, step := range deleteSteps {
+		if err := step.run(); err != nil {
+			slog.Warn("workspace delete step failed", append(
+				logger.RequestAttrs(r),
+				"error", err,
+				"workspace_id", workspaceID,
+				"step", step.name,
+			)...)
+			writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+			return
+		}
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {

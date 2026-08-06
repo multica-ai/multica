@@ -7,6 +7,7 @@ import type { Attachment as AttachmentRecord } from "@multica/core/types";
 const {
   getAttachmentTextContentMock,
   getAttachmentMock,
+  getAttachmentBlobMock,
   getBaseUrlMock,
   downloadMock,
   openExternalMock,
@@ -14,6 +15,7 @@ const {
 } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
   getAttachmentMock: vi.fn(),
+  getAttachmentBlobMock: vi.fn(),
   // Default: empty base URL so existing tests render site-relative URLs
   // through the proxy (i.e. exactly the way the web app behaves). The
   // absolutize-specific suite below overrides this to simulate Desktop /
@@ -28,6 +30,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getAttachmentTextContent: getAttachmentTextContentMock,
     getAttachment: getAttachmentMock,
+    getAttachmentBlob: getAttachmentBlobMock,
     getBaseUrl: getBaseUrlMock,
   },
   PreviewTooLargeError: class extends Error {},
@@ -154,6 +157,15 @@ function renderWithQuery(ui: ReactElement) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
+// jsdom implements neither half of the object-URL API, and the proxy-mode
+// byte fallback depends on both. Stub them per-test so the created/revoked
+// calls are assertable, and restore afterwards.
+const OBJECT_URL = "blob:https://app.example/att-1";
+let originalCreateObjectURL: typeof URL.createObjectURL | undefined;
+let originalRevokeObjectURL: typeof URL.revokeObjectURL | undefined;
+let createObjectURLMock: ReturnType<typeof vi.fn>;
+let revokeObjectURLMock: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
   vi.clearAllMocks();
   resolverState.attachments = [];
@@ -162,11 +174,37 @@ beforeEach(() => {
   // the web app's same-origin proxy. Tests that simulate Desktop / mobile
   // webview override per-case via getBaseUrlMock.mockReturnValue(...).
   getBaseUrlMock.mockReturnValue("");
+
+  originalCreateObjectURL = URL.createObjectURL;
+  originalRevokeObjectURL = URL.revokeObjectURL;
+  createObjectURLMock = vi.fn(() => OBJECT_URL);
+  revokeObjectURLMock = vi.fn();
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: createObjectURLMock,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: revokeObjectURLMock,
+  });
 });
 
 afterEach(() => {
+  restoreObjectURL("createObjectURL", originalCreateObjectURL);
+  restoreObjectURL("revokeObjectURL", originalRevokeObjectURL);
   vi.restoreAllMocks();
 });
+
+function restoreObjectURL(
+  prop: "createObjectURL" | "revokeObjectURL",
+  original: unknown,
+): void {
+  if (original) {
+    Object.defineProperty(URL, prop, { configurable: true, value: original });
+  } else {
+    delete (URL as Partial<typeof URL>)[prop];
+  }
+}
 
 describe("Attachment — image dispatch", () => {
   it("record image renders <img> with hover toolbar (View/Download/Copy)", () => {
@@ -335,7 +373,7 @@ describe("Attachment — image dispatch", () => {
     // through to the durable markdown_url instead.
     configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `/api/attachments/${id}/download`;
     const att = makeRecord({
       id,
       url: "https://cdn.example.test/uploads/ws/shot.png",
@@ -360,6 +398,44 @@ describe("Attachment — image dispatch", () => {
     // Web (same-origin proxy / same-site cookie): the API endpoint loads
     // natively, so no metadata re-fetch is needed.
     expect(getAttachmentMock).not.toHaveBeenCalled();
+  });
+
+  it("re-signs a cross-origin API image URL in the web editor", async () => {
+    // The web app normally uses the same-origin /api proxy, so getBaseUrl is
+    // empty. A self-hosted server can still persist an absolute markdown_url
+    // on a different origin, though. Native <img> loading cannot rely on the
+    // app session cookie being accepted by that host, while an authenticated
+    // metadata request can return a freshly signed storage URL.
+    configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://api.example.test/api/attachments/${id}/download`;
+    const signed =
+      "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
+    resolverState.attachments = [
+      makeRecord({
+        id,
+        url: "https://cdn.example.test/uploads/ws/shot.png",
+        markdown_url: markdownUrl,
+        download_url: `/api/attachments/${id}/download`,
+      }),
+    ];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: signed }));
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(signed);
+    });
+    expect(getAttachmentMock).toHaveBeenCalledWith(id);
   });
 
   it("re-signs the inline media URL through getAttachment on token-mode clients (MUL-3254)", async () => {
@@ -430,15 +506,19 @@ describe("Attachment — image dispatch", () => {
     expect(getAttachmentMock).toHaveBeenCalledWith(id);
   });
 
-  it("keeps the picked URL when fresh metadata has no signed download_url (MUL-3254)", async () => {
-    // Non-CloudFront deployments return the API path again as download_url —
-    // swapping to it gains nothing, so the original pick must stay.
+  it("falls back to an authenticated byte fetch when the deployment has no signed URL (MUL-5445)", async () => {
+    // Proxy download mode — the default `auto` classification for a storage
+    // endpoint on an internal host (docker-compose MinIO). GET
+    // /api/attachments/{id} hands back the auth-gated API path again, so
+    // there is nothing to swap in: the renderer must pull the bytes through
+    // the authenticated client and paint them from an object URL instead of
+    // keeping a src it already knows 401s.
     getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
     const att = makeRecord({
       id,
-      url: "https://cdn.example.test/uploads/ws/shot.png",
+      url: "https://minio:9000/multica/uploads/ws/shot.png",
       markdown_url: markdownUrl,
       download_url: "",
     });
@@ -447,6 +527,56 @@ describe("Attachment — image dispatch", () => {
     getAttachmentMock.mockResolvedValue(
       makeRecord({ id, download_url: `/api/attachments/${id}/download` }),
     );
+    const blob = new Blob(["png-bytes"], { type: "image/png" });
+    getAttachmentBlobMock.mockResolvedValue(blob);
+
+    const { unmount } = renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    });
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+    expect(createObjectURLMock).toHaveBeenCalledWith(blob);
+
+    // The bytes are released once nothing renders them.
+    unmount();
+    expect(revokeObjectURLMock).toHaveBeenCalledWith(OBJECT_URL);
+  });
+
+  it("copies the durable URL, not the session-local object URL (MUL-5445)", async () => {
+    // A `blob:` URL resolves only inside this renderer session, so Copy Link
+    // must keep handing out the persisted attachment URL.
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    resolverState.attachments = [
+      makeRecord({
+        id,
+        url: "https://minio:9000/multica/uploads/ws/shot.png",
+        markdown_url: markdownUrl,
+        download_url: "",
+      }),
+    ];
+    getAttachmentMock.mockResolvedValue(
+      makeRecord({ id, download_url: `/api/attachments/${id}/download` }),
+    );
+    getAttachmentBlobMock.mockResolvedValue(
+      new Blob(["png-bytes"], { type: "image/png" }),
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
 
     renderWithQuery(
       <Attachment
@@ -459,8 +589,79 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    });
+    fireEvent.click(screen.getByTitle("Copy link"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdownUrl));
+  });
+
+  it("does not pull bytes for non-image attachments (MUL-5445)", async () => {
+    // A file card only needs a link. Downloading a large archive into
+    // renderer memory to draw a chip would be a bad trade, so the byte
+    // fallback stays image-only.
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    resolverState.attachments = [
+      makeRecord({
+        id,
+        filename: "archive.zip",
+        content_type: "application/zip",
+        url: "https://minio:9000/multica/uploads/ws/archive.zip",
+        markdown_url: markdownUrl,
+        download_url: "",
+      }),
+    ];
+    getAttachmentMock.mockResolvedValue(
+      makeRecord({
+        id,
+        filename: "archive.zip",
+        content_type: "application/zip",
+        download_url: `/api/attachments/${id}/download`,
+      }),
+    );
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "archive.zip",
+        }}
+      />,
+    );
+
     await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledWith(id));
-    expect(document.querySelector("img")?.getAttribute("src")).toBe(markdownUrl);
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+  });
+
+  it("prefers the signed URL over a byte fetch when the server can presign (MUL-5445)", async () => {
+    // Presign / CloudFront deployments already hand back a natively-loadable
+    // URL. Pulling the bytes as well would double every image download.
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const signed =
+      "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: signed }));
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(signed);
+    });
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
   });
 
   it("forceKind=image renders as image even when filename is empty (markdown ![](url) regression)", () => {

@@ -18,12 +18,13 @@ import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
+import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
-import { buildFreezeEventProps } from "./freeze-flush";
+import { flushFreezeBreadcrumb } from "./freeze-flush";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -168,21 +169,26 @@ function AppContent() {
     });
   }, [qc]);
 
-  // Sync token and start the daemon whenever the user logs in.
+  // Sync token and start the daemon whenever the user logs in. The ordering
+  // inside syncDaemonOnLogin is load-bearing — see that module.
   useEffect(() => {
-    if (!user) return;
+    if (!user || !runtimeConfig) return;
     const token = localStorage.getItem("multica_token");
     if (!token) return;
     const userId = user.id;
     (async () => {
       try {
-        await window.daemonAPI.syncToken(token, userId);
-        await window.daemonAPI.autoStart();
+        await syncDaemonOnLogin(
+          window.daemonAPI,
+          runtimeConfig.apiUrl,
+          token,
+          userId,
+        );
       } catch (err) {
         console.error("Failed to sync daemon on login", err);
       }
     })();
-  }, [user]);
+  }, [user, runtimeConfig]);
 
   // When a user who started the session with zero workspaces creates their
   // first one, restart the daemon so it picks up the new workspace
@@ -327,11 +333,11 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-lg font-semibold">Desktop configuration error</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
+        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <p className="mt-3 text-body text-muted-foreground">
           Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
         </p>
-        <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-xs text-muted-foreground">
+        <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
         </pre>
       </div>
@@ -380,14 +386,15 @@ export default function App() {
   // (the renderer is blocked or gone), so the main process persists it and we
   // emit it here on the next boot. The in-thread, recoverable freeze tier is
   // handled separately by the shared watchdog in CoreProvider.
-  useEffect(() => {
-    const last = window.desktopAPI.getLastFreeze();
-    if (!last) return;
-    captureEvent(
-      last.kind === "render-process-gone" ? "client_crash" : "client_unresponsive",
-      buildFreezeEventProps(last),
-    );
-  }, []);
+  useEffect(
+    () =>
+      flushFreezeBreadcrumb({
+        getLastFreeze: () => window.desktopAPI.getLastFreeze(),
+        ackFreeze: (ts) => window.desktopAPI.ackFreeze(ts),
+        capture: captureEvent,
+      }),
+    [],
+  );
 
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.

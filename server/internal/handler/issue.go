@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1890,9 +1891,10 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err == nil && len(attachments) > 0 {
+		mode := attachmentURLModeFromRequest(r)
 		resp.Attachments = make([]AttachmentResponse, len(attachments))
 		for i, a := range attachments {
-			resp.Attachments[i] = h.attachmentToResponse(a)
+			resp.Attachments[i] = h.attachmentToResponse(a, mode)
 		}
 	}
 
@@ -2191,11 +2193,11 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !agent.RuntimeID.Valid {
-		writeAgentUnavailable(w, "agent has no runtime")
+		writeAgentUnavailable(w, "agent has no runtime", ReasonAgentRuntimeRequired)
 		return
 	}
 	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
-		writeAgentUnavailable(w, "agent's runtime is offline")
+		writeAgentUnavailable(w, "agent's runtime is offline", ReasonRuntimeOffline)
 		return
 	}
 
@@ -2279,12 +2281,17 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 // writeAgentUnavailable returns 422 with a stable error code so the modal
 // can show a "switch agent" hint without parsing the human-readable reason.
-func writeAgentUnavailable(w http.ResponseWriter, reason string) {
+// writeAgentUnavailable refuses a trigger whose agent cannot run. `code` stays
+// agent_unavailable for installed clients; reason_code carries the machine-
+// readable distinction they need to phrase the fix — agent_runtime_required
+// ("bind a runtime") is not runtime_offline ("reconnect the machine").
+func writeAgentUnavailable(w http.ResponseWriter, reason string, reasonCode dispatch.ReasonCode) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	json.NewEncoder(w).Encode(map[string]any{
-		"code":   "agent_unavailable",
-		"reason": reason,
+		"code":        "agent_unavailable",
+		"reason":      reason,
+		"reason_code": reasonCode,
 	})
 }
 
@@ -2582,13 +2589,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		analyticsAgentID = actualCreatorID
 	}
 
+	attachmentMode := attachmentURLModeFromRequest(r)
 	buildAttachmentResponses := func(atts []db.Attachment) []AttachmentResponse {
 		if len(atts) == 0 {
 			return nil
 		}
 		out := make([]AttachmentResponse, len(atts))
 		for i, a := range atts {
-			out[i] = h.attachmentToResponse(a)
+			out[i] = h.attachmentToResponse(a, attachmentMode)
 		}
 		return out
 	}
@@ -3166,13 +3174,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
 	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
-
-	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	})
+	attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
@@ -3188,6 +3190,41 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteIssueAndCollectAttachmentURLs serializes issue deletion with channel
+// media binding. The delete-side FOR UPDATE conflicts with the binder's
+// FOR KEY SHARE, and URL collection happens only after that lock is held:
+// bind-first means the new URL is collected; delete-first means the bind rolls
+// back without consuming its durable object intent.
+func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue) ([]string, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin issue delete: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		return nil, fmt.Errorf("lock issue for delete: %w", err)
+	}
+	attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list issue attachment URLs: %w", err)
+	}
+	if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		return nil, fmt.Errorf("delete issue: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit issue delete: %w", err)
+	}
+	return attachmentURLs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -3541,13 +3578,8 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
-		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
-
-		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err != nil {
+		attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
+		if err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}

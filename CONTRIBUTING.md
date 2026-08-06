@@ -12,6 +12,21 @@ It covers:
 - full-stack isolated testing (backend + frontend + daemon from source)
 - troubleshooting and destructive reset options
 
+## Contribution Terms
+
+By submitting a contribution to Multica — a pull request, a patch, or any
+other work — you agree to condition 2 of the [Multica License](LICENSE):
+
+- your contribution is submitted under the Multica License as a whole (the
+  additional conditions in Part I together with the incorporated Apache
+  License 2.0 text in Part II), not under the Apache License 2.0 alone;
+- your contributed code may be used for commercial purposes, including the
+  producer's cloud business operations;
+- the producer can adjust the Multica License to be more strict or relaxed
+  as deemed necessary.
+
+See the [LICENSE](LICENSE) file for the full terms.
+
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.
@@ -497,7 +512,9 @@ derives, from the worktree path (same `cksum % 1000` offset as the backend /
 frontend ports in `.env.worktree`):
 
 - `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
-  base leaves `5173` for the primary checkout, even when `offset` is `0`)
+  base leaves `5173` for the primary checkout, even when `offset` is `0`). The
+  one offset that would land on `6000` gets `6174` instead: Chromium treats
+  `6000` as a restricted port and fails the load with `ERR_UNSAFE_PORT`
 - `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
   `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
   distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that

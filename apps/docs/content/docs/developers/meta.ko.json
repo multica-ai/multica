@@ -1,4 +1,4 @@
 {
-  "title": "Developers",
-  "pages": ["conventions"]
+  "title": "개발자",
+  "pages": ["contributing", "architecture", "conventions"]
 }

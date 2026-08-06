@@ -44,8 +44,8 @@ const MAX_LOG_LINES = 500;
 const LEVELS: readonly LogLevel[] = ["DEBUG", "INFO", "WARN", "ERROR"];
 
 const LEVEL_BADGE_CLASS: Record<LogLevel, string> = {
-  DEBUG: "border-muted-foreground/25 text-muted-foreground/70",
-  INFO: "border-foreground/15 text-foreground/80",
+  DEBUG: "border-muted-foreground/25 text-muted-foreground",
+  INFO: "border-foreground/15 text-foreground",
   WARN: "border-warning/40 text-warning",
   ERROR: "border-destructive/40 text-destructive",
 };
@@ -249,7 +249,7 @@ export function DaemonPanel({
         <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             <Server className="size-4 shrink-0 text-muted-foreground" />
-            <DialogTitle className="text-sm font-medium">
+            <DialogTitle className="text-body font-medium">
               Local daemon logs
             </DialogTitle>
             <ContextBadge status={status} runtimeCount={runtimeCount} />
@@ -273,7 +273,7 @@ export function DaemonPanel({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search…"
-              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-caption placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
@@ -322,7 +322,7 @@ export function DaemonPanel({
         <div
           ref={logContainerRef}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-2 py-1 font-mono text-xs"
+          className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-2 py-1 font-mono text-caption"
         >
           {displayed.length === 0 ? (
             <EmptyState
@@ -362,11 +362,11 @@ export function DaemonPanel({
             communicated implicitly by the presence of the Jump-to-latest
             button below; an explicit "Paused" word read as "log stream is
             paused" (it isn't — data keeps flowing into the buffer). */}
-        <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between border-t bg-muted/30 px-4 py-1.5 text-caption text-muted-foreground">
           <span className="tabular-nums">
             Showing {filtered.length} of {logs.length}
             {logs.length === MAX_LOG_LINES && (
-              <span className="ml-1 text-muted-foreground/60">
+              <span className="ml-1 text-muted-foreground">
                 (buffer full)
               </span>
             )}
@@ -398,7 +398,7 @@ function ContextBadge({
 }) {
   const isRunning = status.state === "running";
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-xs font-normal">
+    <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-caption font-normal">
       <span
         className={cn(
           "size-1.5 rounded-full",
@@ -445,19 +445,19 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-xs transition-colors hover:bg-accent",
+        "inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-caption transition-colors hover:bg-accent",
         active
           ? variant
             ? LEVEL_BADGE_CLASS[variant]
             : "bg-accent text-accent-foreground"
-          : "border-dashed text-muted-foreground/50",
+          : "border-dashed text-muted-foreground",
       )}
     >
       {label}
       <span
         className={cn(
           "tabular-nums",
-          active ? "text-current/80" : "text-muted-foreground/40",
+          active ? "text-current" : "text-muted-foreground",
         )}
       >
         {count}
@@ -470,7 +470,7 @@ function LevelBadge({ level }: { level: LogLevel }) {
   return (
     <span
       className={cn(
-        "inline-flex h-4 shrink-0 items-center rounded border px-1 text-[10px] font-medium uppercase tracking-wide",
+        "inline-flex h-4 shrink-0 items-center rounded border px-1 text-micro font-medium uppercase tracking-wide",
         LEVEL_BADGE_CLASS[level],
       )}
     >
@@ -497,7 +497,7 @@ function LogLineRow({
   // for panic stack traces and partial writes during log rotation.
   if (!line.timestamp || !line.level) {
     return (
-      <div className="break-all whitespace-pre-wrap px-2 py-0.5 text-muted-foreground/70">
+      <div className="break-all whitespace-pre-wrap px-2 py-0.5 text-muted-foreground">
         {highlight(line.raw, search)}
       </div>
     );
@@ -511,7 +511,7 @@ function LogLineRow({
       )}
       onClick={hasFields ? onToggle : undefined}
     >
-      <span className="shrink-0 tabular-nums text-muted-foreground/60">
+      <span className="shrink-0 tabular-nums text-muted-foreground">
         {line.timestamp}
       </span>
       <LevelBadge level={line.level} />
@@ -519,7 +519,7 @@ function LogLineRow({
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="break-words">{highlight(line.message, search)}</span>
           {hasFields && !expanded && (
-            <span className="min-w-0 truncate text-muted-foreground/60">
+            <span className="min-w-0 truncate text-muted-foreground">
               {fieldEntries
                 .map(([k, v]) => `${k}=${truncateValue(v)}`)
                 .join("  ")}
@@ -530,8 +530,8 @@ function LogLineRow({
           <div className="ml-1 mt-1 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-muted-foreground">
             {fieldEntries.map(([k, v]) => (
               <Fragment key={k}>
-                <span className="text-muted-foreground/70">{k}</span>
-                <span className="break-all text-foreground/85">{v}</span>
+                <span className="text-muted-foreground">{k}</span>
+                <span className="break-all text-foreground">{v}</span>
               </Fragment>
             ))}
           </div>
@@ -574,7 +574,7 @@ function GroupRows({
         <button
           type="button"
           onClick={onToggle}
-          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-[11px] italic text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
         >
           <span>···</span>
           <span>
@@ -608,7 +608,7 @@ function GroupRows({
       <button
         type="button"
         onClick={onToggle}
-        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-[11px] italic text-muted-foreground/60 hover:text-foreground"
+        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
       >
         <span>···</span>
         <span>collapse {rest.length + 1} repeated</span>
@@ -642,9 +642,9 @@ function EmptyState({
     subtitle = "";
   }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground/70">
-      <p className="text-sm">{title}</p>
-      <p className="text-xs text-muted-foreground/50">{subtitle}</p>
+    <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground">
+      <p className="text-body">{title}</p>
+      <p className="text-caption text-muted-foreground">{subtitle}</p>
     </div>
   );
 }

@@ -128,10 +128,16 @@ type InboundMessage struct {
 	// Type is the normalized message kind.
 	Type MsgType
 
-	// Text is the human-readable content, flattened by the adapter. For
-	// non-text messages it may be empty or a short placeholder; the media
+	// Text is the agent-readable content, flattened by the adapter. Router or
+	// an adapter may strip a command directive or enrich it with quoted context.
+	// For non-text messages it may be empty or a short placeholder; the media
 	// itself is in MediaRefs.
 	Text string
+
+	// CommandText is the user's normalized text before command stripping or
+	// contextual enrichment. Shared command classifiers read this field so a
+	// rewritten Text is never interpreted as a second command. Empty means Text.
+	CommandText string
 
 	// MediaRefs is the OUTPUT channel of engine.MediaResolver.ResolveMedia:
 	// the objects it downloaded and uploaded for this message, each covered
@@ -151,10 +157,9 @@ type InboundMessage struct {
 	// arrays, parent ids) stay in Raw.
 	AddressedToBot bool
 
-	// ForceFresh asks the core to start a fresh agent session for this
-	// message instead of resuming the prior one (the platform's "/fresh"
-	// affordance). The adapter normalizes its platform-specific trigger
-	// into this boolean; the core only reads the flag.
+	// ForceFresh asks the core to start a fresh agent session for this message
+	// instead of resuming the prior one. Router recognizes the shared /new text
+	// command; adapters may also set this flag for a native platform affordance.
 	ForceFresh bool
 
 	// Raw is the untouched platform payload. Adapters stash platform-

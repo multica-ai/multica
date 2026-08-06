@@ -8,13 +8,15 @@
  *
  * Events handled:
  *   - chat:message              → invalidate messages + pendingTask
- *   - chat:done                 → patch messages inline + clear pendingTask
+ *   - chat:done                 → patch messages inline + refresh pendingTask
+ *   - chat:quick_actions        → patch the async quick-actions supplement
+ *                                  onto the assistant message
  *   - task:queued / dispatch    → seed / promote pendingTask
- *   - task:cancelled            → clear pendingTask
+ *   - task:cancelled            → refresh pendingTask + messages
  *   - task:completed            → no-op for messages (chat:done already
  *                                  wrote the assistant message); just
- *                                  defensive clear of pendingTask
- *   - task:failed               → clear pendingTask + invalidate messages
+ *                                  refresh pendingTask
+ *   - task:failed               → refresh pendingTask + invalidate messages
  *                                  (FailTask persists a failure assistant
  *                                  message that must show up)
  *   - chat:session_deleted      → fire onSessionDeleted() so the screen
@@ -28,7 +30,8 @@ import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   appendTaskMessage,
   applyChatDoneToCache,
-  clearPendingTask,
+  applyChatQuickActionsToCache,
+  invalidatePendingTask,
   promotePendingTaskToRunning,
   seedPendingTaskFromQueued,
 } from "./chat-ws-updaters";
@@ -64,6 +67,13 @@ export function useChatSessionRealtime(
           if (!isMine(payload)) return;
           applyChatDoneToCache(qc, payload);
         }),
+        // The daemon's background suggestion pass lands here, after chat:done
+        // already refetched an actions-less message list. Patch the actions in
+        // directly — staleTime is Infinity, so nothing would refetch them.
+        ws.on("chat:quick_actions", (payload) => {
+          if (!isMine(payload)) return;
+          void applyChatQuickActionsToCache(qc, payload);
+        }),
         ws.on("task:queued", (payload) => {
           if (!isMine(payload)) return;
           seedPendingTaskFromQueued(qc, payload);
@@ -74,20 +84,18 @@ export function useChatSessionRealtime(
         }),
         ws.on("task:cancelled", (payload) => {
           if (!isMine(payload)) return;
-          clearPendingTask(qc, sessionId);
+          invalidatePendingTask(qc, sessionId);
+          qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         }),
         ws.on("task:completed", (payload) => {
           if (!isMine(payload)) return;
-          // `chat:done` already wrote the assistant message and cleared
-          // pendingTask. Defensive clear in case the two events arrive
-          // out of order on a flaky network.
-          clearPendingTask(qc, sessionId);
+          invalidatePendingTask(qc, sessionId);
         }),
         ws.on("task:failed", (payload) => {
           if (!isMine(payload)) return;
           // FailTask persists a destructive assistant message — surface it
-          // by refetching messages and clearing the pending pill.
-          clearPendingTask(qc, sessionId);
+          // and recover any queued successor from the authoritative endpoint.
+          invalidatePendingTask(qc, sessionId);
           qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         }),
         ws.on("chat:session_deleted", (payload) => {

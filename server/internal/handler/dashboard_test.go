@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1614,6 +1615,160 @@ func TestDashboardFailuresByAgentUsesExactWindow(t *testing.T) {
 	}
 	if got := countTimeouts(w.Body.Bytes()); got < 1 {
 		t.Errorf("days=2 must include yesterday's failure, got %d", got)
+	}
+}
+
+// TestDashboardPerAgentRollupsUseExactWindow is MUL-5551: the Usage page's
+// leaderboard reported MORE tokens for a single agent than the Tokens KPI
+// reported for the entire workspace.
+//
+// Both halves read the same underlying rows; they disagreed only on the
+// window. usage/daily and runtime/daily are date-bucketed, so the client
+// trims `parseSinceParamInTZ`'s extra calendar day back to `-(days-1)` before
+// computing the KPIs and the chart. usage/by-agent and agent-runtime carry no
+// date, so nothing trimmed them and they kept the whole N+1 span — at days=1
+// that is today PLUS yesterday. One busy agent's two-day total then trivially
+// exceeded the workspace's one-day total.
+//
+// Sibling of TestDashboardFailuresByAgentUsesExactWindow, which pinned the
+// same cutoff for the third date-less rollup. All three now close their own
+// window server-side.
+func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'per-agent window test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// A token bucket at noon YESTERDAY, under a provider/model pair no other
+	// fixture uses so the assertion can't be satisfied by ambient rows.
+	// Seeded straight into task_usage_hourly (same shortcut as the tz-bucket
+	// test) — the rollup's own source column is task_usage.created_at, which
+	// is `now()`-defaulted and awkward to backdate.
+	const windowProvider = "exact-window-test"
+	const windowModel = "exact-window-model"
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1 AND provider = $2`, runtimeID, windowProvider)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage_hourly (
+			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+			provider, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
+		)
+		VALUES (
+			((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
+			$1, $2, $3, NULL, $4, $5,
+			7777, 0, 0, 0, 1
+		)
+		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+			SET input_tokens = EXCLUDED.input_tokens
+	`, testWorkspaceID, runtimeID, agentID, windowProvider, windowModel); err != nil {
+		t.Fatalf("seed hourly row: %v", err)
+	}
+
+	// A terminal task that ran for 900s and completed at noon yesterday, for
+	// the agent-runtime half. Noon keeps both fixtures clear of the midnight
+	// edge in either direction.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES (
+			$1, $2, $3, 'completed',
+			((CURRENT_DATE - 1)::timestamp + interval '11 hours 45 minutes') AT TIME ZONE 'UTC',
+			((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
+			now()
+		)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	seededTokens := func(body []byte) int64 {
+		var rows []struct {
+			AgentID     string `json:"agent_id"`
+			Provider    string `json:"provider"`
+			Model       string `json:"model"`
+			InputTokens int64  `json:"input_tokens"`
+		}
+		if err := json.Unmarshal(body, &rows); err != nil {
+			t.Fatalf("decode by-agent: %v", err)
+		}
+		var n int64
+		for _, r := range rows {
+			if r.Model == windowModel {
+				n += r.InputTokens
+			}
+		}
+		return n
+	}
+	agentSeconds := func(body []byte) int64 {
+		var rows []struct {
+			AgentID      string `json:"agent_id"`
+			TotalSeconds int64  `json:"total_seconds"`
+		}
+		if err := json.Unmarshal(body, &rows); err != nil {
+			t.Fatalf("decode agent-runtime: %v", err)
+		}
+		var n int64
+		for _, r := range rows {
+			if r.AgentID == agentID {
+				n += r.TotalSeconds
+			}
+		}
+		return n
+	}
+
+	get := func(path string) []byte {
+		w := httptest.NewRecorder()
+		switch {
+		case strings.HasPrefix(path, "/api/dashboard/usage/by-agent"):
+			testHandler.GetDashboardUsageByAgent(w, newRequest("GET", path, nil))
+		default:
+			testHandler.GetDashboardAgentRunTime(w, newRequest("GET", path, nil))
+		}
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+		return w.Body.Bytes()
+	}
+
+	// days=1 means "today". Neither per-agent rollup may reach yesterday.
+	if got := seededTokens(get("/api/dashboard/usage/by-agent?days=1&tz=UTC")); got != 0 {
+		t.Errorf("days=1 must not reach yesterday's tokens, but by-agent counted %d", got)
+	}
+	oneDaySeconds := agentSeconds(get("/api/dashboard/agent-runtime?days=1&tz=UTC"))
+
+	// days=2 covers today + yesterday, so both fixtures must now appear —
+	// proving the window closed rather than the fixtures being unreachable.
+	if got := seededTokens(get("/api/dashboard/usage/by-agent?days=2&tz=UTC")); got < 7777 {
+		t.Errorf("days=2 must include yesterday's 7777 tokens, got %d", got)
+	}
+	twoDaySeconds := agentSeconds(get("/api/dashboard/agent-runtime?days=2&tz=UTC"))
+	if twoDaySeconds-oneDaySeconds < 900 {
+		t.Errorf(
+			"days=1 leaked yesterday's 900s run: days=1 reported %ds, days=2 %ds (delta %d, want >=900)",
+			oneDaySeconds, twoDaySeconds, twoDaySeconds-oneDaySeconds,
+		)
 	}
 }
 

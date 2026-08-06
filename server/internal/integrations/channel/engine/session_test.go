@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -49,6 +50,7 @@ type fakeSessionQueries struct {
 	linked              db.LinkAttachmentsToChatMessageParams
 	mediaCleared        int
 	reconcilerOwnedKeys map[string]bool
+	issueLookupErr      error
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
 	markRows         int64   // MarkChannelInboundDedupProcessed result
@@ -102,6 +104,13 @@ func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateC
 func (f *fakeSessionQueries) ClearChatMessageChannelMediaPending(context.Context, db.ClearChatMessageChannelMediaPendingParams) error {
 	f.mediaCleared++
 	return nil
+}
+
+func (f *fakeSessionQueries) LockIssueForChannelMediaBind(_ context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error) {
+	if f.issueLookupErr != nil {
+		return pgtype.UUID{}, f.issueLookupErr
+	}
+	return arg.ID, nil
 }
 
 func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
@@ -315,9 +324,25 @@ func TestAppendUserMessage_CommandTextOverridesEnrichedBody(t *testing.T) {
 	if res.IssueCommand == nil || res.IssueCommand.Title != "Real intent" {
 		t.Errorf("CommandText should drive /issue parsing: %+v", res.IssueCommand)
 	}
+	if !f.lastCreate.MessageKind.Valid || f.lastCreate.MessageKind.String != channelCommandMessageKind {
+		t.Errorf("handled command message kind = %+v", f.lastCreate.MessageKind)
+	}
 	// The stored message is still the full (enriched) body.
 	if f.messages[0] != "> quoted context from another message\n/issue Real intent" {
 		t.Errorf("stored body should be the enriched Body: %q", f.messages[0])
+	}
+}
+
+func TestAppendUserMessage_OrdinaryTurnKeepsDefaultMessageKind(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "hello", CommandText: "hello", MessageID: "m1",
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.lastCreate.MessageKind.Valid {
+		t.Fatalf("ordinary message kind must use the database default: %+v", f.lastCreate.MessageKind)
 	}
 }
 
@@ -368,6 +393,9 @@ func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	if att.WorkspaceID != uid(9) || att.ChatSessionID != uid(1) || att.UploaderType != "member" || att.UploaderID != uid(7) {
 		t.Fatalf("attachment ownership/session wrong: %+v", att)
 	}
+	if att.IssueID.Valid {
+		t.Fatalf("plain chat attachment unexpectedly targeted issue %v", att.IssueID)
+	}
 	if att.Filename != "screenshot.png" || att.Url != "https://cdn.example.test/lark/cli/img.png" ||
 		att.ContentType != "image/png" || att.SizeBytes != 3 {
 		t.Fatalf("attachment metadata wrong: %+v", att)
@@ -377,6 +405,71 @@ func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	}
 	if len(f.linked.AttachmentIds) != 1 || f.linked.AttachmentIds[0] != att.ID {
 		t.Fatalf("linked ids = %+v, want attachment id %v", f.linked.AttachmentIds, att.ID)
+	}
+}
+
+func TestBindMediaRefs_CreatesIssueOwnedAttachments(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   uid(42),
+		SessionID:   uid(1),
+		WorkspaceID: uid(9),
+		Sender:      uid(7),
+		IssueID:     uid(8),
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: "lark/cli/issue.png",
+			StorageURL: "https://cdn.example.test/lark/cli/issue.png",
+			Filename:   "issue.png",
+			MimeType:   "image/png",
+			SizeBytes:  3,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if len(f.attachments) != 1 {
+		t.Fatalf("attachments created = %d, want 1", len(f.attachments))
+	}
+	att := f.attachments[0]
+	if att.IssueID != uid(8) {
+		t.Fatalf("attachment issue = %v, want %v", att.IssueID, uid(8))
+	}
+	if att.ChatSessionID.Valid {
+		t.Fatalf("issue attachment must not retain chat-session ownership: %+v", att.ChatSessionID)
+	}
+	if f.linked.ChatMessageID.Valid || len(f.linked.AttachmentIds) != 0 {
+		t.Fatalf("issue attachment must not also bind to chat message: %+v", f.linked)
+	}
+	if f.mediaCleared != 1 {
+		t.Fatalf("media pending marker clears = %d, want 1", f.mediaCleared)
+	}
+}
+
+func TestBindMediaRefs_MissingIssueRollsBackAndClearsPendingMarker(t *testing.T) {
+	f := newFake()
+	f.issueLookupErr = pgx.ErrNoRows
+	s := newTestSession(f)
+	err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   uid(42),
+		SessionID:   uid(1),
+		WorkspaceID: uid(9),
+		Sender:      uid(7),
+		IssueID:     uid(8),
+		MediaRefs: []channel.MediaRef{{
+			StorageKey: "lark/cli/deleted-issue.png",
+			StorageURL: "https://cdn.example.test/lark/cli/deleted-issue.png",
+		}},
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("BindMediaRefs error = %v, want missing issue", err)
+	}
+	if len(f.attachments) != 0 || len(f.linked.AttachmentIds) != 0 {
+		t.Fatalf("missing issue created or linked attachments: created=%d linked=%d", len(f.attachments), len(f.linked.AttachmentIds))
+	}
+	if f.mediaCleared != 1 {
+		t.Fatalf("media pending marker clears = %d, want 1", f.mediaCleared)
 	}
 }
 

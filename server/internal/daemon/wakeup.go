@@ -119,7 +119,18 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// this WS connection gets identical capability gating (MUL-4257).
 	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
 
-	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	// A hand-built websocket.Dialer has Proxy == nil, which gorilla reads as
+	// "dial direct" — unlike websocket.DefaultDialer, it does not fall back to
+	// the environment. On a machine that only reaches the internet through a
+	// corporate egress proxy the handshake then always fails and the daemon
+	// silently degrades to HTTP polling. gorilla rewrites wss:// to https://
+	// before consulting Proxy, so HTTPS_PROXY applies to this dial. With no
+	// proxy variables set, ProxyFromEnvironment returns nil and the connection
+	// is direct, exactly as before.
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+		Proxy:            http.ProxyFromEnvironment,
+	}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
 		return 0, err
@@ -402,6 +413,19 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 			if d.workspaceChanges != nil {
 				d.workspaceChanges.broadcast()
 			}
+		case protocol.EventDaemonPendingWork:
+			var payload protocol.PendingWorkPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("pending work websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.RuntimeID == "" {
+				d.logger.Debug("pending work websocket missing runtime_id")
+				continue
+			}
+			// Own goroutine: the hint triggers an HTTP heartbeat plus the work it
+			// claims, and the read pump must stay free for the next frame.
+			go d.handlePendingWorkHint(payload.RuntimeID, payload.Kind)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {

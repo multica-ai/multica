@@ -1,6 +1,6 @@
 ---
 name: multica-squads
-description: "Use when creating, inspecting, updating, assigning, mentioning, or debugging Multica squads. Explains what squads are, squad/member fields, CLI commands, leader routing, issue assignment, comments, mentions, autopilot behavior, leader briefing, side effects, and product-gap handling."
+description: "Use when creating, inspecting, updating, assigning to, or debugging a Multica squad, including how leader routing picks who runs."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -15,8 +15,11 @@ If debugging why a squad did or did not run, inspect first:
 multica issue get <issue-id> --output json
 multica squad get <squad-id> --output json
 multica squad member list <squad-id> --output json
-multica issue comment list <issue-id> --recent 10 --output json
+multica issue comment list <issue-id> --roots-only --summary --output json
+multica issue comment list <issue-id> --thread <thread-id> --tail 30 --output json
 ```
+
+The two comment reads are a sequence: scan the roots first, then open the threads that look relevant — mention triggers, failure reasons, and user instructions usually live in the replies, which the roots scan never returns.
 
 If the command shape is unclear, check help instead of guessing:
 
@@ -80,9 +83,12 @@ Issue/comment commands often needed with squads:
 ```bash
 multica issue get <issue-id> --output json
 multica issue update <issue-id> --help
-multica issue comment list <issue-id> --output json
+multica issue comment list <issue-id> --roots-only --summary --output json
 multica issue comment add <issue-id> --help
 ```
+
+Comment reads stay bounded — the scan-then-expand sequence from the quick
+start above — never one unbounded `issue comment list` pull.
 
 Prefer `--output json` for reads. Use `--help` before writes.
 

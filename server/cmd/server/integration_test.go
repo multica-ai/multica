@@ -1046,6 +1046,98 @@ func TestUnarchiveInboxPreservesUnread(t *testing.T) {
 // An inbox item belonging to someone else must not be unarchivable, even with a
 // valid session — the loader resolves the item within the caller's workspace and
 // recipient scope.
+// Mark-unread is the inverse of mark-read and, like it, scoped to the single
+// item: the inbox renders one row per issue carrying that group's NEWEST item,
+// so flipping the whole group would resurrect siblings the user already dealt
+// with. The restored item counts toward the unread badge again.
+func TestMarkInboxUnreadIsItemScoped(t *testing.T) {
+	ctx := context.Background()
+	issueID := seedArchivedFixtureIssue(t, "Mark unread fixture")
+
+	var newestID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'new_comment', 'newest', $3, true, false, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueID).Scan(&newestID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	// An older sibling on the same issue, already read. It must stay read.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'status_changed', 'older sibling', $3, true, false, now() - interval '1 hour')
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed sibling inbox item: %v", err)
+	}
+
+	resp := authRequest(t, "POST", "/api/inbox/"+newestID+"/unread", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("MarkInboxUnread: expected 200, got %d", resp.StatusCode)
+	}
+	var updated inboxItemJSON
+	readJSON(t, resp, &updated)
+	if updated.Read {
+		t.Fatalf("expected the item to come back unread, got %+v", updated)
+	}
+	if updated.Archived {
+		t.Fatalf("mark unread must not archive the item, got %+v", updated)
+	}
+
+	rows, err := testPool.Query(ctx, `
+		SELECT title, read FROM inbox_item WHERE issue_id = $1 ORDER BY title
+	`, issueID)
+	if err != nil {
+		t.Fatalf("failed to read back inbox items: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]bool{}
+	for rows.Next() {
+		var title string
+		var read bool
+		if err := rows.Scan(&title, &read); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[title] = read
+	}
+	if got["newest"] {
+		t.Fatal("the targeted item must be unread")
+	}
+	if !got["older sibling"] {
+		t.Fatal("mark unread must not touch older siblings on the same issue")
+	}
+}
+
+// The read/unread endpoints resolve the item within the caller's workspace and
+// recipient scope, so someone else's notification is not addressable.
+func TestMarkInboxUnreadRejectsForeignItem(t *testing.T) {
+	ctx := context.Background()
+	var foreignItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, read)
+		VALUES ($1, 'member', gen_random_uuid(), 'issue_assigned', 'someone else', true)
+		RETURNING id
+	`, testWorkspaceID).Scan(&foreignItemID); err != nil {
+		t.Fatalf("failed to seed foreign inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, foreignItemID)
+	})
+
+	resp := authRequest(t, "POST", "/api/inbox/"+foreignItemID+"/unread", nil)
+	if resp.StatusCode == 200 {
+		t.Fatal("expected mark-unread of another recipient's item to be rejected")
+	}
+
+	var read bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT read FROM inbox_item WHERE id = $1`, foreignItemID).Scan(&read); err != nil {
+		t.Fatalf("failed to read back foreign item: %v", err)
+	}
+	if !read {
+		t.Fatal("another recipient's item must stay read")
+	}
+}
+
 func TestUnarchiveInboxRejectsForeignItem(t *testing.T) {
 	ctx := context.Background()
 	var foreignItemID string

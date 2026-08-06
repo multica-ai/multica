@@ -13,15 +13,15 @@ export function OpenSourceSection() {
         <div className="flex flex-col gap-16 lg:flex-row lg:items-start lg:gap-24">
           {/* Left column — heading + CTA */}
           <div className="lg:w-[480px] lg:shrink-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0a0d12]/40">
+            <p className="text-micro font-semibold uppercase tracking-[0.16em] text-[#0a0d12]/40">
               {t.openSource.label}
             </p>
-            <h2 className="mt-4 font-[family-name:var(--font-serif)] text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem] lg:text-[4.2rem]">
+            <h2 className="mt-4 landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem] lg:text-[4.2rem]">
               {t.openSource.headlineLine1}
               <br />
               {t.openSource.headlineLine2}
             </h2>
-            <p className="mt-6 max-w-[420px] text-[15px] leading-7 text-[#0a0d12]/60 sm:text-[16px]">
+            <p className="mt-6 max-w-[420px] text-body-lg leading-7 text-[#0a0d12]/60 sm:text-title-sm">
               {t.openSource.description}
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -29,7 +29,7 @@ export function OpenSourceSection() {
                 href={githubUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center gap-2.5 rounded-[12px] bg-[#0a0d12] px-5 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#0a0d12]/88"
+                className="inline-flex items-center justify-center gap-2.5 rounded-[12px] bg-[#0a0d12] px-5 py-3 text-body font-semibold text-white transition-colors hover:bg-[#0a0d12]/88"
               >
                 <GitHubMark className="size-4" />
                 {t.openSource.cta}
@@ -42,10 +42,10 @@ export function OpenSourceSection() {
             <div className="grid gap-px overflow-hidden rounded-2xl border border-[#0a0d12]/8 bg-[#0a0d12]/8 sm:grid-cols-2">
               {t.openSource.highlights.map((item) => (
                 <div key={item.title} className="bg-white p-8 lg:p-10">
-                  <h3 className="text-[17px] font-semibold leading-snug text-[#0a0d12] sm:text-[18px]">
+                  <h3 className="text-title font-semibold leading-snug text-[#0a0d12] sm:text-title">
                     {item.title}
                   </h3>
-                  <p className="mt-3 text-[14px] leading-[1.7] text-[#0a0d12]/56 sm:text-[15px]">
+                  <p className="mt-3 text-body leading-[1.7] text-[#0a0d12]/56 sm:text-body-lg">
                     {item.description}
                   </p>
                 </div>

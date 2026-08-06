@@ -31,9 +31,13 @@ interface DesktopAPI {
   runtimeConfig: RuntimeConfigResult;
   /** Main tabbed window or a dedicated issue-only window. */
   windowContext: DesktopWindowContext;
-  /** Read + clear any freeze/crash breadcrumb from a previous session, so the
-   *  renderer can flush it to telemetry on boot. Null when nothing's pending. */
+  /** Read any freeze/crash breadcrumb from a previous session, so the renderer
+   *  can flush it to telemetry on boot. Null when nothing's pending. Reading
+   *  does not consume it — acknowledge with `ackFreeze`. */
   getLastFreeze: () => FreezeBreadcrumb | null;
+  /** Retire the breadcrumb with this exact timestamp once its event has been
+   *  handed to analytics. Unacknowledged breadcrumbs are retried next boot. */
+  ackFreeze: (ts: number) => void;
   /** Report the resolved account identity so stale issue windows can close. */
   reportAuthSession: (userId: string | null) => void;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */

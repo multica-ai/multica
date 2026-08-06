@@ -4,6 +4,7 @@
  *
  * Handles:
  *   - issue:updated / issue:deleted / issue_labels:changed → detail cache
+ *   - issue_attachments:changed → attachment cache
  *   - comment:created / comment:updated / comment:deleted → timeline
  *   - activity:created → timeline
  *   - reaction:added / reaction:removed → comment reactions on timeline
@@ -40,6 +41,7 @@ import {
   appendTimelineEntry,
   clearIssueDetail,
   commentToTimelineEntry,
+  invalidateIssueAfterReconnect,
   patchIssueDetail,
   patchIssueLabels,
   patchMyIssuesList,
@@ -112,6 +114,12 @@ export function useIssueRealtime(
         ws.on("issue_labels:changed", (payload) => {
           if (payload.issue_id !== issueId) return;
           patchIssueLabels(qc, wsId, issueId, payload.labels);
+        }),
+        ws.on("issue_attachments:changed", (payload) => {
+          if (payload.issue_id !== issueId) return;
+          qc.invalidateQueries({
+            queryKey: issueKeys.attachments(wsId, issueId),
+          });
         }),
 
         // ----- Comments / activity -----
@@ -225,8 +233,7 @@ export function useIssueRealtime(
 
         // ----- Reconnect -----
         ws.onReconnect(() => {
-          invalidateThisIssue();
-          invalidateTaskQueries();
+          invalidateIssueAfterReconnect(qc, wsId, issueId);
         }),
       ];
     },

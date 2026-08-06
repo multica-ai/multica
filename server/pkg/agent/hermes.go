@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -157,6 +156,13 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // via the ACP (Agent Communication Protocol) JSON-RPC 2.0 over stdin/stdout.
 // This is the same pattern as Codex but with the ACP protocol instead of
 // the Codex-specific JSON-RPC methods.
+//
+// opts.ThinkingLevel is deliberately not consumed here: Hermes' ACP surface
+// has nowhere to put a reasoning effort (see ThinkingControlSupported in
+// thinking.go for the evidence and the version it was verified against), and
+// the server rejects the field for this provider before a task is ever
+// dispatched. Wire it up here — alongside the model selection below — once
+// Hermes' ACP adapter carries reasoning onto the session.
 type hermesBackend struct {
 	cfg Config
 }
@@ -259,14 +265,21 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Hermes streams interim narration and the final answer as the same
+	// agent_message_chunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	// streamingCurrentTurn gates all session updates so that history
 	// replay (Hermes sends full prior-turn transcripts on session/resume,
 	// and may flush queued chunks before our session/prompt response
 	// streams) is dropped instead of duplicating the previous answer
 	// into output. We flip it to true only after session/prompt is sent.
 	var streamingCurrentTurn atomic.Bool
+	// turnActivity counts the session updates accepted for the current turn.
+	// Zero means the agent produced nothing at all — no text, no thought, no
+	// tool call — which is what separates a dead-session refusal from a model
+	// that genuinely refused the request. See hermesResumeSessionLost.
+	var turnActivity atomic.Int64
 
 	promptDone := make(chan hermesPromptResult, 1)
 	activity := make(chan struct{}, 1)
@@ -289,11 +302,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if !streamingCurrentTurn.Load() {
 				return
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			turnActivity.Add(1)
+			deliverable.observe(msg)
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -311,8 +321,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -345,6 +354,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// resume. Only that is curable by starting a fresh session, so
 		// handshake/network failures below must leave it false.
 		var resumeRejected bool
+		// The stop reason session/prompt reported, when it answered at all.
+		// Read once the turn has fully settled — see the resumed-session check
+		// after the provider-error promotion below.
+		var promptStopReason string
 		effectiveModel := strings.TrimSpace(opts.Model)
 		// The model id the runtime reports as current right after
 		// session/new or session/resume. Used to skip a redundant
@@ -433,6 +446,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("hermes session created", "session_id", sessionID)
+		// Mid-flight pin: daemon PinTaskSession keys off MessageStatus+SessionID.
+		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 
 		// 3. If the caller picked a model (via agent.model from the
 		// UI dropdown), ask hermes to switch the session to it
@@ -542,6 +557,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// from the response parsing.
 			select {
 			case pr := <-promptDone:
+				promptStopReason = pr.stopReason
 				if pr.stopReason == "cancelled" {
 					finalStatus = "aborted"
 					finalError = "hermes cancelled the prompt"
@@ -586,9 +602,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Hermes reports stopReason=end_turn even when the upstream
 		// LLM call ultimately fails (HTTP 429 rate-limit, expired
@@ -598,7 +612,40 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// warning), the agent text stream contains the synthetic
 		// "API call failed after N retries..." turn the adapter
 		// injects on give-up, or there's no output to fall back on.
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// It reads the full text stream, not the deliverable, so a
+		// give-up turn that lands before a tool call stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
+
+		// A resumed session Hermes could not rebuild.
+		//
+		// Evaluated HERE, not at the quiescence boundary above: the quiet
+		// window closing does not end the turn. stdin EOF and the pipe drain
+		// do, and Hermes legitimately delivers a turn's final chunk in that
+		// gap — TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse
+		// exists because of it. Deciding earlier would freeze
+		// turnActivity == 0 while a real answer was still in flight and
+		// discard a healthy session (plus re-run the turn) for a runtime that
+		// merely answered slowly. By this point streamingCurrentTurn is off
+		// and every accepted update has been counted, so the reading is final.
+		//
+		// Runs after the promotion above on purpose: when the sniffer captured
+		// why the rebuild failed (e.g. the provider identity the session
+		// persisted no longer resolves), that message is far more useful to the
+		// user than the generic one here, so we only supply a reason when
+		// nothing else did. Without this, such a turn reports "completed" with
+		// empty output — a task that silently did nothing at all.
+		if hermesResumeSessionLost(opts.ResumeSessionID, promptStopReason, turnActivity.Load()) {
+			b.cfg.Logger.Warn("resumed session refused with no agent activity; treating it as gone and clearing the session id so the daemon retries fresh",
+				"backend", "hermes",
+				"session_id", sessionID,
+			)
+			if finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = hermesResumeLostError
+			}
+			sessionID = ""
+			resumeRejected = true
+		}
 
 		// Build usage map.
 		c.usageMu.Lock()
@@ -633,26 +680,45 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 // may deliver the final agent_message_chunk after the response; closing stdin
 // or cancelling immediately at that boundary loses the user-visible answer.
 func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(hermesNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(hermesReaderDrainGrace)
-	defer hard.Stop()
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, hermesNotificationQuietTime, hermesReaderDrainGrace)
+}
+
+// acpNotificationQuietTime is the default lull the shared drain waits out
+// before concluding an ACP agent has stopped emitting notifications. It is a
+// protocol-level heuristic rather than a per-backend trait, so backends that
+// have no reason to differ share it; the hard bound stays per-backend.
+const acpNotificationQuietTime = 250 * time.Millisecond
+
+// waitForACPNotificationQuiescence gives the shared ACP stdout reader a
+// bounded chance to consume notifications a backend may emit just after its
+// session/prompt response returns. Closing stdin and cancelling the context at
+// the response boundary otherwise races the reader and silently truncates the
+// final text or usage update.
+//
+// It returns as soon as any of these happens, so an agent that holds stdout
+// open forever cannot stall the turn: no notification arrived for quiet, the
+// reader finished, hard elapsed, or ctx was cancelled.
+func waitForACPNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}, quiet, hard time.Duration) {
+	quietTimer := time.NewTimer(quiet)
+	defer quietTimer.Stop()
+	hardTimer := time.NewTimer(hard)
+	defer hardTimer.Stop()
 
 	for {
 		select {
 		case <-activity:
-			if !quiet.Stop() {
+			if !quietTimer.Stop() {
 				select {
-				case <-quiet.C:
+				case <-quietTimer.C:
 				default:
 				}
 			}
-			quiet.Reset(hermesNotificationQuietTime)
-		case <-quiet.C:
+			quietTimer.Reset(quiet)
+		case <-quietTimer.C:
 			return
 		case <-readerDone:
 			return
-		case <-hard.C:
+		case <-hardTimer.C:
 			return
 		case <-ctx.Done():
 			return
@@ -699,6 +765,15 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// selectPermission lets an ACP dialect narrow the generic headless
+	// permission policy. Reasonix uses this to reject user questions and
+	// fresh-human approvals that also happen to carry allow_once options.
+	// Nil preserves the shared ACP policy for existing backends.
+	selectPermission func(json.RawMessage) (optionID string, grant bool, ok bool)
+	// onNotification observes vendor notifications that are not session/update.
+	// Existing backends leave it nil; the callback must do its own method and
+	// lifecycle filtering.
+	onNotification func(method string, params json.RawMessage)
 	// onActivity observes accepted ACP session updates. Hermes and Grok use it
 	// to retain a short post-response drain window; other ACP backends leave it
 	// nil and keep their existing lifecycle behavior.
@@ -854,7 +929,11 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
-		optionID, grant, ok := selectACPPermissionOption(raw["params"])
+		selector := c.selectPermission
+		if selector == nil {
+			selector = selectACPPermissionOption
+		}
+		optionID, grant, ok := selector(raw["params"])
 		if ok {
 			// Select an offered option — either a safe grant (approve) or,
 			// when no safe grant exists, an offered reject_once (deny THIS
@@ -1039,8 +1118,9 @@ func (e *acpRPCError) Error() string {
 // (Internal error), Kiro puts "No session found with id ..." in
 // `data` under -32603, and kimi-cli raises invalid_params (-32602)
 // with {"session_id": "Session not found"} in `data` for every
-// unknown-session path (src/kimi_cli/acp/server.py) — so neither the
-// code nor the text alone is discriminating and both are matched.
+// unknown-session path (src/kimi_cli/acp/server.py), while Reasonix says
+// "session/resume: unknown session <id>" under -32602 — so neither the
+// code nor one runtime's exact wording is discriminating and both are matched.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
@@ -1051,7 +1131,37 @@ func isACPSessionNotFound(err error) bool {
 	}
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
 	return strings.Contains(text, "session not found") ||
-		strings.Contains(text, "no session found")
+		strings.Contains(text, "no session found") ||
+		strings.Contains(text, "unknown session")
+}
+
+// hermesResumeLostError is the fallback reason for a resumed session Hermes
+// could not rebuild, used only when nothing more specific was captured.
+const hermesResumeLostError = "hermes could not restore the resumed session; it refused the turn without running the agent"
+
+// hermesResumeSessionLost reports whether a *successful* session/prompt
+// response means the session we resumed is gone on the agent side.
+//
+// isACPSessionNotFound cannot answer this, because Hermes never reports an
+// unknown session as a JSON-RPC error. Its ACP adapter answers
+// `session/prompt` for a session it cannot load with an ordinary success
+// frame carrying stopReason=refusal (acp_adapter/server.py, the one place it
+// emits that reason), and `session/resume` echoes nothing back — the ACP
+// ResumeSessionResponse schema has no sessionId field at all, unlike
+// NewSessionResponse — so resolveResumedSessionID keeps the id we asked for.
+// Nothing in the exchange is an error, which is why the isACPSessionNotFound
+// branches at set_model and prompt time never fire for this runtime and every
+// later dispatch on the same (agent, issue) pair loops on the dead session
+// (GH #6150).
+//
+// Both conditions are required. stopReason=refusal alone is a legitimate
+// model refusal, and refusing a resumed turn after real work is not a lost
+// session — only a refusal with no agent activity whatsoever (no text, no
+// thought, no tool call) is Hermes telling us it never had the session. The
+// fresh-session retry this unlocks is itself gated on tools == 0 in
+// shouldRetryWithFreshSession, so a turn that acted is never re-run.
+func hermesResumeSessionLost(resumeSessionID, stopReason string, turnActivity int64) bool {
+	return resumeSessionID != "" && stopReason == "refusal" && turnActivity == 0
 }
 
 func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
@@ -1195,6 +1305,9 @@ func parseACPModelIDFromMeta(meta json.RawMessage) string {
 func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+	if c.onNotification != nil {
+		c.onNotification(method, raw["params"])
+	}
 
 	if method != "session/update" && method != "session/notification" {
 		return

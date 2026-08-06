@@ -79,7 +79,7 @@ function ListRowContent({
         ref={containerRef}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors ${
+        className={`group/row flex h-9 items-center gap-2 px-4 text-body transition-colors ${
           selected
             ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
             : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"
@@ -106,7 +106,7 @@ function ListRowContent({
           href={p.issueDetail(issue.id)}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <span className="w-16 shrink-0 text-xs text-muted-foreground">
+          <span className="w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={issue.id} />
@@ -116,7 +116,7 @@ function ListRowContent({
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
-                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                <span className="text-micro text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
               </span>
@@ -127,7 +127,7 @@ function ListRowContent({
                   <LabelChip key={label.id} label={label} />
                 ))}
                 {labels.length > 3 && (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     +{labels.length - 3}
                   </span>
                 )}
@@ -138,9 +138,9 @@ function ListRowContent({
                 {cardCustomProperties.slice(0, 3).map((property) => (
                   <span
                     key={property.id}
-                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground"
                   >
-                    <PropertyIcon property={property} className="size-3 text-[11px]" />
+                    <PropertyIcon property={property} className="size-3 text-micro" />
                     <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
                   </span>
                 ))}
@@ -148,18 +148,18 @@ function ListRowContent({
             )}
           </span>
           {showProject && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
+            <span className="inline-flex shrink-0 items-center gap-1 text-caption text-muted-foreground max-w-[140px]">
               <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
             </span>
           )}
           {showStartDate && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="shrink-0 text-caption text-muted-foreground">
               {formatDate(issue.start_date!)}
             </span>
           )}
           {showDueDate && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="shrink-0 text-caption text-muted-foreground">
               {formatDate(issue.due_date!)}
             </span>
           )}

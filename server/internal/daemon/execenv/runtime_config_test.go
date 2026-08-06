@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,18 +47,16 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
 			}
 			for _, want := range []string{
-				"**Choosing `--status` when creating sub-issues.**",
-				"`--status todo` = **start now**",
-				"`--status backlog` = **wait**",
-				"`multica issue status <child-id> todo`",
-				"all `--status todo`",
-				"`--status backlog` from the start",
-				// Stage guidance must reach the always-on brief so agents
-				// reach for stages instead of only the manual backlog chain
-				// (MUL-3508 follow-up).
-				"**Ordering with stages.**",
-				"`--stage <N>`",
-				"`multica issue children <id>`",
+				// MUL-5442 demotes the full todo/backlog/stage playbook to the
+				// multica-working-on-issues skill. The brief keeps a one-line
+				// map (all three flags stay discoverable, MUL-3508 follow-up)
+				// plus the skill pointer; the skill side of the contract is
+				// asserted in internal/service
+				// (TestWorkingOnIssuesSkillCoversIssueLoopContracts).
+				"`--status todo` starts an agent-assigned child immediately",
+				"`--status backlog` parks it",
+				"`--stage <N>` groups children into ordered stages",
+				"read the `multica-working-on-issues` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -203,155 +202,169 @@ func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
 	}
 }
 
-// The CLAUDE.md workflow surface must carry the same issue-wide since-delta
-// new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
-// stay in sync.
-func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
+// TestPerRunCommentContextStaysOutOfBrief pins MUL-5377: no per-run comment
+// routing value may be rendered into the runtime brief. The brief lands in
+// messages[0], ahead of the whole conversation, so any change there throws away
+// the prompt cache for the entire history on resume. The helpers are unchanged
+// and still feed the per-turn user message (daemon.buildCommentPrompt).
+func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 	t.Parallel()
 	const (
 		issueID = "55555555-6666-7777-8888-999999999999"
 		since   = "2026-05-28T11:00:00Z"
 	)
-	ctx := TaskContextForEnv{
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
 		IssueID:          issueID,
 		TriggerCommentID: "reply-abc",
+		TriggerThreadID:  "thread-abc",
 		NewCommentCount:  4,
 		NewCommentsSince: since,
-	}
-	out := buildMetaSkillContent("claude", ctx)
+		CommentReplyTargets: []ThreadReplyTarget{
+			{ThreadID: "thread-abc", ParentID: "reply-abc"},
+			{ThreadID: "thread-def", ParentID: "reply-def"},
+		},
+	})
 
-	// Issue-wide count.
-	if !strings.Contains(out, "4 new comment(s) on this issue since your last run") {
-		t.Errorf("comment brief must report the issue-wide new-comment count, got:\n%s", out)
+	for _, banned := range []string{
+		"reply-abc", "thread-abc", "reply-def", "thread-def", since,
+		"4 new comment(s) on this issue since your last run",
+		"DISTINCT threads",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("brief must not carry per-run comment value %q (MUL-5377)\n---\n%s", banned, out)
+		}
 	}
-	if !strings.Contains(out, "blindly") {
-		t.Errorf("comment brief must discourage blindly reading every new comment, got:\n%s", out)
-	}
-	// Parent thread first.
-	if !strings.Contains(out, "--thread reply-abc --since "+since+" --output json") {
-		t.Errorf("comment brief must point at the triggering (parent) thread --since read first, got:\n%s", out)
-	}
-	if !strings.Contains(out, "--tail 30") {
-		t.Errorf("comment brief must offer the full-thread (--tail 30) option, got:\n%s", out)
-	}
-	// Issue-wide catch-up demoted to an only-if-needed fallback.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
-		t.Errorf("comment brief must keep the issue-wide --since catch-up fallback, got:\n%s", out)
-	}
-	// The removed resolve step must not reappear.
-	if strings.Contains(out, "multica comment resolve") {
-		t.Errorf("comment brief must not carry the dropped resolve step, got:\n%s", out)
+
+	// The helper that now feeds the per-turn prompt is unchanged.
+	hint := BuildNewCommentsHint(issueID, "reply-abc", "thread-abc", since, 4)
+	for _, want := range []string{
+		"4 new comment(s) on this issue since your last run",
+		"blindly",
+		"--thread thread-abc --since " + since + " --output json",
+		"--tail 30",
+	} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("BuildNewCommentsHint missing %q\n---\n%s", want, hint)
+		}
 	}
 }
 
-// Cold start (no prior run → no since anchor) must point the agent at the
-// triggering CONVERSATION (--thread <trigger> --tail 30) instead of the flat
-// timeline dump or the since-delta hint.
-func TestCommentTriggeredBriefColdStartThreadRead(t *testing.T) {
+// Cold-start thread routing moved to the per-turn prompt (MUL-5377); the
+// helper behaviour it relies on is pinned here directly.
+func TestColdCommentsHintPointsAtTriggeringThread(t *testing.T) {
 	t.Parallel()
 	const issueID = "55555555-6666-7777-8888-999999999999"
-	ctx := TaskContextForEnv{
-		IssueID:          issueID,
-		TriggerCommentID: "trigger-1",
-		TriggerThreadID:  "thread-root-1",
-		NewCommentCount:  0,
-		NewCommentsSince: "",
+	hint := BuildColdCommentsHint(issueID, "trigger-1", "thread-root-1")
+	if strings.Contains(hint, "new comment(s) since your last run") {
+		t.Errorf("no since-delta hint should render on cold start, got:\n%s", hint)
 	}
-	out := buildMetaSkillContent("claude", ctx)
-	if strings.Contains(out, "new comment(s) since your last run") {
-		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
+	if !strings.Contains(hint, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
+		t.Errorf("cold start must point at the triggering thread read, got:\n%s", hint)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
-		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
+	if strings.Contains(buildMetaSkillContent("claude", TaskContextForEnv{IssueID: issueID, TriggerCommentID: "trigger-1", TriggerThreadID: "thread-root-1"}), "thread-root-1") {
+		t.Error("brief must not carry the per-run thread id (MUL-5377)")
 	}
 }
 
-// A resumed comment session with no since-delta should not fall back to the
-// cold-start "read the triggering conversation first" instruction. The trigger
-// body is already embedded in the per-turn prompt and the resumed session should
-// carry prior thread context, so the thread read is only a fallback.
-func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T) {
+// Resumed/no-delta routing moved to the per-turn prompt (MUL-5377).
+func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	t.Parallel()
 	const issueID = "55555555-6666-7777-8888-999999999999"
-	ctx := TaskContextForEnv{
-		IssueID:             issueID,
-		TriggerCommentID:    "trigger-1",
-		TriggerThreadID:     "thread-root-1",
-		PriorSessionResumed: true,
-		NewCommentCount:     0,
-		NewCommentsSince:    "",
-	}
-	out := buildMetaSkillContent("claude", ctx)
+	hint := BuildResumedCommentsHint(issueID, "trigger-1", "thread-root-1")
 
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("resumed/no-delta brief missing %q\n--- output ---\n%s", want, out)
+		if !strings.Contains(hint, want) {
+			t.Errorf("resumed/no-delta hint missing %q\n--- output ---\n%s", want, hint)
 		}
 	}
-	if strings.Contains(out, "scoped to the triggering thread") {
-		t.Errorf("resumed/no-delta brief must not claim the delta is thread-scoped, got:\n%s", out)
+	// The anchor-restating sentence is gone (MUL-5721 OPT-1): the read command
+	// carries the thread anchor and the reply cookbook carries the trigger id.
+	if strings.Contains(hint, "active thread anchor") {
+		t.Errorf("resumed/no-delta hint must not restate anchors outside the commands, got:\n%s", hint)
 	}
-	if strings.Contains(out, "Read the triggering conversation first") {
-		t.Errorf("resumed/no-delta brief must not use the cold-start forced-read wording, got:\n%s", out)
+	if strings.Contains(hint, "scoped to the triggering thread") {
+		t.Errorf("resumed/no-delta hint must not claim the delta is thread-scoped, got:\n%s", hint)
+	}
+	if strings.Contains(hint, "Read the triggering conversation first") {
+		t.Errorf("resumed/no-delta hint must not use the cold-start forced-read wording, got:\n%s", hint)
 	}
 }
 
-// When the daemon could not honor an expected resume, the brief must make the
-// context loss user-visible by instructing the agent to disclose it — not leave
-// it as a silent restart (MUL-4424).
-func TestBriefSurfacesResumeUnavailable(t *testing.T) {
+// The continuity notice moved out of the brief and into the per-turn prompt
+// (MUL-5377) because it is true of one run and false of the next.
+func TestSessionContinuityNoticeLivesOutsideBrief(t *testing.T) {
 	t.Parallel()
-	const issueID = "11111111-2222-3333-4444-555555555555"
-	base := TaskContextForEnv{IssueID: issueID, TriggerCommentID: "trigger-1", TriggerThreadID: "thread-1"}
-
-	lost := base
-	lost.PriorSessionResumeUnavailable = true
-	out := buildMetaSkillContent("codex", lost)
 	for _, want := range []string{
 		"## Session Continuity Notice",
 		"could NOT be restored",
 		"tell the user up front",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("resume-unavailable brief missing %q\n---\n%s", want, out)
+		if !strings.Contains(SessionContinuityNoticeUnrecoverable, want) {
+			t.Errorf("SessionContinuityNoticeUnrecoverable missing %q", want)
 		}
 	}
 
-	if strings.Contains(buildMetaSkillContent("codex", base), "Session Continuity Notice") {
-		t.Error("brief must not show the continuity notice when no resume was lost")
+	// MUL-5722: the issue variant carries the same heading and the same
+	// "do not assume continuity" job, but must NOT order an announcement. An
+	// issue's discussion lives in its comments, which the agent re-reads every
+	// turn, so telling the user it was lost describes a loss that did not
+	// happen — they hear "the discussion is gone" when every word survives.
+	if !strings.Contains(SessionContinuityNoticeIssue, "## Session Continuity Notice") {
+		t.Error("SessionContinuityNoticeIssue must keep the section heading")
+	}
+	if strings.Contains(SessionContinuityNoticeIssue, "tell the user") {
+		t.Errorf("issue variant must not script an apology:\n%s", SessionContinuityNoticeIssue)
+	}
+	// It still has to say what genuinely went missing, or the agent silently
+	// assumes it remembers work it no longer has.
+	if !strings.Contains(SessionContinuityNoticeIssue, "your own working memory") {
+		t.Errorf("issue variant must state the real loss:\n%s", SessionContinuityNoticeIssue)
+	}
+
+	lost := TaskContextForEnv{
+		IssueID:                       "11111111-2222-3333-4444-555555555555",
+		TriggerCommentID:              "trigger-1",
+		PriorSessionResumeUnavailable: true,
+	}
+	if strings.Contains(buildMetaSkillContent("codex", lost), "Session Continuity Notice") {
+		t.Error("brief must never carry the continuity notice — it is per-run state (MUL-5377)")
 	}
 }
 
-// Assignment-triggered briefs are the high-risk path for role conflicts:
-// non-executor agents still need issue context, but the runtime workflow must
-// not turn status changes, investigation, implementation, or delegation into
-// permissions that override Agent Identity.
-func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
+// The issue workflow must keep every Agent Identity guardrail after the
+// comment/assignment branches were merged into one byte-stable section.
+func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	t.Parallel()
 	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
-	ctx := TaskContextForEnv{IssueID: issueID}
-	out := buildMetaSkillContent("claude", ctx)
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: issueID})
 
 	for _, want := range []string{
 		"## Instruction Precedence",
-		"Agent Identity instructions have priority over the assignment workflow below.",
+		"Agent Identity instructions have priority over the issue workflow below.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement",
-		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
-		"Complete the task within your Agent Identity boundaries.",
-		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
-		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
-		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+		// One enumeration, in Instruction Precedence, covering every action
+		// type Agent Identity can forbid. This and workflow step 4 each used to
+		// carry their own list and the two disagreed (MUL-5442).
+		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
+		// MUL-5442: the forbids-clause is stated once on the Ownership-mode
+		// header instead of once per status bullet.
+		"skip any status call below that your Agent Identity forbids",
+		"Before step 4, run `multica issue status <issue-id> in_progress`.",
+		"Complete the task within your Agent Identity boundaries",
+		// Step 4 keeps only what the enumeration cannot express: a
+		// delegation-only role stops once the delegation is delivered.
+		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
+		"When done, run `multica issue status <issue-id> in_review`.",
+		"If blocked, run `multica issue status <issue-id> blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("assignment-triggered brief missing identity-bound workflow text %q\n---\n%s", want, out)
+			t.Errorf("issue brief missing identity-bound workflow text %q\n---\n%s", want, out)
 		}
 	}
 
@@ -361,16 +374,14 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 		"8. When done, run `multica issue status " + issueID + " in_review`\n",
 	} {
 		if strings.Contains(out, banned) {
-			t.Errorf("assignment-triggered brief still contains unconditional legacy workflow text %q\n---\n%s", banned, out)
+			t.Errorf("issue brief still contains unconditional legacy workflow text %q\n---\n%s", banned, out)
 		}
 	}
 }
 
-// Squad-leader assignment briefs must open the parent with in_progress, but
-// must not treat the first dispatch turn as completion (no unconditional
-// in_review). Leaders move the parent to in_review only on a later re-trigger
-// once the overall goal is met.
-func TestSquadLeaderAssignmentProtocolKeepsParentInProgress(t *testing.T) {
+// Squad-leader briefs must open the parent with in_progress, but must not
+// treat the first dispatch turn as completion (no unconditional in_review).
+func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	t.Parallel()
 	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	out := buildMetaSkillContent("claude", TaskContextForEnv{
@@ -379,51 +390,43 @@ func TestSquadLeaderAssignmentProtocolKeepsParentInProgress(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
+		"Before step 4, run `multica issue status <issue-id> in_progress`.",
 		"After this initial dispatch, leave the parent issue `in_progress`",
-		"do NOT run `multica issue status " + issueID + " in_review` or `done` on this turn",
+		// The guest-leader contract test (handler side) bans any runnable
+		// in_review command shape from reaching a guest — the dispatch rule
+		// therefore states the prohibition without a command form.
+		"do NOT move it to `in_review` or `done` on this turn",
 		"only then, if the overall goal is met, move the parent to `in_review`",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("squad-leader assignment brief missing %q\n---\n%s", want, out)
+			t.Errorf("squad-leader issue brief missing %q\n---\n%s", want, out)
 		}
 	}
 
-	for _, banned := range []string{
-		"When done, run `multica issue status " + issueID + " in_review`",
-		"8. When done, run `multica issue status " + issueID + " in_review`",
-	} {
-		if strings.Contains(out, banned) {
-			t.Errorf("squad-leader assignment brief must not contain ordinary-agent completion step %q\n---\n%s", banned, out)
-		}
+	if strings.Contains(out, "When done, run `multica issue status <issue-id> in_review`") {
+		t.Errorf("squad-leader issue brief must not contain the ordinary-agent completion step\n---\n%s", out)
 	}
 }
 
-func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
+// Instruction Precedence belongs to the issue workflow only; the issue-less
+// kinds must not inherit it. After MUL-5377 it applies to every issue run,
+// comment-triggered or not, because there is a single issue workflow.
+func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 	t.Parallel()
+	if out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "11111111-2222-3333-4444-555555555555",
+		TriggerCommentID: "22222222-3333-4444-5555-666666666666",
+	}); !strings.Contains(out, "## Instruction Precedence") {
+		t.Errorf("comment-triggered issue brief must carry Instruction Precedence\n---\n%s", out)
+	}
+
 	cases := []struct {
 		name string
 		ctx  TaskContextForEnv
 	}{
-		{
-			name: "comment-triggered",
-			ctx: TaskContextForEnv{
-				IssueID:          "11111111-2222-3333-4444-555555555555",
-				TriggerCommentID: "22222222-3333-4444-5555-666666666666",
-			},
-		},
-		{
-			name: "chat",
-			ctx:  TaskContextForEnv{ChatSessionID: "chat-1"},
-		},
-		{
-			name: "quick-create",
-			ctx:  TaskContextForEnv{QuickCreatePrompt: "create me an issue"},
-		},
-		{
-			name: "autopilot run-only",
-			ctx:  TaskContextForEnv{AutopilotRunID: "run-1"},
-		},
+		{"chat", TaskContextForEnv{ChatSessionID: "chat-1"}},
+		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "create me an issue"}},
+		{"autopilot run-only", TaskContextForEnv{AutopilotRunID: "run-1"}},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -432,11 +435,11 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 			out := buildMetaSkillContent("claude", tc.ctx)
 			for _, banned := range []string{
 				"## Instruction Precedence",
-				"assignment workflow below",
+				"issue workflow below",
 				"Never treat this runtime workflow as permission to change issue status",
 			} {
 				if strings.Contains(out, banned) {
-					t.Errorf("%s brief must not inherit assignment-only precedence text %q\n---\n%s", tc.name, banned, out)
+					t.Errorf("%s brief must not inherit issue-only precedence text %q\n---\n%s", tc.name, banned, out)
 				}
 			}
 		})
@@ -647,38 +650,39 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestConnectedAppsRenderedAcrossBriefModes(t *testing.T) {
-	ctx := TaskContextForEnv{
+// Connected Apps moved to the per-turn prompt (MUL-5377): the app set is
+// resolved per run from the runtime MCP overlay.
+func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
+	t.Parallel()
+	apps := []runtimeapps.ConnectedApp{{
+		Provider:    "composio",
+		ServerName:  "composio",
+		ToolkitSlug: "notion",
+		ToolkitName: "Notion",
+	}}
+
+	block := BuildConnectedAppsBlock(apps)
+	for _, want := range []string{
+		"## Connected Apps",
+		"- Notion (`notion`) via MCP server `composio`",
+		"Use the listed MCP server when the task asks to read or act in one of these apps.",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("connected-apps block missing %q\n---\n%s", want, block)
+		}
+	}
+	if BuildConnectedAppsBlock(nil) != "" {
+		t.Error("empty app list must render nothing")
+	}
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
 		IssueID:          "11111111-2222-3333-4444-555555555555",
 		WorkspaceContext: "Prefer source-of-truth systems.",
-		ConnectedApps: []runtimeapps.ConnectedApp{{
-			Provider:    "composio",
-			ServerName:  "composio",
-			ToolkitSlug: "notion",
-			ToolkitName: "Notion",
-		}},
+		ConnectedApps:    apps,
+	})
+	if strings.Contains(out, "## Connected Apps") {
+		t.Errorf("brief must not carry Connected Apps — it is per-run state (MUL-5377)\n---\n%s", out)
 	}
-
-	run := func(t *testing.T, label string) {
-		out := buildMetaSkillContent("claude", ctx)
-		for _, want := range []string{
-			"## Connected Apps",
-			"- Notion (`notion`) via MCP server `composio`",
-			"Use the listed MCP server when the task asks to read or act in one of these apps.",
-		} {
-			if !strings.Contains(out, want) {
-				t.Fatalf("%s brief missing connected app text %q\n---\n%s", label, want, out)
-			}
-		}
-		wsIdx := strings.Index(out, "## Workspace Context")
-		appIdx := strings.Index(out, "## Connected Apps")
-		cmdIdx := strings.Index(out, "## Available Commands")
-		if wsIdx == -1 || appIdx == -1 || cmdIdx == -1 || !(wsIdx < appIdx && appIdx < cmdIdx) {
-			t.Fatalf("%s connected apps should sit between workspace context and available commands (ws=%d app=%d cmd=%d)", label, wsIdx, appIdx, cmdIdx)
-		}
-	}
-
-	run(t, "brief")
 }
 
 func TestConnectedAppsHeadingSkippedWhenEmpty(t *testing.T) {
@@ -883,6 +887,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"pi", "AGENTS.md"},
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
+		{"reasonix", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1257,6 +1262,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"pi", "AGENTS.md"},
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
+		{"reasonix", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1536,52 +1542,305 @@ func TestWriteRuntimeConfigFileAlwaysInsertsFixedManagedSeparator(t *testing.T) 
 	}
 }
 
-// TestCommentTriggeredBriefFansOutAcrossThreads pins the second reply-instruction
-// source (the persistent workflow brief) in sync with the per-turn prompt
-// (MUL-4348). When a coalesced run spans >=2 root threads, the workflow's reply
-// step must emit the per-thread fan-out plan — not the single --parent=trigger
-// cookbook — so a cross-thread run never gets one surface saying "one comment"
-// and the other "one per thread".
-func TestCommentTriggeredBriefFansOutAcrossThreads(t *testing.T) {
+// Cross-thread fan-out moved to the per-turn prompt (MUL-5377).
+func TestMultiThreadReplyInstructionsFanOut(t *testing.T) {
 	t.Parallel()
-	ctx := TaskContextForEnv{
-		IssueID:          "55555555-6666-7777-8888-999999999999",
-		TriggerCommentID: "c3",
-		TriggerThreadID:  "c3",
-		CommentReplyTargets: []ThreadReplyTarget{
-			{ThreadID: "c1", ParentID: "c1"},
-			{ThreadID: "c2", ParentID: "c2"},
-			{ThreadID: "c3", ParentID: "c3"},
-		},
-	}
-	out := buildMetaSkillContent("claude", ctx)
+	out := BuildMultiThreadCommentReplyInstructions("55555555-6666-7777-8888-999999999999", []ThreadReplyTarget{
+		{ThreadID: "c1", ParentID: "c1"},
+		{ThreadID: "c2", ParentID: "c2"},
+		{ThreadID: "c3", ParentID: "c3"},
+	}, false)
 
 	for _, want := range []string{"3 DISTINCT threads", "Post ONE reply per thread", "--parent c1", "--parent c2", "--parent c3"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("cross-thread brief must contain %q, got:\n%s", want, out)
+			t.Errorf("cross-thread instructions must contain %q, got:\n%s", want, out)
 		}
 	}
 }
 
-// TestCommentTriggeredBriefSingleThreadKeepsSingleReply pins the hard
-// requirement on the brief surface too: a run with no multi-thread targets
-// (ordinary comment, or same-thread follow-ups that collapsed upstream) keeps
-// the single --parent=trigger cookbook and never emits the fan-out block.
-func TestCommentTriggeredBriefSingleThreadKeepsSingleReply(t *testing.T) {
+// Single-thread reply cookbook moved to the per-turn prompt (MUL-5377).
+func TestSingleThreadReplyInstructionsKeepSingleParent(t *testing.T) {
 	t.Parallel()
-	ctx := TaskContextForEnv{
-		IssueID:          "55555555-6666-7777-8888-999999999999",
-		TriggerCommentID: "c3",
-		TriggerThreadID:  "thread-A",
-		// CommentReplyTargets deliberately empty: same-thread follow-ups collapse
-		// to a single group upstream, so no fan-out targets reach the brief.
-	}
-	out := buildMetaSkillContent("claude", ctx)
+	out := BuildCommentReplyInstructions("claude", "55555555-6666-7777-8888-999999999999", "c3", false)
 
 	if strings.Contains(out, "DISTINCT threads") {
-		t.Errorf("single/same-thread brief must not emit the multi-thread fan-out block, got:\n%s", out)
+		t.Errorf("single/same-thread instructions must not emit the multi-thread fan-out block, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--parent c3 --content-file ./reply.md") {
-		t.Errorf("single/same-thread brief must keep the single --parent=trigger cookbook, got:\n%s", out)
+		t.Errorf("single/same-thread instructions must keep the single --parent=trigger cookbook, got:\n%s", out)
+	}
+}
+
+// TestInjectRuntimeConfigByteIdenticalAcrossTriggers is the regression guard
+// for MUL-5377.
+//
+// Claude Code loads the runtime brief into messages[0], ahead of the entire
+// conversation. A cache breakpoint is all-or-nothing, so a single differing
+// byte in this file invalidates the prompt cache for the whole history: on a
+// resumed session the measured cost was ~426k re-created tokens per run, with
+// only tools[]+system[] surviving.
+//
+// Therefore the rendered managed block must be byte-identical for the same
+// (agent, issue, provider) no matter what triggered the run. Every field
+// varied below is per-run state that used to be interpolated into the brief.
+//
+// If this test fails, do NOT relax it — move the offending value into the
+// per-turn user message (daemon.BuildPrompt) instead. A "skip the write when
+// the block is unchanged" guard does not help here: when a volatile field
+// creeps back in the block is no longer identical, so the guard never fires
+// and the cache breaks anyway.
+func TestInjectRuntimeConfigByteIdenticalAcrossTriggers(t *testing.T) {
+	t.Parallel()
+
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	base := TaskContextForEnv{
+		IssueID:   issueID,
+		AgentID:   "agent-1",
+		AgentName: "Eve",
+	}
+
+	variants := []struct {
+		name   string
+		mutate func(c *TaskContextForEnv)
+	}{
+		{"assignment-triggered", func(c *TaskContextForEnv) {}},
+		{"comment-triggered", func(c *TaskContextForEnv) {
+			c.TriggerCommentID = "comment-1"
+			c.TriggerThreadID = "thread-1"
+		}},
+		{"comment-triggered-other-comment", func(c *TaskContextForEnv) {
+			c.TriggerCommentID = "comment-2"
+			c.TriggerThreadID = "thread-2"
+		}},
+		{"resumed-with-delta", func(c *TaskContextForEnv) {
+			c.TriggerCommentID = "comment-3"
+			c.PriorSessionResumed = true
+			c.NewCommentCount = 7
+			c.NewCommentsSince = "2026-05-28T11:00:00Z"
+		}},
+		{"resume-unavailable", func(c *TaskContextForEnv) {
+			c.TriggerCommentID = "comment-4"
+			c.PriorSessionResumeUnavailable = true
+		}},
+		{"cross-thread-fan-out", func(c *TaskContextForEnv) {
+			c.TriggerCommentID = "comment-5"
+			c.CommentReplyTargets = []ThreadReplyTarget{
+				{ThreadID: "t1", ParentID: "t1"},
+				{ThreadID: "t2", ParentID: "t2"},
+			}
+		}},
+		{"member-initiator", func(c *TaskContextForEnv) {
+			c.InitiatorType = "member"
+			c.InitiatorID = "user-1"
+			c.InitiatorName = "Bohan"
+			c.InitiatorEmail = "bohan@example.com"
+		}},
+		{"agent-initiator", func(c *TaskContextForEnv) {
+			c.InitiatorType = "agent"
+			c.InitiatorID = "agent-9"
+			c.InitiatorName = "GPT-Boy"
+		}},
+		{"connected-apps", func(c *TaskContextForEnv) {
+			c.ConnectedApps = []runtimeapps.ConnectedApp{{
+				Provider:    "composio",
+				ServerName:  "composio",
+				ToolkitSlug: "notion",
+				ToolkitName: "Notion",
+			}}
+		}},
+	}
+
+	// Non-vacuity guard: the brief must still depend on its stable inputs, or
+	// this whole test would pass on a function that ignores ctx entirely.
+	// Since MUL-5442's cross-channel dedup the brief is deliberately
+	// issue-id-independent (the per-turn message carries the ids), so the
+	// guard now varies a different stable input: the agent identity.
+	otherAgent := base
+	otherAgent.AgentName = "Someone Else"
+	if buildMetaSkillContent("claude", base) == buildMetaSkillContent("claude", otherAgent) {
+		t.Fatal("brief does not vary with agent identity — byte-identity assertions below would be vacuous")
+	}
+
+	// The stronger MUL-5442 invariant this PR claims as a design benefit:
+	// with identical stable inputs, two DIFFERENT issue ids must render the
+	// byte-identical brief — this is what makes a cross-issue shared cache
+	// prefix possible. Asserted directly, per provider, so a truncated,
+	// transformed, or id-conditional use of the issue id cannot slip past
+	// the Contains-based negative check.
+	for _, provider := range []string{"claude", "codex"} {
+		otherIssue := base
+		otherIssue.IssueID = "99999999-8888-7777-6666-555555555555"
+		if buildMetaSkillContent(provider, base) != buildMetaSkillContent(provider, otherIssue) {
+			t.Fatalf("%s brief differs across issue ids — the cross-issue cache invariant is broken", provider)
+		}
+	}
+
+	for _, provider := range []string{"claude", "codex"} {
+		provider := provider
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			var want string
+			for i, v := range variants {
+				ctx := base
+				v.mutate(&ctx)
+				got := buildMetaSkillContent(provider, ctx)
+				if i == 0 {
+					want = got
+					continue
+				}
+				if got != want {
+					t.Errorf("brief differs for variant %q — per-run state leaked into messages[0] (MUL-5377).\n%s",
+						v.name, firstBriefDiff(want, got))
+				}
+			}
+		})
+	}
+}
+
+// firstBriefDiff reports the first differing byte with surrounding context so a
+// failure names the offending section instead of dumping two whole briefs.
+func firstBriefDiff(want, got string) string {
+	n := len(want)
+	if len(got) < n {
+		n = len(got)
+	}
+	i := 0
+	for i < n && want[i] == got[i] {
+		i++
+	}
+	lo := i - 120
+	if lo < 0 {
+		lo = 0
+	}
+	hiW, hiG := i+120, i+120
+	if hiW > len(want) {
+		hiW = len(want)
+	}
+	if hiG > len(got) {
+		hiG = len(got)
+	}
+	return "first difference at byte " + strconv.Itoa(i) +
+		"\n--- baseline ---\n" + want[lo:hiW] +
+		"\n--- variant ---\n" + got[lo:hiG]
+}
+
+// TestBriefByteIdenticalAcrossRunsForEveryKind extends the MUL-5377 guarantee
+// past issue runs.
+//
+// Chat sessions resume too — handler/daemon.go:2172 hands the daemon a
+// PriorSessionID from the chat_session row, with the same PriorWorkDir and
+// PriorSessionResumeUnavailable plumbing as an issue task. So a chat brief that
+// varied per turn would lose the prompt cache exactly the same way, and a long
+// chat is precisely where that hurts most. Autopilot and quick-create are
+// single-shot today, but the invariant is free to hold for them too and stops a
+// future resume path from silently reintroducing the bug.
+func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
+	t.Parallel()
+
+	kinds := map[string]TaskContextForEnv{
+		"chat":         {ChatSessionID: "chat-1", ChatChannelType: ChannelTypeSlack, AgentID: "a-1", AgentName: "Eve"},
+		"quick-create": {QuickCreatePrompt: "make an issue", AgentID: "a-1", AgentName: "Eve"},
+		"autopilot":    {AutopilotRunID: "run-1", AutopilotID: "ap-1", AgentID: "a-1", AgentName: "Eve"},
+	}
+
+	// Per-run state that changes between turns of one resumed session.
+	variants := []struct {
+		name   string
+		mutate func(c *TaskContextForEnv)
+	}{
+		{"baseline", func(c *TaskContextForEnv) {}},
+		{"resumed", func(c *TaskContextForEnv) { c.PriorSessionResumed = true }},
+		{"resume-unavailable", func(c *TaskContextForEnv) { c.PriorSessionResumeUnavailable = true }},
+		{"member-initiator", func(c *TaskContextForEnv) {
+			c.InitiatorType, c.InitiatorID = "member", "u-1"
+			c.InitiatorName, c.InitiatorEmail = "Bohan", "bohan@example.com"
+		}},
+		{"other-initiator", func(c *TaskContextForEnv) {
+			// A Slack channel lets a different person trigger each turn.
+			c.InitiatorType, c.InitiatorID = "member", "u-2"
+			c.InitiatorName, c.InitiatorEmail = "Someone Else", "else@example.com"
+		}},
+		{"agent-initiator", func(c *TaskContextForEnv) {
+			c.InitiatorType, c.InitiatorID = "agent", "a-9"
+			c.InitiatorName = "GPT-Boy"
+		}},
+		{"connected-apps", func(c *TaskContextForEnv) {
+			c.ConnectedApps = []runtimeapps.ConnectedApp{{
+				Provider: "composio", ServerName: "composio",
+				ToolkitSlug: "notion", ToolkitName: "Notion",
+			}}
+		}},
+	}
+
+	for kindName, baseCtx := range kinds {
+		kindName, baseCtx := kindName, baseCtx
+		t.Run(kindName, func(t *testing.T) {
+			t.Parallel()
+			var want string
+			for i, v := range variants {
+				ctx := baseCtx
+				v.mutate(&ctx)
+				got := buildMetaSkillContent("claude", ctx)
+				if i == 0 {
+					want = got
+					continue
+				}
+				if got != want {
+					t.Errorf("%s brief differs for variant %q — per-run state leaked into the cached prefix (MUL-5377).\n%s",
+						kindName, v.name, firstBriefDiff(want, got))
+				}
+			}
+		})
+	}
+}
+
+// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
+// index of invocable names, with no descriptions and no per-provider branch.
+//
+// Descriptions were removed because every runtime CLI already builds its own
+// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
+// was the same routing signal paid for twice — ~3,100 tokens per brief on a
+// real task, 40% of the whole brief (MUL-5529).
+//
+// The provider branch was removed because its fallback was wrong: it told
+// providers outside a hardcoded list to look in `.agent_context/skills/`, but
+// the only providers that ever reached it — grok and traecli — have their files
+// written to `.grok/skills` and `.traecli/skills` and discover them natively.
+func TestBriefSkillsListIsNamesOnly(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{
+		IssueID:   "issue-1",
+		AgentName: "Eve",
+		AgentID:   "eve-1",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:        "PR Review",
+				Description: "Use when reviewing a pull request for the Multica project.",
+				Content:     "---\nname: pr-review\n---\n\nbody",
+			},
+		},
+	}
+
+	// grok and traecli are the providers that used to take the removed branch;
+	// the rest are a spread across the native-discovery list.
+	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent(provider, ctx)
+
+			if !strings.Contains(out, "- **pr-review**\n") {
+				t.Errorf("brief does not list the skill by slug:\n%s", out)
+			}
+			if strings.Contains(out, "Use when reviewing a pull request") {
+				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
+			}
+			if strings.Contains(out, ".agent_context/skills/") {
+				t.Errorf("brief still points at the removed fallback path:\n%s", out)
+			}
+			if !strings.Contains(out, "discovered automatically") {
+				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			}
+		})
 	}
 }

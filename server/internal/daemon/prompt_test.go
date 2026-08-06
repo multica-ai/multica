@@ -45,11 +45,21 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
+		// attachment boundary (MUL-5696): the ban is scoped to URLs, and file
+		// delivery defers to the quick-create ## Output section — a blanket
+		// "do NOT pass --attachment" contradicted it (it names --attachment
+		// on the create call as this surface's only file-delivery channel).
+		"`--attachment` takes LOCAL file paths, never URLs",
+		"Files you produced: see `## Output`",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("buildQuickCreatePrompt output missing required rule: %q", s)
 		}
+	}
+
+	if strings.Contains(out, "do NOT pass `--attachment`") {
+		t.Errorf("buildQuickCreatePrompt carries the unconditional --attachment ban that conflicts with the quick-create ## Output delivery channel (MUL-5696)\n--- output ---\n%s", out)
 	}
 }
 
@@ -331,6 +341,59 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	})
 }
 
+// TestBuildChatPromptNoNarrationOnEveryChannel pins the THIRD axis of the chat
+// channel policy: the no-narration delivery rule keys off "is there a channel at
+// all", like the upload axis and unlike the Slack-only history axis.
+//
+// Regression guard for GH #6006. #4776 introduced the rule for every channel;
+// the MUL-4899 split moved it into the Slack branch along with the read commands
+// its wording happened to mention, so Feishu/Lark replies silently went back to
+// carrying interim narration. The two-layer matrix below could not catch that —
+// it only ever asserted the rule on the Slack case.
+//
+// The carve-out is pinned alongside the prohibition on purpose. A rule phrased
+// as "don't say what you just did" reads as forbidding "已创建 Issue X" — the
+// actual deliverable for a do-this request — so the two must move together: the
+// prohibition covers PROCESS, never the completed outcome.
+func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
+	const (
+		prohibition = "Do NOT narrate planned or in-progress steps"
+		carveOut    = "completed actions are part of the outcome"
+	)
+
+	for _, tc := range []struct {
+		name        string
+		channelType string
+		want        bool
+	}{
+		{name: "slack", channelType: execenv.ChannelTypeSlack, want: true},
+		{name: "feishu", channelType: execenv.ChannelTypeFeishu, want: true},
+		{name: "direct chat has no channel to deliver into", channelType: "", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID:   "sess-1",
+				ChatChannelType: tc.channelType,
+				ChatMessage:     "hi",
+			})
+			for _, phrase := range []string{prohibition, carveOut} {
+				if got := strings.Contains(out, phrase); got != tc.want {
+					t.Errorf("%q present=%v, want %v\n--- output ---\n%s", phrase, got, tc.want, out)
+				}
+			}
+			if !tc.want {
+				return
+			}
+			// The prohibition must not read as a blanket ban on past tense. If a
+			// future edit drops the carve-out, an agent asked to create an issue
+			// has no way left to report that it did.
+			if strings.Contains(out, "must not say what you are about to do or just did") {
+				t.Errorf("prohibition must scope to process, not completed outcomes\n--- output ---\n%s", out)
+			}
+		})
+	}
+}
+
 // TestBuildChatPromptTwoLayerChannelPolicy pins the two INDEPENDENT axes of the
 // chat channel policy (MUL-4899). Collapsing them into one condition is exactly
 // the bug this matrix exists to catch:
@@ -426,11 +489,71 @@ func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
 	}
 }
 
+// Audience is a per-turn platform fact. Semantic anchors pin the group privacy
+// boundary without pinning a full sentence, and the count guard prevents a
+// second copy from creeping into another prompt section.
+func TestBuildChatPromptAudience(t *testing.T) {
+	cases := []struct {
+		name string
+		task Task
+		want []string
+		deny []string
+	}{
+		{
+			name: "group",
+			task: Task{ChatSessionID: "s", ChatChannelType: execenv.ChannelTypeSlack, ChatType: execenv.ChatTypeGroup, ChatMessage: "hi"},
+			want: []string{"Audience: group room", "not private", "unseen members"},
+			deny: []string{"Audience: direct", "do not share", "never mention", "avoid discussing"},
+		},
+		{
+			name: "direct channel",
+			task: Task{ChatSessionID: "s", ChatChannelType: execenv.ChannelTypeFeishu, ChatType: execenv.ChatTypeP2P, ChatMessage: "hi"},
+			want: []string{"Audience: direct room"},
+			deny: []string{"Audience: group", "not private", "unseen members"},
+		},
+		{
+			name: "direct web chat",
+			task: Task{ChatSessionID: "s", ChatMessage: "hi"},
+			want: []string{"Audience: direct room"},
+			deny: []string{"Audience: group", "Audience: unknown"},
+		},
+		{
+			name: "channel from an older server",
+			task: Task{ChatSessionID: "s", ChatChannelType: execenv.ChannelTypeWecom, ChatMessage: "hi"},
+			want: []string{"Audience: unknown"},
+			deny: []string{"Audience: group", "Audience: direct", "not private"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := BuildPrompt(tc.task, "claude")
+			if got := strings.Count(out, "Audience:"); got != 1 {
+				t.Fatalf("audience fact count = %d, want 1\n--- output ---\n%s", got, out)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("prompt missing audience anchor %q\n--- output ---\n%s", want, out)
+				}
+			}
+			deny := append([]string{}, tc.deny...)
+			deny = append(deny, "chatting with you directly")
+			for _, deny := range deny {
+				if strings.Contains(out, deny) {
+					t.Errorf("prompt contains retired/contradictory audience text %q\n--- output ---\n%s", deny, out)
+				}
+			}
+			if !strings.Contains(out, "User message:\nhi") {
+				t.Errorf("prompt must still carry the user message\n--- output ---\n%s", out)
+			}
+		})
+	}
+}
+
 func TestBuildChatPromptAgentIntro(t *testing.T) {
-	// The proactive self-introduction chat (MUL-4230) has no user message: the
-	// prompt must tell the agent to open the conversation itself, and must NOT
-	// carry the generic "respond to their message" framing or an empty
-	// "User message:" section that would confuse the agent.
+	// Historical proactive-introduction sessions remain readable even though
+	// new agent creation no longer creates one. Their message-less first turn
+	// must not receive the generic "respond to their message" framing.
 	out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatIntro: true})
 	for _, want := range []string{
 		"You were just created",
@@ -553,25 +676,40 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 	})
 }
 
-// TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
+// TestBuildPromptDefaultScansRootsFirst pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create)
-// starts assignment-triggered comment catch-up with a bounded recent read,
-// while still keeping older history available through pagination.
-func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
+// starts assignment-triggered comment catch-up with a bounded roots scan and
+// only then offers the full-thread read, while still keeping older history
+// available through pagination.
+func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
 	for _, s := range []string{
-		"multica issue comment list issue-default-1 --recent 10 --output json",
-		"Next thread cursor:",
+		"multica issue comment list issue-default-1 --roots-only --summary --output json",
 		"--since",
 	} {
 		if !strings.Contains(out, s) {
 			t.Errorf("default BuildPrompt missing %q\n--- output ---\n%s", s, out)
 		}
 	}
-	// And the default path must NOT inject a --thread example, because there
-	// is no trigger comment id to anchor on.
-	if strings.Contains(out, "--thread") {
-		t.Errorf("default BuildPrompt should NOT mention --thread (no trigger comment to anchor on)\n--- output ---\n%s", out)
+	// MUL-5372: the per-turn prompt names only the reads it wants run. Flag
+	// mechanics — cursors, the --recent saturation trap — live once in the
+	// runtime workflow file's `## Available Commands`, so restating them here
+	// would put the same reference text on every turn.
+	if strings.Contains(out, "--recent") {
+		t.Errorf("default BuildPrompt should not restate the --recent surface\n--- output ---\n%s", out)
+	}
+	if strings.Contains(out, "Next thread cursor:") {
+		t.Errorf("default BuildPrompt should not restate pagination mechanics\n--- output ---\n%s", out)
+	}
+	// MUL-5372: this path now leads with a cheap roots scan, and the scan is
+	// what supplies thread ids, so a generic `--thread <thread-id>` drill-down
+	// is well-founded here. What must still never appear is a CONCRETE anchor —
+	// the default path has no trigger comment to derive one from, and an
+	// interpolated id would send the agent after a thread that does not exist.
+	for _, seg := range strings.Split(out, "--thread")[1:] {
+		if !strings.HasPrefix(seg, " <thread-id>") {
+			t.Errorf("default BuildPrompt must only use the generic --thread <thread-id> placeholder, never a concrete anchor\n--- output ---\n%s", out)
+		}
 	}
 	// The legacy "If you need comment history" soft phrasing conflicts with
 	// the assignment-trigger runtime workflow, which treats reading comments
@@ -639,9 +777,14 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "--tail 30") {
 		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
 	}
-	// Issue-wide catch-up is demoted to an only-if-needed fallback.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
-		t.Errorf("hint must keep the issue-wide --since catch-up as a fallback, got:\n%s", out)
+	// Issue-wide catch-up is demoted to an only-if-needed fallback, phrased as
+	// a rerun of the thread command minus `--thread` (MUL-5721 OPT-1) instead
+	// of a second full command that restated the UUID and anchor.
+	if !strings.Contains(out, "rerun it without `--thread` for the issue-wide catch-up") {
+		t.Errorf("hint must keep the issue-wide catch-up fallback, got:\n%s", out)
+	}
+	if strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
+		t.Errorf("warm hint must not render a second full issue-wide command (MUL-5721 OPT-1), got:\n%s", out)
 	}
 	// The old cursor-heavy paragraph must be gone.
 	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
@@ -671,11 +814,20 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --recent 10 --output json") {
-		t.Errorf("cold start cross-thread fallback should use recent 10, got:\n%s", out)
+	// MUL-5372: cross-thread background is a cheap roots scan. The hint names
+	// only the reads it wants run — `--recent` and its saturation trap are
+	// documented once in the brief's `## Available Commands`, so restating the
+	// flag surface here would put reference text on every cold turn. The scan
+	// is phrased as a flag swap on the thread command, not a second full
+	// command restating the UUID (MUL-5721 OPT-1).
+	if !strings.Contains(out, "Rerun with `--roots-only --summary` replacing `--thread ... --tail 30`") {
+		t.Errorf("cold start should offer the cheap roots scan for cross-thread background, got:\n%s", out)
 	}
-	if strings.Contains(out, "--recent 20") {
-		t.Errorf("cold start cross-thread fallback still uses recent 20, got:\n%s", out)
+	if strings.Contains(out, "multica issue comment list "+issueID+" --roots-only --summary --output json") {
+		t.Errorf("cold hint must not render a second full command for the roots scan (MUL-5721 OPT-1), got:\n%s", out)
+	}
+	if strings.Contains(out, "--recent") {
+		t.Errorf("cold start hint should not restate the --recent surface, got:\n%s", out)
 	}
 }
 
@@ -700,7 +852,6 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
@@ -708,6 +859,11 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)
 		}
+	}
+	// The anchor-restating sentence is gone (MUL-5721 OPT-1): the read command
+	// carries the thread anchor and the reply cookbook carries the trigger id.
+	if strings.Contains(out, "active thread anchor") {
+		t.Errorf("resumed/no-delta prompt must not restate anchors outside the commands, got:\n%s", out)
 	}
 	// The stale thread-scoped wording (since-delta used to be thread-scoped)
 	// must not reappear.
@@ -769,9 +925,14 @@ func TestBuildCommentPromptCoalescedCrossThread(t *testing.T) {
 
 // TestBuildCommentPromptCoalescedIDsOnlyFallback pins the old-server fallback:
 // when only coalesced ids are shipped (no embedded detail), the prompt must
-// still NOT assume a shared thread and must point at an issue-wide fetch.
+// still NOT assume a shared thread, and must reach the ids through a BOUNDED
+// read rather than an issue-wide bulk pull (MUL-5442).
+//
+// The bulk pull is the regression this guards: `--recent N` caps threads, not
+// comments, so on a small issue it returns the whole history — and the brief's
+// own catch-up step forbids exactly that shape.
 func TestBuildCommentPromptCoalescedIDsOnlyFallback(t *testing.T) {
-	task := Task{
+	base := Task{
 		IssueID:               "issue-fallback-1",
 		TriggerCommentID:      "trigger-newest",
 		TriggerThreadID:       "thread-root-A",
@@ -779,13 +940,74 @@ func TestBuildCommentPromptCoalescedIDsOnlyFallback(t *testing.T) {
 		TriggerAuthorType:     "member",
 		CoalescedCommentIDs:   []string{"c-old-1", "c-old-2"},
 	}
-	out := BuildPrompt(task, "claude")
 
+	t.Run("with since anchor", func(t *testing.T) {
+		task := base
+		task.NewCommentsSince = "2026-08-03T06:00:00Z"
+		out := BuildPrompt(task, "claude")
+
+		want := "multica issue comment list issue-fallback-1 --since 2026-08-03T06:00:00Z --output json"
+		if !strings.Contains(out, want) {
+			t.Errorf("id-only fallback should prefetch the window with %q, got:\n%s", want, out)
+		}
+		// The window is a prefetch, never the guarantee: a retry inherits the
+		// prior attempt's coalesced ids verbatim while the anchor is recomputed
+		// from the last started task, so an inherited id can predate the window.
+		// The prompt must say so and must not promise an exact fetch.
+		for _, want := range []string{"candidate window, not a guarantee", "can carry ids older than the window"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("anchored fallback must not present --since as complete, missing %q, got:\n%s", want, out)
+			}
+		}
+		for _, banned := range []string{"returns exactly the comments", "precisely"} {
+			if strings.Contains(out, banned) {
+				t.Errorf("anchored fallback must not overpromise the window (%q), got:\n%s", banned, out)
+			}
+		}
+		assertBoundedIDOnlyFallback(t, out)
+	})
+
+	t.Run("without since anchor", func(t *testing.T) {
+		// No prior run on this issue, so the server sent no anchor. The per-id
+		// lookup below is the whole contract here.
+		out := BuildPrompt(base, "claude")
+
+		if strings.Contains(out, "--since") {
+			t.Errorf("anchorless fallback must not emit a --since read, got:\n%s", out)
+		}
+		// No heuristics: the agent must not be asked to guess which threads look
+		// recent enough to hold the ids (MUL-5442 review).
+		if strings.Contains(out, "last_activity_at") {
+			t.Errorf("anchorless fallback must not rely on a recency heuristic, got:\n%s", out)
+		}
+		assertBoundedIDOnlyFallback(t, out)
+	})
+}
+
+// assertBoundedIDOnlyFallback holds the completeness contract both fallback
+// shapes must satisfy: every listed id is reachable deterministically, through
+// bounded reads, without a bulk pull.
+func assertBoundedIDOnlyFallback(t *testing.T, out string) {
+	t.Helper()
 	if strings.Contains(out, "they are in the triggering thread") {
 		t.Errorf("id-only fallback must not assume a shared thread, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--recent 30") {
-		t.Errorf("id-only fallback must point at an issue-wide fetch (--recent 30), got:\n%s", out)
+	if strings.Contains(out, "--recent") {
+		t.Errorf("id-only fallback must not send the agent at an issue-wide --recent pull (MUL-5442), got:\n%s", out)
+	}
+	// The deterministic per-id lookup. `--thread` resolves ANY comment id, so an
+	// id is reachable without knowing its thread; paging keeps it reachable even
+	// when it is older than the tail window.
+	for _, want := range []string{
+		"multica issue comment list issue-fallback-1 --thread <comment-id> --tail 30 --output json",
+		"accepts a reply id",
+		"Next reply cursor",
+		"--before-id",
+		"Do not finish this turn until every id above is accounted for",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("id-only fallback missing per-id completeness guarantee %q, got:\n%s", want, out)
+		}
 	}
 	for _, id := range []string{"c-old-1", "c-old-2"} {
 		if !strings.Contains(out, id) {
@@ -975,5 +1197,187 @@ func TestBuildCommentPromptSameThreadKeepsSingleReply(t *testing.T) {
 	// trigger comment.
 	if !strings.Contains(out, "--parent c3 --content-file ./reply.md") {
 		t.Errorf("same-thread run must keep the single --parent=trigger reply cookbook, got:\n%s", out)
+	}
+}
+
+// TestPerTurnContextBlocksCarryMovedBriefSections is the other half of
+// MUL-5377: the per-run context that was removed from the runtime brief must
+// still reach the agent, now via the per-turn user message. Losing it silently
+// would be a worse regression than the cache cost it fixes.
+func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		IssueID:                       "issue-1",
+		TriggerCommentID:              "comment-1",
+		TriggerCommentContent:         "please look at this",
+		PriorSessionResumeUnavailable: true,
+		InitiatorType:                 "member",
+		InitiatorName:                 "Bohan",
+		InitiatorEmail:                "bohan@example.com",
+		ConnectedApps: []ConnectedAppData{{
+			Provider:    "composio",
+			ServerName:  "composio",
+			ToolkitSlug: "notion",
+			ToolkitName: "Notion",
+		}},
+	}
+
+	prompt := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"## Session Continuity Notice",
+		// Issue wording: this task has an IssueID, and since MUL-5722 the two
+		// surfaces word the notice differently (the chat variant is the one
+		// that says "could NOT be restored" and asks the agent to announce it).
+		// What this test cares about is that the section reaches the per-turn
+		// message at all, not which variant it is.
+		"could not be restored",
+		"## Task Initiator",
+		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
+		"credentials stay scoped to the runtime owner",
+		"## Connected Apps",
+		"- Notion (`notion`) via MCP server `composio`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("per-turn prompt lost moved brief content %q\n---\n%s", want, prompt)
+		}
+	}
+}
+
+// The blocks are per-run, so they must be absent when their preconditions are.
+func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{IssueID: "issue-1"}, "claude")
+	for _, banned := range []string{
+		"## Session Continuity Notice",
+		"## Task Initiator",
+		"## Connected Apps",
+	} {
+		if strings.Contains(prompt, banned) {
+			t.Errorf("per-turn prompt must not emit %q with no data\n---\n%s", banned, prompt)
+		}
+	}
+}
+
+// An assignment-triggered run carries the initiator too — it is not a
+// comment-path-only block.
+func TestPerTurnContextBlocksOnAssignmentPath(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:       "issue-1",
+		InitiatorType: "agent",
+		InitiatorName: "GPT-Boy",
+	}, "claude")
+	if !strings.Contains(prompt, "initiated by **GPT-Boy**, another agent in this workspace") {
+		t.Errorf("assignment-triggered prompt lost the initiator block\n---\n%s", prompt)
+	}
+}
+
+// TestTurnModeMarkerAlwaysPresent is the regression guard for the review
+// finding on #6021: the brief's mode router keys off an explicit marker in the
+// per-turn prompt, so that marker must be emitted unconditionally from the same
+// branch that selects the code path.
+//
+// The dangerous case is a comment-triggered run whose comment body is empty (or
+// an older server that doesn't send one). Before this guard the prompt emitted
+// no `[NEW COMMENT]` block at all, the brief fell through to Ownership mode,
+// and the agent would change the issue status on a turn that must not.
+func TestTurnModeMarkerAlwaysPresent(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		task Task
+		want string
+		deny string
+	}{
+		{
+			name: "comment-triggered with content",
+			task: Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"},
+			want: "**Turn mode: Reply.**",
+			deny: "**Turn mode: Ownership.**",
+		},
+		{
+			name: "comment-triggered with EMPTY content",
+			task: Task{IssueID: "issue-1", TriggerCommentID: "c-1"},
+			want: "**Turn mode: Reply.**",
+			deny: "**Turn mode: Ownership.**",
+		},
+		{
+			name: "assignment-triggered",
+			task: Task{IssueID: "issue-1"},
+			want: "**Turn mode: Ownership.**",
+			deny: "**Turn mode: Reply.**",
+		},
+		{
+			name: "assignment-triggered with handoff note",
+			task: Task{IssueID: "issue-1", HandoffNote: "start with the API"},
+			want: "**Turn mode: Ownership.**",
+			deny: "**Turn mode: Reply.**",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			prompt := BuildPrompt(tc.task, "claude")
+			if !strings.Contains(prompt, tc.want) {
+				t.Errorf("prompt missing turn-mode marker %q\n---\n%s", tc.want, prompt)
+			}
+			if strings.Contains(prompt, tc.deny) {
+				t.Errorf("prompt carries the wrong turn-mode marker %q\n---\n%s", tc.deny, prompt)
+			}
+		})
+	}
+}
+
+// The mode marker only makes sense for the two issue paths — the issue-less
+// kinds have no Reply/Ownership distinction and no issue status to protect.
+func TestTurnModeMarkerAbsentOnIssuelessKinds(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		task Task
+	}{
+		{"chat", Task{ChatSessionID: "chat-1"}},
+		{"quick-create", Task{QuickCreatePrompt: "make an issue"}},
+		{"autopilot", Task{AutopilotRunID: "run-1"}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			prompt := BuildPrompt(tc.task, "claude")
+			for _, banned := range []string{"**Turn mode: Reply.**", "**Turn mode: Ownership.**"} {
+				if strings.Contains(prompt, banned) {
+					t.Errorf("%s prompt must not carry %q\n---\n%s", tc.name, banned, prompt)
+				}
+			}
+		})
+	}
+}
+
+// The brief's router must describe the markers the prompt actually emits.
+// A drift here is exactly the bug this pair of changes fixes, and it is
+// invisible at runtime until an agent silently picks the wrong mode.
+func TestBriefModeRouterMatchesPromptMarkers(t *testing.T) {
+	t.Parallel()
+
+	brief, err := execenv.InjectRuntimeConfig(t.TempDir(), "claude", execenv.TaskContextForEnv{IssueID: "issue-1"})
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	for _, want := range []string{"`Turn mode: Reply.`", "`Turn mode: Ownership.`"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief mode router does not name %s\n---\n%s", want, brief)
+		}
+	}
+	// The retired wording keyed off the prompt's first line, which was never
+	// actually the [NEW COMMENT] block.
+	if strings.Contains(brief, "It opens with a `[NEW COMMENT]` block") {
+		t.Error("brief still routes on the prompt's opening line; it must route on the explicit marker")
 	}
 }

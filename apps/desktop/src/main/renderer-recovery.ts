@@ -95,15 +95,19 @@ export function installRendererRecoveryHandlers(
     if (isDev || unresponsivePromptTimer) return;
     unresponsivePromptTimer = setTimeout(() => {
       unresponsivePromptTimer = null;
-      const payload: ReloadPromptPayload = {
-        kind: "unresponsive",
-        context: mergeDiagnosticContext({}),
-      };
-      persistBreadcrumb?.(payload);
-      unresponsiveBreadcrumbWritten = true;
-      maybePromptReload(payload);
+      reportHang();
     }, unresponsivePromptDelayMs);
   });
+
+  const reportHang = () => {
+    const payload: ReloadPromptPayload = {
+      kind: "unresponsive",
+      context: mergeDiagnosticContext({}),
+    };
+    persistBreadcrumb?.(payload);
+    unresponsiveBreadcrumbWritten = true;
+    maybePromptReload(payload);
+  };
 
   window.on("responsive", () => {
     if (unresponsivePromptTimer) {

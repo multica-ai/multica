@@ -127,7 +127,7 @@ export function VCSTab() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">{t(($) => $.vcs.page_description)}</p>
+      <p className="text-body text-muted-foreground">{t(($) => $.vcs.page_description)}</p>
 
       {connections.length > 0 && (
         <div className="space-y-3">
@@ -139,10 +139,10 @@ export function VCSTab() {
                     <GitBranch className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 space-y-0.5">
-                    <p className="text-sm font-medium break-all">
+                    <p className="text-body font-medium break-all">
                       {(PROVIDER_LABELS[c.provider] ?? c.provider) + " · " + c.instance_url}
                     </p>
-                    <p className="text-xs text-muted-foreground break-all">
+                    <p className="text-caption text-muted-foreground break-all">
                       {t(($) => $.vcs.connected_as, { login: c.account_login })}
                     </p>
                   </div>
@@ -173,8 +173,8 @@ export function VCSTab() {
         <Card className="border-primary/40">
           <CardContent className="space-y-3">
             <div className="space-y-1">
-              <p className="text-sm font-medium">{t(($) => $.vcs.webhook_setup_title)}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-body font-medium">{t(($) => $.vcs.webhook_setup_title)}</p>
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.vcs.webhook_setup_description)}
               </p>
             </div>
@@ -191,7 +191,7 @@ export function VCSTab() {
               copyLabel={t(($) => $.vcs.copy)}
               mono
             />
-            <p className="text-xs text-amber-600 dark:text-amber-500">
+            <p className="text-caption text-amber-600 dark:text-amber-500">
               {t(($) => $.vcs.webhook_secret_warning)}
             </p>
           </CardContent>
@@ -201,11 +201,11 @@ export function VCSTab() {
       {canManage && (
         <Card>
           <CardContent className="space-y-4">
-            <p className="text-sm font-medium">{t(($) => $.vcs.connect_title)}</p>
+            <p className="text-body font-medium">{t(($) => $.vcs.connect_title)}</p>
             {!configured ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.vcs.not_configured)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">
                   MULTICA_VCS_SECRET_KEY
                 </code>
                 .
@@ -251,7 +251,7 @@ export function VCSTab() {
                     onChange={(e) => setToken(e.target.value)}
                     disabled={connecting}
                   />
-                  <p className="text-xs text-muted-foreground">{t(($) => $.vcs.form_token_hint)}</p>
+                  <p className="text-caption text-muted-foreground">{t(($) => $.vcs.form_token_hint)}</p>
                 </div>
                 <div className="flex justify-end">
                   <Button
@@ -269,7 +269,7 @@ export function VCSTab() {
       )}
 
       {!canManage && connections.length === 0 && (
-        <p className="text-xs text-muted-foreground">{t(($) => $.vcs.contact_admin)}</p>
+        <p className="text-caption text-muted-foreground">{t(($) => $.vcs.contact_admin)}</p>
       )}
 
       <AlertDialog
@@ -338,12 +338,12 @@ function CopyField({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
+      <Label className="text-caption">{label}</Label>
       <div className="flex items-center gap-2">
         <Input
           readOnly
           value={value}
-          className={mono ? "min-w-0 font-mono text-xs" : "min-w-0 text-xs"}
+          className={mono ? "min-w-0 font-mono text-caption" : "min-w-0 text-caption"}
         />
         <Button
           variant="outline"

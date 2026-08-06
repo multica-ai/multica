@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testLogger() *slog.Logger {
@@ -1689,5 +1690,96 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 	got := getRemoteDefaultBranch(barePath)
 	if got != "" {
 		t.Fatalf("getRemoteDefaultBranch = %q, want \"\" (ambiguous origin/* must not guess)", got)
+	}
+}
+
+// TestLastUsedMissingIsUnknownNotAncient pins the distinction the GC's
+// upgrade safety depends on: a cache created before the stamp existed must
+// report "unknown", never a zero time that reads as infinitely idle.
+func TestLastUsedMissingIsUnknownNotAncient(t *testing.T) {
+	t.Parallel()
+	if _, ok := LastUsed(t.TempDir()); ok {
+		t.Fatal("LastUsed on a repo with no stamp must report ok=false")
+	}
+}
+
+// TestMarkUsedRoundTrip covers the stamp write/read pair on its own.
+func TestMarkUsedRoundTrip(t *testing.T) {
+	t.Parallel()
+	barePath := t.TempDir()
+
+	before := time.Now().Add(-time.Second)
+	MarkUsed(barePath, testLogger())
+
+	stamp, ok := LastUsed(barePath)
+	if !ok {
+		t.Fatal("expected a stamp after MarkUsed")
+	}
+	if stamp.Before(before) {
+		t.Errorf("stamp %s is older than the call that wrote it (%s)", stamp, before)
+	}
+	if time.Since(stamp) > time.Hour {
+		t.Errorf("stamp %s is implausibly old", stamp)
+	}
+}
+
+// TestMarkUsedIgnoresUnwritableRepo keeps the stamp best-effort: a failure to
+// record use must not break the checkout that triggered it.
+func TestMarkUsedIgnoresUnwritableRepo(t *testing.T) {
+	t.Parallel()
+	MarkUsed(filepath.Join(t.TempDir(), "does-not-exist"), testLogger())
+	MarkUsed("", testLogger())
+}
+
+// TestCreateWorktreeStampsLastUsed is the one that matters for eviction: the
+// stamp has to be written where "a task really used this repo" happens, since
+// directory mtime cannot distinguish that from a routine fetch.
+func TestCreateWorktreeStampsLastUsed(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("expected cached repo")
+	}
+	// Sync alone must not look like use — only a checkout counts.
+	if _, ok := LastUsed(barePath); ok {
+		t.Fatal("Sync must not stamp last-used; only CreateWorktree does")
+	}
+
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "Code Reviewer",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+	}); err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if _, ok := LastUsed(barePath); !ok {
+		t.Error("CreateWorktree must stamp last-used on the bare repo")
+	}
+}
+
+// TestBarePathIsIndependentOfExistence separates the two questions Lookup used
+// to answer at once: Lookup means "is it cached?", BarePath means "where would
+// it live?" — the GC needs the second to map live repo URLs onto directories.
+func TestBarePathIsIndependentOfExistence(t *testing.T) {
+	t.Parallel()
+	cache := New(t.TempDir(), testLogger())
+
+	path := cache.BarePath("ws-1", "https://example.com/acme/widgets.git")
+	if path == "" {
+		t.Fatal("BarePath must return a path even when nothing is cached")
+	}
+	if cache.Lookup("ws-1", "https://example.com/acme/widgets.git") != "" {
+		t.Error("Lookup must still report an uncached repo as absent")
 	}
 }

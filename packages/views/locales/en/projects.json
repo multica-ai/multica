@@ -70,7 +70,8 @@
     "section_description": "Description",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
-    "clear_date": "Clear date",
+    "no_start_date": "No start date",
+    "no_due_date": "No due date",
     "description_placeholder": "Add description...",
     "description_hint": "Shared with agents as context for every task in this project.",
     "empty_issues_title": "No issues linked",
@@ -126,7 +127,6 @@
   },
   "picker": {
     "no_project": "No project",
-    "remove": "Remove from project",
     "empty": "No projects yet",
     "search_placeholder": "Search projects..."
   },

@@ -346,6 +346,23 @@ func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
 	}
 }
 
+// Claude Code reads the per-task CLAUDE.md the daemon writes into the workdir,
+// so the daemon never populates SystemPrompt for it (see
+// providerNeedsInlineSystemPrompt). Forwarding it as --append-system-prompt
+// would duplicate the whole runtime brief on every turn.
+func TestBuildClaudeArgsIgnoresSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	const brief = "the entire multica runtime brief"
+	args := buildClaudeArgs(ExecOptions{SystemPrompt: brief}, slog.Default())
+	if slices.Contains(args, "--append-system-prompt") {
+		t.Fatalf("unexpected --append-system-prompt in args: %v", args)
+	}
+	if slices.Contains(args, brief) {
+		t.Fatalf("SystemPrompt leaked into args: %v", args)
+	}
+}
+
 func TestArgsRequestBypassPermissions(t *testing.T) {
 	t.Parallel()
 

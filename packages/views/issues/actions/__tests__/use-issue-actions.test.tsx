@@ -188,8 +188,23 @@ describe("useIssueActions", () => {
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
-  it("copyLink writes the issue's shareable URL to the clipboard", async () => {
+  it("copyLink writes the issue's human-readable shareable URL to the clipboard", async () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyLink();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "https://app.multica.com/test/issues/TES-1",
+    );
+  });
+
+  it("copyLink falls back to the UUID when the issue has no identifier", async () => {
+    const { result } = renderHook(
+      () => useIssueActions({ ...mockIssue, identifier: "" } as Issue),
+      { wrapper },
+    );
 
     await act(async () => {
       await result.current.copyLink();

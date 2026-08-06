@@ -216,7 +216,7 @@ function LinkEditBar({
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://..."
         aria-label={t(($) => $.bubble_menu.url_aria_label)}
-        className="h-7 flex-1 text-xs"
+        className="h-7 flex-1 text-caption"
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); apply(); }
           if (e.key === "Escape") { e.preventDefault(); onClose(); editor.commands.focus(); }
@@ -260,7 +260,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
   return (
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
-        className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted"
+        className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-caption font-medium hover:bg-muted"
         onMouseDown={(e) => e.preventDefault()}
       >
         {label}
@@ -278,7 +278,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
           <button
             type="button"
             key={item.label}
-            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-caption outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
             onMouseDown={(e) => {
               e.preventDefault();
               item.action();
@@ -312,7 +312,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={
-          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered || isTask} onMouseDown={(e) => e.preventDefault()} />
+          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-caption font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered || isTask} onMouseDown={(e) => e.preventDefault()} />
         }>
           <List className="size-3.5" />
           <ChevronDown className="size-3" />
@@ -329,7 +329,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
       >
         <button
           type="button"
-          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-caption outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
           onMouseDown={(e) => {
             e.preventDefault();
             editor.chain().focus().toggleBulletList().run();
@@ -341,7 +341,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
         </button>
         <button
           type="button"
-          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-caption outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
           onMouseDown={(e) => {
             e.preventDefault();
             editor.chain().focus().toggleOrderedList().run();
@@ -353,7 +353,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
         </button>
         <button
           type="button"
-          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-caption outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
           onMouseDown={(e) => {
             e.preventDefault();
             editor.chain().focus().toggleTaskList().run();

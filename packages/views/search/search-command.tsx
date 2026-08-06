@@ -520,7 +520,7 @@ export function SearchCommand() {
                   e.stopPropagation();
                 }
               }}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
             />
             <ShortcutKeycaps
               shortcut={createShortcutChord("Escape")}
@@ -533,7 +533,7 @@ export function SearchCommand() {
             {/* Pages section — only shown when query matches */}
             {filteredPages.length > 0 && (
               <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                <div className="px-3 py-1.5 text-caption font-medium text-muted-foreground">
                   {t(($) => $.groups.pages)}
                 </div>
                 {filteredPages.map((page) => {
@@ -543,7 +543,7 @@ export function SearchCommand() {
                     key={page.key}
                     value={`page:${page.key}`}
                     onSelect={() => handlePageSelect(page.key)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <PageIcon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="truncate">
@@ -558,7 +558,7 @@ export function SearchCommand() {
             {/* Commands section — New Issue / New Project / Copy link / Theme, only shown when query matches */}
             {filteredCommands.length > 0 && (
               <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                <div className="px-3 py-1.5 text-caption font-medium text-muted-foreground">
                   {t(($) => $.groups.commands)}
                 </div>
                 {filteredCommands.map((cmd) => (
@@ -566,7 +566,7 @@ export function SearchCommand() {
                     key={cmd.key}
                     value={`command:${cmd.key}`}
                     onSelect={cmd.onSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <cmd.icon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="truncate">
@@ -580,7 +580,7 @@ export function SearchCommand() {
 
             {filteredMembers.length > 0 && (
               <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                <div className="px-3 py-1.5 text-caption font-medium text-muted-foreground">
                   {t(($) => $.groups.members)}
                 </div>
                 {filteredMembers.map((member) => (
@@ -588,7 +588,7 @@ export function SearchCommand() {
                     key={member.user_id}
                     value={`member:${member.user_id}`}
                     onSelect={() => handleMemberSelect(member.user_id)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <ActorAvatarBase
                       name={member.name}
@@ -600,7 +600,7 @@ export function SearchCommand() {
                       <div className="truncate">
                         <HighlightText text={member.name} query={query} />
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">
+                      <div className="truncate text-caption text-muted-foreground">
                         <HighlightText text={member.email} query={query} />
                       </div>
                     </div>
@@ -620,7 +620,7 @@ export function SearchCommand() {
               !hasResults &&
               filteredPages.length === 0 &&
               filteredCommands.length === 0 && (
-                <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
+                <CommandPrimitive.Empty className="py-10 text-center text-body text-muted-foreground">
                   {t(($) => $.empty.no_results)}
                 </CommandPrimitive.Empty>
               )}
@@ -628,14 +628,14 @@ export function SearchCommand() {
             {!isLoading && results.projects.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.projects)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
                 {results.projects.map((project) => (
                   <CommandPrimitive.Item
                     key={`project:${project.id}`}
                     value={`project:${project.id}`}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <div className="flex items-center gap-2.5">
                       <ProjectIcon project={project} size="md" />
@@ -643,7 +643,7 @@ export function SearchCommand() {
                         <HighlightText text={project.title} query={query} />
                       </span>
                       <span
-                        className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
+                        className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
                       >
                         {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
                       </span>
@@ -651,7 +651,7 @@ export function SearchCommand() {
                     {project.match_source === "description" &&
                       project.matched_snippet && (
                         <div className="flex items-start gap-2 pl-[26px]">
-                          <span className="text-xs text-muted-foreground truncate">
+                          <span className="text-caption text-muted-foreground truncate">
                             <HighlightText
                               text={project.matched_snippet}
                               query={query}
@@ -667,21 +667,21 @@ export function SearchCommand() {
             {!isLoading && results.issues.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.issues)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
                 {results.issues.map((issue) => (
                   <CommandPrimitive.Item
                     key={issue.id}
                     value={issue.id}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <div className="flex items-center gap-2.5">
                       <StatusIcon
                         status={issue.status}
                         className="size-4 shrink-0"
                       />
-                      <span className="text-xs text-muted-foreground shrink-0">
+                      <span className="text-caption text-muted-foreground shrink-0">
                         {issue.identifier}
                       </span>
                       <span className="min-w-0 flex-1 truncate">
@@ -695,7 +695,7 @@ export function SearchCommand() {
                     {issue.matched_description_snippet && (
                       <div className="flex items-start gap-2 pl-[26px]">
                         <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
+                        <span className="text-caption text-muted-foreground truncate">
                           <HighlightText
                             text={issue.matched_description_snippet}
                             query={query}
@@ -706,7 +706,7 @@ export function SearchCommand() {
                     {issue.matched_comment_snippet && (
                       <div className="flex items-start gap-2 pl-[26px]">
                         <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
+                        <span className="text-caption text-muted-foreground truncate">
                           <HighlightText
                             text={issue.matched_comment_snippet}
                             query={query}
@@ -721,7 +721,7 @@ export function SearchCommand() {
 
             {!isLoading && !query.trim() && recentIssues.length > 0 && (
               <CommandPrimitive.Group className="p-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                <div className="flex items-center gap-2 px-3 py-1.5 text-caption font-medium text-muted-foreground">
                   <Clock className="size-3" />
                   <span>{t(($) => $.groups.recent)}</span>
                 </div>
@@ -730,13 +730,13 @@ export function SearchCommand() {
                     key={item.id}
                     value={item.id}
                     onSelect={handleSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <StatusIcon
                       status={item.status}
                       className="size-4 shrink-0"
                     />
-                    <span className="text-xs text-muted-foreground shrink-0">
+                    <span className="text-caption text-muted-foreground shrink-0">
                       {item.identifier}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{item.title}</span>
@@ -750,7 +750,7 @@ export function SearchCommand() {
             )}
 
             {!isLoading && !query.trim() && recentIssues.length === 0 && (
-              <div className="px-5 py-4 text-center text-xs text-muted-foreground">
+              <div className="px-5 py-4 text-center text-caption text-muted-foreground">
                 {t(($) => $.empty.type_to_search)}
               </div>
             )}
