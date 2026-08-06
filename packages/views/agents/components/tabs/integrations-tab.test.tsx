@@ -26,12 +26,20 @@ const installationsRef = vi.hoisted(() => ({
     install_supported: true,
   },
 }));
+const wecomInstallationsRef = vi.hoisted(() => ({
+  current: {
+    installations: [] as unknown[],
+    configured: true,
+    install_supported: true,
+  },
+}));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
     if (opts.enabled === false) return { data: undefined };
     const key = JSON.stringify(opts.queryKey);
     if (key.includes("members")) return { data: membersRef.current };
+    if (key.includes('"wecom"')) return { data: wecomInstallationsRef.current };
     if (key.includes("installations")) return { data: installationsRef.current };
     return { data: undefined };
   },
@@ -50,6 +58,13 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/lark", () => ({
   larkInstallationsOptions: () => ({
     queryKey: ["lark", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
+vi.mock("@multica/core/wecom", () => ({
+  wecomInstallationsOptions: () => ({
+    queryKey: ["wecom", "installations"],
     queryFn: vi.fn(),
   }),
 }));
@@ -80,6 +95,22 @@ vi.mock("../../../settings/components/lark-tab", () => ({
   }) => (
     <div
       data-testid="lark-bind-button"
+      data-agent-id={agentId}
+      data-agent-owner-id={agentOwnerId ?? ""}
+    />
+  ),
+}));
+
+vi.mock("../../../settings/components/wecom-tab", () => ({
+  WecomAgentBindButton: ({
+    agentId,
+    agentOwnerId,
+  }: {
+    agentId: string;
+    agentOwnerId?: string | null;
+  }) => (
+    <div
+      data-testid="wecom-bind-button"
       data-agent-id={agentId}
       data-agent-owner-id={agentOwnerId ?? ""}
     />
@@ -143,16 +174,26 @@ function resetFixtures() {
     configured: true,
     install_supported: true,
   };
+  wecomInstallationsRef.current = {
+    installations: [],
+    configured: true,
+    install_supported: true,
+  };
 }
 
 describe("IntegrationsTab", () => {
-  beforeEach(resetFixtures);
+  beforeEach(() => {
+    cleanup();
+    resetFixtures();
+  });
 
-  it("renders the shared bind entry for both platforms for an owner when configured and supported", () => {
+  it("renders the shared bind entry for Lark, WeCom, and Slack for an owner when configured and supported", () => {
     renderTab(<IntegrationsTab agent={agent} />);
     expect(screen.getByText("Lark")).toBeTruthy();
+    expect(screen.getByText("WeCom")).toBeTruthy();
     expect(screen.getByText("Slack")).toBeTruthy();
     expect(screen.getByTestId("lark-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
+    expect(screen.getByTestId("wecom-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("slack-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
   });
 
@@ -162,9 +203,15 @@ describe("IntegrationsTab", () => {
       configured: true,
       install_supported: false,
     };
+    wecomInstallationsRef.current = {
+      installations: [],
+      configured: true,
+      install_supported: false,
+    };
     renderTab(<IntegrationsTab agent={agent} />);
-    expect(screen.getByText(/installation coming soon/i)).toBeTruthy();
+    expect(screen.getAllByText(/installation coming soon/i).length).toBeGreaterThan(0);
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
+    expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
   });
 
   it("shows the not-enabled notice when the deployment has no Lark key", () => {
@@ -173,9 +220,16 @@ describe("IntegrationsTab", () => {
       configured: false,
       install_supported: false,
     };
+    wecomInstallationsRef.current = {
+      installations: [],
+      configured: false,
+      install_supported: false,
+    };
     renderTab(<IntegrationsTab agent={agent} />);
     expect(screen.getByText(/Lark integration not enabled/i)).toBeTruthy();
+    expect(screen.getByText(/WeCom integration not enabled/i)).toBeTruthy();
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
+    expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
   });
 
   it("points members at Settings when they are neither an admin nor the agent owner", () => {
@@ -184,13 +238,14 @@ describe("IntegrationsTab", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={{ ...agent, owner_id: "user-2" }} />);
     expect(
-      screen.getByText(/Only workspace owners and admins can connect an agent/i),
-    ).toBeTruthy();
+      screen.getAllByText(/Only workspace owners and admins can connect an agent/i).length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
+    expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
   });
 
-  it("lets a non-admin agent owner bind Lark but keeps Slack admin-only", () => {
+  it("lets a non-admin agent owner bind Lark and WeCom but keeps Slack admin-only", () => {
     // The agent's owner (user-1) is only a plain workspace member. Lark
     // authorizes the agent owner (canManageAgent), so the Lark bind entry
     // renders and receives owner_id; Slack's and DingTalk's routes stay
@@ -200,24 +255,30 @@ describe("IntegrationsTab", () => {
     const larkButton = screen.getByTestId("lark-bind-button");
     expect(larkButton.getAttribute("data-agent-id")).toBe("agent-1");
     expect(larkButton.getAttribute("data-agent-owner-id")).toBe("user-1");
+    const wecomButton = screen.getByTestId("wecom-bind-button");
+    expect(wecomButton.getAttribute("data-agent-id")).toBe("agent-1");
+    expect(wecomButton.getAttribute("data-agent-owner-id")).toBe("user-1");
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
-    // The Slack and DingTalk sections each fall back to the shared members note.
+    // The Slack and DingTalk sections each fall back to the shared members note;
+    // WeCom lets the agent owner manage, so it renders its bind button instead.
     expect(
       screen.getAllByText(/Only workspace owners and admins can connect an agent/i),
     ).toHaveLength(2);
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {
-    // install_supported governs only NEW installs; an already-bound agent
-    // must still surface its connected state instead of "coming soon"
-    // (regression for the must-fix on MUL-2988).
     installationsRef.current = {
       installations: [{ agent_id: "agent-1", status: "active" }],
       configured: true,
       install_supported: false,
     };
+    wecomInstallationsRef.current = {
+      installations: [],
+      configured: true,
+      install_supported: true,
+    };
     renderTab(<IntegrationsTab agent={agent} />);
-    expect(screen.getByTestId("lark-bind-button")).toBeTruthy();
-    expect(screen.queryByText(/installation coming soon/i)).toBeNull();
+    expect(screen.getAllByTestId("lark-bind-button").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Lark Bot installation coming soon/i)).toBeNull();
   });
 });

@@ -46,6 +46,10 @@ import type {
   ListIssuesResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
+  ListWecomInstallationsResponse,
+  BeginWecomInstallResponse,
+  RedeemWecomBindingResponse,
+  WecomInstallStatusResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   NotificationPreferenceResponse,
@@ -84,6 +88,68 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
   configured: false,
   repository_browse_configured: false,
   can_manage: false,
+};
+
+export const WecomInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  agent_id: z.string(),
+  bot_id: z.string().default(""),
+  installer_user_id: z.string(),
+  status: z.string(),
+  installed_at: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ListWecomInstallationsResponseSchema = z.object({
+  installations: z.array(WecomInstallationSchema).default([]),
+  configured: z.boolean().optional().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
+  installations: [],
+  configured: false,
+  install_supported: false,
+};
+
+export const BeginWecomInstallResponseSchema = z.object({
+  session_id: z.string(),
+  status: z.string(),
+  poll_interval_seconds: z.number().optional().default(1),
+}).loose();
+
+export const MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE: BeginWecomInstallResponse = {
+  session_id: "",
+  status: "error",
+  poll_interval_seconds: 1,
+};
+
+export const WecomInstallStatusResponseSchema = z.object({
+  status: z.string(),
+  qr_code_url: z.string().optional(),
+  expires_in_seconds: z.number().optional(),
+  poll_interval_seconds: z.number().optional().default(1),
+  installation_id: z.string().optional(),
+  error_reason: z.string().optional(),
+  error_message: z.string().optional(),
+}).loose();
+
+export const MALFORMED_WECOM_INSTALL_STATUS_RESPONSE: WecomInstallStatusResponse = {
+  status: "error",
+  poll_interval_seconds: 1,
+  error_reason: "internal_error",
+};
+
+export const RedeemWecomBindingResponseSchema = z.object({
+  workspace_id: z.string(),
+  installation_id: z.string(),
+}).loose();
+
+export const MALFORMED_REDEEM_WECOM_BINDING_RESPONSE: RedeemWecomBindingResponse = {
+  workspace_id: "",
+  installation_id: "",
 };
 
 export const GitHubConnectResponseSchema = z.object({

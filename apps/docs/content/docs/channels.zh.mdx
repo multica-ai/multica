@@ -1,23 +1,23 @@
 ---
 title: 聊天集成
-description: 把 Multica 智能体接入飞书、Lark、Slack 或钉钉，在团队已有的聊天工具中使用。
+description: 把 Multica 智能体接入飞书、Lark、企业微信、Slack 或钉钉，在团队已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 聊天集成让团队不用打开 Multica，也能直接向智能体提问、在群聊中 @它，或从聊天窗口创建 issue。
 
-目前支持飞书/Lark、Slack 和钉钉。它们使用相同的会话、身份和执行机制，但安装方式不同。
+目前支持飞书/Lark、企业微信、Slack 和钉钉。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
 ## 选择平台
 
-| | 飞书 / Lark | Slack | 钉钉 |
-|---|---|---|---|
-| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica |
-| 私聊智能体 | 支持 | 支持 | 支持 |
-| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 |
-| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 |
-| 连接方式 | 平台长连接 | Socket Mode | Stream 模式 |
+| | 飞书 / Lark | 企业微信 | Slack | 钉钉 |
+|---|---|---|---|---|
+| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Multica 中生成二维码，用企业微信扫码授权 —— 每次扫码都会创建一个新的智能机器人 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica |
+| 私聊智能体 | 支持 | 支持 | 支持 | 支持 |
+| 群聊或频道 | @ Bot 后触发 | @ 机器人后触发 | @ Bot 后触发 | @ Bot 后触发 |
+| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 |
+| 连接方式 | 平台长连接 | 平台长连接 | Socket Mode | Stream 模式 |
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
 
@@ -26,6 +26,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 详细步骤：
 
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
+- [企业微信 Bot 接入](/wecom-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
 
@@ -41,7 +42,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 会话隔离
 
-- 飞书/Lark 按聊天区分会话；同一个聊天中的后续消息会继续原会话。
+- 飞书/Lark 和企业微信按聊天区分会话；同一个聊天中的后续消息会继续原会话。
 - Slack 私聊按频道区分；频道中的每个 thread 分别保存一段会话。
 - 钉钉按 conversation 区分会话；每个单聊或群聊分别延续自己的会话。
 
@@ -59,9 +60,9 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 管理连接
 
-工作区 owner 和 admin 可以连接或断开 Bot；飞书/Lark Bot 的连接和断开还对智能体所有者开放。普通成员可以查看已经连接的集成并使用自己有权调用的智能体。
+工作区 owner 和 admin 可以连接或断开 Bot；飞书/Lark 和企业微信 Bot 的连接和断开还对智能体所有者开放。普通成员可以查看已经连接的集成并使用自己有权调用的智能体。
 
-断开后，Bot 不再接收新消息。已有的 Multica 对话和执行记录仍然保留。
+断开后，Bot 不再接收新消息。已有的 Multica 对话和执行记录仍然保留。对企业微信而言，断开连接只是解除机器人与 Multica 的关联，并不会删除企业微信里的智能机器人；如需彻底删除请到企业微信管理后台操作。
 
 ## 自托管
 
@@ -69,6 +70,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ```dotenv
 MULTICA_LARK_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
@@ -78,6 +80,7 @@ MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 ## 接下来
 
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
+- [企业微信 Bot 接入](/wecom-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
 - [与智能体对话](/chat)

@@ -582,6 +582,14 @@ cleared_user_bindings AS (
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM doomed)
 ),
+cleared_outbound_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_outbound_queue AS (
+    DELETE FROM channel_outbound_queue
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
 cleared_audit AS (
     -- Hard delete: purge audit rows rather than detaching them into permanently
     -- unattributable NULL rows (channel_inbound_audit has no workspace_id / reaper).
@@ -682,6 +690,75 @@ type DeleteChannelUserBindingsByWorkspaceMemberParams struct {
 func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context, arg DeleteChannelUserBindingsByWorkspaceMemberParams) error {
 	_, err := q.db.Exec(ctx, deleteChannelUserBindingsByWorkspaceMember, arg.WorkspaceID, arg.MulticaUserID)
 	return err
+}
+
+const deleteRevokedChannelInstallationForReplacement = `-- name: DeleteRevokedChannelInstallationForReplacement :one
+WITH doomed AS (
+    DELETE FROM channel_installation ci
+    WHERE ci.workspace_id = $1
+      AND ci.agent_id = $2
+      AND ci.channel_type = $3
+      AND ci.status = 'revoked'
+      AND ci.config ->> 'app_id' <> $4::text
+    RETURNING ci.id
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM doomed)
+    RETURNING chat_session_id
+),
+cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_user_bindings AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_outbound_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_outbound_queue AS (
+    DELETE FROM channel_outbound_queue
+    WHERE installation_id IN (SELECT id FROM doomed)
+),
+detached_audit AS (
+    UPDATE channel_inbound_audit SET installation_id = NULL
+    WHERE installation_id IN (SELECT id FROM doomed)
+)
+SELECT id FROM doomed
+`
+
+type DeleteRevokedChannelInstallationForReplacementParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	ChannelType string      `json:"channel_type"`
+	NewAppID    string      `json:"new_app_id"`
+}
+
+// WeCom reinstall with a different botid: hard-delete the revoked installation
+// row and every installation-scoped dependent in one statement. The DELETE
+// predicate requires status='revoked' AND a different app_id so a concurrent
+// reconnect that flipped the row back to active deletes nothing (TOCTOU-safe).
+func (q *Queries) DeleteRevokedChannelInstallationForReplacement(ctx context.Context, arg DeleteRevokedChannelInstallationForReplacementParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteRevokedChannelInstallationForReplacement,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.ChannelType,
+		arg.NewAppID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
@@ -1326,6 +1403,14 @@ cleared_user_bindings AS (
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
+    WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_outbound_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt
+    WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_outbound_queue AS (
+    DELETE FROM channel_outbound_queue
     WHERE installation_id IN (SELECT id FROM dead)
 ),
 detached_audit AS (

@@ -535,6 +535,10 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to clear chat session channel binding")
 			return
 		}
+		if err := qtx.FailChannelOutboundBySession(r.Context(), session.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to fail chat session outbound queue")
+			return
+		}
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -638,6 +642,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// editing. A no-op for ordinary chats, which never have one.
 	if err := qtx.DeleteAgentBuilderDraft(r.Context(), session.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
+		return
+	}
+	if err := qtx.DeleteChannelOutboundBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session outbound queue")
 		return
 	}
 

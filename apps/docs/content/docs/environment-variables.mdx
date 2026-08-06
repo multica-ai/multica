@@ -162,6 +162,8 @@ The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; wit
 | GitHub | `GITHUB_APP_ID` | Needed for CI status and mergeability on PR cards and the "pick from GitHub" repository picker |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
+| WeCom | `MULTICA_WECOM_SECRET_KEY` | Base64-encoded 32-byte credential encryption key; the integration is entirely disabled without it |
+| WeCom | `MULTICA_WECOM_SOURCE_ID` | Overrides the built-in default WeCom "source" ID used to create smart bots; Cloud and self-hosted deployments share the default by design, so leave unset unless debugging or migrating to a new source |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
 | Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
@@ -171,7 +173,7 @@ The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; wit
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
-For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), and [Slack bot](/slack-bot-integration#self-hosting-setup).
+For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), [WeCom bot](/wecom-bot-integration#self-hosting-setup), and [Slack bot](/slack-bot-integration#self-hosting-setup).
 
 ## Server-side LLM
 

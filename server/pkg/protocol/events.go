@@ -187,4 +187,13 @@ const (
 	// as Slack's BYO channel installation.
 	EventDingTalkInstallationCreated = "dingtalk_installation:created"
 	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
+
+	// WeCom installation lifecycle. Same semantics as the Lark / Slack
+	// events: `created` covers first-install and re-install alike (the
+	// UNIQUE on (workspace_id, agent_id, channel_type) means at most one
+	// row per agent), `revoked` flips status without deleting the row so
+	// the audit trail is preserved. Front-ends invalidate the WeCom
+	// installations query on either.
+	EventWecomInstallationCreated = "wecom_installation:created"
+	EventWecomInstallationRevoked = "wecom_installation:revoked"
 )

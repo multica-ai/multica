@@ -343,6 +343,7 @@ func main() {
 	var businessMetrics *obsmetrics.BusinessMetrics
 	var samplerPool *pgxpool.Pool
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
+	var wecomMetrics *obsmetrics.WecomAdapterMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
 		// so a stalled scrape can never starve business traffic. If the
@@ -371,6 +372,7 @@ func main() {
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
+		wecomMetrics = metricsRegistry.Wecom
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
 		if daemonHub != nil {
@@ -397,6 +399,7 @@ func main() {
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		BusinessMetrics:    businessMetrics,
+		WecomMetrics:       wecomMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		FeatureFlags:       flags,
@@ -435,6 +438,16 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
+	// WeCom install worker (spec §7.1.1): always constructed when the
+	// WeCom integration is enabled; runs in maintenance mode when no
+	// upstream provider is wired (source id absent) and still sweeps
+	// stale creating/pending sessions.
+	if h.WecomInstallWorker != nil {
+		go h.WecomInstallWorker.Run(sweepCtx)
+	}
+	if h.WecomOutboundReconciler != nil {
+		go h.WecomOutboundReconciler.Run(sweepCtx)
 	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
@@ -534,6 +547,15 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+	// WeCom install worker rides the same drain: after HTTP is closed
+	// nothing new lands in wecom_install_session, and joining before the
+	// webhook worker matches spec §7.1.1's fixed shutdown order.
+	if h.WecomInstallWorker != nil && !h.WecomInstallWorker.WaitWithTimeout(10*time.Second) {
+		slog.Warn("wecom install worker did not exit within shutdown timeout")
+	}
+	if h.WecomOutboundReconciler != nil && !h.WecomOutboundReconciler.WaitWithTimeout(10*time.Second) {
+		slog.Warn("wecom outbound reconciler did not exit within shutdown timeout")
+	}
 	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
 	}

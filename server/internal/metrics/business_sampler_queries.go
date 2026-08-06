@@ -333,3 +333,50 @@ func (c *BusinessSamplerCollector) queryWorkspaceTotal(
 	snap.workspaceTotalKnown = true
 	return nil
 }
+
+// queryChannelOutboundQueue reports the outbound delivery backlog per channel
+// platform: how many replies are still waiting to be sent, and how old the
+// oldest one is. Depth alone cannot distinguish "busy but draining" from
+// "wedged", which is why the age of the oldest queued row is sampled in the
+// same pass. Both are gauges of live DB state, so sampling them at scrape time
+// keeps every server instance reporting the same value — a per-worker push
+// gauge would only ever reflect whichever instance held the lease.
+//
+// channel_type comes from a fixed platform allow-list, not from the row, so a
+// future platform cannot widen the series space before someone adds it there.
+func (c *BusinessSamplerCollector) queryChannelOutboundQueue(
+	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
+) error {
+	const stmt = `
+SELECT
+  channel_type,
+  count(*) AS n,
+  COALESCE(max(EXTRACT(EPOCH FROM (now() - created_at))::float8), 0) AS oldest_age
+FROM channel_outbound_queue
+WHERE status = 'queued'
+GROUP BY 1
+LIMIT 100
+`
+	rows, err := tx.Query(ctx, stmt)
+	if err != nil {
+		return fmt.Errorf("channel_outbound_queue: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rawChannel string
+		var n int64
+		var oldestAge float64
+		if err := rows.Scan(&rawChannel, &n, &oldestAge); err != nil {
+			return fmt.Errorf("channel_outbound_queue scan: %w", err)
+		}
+		channel := NormalizeChannelType(rawChannel)
+		snap.channelOutboundDepth[channel] += float64(n)
+		if oldestAge < 0 {
+			oldestAge = 0
+		}
+		if oldestAge > snap.channelOutboundOldest[channel] {
+			snap.channelOutboundOldest[channel] = oldestAge
+		}
+	}
+	return rows.Err()
+}

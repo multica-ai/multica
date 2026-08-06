@@ -181,6 +181,13 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  BeginWecomInstallResponse,
+  WecomInstallStatusResponse,
+  RedeemWecomBindingResponse,
+} from "./wecom";
+export type {
   ComposioToolkit,
   ComposioConnection,
   ComposioConnectInitResponse,

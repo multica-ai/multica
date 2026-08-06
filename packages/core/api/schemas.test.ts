@@ -40,6 +40,14 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  ListWecomInstallationsResponseSchema,
+  EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+  BeginWecomInstallResponseSchema,
+  MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+  WecomInstallStatusResponseSchema,
+  MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
+  RedeemWecomBindingResponseSchema,
+  MALFORMED_REDEEM_WECOM_BINDING_RESPONSE,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -1217,5 +1225,150 @@ describe("RuntimeModelListRequestSchema", () => {
     expect((parsed as unknown as { future_field?: string }).future_field).toBe(
       "keep me",
     );
+  });
+});
+
+const baseWecomInstallation = {
+  id: "11111111-1111-1111-1111-111111111111",
+  workspace_id: "ws-1",
+  agent_id: "agent-1",
+  bot_id: "bot-1",
+  installer_user_id: "user-1",
+  status: "active",
+  installed_at: "2026-01-01T00:00:00Z",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
+describe("WeCom install schemas", () => {
+  it("passes an unknown installation status through instead of falling back to empty list", () => {
+    const parsed = parseWithFallback(
+      {
+        installations: [{ ...baseWecomInstallation, status: "degraded" }],
+        configured: true,
+      },
+      ListWecomInstallationsResponseSchema,
+      EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.installations).toHaveLength(1);
+    expect(parsed.installations[0]?.status).toBe("degraded");
+  });
+
+  it("passes an unknown begin status through instead of failing the whole response", () => {
+    const parsed = parseWithFallback(
+      {
+        session_id: "sess-1",
+        status: "queued",
+        poll_interval_seconds: 2,
+      },
+      BeginWecomInstallResponseSchema,
+      MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("queued");
+    expect(parsed.session_id).toBe("sess-1");
+  });
+
+  it("passes unknown status and error_reason through on status polling", () => {
+    const parsed = parseWithFallback(
+      {
+        status: "awaiting_confirmation",
+        poll_interval_seconds: 3,
+        error_reason: "rate_limited",
+      },
+      WecomInstallStatusResponseSchema,
+      MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("awaiting_confirmation");
+    expect(parsed.error_reason).toBe("rate_limited");
+  });
+
+  it("degrades malformed list responses to empty installations", () => {
+    const parsed = parseWithFallback(
+      { configured: true },
+      ListWecomInstallationsResponseSchema,
+      EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.installations).toEqual([]);
+    expect(parsed.configured).toBe(true);
+  });
+
+  it("degrades malformed begin responses to error status", () => {
+    const parsed = parseWithFallback(
+      null,
+      BeginWecomInstallResponseSchema,
+      MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("error");
+    expect(parsed.session_id).toBe("");
+  });
+
+  it("degrades malformed status responses to error fallback", () => {
+    const parsed = parseWithFallback(
+      { status: 42 },
+      WecomInstallStatusResponseSchema,
+      MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("error");
+    expect(parsed.error_reason).toBe("internal_error");
+  });
+});
+
+describe("RedeemWecomBindingResponseSchema", () => {
+  const ENDPOINT = { endpoint: "POST /api/wecom/binding/redeem" };
+
+  it("parses a well-formed redeem response", () => {
+    const parsed = parseWithFallback(
+      {
+        workspace_id: "ws-1",
+        installation_id: "inst-1",
+      },
+      RedeemWecomBindingResponseSchema,
+      MALFORMED_REDEEM_WECOM_BINDING_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.workspace_id).toBe("ws-1");
+    expect(parsed.installation_id).toBe("inst-1");
+  });
+
+  it("keeps unknown server fields via .loose()", () => {
+    const parsed = parseWithFallback(
+      {
+        workspace_id: "ws-1",
+        installation_id: "inst-1",
+        future_field: "keep me",
+      },
+      RedeemWecomBindingResponseSchema,
+      MALFORMED_REDEEM_WECOM_BINDING_RESPONSE,
+      ENDPOINT,
+    );
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe(
+      "keep me",
+    );
+  });
+
+  it("degrades malformed redeem responses to empty ids", () => {
+    for (const malformed of [
+      null,
+      "nope",
+      {},
+      { workspace_id: "ws-1" },
+      { installation_id: "inst-1" },
+      { workspace_id: 42, installation_id: "inst-1" },
+      { workspace_id: "ws-1", installation_id: 99 },
+    ]) {
+      const parsed = parseWithFallback(
+        malformed,
+        RedeemWecomBindingResponseSchema,
+        MALFORMED_REDEEM_WECOM_BINDING_RESPONSE,
+        ENDPOINT,
+      );
+      expect(parsed).toEqual(MALFORMED_REDEEM_WECOM_BINDING_RESPONSE);
+    }
   });
 });
