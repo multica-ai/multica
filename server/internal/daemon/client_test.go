@@ -412,8 +412,8 @@ func TestStartTask_RetriesTLSHandshakeTimeoutAfterConfirmedNotStarted(t *testing
 	if got := startCalls.Load(); got != 2 {
 		t.Fatalf("start calls = %d, want 2", got)
 	}
-	if got := statusCalls.Load(); got != 1 {
-		t.Fatalf("status calls = %d, want 1", got)
+	if got := statusCalls.Load(); got != 2 {
+		t.Fatalf("status calls = %d, want 2 (initial reconciliation plus pre-retry check)", got)
 	}
 }
 
@@ -480,7 +480,7 @@ func TestStartTask_ExhaustedTransientRetries(t *testing.T) {
 	if got, want := startCalls.Load(), int32(len(startTaskRetrySchedule)+1); got != want {
 		t.Fatalf("start calls = %d, want %d", got, want)
 	}
-	if got, want := statusCalls.Load(), int32(len(startTaskRetrySchedule)+1); got != want {
+	if got, want := statusCalls.Load(), int32(2*len(startTaskRetrySchedule)+1); got != want {
 		t.Fatalf("status calls = %d, want %d", got, want)
 	}
 }
@@ -563,6 +563,106 @@ func TestStartTask_DoesNotRetryWhenReconciliationIsUnknown(t *testing.T) {
 	}
 	if got := startCalls.Load(); got != 1 {
 		t.Fatalf("start calls = %d, want 1; unknown status must prevent another POST", got)
+	}
+	if got := statusCalls.Load(); got != 1 {
+		t.Fatalf("status calls = %d, want 1", got)
+	}
+}
+
+func TestStartTask_LateCommitAfterPreRetryReconcileReturnsSuccess(t *testing.T) {
+	oldSleep := retrySleep
+	defer func() { retrySleep = oldSleep }()
+
+	var startCalls, statusCalls atomic.Int32
+	status := "dispatched"
+	retrySleep = func(context.Context, time.Duration) error { return nil }
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/tasks/task-1/start":
+			if startCalls.Add(1) == 2 {
+				// The original ambiguous request commits after this retry's
+				// immediately-prior GET but before its POST reaches the server.
+				status = "running"
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusBadGateway)
+		case "/api/daemon/tasks/task-1/status":
+			statusCalls.Add(1)
+			_, _ = w.Write([]byte(`{"status":"` + status + `"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.StartTask(context.Background(), "task-1"); err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if got := startCalls.Load(); got != 2 {
+		t.Fatalf("start calls = %d, want 2", got)
+	}
+	if got := statusCalls.Load(); got != 3 {
+		t.Fatalf("status calls = %d, want 3 (initial, pre-retry, final)", got)
+	}
+}
+
+func TestStartTask_WaitingLocalDirectoryAllowsRetry(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var startCalls, statusCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/tasks/task-1/start":
+			if startCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/api/daemon/tasks/task-1/status":
+			statusCalls.Add(1)
+			_, _ = w.Write([]byte(`{"status":"waiting_local_directory"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.StartTask(context.Background(), "task-1"); err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if got := startCalls.Load(); got != 2 {
+		t.Fatalf("start calls = %d, want 2", got)
+	}
+	if got := statusCalls.Load(); got != 2 {
+		t.Fatalf("status calls = %d, want 2", got)
+	}
+}
+
+func TestStartTask_TerminalStatusPreventsRetry(t *testing.T) {
+	var startCalls, statusCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/tasks/task-1/start":
+			startCalls.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+		case "/api/daemon/tasks/task-1/status":
+			statusCalls.Add(1)
+			_, _ = w.Write([]byte(`{"status":"completed"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.StartTask(context.Background(), "task-1"); err == nil {
+		t.Fatal("StartTask succeeded for terminal task")
+	}
+	if got := startCalls.Load(); got != 1 {
+		t.Fatalf("start calls = %d, want 1", got)
 	}
 	if got := statusCalls.Load(); got != 1 {
 		t.Fatalf("status calls = %d, want 1", got)
