@@ -108,9 +108,11 @@ Contracts:
 - every claim response carries `leader_role_resolved: true`, the capability
   that tells the daemon those fields are authoritative. Servers predating it
   omit it, and a daemon seeing it absent falls back to the legacy
-  "`## Squad Operating Protocol` appears in instructions" inference — the only
-  correct read of a server that never sent `is_leader_task` on claim (#4951).
-  The field is claim-only and never rendered into a prompt;
+  "`## Squad Operating Protocol` appears in instructions" inference. That is
+  the only correct read of either older shape: before #4951 no `is_leader_task`
+  was sent at all, and after it the flag was sent without any guarantee that a
+  briefing came with it. The field is claim-only and never rendered into a
+  prompt;
 - `instructions` section appears only when non-empty (squad_briefing.go:110-112);
 - archived agent members are skipped from roster (squad_briefing.go:178-179);
 - agent member roster rows list assigned workspace skills via

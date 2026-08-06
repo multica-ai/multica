@@ -622,13 +622,17 @@ const squadBriefingMarker = "## Squad Operating Protocol"
 // promoted to leader and handed the leader rules (mandatory `multica squad
 // activity`, silent no_action exit).
 //
-// The capability gate is load-bearing, not ceremony. `is_leader_task` only
-// reached the claim response in #4951; a server older than that still injects
-// the briefing but leaves both fields at their zero value, so reading fields
-// alone would silently demote a real leader to a worker. Absent capability
-// therefore means "this server never answered the question" and the legacy
-// text inference — exactly today's behavior — is the only correct read. Drop
-// this branch once a minimum server version is enforced (MUL-5811).
+// The capability gate is load-bearing, not ceremony. Servers without it split
+// into two groups, and neither can be read by fields alone. Before #4951 the
+// claim response carried no `is_leader_task` at all, so a real leader arrives
+// with the full briefing and both fields at zero — reading fields would
+// silently demote it to a worker. From #4951 until the capability landed the
+// flag IS sent, but nothing yet guaranteed it implies an injected briefing, so
+// a true flag can arrive with no roster and no protocol. Absent capability
+// therefore means "this server never authoritatively answered the question",
+// and the legacy text inference — exactly today's behavior against both
+// groups — is the only correct read. Drop this branch once a minimum server
+// version is enforced (MUL-5811).
 func taskIsSquadLeader(task Task) bool {
 	if !task.LeaderRoleResolved {
 		return task.Agent != nil && strings.Contains(task.Agent.Instructions, squadBriefingMarker)

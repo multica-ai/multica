@@ -287,8 +287,10 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 
 // TestTaskIsSquadLeaderReadsProtocolFields pins the role signal to the wire
 // fields a current server sets when (and only when) it injects a squad-leader
-// briefing, and pins the legacy fallback to the behavior a pre-#4951 server
-// (briefing injected, is_leader_task never sent) requires.
+// briefing, and pins the legacy fallback to what BOTH pre-capability server
+// shapes require: those before #4951 (briefing injected, is_leader_task never
+// sent) and those after it (flag sent, but no guarantee a briefing came with
+// it).
 //
 // Two regressions live in this table. The "current" instructions-only row is
 // MUL-5811 itself: the previous implementation grepped Instructions for the
