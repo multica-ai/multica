@@ -28,6 +28,7 @@ type fakeStore struct {
 	releaseErr     error
 	now            func() time.Time
 	acquireCount   int32
+	listCount      int32
 
 	// releaseBlock, if non-nil, makes ReleaseWSLease block until it is
 	// closed/sent on OR the caller's ctx fires. Simulates a frozen pool so
@@ -45,6 +46,7 @@ func newFakeStore() *fakeStore {
 }
 
 func (f *fakeStore) ListActiveInstallations(ctx context.Context) ([]Installation, error) {
+	atomic.AddInt32(&f.listCount, 1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.listErr != nil {
@@ -623,6 +625,73 @@ func TestSupervisorRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) 
 		return held && owner != ""
 	}) {
 		t.Fatalf("successor lease was cleared by a stale predecessor release")
+	}
+}
+
+// TestSupervisorPassesInstallationIDToFactory proves the engine always sets
+// channel.Config.InstallationID from the row it built the channel for, so
+// adapters that own per-installation connection state (e.g. WeCom's
+// outbound wake registry) can key off it.
+func TestSupervisorPassesInstallationIDToFactory(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var gotID pgtype.UUID
+	var mu sync.Mutex
+	reg := channel.NewRegistry()
+	reg.Register(channel.TypeFeishu, func(cfg channel.Config) (channel.Channel, error) {
+		mu.Lock()
+		gotID = cfg.InstallationID
+		mu.Unlock()
+		return fc, nil
+	})
+
+	sup := NewSupervisor(q, reg, nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+
+	if !waitFor(300*time.Millisecond, func() bool { return fc.Connects() >= 1 }) {
+		t.Fatalf("channel never connected")
+	}
+	mu.Lock()
+	got := gotID
+	mu.Unlock()
+	if got != instID {
+		t.Fatalf("expected Config.InstallationID %v, got %v", instID, got)
+	}
+}
+
+// TestSupervisorNotifyTriggersImmediateSweep proves Notify() coalesces a
+// wake that causes Run's select loop to sweep sooner than the normal
+// PollInterval, instead of waiting for the next ticker tick.
+func TestSupervisorNotifyTriggersImmediateSweep(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, nil)
+
+	cfg := fastConfig()
+	cfg.PollInterval = 10 * time.Second // far longer than this test's timeout
+	sup := NewSupervisor(q, reg, nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+
+	if !waitFor(300*time.Millisecond, func() bool { return fc.Connects() >= 1 }) {
+		t.Fatalf("channel never connected on initial sweep")
+	}
+	before := atomic.LoadInt32(&q.listCount)
+
+	sup.Notify()
+
+	if !waitFor(300*time.Millisecond, func() bool { return atomic.LoadInt32(&q.listCount) > before }) {
+		t.Fatalf("expected Notify to trigger an immediate sweep well before PollInterval")
 	}
 }
 

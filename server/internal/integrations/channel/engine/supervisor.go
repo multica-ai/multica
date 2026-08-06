@@ -221,6 +221,12 @@ type Supervisor struct {
 	wg            sync.WaitGroup
 	stopped       bool
 	stopChan      chan struct{}
+
+	// notify coalesces wake requests from Notify into Run's select loop.
+	// Buffered at 1 so a Notify racing an in-progress sweep is not lost:
+	// the pending value guarantees at least one more sweep runs after the
+	// current one finishes, instead of blocking the caller.
+	notify chan struct{}
 }
 
 // supervisorEntry is the per-installation state the Supervisor holds on
@@ -252,6 +258,7 @@ func NewSupervisor(store InstallationStore, registry *channel.Registry, handler 
 		nodeID:      newNodeID(),
 		supervisors: make(map[string]supervisorEntry),
 		stopChan:    make(chan struct{}),
+		notify:      make(chan struct{}, 1),
 	}
 }
 
@@ -280,7 +287,21 @@ func (s *Supervisor) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			s.sweep(ctx)
+		case <-s.notify:
+			s.sweep(ctx)
 		}
+	}
+}
+
+// Notify wakes the Run loop for an immediate sweep, ahead of the next
+// PollInterval tick. It is safe to call concurrently and never blocks: a
+// pending wake already queued coalesces with this one, since one sweep
+// picks up whatever prompted every Notify call since the last sweep ran
+// (e.g. an install/reinstall that should not wait a full poll cycle).
+func (s *Supervisor) Notify() {
+	select {
+	case s.notify <- struct{}{}:
+	default:
 	}
 }
 
@@ -480,9 +501,10 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		// Lease acquired. Build the platform channel via the registry,
 		// run it under a child context, and renew the lease in parallel.
 		ch, err := s.registry.Build(channel.Config{
-			Type:    inst.ChannelType,
-			Raw:     inst.Config,
-			Handler: s.handler,
+			Type:           inst.ChannelType,
+			Raw:            inst.Config,
+			Handler:        s.handler,
+			InstallationID: inst.ID,
 		})
 		if err != nil {
 			log.Error("channel engine: build channel failed", "error", err)

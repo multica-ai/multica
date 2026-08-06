@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -260,6 +261,21 @@ type Handler struct {
 	DingTalkInstall *dingtalk.InstallService
 	// DingTalkBindingTokens mints and redeems the single-use account-link tokens.
 	DingTalkBindingTokens *dingtalk.BindingTokenService
+	// WeCom integration (spec §7.1.1). WecomInstall owns the scan-code
+	// install lifecycle (begin idempotency, pending resume, conflict
+	// guards, finalize) and is nil when MULTICA_WECOM_SECRET_KEY is
+	// unset — every management endpoint returns 503 in that case. The
+	// service still stays reachable for list (200 configured=false) so
+	// the UI can hide the tab without probing an error. WecomInstallWorker
+	// is always constructed (maintenance mode when the service is not
+	// Configured, so stray creating/pending rows still get terminated on
+	// the sweep); main.go drives Run + WaitWithTimeout on it.
+	WecomInstall            *wecom.InstallService
+	WecomInstallWorker      *wecom.InstallWorker
+	WecomOutboundReconciler *wecom.OutboundReconciler
+	// WecomBindingTokens mints/redeems user-binding tokens for the WeCom DM
+	// bind flow. Nil unless MULTICA_WECOM_SECRET_KEY is set.
+	WecomBindingTokens *wecom.BindingTokenService
 	// SlackHistory backs the agent-facing `multica chat history` command: it
 	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel

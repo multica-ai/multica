@@ -1,0 +1,103 @@
+---
+title: WeCom Bot
+description: Connect an agent to WeCom (企业微信) and hand it work directly from a DM or a group chat.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connect a Multica agent as a WeCom (企业微信) smart bot and team members can DM it, @-mention it in a group, or use `/issue` to create issues. Conversations and run records are still saved to the Multica workspace.
+
+Each smart bot maps to exactly one agent. To use several agents in WeCom, connect a bot for each of them.
+
+## Connect a bot
+
+The agent's owner and workspace owners and admins can start a connection:
+
+1. Open **Agents** and select the agent to connect to WeCom.
+2. Go to **Integrations** and click **Bind to WeCom**.
+3. Scan the QR code with WeCom and authorize the new smart bot.
+4. Return to Multica. Once the page shows **Connected to WeCom**, the bot is ready.
+
+The QR code is valid for 5 minutes; if it expires before you scan it, click **Scan again** to generate a new one.
+
+<Callout type="info">
+Scanning always creates a brand-new WeCom smart bot — it never re-authorizes an existing one. If you disconnect an agent and connect it again, you get a different bot with a different identity in WeCom; the previous bot is not reused or restored.
+</Callout>
+
+An agent that is already connected no longer shows the scan entry point. Multica does not expose bot renaming or permission management — do that from your WeCom admin console.
+
+## First use
+
+The first time a member messages the bot in a direct chat, they receive an account binding link:
+
+1. Open the link and sign in to Multica.
+2. Confirm the workspace account to link.
+3. Return to WeCom and send the message again.
+
+Only after binding can Multica confirm which workspace member a message comes from. Non-members cannot use the bot. This applies to everyone, including the person who scanned the QR code to create the bot — installing a bot and binding your own WeCom account are separate steps.
+
+Binding links can only be issued from a direct chat with the bot. In a group, an unbound member is told to message the bot directly first.
+
+## Hand work to the agent in WeCom
+
+### Direct messages
+
+Message the bot directly. Consecutive messages stay in the same Multica conversation, and the agent's replies go back to that conversation.
+
+### Group chats
+
+Add the bot to the group first, then `@` it and describe what you need. The bot only responds to messages that explicitly @-mention it; when it runs, it draws on the recent context it can read in the current session.
+
+### Create an issue
+
+Send:
+
+```text
+/issue Fix the redirect after login
+Safari stays on the login page after a successful sign-in.
+```
+
+The first line becomes the title and the rest becomes the description. If you send `/issue` alone, Multica tries to use your previous message as the title.
+
+## Manage connections
+
+Open **Settings → Integrations** to view the bots connected in the workspace. Workspace owners and admins can disconnect them here; an agent's owner can also manage their own bot from that agent's **Integrations** page.
+
+After disconnecting, the bot stops receiving new messages. Existing conversations and audit records are not deleted.
+
+<Callout type="warning">
+Disconnecting only unlinks the bot from Multica — it does not delete the smart bot in WeCom. If you want it gone entirely, remove it from your WeCom admin console yourself.
+</Callout>
+
+## Self-hosting setup
+
+Multica Cloud needs no extra configuration. A self-hosted deployment must first set a key used to encrypt bot credentials:
+
+```dotenv
+MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Generate one like this:
+
+```bash
+openssl rand -base64 32
+```
+
+Restart the API server, then connect the bot from the agent's **Integrations** page. Keep this key long-term: if it is rotated or lost, existing credentials can no longer be decrypted and the bot must be reconnected.
+
+Multica Cloud and self-hosted deployments share the same built-in WeCom "source" ID used to create smart bots by design — it isn't a security boundary, so self-hosters don't need to register their own. `MULTICA_WECOM_SOURCE_ID` exists only to override that default for debugging or a future source change; leave it unset in normal operation.
+
+## Troubleshooting
+
+- **No bind button**: confirm the current account is the agent's owner or a workspace owner or admin, and check that the self-hosting key is configured.
+- **QR code expired**: it's only valid for 5 minutes — close the dialog and start the connection again.
+- **The bot asks for account binding**: open the binding link and sign in with the Multica account for that workspace. This still applies even if you were the one who installed the bot.
+- **A reply arrived very late after a brief outage**: Multica automatically resends replies that failed to go out while the connection was down, but only looks back up to 24 hours; anything older is not retried.
+- **The bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
+- **Reconnected but the old bot still exists in WeCom**: expected — disconnecting in Multica never deletes the smart bot in WeCom. Remove it from your WeCom admin console if you don't want it anymore.
+
+## Next steps
+
+- [Chat integrations](/channels) — platform comparison, session isolation, and account binding mechanics.
+- [Chat](/chat) — the conversation and execution model behind the bot.
+- [Issues](/issues) — the unit of work `/issue` creates.

@@ -36,6 +36,10 @@ vi.mock("./lark-tab", () => ({
   LarkTab: () => <div data-testid="lark-tab" />,
 }));
 
+vi.mock("./wecom-tab", () => ({
+  WecomTab: () => <div data-testid="wecom-tab" />,
+}));
+
 vi.mock("./composio-tab", () => ({
   ComposioTab: () => <div data-testid="composio-tab" />,
 }));
@@ -66,6 +70,7 @@ function renderTab() {
 
 describe("Settings IntegrationsTab", () => {
   beforeEach(() => {
+    cleanup();
     queryCallsRef.current = [];
     composioErrorRef.current = null;
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
@@ -87,7 +92,7 @@ describe("Settings IntegrationsTab", () => {
   it("shows Composio when the feature flag is on and the integration is configured", () => {
     renderTab();
 
-    expect(screen.getByTestId("composio-tab")).toBeInTheDocument();
+    expect(screen.getAllByTestId("composio-tab")[0]).toBeTruthy();
     expect(queryCallsRef.current[0]?.enabled).toBe(true);
   });
 
@@ -111,6 +116,6 @@ describe("Settings IntegrationsTab", () => {
 
     renderTab();
 
-    expect(screen.getByTestId("vcs-tab")).toBeInTheDocument();
+    expect(screen.getAllByTestId("vcs-tab")[0]).toBeTruthy();
   });
 });

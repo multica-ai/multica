@@ -1,23 +1,23 @@
 ---
 title: チャット連携
-description: Multica のエージェントを Feishu、Lark、Slack、DingTalk に接続し、チームが普段使っているチャットツールから利用する方法を説明します。
+description: Multica のエージェントを Feishu、Lark、WeCom、Slack、DingTalk に接続し、チームが普段使っているチャットツールから利用する方法を説明します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 チャット連携を使うと、Multica を開かなくても、エージェントへの質問、グループチャットでの @メンション、チャット画面からのイシュー作成ができます。
 
-現在は Feishu/Lark、Slack、DingTalk に対応しています。セッション、ユーザー識別、実行の仕組みは共通ですが、インストール方法が異なります。
+現在は Feishu/Lark、WeCom、Slack、DingTalk に対応しています。セッション、ユーザー識別、実行の仕組みは共通ですが、インストール方法が異なります。
 
 ## プラットフォームを選ぶ
 
-| | Feishu / Lark | Slack | DingTalk |
-|---|---|---|---|
-| インストール | Multica で QR コードを生成し、Feishu でスキャンして認証 | Slack でアプリを作成し、2 つのトークンを Multica に入力 | 社内アプリと Stream モードのロボットを作成し、AppKey と AppSecret を Multica に入力 |
-| エージェントとの DM | 対応 | 対応 | 対応 |
-| グループまたはチャンネル | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー |
-| イシューの作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` スラッシュコマンド。エージェントが説明を整理してから作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 |
-| 接続方式 | プラットフォームの常時接続 | Socket Mode | Stream モード |
+| | Feishu / Lark | WeCom | Slack | DingTalk |
+|---|---|---|---|---|
+| インストール | Multica で QR コードを生成し、Feishu でスキャンして認証 | Multica で QR コードを生成し、WeCom でスキャンして認証 —— スキャンのたびに新しいスマート Bot が作成されます | Slack でアプリを作成し、2 つのトークンを Multica に入力 | 社内アプリと Stream モードのロボットを作成し、AppKey と AppSecret を Multica に入力 |
+| エージェントとの DM | 対応 | 対応 | 対応 | 対応 |
+| グループまたはチャンネル | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー |
+| イシューの作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` スラッシュコマンド。エージェントが説明を整理してから作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 |
+| 接続方式 | プラットフォームの常時接続 | プラットフォームの常時接続 | Socket Mode | Stream モード |
 
 新規接続は現在、中国本土版の Feishu でのみ利用できます。既存の国際版 Lark 接続は、引き続き利用および管理できます。
 
@@ -26,6 +26,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 詳しい手順:
 
 - [Feishu / Lark Bot 連携](/lark-bot-integration)
+- [WeCom Bot 連携](/wecom-bot-integration)
 - [Slack Bot 連携](/slack-bot-integration)
 - [DingTalk Bot 連携](/dingtalk-bot-integration)
 
@@ -41,7 +42,7 @@ Bot を @メンションしていないチャンネルメッセージは、エ�
 
 ## セッションの分離
 
-- Feishu/Lark はチャットごとにセッションを分けます。同じチャットの後続メッセージは同じセッションを継続します。
+- Feishu/Lark と WeCom はチャットごとにセッションを分けます。同じチャットの後続メッセージは同じセッションを継続します。
 - Slack は DM をチャンネルごとに分けます。チャンネル内では、スレッドごとに独立したセッションが保持されます。
 - DingTalk は conversation ごとにセッションを分けます。DM とグループはそれぞれのセッションを継続します。
 
@@ -59,9 +60,9 @@ Multica がエージェントを実行するのは、アカウント連携が完
 
 ## 接続を管理する
 
-ワークスペースの owner と admin は Bot を接続または切断できます。Feishu/Lark Bot の場合は、エージェントの所有者も接続と切断ができます。通常のメンバーは接続済みの連携を確認し、自分に実行権限があるエージェントを利用できます。
+ワークスペースの owner と admin は Bot を接続または切断できます。Feishu/Lark と WeCom Bot の場合は、エージェントの所有者も接続と切断ができます。通常のメンバーは接続済みの連携を確認し、自分に実行権限があるエージェントを利用できます。
 
-切断すると、Bot は新しいメッセージを受信しなくなります。既存の Multica の会話と実行記録は保持されます。
+切断すると、Bot は新しいメッセージを受信しなくなります。既存の Multica の会話と実行記録は保持されます。WeCom の場合、切断は Multica 側の紐付けを外すだけで、WeCom 側のスマート Bot は削除されません。完全に削除したい場合は WeCom の管理画面から削除してください。
 
 ## セルフホスト
 
@@ -69,6 +70,7 @@ Multica がエージェントを実行するのは、アカウント連携が完
 
 ```dotenv
 MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 ```
@@ -78,6 +80,7 @@ MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 ## 次のステップ
 
 - [Feishu / Lark Bot 連携](/lark-bot-integration)
+- [WeCom Bot 連携](/wecom-bot-integration)
 - [Slack Bot 連携](/slack-bot-integration)
 - [DingTalk Bot 連携](/dingtalk-bot-integration)
 - [エージェントとチャットする](/chat)

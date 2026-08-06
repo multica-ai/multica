@@ -3,6 +3,8 @@ package channel
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Type identifies an inbound channel platform — the discriminator the
@@ -90,6 +92,11 @@ type Config struct {
 	// the Channel's receive loop. It may be nil when a Channel is built
 	// purely for its outbound Send path (no inbound delivery needed).
 	Handler InboundHandler
+
+	// InstallationID is the channel_installation primary key. Adapters that
+	// own per-installation connection state (e.g. WeCom outbound wake
+	// registry) MUST read this; the engine always sets it from the row.
+	InstallationID pgtype.UUID
 }
 
 // Factory builds a Channel from its per-installation Config. Each adapter

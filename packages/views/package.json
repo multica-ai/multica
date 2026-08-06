@@ -43,6 +43,7 @@
     "./settings": "./settings/index.ts",
     "./settings/lark-tab": "./settings/components/lark-tab.tsx",
     "./lark": "./lark/index.ts",
+    "./wecom": "./wecom/index.ts",
     "./slack": "./slack/index.ts",
     "./dingtalk": "./dingtalk/index.ts",
     "./invite": "./invite/index.ts",

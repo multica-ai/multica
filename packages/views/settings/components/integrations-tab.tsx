@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { LarkTab } from "./lark-tab";
+import { WecomTab } from "./wecom-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
@@ -43,6 +44,9 @@ export function IntegrationsTab() {
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
       <SettingsSection title={t(($) => $.lark.section_title)}>
         <LarkTab />
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.wecom.section_title)}>
+        <WecomTab />
       </SettingsSection>
       {composioEnabled && !composioUnconfigured && (
         <SettingsSection title={t(($) => $.composio.section_title)}>

@@ -25,6 +25,7 @@ import {
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
+import { wecomKeys } from "../wecom/queries";
 import { slackKeys } from "../slack/queries";
 import { dingtalkKeys } from "../dingtalk/queries";
 import {
@@ -792,6 +793,10 @@ export function useRealtimeSync(
       lark_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      },
+      wecom_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       },
       slack_installation: () => {
         const wsId = getCurrentWsId();

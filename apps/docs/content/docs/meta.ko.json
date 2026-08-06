@@ -37,6 +37,7 @@
     "---연동---",
     "channels",
     "lark-bot-integration",
+    "wecom-bot-integration",
     "slack-bot-integration",
     "dingtalk-bot-integration",
     "github-integration",

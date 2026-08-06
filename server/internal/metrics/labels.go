@@ -89,14 +89,15 @@ var businessMetricLabels = map[string][]string{
 }
 
 var forbiddenMetricLabels = map[string]struct{}{
-	"workspace_id": {},
-	"user_id":      {},
-	"agent_id":     {},
-	"task_id":      {},
-	"issue_id":     {},
-	"runtime_id":   {},
-	"session_id":   {},
-	"ip":           {},
+	"workspace_id":    {},
+	"user_id":         {},
+	"agent_id":        {},
+	"task_id":         {},
+	"issue_id":        {},
+	"runtime_id":      {},
+	"session_id":      {},
+	"installation_id": {},
+	"ip":              {},
 }
 
 var (
@@ -151,6 +152,15 @@ var (
 		"output":      "output",
 		"cache_read":  "cache_read",
 		"cache_write": "cache_write",
+	}
+	// knownChannelTypes mirrors the channel.Type platform slugs persisted in
+	// the channel_type column. Kept as an explicit allow-list so a new
+	// platform slug cannot widen a metric's series space until it is added
+	// here on purpose.
+	knownChannelTypes = map[string]string{
+		"feishu": "feishu",
+		"slack":  "slack",
+		"wecom":  "wecom",
 	}
 	knownFailureReasons = map[string]string{}
 	modelAliasUnsafeRe  = regexp.MustCompile(`[^a-z0-9._:/+-]+`)
@@ -226,6 +236,16 @@ func NormalizeTokenType(value string) string {
 		return normalized
 	}
 	return "input"
+}
+
+// NormalizeChannelType collapses a channel_type column value to the platform
+// allow-list. Unknown slugs become "other" rather than a new series.
+func NormalizeChannelType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if normalized, ok := knownChannelTypes[value]; ok {
+		return normalized
+	}
+	return "other"
 }
 
 func NormalizeModelAlias(value string) string {

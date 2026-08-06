@@ -12,6 +12,7 @@ import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
+import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import {
@@ -168,6 +169,10 @@ export function AgentOverviewPane({
     ...larkInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: wecomListing } = useQuery({
+    ...wecomInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: slackListing } = useQuery({
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
@@ -176,10 +181,14 @@ export function AgentOverviewPane({
     ...dingtalkInstallationsOptions(wsId),
   });
 
+  // Every configured chat platform must open this gate: the tab is the only
+  // home of each platform's bind entry, so omitting one strands its install
+  // flow on a deployment that enabled only that platform.
   const integrationsConfigured =
     larkListing?.configured === true ||
     slackListing?.configured === true ||
-    dingtalkListing?.configured === true;
+    dingtalkListing?.configured === true ||
+    wecomListing?.configured === true;
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime

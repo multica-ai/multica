@@ -119,6 +119,9 @@ type BusinessSamplerCollector struct {
 	descHeartbeatAgeHist *prometheus.Desc
 	descWorkspaceTotal   *prometheus.Desc
 
+	descChannelOutboundDepth  *prometheus.Desc
+	descChannelOutboundOldest *prometheus.Desc
+
 	mu       sync.Mutex
 	snapshot *samplerSnapshot
 }
@@ -191,6 +194,14 @@ func NewBusinessSamplerCollector(opts *BusinessSamplerOptions) *BusinessSamplerC
 			"multica_workspace_total",
 			"Lifetime workspace row count. Useful for sizing alerts and dashboards.",
 			nil, nil),
+		descChannelOutboundDepth: prometheus.NewDesc(
+			"multica_channel_outbound_queue_depth",
+			"Outbound channel replies still in `queued` status, by platform. Sampled from the database.",
+			[]string{"channel_type"}, nil),
+		descChannelOutboundOldest: prometheus.NewDesc(
+			"multica_channel_outbound_queue_oldest_age_seconds",
+			"Age of the oldest `queued` outbound channel reply, by platform. Rises when delivery is wedged even if depth stays small.",
+			[]string{"channel_type"}, nil),
 	}
 	c.refreshFn = c.refreshFromDB
 	return c
@@ -220,6 +231,8 @@ func (c *BusinessSamplerCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.descRuntimeOnline,
 		c.descHeartbeatAgeHist,
 		c.descWorkspaceTotal,
+		c.descChannelOutboundDepth,
+		c.descChannelOutboundOldest,
 	} {
 		ch <- d
 	}
@@ -252,8 +265,9 @@ func (c *BusinessSamplerCollector) maybeRefresh() *samplerSnapshot {
 
 	// Bound the entire refresh to N×queryTimeout so an in-flight scrape
 	// can never block forever even if SET LOCAL is somehow ignored by a
-	// misconfigured Postgres.
-	ctx, cancel := context.WithTimeout(context.Background(), 8*c.queryTimeout)
+	// misconfigured Postgres. N tracks the number of queries in
+	// refreshFromDB; bump it when adding one.
+	ctx, cancel := context.WithTimeout(context.Background(), 9*c.queryTimeout)
 	defer cancel()
 
 	next := c.refreshFn(ctx, now)
@@ -310,6 +324,18 @@ func (c *BusinessSamplerCollector) emit(ch chan<- prometheus.Metric, snap *sampl
 		ch <- prometheus.MustNewConstMetric(
 			c.descWorkspaceTotal, prometheus.GaugeValue, snap.workspaceTotal)
 	}
+
+	// Zero-seeded per platform: an empty queue is the healthy state, and a
+	// dashboard that shows "no data" instead of 0 cannot tell it apart from a
+	// scrape failure.
+	for _, channelType := range knownChannelTypeLabels() {
+		ch <- prometheus.MustNewConstMetric(
+			c.descChannelOutboundDepth, prometheus.GaugeValue,
+			snap.channelOutboundDepth[channelType], channelType)
+		ch <- prometheus.MustNewConstMetric(
+			c.descChannelOutboundOldest, prometheus.GaugeValue,
+			snap.channelOutboundOldest[channelType], channelType)
+	}
 }
 
 // knownSourceLabels enumerates the source values we always emit a zero for.
@@ -321,6 +347,12 @@ func knownSourceLabels() []string {
 
 func knownRuntimeModeLabels() []string {
 	return []string{"local", "cloud", "unknown"}
+}
+
+// knownChannelTypeLabels enumerates the channel platforms we always emit a
+// zero for, plus the "other" bucket NormalizeChannelType falls back to.
+func knownChannelTypeLabels() []string {
+	return []string{"feishu", "slack", "wecom", "other"}
 }
 
 // heartbeatAgeBuckets matches the Grafana board's runtime-health view: a few
@@ -364,20 +396,25 @@ type samplerSnapshot struct {
 	runtimeOnline map[runtimeOnlineKey]float64
 	heartbeatAge  map[string]samplerHistogram
 
+	channelOutboundDepth  map[string]float64
+	channelOutboundOldest map[string]float64
+
 	workspaceTotal      float64
 	workspaceTotalKnown bool
 }
 
 func newSamplerSnapshot(t time.Time) *samplerSnapshot {
 	return &samplerSnapshot{
-		takenAt:          t,
-		activeUsers:      map[string]float64{},
-		activeWorkspaces: map[string]float64{},
-		taskQueued:       map[string]float64{},
-		taskRunning:      map[taskRunningKey]float64{},
-		taskStuck:        map[string]float64{},
-		runtimeOnline:    map[runtimeOnlineKey]float64{},
-		heartbeatAge:     map[string]samplerHistogram{},
+		takenAt:               t,
+		activeUsers:           map[string]float64{},
+		activeWorkspaces:      map[string]float64{},
+		taskQueued:            map[string]float64{},
+		taskRunning:           map[taskRunningKey]float64{},
+		taskStuck:             map[string]float64{},
+		runtimeOnline:         map[runtimeOnlineKey]float64{},
+		heartbeatAge:          map[string]samplerHistogram{},
+		channelOutboundDepth:  map[string]float64{},
+		channelOutboundOldest: map[string]float64{},
 	}
 }
 
@@ -421,6 +458,9 @@ func (c *BusinessSamplerCollector) refreshFromDB(ctx context.Context, now time.T
 	})
 	c.runQuery(ctx, conn, "workspace_total", func(ctx context.Context, tx pgx.Tx) error {
 		return c.queryWorkspaceTotal(ctx, tx, snap)
+	})
+	c.runQuery(ctx, conn, "channel_outbound_queue", func(ctx context.Context, tx pgx.Tx) error {
+		return c.queryChannelOutboundQueue(ctx, tx, snap)
 	})
 
 	return snap

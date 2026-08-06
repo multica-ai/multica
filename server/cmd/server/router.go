@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -30,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -173,9 +176,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 type RouterOptions struct {
 	HTTPMetrics     *obsmetrics.HTTPMetrics
 	BusinessMetrics *obsmetrics.BusinessMetrics
-	DaemonHub       *daemonws.Hub
-	DaemonWakeup    service.TaskWakeupNotifier
-	FeatureFlags    *featureflag.Service
+	// WecomMetrics, when non-nil, replaces the WeCom adapter's no-op metrics
+	// sink. It has to be injected here rather than assigned on the Handler
+	// afterwards because every WeCom component (connection, outbox, install
+	// worker, outbound subscriber, reconciler) takes its sink at construction.
+	WecomMetrics *obsmetrics.WecomAdapterMetrics
+	DaemonHub    *daemonws.Hub
+	DaemonWakeup service.TaskWakeupNotifier
+	FeatureFlags *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -634,6 +642,124 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
 	}
 
+	// WeCom integration (spec §7.1.1). MULTICA_WECOM_SECRET_KEY is the
+	// gate for the whole stack: it decrypts the per-installation bot
+	// secret and seals the short-lived scode / auth_url on install
+	// sessions. Without it every management endpoint returns 503 (list
+	// stays 200 with configured=false so the UI hides the tab) and the
+	// InstallWorker runs in maintenance mode: it still sweeps stale
+	// creating/pending rows to error/integration_unconfigured on GC.
+	//
+	// The scan-code source id is a WeCom-issued caller identifier. Cloud
+	// and self-hosted share the same default value (spec §4.3); operators
+	// may override it via MULTICA_WECOM_SOURCE_ID for debugging without
+	// re-provisioning the source.
+	if wecomKey, err := secretbox.LoadKey("MULTICA_WECOM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(wecomKey)
+		if err != nil {
+			slog.Error("wecom: secretbox.New failed; wecom integration disabled", "error", err)
+		} else {
+			// A typed nil in an interface is still non-nil, and the
+			// Prometheus sink dereferences its collectors, so only assign
+			// when a real registry was built.
+			var wecomMetrics wecom.WecomMetrics = wecom.NoopMetrics()
+			if opts.WecomMetrics != nil {
+				wecomMetrics = opts.WecomMetrics
+			}
+			wecomWake := wecom.NewOutboundWakeRegistry()
+			wecomBindingSvc := wecom.NewBindingTokenService(queries, pool)
+			h.WecomBindingTokens = wecomBindingSvc
+			wecomRate := wecom.NewRateGate(queries, pool)
+			appURL := appURLFromEnv()
+			wecomReplier := wecom.NewOutboundReplier(wecom.OutboundReplierConfig{
+				Queries: queries,
+				Wake:    wecomWake,
+				Logger:  slog.Default(),
+			})
+			wecomMedia := wecom.NewMediaResolver(wecom.MediaResolverConfig{
+				Storage: store,
+				Ledger:  engine.NewDBMediaIntentLedger(queries),
+				Logger:  slog.Default(),
+			})
+			channelRouter.Register(wecom.TypeWecom, wecom.NewWecomResolverSet(queries, pool, wecomReplier, wecomMedia))
+			wecom.NewOutbound(wecom.OutboundConfig{
+				Queries: queries,
+				Wake:    wecomWake,
+				Metrics: wecomMetrics,
+				Logger:  slog.Default(),
+			}).Register(bus)
+			// ChannelDeps.Decrypt receives the raw installation_config.secret_encrypted
+			// string (base64 secretbox ciphertext, mirroring Lark app_secret_encrypted
+			// / Slack bot_token_encrypted), so the base64 decode step lives in this
+			// closure rather than inside the wecom package.
+			wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
+				Decrypt: func(sealed string) ([]byte, error) {
+					ciphertext, err := base64.StdEncoding.DecodeString(sealed)
+					if err != nil {
+						return nil, fmt.Errorf("wecom: base64 decode secret: %w", err)
+					}
+					return box.Open(ciphertext)
+				},
+				Logger:  slog.Default(),
+				Wake:    wecomWake,
+				Metrics: wecomMetrics,
+				Retries: wecom.NewRetryRegistry(),
+				Outbox: wecom.OutboxDeps{
+					Queries: queries,
+					Binding: wecomBindingSvc,
+					Rate:    wecomRate,
+					AppURL:  appURL,
+					Tx:      pool,
+				},
+			})
+
+			sourceID := strings.TrimSpace(os.Getenv("MULTICA_WECOM_SOURCE_ID"))
+			if sourceID == "" {
+				sourceID = wecom.DefaultSourceID
+			}
+			var provider wecom.Provider
+			httpProvider, perr := wecom.NewHTTPProvider(wecom.HTTPProviderConfig{
+				SourceID: sourceID,
+				Logger:   slog.Default(),
+			})
+			if perr != nil {
+				slog.Error("wecom: HTTPProvider init failed; install disabled", "error", perr)
+			} else {
+				provider = httpProvider
+			}
+			installSvc := wecom.NewInstallService(queries, pool, wecom.InstallServiceConfig{
+				SourceID: sourceID,
+				Box:      box,
+				Provider: provider,
+				Logger:   slog.Default(),
+			}, nil)
+			h.WecomInstall = installSvc
+			h.WecomOutboundReconciler = wecom.NewOutboundReconciler(wecom.OutboundReconcilerConfig{
+				Queries:   queries,
+				Wake:      wecomWake,
+				EnqueueOK: installSvc.Configured,
+				Metrics:   wecomMetrics,
+				Logger:    slog.Default(),
+			})
+			// Worker is always constructed so maintenance-mode GC runs.
+			h.WecomInstallWorker = wecom.NewInstallWorker(installSvc, wecom.InstallWorkerConfig{
+				Bus:        bus,
+				Supervisor: h.ChannelSupervisor,
+				Metrics:    wecomMetrics,
+			})
+			// Wire notify AFTER the worker exists so BeginInstall can wake
+			// it without a nil hop; installSvc's notify hook was passed nil
+			// above so we can inject the worker's Notify here without a
+			// circular dependency.
+			installSvc.SetNotify(h.WecomInstallWorker.Notify)
+			slog.Info("wecom integration enabled",
+				"install_configured", provider != nil,
+			)
+		}
+	} else {
+		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1090,6 +1216,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 				})
+
+				// WeCom integration (spec §7.3). Same admin/member split
+				// as Lark: listing is member-visible; begin / status /
+				// revoke each load the target agent and run canManageAgent
+				// (or its orphan / initiator fallback) inside the handler
+				// so an agent owner can bind their own agent without being
+				// a workspace admin.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/wecom/installations", h.ListWecomInstallations)
+					r.Post("/wecom/install/begin", h.BeginWecomInstall)
+					r.Get("/wecom/install/{sessionId}/status", h.GetWecomInstallStatus)
+					r.Delete("/wecom/installations/{installationId}", h.RevokeWecomInstallation)
+				})
 			})
 		})
 
@@ -1109,6 +1249,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// DingTalk binding redemption is user-scoped for the same reason as
 		// Slack: the token is redeemed before workspace context is selected.
 		r.Post("/api/dingtalk/binding/redeem", h.RedeemDingTalkBindingToken)
+		// WeCom binding-token redemption. Same rationale as Lark/Slack: NOT
+		// workspace-scoped — redemption mints the channel_user_binding row.
+		r.Post("/api/wecom/binding/redeem", h.RedeemWecomBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
