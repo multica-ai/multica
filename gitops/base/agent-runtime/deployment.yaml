@@ -23,20 +23,27 @@ spec:
       labels:
         app.kubernetes.io/name: agentrunner
       annotations:
-        # Each pod is a singleton, in-memory coding session with no
-        # checkpoint/resume — cluster-autoscaler consolidation looks only at
-        # requested cpu/memory (never live usage), so a node hosting an
-        # actively-spiking session can still be picked as underutilized and
-        # drained. This stops that: never a scale-down eviction target.
-        # Paired with the PDB in pdb.yaml (belt-and-suspenders — see AIPLAT-153).
+        # An interrupted session resumes from the last provider turn boundary,
+        # not from wherever it was mid-turn, so an eviction still costs real
+        # work. cluster-autoscaler consolidation looks only at requested
+        # cpu/memory (never live usage), so a node hosting an actively-spiking
+        # session can still be picked as underutilized and drained. This stops
+        # that: never a scale-down eviction target. Paired with the PDB in
+        # pdb.yaml (belt-and-suspenders — see AIPLAT-153).
         cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
-      # entrypoint.sh (AIPLAT-168) holds SIGTERM and drains in-flight agent
-      # tasks (polling active_task_count) before forwarding it to the daemon,
-      # up to a ~9.5 min cap — this must exceed that cap plus the daemon's own
-      # teardown (~30s taskWG wait + subprocess grace) or kubelet SIGKILLs
-      # mid-drain.
-      terminationGracePeriodSeconds: 660
+      # Budget for entrypoint.sh's shutdown sequence: DRAIN_MAX_SECONDS waiting
+      # for in-flight tasks to finish, then DAEMON_STOP_WAIT_SECONDS for the
+      # daemon to exit, plus margin for the status polls themselves. Must exceed
+      # their sum or kubelet SIGKILLs the pod mid-sequence.
+      #
+      # Deliberately not sized to outlast a long agent session: sessions run for
+      # hours, so waiting one out is not achievable at any grace period. The
+      # drain only catches tasks genuinely seconds from done; anything still
+      # running is stopped recoverably instead (see entrypoint.sh for why that
+      # means SIGKILL), so a short window is preferable to a long one that
+      # stalls every deploy without saving the session.
+      terminationGracePeriodSeconds: 180
       serviceAccountName: agentrunner
       imagePullSecrets:
         - name: regcred
@@ -86,6 +93,13 @@ spec:
             # fails with "You must specify a region" (AIPLAT-169).
             - name: AWS_REGION
               value: us-east-1
+            # Shutdown timings for entrypoint.sh, surfaced here so they can be
+            # tuned per environment without an image rebuild. Their sum must stay
+            # under terminationGracePeriodSeconds above.
+            - name: DRAIN_MAX_SECONDS
+              value: "120"
+            - name: DAEMON_STOP_WAIT_SECONDS
+              value: "30"
             - name: DEFAULT_GIT_REPO
               value: "https://github.com/g2crowd/ai-enhancement-hub,https://github.com/g2crowd/ue,https://github.com/g2crowd/companies_service"
             # Enterprise Platform Bot GitHub App — installed in both g2crowd and

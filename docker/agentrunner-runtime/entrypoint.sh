@@ -233,6 +233,13 @@ JSON
 
 DEVICE_NAME="agentrunner-${WORKSPACE_SLUG}"
 
+# A pod stopped with SIGKILL leaves daemon.pid behind on the EFS-backed $HOME.
+# Nothing in the normal pod lifecycle reads it — the "already running" guard is
+# the loopback health-port bind and `daemon status` queries that port — but PIDs
+# restart from 1 in a fresh container, so a stale entry can name a live and
+# entirely unrelated process that `multica daemon stop` would then kill.
+rm -f "${config_dir}/daemon.pid"
+
 # ── Provision agents once daemon registers (waits in background) ──────────────
 /usr/local/bin/agentfarm-bootstrap.sh &
 
@@ -395,27 +402,94 @@ fi
 git-ai install-hooks 2>/dev/null \
   || echo "entrypoint: WARNING git-ai install-hooks failed — AI attribution hooks may not be active" >&2
 
-# ── Run daemon in foreground, draining in-flight tasks before shutdown ────────
-# Not exec'd: the daemon's own SIGTERM handling cancels an in-flight task's
-# runCtx immediately (it's derived from the same root ctx the signal cancels),
-# so a mid-run agent session gets killed within seconds on a deploy/pod delete
-# (AIPLAT-168). Running the daemon as a background child makes this script
-# PID 1, so it receives SIGTERM first and can hold it until the daemon reports
-# no active tasks (or a capped wait elapses) before forwarding it.
+# ── Run daemon in foreground, stopping it recoverably on shutdown ─────────────
+# tini is PID 1 and forwards SIGTERM to this script, its only child. The daemon
+# is a background child rather than exec'd so the trap below can choose HOW to
+# stop it — and that choice decides whether an interrupted agent session is
+# recoverable, because the daemon's two stop paths are not equivalent:
+#
+#   SIGTERM — the daemon cancels the in-flight run's ctx (derived from the same
+#     root ctx the signal cancels) and reports the task terminal with
+#     failure_reason="cancelled". The server's auto-retry path does not treat
+#     that reason as retryable, so the task dies and its progress is lost.
+#   SIGKILL — the daemon reports nothing, so the task stays `running`
+#     server-side. The replacement pod's daemon calls recover-orphans during
+#     startup, which reclaims it as failure_reason="runtime_recovery" — that IS
+#     retryable, and the retry inherits session_id + work_dir. The agent then
+#     resumes its provider session (`claude --resume`) in the same workdir,
+#     which is still there because $HOME is the EFS-backed PVC.
+#
+# So: drain first, and stop cleanly with SIGTERM only when the daemon positively
+# reports itself idle (that lets it deregister its runtimes and flush). If work
+# is still in flight — or we cannot tell — use SIGKILL, the recoverable stop,
+# rather than spending the session on a tidy-looking shutdown that discards it.
 multica daemon start --foreground --device-name "${DEVICE_NAME}" &
 DAEMON_PID=$!
 
-drain_and_forward() {
-  echo "entrypoint: SIGTERM received, draining active tasks before signaling daemon..." >&2
-  local waited=0 max_wait="${DRAIN_MAX_SECONDS:-570}" interval=5 active
-  while (( waited < max_wait )); do
-    active=$(multica daemon status --output json 2>/dev/null | jq -r '.active_task_count // 0' 2>/dev/null || echo 1)
-    [[ "${active}" == "0" ]] && break
+# Echoes the daemon's in-flight task count, or fails if that count cannot be
+# trusted. Gating on status=="running" is load-bearing: an unreachable health
+# endpoint still exits 0 with {"status":"stopped"} and no active_task_count, so
+# a bare `.active_task_count // 0` reads a wedged daemon as idle.
+active_task_count() {
+  local health count
+  health=$(multica daemon status --output json 2>/dev/null) || return 1
+  count=$(jq -r 'select(.status == "running") | .active_task_count // 0' <<<"${health}" 2>/dev/null) || return 1
+  [[ "${count}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "${count}"
+}
+
+drain_and_stop() {
+  local drain_max="${DRAIN_MAX_SECONDS:-120}"
+  local stop_wait="${DAEMON_STOP_WAIT_SECONDS:-30}"
+  local waited=0 interval=5 probe_failures=0 active=""
+  local max_probe_failures=3
+
+  echo "entrypoint: SIGTERM received, draining active tasks (max ${drain_max}s)..." >&2
+  while :; do
+    if active=$(active_task_count); then
+      probe_failures=0
+      if [[ "${active}" == "0" ]]; then break; fi
+    else
+      active=""
+      probe_failures=$((probe_failures + 1))
+      # Don't spend the drain budget waiting on a daemon that isn't answering;
+      # bail out early and take the recoverable stop below.
+      if (( probe_failures >= max_probe_failures )); then
+        echo "entrypoint: daemon status unreadable ${probe_failures}x, cannot confirm idle" >&2
+        break
+      fi
+    fi
+    if (( waited >= drain_max )); then break; fi
     sleep "${interval}"
     waited=$((waited + interval))
   done
-  echo "entrypoint: forwarding SIGTERM to daemon (waited ${waited}s)" >&2
-  kill -TERM "${DAEMON_PID}" 2>/dev/null || true
+
+  if [[ "${active}" == "0" ]]; then
+    echo "entrypoint: idle after ${waited}s, stopping daemon cleanly (SIGTERM)" >&2
+    kill -TERM "${DAEMON_PID}" 2>/dev/null || true
+  else
+    echo "entrypoint: work still in flight after ${waited}s (active=${active:-unknown}); SIGKILL so the server reclaims it as a recoverable orphan" >&2
+    kill -KILL "${DAEMON_PID}" 2>/dev/null || true
+  fi
+
+  # A trapped signal makes the `wait` at the bottom of this script return
+  # immediately, so without reaping here the script would fall off the end while
+  # the daemon is still shutting down, taking tini — and therefore the container
+  # — with it. `wait` rather than a `kill -0` poll because a killed-but-unreaped
+  # child stays visible to `kill -0` as a zombie, which reads as "still alive".
+  # The watchdog bounds it, so a wedged daemon cannot hold the pod past
+  # terminationGracePeriodSeconds.
+  (
+    local ticks=0
+    while (( ticks < stop_wait )); do
+      sleep 1
+      if ! kill -0 "${DAEMON_PID}" 2>/dev/null; then exit 0; fi
+      ticks=$((ticks + 1))
+    done
+    echo "entrypoint: daemon did not exit within ${stop_wait}s, escalating to SIGKILL" >&2
+    kill -KILL "${DAEMON_PID}" 2>/dev/null || true
+  ) &
+  wait "${DAEMON_PID}" 2>/dev/null || true
 }
-trap drain_and_forward SIGTERM SIGINT
+trap drain_and_stop SIGTERM SIGINT
 wait "${DAEMON_PID}"
