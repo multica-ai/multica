@@ -41,6 +41,15 @@ describe("blocked trigger copy", () => {
     expect(unbound).toBe(en.comment.trigger_blocked_short_agent_runtime_required);
   });
 
+  it("explains issue-level execution suppression", () => {
+    expect(blockedReasonLabel("execution_suppressed", t)).toBe(
+      en.comment.trigger_blocked_execution_suppressed,
+    );
+    expect(blockedShortReasonLabel("execution_suppressed", t)).toBe(
+      en.comment.trigger_blocked_short_execution_suppressed,
+    );
+  });
+
   it("degrades an unknown code to the generic label", () => {
     expect(blockedReasonLabel("some_future_code", t)).toBe(en.comment.trigger_blocked_generic);
     expect(blockedShortReasonLabel("some_future_code", t)).toBe(

@@ -285,14 +285,26 @@ ORDER BY created_at DESC;
 -- issues with no linked PR. Issue-linked tasks never hit quick-create context
 -- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
 -- key rides harmlessly alongside.
+WITH runnable_issue AS (
+    -- Serialize against metadata writes so a stale in-memory Issue cannot race
+    -- the aggregation-only contract between the service check and this insert.
+    SELECT issue.id
+    FROM issue
+    WHERE issue.id = @issue_id
+      AND NOT (
+        lower(btrim(COALESCE(issue.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(issue.metadata->>'execution_expected', ''))) = 'false'
+      )
+    FOR UPDATE
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
-VALUES (
-    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+SELECT
+    @agent_id, @runtime_id, runnable_issue.id, 'queued', @priority, sqlc.narg(trigger_comment_id),
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -314,13 +326,26 @@ VALUES (
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id)
-)
-RETURNING *;
+FROM runnable_issue
+RETURNING agent_task_queue.*;
 
 -- name: CreateDeferredChannelIssueTask :one
 -- Channel /issue media resolves after issue creation. Persist the assigned
 -- issue task up front for crash safety, but keep it inert until attachment
 -- binding settles or the fire_at fallback is promoted by the normal sweeper.
+-- The issue can already carry the aggregation-only contract when a non-HTTP
+-- create caller supplies metadata in the same transaction, so keep this fresh
+-- insertion boundary aligned with CreateAgentTask.
+WITH runnable_issue AS (
+    SELECT issue.id
+    FROM issue
+    WHERE issue.id = @issue_id
+      AND NOT (
+        lower(btrim(COALESCE(issue.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(issue.metadata->>'execution_expected', ''))) = 'false'
+      )
+    FOR UPDATE
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
@@ -328,8 +353,8 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at
 )
-VALUES (
-    $1, $2, $3, 'deferred', $4, sqlc.narg(trigger_comment_id),
+SELECT
+    @agent_id, @runtime_id, runnable_issue.id, 'deferred', @priority, sqlc.narg(trigger_comment_id),
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -351,15 +376,25 @@ VALUES (
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at
-)
-RETURNING *;
+FROM runnable_issue
+RETURNING agent_task_queue.*;
 
 -- name: PromoteDeferredChannelIssueTask :one
 -- Early promotion is idempotent at the service layer: a task already promoted
--- by the fire_at sweeper no longer matches and is treated as settled.
+-- by the fire_at sweeper no longer matches and is treated as settled. Re-check
+-- current issue metadata so media resolution cannot wake a task admitted before
+-- its issue became an aggregation-only parent orchestrator.
 UPDATE agent_task_queue
 SET status = 'queued', fire_at = NULL
-WHERE id = $1 AND issue_id IS NOT NULL AND status = 'deferred'
+WHERE agent_task_queue.id = $1
+  AND agent_task_queue.issue_id IS NOT NULL
+  AND agent_task_queue.status = 'deferred'
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING *;
 
 -- name: SetDeferredChannelIssueTaskRuntimeOverlay :execrows
@@ -407,14 +442,24 @@ RETURNING *;
 -- same trigger comment as the primary task, so the fallback assignee's run
 -- carries a non-NULL source and evidence rather than bypassing attribution
 -- (MUL-4302 §2).
+WITH runnable_issue AS (
+    SELECT issue.id
+    FROM issue
+    WHERE issue.id = @issue_id
+      AND NOT (
+        lower(btrim(COALESCE(issue.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(issue.metadata->>'execution_expected', ''))) = 'false'
+      )
+    FOR UPDATE
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at,
     originator_user_id, accountable_user_id, originator_source,
     delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
-VALUES (
-    @agent_id, @runtime_id, @issue_id, 'deferred', @priority,
+SELECT
+    @agent_id, @runtime_id, runnable_issue.id, 'deferred', @priority,
     sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
@@ -427,8 +472,8 @@ VALUES (
     sqlc.narg(delegated_from_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id)
-)
-RETURNING *;
+FROM runnable_issue
+RETURNING agent_task_queue.*;
 
 -- name: LinkTaskToIssue :exec
 -- Attaches the issue a quick-create task produced back to the task row, once
@@ -522,8 +567,16 @@ SELECT
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at)
 FROM agent_task_queue p
+LEFT JOIN issue i ON i.id = p.issue_id
 WHERE p.id = $1
-RETURNING *;
+  AND (
+    p.issue_id IS NULL
+    OR NOT (
+      lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+      AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+    )
+  )
+RETURNING agent_task_queue.*;
 
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
@@ -596,8 +649,10 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE atq.id = $1 AND a.workspace_id = $2;
 
 -- name: ClaimAgentTask :one
--- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
--- a task is only claimable when no other task for the same issue AND same agent is
+-- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization.
+-- Issue-linked rows whose current metadata suppresses execution are not claimable,
+-- including rows queued before the metadata contract was applied. Otherwise, a task
+-- is only claimable when no other task for the same issue AND same agent is
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
@@ -612,6 +667,12 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = atq.issue_id
+            AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+            AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -682,6 +743,7 @@ RETURNING *;
 -- Re-delivers a task whose previous claim likely succeeded server-side but
 -- whose response never reached the daemon. The task is still in `dispatched`
 -- with no `started_at`, so the daemon has not acknowledged it via StartTask.
+-- Suppressed issue tasks are not re-delivered after metadata changes.
 -- Refresh dispatched_at so the server-side dispatch timeout measures from the
 -- recovered delivery attempt.
 UPDATE agent_task_queue
@@ -692,6 +754,12 @@ WHERE id = (
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = atq.issue_id
+            AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+            AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+      )
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
@@ -716,6 +784,12 @@ WHERE id IN (
     WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = atq.issue_id
+            AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+            AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+      )
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
@@ -741,15 +815,24 @@ RETURNING *;
 -- Transitions a task to running. Accepts either 'dispatched' (the normal
 -- claim → run flow) or 'waiting_local_directory' (the daemon held the row in
 -- a wait state while another task owned the local_directory path lock; once
--- the lock was acquired the daemon flips here). wait_reason is cleared on
--- the transition so a future read can't conflate "currently waiting" with
+-- the lock was acquired the daemon flips here). Re-check current issue metadata
+-- at this final execution boundary: an issue can become aggregation-only after
+-- claim but before the daemon acknowledges start. wait_reason is cleared on the
+-- transition so a future read can't conflate "currently waiting" with
 -- "previously waited".
 UPDATE agent_task_queue
 SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
-WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
+WHERE agent_task_queue.id = $1
+  AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING *;
 
 -- name: MarkAgentTaskWaitingLocalDirectory :one
@@ -1471,17 +1554,34 @@ ORDER BY priority DESC, created_at ASC;
 -- the result with rows that always lose the per-(issue, agent) race in
 -- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 -- runtime is busy on a long-running task. Backed by the partial index
--- idx_agent_task_queue_claim_candidates so the warm path is cheap.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+-- idx_agent_task_queue_claim_candidates so the warm path is cheap. Exclude rows
+-- whose issue has since become aggregation-only so idle daemons can cache a truly
+-- empty runtime instead of repeatedly attempting an unclaimable row.
+SELECT * FROM agent_task_queue atq
+WHERE atq.runtime_id = $1
+  AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = atq.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntime :many
+-- Re-check current issue metadata because suppression may be applied after the
+-- inert fallback was created but before its fire_at deadline.
 UPDATE agent_task_queue
 SET status = 'queued'
 WHERE runtime_id = @runtime_id
   AND status = 'deferred'
   AND fire_at <= now()
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING *;
 
 -- name: ListQueuedClaimCandidatesByRuntimes :many
@@ -1495,9 +1595,16 @@ RETURNING *;
 -- a sort step (each runtime's slice is index-ordered, but merging several
 -- runtimes' rows into one priority/FIFO order is not). The per-machine
 -- candidate set is small, so this is cheap in practice.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+SELECT * FROM agent_task_queue atq
+WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+  AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = atq.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
@@ -1507,6 +1614,12 @@ SET status = 'queued'
 WHERE runtime_id = ANY(@runtime_ids::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING *;
 
 -- name: CancelDeferredEscalationsForTask :many

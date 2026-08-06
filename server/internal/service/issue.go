@@ -546,6 +546,9 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 }
 
 func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string, agentRunFireAt time.Time) pgtype.UUID {
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		return pgtype.UUID{}
+	}
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return pgtype.UUID{}
 	}
@@ -581,7 +584,7 @@ func (s *IssueService) shouldEnqueueAgentTask(ctx context.Context, issue db.Issu
 }
 
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
-	if issue.Status == "backlog" {
+	if util.IssueExecutionSuppressed(issue.Metadata) || issue.Status == "backlog" {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, q, issue)
@@ -599,7 +602,7 @@ func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue d
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
+	if util.IssueExecutionSuppressed(issue.Metadata) || issue.Status == "backlog" {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)

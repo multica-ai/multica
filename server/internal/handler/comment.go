@@ -2232,12 +2232,18 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // ran during resolution, so a failure here is either a fail-closed attribution
 // refusal (attribution_blocked, typed via errors.Is) or a rare race /
 // infrastructure error that stays an unclassified internal error rather than
-// leaking the raw message.
+// leaking the raw message. A metadata write racing the final SQL insert is
+// translated by TaskService back to execution_suppressed, preserving the stable
+// explicit-request outcome instead of degrading to internal_error.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
-	if errors.Is(err, service.ErrAttributionFailClosed) {
+	switch {
+	case errors.Is(err, service.ErrAttributionFailClosed):
 		return ReasonAttributionBlocked
+	case errors.Is(err, service.ErrIssueExecutionSuppressed):
+		return ReasonExecutionSuppressed
+	default:
+		return ReasonInternalError
 	}
-	return ReasonInternalError
 }
 
 // hasActiveTaskForIssueAndAgent reports whether the (issue, agent) pair has any
@@ -2601,6 +2607,11 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return nil, nil
 	}
 
+	mentions := util.ParseMentions(content)
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		return nil, blockedExplicitMentionTargets(mentions, ReasonExecutionSuppressed)
+	}
+
 	// Autopilot delegation authority (MUL-4857) is applied by the gate via
 	// opts.effectiveInvoker(): when a run carried no human originator, the gate
 	// falls back to opts.AutopilotDelegationAuthorityUserID, which the caller has
@@ -2608,8 +2619,6 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// autopilotDelegationAuthority). Nothing is re-derived from issue provenance
 	// here, so an unrelated unattributed run cannot borrow a stranger autopilot
 	// creator's authority by commenting on that autopilot's issue.
-
-	mentions := util.ParseMentions(content)
 
 	// EXPLICIT @agent / @squad mentions are a direct request and win over the
 	// @all broadcast (MUL-5411). @all only suppresses the IMPLICIT routing
@@ -2685,6 +2694,33 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return []commentAgentTrigger{trigger}, nil
 	}
 	return nil, nil
+}
+
+// blockedExplicitMentionTargets reports one terminal outcome for every unique
+// explicit execution target in a comment. It intentionally does not resolve the
+// target first: issue-level suppression applies before target permissions or
+// availability, so the response neither enumerates private targets nor silently
+// drops a user-named request.
+func blockedExplicitMentionTargets(mentions []util.Mention, reason DispatchReasonCode) []commentMentionTarget {
+	targets := make([]commentMentionTarget, 0, len(mentions))
+	seen := make(map[string]struct{}, len(mentions))
+	for _, mention := range mentions {
+		if mention.Type != "agent" && mention.Type != "squad" {
+			continue
+		}
+		key := mention.Type + ":" + mention.ID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, commentMentionTarget{
+			TargetType: mention.Type,
+			TargetID:   mention.ID,
+			Status:     DispatchBlocked,
+			ReasonCode: reason,
+		})
+	}
+	return targets
 }
 
 func hasAgentOrSquadMention(mentions []util.Mention) bool {
@@ -2872,6 +2908,9 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 }
 
 func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		return commentAgentTrigger{}, false
+	}
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,

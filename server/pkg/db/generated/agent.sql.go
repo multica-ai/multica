@@ -1101,6 +1101,12 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
       AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = atq.issue_id
+            AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+            AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+      )
+      AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
             AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -1129,8 +1135,10 @@ type ClaimAgentTaskParams struct {
 	PrepareLeaseSecs float64     `json:"prepare_lease_secs"`
 }
 
-// Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
-// a task is only claimable when no other task for the same issue AND same agent is
+// Claims the next queued task for an agent, enforcing per-(issue, agent) serialization.
+// Issue-linked rows whose current metadata suppresses execution are not claimable,
+// including rows queued before the metadata contract was applied. Otherwise, a task
+// is only claimable when no other task for the same issue AND same agent is
 // already dispatched or running. This allows different agents to work on the same
 // issue in parallel while preventing a single agent from running duplicate tasks.
 // Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
@@ -1724,25 +1732,38 @@ func (q *Queries) CreateAgentBuilder(ctx context.Context, arg CreateAgentBuilder
 }
 
 const createAgentTask = `-- name: CreateAgentTask :one
+WITH runnable_issue AS (
+    -- Serialize against metadata writes so a stale in-memory Issue cannot race
+    -- the aggregation-only contract between the service check and this insert.
+    SELECT issue.id
+    FROM issue
+    WHERE issue.id = $22
+      AND NOT (
+        lower(btrim(COALESCE(issue.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(issue.metadata->>'execution_expected', ''))) = 'false'
+      )
+    FOR UPDATE
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
-VALUES (
-    $1, $2, $3, 'queued', $4, $5,
-    COALESCE($6::uuid[], '{}'),
-    $7,
+SELECT
+    $1, $2, runnable_issue.id, 'queued', $3, $4,
+    COALESCE($5::uuid[], '{}'),
+    $6,
+    COALESCE($7::boolean, FALSE),
     COALESCE($8::boolean, FALSE),
-    COALESCE($9::boolean, FALSE),
+    $9,
     $10,
-    $11,
     CASE
-        WHEN COALESCE($12::text, '') <> ''
-        THEN jsonb_build_object('head_sha', $12::text)
+        WHEN COALESCE($11::text, '') <> ''
+        THEN jsonb_build_object('head_sha', $11::text)
         ELSE NULL
     END,
+    $12,
     $13,
     $14,
     $15,
@@ -1751,16 +1772,14 @@ VALUES (
     $18,
     $19,
     $20,
-    $21,
-    $22
-)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+    $21
+FROM runnable_issue
+RETURNING agent_task_queue.id, agent_task_queue.agent_id, agent_task_queue.issue_id, agent_task_queue.status, agent_task_queue.priority, agent_task_queue.dispatched_at, agent_task_queue.started_at, agent_task_queue.completed_at, agent_task_queue.result, agent_task_queue.error, agent_task_queue.created_at, agent_task_queue.context, agent_task_queue.runtime_id, agent_task_queue.session_id, agent_task_queue.work_dir, agent_task_queue.trigger_comment_id, agent_task_queue.chat_session_id, agent_task_queue.autopilot_run_id, agent_task_queue.attempt, agent_task_queue.max_attempts, agent_task_queue.parent_task_id, agent_task_queue.failure_reason, agent_task_queue.trigger_summary, agent_task_queue.force_fresh_session, agent_task_queue.is_leader_task, agent_task_queue.wait_reason, agent_task_queue.initiator_user_id, agent_task_queue.handoff_note, agent_task_queue.prepare_lease_expires_at, agent_task_queue.squad_id, agent_task_queue.runtime_mcp_overlay, agent_task_queue.escalation_for_task_id, agent_task_queue.fire_at, agent_task_queue.originator_user_id, agent_task_queue.runtime_connected_apps, agent_task_queue.coalesced_comment_ids, agent_task_queue.delivered_comment_ids, agent_task_queue.chat_input_task_id, agent_task_queue.chat_finalize_deferred_at, agent_task_queue.originator_source, agent_task_queue.delegated_from_task_id, agent_task_queue.retry_of_task_id, agent_task_queue.rerun_of_task_id, agent_task_queue.rule_version_id, agent_task_queue.trigger_evidence_kind, agent_task_queue.trigger_evidence_ref_id, agent_task_queue.accountable_user_id, agent_task_queue.session_rollout_missing, agent_task_queue.retired_session_id, agent_task_queue.quick_actions_disabled, agent_task_queue.regenerate_quick_actions_for
 `
 
 type CreateAgentTaskParams struct {
 	AgentID              pgtype.UUID   `json:"agent_id"`
 	RuntimeID            pgtype.UUID   `json:"runtime_id"`
-	IssueID              pgtype.UUID   `json:"issue_id"`
 	Priority             int32         `json:"priority"`
 	TriggerCommentID     pgtype.UUID   `json:"trigger_comment_id"`
 	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
@@ -1780,6 +1799,7 @@ type CreateAgentTaskParams struct {
 	RerunOfTaskID        pgtype.UUID   `json:"rerun_of_task_id"`
 	TriggerEvidenceKind  pgtype.Text   `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID   `json:"trigger_evidence_ref_id"`
+	IssueID              pgtype.UUID   `json:"issue_id"`
 }
 
 // head_sha stamps the commit under review into the task's context JSONB so the
@@ -1793,7 +1813,6 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 	row := q.db.QueryRow(ctx, createAgentTask,
 		arg.AgentID,
 		arg.RuntimeID,
-		arg.IssueID,
 		arg.Priority,
 		arg.TriggerCommentID,
 		arg.CoalescedCommentIds,
@@ -1813,6 +1832,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.RerunOfTaskID,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
+		arg.IssueID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -1872,17 +1892,28 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 }
 
 const createDeferredAgentTask = `-- name: CreateDeferredAgentTask :one
+WITH runnable_issue AS (
+    SELECT issue.id
+    FROM issue
+    WHERE issue.id = $16
+      AND NOT (
+        lower(btrim(COALESCE(issue.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(issue.metadata->>'execution_expected', ''))) = 'false'
+      )
+    FOR UPDATE
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at,
     originator_user_id, accountable_user_id, originator_source,
     delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
-VALUES (
-    $1, $2, $3, 'deferred', $4,
+SELECT
+    $1, $2, runnable_issue.id, 'deferred', $3,
+    $4,
     $5,
-    $6,
-    COALESCE($7::boolean, FALSE),
+    COALESCE($6::boolean, FALSE),
+    $7,
     $8,
     $9,
     $10,
@@ -1890,16 +1921,14 @@ VALUES (
     $12,
     $13,
     $14,
-    $15,
-    $16
-)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+    $15
+FROM runnable_issue
+RETURNING agent_task_queue.id, agent_task_queue.agent_id, agent_task_queue.issue_id, agent_task_queue.status, agent_task_queue.priority, agent_task_queue.dispatched_at, agent_task_queue.started_at, agent_task_queue.completed_at, agent_task_queue.result, agent_task_queue.error, agent_task_queue.created_at, agent_task_queue.context, agent_task_queue.runtime_id, agent_task_queue.session_id, agent_task_queue.work_dir, agent_task_queue.trigger_comment_id, agent_task_queue.chat_session_id, agent_task_queue.autopilot_run_id, agent_task_queue.attempt, agent_task_queue.max_attempts, agent_task_queue.parent_task_id, agent_task_queue.failure_reason, agent_task_queue.trigger_summary, agent_task_queue.force_fresh_session, agent_task_queue.is_leader_task, agent_task_queue.wait_reason, agent_task_queue.initiator_user_id, agent_task_queue.handoff_note, agent_task_queue.prepare_lease_expires_at, agent_task_queue.squad_id, agent_task_queue.runtime_mcp_overlay, agent_task_queue.escalation_for_task_id, agent_task_queue.fire_at, agent_task_queue.originator_user_id, agent_task_queue.runtime_connected_apps, agent_task_queue.coalesced_comment_ids, agent_task_queue.delivered_comment_ids, agent_task_queue.chat_input_task_id, agent_task_queue.chat_finalize_deferred_at, agent_task_queue.originator_source, agent_task_queue.delegated_from_task_id, agent_task_queue.retry_of_task_id, agent_task_queue.rerun_of_task_id, agent_task_queue.rule_version_id, agent_task_queue.trigger_evidence_kind, agent_task_queue.trigger_evidence_ref_id, agent_task_queue.accountable_user_id, agent_task_queue.session_rollout_missing, agent_task_queue.retired_session_id, agent_task_queue.quick_actions_disabled, agent_task_queue.regenerate_quick_actions_for
 `
 
 type CreateDeferredAgentTaskParams struct {
 	AgentID              pgtype.UUID        `json:"agent_id"`
 	RuntimeID            pgtype.UUID        `json:"runtime_id"`
-	IssueID              pgtype.UUID        `json:"issue_id"`
 	Priority             int32              `json:"priority"`
 	TriggerCommentID     pgtype.UUID        `json:"trigger_comment_id"`
 	TriggerSummary       pgtype.Text        `json:"trigger_summary"`
@@ -1913,6 +1942,7 @@ type CreateDeferredAgentTaskParams struct {
 	DelegatedFromTaskID  pgtype.UUID        `json:"delegated_from_task_id"`
 	TriggerEvidenceKind  pgtype.Text        `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
 }
 
 // Deferred tasks are inert until PromoteDueDeferredTasksForRuntime flips them
@@ -1926,7 +1956,6 @@ func (q *Queries) CreateDeferredAgentTask(ctx context.Context, arg CreateDeferre
 	row := q.db.QueryRow(ctx, createDeferredAgentTask,
 		arg.AgentID,
 		arg.RuntimeID,
-		arg.IssueID,
 		arg.Priority,
 		arg.TriggerCommentID,
 		arg.TriggerSummary,
@@ -1940,6 +1969,7 @@ func (q *Queries) CreateDeferredAgentTask(ctx context.Context, arg CreateDeferre
 		arg.DelegatedFromTaskID,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
+		arg.IssueID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -1999,6 +2029,16 @@ func (q *Queries) CreateDeferredAgentTask(ctx context.Context, arg CreateDeferre
 }
 
 const createDeferredChannelIssueTask = `-- name: CreateDeferredChannelIssueTask :one
+WITH runnable_issue AS (
+    SELECT issue.id
+    FROM issue
+    WHERE issue.id = $23
+      AND NOT (
+        lower(btrim(COALESCE(issue.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(issue.metadata->>'execution_expected', ''))) = 'false'
+      )
+    FOR UPDATE
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
@@ -2006,18 +2046,19 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at
 )
-VALUES (
-    $1, $2, $3, 'deferred', $4, $5,
-    COALESCE($6::uuid[], '{}'),
-    $7,
+SELECT
+    $1, $2, runnable_issue.id, 'deferred', $3, $4,
+    COALESCE($5::uuid[], '{}'),
+    $6,
+    COALESCE($7::boolean, FALSE),
     COALESCE($8::boolean, FALSE),
-    COALESCE($9::boolean, FALSE),
+    $9,
     $10,
-    $11,
     jsonb_strip_nulls(jsonb_build_object(
-        'head_sha', NULLIF(COALESCE($12::text, ''), ''),
+        'head_sha', NULLIF(COALESCE($11::text, ''), ''),
         'channel_issue_media_pending', TRUE
     )),
+    $12,
     $13,
     $14,
     $15,
@@ -2027,16 +2068,14 @@ VALUES (
     $19,
     $20,
     $21,
-    $22,
-    $23
-)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+    $22
+FROM runnable_issue
+RETURNING agent_task_queue.id, agent_task_queue.agent_id, agent_task_queue.issue_id, agent_task_queue.status, agent_task_queue.priority, agent_task_queue.dispatched_at, agent_task_queue.started_at, agent_task_queue.completed_at, agent_task_queue.result, agent_task_queue.error, agent_task_queue.created_at, agent_task_queue.context, agent_task_queue.runtime_id, agent_task_queue.session_id, agent_task_queue.work_dir, agent_task_queue.trigger_comment_id, agent_task_queue.chat_session_id, agent_task_queue.autopilot_run_id, agent_task_queue.attempt, agent_task_queue.max_attempts, agent_task_queue.parent_task_id, agent_task_queue.failure_reason, agent_task_queue.trigger_summary, agent_task_queue.force_fresh_session, agent_task_queue.is_leader_task, agent_task_queue.wait_reason, agent_task_queue.initiator_user_id, agent_task_queue.handoff_note, agent_task_queue.prepare_lease_expires_at, agent_task_queue.squad_id, agent_task_queue.runtime_mcp_overlay, agent_task_queue.escalation_for_task_id, agent_task_queue.fire_at, agent_task_queue.originator_user_id, agent_task_queue.runtime_connected_apps, agent_task_queue.coalesced_comment_ids, agent_task_queue.delivered_comment_ids, agent_task_queue.chat_input_task_id, agent_task_queue.chat_finalize_deferred_at, agent_task_queue.originator_source, agent_task_queue.delegated_from_task_id, agent_task_queue.retry_of_task_id, agent_task_queue.rerun_of_task_id, agent_task_queue.rule_version_id, agent_task_queue.trigger_evidence_kind, agent_task_queue.trigger_evidence_ref_id, agent_task_queue.accountable_user_id, agent_task_queue.session_rollout_missing, agent_task_queue.retired_session_id, agent_task_queue.quick_actions_disabled, agent_task_queue.regenerate_quick_actions_for
 `
 
 type CreateDeferredChannelIssueTaskParams struct {
 	AgentID              pgtype.UUID        `json:"agent_id"`
 	RuntimeID            pgtype.UUID        `json:"runtime_id"`
-	IssueID              pgtype.UUID        `json:"issue_id"`
 	Priority             int32              `json:"priority"`
 	TriggerCommentID     pgtype.UUID        `json:"trigger_comment_id"`
 	CoalescedCommentIds  []pgtype.UUID      `json:"coalesced_comment_ids"`
@@ -2057,16 +2096,19 @@ type CreateDeferredChannelIssueTaskParams struct {
 	TriggerEvidenceKind  pgtype.Text        `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID        `json:"trigger_evidence_ref_id"`
 	FireAt               pgtype.Timestamptz `json:"fire_at"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
 }
 
 // Channel /issue media resolves after issue creation. Persist the assigned
 // issue task up front for crash safety, but keep it inert until attachment
 // binding settles or the fire_at fallback is promoted by the normal sweeper.
+// The issue can already carry the aggregation-only contract when a non-HTTP
+// create caller supplies metadata in the same transaction, so keep this fresh
+// insertion boundary aligned with CreateAgentTask.
 func (q *Queries) CreateDeferredChannelIssueTask(ctx context.Context, arg CreateDeferredChannelIssueTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createDeferredChannelIssueTask,
 		arg.AgentID,
 		arg.RuntimeID,
-		arg.IssueID,
 		arg.Priority,
 		arg.TriggerCommentID,
 		arg.CoalescedCommentIds,
@@ -2087,6 +2129,7 @@ func (q *Queries) CreateDeferredChannelIssueTask(ctx context.Context, arg Create
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
 		arg.FireAt,
+		arg.IssueID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -2285,8 +2328,16 @@ SELECT
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, $2
 FROM agent_task_queue p
+LEFT JOIN issue i ON i.id = p.issue_id
 WHERE p.id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+  AND (
+    p.issue_id IS NULL
+    OR NOT (
+      lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+      AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+    )
+  )
+RETURNING agent_task_queue.id, agent_task_queue.agent_id, agent_task_queue.issue_id, agent_task_queue.status, agent_task_queue.priority, agent_task_queue.dispatched_at, agent_task_queue.started_at, agent_task_queue.completed_at, agent_task_queue.result, agent_task_queue.error, agent_task_queue.created_at, agent_task_queue.context, agent_task_queue.runtime_id, agent_task_queue.session_id, agent_task_queue.work_dir, agent_task_queue.trigger_comment_id, agent_task_queue.chat_session_id, agent_task_queue.autopilot_run_id, agent_task_queue.attempt, agent_task_queue.max_attempts, agent_task_queue.parent_task_id, agent_task_queue.failure_reason, agent_task_queue.trigger_summary, agent_task_queue.force_fresh_session, agent_task_queue.is_leader_task, agent_task_queue.wait_reason, agent_task_queue.initiator_user_id, agent_task_queue.handoff_note, agent_task_queue.prepare_lease_expires_at, agent_task_queue.squad_id, agent_task_queue.runtime_mcp_overlay, agent_task_queue.escalation_for_task_id, agent_task_queue.fire_at, agent_task_queue.originator_user_id, agent_task_queue.runtime_connected_apps, agent_task_queue.coalesced_comment_ids, agent_task_queue.delivered_comment_ids, agent_task_queue.chat_input_task_id, agent_task_queue.chat_finalize_deferred_at, agent_task_queue.originator_source, agent_task_queue.delegated_from_task_id, agent_task_queue.retry_of_task_id, agent_task_queue.rerun_of_task_id, agent_task_queue.rule_version_id, agent_task_queue.trigger_evidence_kind, agent_task_queue.trigger_evidence_ref_id, agent_task_queue.accountable_user_id, agent_task_queue.session_rollout_missing, agent_task_queue.retired_session_id, agent_task_queue.quick_actions_disabled, agent_task_queue.regenerate_quick_actions_for
 `
 
 type CreateRetryTaskParams struct {
@@ -4493,9 +4544,16 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue atq
+WHERE atq.runtime_id = $1
+  AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = atq.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC
 `
 
 // Returns rows the runtime can attempt to claim. Status is restricted to
@@ -4505,7 +4563,9 @@ ORDER BY priority DESC, created_at ASC
 // the result with rows that always lose the per-(issue, agent) race in
 // ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 // runtime is busy on a long-running task. Backed by the partial index
-// idx_agent_task_queue_claim_candidates so the warm path is cheap.
+// idx_agent_task_queue_claim_candidates so the warm path is cheap. Exclude rows
+// whose issue has since become aggregation-only so idle daemons can cache a truly
+// empty runtime instead of repeatedly attempting an unclaimable row.
 func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, runtimeID)
 	if err != nil {
@@ -4579,9 +4639,16 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 }
 
 const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesByRuntimes :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
-WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue atq
+WHERE atq.runtime_id = ANY($1::uuid[])
+  AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = atq.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC
 `
 
 // Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
@@ -5442,12 +5509,22 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 const promoteDeferredChannelIssueTask = `-- name: PromoteDeferredChannelIssueTask :one
 UPDATE agent_task_queue
 SET status = 'queued', fire_at = NULL
-WHERE id = $1 AND issue_id IS NOT NULL AND status = 'deferred'
+WHERE agent_task_queue.id = $1
+  AND agent_task_queue.issue_id IS NOT NULL
+  AND agent_task_queue.status = 'deferred'
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
 `
 
 // Early promotion is idempotent at the service layer: a task already promoted
-// by the fire_at sweeper no longer matches and is treated as settled.
+// by the fire_at sweeper no longer matches and is treated as settled. Re-check
+// current issue metadata so media resolution cannot wake a task admitted before
+// its issue became an aggregation-only parent orchestrator.
 func (q *Queries) PromoteDeferredChannelIssueTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, promoteDeferredChannelIssueTask, id)
 	var i AgentTaskQueue
@@ -5513,9 +5590,17 @@ SET status = 'queued'
 WHERE runtime_id = $1
   AND status = 'deferred'
   AND fire_at <= now()
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
 `
 
+// Re-check current issue metadata because suppression may be applied after the
+// inert fallback was created but before its fire_at deadline.
 func (q *Queries) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, promoteDueDeferredTasksForRuntime, runtimeID)
 	if err != nil {
@@ -5594,6 +5679,12 @@ SET status = 'queued'
 WHERE runtime_id = ANY($1::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
 `
 
@@ -5754,6 +5845,12 @@ WHERE id = (
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = atq.issue_id
+            AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+            AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+      )
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
@@ -5772,6 +5869,7 @@ type ReclaimStaleDispatchedTaskForRuntimeParams struct {
 // Re-delivers a task whose previous claim likely succeeded server-side but
 // whose response never reached the daemon. The task is still in `dispatched`
 // with no `started_at`, so the daemon has not acknowledged it via StartTask.
+// Suppressed issue tasks are not re-delivered after metadata changes.
 // Refresh dispatched_at so the server-side dispatch timeout measures from the
 // recovered delivery attempt.
 func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg ReclaimStaleDispatchedTaskForRuntimeParams) (AgentTaskQueue, error) {
@@ -5842,6 +5940,12 @@ WHERE id IN (
     WHERE atq.runtime_id = ANY($2::uuid[])
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = atq.issue_id
+            AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+            AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+      )
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
@@ -6361,15 +6465,24 @@ SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
-WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
+WHERE agent_task_queue.id = $1
+  AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
+  AND NOT EXISTS (
+      SELECT 1 FROM issue i
+      WHERE i.id = agent_task_queue.issue_id
+        AND lower(btrim(COALESCE(i.metadata->>'workflow_role', ''))) = 'parent_orchestrator'
+        AND lower(btrim(COALESCE(i.metadata->>'execution_expected', ''))) = 'false'
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
 `
 
 // Transitions a task to running. Accepts either 'dispatched' (the normal
 // claim → run flow) or 'waiting_local_directory' (the daemon held the row in
 // a wait state while another task owned the local_directory path lock; once
-// the lock was acquired the daemon flips here). wait_reason is cleared on
-// the transition so a future read can't conflate "currently waiting" with
+// the lock was acquired the daemon flips here). Re-check current issue metadata
+// at this final execution boundary: an issue can become aggregation-only after
+// claim but before the daemon acknowledges start. wait_reason is cleared on the
+// transition so a future read can't conflate "currently waiting" with
 // "previously waited".
 func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, startAgentTask, id)

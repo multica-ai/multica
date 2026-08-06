@@ -213,6 +213,10 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
+	if errors.Is(err, service.ErrIssueExecutionSuppressed) {
+		h.writeDispatchBlocked(w, http.StatusConflict, ReasonExecutionSuppressed)
+		return
+	}
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

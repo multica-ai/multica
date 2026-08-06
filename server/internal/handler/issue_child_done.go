@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -584,6 +585,9 @@ func sanitizeMentionLabel(name string) string {
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
 func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment) {
+	if util.IssueExecutionSuppressed(parent.Metadata) {
+		return
+	}
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -88,6 +89,9 @@ func allowAllAgents(db.Agent) bool { return true }
 //     same unique index, so the assignee still ends up with one pending run.
 func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput, probe IssueTriggerProbe) (IssueRunTrigger, bool) {
 	issue := in.Issue
+	if util.IssueExecutionSuppressed(issue.Metadata) {
+		return IssueRunTrigger{}, false
+	}
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return IssueRunTrigger{}, false
 	}
