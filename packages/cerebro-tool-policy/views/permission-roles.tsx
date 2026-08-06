@@ -11,6 +11,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
@@ -374,17 +375,27 @@ function RoleEditor({
   const [permissions, setPermissions] = useState<RolePermissions>(role?.permissions ?? {});
   const saving = create.isPending || update.isPending;
 
+  const allPresentedRows = useMemo(
+    () => presentCapabilityRows(catalog.data ?? []),
+    [catalog.data],
+  );
   const presentedRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return presentCapabilityRows(catalog.data ?? []).filter((presented) =>
-      !needle ||
-      `${presented.title} ${presented.rows
+    return allPresentedRows.filter((presented) => {
+      const matchesSearch = `${presented.title} ${presented.rows
         .map((row) => `${row.title} ${row.tool_key} ${row.category}`)
         .join(" ")}`
         .toLowerCase()
-        .includes(needle),
-    );
-  }, [catalog.data, search]);
+        .includes(needle);
+      const hasOverride = presented.rows.some(
+        (row) => (permissions[row.tool_key] ?? []).length > 0,
+      );
+      return needle ? matchesSearch : hasOverride;
+    });
+  }, [allPresentedRows, permissions, search]);
+  const overrideCount = allPresentedRows.filter((presented) =>
+    presented.rows.some((row) => (permissions[row.tool_key] ?? []).length > 0),
+  ).length;
 
   async function save() {
     if (!name.trim()) return;
@@ -396,15 +407,15 @@ function RoleEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-3xl flex-col overflow-hidden sm:max-h-[85vh]">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden sm:max-h-[85vh] sm:max-w-3xl">
+        <DialogHeader className="shrink-0 pr-8">
           <DialogTitle>{role ? `Edit ${role.name}` : "Create profile"}</DialogTitle>
           <DialogDescription>
             Save one shared set of access rules. Every assigned agent or member
             receives the same version through the permission engine.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid shrink-0 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="role-name">Name</Label>
             <Input id="role-name" value={name} onChange={(event) => setName(event.target.value)} />
@@ -414,15 +425,46 @@ function RoleEditor({
             <Textarea id="role-description" rows={1} value={description} onChange={(event) => setDescription(event.target.value)} />
           </div>
         </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+        <div className="min-h-0 flex-1 space-y-3 overflow-hidden">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-medium">Permission overrides</h3>
+              <p className="text-xs text-muted-foreground">
+                All other permissions inherit the workspace&apos;s current rules.
+              </p>
+            </div>
+            <Badge variant="secondary">
+              {overrideCount} {overrideCount === 1 ? "override" : "overrides"}
+            </Badge>
+          </div>
           <Input
             aria-label="Search permissions"
             placeholder="Search permissions"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <div className="max-h-[48vh] overflow-y-auto rounded-md border">
-            {presentedRows.map((presented) => {
+          <div className="min-h-32 max-h-[42vh] overflow-y-auto rounded-md border">
+            {catalog.isLoading ? (
+              <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading permissions…
+              </div>
+            ) : catalog.isError ? (
+              <p className="p-6 text-center text-sm text-destructive">
+                Permissions could not be loaded.
+              </p>
+            ) : presentedRows.length === 0 ? (
+              <div className="flex min-h-32 flex-col items-center justify-center px-6 text-center">
+                <ShieldCheck className="mb-2 h-5 w-5 text-muted-foreground" />
+                <p className="text-sm font-medium">
+                  {search.trim() ? "No matching permissions." : "No permission overrides yet."}
+                </p>
+                <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+                  {search.trim()
+                    ? "Try another permission name or category."
+                    : "Search above to add an Allow, Ask or Deny decision."}
+                </p>
+              </div>
+            ) : presentedRows.map((presented) => {
               const decisions = presented.rows.map((row) =>
                 capabilityWideDecision(permissions[row.tool_key]),
               );
@@ -479,13 +521,13 @@ function RoleEditor({
             })}
           </div>
         </div>
-        <div className="flex justify-end gap-2">
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button disabled={!name.trim() || saving} onClick={save}>
             {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
             Save version
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

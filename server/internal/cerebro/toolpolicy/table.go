@@ -61,15 +61,24 @@ type TableRow struct {
 	// Source records how the capability was discovered (e.g. "scan", "report").
 	Source string
 	// ManagedExternally is true for platform capabilities whose enforcement point
-	// is not the tool-policy gate (membership ACL, daemon token, etc.). Always
-	// false for reported runtime tools and repo rows. Shown so the admin sees the
-	// row is informational, not gated (FIR-2594).
+	// is not the tool-policy gate. Always false for reported runtime tools and
+	// repo rows. After FIR-4220 only the machine-intake boundaries remain marked;
+	// every other platform row is policy-enforced.
 	ManagedExternally bool
 	// ExternalSecurityOwner names the live security boundary that enforces a
 	// managed-external platform capability. It is empty for policy-gated rows.
 	// Returning it with the row prevents Settings from presenting an advisory
 	// decision without naming the system that actually decides access.
 	ExternalSecurityOwner string
+	// WorkspaceIntakeSwitch is true for a managed-external machine-intake
+	// boundary whose workspace-layer row IS read at the intake point as an
+	// off-switch (FIR-4220): the UI renders a workspace-layer-only decision
+	// control instead of a fully read-only row.
+	WorkspaceIntakeSwitch bool
+	// CallableIdentities lists the exact runtime/CLI/MCP callables represented by
+	// a platform permission family. Empty means the row is not a platform
+	// callable family; consumers must never infer ToolKey as a broad grant.
+	CallableIdentities []string
 	// Layers holds the explicit setting at each layer for this context. A layer
 	// absent from the map carries no explicit choice (Inherit). LayerGroup, when
 	// present, is the combined value across the context's groups (most permissive
@@ -443,7 +452,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		return nil, err
 	}
 
-	// Append the code-owned platform-capability rows (FIR-2594). Like repo rows
+	// Append the code-owned platform-capability rows (FIR-4220). Like repo rows
 	// these are not in the capability register, so the query above never emits
 	// them; they are capability-wide (empty ResourcePattern) and carry the
 	// "platform" source. Gated by IncludePlatform so an unflagged workspace lists

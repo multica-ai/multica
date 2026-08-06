@@ -125,8 +125,12 @@ export function resolveReleaseSigning(env, platform) {
   if (missing.length === 0) {
     return { environment: env, missing, signed: true };
   }
+  const environment = { ...env };
+  for (const key of required) {
+    delete environment[key];
+  }
   return {
-    environment: { ...env, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+    environment: { ...environment, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
     missing,
     signed: false,
   };

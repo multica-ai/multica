@@ -20,6 +20,12 @@ SELECT artifact_id, owner_id, visibility, pinned, pinned_at, author_codes, creat
 FROM cerebro_note
 WHERE artifact_id = $1;
 
+-- name: GetNoteWorkspaceID :one
+-- The live-collaboration WebSocket authenticates itself outside workspace
+-- middleware, so its authoritative feature-flag gate resolves the workspace
+-- from the note rather than trusting a caller-supplied workspace id.
+SELECT workspace_id FROM artifact WHERE id = $1;
+
 -- name: SetNoteAuthorCodes :exec
 -- FIR-2810: per-note toggle — stamp the writer's member code on every line.
 UPDATE cerebro_note

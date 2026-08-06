@@ -1769,14 +1769,9 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	for _, tool := range customerServiceMCPTools() {
 		r.Register(tool)
 	}
-	// CEREBRO-PATCH(register-report-loop-check): FIR-2283 — register ingress tool
-	// only when the loop store is wired; nil store = tool absent, gate stays safe.
-	if tctx.LoopStore != nil {
-		r.Register(&FirtalReportLoopCheckTool{store: tctx.LoopStore, tctx: tctx})
-		r.Register(&FirtalReportLoopJudgeTool{store: tctx.LoopStore, tctx: tctx})
-		r.Register(&FirtalReportLoopHumanTool{store: tctx.LoopStore, tctx: tctx})
-		if tctx.LoopStep != nil {
-			r.Register(&FirtalOpenLoopStepTool{store: tctx.LoopStore, capability: *tctx.LoopStep})
-		}
+	// CEREBRO-PATCH(register-open-loop-step): Chain v2 exposes only its trusted
+	// step successor tool. The retired report_loop_* gate ingress is absent.
+	if tctx.LoopStore != nil && tctx.LoopStep != nil {
+		r.Register(&FirtalOpenLoopStepTool{store: tctx.LoopStore, capability: *tctx.LoopStep})
 	}
 }

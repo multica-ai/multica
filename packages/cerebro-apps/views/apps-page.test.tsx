@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const push = vi.fn();
 const listApps = vi.fn();
 const retryAppDeployment = vi.fn();
+const installAllergenFormatter = vi.fn();
 
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => true }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws-1", slug: "firtal" }) }));
@@ -16,7 +17,11 @@ vi.mock("@multica/views/navigation", () => ({
     <a href={href} onClick={(event) => { event.preventDefault(); push(href); }} {...props}>{children}</a>
   ),
 }));
-vi.mock("../core/api", () => ({ listApps: () => listApps(), retryAppDeployment: (...args: unknown[]) => retryAppDeployment(...args), installAllergenFormatter: vi.fn() }));
+vi.mock("../core/api", () => ({
+  listApps: () => listApps(),
+  retryAppDeployment: (...args: unknown[]) => retryAppDeployment(...args),
+  installAllergenFormatter: (...args: unknown[]) => installAllergenFormatter(...args),
+}));
 
 import { AppsPage } from "./apps-page";
 
@@ -26,7 +31,9 @@ describe("AppsPage", () => {
     push.mockReset();
     listApps.mockReset();
     retryAppDeployment.mockReset();
+    installAllergenFormatter.mockReset();
     retryAppDeployment.mockResolvedValue(undefined);
+    installAllergenFormatter.mockResolvedValue({ id: "app-1" });
     listApps.mockResolvedValue({ apps: [], can_manage: true });
   });
 
@@ -80,6 +87,25 @@ describe("AppsPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Retry Allergen Formatter deployment" }));
 
     expect(retryAppDeployment).toHaveBeenCalledWith("app-1", "1.0.0", "firtal");
+  });
+
+  it("updates an existing managed Allergen Formatter before it is opened again", async () => {
+    const outdatedApp = {
+      id: "app-1", slug: "allergen-formatter", name: "Allergen Formatter", description: "Format ingredients",
+      icon: "blocks", folder: "Operations", current_version: "1.0.2", status: "published" as const,
+      owner: "Jesper Hvejsel", deployment_version: "1.0.2", deployment_status: "ready" as const,
+      health: "healthy" as const, builtin_update_available: true,
+    };
+    listApps.mockResolvedValue({
+      can_manage: true,
+      apps: [{ ...outdatedApp, deployment_version: "1.0.4", deployment_status: "provisioning", health: "provisioning", builtin_update_available: false }],
+    });
+    listApps.mockResolvedValueOnce({ can_manage: true, apps: [outdatedApp] });
+
+    render(<AppsPage />);
+
+    await waitFor(() => expect(installAllergenFormatter).toHaveBeenCalledWith("firtal"));
+    expect((await screen.findAllByText("Provisioning")).length).toBeGreaterThan(0);
   });
 
   it("shows a stable loading state while the catalog is being fetched", () => {

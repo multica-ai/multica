@@ -16,6 +16,7 @@ import {
   clearToolPolicy,
   fetchToolPolicyTable,
   isLockedFromElsewhere,
+  isRowSettable,
   permissionDescription,
   setToolPolicy,
 } from "./tool-policy";
@@ -328,5 +329,48 @@ describe("isLockedFromElsewhere", () => {
     expect(isLockedFromElsewhere(floor, "agent")).toBe(true);
     // The deciding layer editing itself is not locked.
     expect(isLockedFromElsewhere(floor, "workspace")).toBe(false);
+  });
+});
+
+describe("isRowSettable (FIR-4220)", () => {
+  const base: ToolPolicyRow = {
+    tool_key: "autopilot_webhook",
+    resource_pattern: "",
+    title: "Autopilot inbound webhook",
+    category: "Autopilots",
+    source: "platform",
+    managed_externally: false,
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: null },
+    conditions: { workspace: null, runtime: null, agent: null, user: null, system: null },
+    effective: { setting: "allow", decided_by: "", capped_by: "", reason: "", openable: true },
+    capped_by_groups: [],
+  };
+
+  it("keeps ordinary rows settable at every layer", () => {
+    for (const layer of ["workspace", "runtime", "agent", "group", "user", "system"] as const) {
+      expect(isRowSettable(base, layer)).toBe(true);
+    }
+  });
+
+  it("keeps a plain managed-external row read-only at every layer", () => {
+    const row = { ...base, managed_externally: true };
+    for (const layer of ["workspace", "runtime", "agent", "group", "user", "system"] as const) {
+      expect(isRowSettable(row, layer)).toBe(false);
+    }
+  });
+
+  it("opens an intake off-switch at the workspace layer only", () => {
+    const row = { ...base, managed_externally: true, workspace_intake_switch: true };
+    expect(isRowSettable(row, "workspace")).toBe(true);
+    for (const layer of ["runtime", "agent", "group", "user", "system"] as const) {
+      expect(isRowSettable(row, layer)).toBe(false);
+    }
+  });
+
+  it("treats a missing workspace_intake_switch (older backend) as read-only", () => {
+    // Mirrors the zod default: an older backend omitting the field must render
+    // the safer fully read-only row, never offer a write the server rejects.
+    const row = { ...base, managed_externally: true, workspace_intake_switch: undefined };
+    expect(isRowSettable(row, "workspace")).toBe(false);
   });
 });

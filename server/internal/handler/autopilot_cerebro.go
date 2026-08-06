@@ -113,6 +113,13 @@ func (h *Handler) cerebroApplyScopeOnCreate(w http.ResponseWriter, r *http.Reque
 		return autopilot, true
 	}
 
+	// FIR-4220: choosing a non-default scope is the autopilot_scope platform
+	// capability. Agent actors need the tool-policy engine's verdict; members
+	// keep the existing scope validation below as their gate.
+	if !h.allowPlatformCapability(w, r, autopilotScopePlatformAction) {
+		return autopilot, false
+	}
+
 	var ownerUUID, groupUUID pgtype.UUID
 	if req.OwnerUserID != nil && *req.OwnerUserID != "" {
 		u, ok := parseUUIDOrBadRequest(w, *req.OwnerUserID, "owner_user_id")

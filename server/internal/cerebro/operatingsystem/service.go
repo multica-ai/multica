@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	notetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -49,14 +50,19 @@ type ProjectReader interface {
 	GetAgentInWorkspace(context.Context, db.GetAgentInWorkspaceParams) (db.Agent, error)
 }
 
+type TxStarter interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 type Service struct {
 	queries  *cerebrodb.Queries
 	projects ProjectReader
+	tx       TxStarter
 	now      func() time.Time
 }
 
-func NewService(queries *cerebrodb.Queries, projects ProjectReader) *Service {
-	return &Service{queries: queries, projects: projects, now: time.Now}
+func NewService(queries *cerebrodb.Queries, projects ProjectReader, tx TxStarter) *Service {
+	return &Service{queries: queries, projects: projects, tx: tx, now: time.Now}
 }
 
 func DefaultTerminology() Terminology {
@@ -233,8 +239,35 @@ func ValidateVisionPlanSectionInput(input VisionPlanSectionInput) error {
 	if strings.TrimSpace(input.Name) == "" {
 		return errors.New("name is required")
 	}
-	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" {
-		return errors.New("section_type must be list, structured, or process")
+	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" && input.SectionType != "goals" {
+		return errors.New("section_type must be list, structured, process, or goals")
+	}
+	if _, err := util.ParseUUID(input.PageID); err != nil {
+		return errors.New("page_id must be a UUID")
+	}
+	if input.RowIndex < 0 || input.RowIndex > 11 {
+		return errors.New("row_index must be between 0 and 11")
+	}
+	if input.ColumnIndex < 0 || input.ColumnIndex > 3 {
+		return errors.New("column_index must be between 0 and 3")
+	}
+	return nil
+}
+
+func ValidateVisionPlanPageInput(input VisionPlanPageInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if len(input.RowColumnCounts) == 0 {
+		return errors.New("a page needs at least one row")
+	}
+	if len(input.RowColumnCounts) > 12 {
+		return errors.New("a page holds at most 12 rows")
+	}
+	for _, count := range input.RowColumnCounts {
+		if count < 1 || count > 4 {
+			return errors.New("every row must have between 1 and 4 columns")
+		}
 	}
 	return nil
 }
@@ -293,16 +326,19 @@ func ValidateOrgChartSeatInput(input OrgChartSeatInput) error {
 	if strings.TrimSpace(input.Name) == "" {
 		return errors.New("name is required")
 	}
-	if (input.OwnerType == "") != (input.OwnerID == "") {
-		return errors.New("owner_type and owner_id must be provided together")
-	}
-	if input.OwnerType != "" && input.OwnerType != "member" && input.OwnerType != "agent" {
-		return errors.New("owner_type must be member or agent")
-	}
-	if input.OwnerID != "" {
-		if _, err := util.ParseUUID(input.OwnerID); err != nil {
-			return errors.New("owner_id must be a UUID")
+	seenOwners := make(map[string]bool, len(input.Owners))
+	for _, owner := range input.Owners {
+		if owner.Type != "member" && owner.Type != "agent" {
+			return errors.New("owner type must be member or agent")
 		}
+		if _, err := util.ParseUUID(owner.ID); err != nil {
+			return errors.New("owner id must be a UUID")
+		}
+		key := owner.Type + ":" + owner.ID
+		if seenOwners[key] {
+			return errors.New("the same owner is listed twice")
+		}
+		seenOwners[key] = true
 	}
 	if input.ParentID != "" {
 		if _, err := util.ParseUUID(input.ParentID); err != nil {
@@ -555,18 +591,65 @@ func (s *Service) meetingNoteTypes(ctx context.Context, workspaceID pgtype.UUID)
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	out := make([]MeetingNoteTypeResponse, 0, len(rows))
 	for _, row := range rows {
 		if !row.Enabled || row.CadenceUnit == "manual" {
 			continue
 		}
-		out = append(out, MeetingNoteTypeResponse{
-			ID: util.UUIDToString(row.ID), Name: row.Name,
+		item := MeetingNoteTypeResponse{
+			ID: util.UUIDToString(row.ID), Name: row.Name, Icon: row.Icon,
 			CadenceUnit: row.CadenceUnit, CadenceCount: row.CadenceCount, Enabled: row.Enabled,
-			CurrentNoteID: util.UUIDToString(row.RunningDocArtifactID),
-		})
+			CurrentNoteID: s.currentNoteLink(ctx, row),
+		}
+		if row.AnchorWeekday.Valid {
+			v := row.AnchorWeekday.Int16
+			item.AnchorWeekday = &v
+		}
+		if row.AnchorWeekOfMonth.Valid {
+			v := row.AnchorWeekOfMonth.Int16
+			item.AnchorWeekOfMonth = &v
+		}
+		upcoming := notetypes.Upcoming(row, now, 4)
+		dates := make([]string, 0, len(upcoming))
+		for _, d := range upcoming {
+			dates = append(dates, d.Format("2006-01-02"))
+		}
+		if len(dates) > 0 {
+			item.NextMeetingDate = dates[0]
+			item.UpcomingDates = dates
+		}
+		yearAhead := notetypes.UpcomingUntil(row, now, now.AddDate(1, 0, 0), 60)
+		year := make([]string, 0, len(yearAhead))
+		for _, d := range yearAhead {
+			year = append(year, d.Format("2006-01-02"))
+		}
+		if len(year) > 0 {
+			item.YearDates = year
+		}
+		if len(row.Participants) > 0 {
+			var refs []MeetingParticipant
+			if err := json.Unmarshal(row.Participants, &refs); err == nil {
+				item.Participants = refs
+			}
+		}
+		out = append(out, item)
 	}
 	return out, nil
+}
+
+// currentNoteLink resolves the note to open from the planner: the single
+// rolling document for running_doc types, otherwise the newest materialised
+// note for new_note types. Empty when the type has never materialised a note.
+func (s *Service) currentNoteLink(ctx context.Context, row cerebrodb.CerebroNoteType) string {
+	if row.RunningDocArtifactID.Valid {
+		return util.UUIDToString(row.RunningDocArtifactID)
+	}
+	id, err := s.queries.GetLatestNoteTypeArtifact(ctx, row.ID)
+	if err != nil || !id.Valid {
+		return ""
+	}
+	return util.UUIDToString(id)
 }
 
 func applyMeetingNoteType(response *MeetingConfigResponse, noteTypes []MeetingNoteTypeResponse) {
@@ -701,12 +784,59 @@ func responsibilities(raw []byte) []string {
 	return out
 }
 
-func orgSeatResponse(id, workspaceID, parentID pgtype.UUID, name string, rawResponsibilities []byte, ownerType pgtype.Text, ownerID pgtype.UUID, ownerName string, position int32) OrgChartSeatResponse {
+func orgSeatResponse(id, workspaceID, parentID pgtype.UUID, name string, rawResponsibilities []byte, owners []OrgChartSeatOwnerResponse, position int32) OrgChartSeatResponse {
+	if owners == nil {
+		owners = []OrgChartSeatOwnerResponse{}
+	}
 	return OrgChartSeatResponse{
 		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), ParentID: nullableUUIDString(parentID),
-		Name: name, Responsibilities: responsibilities(rawResponsibilities), OwnerType: ownerType.String,
-		OwnerID: nullableUUIDString(ownerID), OwnerName: ownerName, Vacant: !ownerID.Valid, Position: position,
+		Name: name, Responsibilities: responsibilities(rawResponsibilities),
+		Owners: owners, Vacant: len(owners) == 0, Position: position,
 	}
+}
+
+// Every seat's owners in one read, keyed by seat, so listing the chart stays a
+// two-query operation no matter how many seats hold several people.
+func (s *Service) orgChartOwnersBySeat(ctx context.Context, workspaceID pgtype.UUID) (map[string][]OrgChartSeatOwnerResponse, error) {
+	rows, err := s.queries.ListOrgChartSeatOwners(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	bySeat := make(map[string][]OrgChartSeatOwnerResponse, len(rows))
+	for _, row := range rows {
+		seatID := util.UUIDToString(row.SeatID)
+		bySeat[seatID] = append(bySeat[seatID], OrgChartSeatOwnerResponse{
+			Type: row.OwnerType, ID: util.UUIDToString(row.OwnerID), Name: row.OwnerName,
+		})
+	}
+	return bySeat, nil
+}
+
+// Ownership is replaced wholesale on every save: the input list is the seat's
+// complete set of holders, in the order the caller sent them.
+func (s *Service) replaceOrgChartSeatOwners(ctx context.Context, workspaceID, seatID pgtype.UUID, owners []OrgChartSeatOwnerInput) ([]OrgChartSeatOwnerResponse, error) {
+	if err := s.queries.DeleteOrgChartSeatOwners(ctx, cerebrodb.DeleteOrgChartSeatOwnersParams{SeatID: seatID, WorkspaceID: workspaceID}); err != nil {
+		return nil, err
+	}
+	for index, owner := range owners {
+		ownerID, err := util.ParseUUID(owner.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, owner.Type, ownerID, workspaceID); err != nil {
+			return nil, err
+		}
+		if err := s.queries.CreateOrgChartSeatOwner(ctx, cerebrodb.CreateOrgChartSeatOwnerParams{
+			SeatID: seatID, WorkspaceID: workspaceID, OwnerType: owner.Type, OwnerID: ownerID, Position: int32(index),
+		}); err != nil {
+			return nil, err
+		}
+	}
+	bySeat, err := s.orgChartOwnersBySeat(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return bySeat[util.UUIDToString(seatID)], nil
 }
 
 func nullableUUIDString(id pgtype.UUID) string {
@@ -758,9 +888,13 @@ func (s *Service) ListOrgChartSeats(ctx context.Context, workspaceID pgtype.UUID
 	if err != nil {
 		return nil, err
 	}
+	ownersBySeat, err := s.orgChartOwnersBySeat(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]OrgChartSeatResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, row.OwnerType, row.OwnerID, row.OwnerName, row.Position))
+		out = append(out, orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, ownersBySeat[util.UUIDToString(row.ID)], row.Position))
 	}
 	return out, nil
 }
@@ -779,15 +913,6 @@ func (s *Service) saveOrgChartSeat(ctx context.Context, workspaceID, seatID pgty
 	if err := s.validateOrgChartParent(ctx, workspaceID, seatID, parentID); err != nil {
 		return OrgChartSeatResponse{}, err
 	}
-	ownerID := pgtype.UUID{}
-	ownerType := pgtype.Text{}
-	if input.OwnerID != "" {
-		ownerID, _ = util.ParseUUID(input.OwnerID)
-		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
-			return OrgChartSeatResponse{}, err
-		}
-		ownerType = pgtype.Text{String: input.OwnerType, Valid: true}
-	}
 	rawResponsibilities, err := json.Marshal(responsibilitiesFromInput(input.Responsibilities))
 	if err != nil {
 		return OrgChartSeatResponse{}, err
@@ -795,21 +920,29 @@ func (s *Service) saveOrgChartSeat(ctx context.Context, workspaceID, seatID pgty
 	if seatID.Valid {
 		row, err := s.queries.UpdateOrgChartSeat(ctx, cerebrodb.UpdateOrgChartSeatParams{
 			ID: seatID, WorkspaceID: workspaceID, ParentID: parentID, Name: strings.TrimSpace(input.Name),
-			Responsibilities: rawResponsibilities, OwnerType: ownerType, OwnerID: ownerID, Position: input.Position,
+			Responsibilities: rawResponsibilities, Position: input.Position,
 		})
 		if err != nil {
 			return OrgChartSeatResponse{}, err
 		}
-		return orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, row.OwnerType, row.OwnerID, row.OwnerName, row.Position), nil
+		owners, err := s.replaceOrgChartSeatOwners(ctx, workspaceID, row.ID, input.Owners)
+		if err != nil {
+			return OrgChartSeatResponse{}, err
+		}
+		return orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, owners, row.Position), nil
 	}
 	row, err := s.queries.CreateOrgChartSeat(ctx, cerebrodb.CreateOrgChartSeatParams{
 		WorkspaceID: workspaceID, ParentID: parentID, Name: strings.TrimSpace(input.Name),
-		Responsibilities: rawResponsibilities, OwnerType: ownerType, OwnerID: ownerID, Position: input.Position,
+		Responsibilities: rawResponsibilities, Position: input.Position,
 	})
 	if err != nil {
 		return OrgChartSeatResponse{}, err
 	}
-	return orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, row.OwnerType, row.OwnerID, row.OwnerName, row.Position), nil
+	owners, err := s.replaceOrgChartSeatOwners(ctx, workspaceID, row.ID, input.Owners)
+	if err != nil {
+		return OrgChartSeatResponse{}, err
+	}
+	return orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, owners, row.Position), nil
 }
 
 func responsibilitiesFromInput(values []string) []string {
@@ -851,6 +984,22 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 	if err := s.queries.AssignLegacyVisionPlanItems(ctx, workspaceID); err != nil {
 		return VisionPlanResponse{}, err
 	}
+	if err := s.queries.EnsureDefaultVisionPlanPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureDefaultVisionPlanGoalsBlock(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignDefaultVisionPlanSectionPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignRemainingVisionPlanSectionPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	pageRows, err := s.queries.ListVisionPlanPages(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
 	sectionRows, err := s.queries.ListVisionPlanSections(ctx, workspaceID)
 	if err != nil {
 		return VisionPlanResponse{}, err
@@ -864,11 +1013,24 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 		return VisionPlanResponse{}, err
 	}
 
+	linkRows, err := s.queries.ListVisionPlanObjectLinks(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+
 	connections := make(map[string][]VisionPlanGoalConnection)
 	for _, row := range connectionRows {
 		itemID := util.UUIDToString(row.StrategyItemID)
 		connections[itemID] = append(connections[itemID], VisionPlanGoalConnection{
 			ConnectionID: util.UUIDToString(row.ID), GoalID: util.UUIDToString(row.GoalID),
+		})
+	}
+	links := make(map[string][]VisionPlanObjectLink)
+	for _, row := range linkRows {
+		itemID := util.UUIDToString(row.StrategyItemID)
+		links[itemID] = append(links[itemID], VisionPlanObjectLink{
+			ConnectionID: util.UUIDToString(row.ID), TargetType: row.TargetType,
+			TargetID: util.UUIDToString(row.TargetID), Title: row.TargetTitle, Identifier: row.TargetIdentifier,
 		})
 	}
 	items := make(map[string][]VisionPlanItemResponse)
@@ -882,18 +1044,76 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 		if response.GoalConnections == nil {
 			response.GoalConnections = []VisionPlanGoalConnection{}
 		}
+		response.Links = links[response.ID]
+		if response.Links == nil {
+			response.Links = []VisionPlanObjectLink{}
+		}
 		items[response.SectionID] = append(items[response.SectionID], response)
 	}
 	sections := make([]VisionPlanSectionResponse, 0, len(sectionRows))
 	for _, row := range sectionRows {
-		section := visionPlanSectionResponse(row)
+		section := visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.RowIndex, row.ColumnIndex, row.CreatedAt, row.UpdatedAt)
 		section.Items = items[section.ID]
 		if section.Items == nil {
 			section.Items = []VisionPlanItemResponse{}
 		}
 		sections = append(sections, section)
 	}
-	return VisionPlanResponse{Sections: sections}, nil
+	pages := make([]VisionPlanPageResponse, 0, len(pageRows))
+	for _, row := range pageRows {
+		pages = append(pages, visionPlanPageResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.RowColumnCounts, row.Position, row.CreatedAt, row.UpdatedAt))
+	}
+	return VisionPlanResponse{Pages: pages, Sections: sections}, nil
+}
+
+func (s *Service) CreateVisionPlanPage(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	if err := ValidateVisionPlanPageInput(input); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	rawRowColumnCounts, err := json.Marshal(input.RowColumnCounts)
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	row, err := s.queries.CreateVisionPlanPage(ctx, cerebrodb.CreateVisionPlanPageParams{
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), RowColumnCounts: rawRowColumnCounts, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	return visionPlanPageResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.RowColumnCounts, row.Position, row.CreatedAt, row.UpdatedAt), nil
+}
+
+func (s *Service) UpdateVisionPlanPage(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	if err := ValidateVisionPlanPageInput(input); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	rawRowColumnCounts, err := json.Marshal(input.RowColumnCounts)
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	row, err := s.queries.UpdateVisionPlanPage(ctx, cerebrodb.UpdateVisionPlanPageParams{
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), RowColumnCounts: rawRowColumnCounts, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	return visionPlanPageResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.RowColumnCounts, row.Position, row.CreatedAt, row.UpdatedAt), nil
+}
+
+// Deleting a page takes its blocks with it, so the last page is never removable
+// — a workspace always keeps somewhere to put a block.
+func (s *Service) DeleteVisionPlanPage(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	count, err := s.queries.DeleteVisionPlanPage(ctx, cerebrodb.DeleteVisionPlanPageParams{ID: id, WorkspaceID: workspaceID})
+	return count > 0, err
 }
 
 func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
@@ -903,13 +1123,18 @@ func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtyp
 	if err := ValidateVisionPlanSectionInput(input); err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
+	pageID, err := util.ParseUUID(input.PageID)
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
 	row, err := s.queries.CreateVisionPlanSection(ctx, cerebrodb.CreateVisionPlanSectionParams{
-		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType,
+		Position: input.Position, PageID: pageID, RowIndex: input.RowIndex, ColumnIndex: input.ColumnIndex,
 	})
 	if err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
-	return visionPlanSectionResponse(row), nil
+	return visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.RowIndex, row.ColumnIndex, row.CreatedAt, row.UpdatedAt), nil
 }
 
 func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
@@ -919,13 +1144,18 @@ func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id p
 	if err := ValidateVisionPlanSectionInput(input); err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
+	pageID, err := util.ParseUUID(input.PageID)
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
 	row, err := s.queries.UpdateVisionPlanSection(ctx, cerebrodb.UpdateVisionPlanSectionParams{
-		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType,
+		Position: input.Position, PageID: pageID, RowIndex: input.RowIndex, ColumnIndex: input.ColumnIndex,
 	})
 	if err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
-	return visionPlanSectionResponse(row), nil
+	return visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.RowIndex, row.ColumnIndex, row.CreatedAt, row.UpdatedAt), nil
 }
 
 func (s *Service) DeleteVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
@@ -1209,6 +1439,27 @@ func (s *Service) SaveRock(ctx context.Context, workspaceID pgtype.UUID, actorTy
 			return RockResponse{}, err
 		}
 	}
+	if err := s.validateRockConnections(ctx, workspaceID, input); err != nil {
+		return RockResponse{}, err
+	}
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return RockResponse{}, err
+	}
+	defer tx.Rollback(ctx)
+	txService := *s
+	txService.queries = s.queries.WithTx(tx)
+	out, err := txService.saveRock(ctx, workspaceID, actorType, actorID, rockID, input, periodID, ownerID, goalTypeID)
+	if err != nil {
+		return RockResponse{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return RockResponse{}, err
+	}
+	return out, nil
+}
+
+func (s *Service) saveRock(ctx context.Context, workspaceID pgtype.UUID, actorType string, actorID pgtype.UUID, rockID *pgtype.UUID, input RockInput, periodID, ownerID, goalTypeID pgtype.UUID) (RockResponse, error) {
 	var id pgtype.UUID
 	if rockID == nil {
 		row, err := s.queries.CreateRock(ctx, cerebrodb.CreateRockParams{
@@ -1278,12 +1529,26 @@ func (s *Service) CreateConnection(ctx context.Context, workspaceID pgtype.UUID,
 	if err != nil {
 		return ObjectConnectionResponse{}, err
 	}
-	if input.SourceType == "strategy_item" && input.TargetType == "rock" {
-		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
-			return ObjectConnectionResponse{}, err
+	if input.SourceType == "strategy_item" {
+		switch input.TargetType {
+		case "rock", "project", "issue":
+			if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
 		}
-		if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
-			return ObjectConnectionResponse{}, err
+		switch input.TargetType {
+		case "rock":
+			if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
+		case "project":
+			if err := EnsureProjectInWorkspace(ctx, s.projects, params.TargetID, workspaceID); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
+		case "issue":
+			if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
 		}
 	}
 	row, err := s.queries.CreateObjectConnection(ctx, params)
@@ -1320,24 +1585,9 @@ func (s *Service) replaceRockConnections(ctx context.Context, workspaceID pgtype
 	if actorType != "member" && actorType != "agent" {
 		return errors.New("invalid actor type")
 	}
-	for _, raw := range input.ProjectIDs {
-		id, _ := util.ParseUUID(raw)
-		if err := EnsureProjectInWorkspace(ctx, s.projects, id, workspaceID); err != nil {
-			return err
-		}
-	}
-	for _, raw := range input.IssueIDs {
-		id, _ := util.ParseUUID(raw)
-		if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
-			return err
-		}
-	}
 	var strategyID pgtype.UUID
 	if input.StrategyItemID != "" {
 		strategyID, _ = util.ParseUUID(input.StrategyItemID)
-		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: strategyID, WorkspaceID: workspaceID}); err != nil {
-			return err
-		}
 	}
 	if err := s.queries.DeleteObjectConnectionsForSource(ctx, cerebrodb.DeleteObjectConnectionsForSourceParams{
 		WorkspaceID: workspaceID, SourceType: "rock", SourceID: rockID, TargetTypes: []string{"project", "issue"},
@@ -1373,6 +1623,29 @@ func (s *Service) replaceRockConnections(ctx context.Context, workspaceID pgtype
 	return nil
 }
 
+func (s *Service) validateRockConnections(ctx context.Context, workspaceID pgtype.UUID, input RockInput) error {
+	for _, raw := range input.ProjectIDs {
+		id, _ := util.ParseUUID(raw)
+		if err := EnsureProjectInWorkspace(ctx, s.projects, id, workspaceID); err != nil {
+			return err
+		}
+	}
+	for _, raw := range input.IssueIDs {
+		id, _ := util.ParseUUID(raw)
+		if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
+	}
+	var strategyID pgtype.UUID
+	if input.StrategyItemID != "" {
+		strategyID, _ = util.ParseUUID(input.StrategyItemID)
+		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: strategyID, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) getRockResponse(ctx context.Context, workspaceID, rockID pgtype.UUID) (RockResponse, error) {
 	rows, err := s.ListRocks(ctx, workspaceID)
 	if err != nil {
@@ -1403,6 +1676,7 @@ func (s *Service) enrichRockResponse(ctx context.Context, workspaceID pgtype.UUI
 		rock.Issues = append(rock.Issues, RockIssue{
 			ID: util.UUIDToString(issue.ID), Identifier: issue.Identifier, Title: issue.Title,
 			Status: issue.Status, ProjectID: util.UUIDToString(issue.ProjectID), ProjectTitle: issue.ProjectTitle,
+			ParentID: util.UUIDToString(issue.ParentIssueID),
 		})
 	}
 	checkIns, err := s.queries.ListRockCheckIns(ctx, cerebrodb.ListRockCheckInsParams{WorkspaceID: workspaceID, RockID: rockID})
@@ -1485,11 +1759,30 @@ func strategyResponse(id, workspaceID pgtype.UUID, kind, title, description stri
 	}
 }
 
-func visionPlanSectionResponse(row cerebrodb.CerebroVisionPlanSection) VisionPlanSectionResponse {
+func visionPlanSectionResponse(id, workspaceID pgtype.UUID, key, name, sectionType string, position int32, pageID pgtype.UUID, rowIndex, columnIndex int32, createdAt, updatedAt pgtype.Timestamptz) VisionPlanSectionResponse {
 	return VisionPlanSectionResponse{
-		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
-		Key: row.Key, Name: row.Name, SectionType: row.SectionType, Position: row.Position,
-		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID),
+		Key: key, Name: name, SectionType: sectionType, Position: position,
+		PageID: util.UUIDToString(pageID), RowIndex: rowIndex, ColumnIndex: columnIndex,
+		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
+	}
+}
+
+// A page with no stored rows still renders: one row of three columns is the
+// shape every page had before rows existed.
+func rowColumnCounts(raw []byte) []int32 {
+	var counts []int32
+	if len(raw) > 0 && json.Unmarshal(raw, &counts) == nil && len(counts) > 0 {
+		return counts
+	}
+	return []int32{3}
+}
+
+func visionPlanPageResponse(id, workspaceID pgtype.UUID, key, name string, rawRowColumnCounts []byte, position int32, createdAt, updatedAt pgtype.Timestamptz) VisionPlanPageResponse {
+	return VisionPlanPageResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID),
+		Key: key, Name: name, RowColumnCounts: rowColumnCounts(rawRowColumnCounts), Position: position,
+		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }
 
@@ -1498,7 +1791,7 @@ func visionPlanItemResponse(id, workspaceID, sectionID pgtype.UUID, title, descr
 		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), SectionID: util.UUIDToString(sectionID),
 		Title: title, Description: description, PartLabel: partLabel,
 		OwnerType: ownerType.String, OwnerID: util.UUIDToString(ownerID), OwnerName: ownerName,
-		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{},
+		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{}, Links: []VisionPlanObjectLink{},
 		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }

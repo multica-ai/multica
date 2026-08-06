@@ -67,12 +67,17 @@ type BlockDispatcher interface {
 	DispatchBlock(context.Context, BlockDispatch) (BlockDispatchResult, error)
 }
 
+type chainStepLifecycle interface {
+	AfterStepCompleted(context.Context, BlockDispatch, ChainStep) error
+}
+
 // ChainDriver advances a chain until it must wait, change issue status, fail,
 // or finish. Re-entering Advance is safe because completed steps and phases
 // are read from the durable store instead of dispatched again.
 type ChainDriver struct {
 	store      *Store
 	dispatcher BlockDispatcher
+	lifecycle  chainStepLifecycle
 }
 
 func NewChainDriver(store *Store, dispatcher BlockDispatcher) *ChainDriver {
@@ -226,7 +231,8 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 		previousSteps := make([]ChainStep, 0, len(previousPhaseSteps)+len(steps))
 		previousSteps = append(previousSteps, previousPhaseSteps...)
 		previousSteps = append(previousSteps, steps...)
-		result, err := d.dispatcher.DispatchBlock(ctx, BlockDispatch{Run: run, Phase: phase, Block: block, Step: step, PreviousSteps: previousSteps})
+		dispatch := BlockDispatch{Run: run, Phase: phase, Block: block, Step: step, PreviousSteps: previousSteps}
+		result, err := d.dispatcher.DispatchBlock(ctx, dispatch)
 		if err != nil {
 			outcome, _ := json.Marshal(map[string]any{"error": err.Error()})
 			_ = d.store.RecordStepOutcome(ctx, step.StepRef, StepFailed, outcome)
@@ -242,6 +248,11 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 		step.Status, step.Outcome = result.Status, result.Outcome
 		switch result.Status {
 		case StepCompleted:
+			if d.lifecycle != nil {
+				if err := d.lifecycle.AfterStepCompleted(ctx, dispatch, step); err != nil {
+					return ChainDecision{}, false, err
+				}
+			}
 			continue
 		case StepFailed:
 			reason := fmt.Sprintf("block %s failed", block.ID)

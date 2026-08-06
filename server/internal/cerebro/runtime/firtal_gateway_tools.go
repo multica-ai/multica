@@ -49,9 +49,8 @@ type ToolContext struct {
 	// override them.
 	IssueID       pgtype.UUID
 	ChatMessageID pgtype.UUID
-	// CEREBRO-PATCH(toolctx-loopstore): FIR-2283 — loop check outcome store, used
-	// by FirtalReportLoopCheckTool so worker agents can report check exit codes
-	// back to the delivery gate. Nil disables the tool (no loop check reporting).
+	// CEREBRO-PATCH(toolctx-loopstore): Chain v2 store used by open_loop_step.
+	// Nil disables the successor-step tool.
 	LoopStore *cerebroloops.Store
 	// CapabilitiesProvider builds the agent's own capabilities card for
 	// get_agent_capabilities (FIR-3398). Nil disables the tool, so the Gateway
@@ -61,8 +60,13 @@ type ToolContext struct {
 	// self-lookup applies it to the returned card so the answer matches the same
 	// call-time guard every tool execution passes through.
 	TaskMandates taskMandateStore
-	// TaskMandateEnforcement is the shared workspace circuit breaker used by the capability self-lookup.
+	// TaskMandateEnforcement is the shared workspace circuit breaker used by
+	// the capability self-lookup. A stored snapshot remains diagnostic when it
+	// returns false.
 	TaskMandateEnforcement func(context.Context, pgtype.UUID) bool
+	// TaskMandateGeneration points at the generation finalized after the exact
+	// provider tool list is known. Tools read it only after the call-time guard.
+	TaskMandateGeneration *int64
 	// LoopStep is a server-derived capability for the exact workflow block step
 	// represented by the current task. Nil means this task may not open another
 	// step. Agents never supply these IDs or limits themselves.

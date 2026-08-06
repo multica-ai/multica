@@ -64,12 +64,16 @@ export type WorkspaceBriefMode = "" | "off";
  */
 export type ToolsBriefMode = "" | "summary" | "off";
 
+export type AgentSpeedMode = "" | "standard" | "fast";
+
 declare module "@multica/core/types/agent" {
   interface SkillSummary {
     // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
     metadata?: SkillMetadata | null;
   }
   interface AgentContextSnapshot {
+    /** FIR-4000: the versioned Engine. Omitted only by historical snapshots. */
+    runtime_id?: string;
     /**
      * FIR-3805: the subset of `skill_ids` this version marks always on. The
      * server already stores and applies it; the frontend needs it on the
@@ -80,6 +84,8 @@ declare module "@multica/core/types/agent" {
     always_on_skill_ids?: string[];
   }
   interface CreateAgentContextChangeRequestRequest {
+    /** FIR-4000: propose an Engine change through context governance. */
+    runtime_id?: string;
     /**
      * FIR-3805: the subset of `skill_ids` whose full text is pasted into the
      * agent's instructions on every run. Proposed through the same versioned
@@ -113,6 +119,12 @@ declare module "@multica/core/types/agent" {
      * validation rules as `workspace_brief_mode`.
      */
     tools_brief_mode?: ToolsBriefMode;
+    /** FIR-4000: typed, versioned response tier stored in runtime_config. */
+    speed_mode?: AgentSpeedMode;
+    /** FIR-4000: zero inherits the selected session Mode profile. */
+    max_turns?: number;
+    /** FIR-4000: zero inherits the selected session Mode profile. */
+    timeout_minutes?: number;
   }
   interface Agent {
     // TECH-3670: per-surface discovery visibility. Orthogonal to `visibility`

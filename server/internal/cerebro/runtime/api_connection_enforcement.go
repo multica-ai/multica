@@ -69,7 +69,7 @@ func (e *FirtalGatewayExecutor) apiEndpointSetting(
 	failClosed bool,
 	meta GatewayRequestMeta,
 ) (toolpolicy.Setting, string) {
-	if e == nil || e.connDeny == nil || reg == nil || !agentID.Valid || toolName == "" {
+	if e == nil || reg == nil || !agentID.Valid || toolName == "" {
 		return toolpolicy.SettingAllow, ""
 	}
 	t, ok := reg.Get(toolName)
@@ -85,6 +85,11 @@ func (e *FirtalGatewayExecutor) apiEndpointSetting(
 	onErr := toolpolicy.SettingAllow
 	if failClosed {
 		onErr = toolpolicy.SettingDeny
+	}
+	if e.connDeny == nil || e.queries == nil {
+		e.logger.Warn("api endpoint policy: resolver unavailable",
+			"agent_id", meta.AgentID, "tool", toolName, "fail_closed", failClosed)
+		return onErr, api.ConnectionName()
 	}
 	agent, err := e.queries.GetAgent(ctx, agentID)
 	if err != nil {

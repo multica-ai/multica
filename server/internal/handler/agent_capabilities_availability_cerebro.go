@@ -11,14 +11,13 @@ package handler
 // different question "what has been PROVED on the runtime this agent actually
 // runs on?", and only availabilityevidence.LevelVerified counts as an answer.
 //
-// Permission is the final canonical answer: policy Allow is reduced to Deny
-// when the shared access engine says the live runtime evidence is insufficient.
-// Availability keeps the evidence and explanation visible alongside it.
+// Permission is the effective policy answer. Availability keeps runtime
+// evidence separate, and callability combines policy, delivery availability,
+// and enforcement without rewriting that policy history.
 
 import (
 	"strings"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
@@ -105,25 +104,7 @@ func applyAgentCapabilityAvailabilityForProvider(
 			level := availabilityevidence.Level(availability.Level)
 			tools[i].Available = level == availabilityevidence.LevelDiscovered || level == availabilityevidence.LevelVerified
 		}
-		if tool.Permission == string(accessdecision.PolicyAllow) && !tool.ManagedExternally {
-			capabilityID, canonical := canonicalCapabilityID(tool, provider)
-			if canonical {
-				result := accessdecision.Evaluate(accessdecision.EvaluationInput{
-					CanonicalCapabilityID: capabilityID,
-					PolicyDecision:        accessdecision.PolicyAllow,
-					EvidenceLevel:         availabilityevidence.Level(availability.Level),
-				})
-				if result.Decision == accessdecision.DecisionDeny {
-					tools[i].Permission = string(accessdecision.DecisionDeny)
-					tools[i].Reason = result.Reason
-				}
-			}
-		}
-		// Permission may have been tightened above when the runtime cannot
-		// support a canonical action. Keep the explicit truth model in lockstep
-		// with that effective verdict; otherwise the JSON could say permission
-		// "deny" while allowed/callable still said true.
-		tools[i].Allowed = tools[i].Permission == string(accessdecision.PolicyAllow)
+		tools[i].Allowed = tools[i].Permission == "allow"
 		if availability.Proven {
 			summary.Verified++
 		} else {

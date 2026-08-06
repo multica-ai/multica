@@ -97,22 +97,111 @@ WHERE item.workspace_id = $1 AND item.section_id IS NULL
       ELSE 'legacy-horizon-' || md5(COALESCE(NULLIF(item.horizon_label, ''), item.horizon_count::text || '-' || item.horizon_unit))
   END;
 
--- name: ListVisionPlanSections :many
-SELECT id, workspace_id, key, name, section_type, position, created_at, updated_at
-FROM cerebro_vision_plan_section
+-- Seeded once, on the workspace's first read. A page the workspace deletes
+-- afterwards must stay deleted, so this never tops the set back up.
+-- name: EnsureDefaultVisionPlanPages :exec
+INSERT INTO cerebro_vision_plan_page (workspace_id, key, name, row_column_counts, position)
+SELECT sqlc.arg('workspace_id')::uuid, defaults.key, defaults.name, defaults.row_column_counts::jsonb, defaults.position
+FROM (VALUES
+    ('vision', 'Vision', '[2]', 0),
+    ('traction', 'Traction', '[3]', 1)
+) AS defaults(key, name, row_column_counts, position)
+WHERE NOT EXISTS (
+    SELECT 1 FROM cerebro_vision_plan_page existing
+    WHERE existing.workspace_id = sqlc.arg('workspace_id')::uuid
+)
+ON CONFLICT (workspace_id, key) DO NOTHING;
+
+-- Runs before the sections are assigned to pages, so "Traction has no blocks"
+-- is only true on the first read.
+-- name: EnsureDefaultVisionPlanGoalsBlock :exec
+INSERT INTO cerebro_vision_plan_section (workspace_id, key, name, section_type, position, page_id, column_index)
+SELECT page.workspace_id, 'goals-board', 'Goals', 'goals', 0, page.id, 1
+FROM cerebro_vision_plan_page page
+WHERE page.workspace_id = $1 AND page.key = 'traction'
+  AND NOT EXISTS (
+      SELECT 1 FROM cerebro_vision_plan_section block WHERE block.page_id = page.id
+  )
+ON CONFLICT (workspace_id, key) DO NOTHING;
+
+-- name: AssignDefaultVisionPlanSectionPages :exec
+UPDATE cerebro_vision_plan_section section
+SET page_id = page.id, column_index = layout.column_index, position = layout.position
+FROM (VALUES
+    ('core-values', 'vision', 0, 0),
+    ('core-focus', 'vision', 0, 1),
+    ('long-term-target', 'vision', 0, 2),
+    ('marketing-strategy', 'vision', 0, 3),
+    ('three-year-picture', 'vision', 1, 0),
+    ('core-processes', 'vision', 1, 1),
+    ('one-year-plan', 'traction', 0, 0),
+    ('quarterly-goals', 'traction', 0, 1),
+    ('issues-list', 'traction', 2, 0)
+) AS layout(section_key, page_key, column_index, position),
+     cerebro_vision_plan_page page
+WHERE section.workspace_id = $1 AND section.page_id IS NULL
+  AND section.key = layout.section_key
+  AND page.workspace_id = section.workspace_id
+  AND page.key = layout.page_key;
+
+-- name: AssignRemainingVisionPlanSectionPages :exec
+UPDATE cerebro_vision_plan_section section
+SET page_id = page.id, column_index = 0
+FROM cerebro_vision_plan_page page
+WHERE section.workspace_id = $1 AND section.page_id IS NULL
+  AND page.workspace_id = section.workspace_id
+  AND page.id = (
+      SELECT candidate.id FROM cerebro_vision_plan_page candidate
+      WHERE candidate.workspace_id = section.workspace_id
+      ORDER BY candidate.position ASC, candidate.created_at ASC
+      LIMIT 1
+  );
+
+-- name: ListVisionPlanPages :many
+SELECT id, workspace_id, key, name, row_column_counts, position, created_at, updated_at
+FROM cerebro_vision_plan_page
 WHERE workspace_id = $1
 ORDER BY position ASC, created_at ASC;
 
+-- name: CreateVisionPlanPage :one
+INSERT INTO cerebro_vision_plan_page (workspace_id, key, name, row_column_counts, position)
+VALUES ($1, 'page-' || gen_random_uuid()::text, $2, $3, $4)
+RETURNING id, workspace_id, key, name, row_column_counts, position, created_at, updated_at;
+
+-- name: UpdateVisionPlanPage :one
+UPDATE cerebro_vision_plan_page
+SET name = $3, row_column_counts = $4, position = $5, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, key, name, row_column_counts, position, created_at, updated_at;
+
+-- name: DeleteVisionPlanPage :execrows
+DELETE FROM cerebro_vision_plan_page page
+WHERE page.id = $1 AND page.workspace_id = $2
+  AND (SELECT count(*) FROM cerebro_vision_plan_page other WHERE other.workspace_id = page.workspace_id) > 1;
+
+-- name: ListVisionPlanSections :many
+SELECT id, workspace_id, key, name, section_type, position, page_id, row_index, column_index, created_at, updated_at
+FROM cerebro_vision_plan_section
+WHERE workspace_id = $1
+ORDER BY row_index ASC, column_index ASC, position ASC, created_at ASC;
+
 -- name: CreateVisionPlanSection :one
-INSERT INTO cerebro_vision_plan_section (workspace_id, key, name, section_type, position)
-VALUES ($1, 'custom-' || gen_random_uuid()::text, $2, $3, $4)
-RETURNING id, workspace_id, key, name, section_type, position, created_at, updated_at;
+INSERT INTO cerebro_vision_plan_section (workspace_id, key, name, section_type, position, page_id, row_index, column_index)
+SELECT page.workspace_id, 'custom-' || gen_random_uuid()::text,
+       sqlc.arg('name'), sqlc.arg('section_type'), sqlc.arg('position'), page.id, sqlc.arg('row_index'), sqlc.arg('column_index')
+FROM cerebro_vision_plan_page page
+WHERE page.id = sqlc.arg('page_id') AND page.workspace_id = sqlc.arg('workspace_id')
+RETURNING id, workspace_id, key, name, section_type, position, page_id, row_index, column_index, created_at, updated_at;
 
 -- name: UpdateVisionPlanSection :one
-UPDATE cerebro_vision_plan_section
-SET name = $3, section_type = $4, position = $5, updated_at = now()
-WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, key, name, section_type, position, created_at, updated_at;
+UPDATE cerebro_vision_plan_section section
+SET name = $3, section_type = $4, position = $5, page_id = $6, row_index = $7, column_index = $8, updated_at = now()
+WHERE section.id = $1 AND section.workspace_id = $2
+  AND EXISTS (
+      SELECT 1 FROM cerebro_vision_plan_page page
+      WHERE page.id = $6 AND page.workspace_id = section.workspace_id
+  )
+RETURNING id, workspace_id, key, name, section_type, position, page_id, row_index, column_index, created_at, updated_at;
 
 -- name: DeleteVisionPlanSection :execrows
 DELETE FROM cerebro_vision_plan_section
@@ -163,6 +252,18 @@ FROM cerebro_object_connection
 WHERE workspace_id = $1 AND source_type = 'strategy_item'
   AND target_type = 'rock' AND relationship_type = 'supports'
 ORDER BY created_at ASC;
+
+-- name: ListVisionPlanObjectLinks :many
+SELECT c.id, c.source_id AS strategy_item_id, c.target_type, c.target_id,
+       COALESCE(p.title, i.title, '') AS target_title,
+       COALESCE(w.issue_prefix || '-' || i.number, '')::text AS target_identifier
+FROM cerebro_object_connection c
+LEFT JOIN project p ON c.target_type = 'project' AND p.id = c.target_id AND p.workspace_id = c.workspace_id
+LEFT JOIN issue i ON c.target_type = 'issue' AND i.id = c.target_id AND i.workspace_id = c.workspace_id
+LEFT JOIN workspace w ON w.id = c.workspace_id
+WHERE c.workspace_id = $1 AND c.source_type = 'strategy_item'
+  AND c.target_type IN ('project', 'issue')
+ORDER BY c.created_at ASC;
 
 -- name: ListStrategyItemHistory :many
 SELECT id, strategy_item_id, action, title, snapshot, changed_at
@@ -343,7 +444,7 @@ SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type,
        (SELECT COUNT(*)::integer FROM cerebro_object_connection c
         WHERE c.workspace_id = r.workspace_id AND c.source_type = 'rock'
           AND c.source_id = r.id AND c.target_type = 'project') AS project_count,
-       COALESCE(si.id, '00000000-0000-0000-0000-000000000000'::uuid) AS strategy_item_id,
+       si.id AS strategy_item_id,
        COALESCE(si.title, '') AS strategy_item_title
 FROM cerebro_rock r
 JOIN cerebro_operating_period op ON op.id = r.period_id AND op.workspace_id = r.workspace_id
@@ -382,7 +483,7 @@ WITH connected_issue AS (
     JOIN issue i ON c.target_type = 'project' AND i.project_id = c.target_id AND i.workspace_id = c.workspace_id
     WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
 )
-SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title
+SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title, i.parent_issue_id
 FROM connected_issue ci
 JOIN issue i ON i.id = ci.id AND i.workspace_id = $1
 JOIN workspace w ON w.id = i.workspace_id
@@ -470,37 +571,50 @@ RETURNING workspace_id, note_type_id, cadence_unit, cadence_count, agenda, creat
 
 -- name: ListOrgChartSeats :many
 SELECT seat.id, seat.workspace_id, seat.parent_id, seat.name, seat.responsibilities,
-       seat.owner_type, seat.owner_id,
-       COALESCE(u.name, a.name, '') AS owner_name,
        seat.position, seat.created_at, seat.updated_at
 FROM cerebro_org_chart_seat seat
-LEFT JOIN member m ON seat.owner_type = 'member' AND m.id = seat.owner_id AND m.workspace_id = seat.workspace_id
-LEFT JOIN "user" u ON u.id = m.user_id
-LEFT JOIN agent a ON seat.owner_type = 'agent' AND a.id = seat.owner_id AND a.workspace_id = seat.workspace_id
 WHERE seat.workspace_id = $1
 ORDER BY seat.parent_id NULLS FIRST, seat.position ASC, seat.created_at ASC;
 
 -- name: CreateOrgChartSeat :one
 INSERT INTO cerebro_org_chart_seat (
-    workspace_id, parent_id, name, responsibilities, owner_type, owner_id, position
+    workspace_id, parent_id, name, responsibilities, position
 )
-VALUES ($1, sqlc.narg(parent_id), $2, $3, sqlc.narg(owner_type), sqlc.narg(owner_id), $4)
-RETURNING id, workspace_id, parent_id, name, responsibilities, owner_type, owner_id,
-          ''::text AS owner_name, position, created_at, updated_at;
+VALUES ($1, sqlc.narg(parent_id), $2, $3, $4)
+RETURNING id, workspace_id, parent_id, name, responsibilities, position, created_at, updated_at;
 
 -- name: UpdateOrgChartSeat :one
 UPDATE cerebro_org_chart_seat
 SET parent_id = sqlc.narg(parent_id),
     name = $3,
     responsibilities = $4,
-    owner_type = sqlc.narg(owner_type),
-    owner_id = sqlc.narg(owner_id),
     position = $5,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, parent_id, name, responsibilities, owner_type, owner_id,
-          ''::text AS owner_name, position, created_at, updated_at;
+RETURNING id, workspace_id, parent_id, name, responsibilities, position, created_at, updated_at;
 
 -- name: DeleteOrgChartSeat :execrows
 DELETE FROM cerebro_org_chart_seat
 WHERE id = $1 AND workspace_id = $2;
+
+-- FIR-3589: a seat's owners, several per seat, each resolved to a display name.
+
+-- name: ListOrgChartSeatOwners :many
+SELECT owner.seat_id, owner.owner_type, owner.owner_id,
+       COALESCE(u.name, a.name, '') AS owner_name,
+       owner.position
+FROM cerebro_org_chart_seat_owner owner
+LEFT JOIN member m ON owner.owner_type = 'member' AND m.id = owner.owner_id AND m.workspace_id = owner.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+LEFT JOIN agent a ON owner.owner_type = 'agent' AND a.id = owner.owner_id AND a.workspace_id = owner.workspace_id
+WHERE owner.workspace_id = $1
+ORDER BY owner.seat_id, owner.position ASC, owner.created_at ASC;
+
+-- name: DeleteOrgChartSeatOwners :exec
+DELETE FROM cerebro_org_chart_seat_owner
+WHERE seat_id = $1 AND workspace_id = $2;
+
+-- name: CreateOrgChartSeatOwner :exec
+INSERT INTO cerebro_org_chart_seat_owner (seat_id, workspace_id, owner_type, owner_id, position)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (seat_id, owner_type, owner_id) DO UPDATE SET position = EXCLUDED.position;

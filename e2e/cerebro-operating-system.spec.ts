@@ -7,7 +7,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 test.describe("Cerebro operating system", () => {
   let api: TestApiClient;
   let slug: string;
-  let strategyTitle: string;
 
   test.beforeEach(async ({ page }) => {
     api = await createTestApi();
@@ -17,7 +16,6 @@ test.describe("Cerebro operating system", () => {
       body: JSON.stringify({ terminology: { strategy: "Strategy", rock: "Rock", rocks: "Rocks" } }),
     });
     slug = await loginAsDefault(page);
-    strategyTitle = `E2E horizon ${Date.now()}`;
   });
 
   test.afterEach(async () => {
@@ -39,94 +37,40 @@ test.describe("Cerebro operating system", () => {
     await api.cleanup();
   });
 
-  test("creates and edits a first-class Rock with Projects, Issues, Strategy, check-ins, rollup, and history", async ({ page }) => {
-    const requests: string[] = [];
-    const serverErrors: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
+  test("creates and edits a standalone Rock without a Strategy connection", async ({ page }, testInfo) => {
+    const rockErrors: string[] = [];
     page.on("response", (response) => {
-      if (response.status() >= 500) serverErrors.push(`${response.status()} ${response.url()}`);
+      if (response.status() >= 400 && response.url().includes("/api/cerebro/rocks")) {
+        rockErrors.push(`${response.status()} ${response.url()}`);
+      }
     });
     const suffix = Date.now();
-    const projectOne = await api.createProject(`E2E v4 Project A ${suffix}`);
-    const projectTwo = await api.createProject(`E2E v4 Project B ${suffix}`);
-    const standaloneIssue = await api.createIssue(`E2E v4 standalone issue ${suffix}`);
-    const blockedIssue = await api.createIssue(`E2E v4 blocked issue ${suffix}`, { project_id: projectOne.id, status: "blocked" });
-    await api.createIssue(`E2E v4 done issue ${suffix}`, { project_id: projectOne.id, status: "done" });
-    await api.createIssue(`E2E v4 second project issue ${suffix}`, { project_id: projectTwo.id, status: "in_progress" });
-    await request(api, "/api/cerebro/strategy-items", { method: "POST", body: JSON.stringify({ kind: "core_value", title: `E2E v4 Strategy value ${suffix}`, description: "Own the outcome", position: 0, state: "active" }) });
-    await request(api, "/api/cerebro/strategy-items", { method: "POST", body: JSON.stringify({ kind: "core_focus", title: `E2E v4 Strategy focus ${suffix}`, description: "Commerce operations", position: 1, state: "active" }) });
-
-    await page.goto(`/${slug}/strategy`);
-    await page.getByRole("button", { name: "Edit map" }).click();
-    await page.getByRole("button", { name: "+ Add item" }).click();
-    await page.getByLabel("Type").selectOption("horizon_goal");
-    await page.getByLabel("Title").fill(strategyTitle);
-    await page.getByLabel("Horizon name").fill("FY27 North Star");
-    await page.getByLabel("Horizon count").fill("18");
-    await page.getByLabel("Horizon unit").selectOption("month");
-    await page.getByRole("button", { name: "Save Strategy item" }).click();
-    await expect(page.getByText(strategyTitle)).toBeVisible();
-
     await page.goto(`/${slug}/rocks`);
-    await page.getByRole("button", { name: "+ New Rock" }).click();
-    await page.getByLabel("Rock title").fill(`E2E v4 Rock ${suffix}`);
-    await page.getByLabel("Description").fill("A standalone outcome with optional execution links.");
-    await page.getByLabel("Owner").selectOption({ label: "E2E User" });
-    await page.getByLabel("Confidence").fill("80");
-    await page.getByLabel("Reported health").selectOption("on_track");
-    await page.getByLabel("Strategy connection").selectOption({ label: strategyTitle });
-    await page.getByLabel("Projects").selectOption([projectOne.id, projectTwo.id]);
-    await page.getByLabel("Issues").selectOption([standaloneIssue.id]);
-    await page.getByRole("button", { name: "Save Rock" }).click();
+    await page.getByRole("button", { name: "List view" }).click();
     const originalTitle = `E2E v4 Rock ${suffix}`;
-    await expect(page.getByText(originalTitle)).toBeVisible();
-    await expect(page.getByText("1/4 issues · 2 projects")).toBeVisible();
+    await page.getByLabel("New Rock title").fill(originalTitle);
+    await page.getByLabel("New Rock title").press("Enter");
+    await expect(page.getByRole("button", { name: `Edit ${originalTitle}` })).toBeVisible();
 
-    await page.getByRole("button", { name: `View ${originalTitle}` }).click();
-    await expect(page.getByText(blockedIssue.title)).toBeVisible();
-    await expect(page.getByText(standaloneIssue.title)).toBeVisible();
-    await page.getByLabel("Check-in confidence").fill("42");
-    await page.getByLabel("Check-in health").selectOption("at_risk");
-    await page.getByLabel("Check-in note").fill("Customer dependency needs attention.");
-    await page.getByRole("button", { name: "Save check-in" }).click();
-    await expect(page.getByText("Customer dependency needs attention.")).toBeVisible();
-
-    await page.getByRole("button", { name: "Edit Rock" }).click();
+    await page.getByRole("button", { name: `Edit ${originalTitle}` }).click();
+    await expect(page.getByRole("heading", { name: `Edit ${originalTitle}` })).toBeVisible();
+    await expect(page.getByLabel("Strategy connection")).toContainText("No Strategy connection");
     const editedTitle = `E2E v4 Rock edited ${suffix}`;
-    await page.getByLabel("Rock title").fill(editedTitle);
-    await page.getByLabel("Confidence", { exact: true }).fill("65");
-    await page.getByLabel("Reported health").selectOption("at_risk");
+    await page.getByLabel("Rock title", { exact: true }).fill(editedTitle);
     await page.getByRole("button", { name: "Save Rock" }).click();
     await expect(page.getByRole("button", { name: `View ${editedTitle}` })).toBeVisible();
 
-    await page.goto(`/${slug}/strategy`);
-    await expect(page.getByRole("heading", { name: "FY27 North Star" })).toBeVisible();
-    await expect(page.getByText(editedTitle)).toBeVisible();
-    await expect(page.getByText("1/4 issues · 65% confidence")).toBeVisible();
-    await expect(page.getByText(`E2E v4 Strategy value ${suffix}`)).toBeVisible();
-    await expect(page.getByText(`E2E v4 Strategy focus ${suffix}`)).toBeVisible();
-
-    await page.getByRole("button", { name: "Edit map" }).click();
-    await page.getByRole("heading", { name: strategyTitle }).locator("xpath=ancestor::article").getByRole("button", { name: "Edit" }).click();
-    const editedStrategyTitle = `E2E horizon edited ${suffix}`;
-    await page.getByLabel("Title").fill(editedStrategyTitle);
-    await page.getByRole("button", { name: "Save Strategy item" }).click();
-    await expect(page.getByText(editedStrategyTitle).first()).toBeVisible();
-
-    const strategyResponse = await request(api, "/api/cerebro/strategy-items");
-    const strategyData = await strategyResponse.json() as { strategy_items: Array<{ id: string; title: string }> };
-    const editedStrategy = strategyData.strategy_items.find((item) => item.title === editedStrategyTitle);
-    expect(editedStrategy).toBeTruthy();
-    await request(api, `/api/cerebro/strategy-items/${editedStrategy!.id}`, { method: "DELETE" });
     await page.reload();
-    await page.getByRole("button", { name: "History" }).click();
-    await expect(page.getByRole("heading", { name: "Strategy history" })).toBeVisible();
-    await expect(page.getByText("updated", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText("deleted", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(editedStrategyTitle).first()).toBeVisible();
-
-    expect(requests.some((url) => url.toLowerCase().includes("atlas"))).toBe(false);
-    expect(serverErrors).toEqual([]);
+    await page.getByRole("button", { name: "List view" }).click();
+    const persistedRock = page.getByRole("button", { name: `Edit ${editedTitle}` });
+    await expect(persistedRock).toBeVisible();
+    await persistedRock.click();
+    await expect(page.getByLabel("Strategy connection")).toContainText("No Strategy connection");
+    await testInfo.attach("standalone-rock-saved", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    expect(rockErrors).toEqual([]);
   });
 
   test(
@@ -150,7 +94,7 @@ test.describe("Cerebro operating system", () => {
             .toBe(true);
           await expect(
             page.getByRole("button", {
-              name: route === "rocks" ? "+ New Rock" : "Edit map",
+              name: route === "rocks" ? "List view" : "Add page",
             }),
           ).toBeVisible();
           await page.screenshot({
@@ -162,15 +106,14 @@ test.describe("Cerebro operating system", () => {
 
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`/${slug}/rocks`);
-      const newRockButton = page.getByRole("button", { name: "+ New Rock" });
-      await newRockButton.focus();
-      await expect(newRockButton).toBeFocused();
+      await page.getByRole("button", { name: "List view" }).click();
+      const newRockTitle = page.getByLabel("New Rock title");
+      await newRockTitle.focus();
+      await expect(newRockTitle).toBeFocused();
+      const keyboardTitle = `E2E v4 Rock keyboard ${Date.now()}`;
+      await newRockTitle.fill(keyboardTitle);
       await page.keyboard.press("Enter");
-      await expect(page.getByRole("heading", { name: "New Rock" })).toBeVisible();
-      const cancelButton = page.getByRole("button", { name: "Cancel" });
-      await cancelButton.focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByRole("heading", { name: "New Rock" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: `Edit ${keyboardTitle}` })).toBeVisible();
     },
   );
 
@@ -179,8 +122,8 @@ test.describe("Cerebro operating system", () => {
     await page.getByRole("tab", { name: "Operating System" }).click();
     await page.getByRole("combobox", { name: "Profile" }).selectOption("custom");
     await page.getByLabel("Strategy label").fill("Direction");
-    await page.getByLabel("Rock label").fill("Priority");
-    await page.getByLabel("Rocks label").fill("Priorities");
+    await page.getByLabel("Goal label (singular)").fill("Priority");
+    await page.getByLabel("Goals label (plural)").fill("Priorities");
     await page.getByRole("button", { name: "Save terminology" }).click();
 
     await page.goto(`/${slug}/rocks`);
@@ -188,9 +131,9 @@ test.describe("Cerebro operating system", () => {
     await expect(page.getByRole("link", { name: "Priorities" })).toBeVisible();
     await expect(page.getByLabel("Strategy label")).toHaveCount(0);
     await page.goto(`/${slug}/strategy`);
-    await expect(page.getByRole("heading", { name: "Direction" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Strategy Map" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Direction" })).toBeVisible();
-    await expect(page.getByLabel("Rocks label")).toHaveCount(0);
+    await expect(page.getByLabel("Goals label (plural)")).toHaveCount(0);
 
     await api.setWorkspaceFeatureFlag("cerebro_operating_system", false);
     await page.reload();

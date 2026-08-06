@@ -26,8 +26,8 @@ type HasTaskPostedOnIssueParams struct {
 
 // TECH-3099: session-level guard queries for the sub-issue comment guard.
 // Returns true when the given task has already stored at least one
-// cerebro_comment_task row for the given issue — used by the sub-issue
-// no-split-session check (cerebro_sub_issue_no_split_session flag).
+// cerebro_comment_task row for the given issue. The message hook receives
+// this as a fact and owns the decision.
 func (q *Queries) HasTaskPostedOnIssue(ctx context.Context, arg HasTaskPostedOnIssueParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasTaskPostedOnIssue, arg.TaskID, arg.IssueID)
 	var posted bool

@@ -27,6 +27,21 @@ export const SUPPORTED_CURRENCIES: readonly DisplayCurrency[] = [
 /** Default display currency — preserves today's behavior (raw USD). */
 export const DEFAULT_DISPLAY_CURRENCY: DisplayCurrency = "USD";
 
+/** Cache-read tokens as a share of all input-side tokens for one run/rollup. */
+export function formatPromptCacheHitRatio(
+  inputTokens: number,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+): string {
+  const total = inputTokens + cacheReadTokens + cacheWriteTokens;
+  if (!Number.isFinite(total) || total <= 0) return "—";
+  const ratio = Math.max(0, Math.min(1, cacheReadTokens / total));
+  return new Intl.NumberFormat("en-US", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(ratio);
+}
+
 /**
  * A cached USD->target exchange rate plus when it was fetched, so callers can
  * surface freshness. `rate` is "target units per 1 USD" (USD itself is 1).

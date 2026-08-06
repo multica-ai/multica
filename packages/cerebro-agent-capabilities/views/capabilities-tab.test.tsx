@@ -71,6 +71,13 @@ describe("CerebroCapabilitiesTab", () => {
       tools: [
         { key: "add_comment", permission: "allow", decided_by: "runtime" },
         { key: "create_local_runtime", permission: "deny", decided_by: "agent" },
+        {
+          key: "autopilot_webhook",
+          title: "Autopilot inbound webhook",
+          permission: "allow",
+          managed_externally: true,
+          external_security_owner: "Autopilot webhook secret",
+        },
       ],
       repos: [
         {
@@ -161,6 +168,7 @@ describe("CerebroCapabilitiesTab", () => {
     expect(screen.getByText("deploy")).toBeInTheDocument();
     expect(screen.getByText("add_comment")).toBeInTheDocument();
     expect(screen.getByText("create_local_runtime")).toBeInTheDocument();
+    expect(screen.getByText(/managed by Autopilot webhook secret/)).toBeInTheDocument();
 
     // Repo permissions as pills.
     expect(screen.getByText("Read code")).toBeInTheDocument();
@@ -401,6 +409,43 @@ describe("CerebroCapabilitiesTab", () => {
     expect(
       screen.getByTitle(/available: yes.*callable: yes/i),
     ).toBeInTheDocument();
+  });
+
+  it("shows multica delivery separately from policy and runtime evidence", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Sofie",
+      model: "gpt-5",
+      tools: [
+        {
+          key: "add_comment",
+          title: "Add comment",
+          delivery_channel: "multica",
+          permission: "allow",
+          allowed: true,
+          available: true,
+          enforced: true,
+          callable: true,
+          verified: false,
+          availability: {
+            level: "declared",
+            proven: false,
+            reason: "no direct runtime probe has run",
+          },
+        },
+      ],
+    });
+
+    renderTab();
+
+    const pill = await screen.findByText("Add comment");
+    expect(pill).toHaveTextContent("callable");
+    expect(pill.closest("span")).toHaveAttribute(
+      "title",
+      expect.stringMatching(
+        /allow.*delivery: multica.*not proved on runtime.*allowed: yes.*available: yes.*enforced: yes.*callable: yes/i,
+      ),
+    );
   });
 
   it("shows availability as unknown rather than implying nothing works (FIR-3398)", async () => {

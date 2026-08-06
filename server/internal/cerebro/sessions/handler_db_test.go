@@ -9,6 +9,7 @@ package sessions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,9 +18,11 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -103,6 +106,70 @@ func seedRootComment(t *testing.T, issueID, workspaceID string) string {
 	return id
 }
 
+func seedAssignedSessionIssue(t *testing.T) (issueID, workspaceID, rootCommentID string, member db.Member) {
+	t.Helper()
+	issueID, workspaceID = seedIssue(t)
+	ctx := context.Background()
+	var userID, memberID, runtimeID, agentID pgtype.UUID
+	if err := sessTestPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Session Handoff User', 'session-handoff-'||gen_random_uuid()||'@multica.test')
+		RETURNING id
+	`).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := sessTestPool.QueryRow(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1::uuid, $2, 'owner')
+		RETURNING id
+	`, workspaceID, userID).Scan(&memberID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if err := sessTestPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		) VALUES ($1::uuid, 'Session Handoff Runtime', 'cloud', 'session_test', 'online', '{}', '{}', now())
+		RETURNING id
+	`, workspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	if err := sessTestPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config, runtime_id,
+			visibility, max_concurrent_tasks, owner_id
+		) VALUES ($1::uuid, 'Session Handoff Agent', 'cloud', '{}', $2, 'workspace', 1, $3)
+		RETURNING id
+	`, workspaceID, runtimeID, userID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := sessTestPool.Exec(ctx, `
+		UPDATE issue
+		SET assignee_type='agent', assignee_id=$2
+		WHERE id=$1::uuid
+	`, issueID, agentID); err != nil {
+		t.Fatalf("assign issue: %v", err)
+	}
+	rootCommentID = seedRootComment(t, issueID, workspaceID)
+	var workspaceUUID pgtype.UUID
+	if err := workspaceUUID.Scan(workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	member = db.Member{ID: memberID, WorkspaceID: workspaceUUID, UserID: userID, Role: "owner"}
+	return
+}
+
+func callStartFreshAsMember(h *Handler, issueID, workspaceID string, member db.Member, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("issueId", issueID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = middleware.SetMemberContext(ctx, workspaceID, member)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.StartFresh(rec, req)
+	return rec
+}
+
 // TestStartFreshHandoffResolvesThread proves the FIR-1874 behavior: handing off a
 // thread resolves its root comment (closing the session) and writes a handoff on
 // that thread's session row.
@@ -136,16 +203,13 @@ func TestStartFreshHandoffResolvesThread(t *testing.T) {
 	}
 }
 
-// TestStartFreshStartNewClosesThenSurfacesEnqueueError proves the FIR-2021
-// one-command handoff ordering guarantee: with start_new=true the old thread is
-// closed FIRST (durably), and only then is the fresh run attempted. When the
-// fresh-run dependency is unavailable (TaskService nil here) the handler returns
-// 502 but the close must already be committed — a half-done handoff never leaves
-// the old session open.
-func TestStartFreshStartNewClosesThenSurfacesEnqueueError(t *testing.T) {
+// TestStartFreshStartNewRollsBackWhenFreshRunCannotStart proves the FIR-3692
+// ordering guarantee: a failed required step leaves the original thread open
+// and does not store a partial Handoff.
+func TestStartFreshStartNewRollsBackWhenFreshRunCannotStart(t *testing.T) {
 	issueID, workspaceID := seedIssue(t)
 	commentID := seedRootComment(t, issueID, workspaceID)
-	// nil TaskService → startFreshSession fails, but the close is durable.
+	// nil TaskService → fresh-session validation fails before any write.
 	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rec := callStartFresh(h, issueID, workspaceID, `{"root_comment_id":"`+commentID+`","start_new":true}`)
@@ -158,7 +222,103 @@ func TestStartFreshStartNewClosesThenSurfacesEnqueueError(t *testing.T) {
 		`SELECT resolved_at IS NOT NULL FROM comment WHERE id = $1::uuid`, commentID).Scan(&resolved); err != nil {
 		t.Fatalf("read comment: %v", err)
 	}
-	if !resolved {
-		t.Error("expected the thread root to be resolved (session closed) even when the fresh run could not start")
+	if resolved {
+		t.Error("expected the thread root to remain open when the fresh run could not start")
+	}
+
+	var sessionCount int
+	if err := sessTestPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM cerebro_session WHERE root_comment_id = $1::uuid`, commentID).Scan(&sessionCount); err != nil {
+		t.Fatalf("count session rows: %v", err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("partial Handoff rows = %d, want 0", sessionCount)
+	}
+}
+
+func TestStartFreshStartNewCommitsCommentHandoffAndTaskTogether(t *testing.T) {
+	issueID, workspaceID, rootCommentID, member := seedAssignedSessionIssue(t)
+	queries := db.New(sessTestPool)
+	tasks := service.NewTaskService(queries, sessTestPool, nil, nil)
+	h := NewHandler(sessTestPool, queries, tasks, nil)
+
+	rec := callStartFreshAsMember(h, issueID, workspaceID, member,
+		`{"root_comment_id":"`+rootCommentID+`","start_new":true,"prompt":"Continue from the Handoff."}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("StartFresh: code=%d body=%s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	var response startFreshResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.FreshRun == nil {
+		t.Fatal("fresh_run is missing")
+	}
+
+	var resolved, hasHandoff, forceFresh bool
+	var triggerCommentID string
+	if err := sessTestPool.QueryRow(context.Background(), `
+		SELECT
+			c.resolved_at IS NOT NULL,
+			s.handoff IS NOT NULL,
+			t.trigger_comment_id::text,
+			t.force_fresh_session
+		FROM comment c
+		JOIN cerebro_session s ON s.root_comment_id=c.id
+		JOIN agent_task_queue t ON t.id=$2::uuid
+		WHERE c.id=$1::uuid
+	`, rootCommentID, response.FreshRun.TaskID).Scan(&resolved, &hasHandoff, &triggerCommentID, &forceFresh); err != nil {
+		t.Fatalf("load committed Handoff: %v", err)
+	}
+	if !resolved || !hasHandoff || !forceFresh || triggerCommentID != response.FreshRun.RootCommentID {
+		t.Fatalf("resolved=%v handoff=%v force_fresh=%v trigger=%s fresh_root=%s", resolved, hasHandoff, forceFresh, triggerCommentID, response.FreshRun.RootCommentID)
+	}
+}
+
+func TestStartFreshStartNewRollsBackAllWritesWhenTaskInsertFails(t *testing.T) {
+	issueID, workspaceID, rootCommentID, member := seedAssignedSessionIssue(t)
+	queries := db.New(sessTestPool)
+	tasks := service.NewTaskService(queries, sessTestPool, nil, nil)
+	h := NewHandler(sessTestPool, queries, tasks, nil)
+
+	var issueUUID, agentUUID, runtimeUUID pgtype.UUID
+	if err := issueUUID.Scan(issueID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessTestPool.QueryRow(context.Background(), `
+		SELECT assignee_id, runtime_id
+		FROM issue i
+		JOIN agent a ON a.id=i.assignee_id
+		WHERE i.id=$1
+	`, issueUUID).Scan(&agentUUID, &runtimeUUID); err != nil {
+		t.Fatalf("load assignee: %v", err)
+	}
+	if _, err := queries.CreateAgentTask(context.Background(), db.CreateAgentTaskParams{
+		AgentID: agentUUID, RuntimeID: runtimeUUID, IssueID: issueUUID,
+		OriginalUserID: member.UserID,
+	}); err != nil {
+		t.Fatalf("seed competing task: %v", err)
+	}
+
+	rec := callStartFreshAsMember(h, issueID, workspaceID, member,
+		`{"root_comment_id":"`+rootCommentID+`","start_new":true}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("StartFresh: want 502, got code=%d body=%s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+
+	var resolved bool
+	var sessionCount, agentRootCount int
+	if err := sessTestPool.QueryRow(context.Background(), `
+		SELECT
+			c.resolved_at IS NOT NULL,
+			(SELECT count(*) FROM cerebro_session WHERE root_comment_id=c.id),
+			(SELECT count(*) FROM comment WHERE issue_id=c.issue_id AND author_type='agent' AND parent_id IS NULL)
+		FROM comment c
+		WHERE c.id=$1::uuid
+	`, rootCommentID).Scan(&resolved, &sessionCount, &agentRootCount); err != nil {
+		t.Fatalf("load rollback state: %v", err)
+	}
+	if resolved || sessionCount != 0 || agentRootCount != 0 {
+		t.Fatalf("partial Handoff persisted: resolved=%v sessions=%d agent_roots=%d", resolved, sessionCount, agentRootCount)
 	}
 }

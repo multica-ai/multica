@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -627,6 +628,9 @@ func TestResolveIssueRef(t *testing.T) {
 	t.Run("identifier is resolved before prefix lookup", func(t *testing.T) {
 		listCalled := false
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("X-Multica-Callable"); got != "get_issue" {
+				t.Errorf("helper callable = %q, want get_issue", got)
+			}
 			switch r.URL.Path {
 			case "/api/issues/MUL-1852":
 				json.NewEncoder(w).Encode(issue)
@@ -640,6 +644,7 @@ func TestResolveIssueRef(t *testing.T) {
 		defer srv.Close()
 
 		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		client.CallableIdentity = "update_issue"
 		got, err := resolveIssueRef(context.Background(), client, "MUL-1852")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -654,6 +659,9 @@ func TestResolveIssueRef(t *testing.T) {
 
 	t.Run("short UUID prefix resolves from workspace issue list", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("X-Multica-Callable"); got != "list_issues" {
+				t.Errorf("helper callable = %q, want list_issues", got)
+			}
 			if r.URL.Path != "/api/issues" {
 				http.NotFound(w, r)
 				return
@@ -710,6 +718,41 @@ func TestResolveIssueRef(t *testing.T) {
 			t.Fatalf("expected prefix error, got: %s", got)
 		}
 	})
+}
+
+// CEREBRO-PATCH(task-mandate-callable-identity): FIR-4292 prove helper reads cannot inherit mutation identity.
+func TestRunIssueStatusUsesRequestScopedCallableIdentityForIssueKey(t *testing.T) {
+	const issueID = "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+r.Header.Get("X-Multica-Callable"))
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1852":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "MUL-1852"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "MUL-1852", "status": "in_progress"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	if err := runIssueStatus(issueStatusCmd, []string{"MUL-1852", "in_progress"}); err != nil {
+		t.Fatalf("runIssueStatus: %v", err)
+	}
+	want := []string{
+		"GET /api/issues/MUL-1852 get_issue",
+		"PUT /api/issues/" + issueID + " update_issue",
+	}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("request identities = %#v, want %#v", requests, want)
+	}
 }
 
 func TestFetchAutopilotCandidatesPaginates(t *testing.T) {

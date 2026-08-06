@@ -129,6 +129,21 @@ const DiscoveredEndpointSchema = z
   })
   .loose();
 
+const AccessDiagnosticSchema = z.object({
+  code: z.string(),
+  state: z
+    .enum(["success", "info", "partial", "stale", "empty", "denied", "unavailable", "error"])
+    .catch("info"),
+  title: z.string(),
+  message: z.string(),
+  affected_capability: z.string().optional(),
+  source_policy: z.string().default("Unknown source"),
+  recovery_action: z.string().default("Refresh the diagnostic and investigate the source."),
+  version: z.string().optional(),
+  count: z.number().optional(),
+  observed_at: z.string().optional(),
+}).loose();
+
 export const TestResultSchema = z
   .object({
     reachable: z.boolean(),
@@ -137,10 +152,63 @@ export const TestResultSchema = z
     scope_suggestions: z.array(ScopableArgSchema).optional(),
     endpoints: z.array(DiscoveredEndpointSchema).optional(),
     error: z.string().optional(),
+    diagnostics: z.array(AccessDiagnosticSchema).default([]),
   })
   .loose();
 
 export type TestResult = z.infer<typeof TestResultSchema>;
+
+const CompanyBrainClaimSchema = z
+  .object({
+    write_source: z.string(),
+    allowed_read_sources: z.array(z.string()).default([]),
+  })
+  .loose();
+
+const CompanyBrainSourceSchema = z
+  .object({
+    connection_id: z.string(),
+    connection_name: z.string(),
+    claim: CompanyBrainClaimSchema.optional(),
+    tool_access: z.array(z.object({
+      tool: z.string(),
+      decision: z.enum(["allow", "ask", "deny"]).catch("deny"),
+    }).loose()).default([]),
+    status: z.enum(["verified", "unverifiable"]).catch("unverifiable"),
+    error_code: z.string().optional(),
+  })
+  .loose();
+
+export const CompanyBrainMigrationCensusSchema = z
+  .object({
+    generated_at: z.string(),
+    actors: z.array(z.object({
+      agent_id: z.string(),
+      name: z.string(),
+      status: z.string(),
+      sources: z.array(CompanyBrainSourceSchema).default([]),
+    }).loose()).default([]),
+    automations: z.array(z.object({
+      automation_id: z.string(),
+      title: z.string(),
+      status: z.string(),
+      assignee_type: z.string(),
+      assignee_id: z.string().optional(),
+      trigger_kinds: z.array(z.string()).default([]),
+      sources: z.array(CompanyBrainSourceSchema).default([]),
+    }).loose()).default([]),
+    connections: z.array(CompanyBrainSourceSchema).default([]),
+    references: z.array(z.object({
+      owner_type: z.string(),
+      owner_id: z.string(),
+      owner_name: z.string(),
+      field: z.string(),
+      reference: z.string(),
+    }).loose()).default([]),
+  })
+  .loose();
+
+export type CompanyBrainMigrationCensus = z.infer<typeof CompanyBrainMigrationCensusSchema>;
 
 // ---------------------------------------------------------------------------
 // Query keys

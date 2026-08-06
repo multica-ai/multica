@@ -46,6 +46,7 @@ type deadFailedRunResponse struct {
 	RuntimePaused bool   `json:"runtime_paused,omitempty"`
 	UnpauseAt     string `json:"unpause_at,omitempty"`
 }
+
 // resumeBlockedReason explains a false resume_possible. Order matters: report
 // the most actionable cause first. English copy — app-facing strings are
 // English everywhere in this codebase.
@@ -68,6 +69,7 @@ func resumeBlockedReason(t cerebrodb.DeadFailedTask) string {
 	}
 	return "This run cannot be continued."
 }
+
 // isPoisonedReason mirrors the blacklist the resume lookup applies.
 func isPoisonedReason(reason string) bool {
 	switch reason {
@@ -180,3 +182,5 @@ func mapDeadFailed(rows []cerebrodb.DeadFailedTask) []deadFailedRunResponse {
 	}
 	return out
 }
+
+

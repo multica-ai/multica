@@ -28,6 +28,9 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
     </div>
   ),
 }));
+vi.mock("@multica/cerebro-ui", () => ({
+  EditorToolbarSettings: () => <div>Formatting toolbar settings</div>,
+}));
 
 describe("NotesSettingsTab", () => {
   it("labels the per-line attribution feature 'Line history', not 'Line authors' (FIR-3601)", () => {
@@ -42,6 +45,13 @@ describe("NotesSettingsTab", () => {
       screen.getByText(/the 'Line history' toggle in a note's ⋯ menu/, {
         selector: "span",
       }),
+    ).toBeInTheDocument();
+  });
+
+  it("includes the shared formatting-toolbar order settings", () => {
+    render(<NotesSettingsTab />);
+    expect(
+      screen.getByText("Formatting toolbar settings"),
     ).toBeInTheDocument();
   });
 });

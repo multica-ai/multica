@@ -32,6 +32,7 @@ export class TestApiClient {
   private createdAgentIds: string[] = [];
   private createdRuntimeIds: string[] = [];
   private createdAccountIds: string[] = [];
+  private createdFolderIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -101,6 +102,7 @@ export class TestApiClient {
   async getAgentCapabilities(agentId: string): Promise<{
     tools: Array<{
       key: string;
+      delivery_channel?: string;
       permission: string;
       allowed?: boolean;
       available?: boolean;
@@ -194,15 +196,31 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async createComment(issueId: string, content: string) {
+  // `parentId` hangs the new comment under an existing one, which is the only
+  // way to build a multi-comment thread for the move-to-thread specs.
+  async createComment(issueId: string, content: string, parentId?: string) {
     const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(parentId ? { content, parent_id: parentId } : { content }),
     });
     if (!res.ok) {
       throw new Error(`createComment failed: ${res.status} ${await res.text()}`);
     }
     return res.json();
+  }
+
+  async listComments(issueId: string): Promise<Array<{
+    id: string;
+    parent_id: string | null;
+    content: string | null;
+    type: string;
+  }>> {
+    const res = await this.authedFetch(`/api/issues/${issueId}/comments`);
+    if (!res.ok) {
+      throw new Error(`listComments failed: ${res.status} ${await res.text()}`);
+    }
+    const body = await res.json();
+    return Array.isArray(body) ? body : (body.comments ?? []);
   }
 
   // FIR-2680 — create a named channel (kind='channel'). Channels are issues, so
@@ -476,13 +494,60 @@ export class TestApiClient {
     }
   }
 
+  /**
+   * FIR-1317 — seed a note two workspace members may both EDIT, which is what
+   * live co-editing needs. CanUserEditNote grants write to the owner or to
+   * anyone who reaches the note's folder through a Collections grant, so a
+   * root note (no folder) is owner-only and cannot be co-edited. This creates
+   * a folder carrying the "whole workspace" grant and puts the note inside it.
+   */
+  async createSharedNote(title: string, body = "") {
+    if (!this.workspaceId) {
+      throw new Error("createSharedNote: no workspace — call login() first");
+    }
+    const folderRes = await this.authedFetch("/api/artifact-folders", {
+      method: "POST",
+      body: JSON.stringify({ name: `${title} folder`, kind: "note" }),
+    });
+    if (!folderRes.ok) {
+      throw new Error(`create folder failed: ${folderRes.status} ${await folderRes.text()}`);
+    }
+    const folder = await folderRes.json();
+    this.createdFolderIds.push(folder.id);
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `INSERT INTO cerebro_folder_grant (surface, folder_id, grantee_type, grantee_id, role, created_by)
+         VALUES ('artifact', $1, 'workspace', NULL, 'full_access', $2)
+         ON CONFLICT DO NOTHING`,
+        [folder.id, this.userId],
+      );
+    } finally {
+      await client.end();
+    }
+
+    const noteRes = await this.authedFetch("/api/notes", {
+      method: "POST",
+      body: JSON.stringify({ title, body, folder_id: folder.id, visibility: "workspace" }),
+    });
+    if (!noteRes.ok) {
+      throw new Error(`create note failed: ${noteRes.status} ${await noteRes.text()}`);
+    }
+    const note = await noteRes.json();
+    this.createdArtifactIds.push(note.id);
+    return { id: note.id as string, folderId: folder.id as string };
+  }
+
   /** Clean up all issues + inbox items created during this test. */
   async cleanup() {
     if (
       this.createdArtifactIds.length ||
       this.createdAgentIds.length ||
       this.createdRuntimeIds.length ||
-      this.createdAccountIds.length
+      this.createdAccountIds.length ||
+      this.createdFolderIds.length
     ) {
       const client = new pg.Client(DATABASE_URL);
       await client.connect();
@@ -499,6 +564,13 @@ export class TestApiClient {
         for (const id of this.createdAccountIds) {
           await client.query("DELETE FROM cerebro_account WHERE id = $1", [id]);
         }
+        for (const id of this.createdFolderIds) {
+          await client.query(
+            "DELETE FROM cerebro_folder_grant WHERE surface = 'artifact' AND folder_id = $1",
+            [id],
+          );
+          await client.query("DELETE FROM artifact_folder WHERE id = $1", [id]);
+        }
       } catch {
         /* ignore — best-effort cleanup */
       } finally {
@@ -508,6 +580,7 @@ export class TestApiClient {
       this.createdAgentIds = [];
       this.createdRuntimeIds = [];
       this.createdAccountIds = [];
+      this.createdFolderIds = [];
     }
 
     for (const id of this.createdIssueIds) {

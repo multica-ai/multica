@@ -13,11 +13,13 @@ type ToolPolicyResolveResult struct {
 }
 
 // CEREBRO-PATCH(daemon-task-mandate): resolve against the immutable task ceiling.
-func (c *Client) ResolveToolPolicy(ctx context.Context, workspaceID, agentID, taskID, toolName, resourcePattern string, args map[string]any) (ToolPolicyResolveResult, error) {
+// CEREBRO-PATCH(task-mandate-claim-generation): FIR-4292 carry the immutable claim generation through live resolution.
+func (c *Client) ResolveToolPolicy(ctx context.Context, workspaceID, agentID, taskID string, claimGeneration int64, toolName, resourcePattern string, args map[string]any) (ToolPolicyResolveResult, error) {
 	var resp ToolPolicyResolveResult
 	err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/tool-policy/resolve", workspaceID), map[string]any{
 		"agent_id":         agentID,
 		"task_id":          taskID,
+		"claim_generation": claimGeneration,
 		"tool_name":        toolName,
 		"resource_pattern": resourcePattern,
 		"args":             args,

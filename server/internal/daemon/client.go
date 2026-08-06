@@ -242,6 +242,29 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
+type RuntimeHookEvent struct { // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 authenticated daemon-to-server lifecycle event contract.
+	EventType      string         `json:"event_type"`
+	SessionID      string         `json:"session_id,omitempty"`
+	Model          string         `json:"model,omitempty"`
+	ProposedAction map[string]any `json:"proposed_action,omitempty"`
+	Context        map[string]any `json:"context,omitempty"`
+	MutableFields  []string       `json:"mutable_fields,omitempty"`
+}
+
+type RuntimeHookResult struct {
+	Decision      string         `json:"decision"`
+	Modifications map[string]any `json:"modifications,omitempty"`
+	Warning       string         `json:"warning,omitempty"`
+}
+
+// EmitRuntimeHookEvent sends lifecycle events that only the local runtime can
+// observe to the server-side workflow hook engine.
+func (c *Client) EmitRuntimeHookEvent(ctx context.Context, taskID string, event RuntimeHookEvent) (RuntimeHookResult, error) {
+	var result RuntimeHookResult
+	err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/hook-events", taskID), event, &result)
+	return result, err
+}
+
 func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {

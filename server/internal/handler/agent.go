@@ -184,11 +184,12 @@ type ChatHistoryMessage struct {
 }
 
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                    string `json:"id"`
+	AgentID               string `json:"agent_id"`
+	RuntimeID             string `json:"runtime_id"`
+	IssueID               string `json:"issue_id"`
+	WorkspaceID           string `json:"workspace_id"`
+	TaskMandateGeneration int64  `json:"task_mandate_generation,omitempty"` // CEREBRO-PATCH(task-mandate-generation-claim): FIR-4292 immutable generation carried to every call-time gate.
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
@@ -619,6 +620,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 				ID:          uuidToString(row.ID),
 				Name:        row.Name,
 				Description: row.Description,
+				AlwaysOn:    row.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-4002 the agent page renders the Skills tab from the LIST response, not GET /agents/{id} — dropping the flag here made every checkbox read back unchecked.
 			})
 		}
 	}

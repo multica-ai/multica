@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useNavigation } from "@multica/views/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createHookDraft, type WorkflowHook } from "../../core/hook-types";
@@ -14,10 +13,8 @@ import { HookTemplatePicker } from "./hook-template-picker";
 import { toast } from "sonner";
 
 export function WorkflowHookEditorPage({ hookId }: { hookId?: string }) {
-  const enabled = useFeatureFlag("cerebro_workflow_hooks");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
-  if (!enabled) return null;
   if (!workspace) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading workspace context…</div>;
 	return <WorkflowHookEditorLoaded wsId={workspace.id} workspaceSlug={workspace.slug} hookId={hookId} onNavigate={(path) => navigation.push(path)} />;
 }

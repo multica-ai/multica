@@ -271,20 +271,7 @@ func normalizeEndpointPath(p string) string {
 // connection name is kept as a distinct prefix (double underscore) so two
 // connections that expose the same path never collide.
 func apiToolName(connName, method, path string) string {
-	conn := sanitizeToolSegment(connName)
-	tail := sanitizeToolSegment(method + " " + path)
-	if conn == "" || tail == "" {
-		return ""
-	}
-	return conn + "__" + tail
-}
-
-var nonToolChar = regexp.MustCompile(`[^a-z0-9]+`)
-
-func sanitizeToolSegment(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = nonToolChar.ReplaceAllString(s, "_")
-	return strings.Trim(s, "_")
+	return connmeta.APIEndpointToolName(connName, method, path)
 }
 
 // apiToolDescription is the human/model-facing one-liner for an endpoint tool.

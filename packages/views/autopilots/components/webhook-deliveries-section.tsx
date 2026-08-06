@@ -98,11 +98,14 @@ function canReplay(delivery: WebhookDelivery): boolean {
 // --- Section --------------------------------------------------------------
 
 export function WebhookDeliveriesSection({
+  // CEREBRO-PATCH(autopilot-permissions): replay mirrors the existing effective trigger_autopilot decision (FIR-4359).
   autopilotId,
   hasWebhookTrigger,
+  replayBlocked,
 }: {
   autopilotId: string;
   hasWebhookTrigger: boolean;
+  replayBlocked: boolean;
 }) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
@@ -140,6 +143,7 @@ export function WebhookDeliveriesSection({
               key={delivery.id}
               delivery={delivery}
               autopilotId={autopilotId}
+              replayBlocked={replayBlocked}
             />
           ))}
         </div>
@@ -153,9 +157,11 @@ export function WebhookDeliveriesSection({
 function DeliveryRow({
   delivery,
   autopilotId,
+  replayBlocked,
 }: {
   delivery: WebhookDelivery;
   autopilotId: string;
+  replayBlocked: boolean;
 }) {
   const { t } = useT("autopilots");
   const [open, setOpen] = useState(false);
@@ -213,6 +219,7 @@ function DeliveryRow({
           onOpenChange={setOpen}
           autopilotId={autopilotId}
           delivery={delivery}
+          replayBlocked={replayBlocked}
         />
       )}
     </>
@@ -226,11 +233,13 @@ function DeliveryDetailDialog({
   onOpenChange,
   autopilotId,
   delivery,
+  replayBlocked,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   autopilotId: string;
   delivery: WebhookDelivery;
+  replayBlocked: boolean;
 }) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
@@ -340,6 +349,7 @@ function DeliveryDetailDialog({
             <ReplayButton
               autopilotId={autopilotId}
               delivery={full}
+              replayBlocked={replayBlocked}
               onSuccess={() => onOpenChange(false)}
             />
           </div>
@@ -515,15 +525,17 @@ function ReplayHint({ delivery }: { delivery: WebhookDelivery }) {
 function ReplayButton({
   autopilotId,
   delivery,
+  replayBlocked,
   onSuccess,
 }: {
   autopilotId: string;
   delivery: WebhookDelivery;
+  replayBlocked: boolean;
   onSuccess: () => void;
 }) {
   const { t } = useT("autopilots");
   const replay = useReplayAutopilotDelivery();
-  const enabled = canReplay(delivery) && !replay.isPending;
+  const enabled = !replayBlocked && canReplay(delivery) && !replay.isPending; // CEREBRO-PATCH(autopilot-permissions): FIR-4359.
 
   const handleClick = async () => {
     try {
@@ -545,6 +557,7 @@ function ReplayButton({
       variant="outline"
       onClick={handleClick}
       disabled={!enabled}
+      title={replayBlocked ? "Blocked by Permissions" : undefined}
     >
       <RotateCw
         className={cn(

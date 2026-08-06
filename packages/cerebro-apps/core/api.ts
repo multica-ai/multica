@@ -17,6 +17,7 @@ const catalogAppSchema = z.object({
   owner: z.string().optional(), deployment_status: z.enum(["not_deployed", "pending", "provisioning", "ready", "failed", "paused"]).optional(),
   deployment_version: z.string().optional(),
   health: z.enum(["healthy", "failed", "provisioning", "disabled", "not_deployed"]).optional(), deployment_error: z.string().optional(),
+  builtin_update_available: z.boolean().optional(),
 });
 const detailSchema = catalogAppSchema.extend({
   versions: z.array(z.object({ version: z.string(), release_notes: z.string(), grant_status: z.enum(["pending", "approved", "revoked", "not_requested"]), scopes: z.array(scopeSchema), created_at: z.string().optional() })).catch([]),

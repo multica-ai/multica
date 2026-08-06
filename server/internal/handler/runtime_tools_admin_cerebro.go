@@ -14,9 +14,12 @@ package handler
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdiagnostics"
 )
 
 // RuntimeToolsAdminService is the seam the cerebro runtimetools service
@@ -252,6 +255,61 @@ func (h *Handler) ListRuntimeToolEffectiveAccess(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
+}
+
+// GetRuntimeAccessDiagnostics handles GET /api/runtimes/{runtimeId}/access-diagnostics.
+// It projects provider-probe and MCP tools/list evidence through one read-only
+// REST contract used by the app, CLI and MCP. It never authors or enforces access.
+func (h *Handler) GetRuntimeAccessDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if !h.requireToolsAdmin(w) {
+		return
+	}
+	rtID, _, ok := h.loadRuntimeForAdmin(w, r)
+	if !ok {
+		return
+	}
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), rtID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	tools, err := h.runtimeToolsAdmin.ListTools(r.Context(), rtID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list runtime access diagnostics: "+err.Error())
+		return
+	}
+	evidence := make([]accessdiagnostics.RuntimeToolEvidence, 0, len(tools))
+	for _, tool := range tools {
+		row := accessdiagnostics.RuntimeToolEvidence{
+			Name:          tool.Name,
+			Source:        tool.Source,
+			MCPServerName: tool.MCPServerName,
+		}
+		if tool.LastScannedAt != nil {
+			row.LastScannedAt, _ = time.Parse(time.RFC3339Nano, *tool.LastScannedAt)
+		}
+		evidence = append(evidence, row)
+	}
+	capabilities := normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig)
+	writeJSON(w, http.StatusOK, accessdiagnostics.BuildRuntimeDiagnostics(accessdiagnostics.RuntimeInput{
+		RuntimeID:          uuidToString(rt.ID),
+		Provider:           rt.Provider,
+		Status:             rt.Status,
+		Capabilities:       capabilities,
+		ProviderObservedAt: providerObservedAt(capabilities),
+		Tools:              evidence,
+		Now:                time.Now(),
+		StaleAfter:         30 * time.Minute,
+	}))
+}
+
+func providerObservedAt(capabilities map[string]any) time.Time {
+	raw, _ := capabilities["provider_observed_at"].(string)
+	observedAt, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return observedAt
 }
 
 // CEREBRO-PATCH(runtime-tools-scan-now): FIR-2230 admin-triggered live scan endpoint.

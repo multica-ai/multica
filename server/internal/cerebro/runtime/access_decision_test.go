@@ -205,6 +205,19 @@ func TestEveryRegisteredGatewayPermissionUsesThePolicyDecisionService(t *testing
 	_, denyAgent := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	askExecutor, askAgent := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	executor.SetAccessDecisionService(accessdecision.NewService(executor.toolPolicy, nil, &shadowLedgerWriter{}))
+	if _, err := runtimeAccountTestPool.Exec(context.Background(), `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, endpoint_permissions, default_access, enabled)
+		VALUES ($1, 'infisical-admin', 'Permission contract API', 'api', 'http://internal:3000',
+		        '[{"path":"/secrets","methods":["GET"]}]'::jsonb, 'allow', true)
+	`, runtimeAccountTestWSID); err != nil {
+		t.Fatalf("seed permission contract API connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = runtimeAccountTestPool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1 AND name = 'infisical-admin'`,
+			runtimeAccountTestWSID)
+	})
 
 	registry := NewDefaultRegistry(nil, nil, ToolContext{CapabilitiesProvider: stubCapabilitiesProvider{}})
 	registry.Register(&gatewayMCPTool{
@@ -261,12 +274,12 @@ func TestEveryRegisteredGatewayPermissionUsesThePolicyDecisionService(t *testing
 	mandates := &captureTaskMandates{}
 	executor.SetTaskMandates(mandates)
 	executor.SetAccessDecisionService(accessdecision.NewService(executor.toolPolicy, nil, &shadowLedgerWriter{}).WithMandates(mandates))
-	issuedTools := executor.policyDecisionTools(
+	executor.policyDecisionTools(
 		context.Background(), registry, allowAgent, runtimeAccountTestWSID,
 		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))},
 	)
-	if got := sortedToolNames(issuedTools); !equalStrings(got, mandates.issued) {
-		t.Fatalf("task mandate = %v, want exact final allowed list %v", mandates.issued, got)
+	if mandates.issued != nil {
+		t.Fatalf("policy decision finalized Task Mandate before task-scoped tools were assembled: %v", mandates.issued)
 	}
 	if denied := executor.policyDecisionTools(
 		context.Background(), registry, denyAgent, runtimeAccountTestWSID, GatewayRequestMeta{},

@@ -1,5 +1,10 @@
 // CEREBRO-PATCH(editor-preprocess): cerebro modification of upstream file
-import { preprocessLinks, preprocessMentionShortcodes, preprocessFileCards } from "@multica/ui/markdown";
+import {
+  preprocessLinks,
+  preprocessMentionShortcodes,
+  preprocessFileCards,
+  preprocessIssueIdentifiers,
+} from "@multica/ui/markdown";
 import { configStore } from "@multica/core/config";
 
 /**
@@ -9,11 +14,12 @@ import { configStore } from "@multica/core/config";
  * It does NOT convert to HTML — that was the old markdownToHtml.ts pipeline which
  * was deleted in the April 2026 refactor.
  *
- * Three string→string transforms on raw Markdown:
+ * String→string transforms on raw Markdown:
  * 1. Legacy mention shortcodes [@ id="..." label="..."] → [@Label](mention://member/id)
  *    (old serialization format in database, migrated on read)
- * 2. Raw URLs → markdown links via linkify-it (so they render as clickable Link nodes)
- * 3. File card syntax (new !file[name](url) + legacy [name](cdnUrl)) → HTML div for
+ * 2. (readonly only) Bare issue identifiers MUL-123 → [MUL-123](mention://issue/MUL-123)
+ * 3. Raw URLs → markdown links via linkify-it (so they render as clickable Link nodes)
+ * 4. File card syntax (new !file[name](url) + legacy [name](cdnUrl)) → HTML div for
  *    fileCard node parsing
  *
  * When `attachmentsByUrl` is provided, file-card divs include the attachment's ID
@@ -22,11 +28,15 @@ import { configStore } from "@multica/core/config";
 export function preprocessMarkdown(
   markdown: string,
   attachmentsByUrl?: ReadonlyMap<string, string>,
+  opts?: { autolinkIssueIdentifiers?: boolean },
 ): string {
   if (!markdown) return "";
   const cdnDomain = configStore.getState().cdnDomain;
   const step1 = preprocessMentionShortcodes(markdown);
-  const step2 = preprocessLinks(step1);
-  const step3 = preprocessFileCards(step2, cdnDomain, attachmentsByUrl);
-  return step3;
+  const step2 = opts?.autolinkIssueIdentifiers
+    ? preprocessIssueIdentifiers(step1)
+    : step1;
+  const step3 = preprocessLinks(step2);
+  const step4 = preprocessFileCards(step3, cdnDomain, attachmentsByUrl);
+  return step4;
 }

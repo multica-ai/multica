@@ -2,43 +2,20 @@ package workflows
 
 import (
 	"context"
-	"log/slog"
+	"encoding/json"
+	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TaskFailureContext is everything the on.task.failure hook event needs about
-// a freshly-failed task. RetryPending distinguishes "a retry child is already
-// queued and will report on its own" from "this failure is terminal" — the
-// default guard hook only comments/blocks in the terminal case.
-type TaskFailureContext struct {
-	HooksEnabled  bool
-	TaskID        string
-	WorkspaceID   string
-	ProjectID     string
-	IssueID       string
-	IssueStatus   string
-	AgentID       string
-	Model         string
-	SessionID     string
-	FailureReason string
-	ErrorText     string
-	Attempt       int
-	MaxAttempts   int
-	RetryPending  bool
-}
-
 type TaskFailureContextStore interface {
-	LoadTaskFailureContext(context.Context, pgtype.UUID) (TaskFailureContext, error)
+	WorkflowHooksEnabledForTask(context.Context, pgtype.UUID) (bool, error)
+	LoadTaskFailureContext(context.Context, pgtype.UUID) (TaskCompletionContext, error)
 }
 
-// TaskFailureGate connects the in-process task:failed broadcast to the
-// on.task.failure hook event. Until this gate existed the event type was
-// listed in the catalog but nothing ever fired it.
 type TaskFailureGate struct {
 	store          TaskFailureContextStore
 	evaluator      HookEvaluator
@@ -53,67 +30,78 @@ func NewTaskFailureGate(store TaskFailureContextStore, evaluator HookEvaluator, 
 	return &TaskFailureGate{store: store, evaluator: evaluator, featureEnabled: enabled}
 }
 
-// Attach subscribes the gate on the bus. Safe to call once at server startup.
-func (g *TaskFailureGate) Attach(bus *events.Bus) {
-	bus.Subscribe(protocol.EventTaskFailed, g.onTaskFailed)
+func (g *TaskFailureGate) EvaluateTaskFailure(ctx context.Context, task db.AgentTaskQueue, reason, message string) (service.TaskFailureDecision, error) {
+	if !g.featureEnabled || g.store == nil || g.evaluator == nil {
+		return service.TaskFailureDecision{}, nil
+	}
+	enabled, err := g.store.WorkflowHooksEnabledForTask(ctx, task.ID)
+	if err != nil || !enabled {
+		return service.TaskFailureDecision{}, err
+	}
+	failureContext, err := g.store.LoadTaskFailureContext(ctx, task.ID)
+	if err != nil {
+		return service.TaskFailureDecision{}, err
+	}
+	result, err := g.evaluator.Evaluate(ctx, HookEvent{
+		EventID:     fmt.Sprintf("%s:task-failure:%s:%d", failureContext.TaskID, reason, task.Attempt),
+		Type:        HookOnTaskFailure,
+		WorkspaceID: failureContext.WorkspaceID, ProjectID: failureContext.ProjectID,
+		WorkflowID: failureContext.WorkflowID, AgentID: failureContext.AgentID,
+		Model: failureContext.Model, IssueID: failureContext.IssueID,
+		SessionID: failureContext.SessionID, Attempt: int(task.Attempt),
+		Context: map[string]any{
+			"failure": map[string]any{
+				"reason": reason, "message": message,
+				"attempt": task.Attempt, "max_attempts": task.MaxAttempts,
+			},
+			"task": map[string]any{"id": failureContext.TaskID, "status": task.Status},
+		},
+		MutableFields: []string{"failure_action", "fresh_session", "retry_limit", "user_message"},
+	})
+	if err != nil {
+		return service.TaskFailureDecision{}, err
+	}
+	decision := service.TaskFailureDecision{
+		Action:    service.TaskFailureSurface,
+		Evaluated: result.Evaluated,
+	}
+	if action, ok := result.Modifications["failure_action"].(string); ok {
+		switch service.TaskFailureAction(action) {
+		case service.TaskFailureRetry, service.TaskFailurePause, service.TaskFailureAlert, service.TaskFailureSurface:
+			decision.Action = service.TaskFailureAction(action)
+		}
+	}
+	if fresh, ok := result.Modifications["fresh_session"].(bool); ok {
+		decision.FreshSession = fresh
+	}
+	if retryLimit, ok := integerModification(result.Modifications["retry_limit"]); ok {
+		decision.RetryLimit = int32(retryLimit)
+	}
+	if userMessage, ok := result.Modifications["user_message"].(string); ok {
+		decision.UserMessage = userMessage
+	}
+	return decision, nil
 }
 
-func (g *TaskFailureGate) onTaskFailed(e events.Event) {
-	if !g.featureEnabled || g.store == nil || g.evaluator == nil {
-		return
-	}
-	payload, ok := payloadToMap(e.Payload)
-	if !ok {
-		return
-	}
-	// Cancellations are re-broadcast on the task:failed channel so frontends
-	// clear the live card; a user-cancelled run is not a failure.
-	if status, _ := payload["status"].(string); status != "failed" {
-		return
-	}
-	taskIDRaw, _ := payload["task_id"].(string)
-	taskID, err := util.ParseUUID(taskIDRaw)
-	if err != nil {
-		return
-	}
-	ctx := context.Background()
-	failure, err := g.store.LoadTaskFailureContext(ctx, taskID)
-	if err != nil {
-		// Chat-session tasks have no issue row and resolve to no context;
-		// the guard hook is issue-scoped by design.
-		return
-	}
-	if !failure.HooksEnabled || failure.IssueID == "" {
-		return
-	}
-	event := HookEvent{
-		EventID:     "task-failure:" + failure.TaskID,
-		Type:        HookOnTaskFailure,
-		WorkspaceID: failure.WorkspaceID,
-		ProjectID:   failure.ProjectID,
-		AgentID:     failure.AgentID,
-		Model:       failure.Model,
-		IssueID:     failure.IssueID,
-		SessionID:   failure.SessionID,
-		Attempt:     failure.Attempt,
-		Context: map[string]any{
-			"task": map[string]any{
-				"id":             failure.TaskID,
-				"failure_reason": failure.FailureReason,
-				"error":          failure.ErrorText,
-				"attempt":        failure.Attempt,
-				"max_attempts":   failure.MaxAttempts,
-			},
-			"retry": map[string]any{"pending": failure.RetryPending},
-			"issue": map[string]any{"id": failure.IssueID, "status": failure.IssueStatus},
-		},
-	}
-	if _, err := g.evaluator.Evaluate(ctx, event); err != nil {
-		slog.Warn("task failure hook evaluation failed",
-			"task_id", failure.TaskID,
-			"issue_id", failure.IssueID,
-			"workspace_id", failure.WorkspaceID,
-			"error", err,
-		)
+func integerModification(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int32:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), typed == float64(int64(typed))
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseInt(typed, 10, 32)
+		return parsed, err == nil
+	default:
+		return 0, false
 	}
 }
+
+var _ service.WorkflowFailureGate = (*TaskFailureGate)(nil)

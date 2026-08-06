@@ -5,6 +5,8 @@ import {
   canSubmitContextDraft,
   readBriefLayerMode,
   readSystemPromptMode,
+  readSpeedMode,
+  readPositiveIntegerSetting,
 } from "./context-draft";
 
 describe("bumpPatch", () => {
@@ -20,11 +22,15 @@ describe("bumpPatch", () => {
 describe("context draft state", () => {
   const current = {
     instructions: "Current",
+    runtimeId: "runtime-1",
     model: "gpt-5",
     thinkingLevel: "high",
     workspaceBriefMode: "",
     toolsBriefMode: "",
     systemPromptMode: "",
+    speedMode: "",
+    maxTurns: "",
+    timeoutMinutes: "",
   };
 
   it("detects a changed instruction", () => {
@@ -47,10 +53,32 @@ describe("context draft state", () => {
     expect(isContextDraftDirty(current, { ...current, systemPromptMode: "replace" })).toBe(true);
   });
 
+  it("detects changed runtime controls (FIR-4000)", () => {
+    expect(isContextDraftDirty(current, { ...current, runtimeId: "runtime-2" })).toBe(true);
+    expect(isContextDraftDirty(current, { ...current, speedMode: "fast" })).toBe(true);
+    expect(isContextDraftDirty(current, { ...current, maxTurns: "18" })).toBe(true);
+    expect(isContextDraftDirty(current, { ...current, timeoutMinutes: "42" })).toBe(true);
+  });
+
   it("requires both a change and a title before submission", () => {
     expect(canSubmitContextDraft("Reason", true)).toBe(true);
     expect(canSubmitContextDraft("  ", true)).toBe(false);
     expect(canSubmitContextDraft("Reason", false)).toBe(false);
+  });
+});
+
+describe("versioned runtime setting readers (FIR-4000)", () => {
+  it("normalises speed and positive integer overrides", () => {
+    const config = { speed_mode: "fast", max_turns: 18, timeout_minutes: 42 };
+    expect(readSpeedMode(config)).toBe("fast");
+    expect(readPositiveIntegerSetting(config, "max_turns")).toBe("18");
+    expect(readPositiveIntegerSetting(config, "timeout_minutes")).toBe("42");
+  });
+
+  it("treats defaults and malformed values as inherited", () => {
+    expect(readSpeedMode({ speed_mode: "standard" })).toBe("");
+    expect(readPositiveIntegerSetting({ max_turns: 0 }, "max_turns")).toBe("");
+    expect(readPositiveIntegerSetting({ timeout_minutes: "42" }, "timeout_minutes")).toBe("");
   });
 });
 

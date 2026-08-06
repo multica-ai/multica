@@ -49,6 +49,7 @@ type IssueLoopBridge struct {
 	monitorEvals MonitorEvalBindingLister
 	driver       *ChainDriver
 	dispatcher   *TaskDispatcher
+	hooks        workflows.HookEvaluator
 }
 
 func NewIssueLoopBridge(pool *pgxpool.Pool, queries *cerebrodb.Queries, issues *db.Queries, columns *workflows.IssueLoopColumnStore) *IssueLoopBridge {
@@ -279,6 +280,14 @@ func (b *IssueLoopBridge) ResolveHumanBlock(ctx context.Context, workflowID, iss
 			if err := store.RecordStepOutcome(ctx, step.StepRef, status, outcome); err != nil {
 				return err
 			}
+			if status == StepCompleted {
+				if err := b.AfterStepCompleted(ctx, BlockDispatch{
+					Run:   ChainRun{IssueID: issueID, WorkflowID: workflowID},
+					Phase: phase, Block: *block,
+				}, ChainStep{StepRef: step.StepRef, Status: status, Outcome: outcome}); err != nil {
+					return err
+				}
+			}
 			return b.advanceChain(ctx, workflowID, issueID, chain)
 		}
 	}
@@ -398,15 +407,24 @@ func (b *IssueLoopBridge) advanceChain(ctx context.Context, workflowID, issueID 
 			if decision.Status == "" || decision.Status == run.IssueStatus {
 				return nil
 			}
-			if _, err := b.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, WorkspaceID: issue.WorkspaceID, Status: decision.Status}); err != nil {
+			status, err := b.BeforeIssueStatusChange(ctx, issue, decision.Status, "workflow", util.UUIDToString(workflowID))
+			if err != nil {
+				return err
+			}
+			if _, err := b.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, WorkspaceID: issue.WorkspaceID, Status: status}); err != nil {
 				return fmt.Errorf("set chain issue status: %w", err)
 			}
-			run.IssueStatus = decision.Status
+			run.IssueStatus = status
+			issue.Status = status
 			if decision.Kind == ChainDone {
 				return nil
 			}
 		case ChainFailed:
-			_, err := b.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, WorkspaceID: issue.WorkspaceID, Status: "blocked"})
+			status, gateErr := b.BeforeIssueStatusChange(ctx, issue, "blocked", "workflow", util.UUIDToString(workflowID))
+			if gateErr != nil {
+				return gateErr
+			}
+			_, err := b.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, WorkspaceID: issue.WorkspaceID, Status: status})
 			return err
 		default:
 			return fmt.Errorf("unknown chain decision %q", decision.Kind)

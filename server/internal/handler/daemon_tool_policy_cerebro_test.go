@@ -94,6 +94,9 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("clear seeded task mandate: %v", err)
+	}
 	// The real claim path (cerebroEffectiveToolsForClaim) snapshots CAPABILITY KEYS
 	// into the mandate — built-ins as "tools:<Name>", because the daemon capability
 	// snapshot reports them under the "tools" kind (verified in
@@ -101,8 +104,8 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	// bare Claude name, and Authorize canonicalises it through PolicyToolKey to
 	// match, exactly as the policy-chain resolve does. Seed the realistic key.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
-		VALUES ($1, $2, $3, '["tools:Read"]'::jsonb, now() + interval '1 hour')
+		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at, claim_generation, lifecycle_state)
+		VALUES ($1, $2, $3, '["tools:Read"]'::jsonb, now() + interval '1 hour', 1, 'finalized')
 	`, taskID, testWorkspaceID, agentID); err != nil {
 		t.Fatalf("issue task mandate: %v", err)
 	}
@@ -130,9 +133,9 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 		t.Fatalf("seed deny policy: %v", err)
 	}
 
-	resolve := func(tool string) map[string]any {
+	resolveWithGeneration := func(tool string, generation int64) map[string]any {
 		t.Helper()
-		body := map[string]any{"tool_name": tool, "agent_id": agentID, "task_id": taskID}
+		body := map[string]any{"tool_name": tool, "agent_id": agentID, "task_id": taskID, "claim_generation": generation}
 		req := withURLParams(
 			newRequest(http.MethodPost, "/api/daemon/workspaces/"+testWorkspaceID+"/tool-policy/resolve", body),
 			"workspaceId", testWorkspaceID,
@@ -147,6 +150,13 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 			t.Fatalf("decode response: %v", err)
 		}
 		return resp
+	}
+	resolve := func(tool string) map[string]any { return resolveWithGeneration(tool, 1) }
+
+	if r := resolveWithGeneration(openTool, 2); r["allowed"] != false || r["decision"] != "deny" {
+		t.Fatalf("stale local generation: got allowed=%v decision=%v, want false/deny", r["allowed"], r["decision"])
+	} else if verdict, ok := r["verdict"].(map[string]any); !ok || verdict["code"] != "task_generation_stale" || verdict["recovery_action"] != "retry_claim" {
+		t.Fatalf("stale local verdict = %#v, want task_generation_stale/retry_claim", r["verdict"])
 	}
 
 	// The denied tool is blocked with no rollout switch.
@@ -165,6 +175,54 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	}
 	if r := resolve(deniedTool); r["allowed"] != false || r["decision"] != "deny" {
 		t.Fatalf("mandate expanded after policy opened: got allowed=%v decision=%v, want false/deny", r["allowed"], r["decision"])
+	} else if verdict, ok := r["verdict"].(map[string]any); !ok || verdict["code"] != "task_tool_not_authorized" || verdict["recovery_action"] != "start_new_task" {
+		t.Fatalf("mandate denial verdict = %#v, want task_tool_not_authorized/start_new_task", r["verdict"])
+	}
+	var mandateDenials int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM cerebro_access_decision_ledger
+		WHERE agent_id = $1
+		  AND task_id = $2
+		  AND observed_tool_name = $3
+		  AND reason_code = 'task_tool_not_authorized'
+	`, agentID, taskID, deniedTool).Scan(&mandateDenials); err != nil {
+		t.Fatalf("read task mandate denial observation: %v", err)
+	}
+	if mandateDenials < 1 {
+		t.Fatal("local Task Mandate denial was not recorded for Capabilities drift")
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE cerebro_access_decision_ledger
+		SET reason = 'display copy contains no authority token'
+		WHERE agent_id = $1 AND task_id = $2 AND observed_tool_name = $3
+		  AND reason_code = 'task_tool_not_authorized'
+	`, agentID, taskID, deniedTool); err != nil {
+		t.Fatalf("rewrite display-only denial reason: %v", err)
+	}
+	observed, err := testHandler.CerebroQueries.ListAgentObservedToolUsage(ctx, cerebrodb.ListAgentObservedToolUsageParams{
+		AgentID:    parseUUID(agentID),
+		WindowDays: observedAccessWindowDays,
+	})
+	if err != nil {
+		t.Fatalf("read Capabilities observed access: %v", err)
+	}
+	visible := false
+	for _, tool := range observed {
+		if tool.Tool == deniedTool && tool.MandateDenials >= 1 {
+			visible = true
+		}
+	}
+	if !visible {
+		t.Fatalf("Task Mandate denial is missing from Capabilities observed access: %+v", observed)
+	}
+
+	// The rollout circuit breaker restores the policy-only decision without a
+	// deploy or mandate rewrite. Bash is Allow in policy and remains outside the
+	// immutable snapshot, so turning enforcement off must immediately allow it.
+	setTaskMandateEnforcement(t, false)
+	if r := resolve(deniedTool); r["allowed"] != true || r["decision"] != "allow" {
+		t.Fatalf("default-off Task Mandate circuit breaker: got allowed=%v decision=%v, want true/allow", r["allowed"], r["decision"])
 	}
 	var mandateDenials int
 	if err := testPool.QueryRow(ctx, `
@@ -272,9 +330,12 @@ func TestResolveDaemonToolPolicy_NormalizesCursorHookNames(t *testing.T) {
 	`, agentID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `DELETE FROM cerebro_task_mandate WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("clear seeded task mandate: %v", err)
+	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
-		VALUES ($1, $2, $3, '["tools:run_terminal_cmd","tools:read_file","tools:Task"]'::jsonb, now() + interval '1 hour')
+		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at, claim_generation, lifecycle_state)
+		VALUES ($1, $2, $3, '["tools:run_terminal_cmd","tools:read_file","tools:Task"]'::jsonb, now() + interval '1 hour', 1, 'finalized')
 	`, taskID, testWorkspaceID, agentID); err != nil {
 		t.Fatalf("issue task mandate: %v", err)
 	}
@@ -284,7 +345,7 @@ func TestResolveDaemonToolPolicy_NormalizesCursorHookNames(t *testing.T) {
 
 	resolve := func(tool string, args map[string]any) map[string]any {
 		t.Helper()
-		body := map[string]any{"tool_name": tool, "agent_id": agentID, "task_id": taskID, "args": args}
+		body := map[string]any{"tool_name": tool, "agent_id": agentID, "task_id": taskID, "claim_generation": 1, "args": args}
 		req := withURLParams(
 			newRequest(http.MethodPost, "/api/daemon/workspaces/"+testWorkspaceID+"/tool-policy/resolve", body),
 			"workspaceId", testWorkspaceID,

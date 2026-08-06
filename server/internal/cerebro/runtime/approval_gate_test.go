@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -13,12 +14,25 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type gateFakeTaskMandates struct {
 	authorizeErr error
 	calls        []string
+}
+
+type gateGenerationTaskMandates struct {
+	gateFakeTaskMandates
+	generation int64
+}
+
+func (f *gateGenerationTaskMandates) AuthorizeClaimGeneration(_ context.Context, _, _, _ pgtype.UUID, generation int64, tool string) error {
+	f.calls = append(f.calls, tool)
+	f.generation = generation
+	return f.authorizeErr
 }
 
 func (f *gateFakeTaskMandates) Issue(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time) error {
@@ -73,6 +87,31 @@ func gateTestUUID(seed byte) pgtype.UUID {
 	return u
 }
 
+func TestConnectionToolSettingBlocksWhenResolverIsUnavailable(t *testing.T) {
+	e := &FirtalGatewayExecutor{logger: slog.Default()}
+	reg := NewRegistry(nil)
+	reg.Register(&gatewayMCPTool{
+		exposedName:    "mcp__customer_service__draft_reply",
+		connectionName: "customer_service",
+		toolName:       "draft_reply",
+	})
+	got, conn := e.connectionToolSetting(
+		context.Background(),
+		gateTestUUID(1),
+		gateTestUUID(2),
+		reg,
+		"mcp__customer_service__draft_reply",
+		GatewayRequestMeta{AgentID: "agent-1"},
+	)
+	if got != toolpolicy.SettingDeny || conn != "customer_service" {
+		t.Fatalf("missing connection resolver = %s/%q, want Deny/customer_service", got, conn)
+	}
+	resource, connection, ok := connectionPolicyTarget(reg, "mcp__customer_service__draft_reply")
+	if !ok || resource != "draft_reply" || connection != "customer_service" {
+		t.Fatalf("connection policy target = %q/%q/%v, want draft_reply/customer_service/true", resource, connection, ok)
+	}
+}
+
 func newGatedExecutor(ap *gateFakeApprovals) *FirtalGatewayExecutor {
 	e := &FirtalGatewayExecutor{logger: slog.Default()}
 	gate := &permgate.Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
@@ -121,11 +160,41 @@ func TestGuardToolCallTaskMandateDeniesEveryCallPathBeforePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		tool string
+		reg  *Registry
 		err  error
 	}{
 		{name: "expired ordinary tool", tool: "web_fetch", err: errors.New("task mandate expired")},
 		{name: "tool outside mandate", tool: "web_fetch", err: errors.New("tool is outside task mandate")},
 		{name: "expired create_issue early path", tool: "create_issue", err: errors.New("task mandate expired")},
+		{
+			name: "MCP connection tool outside mandate",
+			tool: "mcp__customer_service__draft_reply",
+			reg: func() *Registry {
+				reg := NewRegistry(nil)
+				reg.Register(&gatewayMCPTool{
+					exposedName:    "mcp__customer_service__draft_reply",
+					connectionName: "customer_service",
+					toolName:       "draft_reply",
+				})
+				return reg
+			}(),
+			err: errors.New("tool is outside task mandate"),
+		},
+		{
+			name: "API connection tool outside mandate",
+			tool: "infisical_admin__get_secrets",
+			reg: func() *Registry {
+				reg := NewRegistry(nil)
+				reg.Register(&APIConnectionTool{
+					toolName: "infisical_admin__get_secrets",
+					connName: "infisical-admin",
+					method:   "GET",
+					path:     "/secrets",
+				})
+				return reg
+			}(),
+			err: errors.New("tool is outside task mandate"),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mandates := &gateFakeTaskMandates{authorizeErr: tc.err}
@@ -135,7 +204,7 @@ func TestGuardToolCallTaskMandateDeniesEveryCallPathBeforePolicy(t *testing.T) {
 					return true
 				},
 			}).SetTaskMandates(mandates)
-			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, nil, meta)
+			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, tc.reg, meta)
 			if allowed || !strings.Contains(reason, tc.err.Error()) {
 				t.Fatalf("guardToolCall() = (%v, %q), want denial containing %q", allowed, reason, tc.err)
 			}
@@ -143,6 +212,28 @@ func TestGuardToolCallTaskMandateDeniesEveryCallPathBeforePolicy(t *testing.T) {
 				t.Fatalf("mandate calls = %v, want [%s]", mandates.calls, tc.tool)
 			}
 		})
+	}
+}
+
+func TestGuardToolCallTaskMandateEnforcementDefaultsOff(t *testing.T) {
+	mandates := &gateFakeTaskMandates{authorizeErr: errors.New("task mandate missing")}
+	e := (&FirtalGatewayExecutor{logger: slog.Default()}).SetTaskMandates(mandates)
+
+	_, reason := e.guardToolCall(
+		context.Background(),
+		gateTestUUID(1),
+		gateTestUUID(9),
+		"web_fetch",
+		nil,
+		nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))},
+	)
+
+	if len(mandates.calls) != 0 {
+		t.Fatalf("default-off circuit breaker called Task Mandate: %v", mandates.calls)
+	}
+	if strings.Contains(reason, "task mandate") {
+		t.Fatalf("default-off circuit breaker returned Task Mandate denial: %q", reason)
 	}
 }
 
@@ -161,6 +252,52 @@ func TestGuardToolCallMissingTaskMandateFailsClosed(t *testing.T) {
 				t.Fatalf("guardToolCall() = (%v, %q), want missing-mandate denial", allowed, reason)
 			}
 		})
+	}
+}
+
+func TestGuardToolCallReturnsStructuredTaskMandateRecovery(t *testing.T) {
+	taskID := gateTestUUID(7)
+	executor := (&FirtalGatewayExecutor{
+		logger:                 slog.Default(),
+		taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
+	}).SetTaskMandates(&gateFakeTaskMandates{authorizeErr: taskmandate.ErrExpired})
+
+	allowed, reason := executor.guardToolCall(
+		context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(taskID)},
+	)
+	var payload struct {
+		Verdict taskmandate.Verdict `json:"verdict"`
+	}
+	if err := json.Unmarshal([]byte(reason), &payload); err != nil {
+		t.Fatalf("Gateway Task Mandate denial is not structured JSON: %q (%v)", reason, err)
+	}
+	if allowed || payload.Verdict.Code != taskmandate.VerdictMandateExpired || payload.Verdict.RecoveryAction != taskmandate.RecoveryStartNewTask {
+		t.Fatalf("Gateway Task Mandate verdict = %+v allowed=%v, want expired/start_new_task denial", payload.Verdict, allowed)
+	}
+}
+
+func TestGuardToolCallRequiresCurrentClaimGeneration(t *testing.T) {
+	taskID := gateTestUUID(7)
+	mandates := &gateGenerationTaskMandates{}
+	executor := (&FirtalGatewayExecutor{
+		logger:                 slog.Default(),
+		taskMandateEnforcement: func(context.Context, pgtype.UUID) bool { return true },
+	}).SetTaskMandates(mandates)
+
+	allowed, reason := executor.guardToolCall(
+		context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(taskID)},
+	)
+	if allowed || !strings.Contains(reason, string(taskmandate.VerdictStaleGeneration)) {
+		t.Fatalf("missing generation = (%v, %q), want task_generation_stale", allowed, reason)
+	}
+	allowed, _ = executor.guardToolCall(
+		context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{TaskID: util.UUIDToString(taskID), TaskMandateGeneration: 11},
+	)
+	if mandates.generation != 11 {
+		t.Fatalf("AuthorizeClaimGeneration generation = %d, want 11", mandates.generation)
 	}
 }
 

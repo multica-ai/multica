@@ -6,7 +6,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http/httptest"
 	"sort"
 	"testing"
@@ -18,6 +17,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -30,32 +30,92 @@ type rejectingCapabilityMandate struct{ denied map[string]bool }
 
 func (m rejectingCapabilityMandate) Authorize(_ context.Context, _, _, _ pgtype.UUID, tool string) error {
 	if m.denied[tool] {
-		return fmt.Errorf("tool is outside task mandate")
+		return taskmandate.ErrToolDeny
 	}
 	return nil
+}
+
+type generationCapabilityMandate struct {
+	rejectingCapabilityMandate
+	generation int64
+}
+
+func (m *generationCapabilityMandate) AuthorizeClaimGeneration(_ context.Context, _, _, _ pgtype.UUID, generation int64, _ string) error {
+	m.generation = generation
+	if generation != 23 {
+		return taskmandate.ErrStaleClaimGeneration
+	}
+	return nil
+}
+
+func TestApplyTaskMandateDeniesAPIConnectionEndpointOnCapabilitiesCard(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Connections: []AgentCapabilityConnection{{
+		Name:      "infisical-admin",
+		Endpoints: []AgentCapabilityConnEndpoint{{Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true}},
+	}}}
+	ApplyTaskMandate(context.Background(), true, rejectingCapabilityMandate{denied: map[string]bool{"infisical_admin__get_secrets": true}}, id, id, id, &card)
+	got := card.Connections[0].Endpoints[0]
+	if got.Permission != "deny" || got.Allowed || got.Callable || got.BlockedReason == "" || got.HowToFix == "" || got.Verdict == nil || got.Verdict.Code != taskmandate.VerdictToolNotAuthorized {
+		t.Fatalf("API endpoint mandate denial must be visible on the capabilities card: %+v", got)
+	}
+}
+
+func TestApplyTaskMandateUsesExactPlatformToolBindings(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Tools: []AgentCapabilityTool{{
+		Key: "read_issues", Permission: "allow", Allowed: true, Callable: true,
+	}}}
+
+	ApplyTaskMandate(context.Background(), true, rejectingCapabilityMandate{
+		denied: map[string]bool{
+			"list_issues": true, "get_issue": true, "search_issues": true,
+			"list_comments": true, "list_sessions": true,
+		},
+	}, id, id, id, &card)
+
+	got := card.Tools[0]
+	if got.Permission != "deny" || got.Allowed || got.Callable || got.Verdict == nil || got.Verdict.Code != taskmandate.VerdictToolNotAuthorized {
+		t.Fatalf("platform capability must reflect its exact Task Mandate bindings: %+v", got)
+	}
+	if len(got.CallableIdentities) != 5 || len(got.AuthorizedCallables) != 0 {
+		t.Fatalf("platform callable identities = %v authorized = %v", got.CallableIdentities, got.AuthorizedCallables)
+	}
+}
+
+func TestApplyTaskMandateUsesClaimGenerationWhenProvided(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	mandate := &generationCapabilityMandate{}
+	card := AgentCapabilities{Tools: []AgentCapabilityTool{{
+		Key: "create_issue", Permission: "allow", Allowed: true, Callable: true,
+	}}}
+	ApplyTaskMandate(context.Background(), true, mandate, id, id, id, &card, 22)
+	if mandate.generation != 22 || card.Tools[0].Verdict == nil || card.Tools[0].Verdict.Code != taskmandate.VerdictStaleGeneration {
+		t.Fatalf("generation overlay = %d/%+v, want 22/task_generation_stale", mandate.generation, card.Tools[0])
+	}
 }
 
 func TestApplyTaskMandateDisabledPreservesResolvedPermissions(t *testing.T) {
 	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	card := AgentCapabilities{Connections: []AgentCapabilityConnection{{
-		Name: "company-brain",
-		Tools: []AgentCapabilityConnTool{
-			{Name: "allowed", Permission: "allow", Allowed: true, Callable: true},
-			{Name: "denied", Permission: "deny", Allowed: false, Callable: false, BlockedReason: "Tool Policy denied the capability"},
+		Name: "infisical-admin",
+		Endpoints: []AgentCapabilityConnEndpoint{
+			{Path: "/allowed", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true},
+			{Path: "/denied", Methods: []string{"GET"}, Permission: "deny", Allowed: false, Callable: false, BlockedReason: "Tool Policy denied the capability"},
 		},
 	}}}
 	mandates := rejectingCapabilityMandate{denied: map[string]bool{
-		"mcp__company-brain__allowed": true,
-		"mcp__company-brain__denied":  true,
+		"infisical_admin__get_allowed": true,
+		"infisical_admin__get_denied":  true,
 	}}
 
 	ApplyTaskMandate(context.Background(), false, mandates, id, id, id, &card)
 
-	allowed := card.Connections[0].Tools[0]
+	allowed := card.Connections[0].Endpoints[0]
 	if allowed.Permission != "allow" || !allowed.Allowed || !allowed.Callable || allowed.BlockedReason != "" {
 		t.Fatalf("disabled Task Mandate changed Tool Policy Allow: %+v", allowed)
 	}
-	denied := card.Connections[0].Tools[1]
+	denied := card.Connections[0].Endpoints[1]
 	if denied.Permission != "deny" || denied.Allowed || denied.Callable || denied.BlockedReason != "Tool Policy denied the capability" {
 		t.Fatalf("disabled Task Mandate changed Tool Policy Deny: %+v", denied)
 	}
@@ -155,7 +215,7 @@ func TestMergeCanonicalCapabilityToolsCollapsesLiveBridgeAndPlatformRow(t *testi
 
 	tools := []AgentCapabilityTool{
 		{Key: "add_comment", Title: "add_comment", Source: capSourceScan, Permission: "allow", Allowed: true, Enforced: true},
-		{Key: "add_comment", Title: "Add comment", Source: platformcatalog.Source, Permission: "allow", Allowed: true, Available: true, Enforced: true},
+		{Key: "add_comment", Title: "Add comment", Source: platformcatalog.Source, DeliveryChannel: "multica", Permission: "allow", Allowed: true, Available: true, Enforced: true},
 	}
 	got := mergeCanonicalCapabilityTools(tools, "codex")
 	if len(got) != 1 {
@@ -163,6 +223,9 @@ func TestMergeCanonicalCapabilityToolsCollapsesLiveBridgeAndPlatformRow(t *testi
 	}
 	if got[0].Source != capSourceScan {
 		t.Fatalf("merged source = %q, want live scan source", got[0].Source)
+	}
+	if got[0].DeliveryChannel != "multica" {
+		t.Fatalf("merged delivery_channel = %q, want multica", got[0].DeliveryChannel)
 	}
 }
 
@@ -189,6 +252,17 @@ func TestCapabilityToolFromPlatformRowReportsCallability(t *testing.T) {
 	})
 	if !allowed.Allowed || !allowed.Available || !allowed.Enforced || !allowed.Callable {
 		t.Fatalf("allowed hooks:write = %+v, want callable effective action", allowed)
+	}
+
+	external := capabilityToolFromRow(cerebrotoolpolicy.TableRow{
+		ToolKey:               "autopilot_webhook",
+		Source:                platformcatalog.Source,
+		ManagedExternally:     true,
+		ExternalSecurityOwner: "Autopilot webhook secret",
+		Effective:             cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow},
+	})
+	if external.ExternalSecurityOwner != "Autopilot webhook secret" || external.Enforced {
+		t.Fatalf("external permission projection = %+v, want named owner and policy-engine enforced=false", external)
 	}
 }
 

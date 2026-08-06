@@ -3314,6 +3314,8 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		s := readClaudeMD(t, assignmentCtx)
 		for _, want := range []string{
 			"side-effecting actions",
+			"Before handing work to another agent",   // CEREBRO-PATCH(agent-handoff-runtime-check): FIR-4217
+			"add one short line to the same comment", // CEREBRO-PATCH(agent-handoff-runtime-check): FIR-4217
 			"enqueues a new run for that agent",
 			"When NOT to use a mention link",
 			"When a mention IS appropriate",

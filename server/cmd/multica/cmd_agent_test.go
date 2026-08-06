@@ -108,6 +108,23 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	})
 }
 
+// CEREBRO-PATCH(task-mandate-claim-generation): FIR-4292 preserve task ceiling generation in CLI clients.
+func TestNewAPIClientReadsTaskMandateGeneration(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://multica.test")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-1")
+	t.Setenv("MULTICA_TOKEN", "token-1")
+	t.Setenv("MULTICA_AGENT_ID", "agent-1")
+	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TASK_MANDATE_GENERATION", "17")
+	client, err := newAPIClient(testCmd())
+	if err != nil {
+		t.Fatalf("newAPIClient: %v", err)
+	}
+	if client.TaskMandateGeneration != 17 {
+		t.Fatalf("TaskMandateGeneration = %d, want 17", client.TaskMandateGeneration)
+	}
+}
+
 // TestParseCustomEnv covers the --custom-env flag parser used by
 // `agent create` and `agent env set`. The flag accepts a JSON object
 // of string keys and values; the only clear signal is the explicit

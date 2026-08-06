@@ -17,6 +17,7 @@ const placementState = vi.hoisted(() => ({
 // FIR-4350 create/settings handlers.
 const railProps = vi.hoisted(() => ({
   showSectionControls: undefined as unknown,
+  flush: undefined as unknown,
   onCreate: undefined as undefined | (() => void),
   onOpenSettings: undefined as undefined | (() => void),
 }));
@@ -62,11 +63,13 @@ vi.mock("@multica/core/modals", () => ({
 vi.mock("@multica/cerebro-inbox-slack-block", () => ({
   SlackBlock: (props: {
     showSectionControls?: boolean;
+    flush?: boolean;
     onCreate?: () => void;
     onOpenSettings?: () => void;
     onOpenAgentChat: (id: string) => void;
   }) => {
     railProps.showSectionControls = props.showSectionControls;
+    railProps.flush = props.flush;
     railProps.onCreate = props.onCreate;
     railProps.onOpenSettings = props.onOpenSettings;
     return (
@@ -146,6 +149,26 @@ describe("ChatPage", () => {
     expect(screen.getByTestId("panel-session")).toHaveTextContent("sess-99");
   });
 
+  // FIR-4350 design review — the page names itself. Before this, only the
+  // mobile branch rendered a PageHeader, so on desktop the Chat page opened
+  // into a bare two-pane split with nothing on it saying "Chat".
+  it("renders a page header with the page name on desktop", async () => {
+    await act(async () => {
+      render(<ChatPage />);
+    });
+    expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
+  });
+
+  // FIR-4350 design review — the rail is this page's left column, not a card
+  // floating inside it, so it is rendered flush (no rounded border, no
+  // drag-handle inset, pinned header).
+  it("renders the rail flush instead of as an inbox card", async () => {
+    await act(async () => {
+      render(<ChatPage />);
+    });
+    expect(railProps.flush).toBe(true);
+  });
+
   it("shows an empty-rail hint with a settings button when nothing is in Chat", async () => {
     placementState.value = NONE_IN_CHAT;
     await act(async () => {
@@ -153,8 +176,9 @@ describe("ChatPage", () => {
     });
     expect(screen.queryByTestId("rail")).not.toBeInTheDocument();
     expect(screen.getByText(/Nothing is placed in Chat yet/)).toBeInTheDocument();
-    // FIR-4350 — the empty rail opens the placement settings on the page.
-    await userEvent.setup().click(screen.getByText("Chat settings"));
+    // FIR-4350 — the empty rail opens the placement settings on the page. The
+    // button carries the same name as the dialog it opens ("Chat placement").
+    await userEvent.setup().click(screen.getByText("Chat placement"));
     expect(screen.getByTestId("placement-settings")).toBeInTheDocument();
   });
 

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	cerebroaccessdecision "github.com/multica-ai/multica/server/internal/cerebro/accessdecision"     // CEREBRO-PATCH(main-access-decision-service): FIR-3388 canonical Gateway Policy Decision Service.
@@ -354,12 +355,7 @@ func main() {
 	// CEREBRO-PATCH(main-workflow-session-stamper): FIR-2283 — dispatch-time session badge writer shared by the engine's phase dispatch and the loop revision dispatcher.
 	workflowSessionStamper := cerebroworkflows.NewSessionPhaseStamper(pool)
 	workflowSvc.WithSessionStamper(workflowSessionStamper)
-	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
-	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
-	baseLoopGate := cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries).WithSessionStamper(workflowSessionStamper)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)) // CEREBRO-PATCH(main-eval-gate): FIR-3308 preserve existing checks.
-	evalGateStore := cerebroevals.NewStore(pool)                                                                                                                                                                        // CEREBRO-PATCH(main-eval-advisory): FIR-3496 share one store between the blocking gate and the advisory warner.
-	evalAdvisoryWarner := cerebroevals.NewAdvisoryWarner(evalGateStore, cerebrodb.New(pool), queries, bus)                                                                                                              // CEREBRO-PATCH(main-eval-advisory): FIR-3496 warn owners/admins on failing advisory (non-blocking) eval bindings.
-	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, evalGateStore).WithAdvisoryWarner(evalAdvisoryWarner))                                                                                    // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
+	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(cerebroevalrun.New(pool))) // CEREBRO-PATCH(main-workflow-hooks-shared): FIR-3692 one evaluator for request and background paths.
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
@@ -368,6 +364,7 @@ func main() {
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
 		WorkflowService:    workflowSvc,
+		WorkflowHooks:      workflowHooksFeature,
 	})
 
 	srv := &http.Server{
@@ -384,10 +381,12 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
+	taskSvc.WorkflowCompletionGate = workflowHooksFeature.CompletionGate // CEREBRO-PATCH(main-workflow-completion-gate): FIR-3692 background task paths share the Workflow completion decision.
+	taskSvc.WorkflowFailureGate = workflowHooksFeature.FailureGate       // CEREBRO-PATCH(main-workflow-failure-gate): FIR-3692 background task paths share the Workflow failure decision.
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 issue/time/GitHub-CI wakeup listeners.
-	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus)
+	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus).WithHooks(workflowHooksFeature.Evaluator)
 	cerebrowakeup.RegisterListeners(bus, wakeupSvc)
 	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 snapshot a version whenever an agent-created document (artifact) is created/updated, reusing the note version engine.
 	cerebronote.RegisterArtifactVersionListener(bus, cerebrodb.New(pool))
@@ -420,7 +419,6 @@ func main() {
 	go runIssueDateReminderSweeper(sweepCtx, queries, bus, taskSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
-	go activeQueryCensus.run(sweepCtx) // CEREBRO-PATCH(query-census): FIR-3781 report the busiest statements.
 	// CEREBRO-PATCH(cerebro-account-token-retention): bound token telemetry storage to the rolling windows.
 	go runCerebroAccountTokenUsageCleanup(sweepCtx, cerebrodb.New(pool))
 	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
@@ -450,6 +448,8 @@ func main() {
 	go cerebroevals.NewScheduleSweeper(cerebroevals.NewStore(pool), cerebroevalrun.New(pool)).Run(sweepCtx, time.Minute)
 	// CEREBRO-PATCH(main-eval-drift-sweeper): FIR-3496 daily eval drift alarm (fail + pass-rate regression). Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED.
 	go cerebroevals.NewDriftSweeper(cerebroevals.NewStore(pool), cerebrodb.New(pool), queries, bus).Run(sweepCtx, 24*time.Hour)
+	// CEREBRO-PATCH(main-connection-tool-refresh-sweeper): FIR-4187 nightly MCP tool-list refresh. An undiscovered tool has no permission row and resolves ungated, so a stale list is a permission hole.
+	go cerebroconnections.NewToolRefreshSweeper(cerebroconnections.New(pool)).Run(sweepCtx, cerebroconnections.DefaultRefreshInterval)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)
@@ -463,7 +463,7 @@ func main() {
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-api-connection-tools): FIR-2166 C PR2 — expose enabled API-type connections as server-side-dispatched agent tools, behind the default-off cerebro_api_connection_tools workspace flag.
 		gatewayExecutor.SetAPIConnectionStore(cerebroconnections.New(pool))
-		// CEREBRO-PATCH(main-loop-report-store): FIR-2283 — wire the loop check store so worker agents can call report_loop_check to report check exit codes back to the delivery gate.
+		// CEREBRO-PATCH(main-loop-step-store): wire the Chain v2 store used by open_loop_step.
 		gatewayExecutor.SetLoopStore(cerebroloops.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-agent-capabilities): FIR-3398 — wire the capabilities card builder so the gateway answers get_agent_capabilities from the same implementation as the HTTP route.
 		gatewayExecutor.SetAgentCapabilitiesProvider(h)
@@ -471,7 +471,11 @@ func main() {
 		h.CapabilityEvidence = cerebroruntime.NewGatewayAvailabilityLedger(gatewayRuntimeCtx, h, queries)
 		mandates := cerebrotaskmandate.NewStore(pool)
 		gatewayExecutor.SetTaskMandates(mandates)
-		gatewayExecutor.SetAccessDecisionService(cerebroaccessdecision.NewService(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates)) // CEREBRO-PATCH(main-access-decision-service): FIR-3388 canonical Gateway decision.
+		gatewayExecutor.SetSessionModeAllowedToolsResolver(h) // CEREBRO-PATCH(task-mandate-session-mode-parity): FIR-4292 apply the published Mode ceiling before Gateway exposure and finalization.
+		mandateFlags := cerebrodb.New(pool)
+		gatewayExecutor.SetAccessDecisionService(cerebroaccessdecision.NewService(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates).WithMandateEnforcement(func(ctx context.Context, workspaceID pgtype.UUID) bool { // CEREBRO-PATCH(task-mandate-enforcement-circuit-breaker): FIR-4220 keep duplicate Gateway decision enforcement on the same default-off workspace flag.
+			return cerebrotaskmandate.EnforcementEnabled(ctx, mandateFlags, workspaceID)
+		}))
 		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 policy-controlled in-process bridge to the full CLI tool surface.
 		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)

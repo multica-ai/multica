@@ -46,6 +46,7 @@ export {
   CADENCE_UNITS,
   type NoteType,
   type NoteTypeWriteInput,
+  type NoteTypeParticipant,
   type RecurrenceMode,
   type CadenceUnit,
 } from "./note-types-types";

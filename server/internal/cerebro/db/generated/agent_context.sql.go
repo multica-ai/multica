@@ -50,7 +50,8 @@ UPDATE agent SET
     mcp_config      = $6,
     custom_args     = $7,
     runtime_config  = $8,
-    context_version = $9,
+    runtime_id      = COALESCE($9::uuid, runtime_id),
+    context_version = $10,
     updated_at      = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version, paused_at, unpause_at, pause_reason, auto_pause_count
@@ -65,6 +66,7 @@ type ApplyAgentContextSnapshotParams struct {
 	McpConfig      []byte      `json:"mcp_config"`
 	CustomArgs     []byte      `json:"custom_args"`
 	RuntimeConfig  []byte      `json:"runtime_config"`
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
 	ContextVersion string      `json:"context_version"`
 }
 
@@ -83,6 +85,7 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 		arg.McpConfig,
 		arg.CustomArgs,
 		arg.RuntimeConfig,
+		arg.RuntimeID,
 		arg.ContextVersion,
 	)
 	var i Agent
@@ -431,6 +434,23 @@ func (q *Queries) GetAgentContextInWorkspace(ctx context.Context, arg GetAgentCo
 		&i.AutoPauseCount,
 	)
 	return i, err
+}
+
+const getAgentContextRuntimeProvider = `-- name: GetAgentContextRuntimeProvider :one
+SELECT provider FROM agent_runtime
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetAgentContextRuntimeProviderParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetAgentContextRuntimeProvider(ctx context.Context, arg GetAgentContextRuntimeProviderParams) (string, error) {
+	row := q.db.QueryRow(ctx, getAgentContextRuntimeProvider, arg.ID, arg.WorkspaceID)
+	var provider string
+	err := row.Scan(&provider)
+	return provider, err
 }
 
 const getAgentContextVersion = `-- name: GetAgentContextVersion :one

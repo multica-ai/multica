@@ -12,6 +12,8 @@
  *     task:failed / task:cancelled → invalidate timeline + detail (task
  *     state can flip an issue's status server-side without firing
  *     issue:updated, so we refetch the authoritative detail too)
+ *   - artifact:created / artifact:updated / artifact:deleted → invalidate the
+ *     issue's artifacts so the Workpad plan checklist follows the agent
  *   - reconnect → invalidate detail + timeline (we might've missed events
  *     while disconnected; server has no replay buffer for this client)
  *
@@ -32,6 +34,7 @@ import type {
   TaskMessagePayload,
   TaskQueuedPayload,
 } from "@multica/core/types";
+import { artifactKeys } from "@/data/queries/artifacts";
 import { issueKeys } from "@/data/queries/issue-keys";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
@@ -94,6 +97,25 @@ export function useIssueRealtime(
         if ((p as TaskEventPayload).issue_id !== issueId) return;
         invalidateThisIssue();
         invalidateTaskQueries();
+      };
+
+      // FIR-3659 — artifacts coupled to this issue; the Workpad panel reads
+      // the `kind:"plan"` one. The payload carries a single artifact, not the
+      // list, so invalidate is the correct primitive per apps/mobile/CLAUDE.md
+      // "Patch over invalidate" rule #1 — list membership itself may have
+      // changed (a plan created or deleted), which a patch cannot express.
+      const invalidateArtifacts = () => {
+        qc.invalidateQueries({ queryKey: artifactKeys.byIssue(wsId, issueId) });
+      };
+
+      // `artifact:*` has no entry in WSEventPayloadMap (packages/core/types/
+      // events.ts), so the payload is cast — packages/cerebro-realtime/
+      // handlers.ts casts the same shape for the same reason.
+      const onArtifactEvent = (p: unknown) => {
+        const artifact = (p as { artifact?: { issue_id: string | null } })
+          ?.artifact;
+        if (artifact?.issue_id !== issueId) return;
+        invalidateArtifacts();
       };
 
       return [
@@ -223,10 +245,21 @@ export function useIssueRealtime(
         ws.on("task:failed", onTaskEvent),
         ws.on("task:cancelled", onTaskEvent),
 
+        // ----- Artifacts (Workpad plan) -----
+        // The agent ticks its plan off while it works; without these the
+        // Workpad panel freezes at whatever the plan said when the screen
+        // opened, which defeats the feature. Mirrors web's handlers
+        // (packages/cerebro-realtime/handlers.ts), which invalidate the same
+        // by-issue key.
+        ws.on("artifact:created", onArtifactEvent),
+        ws.on("artifact:updated", onArtifactEvent),
+        ws.on("artifact:deleted", onArtifactEvent),
+
         // ----- Reconnect -----
         ws.onReconnect(() => {
           invalidateThisIssue();
           invalidateTaskQueries();
+          invalidateArtifacts();
         }),
       ];
     },

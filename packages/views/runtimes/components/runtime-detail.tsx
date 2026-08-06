@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Cpu,
   Lock,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -26,7 +27,7 @@ import {
   useUpdateRuntimeSandbox,
   useUpdateRuntimeSandboxPolicy,
 } from "@multica/core/runtimes/mutations";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
+import { deriveRuntimeHealth, runtimeDisplayName } from "@multica/core/runtimes";
 // CEREBRO-PATCH(runtime-detail-pause): pause/resume controls live in cerebro-runtime.
 // CEREBRO-PATCH(runtime-detail-tools-card-import): runtime-level unified tools card (JEH-1710). Replaces the prior MCP servers JSON card.
 // CEREBRO-PATCH(runtime-detail-sandbox-card-import): FIR-2284 consolidated sandbox surface (extracted to cerebro zone).
@@ -53,6 +54,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { RenameRuntimeDialog } from "./rename-runtime-dialog";
 import { useT } from "../../i18n";
 // CEREBRO-PATCH(runtime-detail-accounts): JEH-999 filter card to runtime's own account
 import { RuntimeAccountsCard } from "@multica/cerebro-runtime";
@@ -121,6 +123,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   const health = deriveRuntimeHealth(runtime, now);
   const ownerMember = runtime.owner_id
@@ -170,7 +173,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
+          {runtimeDisplayName(runtime)}
         </span>
         <div className="ml-auto flex items-center gap-2">
           {!canDelete && (
@@ -219,6 +222,8 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               ownerMember={ownerMember}
               cliVersion={cliVersion}
               daemonShort={daemonShort}
+              canEdit={!!canDelete}
+              onRename={() => setRenameOpen(true)}
             />
             <UsageSection runtimeId={runtime.id} />
             {/* CEREBRO-PATCH(runtime-detail-tools-card): unified tools inventory + access (JEH-1710). Single card; the old MCP-servers JSON box is gone. */}
@@ -259,6 +264,14 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         wsId={wsId}
         onDeleted={handleDeleted}
       />
+      {canDelete && (
+        <RenameRuntimeDialog
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          runtime={runtime}
+          wsId={wsId}
+        />
+      )}
     </div>
   );
 }
@@ -284,6 +297,8 @@ function HeroCard({
   ownerMember,
   cliVersion,
   daemonShort,
+  canEdit,
+  onRename,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -291,6 +306,8 @@ function HeroCard({
   ownerMember: MemberWithUser | null;
   cliVersion: string | null;
   daemonShort: string | null;
+  canEdit: boolean;
+  onRename: () => void;
 }) {
   const { t } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
@@ -307,8 +324,18 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtime.name}
+              {runtimeDisplayName(runtime)}
             </h2>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={onRename}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Rename runtime"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
               {t(($) => $.detail.last_seen, { when: lastSeen })}

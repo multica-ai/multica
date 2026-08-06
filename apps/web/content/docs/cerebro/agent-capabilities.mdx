@@ -22,9 +22,10 @@ The page groups access into **Skills**, **Tools**, **Repos**, **Connections**, *
 
 The runtime availability summary separates access that is verified on the current runtime from access that is only declared. This helps identify a tool that is permitted in policy but unavailable in practice.
 
+For platform actions, `delivery_channel: "multica"` means the agent reaches the action through the authenticated `multica` command or API path. It does not need a same-named direct runtime tool. `permission`, `available`, `enforced`, and `callable` remain separate so missing or stale runtime inventory cannot change the configured policy decision.
+
 ## Compare configured and observed access
 
 **Observed access** shows what the agent actually used during the displayed period. A difference between configured and observed access is highlighted as drift so an administrator can investigate it.
 
 The same effective capability data is available to authorized agents through the CLI and MCP. This keeps the human view and the agent view aligned.
-

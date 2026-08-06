@@ -27,7 +27,17 @@ export function AppsPage() {
     setLoading(true);
     setError("");
     void listApps(workspace.slug)
-      .then((result) => { if (current) { setApps(result.apps); setCanManage(result.can_manage); } })
+      .then(async (result) => {
+        if (!current) return;
+        setApps(result.apps);
+        setCanManage(result.can_manage);
+        if (!result.can_manage || !result.apps.some((app) => app.builtin_update_available)) return;
+        await installAllergenFormatter(workspace.slug);
+        const refreshed = await listApps(workspace.slug);
+        if (!current) return;
+        setApps(refreshed.apps);
+        setCanManage(refreshed.can_manage);
+      })
       .catch((cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : "Could not load apps"); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };

@@ -1,0 +1,6 @@
+extends: electron-builder.yml
+publish:
+  provider: github
+  owner: firtal-group
+  repo: firtal-cerebro
+  releaseType: release

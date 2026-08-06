@@ -67,7 +67,7 @@ func (s *Server) Call(ctx context.Context, name string, args map[string]any) (Ca
 	if !ok {
 		return ErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
-	return h(ctx, args)
+	return h(withCallableIdentity(ctx, name), args) // CEREBRO-PATCH(task-mandate-callable-propagation): FIR-4292 stamp direct MCP dispatch.
 }
 
 // CEREBRO-PATCH(workspace-mcp-http): TECH-3405 expose JSON-RPC MCP over HTTP for Connections.
@@ -185,7 +185,7 @@ func (s *Server) handleRequest(ctx context.Context, req Request) Response {
 			}
 		}
 
-		result, err := handler(ctx, params.Arguments)
+		result, err := handler(withCallableIdentity(ctx, params.Name), params.Arguments) // CEREBRO-PATCH(task-mandate-callable-propagation): FIR-4292 stamp JSON-RPC MCP dispatch.
 		if err != nil {
 			return Response{
 				JSONRPC: "2.0",

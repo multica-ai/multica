@@ -65,6 +65,11 @@ jobs:
       - name: Test local check process cleanup
         run: bash scripts/check-process-tree.test.sh
 
+      # CEREBRO-PATCH(post-deploy-runtime-tool-gate-ci): FIR-4220 keeps the
+      # canonical deploy hook, fail-closed live checker, and retirement gate pinned.
+      - name: Test post-deploy live Runtime tool gate
+        run: bash scripts/cerebro/test-live-runtime-tools-post-deploy.sh
+
       - name: Test Pi Firtal Gateway model discovery
         run: node --experimental-strip-types --test docker/pi-firtal-gateway.test.mjs
 

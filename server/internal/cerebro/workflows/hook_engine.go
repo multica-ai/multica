@@ -56,7 +56,7 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 		return allow, ErrHookDepthExceeded
 	}
 	if event.NoProgress > MaxHookNoProgress {
-		return HookResult{Decision: HookBlock, Warning: "Hook stopped after repeated no-progress events"}, nil
+		return HookResult{Evaluated: true, Decision: HookBlock, Warning: "Hook stopped after repeated no-progress events"}, nil
 	}
 	key := event.EventID
 	if key == "" {
@@ -81,7 +81,8 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 		return result, nil
 	}
 
-	result := HookResult{RunID: key, Decision: HookAllow, Modifications: map[string]any{}}
+	result := HookResult{RunID: key, Evaluated: true, Decision: HookAllow, Modifications: map[string]any{}}
+policyLoop:
 	for _, policy := range policies {
 		if policy.Mode == HookModeOff || !eventListed(policy.Events, event.Type) || !policyMatches(policy, event) {
 			continue
@@ -116,7 +117,9 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 			}
 			for field, value := range handler.Modifications {
 				if containsString(event.MutableFields, field) {
-					result.Modifications[field] = value
+					if resolved, ok := resolveHookModification(value, event); ok {
+						result.Modifications[field] = resolved
+					}
 				}
 			}
 			for index, action := range handler.Actions {
@@ -140,6 +143,7 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 					switch policy.FailMode {
 					case HookFailClosed:
 						result.Decision = HookBlock
+						break policyLoop
 					case HookFailWarn:
 						result.Warning = "A hook action failed"
 					}
@@ -159,15 +163,15 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 func timeoutResult(policies []HookPolicy) HookResult {
 	for _, policy := range policies {
 		if policy.Mode != HookModeOff && policy.FailMode == HookFailClosed {
-			return HookResult{Decision: HookBlock, TimedOut: true, Warning: "Hook evaluation timed out and failed closed"}
+			return HookResult{Evaluated: true, Decision: HookBlock, TimedOut: true, Warning: "Hook evaluation timed out and failed closed"}
 		}
 	}
 	for _, policy := range policies {
 		if policy.Mode != HookModeOff && policy.FailMode == HookFailWarn {
-			return HookResult{Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out"}
+			return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true, Warning: "Hook evaluation timed out"}
 		}
 	}
-	return HookResult{Decision: HookAllow, TimedOut: true}
+	return HookResult{Evaluated: true, Decision: HookAllow, TimedOut: true}
 }
 
 func strongerDecision(current, next HookDecision) HookDecision {
@@ -265,6 +269,14 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func resolveHookModification(value any, event HookEvent) (any, bool) {
+	path, dynamic := value.(string)
+	if !dynamic || !strings.HasPrefix(path, "$event.") {
+		return value, true
+	}
+	return lookup(strings.TrimPrefix(path, "$event."), hookConditionContext(event))
 }
 
 type MemoryHookStore struct {

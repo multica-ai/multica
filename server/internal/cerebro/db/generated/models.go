@@ -129,6 +129,7 @@ type AgentRuntime struct {
 	ToolsConfig      []byte             `json:"tools_config"`
 	SandboxPolicy    []byte             `json:"sandbox_policy"`
 	AutoPauseCount   int32              `json:"auto_pause_count"`
+	CustomName       pgtype.Text        `json:"custom_name"`
 	CheapModel       string             `json:"cheap_model"`
 }
 
@@ -331,6 +332,7 @@ type CerebroAccessDecisionLedger struct {
 	Differs               bool               `json:"differs"`
 	Reason                string             `json:"reason"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	ReasonCode            string             `json:"reason_code"`
 }
 
 type CerebroAccount struct {
@@ -929,6 +931,149 @@ type CerebroCommentTask struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroCompanyBrainApprovalAuditTombstone struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RollbackWindowID pgtype.UUID        `json:"rollback_window_id"`
+	ApprovalID       pgtype.UUID        `json:"approval_id"`
+	ApprovalAuditID  pgtype.UUID        `json:"approval_audit_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCompanyBrainApprovalTombstone struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	RollbackWindowID     pgtype.UUID        `json:"rollback_window_id"`
+	LegacyConnectionID   pgtype.UUID        `json:"legacy_connection_id"`
+	LegacyConnectionName string             `json:"legacy_connection_name"`
+	ApprovalID           pgtype.UUID        `json:"approval_id"`
+	Capability           string             `json:"capability"`
+	Resource             string             `json:"resource"`
+	MetadataSha256       string             `json:"metadata_sha256"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCompanyBrainConnection struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ConnectionID       pgtype.UUID        `json:"connection_id"`
+	ToolContractSha256 string             `json:"tool_contract_sha256"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroCompanyBrainConnectionTombstone struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	RollbackWindowID     pgtype.UUID        `json:"rollback_window_id"`
+	LegacyConnectionID   pgtype.UUID        `json:"legacy_connection_id"`
+	LegacyConnectionName string             `json:"legacy_connection_name"`
+	MetadataSha256       string             `json:"metadata_sha256"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCompanyBrainMigrationDecision struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	CompanyBrainConnectionID pgtype.UUID        `json:"company_brain_connection_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	CensusVersion            int64              `json:"census_version"`
+	ConflictCode             string             `json:"conflict_code"`
+	AffectedReference        string             `json:"affected_reference"`
+	Outcome                  string             `json:"outcome"`
+	Status                   string             `json:"status"`
+	Consequence              string             `json:"consequence"`
+	RecommendedChoice        string             `json:"recommended_choice"`
+	SafeRemediation          string             `json:"safe_remediation"`
+	ObservedState            string             `json:"observed_state"`
+	ExpectedState            string             `json:"expected_state"`
+	OwnerUserID              pgtype.UUID        `json:"owner_user_id"`
+	SavedDecision            pgtype.Text        `json:"saved_decision"`
+	DecidedByUserID          pgtype.UUID        `json:"decided_by_user_id"`
+	DecidedAt                pgtype.Timestamptz `json:"decided_at"`
+	DecisionNote             pgtype.Text        `json:"decision_note"`
+	EvidenceSha256           string             `json:"evidence_sha256"`
+	EvidenceAt               pgtype.Timestamptz `json:"evidence_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroCompanyBrainParityProof struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	CompanyBrainConnectionID pgtype.UUID        `json:"company_brain_connection_id"`
+	TargetPermissionID       pgtype.UUID        `json:"target_permission_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	CensusVersion            int64              `json:"census_version"`
+	AccessVersion            int64              `json:"access_version"`
+	LegacyAccessSha256       string             `json:"legacy_access_sha256"`
+	TargetAccessSha256       string             `json:"target_access_sha256"`
+	LegacyApprovalSha256     string             `json:"legacy_approval_sha256"`
+	TargetApprovalSha256     string             `json:"target_approval_sha256"`
+	LegacyToolCallsSha256    string             `json:"legacy_tool_calls_sha256"`
+	TargetToolCallsSha256    string             `json:"target_tool_calls_sha256"`
+	LegacyToolCount          int32              `json:"legacy_tool_count"`
+	TargetToolCount          int32              `json:"target_tool_count"`
+	LegacyWriteSource        string             `json:"legacy_write_source"`
+	TargetWriteSource        string             `json:"target_write_source"`
+	Status                   string             `json:"status"`
+	BlockerCode              pgtype.Text        `json:"blocker_code"`
+	EvidenceSha256           string             `json:"evidence_sha256"`
+	EvidenceAt               pgtype.Timestamptz `json:"evidence_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroCompanyBrainPermissionAuditTombstone struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RollbackWindowID  pgtype.UUID        `json:"rollback_window_id"`
+	PermissionID      pgtype.UUID        `json:"permission_id"`
+	PermissionAuditID pgtype.UUID        `json:"permission_audit_id"`
+	ToolKey           string             `json:"tool_key"`
+	Layer             string             `json:"layer"`
+	SubjectID         pgtype.UUID        `json:"subject_id"`
+	ResourcePattern   string             `json:"resource_pattern"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCompanyBrainPermissionTombstone struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	RollbackWindowID     pgtype.UUID        `json:"rollback_window_id"`
+	LegacyConnectionID   pgtype.UUID        `json:"legacy_connection_id"`
+	LegacyConnectionName string             `json:"legacy_connection_name"`
+	PermissionID         pgtype.UUID        `json:"permission_id"`
+	ToolKey              string             `json:"tool_key"`
+	Layer                string             `json:"layer"`
+	SubjectID            pgtype.UUID        `json:"subject_id"`
+	ResourcePattern      string             `json:"resource_pattern"`
+	MetadataSha256       string             `json:"metadata_sha256"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCompanyBrainRollbackWindow struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	CompanyBrainConnectionID pgtype.UUID        `json:"company_brain_connection_id"`
+	SnapshotSha256           string             `json:"snapshot_sha256"`
+	StartsAt                 pgtype.Timestamptz `json:"starts_at"`
+	ExpiresAt                pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCompanyBrainToolAliasTombstone struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	RollbackWindowID     pgtype.UUID        `json:"rollback_window_id"`
+	LegacyConnectionID   pgtype.UUID        `json:"legacy_connection_id"`
+	LegacyConnectionName string             `json:"legacy_connection_name"`
+	AliasID              pgtype.UUID        `json:"alias_id"`
+	CapabilityID         string             `json:"capability_id"`
+	MetadataSha256       string             `json:"metadata_sha256"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroConnectionPersonKey struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -1471,6 +1616,8 @@ type CerebroNoteType struct {
 	NextNumber           int32              `json:"next_number"`
 	AnchorWeekday        pgtype.Int2        `json:"anchor_weekday"`
 	AuthorCodes          bool               `json:"author_codes"`
+	AnchorWeekOfMonth    pgtype.Int2        `json:"anchor_week_of_month"`
+	Participants         []byte             `json:"participants"`
 }
 
 type CerebroNoteVersion struct {
@@ -1536,11 +1683,18 @@ type CerebroOrgChartSeat struct {
 	ParentID         pgtype.UUID        `json:"parent_id"`
 	Name             string             `json:"name"`
 	Responsibilities []byte             `json:"responsibilities"`
-	OwnerType        pgtype.Text        `json:"owner_type"`
-	OwnerID          pgtype.UUID        `json:"owner_id"`
 	Position         int32              `json:"position"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroOrgChartSeatOwner struct {
+	SeatID      pgtype.UUID        `json:"seat_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	OwnerType   string             `json:"owner_type"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroOsElementSetting struct {
@@ -1937,27 +2091,39 @@ type CerebroTaskContextFootprintHistory struct {
 }
 
 type CerebroTaskMandate struct {
-	ID           pgtype.UUID        `json:"id"`
-	TaskID       pgtype.UUID        `json:"task_id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	AgentID      pgtype.UUID        `json:"agent_id"`
-	AllowedTools []byte             `json:"allowed_tools"`
-	IssuedAt     pgtype.Timestamptz `json:"issued_at"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	TaskID               pgtype.UUID        `json:"task_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	AllowedTools         []byte             `json:"allowed_tools"`
+	IssuedAt             pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	ClaimGeneration      int64              `json:"claim_generation"`
+	Producer             pgtype.Text        `json:"producer"`
+	Finalizer            pgtype.Text        `json:"finalizer"`
+	LifecycleState       string             `json:"lifecycle_state"`
+	InventoryVersion     pgtype.Text        `json:"inventory_version"`
+	DiscoveryVersion     pgtype.Text        `json:"discovery_version"`
+	FinalizedGrantDigest pgtype.Text        `json:"finalized_grant_digest"`
 }
 
 type CerebroToolPolicy struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	ToolKey         string             `json:"tool_key"`
-	Layer           string             `json:"layer"`
-	SubjectID       pgtype.UUID        `json:"subject_id"`
-	Setting         string             `json:"setting"`
-	UpdatedBy       pgtype.UUID        `json:"updated_by"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	ResourcePattern string             `json:"resource_pattern"`
-	Conditions      []byte             `json:"conditions"`
+	ID                             pgtype.UUID        `json:"id"`
+	WorkspaceID                    pgtype.UUID        `json:"workspace_id"`
+	ToolKey                        string             `json:"tool_key"`
+	Layer                          string             `json:"layer"`
+	SubjectID                      pgtype.UUID        `json:"subject_id"`
+	Setting                        string             `json:"setting"`
+	UpdatedBy                      pgtype.UUID        `json:"updated_by"`
+	CreatedAt                      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                      pgtype.Timestamptz `json:"updated_at"`
+	ResourcePattern                string             `json:"resource_pattern"`
+	Conditions                     []byte             `json:"conditions"`
+	CompanyBrainConnectionID       pgtype.UUID        `json:"company_brain_connection_id"`
+	CompanyBrainAllowedReadSources []string           `json:"company_brain_allowed_read_sources"`
+	CompanyBrainWriteSource        pgtype.Text        `json:"company_brain_write_source"`
+	CompanyBrainAccessVersion      pgtype.Int8        `json:"company_brain_access_version"`
+	CompanyBrainLifecycleState     pgtype.Text        `json:"company_brain_lifecycle_state"`
 }
 
 type CerebroToolPolicyAudit struct {
@@ -2018,6 +2184,17 @@ type CerebroUserInfisicalIdentity struct {
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroVisionPlanPage struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Key             string             `json:"key"`
+	Name            string             `json:"name"`
+	Position        int32              `json:"position"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	RowColumnCounts []byte             `json:"row_column_counts"`
+}
+
 type CerebroVisionPlanSection struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -2027,6 +2204,9 @@ type CerebroVisionPlanSection struct {
 	Position    int32              `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	ColumnIndex int32              `json:"column_index"`
+	RowIndex    int32              `json:"row_index"`
 }
 
 type CerebroWebFetchPolicy struct {

@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token headers
+	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
 // ClientVersion is the CLI version sent on every request as X-Client-Version.
@@ -47,12 +49,14 @@ func normalizeGOOS(goos string) string {
 // Used by ctrl subcommands (agent, runtime, status, etc.). Requests
 // automatically include auth and execution context headers when configured.
 type APIClient struct {
-	BaseURL     string
-	WorkspaceID string
-	Token       string
-	AgentID     string // When set, requests are attributed to this agent instead of the user.
-	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
-	HTTPClient  *http.Client
+	BaseURL               string
+	WorkspaceID           string
+	Token                 string
+	AgentID               string // When set, requests are attributed to this agent instead of the user.
+	TaskID                string // When set, sent as X-Task-ID for agent-task validation.
+	TaskMandateGeneration int64  // CEREBRO-PATCH(task-mandate-generation-cli): FIR-4292 immutable claim generation sent to REST gates.
+	CallableIdentity      string // CEREBRO-PATCH(task-mandate-callable-propagation): FIR-4292 exact CLI/MCP operation carried to Task Mandate route gates.
+	HTTPClient            *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.
@@ -109,6 +113,16 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	}
 	if c.TaskID != "" {
 		req.Header.Set("X-Task-ID", c.TaskID)
+	}
+	if c.TaskMandateGeneration > 0 {
+		req.Header.Set("X-Task-Mandate-Generation", strconv.FormatInt(c.TaskMandateGeneration, 10))
+	}
+	callable := mcp.CallableIdentity(req.Context())
+	if callable == "" {
+		callable = c.CallableIdentity
+	}
+	if callable != "" {
+		req.Header.Set("X-Multica-Callable", callable)
 	}
 
 	platform := c.Platform
@@ -488,6 +502,7 @@ func (c *APIClient) UploadAttachmentTo(ctx context.Context, fileData []byte, fil
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.setHeaders(req)
+	req.Header.Set("X-Multica-Callable", "add_attachment")
 
 	// Use a client that respects the context deadline for slow uploads
 	// (e.g. avatar uploads with 5MB files). The default 15s HTTP client
@@ -545,6 +560,7 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.setHeaders(req)
+	req.Header.Set("X-Multica-Callable", "add_attachment")
 
 	// Use a client that respects the context deadline for slow uploads
 	// (e.g. avatar uploads with 5MB files). The default 15s HTTP client

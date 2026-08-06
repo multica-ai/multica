@@ -31,6 +31,15 @@ type completingBlockDispatcher struct {
 	dispatches []BlockDispatch
 }
 
+type recordingChainLifecycle struct {
+	completed int
+}
+
+func (l *recordingChainLifecycle) AfterStepCompleted(context.Context, BlockDispatch, ChainStep) error {
+	l.completed++
+	return nil
+}
+
 func (d *completingBlockDispatcher) DispatchBlock(_ context.Context, dispatch BlockDispatch) (BlockDispatchResult, error) {
 	d.dispatches = append(d.dispatches, dispatch)
 	outcome, _ := json.Marshal(map[string]any{"output": dispatch.Block.ID + " output"})
@@ -47,6 +56,8 @@ func TestChainDriver_CarriesPreviousStepsAcrossPhases(t *testing.T) {
 	workflowID := seedLoopWorkflow(t, issueID)
 	dispatcher := &completingBlockDispatcher{}
 	driver := NewChainDriver(NewStore(loopTestPool), dispatcher)
+	lifecycle := &recordingChainLifecycle{}
+	driver.lifecycle = lifecycle
 	limits := PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}
 	chain := &Chain{Version: ChainVersion, Phases: []Phase{
 		{ID: "build", Limits: limits, Blocks: []Block{{ID: "builder", Type: BlockSession, Skill: "build"}}},
@@ -60,6 +71,9 @@ func TestChainDriver_CarriesPreviousStepsAcrossPhases(t *testing.T) {
 	}
 	if len(dispatcher.dispatches) != 2 {
 		t.Fatalf("dispatches = %+v", dispatcher.dispatches)
+	}
+	if lifecycle.completed != 2 {
+		t.Fatalf("completed lifecycle events = %d, want 2", lifecycle.completed)
 	}
 	previous := dispatcher.dispatches[1].PreviousSteps
 	if len(previous) != 1 || previous[0].BlockID != "builder" || !strings.Contains(string(previous[0].Outcome), "builder output") {

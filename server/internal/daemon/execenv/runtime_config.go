@@ -604,7 +604,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 		b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
 	}
-	if hasIssueContext { // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
+	b.WriteString(cerebroNamesVerbatimRule()) // CEREBRO-PATCH(runtime-config-names-verbatim): FIR-3986 — never translate a product name; emitted for every task, not only issue ones
+	if hasIssueContext {                      // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
 		b.WriteString(cerebroNoBusyWaitRule())
 		b.WriteString(cerebroWakeupMandatoryRule())
 		b.WriteString(cerebroClaudeMdScopeRule()) // CEREBRO-PATCH(runtime-config-claudemd-scope): FIR-1585 — repo CLAUDE.md/AGENTS.md is repo-only; keep workspace/agent/process content out
@@ -799,6 +800,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("Without MCP, drive the same flow from the skill's page in the Multica web UI. Either way: propose and let the owner review — that is how skill changes are meant to land.\n\n")
 
 	b.WriteString("## Mentions\n\n")
+	// CEREBRO-PATCH(agent-handoff-runtime-check): FIR-4217 silently verify recipient availability before handoff.
+	b.WriteString("Before handing work to another agent through issue assignment or a `mention://agent/...` link, silently read that agent's `runtime_id` with `multica agent get <agent-id> --output json` and check that runtime's `STATUS` in `multica runtime list`. Never block or delay the handoff on the result — always complete the requested assignment or mention. If that runtime is not `online`, add one short line to the same comment naming the agent and saying the work stays queued until its runtime is back.\n\n")
 	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
 	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **sends a notification to a human**\n")

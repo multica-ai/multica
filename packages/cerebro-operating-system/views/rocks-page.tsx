@@ -11,8 +11,8 @@ import { rockToInput } from "../core/rock-input";
 import { goalTypesOptions, periodsOptions, rocksOptions, settingsOptions, strategyOptions, useSavePeriod, useSaveRock } from "../core/queries";
 import type { GoalType, OperatingPeriod, Rock, RockInput, Terminology } from "../core/types";
 import { HealthBadge, HealthScore } from "./health-score";
-import { RockDetail } from "./rock-detail";
-import { RockForm } from "./rock-form";
+import { OsPageShell } from "./os-page-shell";
+import { RockEditor } from "./rock-editor";
 import { RocksTimeline } from "./rocks-timeline";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
 
@@ -61,8 +61,8 @@ function InlineRockAdd({ terminology, periods, goalTypes, defaultPeriodId, onPla
         placeholder={`Add a ${terminology.rock}… (press Enter)`}
         className="h-9 min-w-56 flex-1 rounded-md border bg-background px-3 text-sm"
       />
-      <SearchSelect compact className="w-40" label={`New ${terminology.rock} period`} options={periods.map(periodOption)} value={periodId} onChange={setPeriodId} actionLabel="Plan next period" onAction={() => onPlanPeriod(setPeriodId)} placeholder="Period" />
-      <SearchSelect compact className="w-36" label={`New ${terminology.rock} type`} options={goalTypes.map(typeOption)} value={goalTypeId} onChange={setGoalTypeId} clearLabel="No type" placeholder="Type" />
+      <SearchSelect compact className="w-44" fieldLabel="Period" label={`New ${terminology.rock} period`} options={periods.map(periodOption)} value={periodId} onChange={setPeriodId} actionLabel="Plan next period" onAction={() => onPlanPeriod(setPeriodId)} placeholder="Select" />
+      <SearchSelect compact className="w-40" fieldLabel="Type" label={`New ${terminology.rock} type`} options={goalTypes.map(typeOption)} value={goalTypeId} onChange={setGoalTypeId} clearLabel="No type" placeholder="Any" />
       <button type="button" aria-label={`Add ${terminology.rock}`} disabled={isPending || !title.trim() || !periodId} onClick={submit} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">Add</button>
     </div>
   );
@@ -119,12 +119,11 @@ export function RocksPage() {
   if (!enabled) return null;
 
   return (
-    <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
-      <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 p-4 sm:p-6">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div><h1 className="text-3xl font-semibold tracking-tight">{terminology.rocks}</h1><p className="mt-1 text-sm text-muted-foreground">Priorities · {currentPeriod?.name ?? "No active period"}{currentPeriod ? ` · ${formatDate(currentPeriod.starts_on)} – ${formatDate(currentPeriod.ends_on)}` : ""}</p></div>
+    <OsPageShell title={terminology.rocks} subtitle={`Priorities · ${currentPeriod?.name ?? "No active period"}${currentPeriod ? ` · ${formatDate(currentPeriod.starts_on)} – ${formatDate(currentPeriod.ends_on)}` : ""}`}>
+      <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 bg-muted/20 p-4 sm:p-6">
+        <div role="toolbar" aria-label={`${terminology.rocks} filters`} className="flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <SearchSelect compact className="w-44" label="Period filter" options={periodList.map(periodOption)} value={periodFilter} onChange={setPeriodFilter} clearLabel="All periods" actionLabel="Plan next period" onAction={() => planNextPeriod(setPeriodFilter)} placeholder="All periods" />
+            <SearchSelect compact className="w-48" fieldLabel="Period" label="Period filter" options={periodList.map(periodOption)} value={periodFilter} onChange={setPeriodFilter} clearLabel="All periods" actionLabel="Plan next period" onAction={() => planNextPeriod(setPeriodFilter)} placeholder="All" />
             {types.length > 0 && (
               <div className="flex flex-wrap gap-1 rounded-md border bg-background p-1" role="group" aria-label={`Filter by ${terminology.rock.toLowerCase()} type`}>
                 <button type="button" onClick={() => setTypeFilter("")} className={`h-8 rounded px-3 text-sm font-medium ${typeFilter === "" ? "bg-muted" : ""}`}>All</button>
@@ -146,7 +145,7 @@ export function RocksPage() {
               </div>
             )}
           </div>
-        </header>
+        </div>
 
         <section className="grid overflow-hidden rounded-xl border bg-card sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex items-center gap-3 border-b p-4 sm:border-r lg:border-b-0"><HealthScore score={metrics.score} state={metrics.score >= 70 ? "on_track" : metrics.score >= 40 ? "at_risk" : metrics.score ? "off_track" : "unset"} /><div><p className="text-xs font-semibold tracking-wide text-muted-foreground">OVERALL HEALTH</p><p className="text-sm font-medium">Portfolio score</p></div></div>
@@ -182,7 +181,7 @@ export function RocksPage() {
                         <button type="button" aria-label={`View ${rock.title}`} onClick={() => setOpenRockId(openRockId === rock.id ? undefined : rock.id)} className="min-w-0 truncate text-left text-sm font-semibold hover:underline">{rock.title}</button>
                         <button type="button" aria-label={`Rename ${rock.title}`} onClick={() => setRenamingId(rock.id)} className="shrink-0 rounded px-1 text-xs text-muted-foreground hover:bg-muted">✎</button>
                         <button type="button" aria-label={`Edit ${rock.title}`} onClick={() => setOpenRockId(rock.id)} className="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-muted">Edit</button>
-                        <SearchSelect compact className="w-28 shrink-0" label={`${rock.title} type`} options={types.map(typeOption)} value={rock.goal_type_id ?? ""} onChange={(value) => saveInline(rock, { goal_type_id: value || undefined })} clearLabel="No type" placeholder="Type" />
+                        <SearchSelect compact className="w-36 shrink-0" fieldLabel="Type" label={`${rock.title} type`} options={types.map(typeOption)} value={rock.goal_type_id ?? ""} onChange={(value) => saveInline(rock, { goal_type_id: value || undefined })} clearLabel="No type" placeholder="None" />
                       </>
                     )}
                   </span>
@@ -198,18 +197,11 @@ export function RocksPage() {
         )}
 
         {openRock && (
-          <section aria-label={`Edit ${openRock.title}`} className="grid gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">{openRock.title}</h2>
-              <button type="button" aria-label="Close" onClick={() => setOpenRockId(undefined)} className="h-8 rounded-md border px-3 text-sm font-medium">Close</button>
-            </div>
-            <RockForm wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={openRock} onSaved={() => setOpenRockId(undefined)} onCancel={() => setOpenRockId(undefined)} />
-            <RockDetail wsId={wsId} rock={openRock} terminology={terminology} />
-          </section>
+          <RockEditor wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={openRock} onClose={() => setOpenRockId(undefined)} />
         )}
 
         <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-center text-sm text-muted-foreground"><strong className="text-foreground">Built on Multica</strong> — a {terminology.rock} can stand alone or connect to Projects and Issues.</footer>
       </div>
-    </main>
+    </OsPageShell>
   );
 }

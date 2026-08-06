@@ -216,7 +216,7 @@ func TestBridge_CommandToolsAreAvailableToGatewayRegistry(t *testing.T) {
 	clitools.RegisterTools(srv, client, &session, "ws-1", "", "")
 	reg := NewRegistry(nil)
 	RegisterBridgedMCPTools(reg, srv, DefaultInAppAdminDenylist(), true)
-	for _, name := range []string{"list_commands", "get_command", "create_command", "update_command", "delete_command"} {
+	for _, name := range []string{"list_commands", "get_command", "create_command", "update_command", "delete_command", "get_runtime_access_diagnostics"} {
 		if !reg.hasTool(name) {
 			t.Errorf("%s was not bridged into the gateway registry", name)
 		}
@@ -242,6 +242,7 @@ func TestBridge_AdminDenylistShape(t *testing.T) {
 
 	mustAllow := []string{
 		"search_issues", "skill_list", "skill_get", "list_groups",
+		"get_runtime_access_diagnostics",
 		"create_artifact", "schedule_wakeup", "list_wakeups",
 		"add_attachment", "list_attachments", "read_attachment",
 	}

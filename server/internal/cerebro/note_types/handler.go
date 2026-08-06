@@ -3,6 +3,7 @@ package notetypes
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -39,9 +40,12 @@ func NewHandler(cerebro *cerebrodb.Queries, pool *pgxpool.Pool) *Handler {
 // ---------------------------------------------------------------------------
 
 type noteTypeRequest struct {
-	Name             string          `json:"name"`
-	Icon             string          `json:"icon"`
-	TemplateBody     string          `json:"template_body"`
+	Name string `json:"name"`
+	// FIR-3589: pointers, so an update that only re-times a cycle leaves the
+	// note's icon and template alone. A plain string could not tell "not sent"
+	// apart from "set to empty", and silently wiped the template.
+	Icon             *string         `json:"icon"`
+	TemplateBody     *string         `json:"template_body"`
 	RecurrenceMode   string          `json:"recurrence_mode"`
 	CadenceUnit      string          `json:"cadence_unit"`
 	CadenceCount     *int32          `json:"cadence_count"`
@@ -50,29 +54,54 @@ type noteTypeRequest struct {
 	NumberingEnabled *bool           `json:"numbering_enabled"`
 	NextNumber       *int32          `json:"next_number"`
 	AnchorWeekday    json.RawMessage `json:"anchor_weekday,omitempty"`
+	// FIR-3589: for a monthly cadence, the ordinal week-of-month the type
+	// anchors to (1..5, or -1 for "last"), combined with anchor_weekday to
+	// schedule e.g. the 3rd Monday of every month.
+	AnchorWeekOfMonth json.RawMessage `json:"anchor_week_of_month,omitempty"`
 	// FIR-2810: when true, notes materialised from this type start with the
 	// "stamp the writer's member code on every line" toggle switched on.
 	AuthorCodes *bool `json:"author_codes"`
+	// FIR-3589: the people and agents who attend this cycle. nil leaves the
+	// stored list unchanged on update; an empty slice clears it.
+	Participants *[]ParticipantRef `json:"participants"`
+}
+
+// An omitted optional string means "empty" on create and "leave unchanged" on
+// update; the update path reads the existing value instead of calling this.
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// ParticipantRef is one attendee of a recurring note (a cycle): a workspace
+// member or an agent.
+type ParticipantRef struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
 }
 
 type noteTypeResponse struct {
-	ID                   string  `json:"id"`
-	WorkspaceID          string  `json:"workspace_id"`
-	Name                 string  `json:"name"`
-	Icon                 string  `json:"icon"`
-	TemplateBody         string  `json:"template_body"`
-	RecurrenceMode       string  `json:"recurrence_mode"`
-	CadenceUnit          string  `json:"cadence_unit"`
-	CadenceCount         int32   `json:"cadence_count"`
-	TargetFolderID       *string `json:"target_folder_id"`
-	RunningDocArtifactID *string `json:"running_doc_artifact_id"`
-	Enabled              bool    `json:"enabled"`
-	NumberingEnabled     bool    `json:"numbering_enabled"`
-	NextNumber           int32   `json:"next_number"`
-	AnchorWeekday        *int16  `json:"anchor_weekday"`
-	AuthorCodes          bool    `json:"author_codes"`
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
+	ID                   string           `json:"id"`
+	WorkspaceID          string           `json:"workspace_id"`
+	Name                 string           `json:"name"`
+	Icon                 string           `json:"icon"`
+	TemplateBody         string           `json:"template_body"`
+	RecurrenceMode       string           `json:"recurrence_mode"`
+	CadenceUnit          string           `json:"cadence_unit"`
+	CadenceCount         int32            `json:"cadence_count"`
+	TargetFolderID       *string          `json:"target_folder_id"`
+	RunningDocArtifactID *string          `json:"running_doc_artifact_id"`
+	Enabled              bool             `json:"enabled"`
+	NumberingEnabled     bool             `json:"numbering_enabled"`
+	NextNumber           int32            `json:"next_number"`
+	AnchorWeekday        *int16           `json:"anchor_weekday"`
+	AnchorWeekOfMonth    *int16           `json:"anchor_week_of_month"`
+	AuthorCodes          bool             `json:"author_codes"`
+	Participants         []ParticipantRef `json:"participants"`
+	CreatedAt            string           `json:"created_at"`
+	UpdatedAt            string           `json:"updated_at"`
 }
 
 func toResponse(nt cerebrodb.CerebroNoteType) noteTypeResponse {
@@ -104,7 +133,46 @@ func toResponse(nt cerebrodb.CerebroNoteType) noteTypeResponse {
 		v := nt.AnchorWeekday.Int16
 		resp.AnchorWeekday = &v
 	}
+	if nt.AnchorWeekOfMonth.Valid {
+		v := nt.AnchorWeekOfMonth.Int16
+		resp.AnchorWeekOfMonth = &v
+	}
+	resp.Participants = decodeParticipants(nt.Participants)
 	return resp
+}
+
+// decodeParticipants turns the stored JSON array into a response slice, always
+// non-nil so the JSON renders "[]" rather than null.
+func decodeParticipants(raw []byte) []ParticipantRef {
+	out := []ParticipantRef{}
+	if len(raw) == 0 {
+		return out
+	}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// encodeParticipants validates and marshals the requested participants into the
+// JSONB column value. Unknown types are rejected; blank ids are dropped.
+func encodeParticipants(refs []ParticipantRef) ([]byte, error) {
+	clean := make([]ParticipantRef, 0, len(refs))
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		id := strings.TrimSpace(ref.ID)
+		if id == "" {
+			continue
+		}
+		if ref.Type != "member" && ref.Type != "agent" {
+			return nil, fmt.Errorf("participant type %q must be member or agent", ref.Type)
+		}
+		key := ref.Type + ":" + id
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		clean = append(clean, ParticipantRef{Type: ref.Type, ID: id})
+	}
+	return json.Marshal(clean)
 }
 
 // ---------------------------------------------------------------------------
@@ -195,22 +263,33 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 	if req.AuthorCodes != nil {
 		authorCodes = *req.AuthorCodes
 	}
+	participants := []byte("[]")
+	if req.Participants != nil {
+		encoded, err := encodeParticipants(*req.Participants)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		participants = encoded
+	}
 
 	nt, err := h.Cerebro.CreateCerebroNoteType(r.Context(), cerebrodb.CreateCerebroNoteTypeParams{
-		WorkspaceID:      wsUUID,
-		Name:             strings.TrimSpace(req.Name),
-		Icon:             req.Icon,
-		TemplateBody:     req.TemplateBody,
-		RecurrenceMode:   norm.mode,
-		CadenceUnit:      norm.cadence,
-		CadenceCount:     norm.count,
-		Enabled:          enabled,
-		CreatedBy:        createdBy,
-		TargetFolderID:   norm.folder,
-		NumberingEnabled: norm.numbering,
-		NextNumber:       norm.nextNumber,
-		AnchorWeekday:    norm.anchorWeekday,
-		AuthorCodes:      authorCodes,
+		WorkspaceID:       wsUUID,
+		Name:              strings.TrimSpace(req.Name),
+		Icon:              optionalString(req.Icon),
+		TemplateBody:      optionalString(req.TemplateBody),
+		RecurrenceMode:    norm.mode,
+		CadenceUnit:       norm.cadence,
+		CadenceCount:      norm.count,
+		Enabled:           enabled,
+		CreatedBy:         createdBy,
+		TargetFolderID:    norm.folder,
+		NumberingEnabled:  norm.numbering,
+		NextNumber:        norm.nextNumber,
+		AnchorWeekday:     norm.anchorWeekday,
+		AnchorWeekOfMonth: norm.anchorWeekOfMonth,
+		AuthorCodes:       authorCodes,
+		Participants:      participants,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create note type failed")
@@ -247,12 +326,13 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	norm, problem := h.normalize(req, normalizeDefaults{
-		mode:          existing.RecurrenceMode,
-		cadence:       existing.CadenceUnit,
-		count:         existing.CadenceCount,
-		numbering:     existing.NumberingEnabled,
-		nextNumber:    existing.NextNumber,
-		anchorWeekday: existing.AnchorWeekday,
+		mode:              existing.RecurrenceMode,
+		cadence:           existing.CadenceUnit,
+		count:             existing.CadenceCount,
+		numbering:         existing.NumberingEnabled,
+		nextNumber:        existing.NextNumber,
+		anchorWeekday:     existing.AnchorWeekday,
+		anchorWeekOfMonth: existing.AnchorWeekOfMonth,
 	}, w, r)
 	if problem {
 		return
@@ -269,21 +349,44 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 	if req.AuthorCodes != nil {
 		authorCodes = *req.AuthorCodes
 	}
+	participants := existing.Participants
+	if len(participants) == 0 {
+		participants = []byte("[]")
+	}
+	if req.Participants != nil {
+		encoded, err := encodeParticipants(*req.Participants)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		participants = encoded
+	}
+
+	icon := existing.Icon
+	if req.Icon != nil {
+		icon = *req.Icon
+	}
+	templateBody := existing.TemplateBody
+	if req.TemplateBody != nil {
+		templateBody = *req.TemplateBody
+	}
 
 	nt, err := h.Cerebro.UpdateCerebroNoteType(r.Context(), cerebrodb.UpdateCerebroNoteTypeParams{
-		ID:               id,
-		Name:             name,
-		Icon:             req.Icon,
-		TemplateBody:     req.TemplateBody,
-		RecurrenceMode:   norm.mode,
-		CadenceUnit:      norm.cadence,
-		CadenceCount:     norm.count,
-		Enabled:          enabled,
-		TargetFolderID:   norm.folder,
-		NumberingEnabled: norm.numbering,
-		NextNumber:       norm.nextNumber,
-		AnchorWeekday:    norm.anchorWeekday,
-		AuthorCodes:      authorCodes,
+		ID:                id,
+		Name:              name,
+		Icon:              icon,
+		TemplateBody:      templateBody,
+		RecurrenceMode:    norm.mode,
+		CadenceUnit:       norm.cadence,
+		CadenceCount:      norm.count,
+		Enabled:           enabled,
+		TargetFolderID:    norm.folder,
+		NumberingEnabled:  norm.numbering,
+		NextNumber:        norm.nextNumber,
+		AnchorWeekday:     norm.anchorWeekday,
+		AnchorWeekOfMonth: norm.anchorWeekOfMonth,
+		AuthorCodes:       authorCodes,
+		Participants:      participants,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update note type failed")
@@ -369,13 +472,14 @@ func (h *Handler) RunNow(w http.ResponseWriter, r *http.Request) {
 // falling back to the supplied defaults when a field is omitted. Returns
 // problem=true (after writing the 4xx) when validation fails.
 type normalized struct {
-	mode          string
-	cadence       string
-	count         int32
-	folder        pgtype.UUID
-	numbering     bool
-	nextNumber    int32
-	anchorWeekday pgtype.Int2
+	mode              string
+	cadence           string
+	count             int32
+	folder            pgtype.UUID
+	numbering         bool
+	nextNumber        int32
+	anchorWeekday     pgtype.Int2
+	anchorWeekOfMonth pgtype.Int2
 }
 
 func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.ResponseWriter, r *http.Request) (normalized, bool) {
@@ -435,8 +539,37 @@ func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.R
 			return normalized{}, true
 		}
 	}
-	if out.cadence != CadenceWeek {
+	out.anchorWeekOfMonth = def.anchorWeekOfMonth
+	if req.AnchorWeekOfMonth != nil {
+		if string(req.AnchorWeekOfMonth) == "null" {
+			out.anchorWeekOfMonth = pgtype.Int2{}
+		} else {
+			var week int16
+			if err := json.Unmarshal(req.AnchorWeekOfMonth, &week); err != nil {
+				writeError(w, http.StatusBadRequest, "anchor_week_of_month must be 1..5 or -1 (last)")
+				return normalized{}, true
+			}
+			if week != -1 && (week < 1 || week > 5) {
+				writeError(w, http.StatusBadRequest, "anchor_week_of_month must be 1..5 or -1 (last)")
+				return normalized{}, true
+			}
+			out.anchorWeekOfMonth = pgtype.Int2{Int16: week, Valid: true}
+		}
+	}
+	// Anchors are cadence-specific. A weekly cadence keeps its weekday; a
+	// monthly cadence uses the weekday only together with a week-of-month
+	// ordinal ("3rd Monday"); every other cadence clears both.
+	switch out.cadence {
+	case CadenceWeek:
+		out.anchorWeekOfMonth = pgtype.Int2{}
+	case CadenceMonth:
+		if !out.anchorWeekOfMonth.Valid || !out.anchorWeekday.Valid {
+			out.anchorWeekday = pgtype.Int2{}
+			out.anchorWeekOfMonth = pgtype.Int2{}
+		}
+	default:
 		out.anchorWeekday = pgtype.Int2{}
+		out.anchorWeekOfMonth = pgtype.Int2{}
 	}
 	if req.TargetFolderID != nil && strings.TrimSpace(*req.TargetFolderID) != "" {
 		f, err := util.ParseUUID(strings.TrimSpace(*req.TargetFolderID))
@@ -450,12 +583,13 @@ func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.R
 }
 
 type normalizeDefaults struct {
-	mode          string
-	cadence       string
-	count         int32
-	numbering     bool
-	nextNumber    int32
-	anchorWeekday pgtype.Int2
+	mode              string
+	cadence           string
+	count             int32
+	numbering         bool
+	nextNumber        int32
+	anchorWeekday     pgtype.Int2
+	anchorWeekOfMonth pgtype.Int2
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
 func TestPostJSON(t *testing.T) {
@@ -119,6 +121,9 @@ func TestPostJSON(t *testing.T) {
 			if task := r.Header.Get("X-Task-ID"); task != "task-456" {
 				t.Errorf("expected X-Task-ID task-456, got %s", task)
 			}
+			if generation := r.Header.Get("X-Task-Mandate-Generation"); generation != "7" {
+				t.Errorf("expected X-Task-Mandate-Generation 7, got %s", generation)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(respBody{ID: "456"})
 		}))
@@ -127,10 +132,33 @@ func TestPostJSON(t *testing.T) {
 		client := NewAPIClient(srv.URL, "ws-abc", "test-token")
 		client.AgentID = "agent-123"
 		client.TaskID = "task-456"
+		client.TaskMandateGeneration = 7
 		var out respBody
 		err := client.PostJSON(context.Background(), "/test", reqBody{}, &out)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// CEREBRO-PATCH(task-mandate-callable-propagation): FIR-4292 pin the MCP-to-REST identity contract.
+	t.Run("exact MCP callable identity header", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if callable := r.Header.Get("X-Multica-Callable"); callable != "create_workflow" {
+				t.Errorf("expected X-Multica-Callable create_workflow, got %s", callable)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(respBody{ID: "456"})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "ws-abc", "test-token")
+		toolServer := mcp.NewServer("test", "v1")
+		toolServer.RegisterTool(mcp.Tool{Name: "create_workflow"}, func(ctx context.Context, _ map[string]any) (mcp.CallToolResult, error) {
+			var out respBody
+			return mcp.TextResult("ok"), client.PostJSON(ctx, "/test", reqBody{}, &out)
+		})
+		if _, err := toolServer.Call(context.Background(), "create_workflow", nil); err != nil {
+			t.Fatalf("Call: %v", err)
 		}
 	})
 
@@ -267,6 +295,9 @@ func TestUploadFileWithURL(t *testing.T) {
 			if ct := r.Header.Get("Content-Type"); !strings.Contains(ct, "multipart/form-data") {
 				t.Errorf("expected multipart content-type, got %s", ct)
 			}
+			if callable := r.Header.Get("X-Multica-Callable"); callable != "add_attachment" {
+				t.Errorf("expected upload callable add_attachment, got %s", callable)
+			}
 
 			file, header, err := r.FormFile("file")
 			if err != nil {
@@ -385,6 +416,23 @@ func TestUploadFileWithURL(t *testing.T) {
 			t.Errorf("unexpected error message: %s", err.Error())
 		}
 	})
+}
+
+func TestUploadAttachmentToOverridesParentCommandCallable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if callable := r.Header.Get("X-Multica-Callable"); callable != "add_attachment" {
+			t.Errorf("expected upload callable add_attachment, got %s", callable)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "att-1"})
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "ws-1", "token")
+	client.CallableIdentity = "add_comment"
+	if _, err := client.UploadAttachmentTo(context.Background(), []byte("proof"), "proof.png", AttachmentTarget{CommentID: "comment-1"}); err != nil {
+		t.Fatalf("UploadAttachmentTo: %v", err)
+	}
 }
 
 func TestNormalizeGOOS(t *testing.T) {

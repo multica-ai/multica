@@ -27,6 +27,35 @@ it("falls back to unsigned CI release packaging when credentials are missing", (
   });
 });
 
+it("removes blank GitHub signing variables before unsigned macOS packaging", () => {
+  expect(
+    resolveReleaseSigning(
+      {
+        CI: "true",
+        CSC_LINK: "",
+        CSC_KEY_PASSWORD: "",
+        APPLE_ID: "",
+        APPLE_APP_SPECIFIC_PASSWORD: "",
+        APPLE_TEAM_ID: "",
+      },
+      "darwin",
+    ),
+  ).toEqual({
+    environment: {
+      CI: "true",
+      CSC_IDENTITY_AUTO_DISCOVERY: "false",
+    },
+    missing: [
+      "CSC_LINK",
+      "CSC_KEY_PASSWORD",
+      "APPLE_ID",
+      "APPLE_APP_SPECIFIC_PASSWORD",
+      "APPLE_TEAM_ID",
+    ],
+    signed: false,
+  });
+});
+
 it("keeps signing enabled when release credentials are present", () => {
   const environment = {
     CI: "true",

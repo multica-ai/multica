@@ -48,6 +48,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
+import { ContentEditor } from "../../editor/content-editor"; // CEREBRO-PATCH(rich-text-agent-instructions): inject the shared editor into the Cerebro-owned versioned Instructions form.
 import { useT } from "../../i18n";
 
 export type DetailTab =
@@ -271,6 +272,7 @@ export function AgentOverviewPane({
           agent={agent}
           runtimes={runtimes}
           canEdit={canEdit}
+          instructionsEditor={ContentEditor} // CEREBRO-PATCH(rich-text-agent-instructions): preserve the upstream-to-Cerebro dependency direction while making Instructions visual.
         />
       )}
       {tabId === "skills" && (

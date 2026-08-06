@@ -124,6 +124,18 @@ func TestHookConditionOperators(t *testing.T) {
 	}
 }
 
+func TestEvaluate_DynamicEventValue(t *testing.T) {
+	ctx := map[string]any{
+		"wakeup": map[string]any{"active_count": int64(8), "max_active": 8},
+	}
+	condition := Condition{
+		Field: "wakeup.active_count", Op: "gte", Value: "$event.wakeup.max_active",
+	}
+	if !evaluate([]Condition{condition}, ctx) {
+		t.Fatal("dynamic event threshold should match")
+	}
+}
+
 func TestEvaluate_AllMustHold(t *testing.T) {
 	ctx := map[string]any{"issue": map[string]any{"priority": "high", "status": "todo"}}
 	conds := []Condition{

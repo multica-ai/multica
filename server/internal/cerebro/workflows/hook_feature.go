@@ -3,6 +3,8 @@ package workflows
 import (
 	"context"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,13 +16,12 @@ import (
 // engine and lifecycle gates. The shared server only mounts and delegates.
 type HookFeature struct {
 	API            *HookAPI
+	Evaluator      HookEvaluator
 	CompletionGate *TaskCompletionGate
-	// StatusGate fires before.issue.status_change for agent actors (FIR-3659);
-	// wired into UpdateIssue via the handler's cerebro sibling file.
-	StatusGate *IssueStatusGate
-	// FailureGate fires on.task.failure from the task:failed bus broadcast;
-	// attached to the bus in router.go.
-	FailureGate *TaskFailureGate
+	FailureGate    *TaskFailureGate
+	// AssignGate fires before.issue.assigned when an issue is handed to an
+	// agent (FIR-4183). It subscribes to the bus itself — see its Attach.
+	AssignGate *IssueAssignGate
 }
 
 func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalStore) *HookFeature {
@@ -36,16 +37,26 @@ func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore Eva
 		// panics when the eval_passed condition is evaluated.
 		engine = engine.WithConditionResolver(evalStore)
 	}
+	evaluator := NewWorkspaceHookEvaluator(hookFeatureEnabled(), engine).
+		WithWorkspaceFlags(NewPostgresWorkspaceFlagResolver(db))
 	return &HookFeature{
 		API:            NewHookAPI(repository, authorizer),
-		CompletionGate: NewTaskCompletionGate(NewPostgresTaskCompletionStore(db), engine, hookFeatureEnabled()),
-		StatusGate:     NewIssueStatusGate(engine),
-		FailureGate:    NewTaskFailureGate(NewPostgresTaskFailureStore(db), engine, hookFeatureEnabled()),
+		Evaluator:      evaluator,
+		CompletionGate: NewTaskCompletionGate(NewPostgresTaskCompletionStore(db), evaluator, hookFeatureEnabled()),
+		FailureGate:    NewTaskFailureGate(NewPostgresTaskFailureContextStore(db), evaluator, hookFeatureEnabled()),
+		AssignGate:     NewIssueAssignGate(evaluator),
 	}
 }
 
 func hookFeatureEnabled() bool {
-	return envFlagEnabled("CEREBRO_WORKFLOW_HOOKS_ENABLED")
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CEREBRO_WORKFLOW_HOOKS_ENABLED"))) {
+	case "", "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func (f *HookFeature) Routes() http.Handler {

@@ -131,8 +131,9 @@ describe("AgentContextApprovalImpact", () => {
     const row = await screen.findByTestId("approval-ineffective-instructions");
     expect(row).toHaveAttribute("data-severity", "logged");
     expect(
-      screen.getByText(/will not take effect|nothing will change/i),
+      screen.getByText(/will not work on the selected engine/i),
     ).toBeInTheDocument();
+    expect(screen.getByText("Role and instructions")).toBeInTheDocument();
   });
 
   // Severity must be in the DOM, not only in a colour: a silent drop is the one
@@ -219,7 +220,7 @@ describe("AgentContextApprovalImpact", () => {
     );
 
     expect(
-      await screen.findByText(/no longer carries system-prompt semantics/i),
+      await screen.findByText(/receives the role as part of the task/i),
     ).toBeInTheDocument();
   });
 

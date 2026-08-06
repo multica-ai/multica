@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Markdown } from "./markdown";
+
+const { resolvedIssueState } = vi.hoisted(() => ({
+  resolvedIssueState: { current: null as { id: string } | null },
+}));
 
 vi.mock("@multica/core/config", () => ({
   useConfigStore: (selector: (state: { cdnDomain: string }) => unknown) =>
@@ -12,6 +16,10 @@ vi.mock("../issues/components/issue-mention-card", () => ({
   IssueMentionCard: ({ issueId }: { issueId: string }) => (
     <span data-testid="issue-mention-card">{issueId}</span>
   ),
+}));
+
+vi.mock("../issues/hooks", () => ({
+  useResolveIssueIdentifier: () => resolvedIssueState.current,
 }));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
@@ -70,6 +78,27 @@ const ligatureClasses = [
 ];
 
 describe("Markdown", () => {
+  beforeEach(() => {
+    resolvedIssueState.current = null;
+  });
+
+  it("keeps a bare issue identifier layout-stable when it resolves", () => {
+    const view = render(<Markdown>FIR-123</Markdown>);
+
+    expect(view.container.textContent).toBe("FIR-123");
+    expect(screen.queryByRole("link")).toBeNull();
+
+    resolvedIssueState.current = { id: "issue-123" };
+    view.rerender(<Markdown>FIR-123</Markdown>);
+
+    expect(view.container.textContent).toBe("FIR-123");
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "/acme/issues/issue-123",
+    );
+    expect(screen.queryByTestId("issue-mention-card")).toBeNull();
+  });
+
   it("disables ligatures inside raw code tags", () => {
     render(<Markdown>{"<code>uv run --extra dev pytest -q</code>"}</Markdown>);
 

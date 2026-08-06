@@ -62,7 +62,7 @@ var versionOneHookActionTypes = []string{
 	"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
 	"approval.require", "audit.record", "metric.increment",
 	"skill.run", "judge.gate", "eval.gate", "eval.run",
-	"issue.comment", "issue.status",
+	"issue.comment", "issue.status", "issue.check_related",
 }
 
 var issueStatusActionValues = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
@@ -157,6 +157,10 @@ func validateTypedHookAction(action HookAction) error {
 			}
 		}
 		return fmt.Errorf("issue.status status %q is not a valid issue status", status)
+	case "issue.check_related":
+		// Every knob has a safe default (link and comment on, never block), so
+		// a policy can enable the check with an empty config.
+		return nil
 	case "agent.dispatch":
 		return requireString("agent_id")
 	case "squad.dispatch":
@@ -187,7 +191,7 @@ func validateTypedHookActions(policy HookPolicy) error {
 
 func hookActionCapability(actionType string) string {
 	switch actionType {
-	case "member.notify", "issue.comment":
+	case "member.notify", "issue.comment", "issue.check_related":
 		return "add_comment"
 	case "issue.status":
 		return "update_issue"

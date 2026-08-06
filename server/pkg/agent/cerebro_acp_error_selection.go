@@ -8,7 +8,7 @@ package agent
 //
 // Both are load-bearing beyond cosmetics. The failure text is what
 // taskfailure.Classify() reads, and the resulting failure_reason is what
-// failrouter turns into retry / pause / surface. A run killed by an
+// Workflow turns into retry / pause / surface. A run killed by an
 // upstream 429 that gets labelled with an unrelated line lands in
 // agent_error.unknown — the one bucket with no retry at all — so a
 // transient rate limit becomes a permanent red failure on the issue.

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -256,6 +257,7 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
+	client.CallableIdentity = taskCallableForCommand(cmd) // CEREBRO-PATCH(task-mandate-callable-propagation): FIR-4292 carry the exact CLI operation to REST gates.
 	// CEREBRO-PATCH(cf-access-client): load the per-machine Cloudflare Access
 	// service-token from the active profile so the CLI passes the wall. setHeaders
 	// falls back to env when this is empty.
@@ -268,6 +270,9 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
 		client.TaskID = taskID
+	}
+	if generation, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("MULTICA_TASK_MANDATE_GENERATION")), 10, 64); err == nil && generation > 0 {
+		client.TaskMandateGeneration = generation
 	}
 	return client, nil
 }

@@ -20,6 +20,7 @@
     "service-tokens",
     "permissions-ui",
     "daemon-setup",
+    "update-daemon",
     "pwa",
     "..."
   ]

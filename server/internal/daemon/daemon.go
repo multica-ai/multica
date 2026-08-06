@@ -250,6 +250,8 @@ type Daemon struct {
 	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
+	drain cerebroDrainState // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 graceful-drain runtime state; see cerebro_graceful_drain.go
+
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
@@ -2637,9 +2639,10 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			wakeup := make(chan struct{}, 1)
 			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
 			pollerWG.Add(1)
+			taskCtx := d.taskParentCtx(ctx) // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 task lifetime is decoupled from SIGTERM so drain can outlive shutdown; see cerebro_graceful_drain.go
 			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
 				defer pollerWG.Done()
-				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
+				d.runRuntimePoller(pctx, taskCtx, rid, sem, wakeup, &taskWG)
 			}(rid, pctx, wakeup)
 		}
 	}
@@ -2649,7 +2652,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 	for {
 		select {
 		case <-ctx.Done():
-			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
+			// CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 shutdown-wait logging moved into drainInFlightTasks (drain window vs legacy 30s differ); see cerebro_graceful_drain.go
 			for _, h := range pollers {
 				h.cancel()
 			}
@@ -2658,14 +2661,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			// could race with taskWG.Wait when the counter is zero, which
 			// is an undefined sync.WaitGroup misuse.
 			pollerWG.Wait()
-
-			waitDone := make(chan struct{})
-			go func() { taskWG.Wait(); close(waitDone) }()
-			select {
-			case <-waitDone:
-			case <-time.After(30 * time.Second):
-				d.logger.Warn("timed out waiting for in-flight tasks")
-			}
+			d.drainInFlightTasks(&taskWG) // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 bounded graceful drain replaces the fixed 30s wait; see cerebro_graceful_drain.go
 			return ctx.Err()
 		case <-runtimeSetCh:
 			syncPollers()
@@ -3680,8 +3676,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		SessionModeAllowedTools:          modeProfile.AllowedTools,
 		SessionModeDataSources:           modeProfile.DataSources,
 		SessionModeApprovalPolicy:        modeProfile.ApprovalPolicy,
-		SessionModeWorkflowID:            modeProfile.WorkflowID,
-		SessionModeEvalSkillIDs:          modeProfile.EvalSkillIDs,
+		SessionModeEvalIDs:               modeProfile.EvalIDs, // CEREBRO-PATCH(session-mode-evals): FIR-4047 carry the Mode's evaluations into the brief.
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",
@@ -3900,6 +3895,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	prompt := BuildPrompt(task, provider)
+	// CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 send the prompt lifecycle through the runtime hook channel.
+	prompt, err = d.applyRuntimePromptHook(ctx, task, provider, prompt)
+	if err != nil {
+		return TaskResult{}, err
+	}
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -3914,17 +3914,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
+	// CEREBRO-PATCH(task-mandate-claim-generation): FIR-4292 expose server-owned task generation to CLI requests.
 	// CEREBRO-PATCH(cursor-tool-policy-hook-json): FIR-4526 provider identity for before-tool hook protocol selection.
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":          agentToken,
-		"MULTICA_SERVER_URL":     d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":    fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID":   task.WorkspaceID,
-		"MULTICA_AGENT_NAME":     agentName,
-		"MULTICA_AGENT_ID":       task.AgentID,
-		"MULTICA_TASK_ID":        task.ID,
-		"MULTICA_TASK_SLOT":      strconv.Itoa(slot),
-		"MULTICA_AGENT_PROVIDER": provider,
+		"MULTICA_TOKEN":                   agentToken,
+		"MULTICA_SERVER_URL":              d.cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT":             fmt.Sprintf("%d", d.cfg.HealthPort),
+		"MULTICA_WORKSPACE_ID":            task.WorkspaceID,
+		"MULTICA_AGENT_NAME":              agentName,
+		"MULTICA_AGENT_ID":                task.AgentID,
+		"MULTICA_TASK_ID":                 task.ID,
+		"MULTICA_TASK_MANDATE_GENERATION": strconv.FormatInt(task.TaskMandateGeneration, 10),
+		"MULTICA_TASK_SLOT":               strconv.Itoa(slot),
+		"MULTICA_AGENT_PROVIDER":          provider,
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -4177,6 +4179,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — ship byte-exact production prompt evidence before spawn (async, best-effort; see cerebro_prompt_snapshot.go).
 	d.shipPromptSnapshot(buildPromptSnapshot(promptSnapshotInput{Task: task, Provider: provider, Model: model, RuntimeVersion: d.agentVersion(provider), SystemPromptMode: string(execOpts.SystemPromptMode), RuntimeBrief: runtimeBrief, BriefInline: execOpts.SystemPrompt != "", Prompt: prompt, Secrets: snapshotSecretsForTask(task, agentToken)}), taskLog)
 
+	// CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 evaluate before.session.start at the provider spawn boundary.
+	if err := d.beforeRuntimeSession(ctx, task.ID, model, provider, execOpts.ResumeSessionID != ""); err != nil {
+		return TaskResult{}, err
+	}
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err
@@ -4408,6 +4414,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
+	d.emitRuntimeSessionStarted(taskID, opts) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 emit after.session.start once the provider accepts the spawn.
 	taskLog.Debug("backend started, draining messages")
 
 	// Bound the drain loop only when there is a wall-clock cap. With a positive
@@ -4596,6 +4603,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Output: output,
 					})
 					mu.Unlock()
+					d.emitRuntimeToolResult(taskID, toolName, msg.CallID, output) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 emit after.tool.call from the transcript.
 				case agent.MessageThinking:
 					if msg.Content != "" {
 						mu.Lock()
@@ -4619,6 +4627,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Content: msg.Content,
 					})
 					mu.Unlock()
+					d.emitRuntimeError(taskID, msg.Content) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 emit on.error from the transcript.
 				}
 			case <-drainCtx.Done():
 				goto drainDone
@@ -4631,11 +4640,13 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
+		// CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 run both session-end hook phases at the provider result boundary.
+		if err := d.finishRuntimeSession(ctx, taskID, result, opts); err != nil {
+			return agent.Result{}, toolCount.Load(), err
+		}
 		if toolCallWatchdogFired.Load() {
 			result.Status = "tool_timeout"
-			if result.Error == "" {
-				result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration)
-			}
+			result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration) // CEREBRO-PATCH(daemon-per-tool-call-timeout): watchdog ownership overrides a backend cancellation race.
 		} else if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".

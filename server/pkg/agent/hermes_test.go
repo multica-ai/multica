@@ -2079,3 +2079,84 @@ func TestStripHermesProfileArgs(t *testing.T) {
 		t.Error("hermesBlockedArgs must not unconditionally strip --profile")
 	}
 }
+
+// fakeHermesArgvScript records the full argv (one arg per line) to
+// $HERMES_ARGS_FILE and then answers the ACP handshake so Execute can
+// finish cleanly. Used to pin the argv contract with hermes' argparse.
+func fakeHermesArgvScript(argsFile string) string {
+	return `#!/bin/sh
+for arg in "$@"; do
+  printf '%s\n' "$arg" >> ` + argsFile + `
+done
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestHermesBackendPlacesCustomArgsBeforeACPSubcommand pins the argv
+// contract against hermes' argparse: --provider / --model / --skills and
+// friends are declared on the TOP-LEVEL parser, never on the `acp`
+// subparser. Emitting `hermes acp --provider X` makes hermes exit with
+// "unrecognized arguments: --provider X" before answering initialize,
+// which the daemon could only report as the useless
+// "hermes initialize failed: hermes process exited" (FIR-3945).
+func TestHermesBackendPlacesCustomArgsBeforeACPSubcommand(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesArgvScript(argsFile)))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"--provider", "opencode-go"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	want := []string{"--provider", "opencode-go", "acp"}
+	if len(got) != len(want) {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("argv: got %q, want %q", got, want)
+		}
+	}
+}

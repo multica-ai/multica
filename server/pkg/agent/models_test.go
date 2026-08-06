@@ -117,7 +117,7 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	}
 }
 
-// CEREBRO-PATCH(codex-gpt-5-6-models): guard the Codex models exposed in the agent model picker.
+// CEREBRO-PATCH(codex-supported-models): guard the Codex models exposed to agents and wakeups.
 func TestCodexStaticModelsExposesGPT56(t *testing.T) {
 	// Codex CLI has no `models list` subcommand so the catalog is
 	// hand-maintained. Regression guard for multica-ai/multica#2009 —
@@ -130,7 +130,8 @@ func TestCodexStaticModelsExposesGPT56(t *testing.T) {
 	}
 	for _, want := range []string{
 		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-		"gpt-5.5", "gpt-5.5-mini",
+		"gpt-5.5",
+		// CEREBRO-PATCH(codex-supported-models): keep the Codex guard aligned with supported runtimes.
 		"gpt-5.4", "gpt-5.4-mini",
 		"gpt-5.3-codex", "gpt-5",
 		"o3", "o3-mini",
