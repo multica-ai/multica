@@ -193,6 +193,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverPiModels(ctx, executablePath))
 		})
+	case "omp":
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
+			return discovered(discoverOmpModels(ctx, executablePath))
+		})
 	case "openclaw":
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverOpenclawAgents(ctx, executablePath))
@@ -894,6 +898,81 @@ func isPiDiscoveryNoise(line string) bool {
 		strings.Contains(lower, "usage:") ||
 		strings.Contains(lower, "unknown flag") ||
 		strings.Contains(lower, "unknown command")
+}
+
+// discoverOmpModels runs `omp models --json` and parses the JSON catalog.
+// omp (oh-my-pi) rejects `--list-models` (a pi flag it never adopted); its
+// native discovery is `omp models --json`, which prints a JSON array of
+// model objects with at least `id` and `name` fields. An empty catalog or
+// a non-zero exit (binary missing, omp too old) falls back to an empty
+// list so the UI degrades to manual entry instead of erroring.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "omp"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--json")
+	hideAgentWindow(cmd)
+	stdout, err := cmd.Output()
+	if err != nil || len(stdout) == 0 {
+		return []Model{}, nil
+	}
+	return parseOmpModels(stdout)
+}
+
+// parseOmpModels parses the JSON output from `omp models --json`. omp emits
+// an object wrapper with a `models` array — NOT a bare top-level array:
+//
+//	{"models":[{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5",...}]}
+//
+// Each entry has `provider` and `id` as separate fields; `selector` is the
+// qualified `provider/id` form. The parser reads `provider` and `id` from
+// their own fields (not by splitting `id` on `/`) and uses `selector` as the
+// dedup key when present, falling back to `provider/id`.
+func parseOmpModels(data []byte) ([]Model, error) {
+	var wrapper struct {
+		Models []struct {
+			ID       string `json:"id"`
+			Provider string `json:"provider"`
+			Selector string `json:"selector"`
+			Name     string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return []Model{}, nil
+	}
+	var models []Model
+	seen := map[string]bool{}
+	for _, e := range wrapper.Models {
+		id := strings.TrimSpace(e.ID)
+		if id == "" {
+			continue
+		}
+		provider := strings.TrimSpace(e.Provider)
+		// Dedup by selector when present, else by provider/id.
+		key := strings.TrimSpace(e.Selector)
+		if key == "" {
+			if provider != "" {
+				key = provider + "/" + id
+			} else {
+				key = id
+			}
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		label := strings.TrimSpace(e.Name)
+		if label == "" {
+			label = id
+		}
+		models = append(models, Model{ID: id, Label: label, Provider: provider})
+	}
+	return models, nil
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,

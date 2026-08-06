@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // TestDefaultAgentCommandNamesCoversAllProbes guards the invariant documented
@@ -74,11 +76,22 @@ func TestDefaultAgentCommandNamesCoversAllProbes(t *testing.T) {
 
 	// Without this the whole test passes vacuously the moment probeAgentCLIs
 	// moves to another file, which is exactly how this guard failed before.
-	if probeCalls < len(defaultAgentCommandNames) {
-		t.Fatalf("found only %d probe() call(s) with a literal command name in %s, "+
+	// Built-in runtime identities (from agent.BuiltinRuntimes) are probed in
+	// a loop, not with literal probe() calls, so their command names are
+	// counted from the descriptor, not the AST.
+	descriptorProbes := len(agent.BuiltinRuntimes)
+	if probeCalls+descriptorProbes < len(defaultAgentCommandNames) {
+		t.Fatalf("found only %d probe() call(s) (%d literal + %d from descriptor) in %s, "+
 			"expected at least %d (one per default agent command); "+
 			"did the probe loop move, or is a provider probed without probe()?",
-			probeCalls, probeSourceFile, len(defaultAgentCommandNames))
+			probeCalls+descriptorProbes, probeCalls, descriptorProbes, probeSourceFile, len(defaultAgentCommandNames))
+	}
+
+	// Also verify that built-in runtime descriptor commands are covered.
+	for _, desc := range agent.BuiltinRuntimes {
+		if !known[desc.DefaultCommand] {
+			missing = append(missing, desc.DefaultCommand)
+		}
 	}
 
 	if len(missing) > 0 {

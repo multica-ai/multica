@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
-// OpenClaw, Hermes, Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
+// OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
 // Trae, Grok, Qwen Code, QwenPaw). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
@@ -252,7 +252,7 @@ type Config struct {
 // runtime_profile.protocol_family CHECK constraint (migration 120, widened by
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
-// migration 242 to add qoderclicn, migration 253 to add qwenpaw, and
+// migration 242 to add qoderclicn, migration 253 to add qwenpaw,
 // migration 254 to add reasonix): a
 // custom runtime profile may only
 // be based on a backend Multica officially supports.
@@ -370,6 +370,24 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
 	default:
+		// Built-in runtime identities (e.g. "omp") are not in the switch
+		// above — they dispatch to their protocol family's backend via the
+		// descriptor registry. This keeps SupportedTypes (the protocol_family
+		// whitelist) clean while letting the daemon register fork runtimes
+		// that reuse an existing backend.
+		if desc, ok := BuiltinRuntimeByID(agentType); ok {
+			backend, err := New(desc.ProtocolFamily, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("builtin runtime %q: %w", agentType, err)
+			}
+			// Apply descriptor-specific overrides for backends that support
+			// them. Currently only piBackend has defaultExecutable/providerLabel.
+			if pb, ok := backend.(*piBackend); ok {
+				pb.defaultExecutable = desc.DefaultExecutable
+				pb.providerLabel = desc.ProviderLabel
+			}
+			return backend, nil
+		}
 		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
 	}
 }
@@ -412,5 +430,13 @@ var launchHeaders = map[string]string{
 // empty string if the type is unknown. Callers render this as a preview so
 // users understand which command their custom_args get appended to.
 func LaunchHeader(agentType string) string {
-	return launchHeaders[agentType]
+	if h := launchHeaders[agentType]; h != "" {
+		return h
+	}
+	// Built-in runtime identities derive their launch header from the
+	// descriptor, not the protocol-family map.
+	if desc, ok := BuiltinRuntimeByID(agentType); ok {
+		return desc.LaunchHeader
+	}
+	return ""
 }
