@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os/exec"
 	"slices"
@@ -127,7 +129,7 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 		// Multica's final-path assertion. App-specific failure tests override it.
 		return []byte("https://registry.firtal.com/authentication/api-keys/key-1/issues\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
-		return []byte("Dashboard\nAuthentication\nAPI Keys\nGenerate New Key\nYour Registry API URL\nActors\nSystems\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
+		return []byte("Dashboard\nAuthentication\nAPI Keys\nData Sources\nAPI Endpoints\nAI Models\nApps\nAPI Access\nSave\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
 		return []byte("[]\n"), nil
 	default:
@@ -182,7 +184,7 @@ func (c *concurrentProbeCommander) CaptureScreenshot(_ context.Context, _ ...str
 func testRunner(commander Commander) *Runner {
 	runner := NewRunner(commander)
 	runner.resolveHost = func(context.Context, string) error { return nil }
-	runner.fetchVersion = func(context.Context, string) (string, error) {
+	runner.fetchVersion = func(context.Context, string, map[string]string) (string, error) {
 		return "0123456789abcdef0123456789abcdef01234567", nil
 	}
 	return runner
@@ -337,7 +339,7 @@ func TestFailureResultCarriesNoCredential(t *testing.T) {
 	}
 }
 
-func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
+func TestRegistryTargetProvesPermissionsAndRunningVersion(t *testing.T) {
 	target, err := TargetFor("registry")
 	if err != nil {
 		t.Fatalf("TargetFor(registry): %v", err)
@@ -351,18 +353,79 @@ func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	if target.NavigatePath != "/authentication/api-keys" {
 		t.Fatalf("registry navigation = %q, want the direct api-keys route", target.NavigatePath)
 	}
-	if target.NavigateLinkName != "" || target.NavigateSelector != "" || target.NavigateTabName != "" {
-		t.Fatalf("registry must not click through the scrollable sidebar: %q/%q/%q", target.NavigateLinkName, target.NavigateSelector, target.NavigateTabName)
+	if target.NavigateLinkName != "" || target.NavigateSelector != "tbody tr" || target.NavigateTabName != "Permissions" {
+		t.Fatalf("registry detail navigation = %q/%q/%q", target.NavigateLinkName, target.NavigateSelector, target.NavigateTabName)
 	}
-	if target.ExpectedURLPart != "/authentication/api-keys" {
+	if target.ExpectedURLPart != "/authentication/api-keys/" {
 		t.Fatalf("registry expected URL = %q", target.ExpectedURLPart)
 	}
-	wantMarkers := []string{"API Keys", "Generate New Key", "Your Registry API URL", "Actors", "Systems"}
+	if target.VersionPath != "/api/health" {
+		t.Fatalf("registry version path = %q, want /api/health", target.VersionPath)
+	}
+	wantMarkers := []string{"Data Sources", "API Endpoints", "AI Models", "Apps", "API Access", "Save"}
 	if strings.Join(target.ExpectedText, "|") != strings.Join(wantMarkers, "|") {
 		t.Fatalf("registry markers = %v, want %v", target.ExpectedText, wantMarkers)
 	}
 	if _, err := TargetFor("https://registry.firtal.com"); err == nil {
 		t.Fatal("arbitrary public URL was accepted as a target")
+	}
+}
+
+func TestFetchVersionCommitUsesAccessHeadersAndBuildCommit(t *testing.T) {
+	const (
+		accessID     = "access-id"
+		accessSecret = "access-secret"
+		wantCommit   = "abcdef0123456789abcdef0123456789abcdef01"
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("CF-Access-Client-Id") != accessID ||
+			request.Header.Get("CF-Access-Client-Secret") != accessSecret {
+			http.Error(w, "missing access headers", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"build_commit":"` + wantCommit + `"}`))
+	}))
+	defer server.Close()
+
+	got, err := fetchVersionCommit(context.Background(), server.URL, map[string]string{
+		"CF-Access-Client-Id":     accessID,
+		"CF-Access-Client-Secret": accessSecret,
+	})
+	if err != nil {
+		t.Fatalf("fetchVersionCommit: %v", err)
+	}
+	if got != wantCommit {
+		t.Fatalf("commit = %q, want %q", got, wantCommit)
+	}
+}
+
+func TestRunnerPassesAccessHeadersToRegistryVersionCheck(t *testing.T) {
+	const (
+		accessID     = "registry-access-id"
+		accessSecret = "registry-access-secret"
+	)
+	runner := testRunner(&recordingCommander{})
+	var requestedURL string
+	var requestedHeaders map[string]string
+	runner.fetchVersion = func(_ context.Context, versionURL string, headers map[string]string) (string, error) {
+		requestedURL = versionURL
+		requestedHeaders = headers
+		return "abcdef0123456789abcdef0123456789abcdef01", nil
+	}
+
+	_, err := runner.Verify(context.Background(), "registry", Credential{
+		Username: "registry-test@example.com", Password: "password",
+		AccessClientID: accessID, AccessClientSecret: accessSecret,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if requestedURL != "https://registry.firtal.com/api/health" {
+		t.Fatalf("version URL = %q", requestedURL)
+	}
+	if requestedHeaders["CF-Access-Client-Id"] != accessID ||
+		requestedHeaders["CF-Access-Client-Secret"] != accessSecret {
+		t.Fatalf("version request did not receive the Registry Access headers")
 	}
 }
 
@@ -463,7 +526,7 @@ func TestMulticaTargetUsesFullProductionNavigationMarkers(t *testing.T) {
 func TestRunnerReturnsSafeMulticaVersionCommit(t *testing.T) {
 	runner := testRunner(&recordingCommander{})
 	var requestedURL string
-	runner.fetchVersion = func(_ context.Context, versionURL string) (string, error) {
+	runner.fetchVersion = func(_ context.Context, versionURL string, _ map[string]string) (string, error) {
 		requestedURL = versionURL
 		return "abcdef0123456789abcdef0123456789abcdef01", nil
 	}
@@ -481,7 +544,7 @@ func TestRunnerReturnsSafeMulticaVersionCommit(t *testing.T) {
 
 func TestRunnerFailsClosedWhenMulticaVersionIsUnavailable(t *testing.T) {
 	runner := testRunner(&stageFailingCommander{stage: "no-such-stage"})
-	runner.fetchVersion = func(context.Context, string) (string, error) {
+	runner.fetchVersion = func(context.Context, string, map[string]string) (string, error) {
 		return "", errors.New("must not escape")
 	}
 	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
@@ -498,7 +561,7 @@ func TestRunnerFailsClosedWhenMulticaVersionIsUnavailable(t *testing.T) {
 
 func TestRunnerFailsClosedWhenMulticaVersionIsUnknown(t *testing.T) {
 	runner := testRunner(&recordingCommander{})
-	runner.fetchVersion = func(context.Context, string) (string, error) {
+	runner.fetchVersion = func(context.Context, string, map[string]string) (string, error) {
 		return "unknown", nil
 	}
 	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
