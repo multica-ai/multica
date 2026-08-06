@@ -5013,4 +5013,3 @@ func TestFreshSessionMayHelp(t *testing.T) {
 		t.Fatalf("freshSessionMayHelp(auth-resolution error) = false; a fresh session cures this failure, it must report session-fixable")
 	}
 }
-

@@ -3897,9 +3897,10 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	// missing api_key / auth_token / auth header is baked into the session's
 	// provider state, so a rerun must start fresh instead of replaying the same
 	// auth error on the recorded (agent, issue) session. taskfailure.Classify
-	// now labels new failures agent_error.missing_config, but this text guard is
-	// what also catches pre-fix rows already tagged agent_error.unknown — keep it
-	// in sync with the GetLastTaskSession / GetLastChatTaskSession resume queries.
+	// deliberately leaves this error as agent_error.unknown, so this
+	// reason-independent text guard is the load-bearing protection for both new
+	// and already persisted rows. Keep it in sync with the GetLastTaskSession /
+	// GetLastChatTaskSession resume queries.
 	if strings.Contains(lower, "could not resolve authentication method") {
 		return true
 	}
