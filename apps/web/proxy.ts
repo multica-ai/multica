@@ -57,6 +57,8 @@ export function proxy(req: NextRequest) {
 
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
+  const isPwaLaunch =
+    pathname === "/" && req.nextUrl.searchParams.get("source") === "pwa";
 
   // --- Legacy URL redirect: /issues/... → /{slug}/issues/... ---
   // Old bookmarks and clients that hit us before the slug migration would
@@ -83,6 +85,16 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // --- PWA launch: authenticate before resolving a workspace ---
+  if (isPwaLaunch && (!hasSession || !lastSlug)) {
+    const url = req.nextUrl.clone();
+    const next = `${pathname}${req.nextUrl.search}`;
+    url.pathname = "/login";
+    url.search = "";
+    url.searchParams.set("next", next);
+    return NextResponse.redirect(url);
+  }
+
   // --- Root path: redirect logged-in users to their last workspace ---
   // The official cloud host also serves the public marketing site. Visiting
   // https://multica.ai/ must remain a public-site navigation even when a local
@@ -92,7 +104,7 @@ export function proxy(req: NextRequest) {
     pathname === "/" &&
     hasSession &&
     lastSlug &&
-    !isOfficialMarketingHost(req.nextUrl.hostname)
+    (isPwaLaunch || !isOfficialMarketingHost(req.nextUrl.hostname))
   ) {
     const url = req.nextUrl.clone();
     url.pathname = `/${lastSlug}/issues`;
