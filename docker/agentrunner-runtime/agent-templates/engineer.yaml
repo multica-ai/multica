@@ -10,3 +10,4 @@ skill_dirs:
   - "acli"
   - "multica-repo-workspace"
   - "smoke"
+  - "s3-scratchpad"
