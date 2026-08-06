@@ -3895,6 +3895,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	prompt := BuildPrompt(task, provider)
+	// CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 send the prompt lifecycle through the runtime hook channel.
+	prompt, err = d.applyRuntimePromptHook(ctx, task, provider, prompt)
+	if err != nil {
+		return TaskResult{}, err
+	}
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -4174,6 +4179,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — ship byte-exact production prompt evidence before spawn (async, best-effort; see cerebro_prompt_snapshot.go).
 	d.shipPromptSnapshot(buildPromptSnapshot(promptSnapshotInput{Task: task, Provider: provider, Model: model, RuntimeVersion: d.agentVersion(provider), SystemPromptMode: string(execOpts.SystemPromptMode), RuntimeBrief: runtimeBrief, BriefInline: execOpts.SystemPrompt != "", Prompt: prompt, Secrets: snapshotSecretsForTask(task, agentToken)}), taskLog)
 
+	// CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 evaluate before.session.start at the provider spawn boundary.
+	if err := d.beforeRuntimeSession(ctx, task.ID, model, provider, execOpts.ResumeSessionID != ""); err != nil {
+		return TaskResult{}, err
+	}
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err
@@ -4405,6 +4414,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
+	d.emitRuntimeSessionStarted(taskID, opts) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 emit after.session.start once the provider accepts the spawn.
 	taskLog.Debug("backend started, draining messages")
 
 	// Bound the drain loop only when there is a wall-clock cap. With a positive
@@ -4593,6 +4603,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Output: output,
 					})
 					mu.Unlock()
+					d.emitRuntimeToolResult(taskID, toolName, msg.CallID, output) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 emit after.tool.call from the transcript.
 				case agent.MessageThinking:
 					if msg.Content != "" {
 						mu.Lock()
@@ -4616,6 +4627,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Content: msg.Content,
 					})
 					mu.Unlock()
+					d.emitRuntimeError(taskID, msg.Content) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 emit on.error from the transcript.
 				}
 			case <-drainCtx.Done():
 				goto drainDone
@@ -4628,6 +4640,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
+		// CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 run both session-end hook phases at the provider result boundary.
+		if err := d.finishRuntimeSession(ctx, taskID, result, opts); err != nil {
+			return agent.Result{}, toolCount.Load(), err
+		}
 		if toolCallWatchdogFired.Load() {
 			result.Status = "tool_timeout"
 			result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration) // CEREBRO-PATCH(daemon-per-tool-call-timeout): watchdog ownership overrides a backend cancellation race.

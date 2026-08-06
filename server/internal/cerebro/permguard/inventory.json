@@ -1153,6 +1153,10 @@
       "gate": "daemon_auth"
     },
     {
+      "id": "POST /api/daemon/tasks/{taskId}/hook-events",
+      "gate": "daemon_auth"
+    },
+    {
       "id": "POST /api/daemon/tasks/{taskId}/messages",
       "gate": "daemon_auth"
     },

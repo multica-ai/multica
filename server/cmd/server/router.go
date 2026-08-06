@@ -868,6 +868,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.WorkflowFailureGate = workflowHooksFeature.FailureGate           // CEREBRO-PATCH(workflow-hooks-failure-wire): FIR-3692 task failure routing is selected by Workflow.
 	toolExecutor.Hooks = workflowHooksFeature.Evaluator                            // CEREBRO-PATCH(workflow-hooks-tool-failure-wire): FIR-3692 tool failures emit Workflow events.
 	h.CommentTargetGuard = cerebrocommentguard.New(workflowHooksFeature.Evaluator) // CEREBRO-PATCH(router-comment-workflow-gate): FIR-3692 before.message.send is the only comment decision path.
+	h.RuntimeHookEvents = workflowHooksFeature.Evaluator                           // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 evaluate authenticated runtime-layer events.
 	workflowHooksFeature.AssignGate.Attach(bus)                                    // CEREBRO-PATCH(issue-assign-gate-wire): FIR-4183 before.issue.assigned fires from the issue:updated broadcast.
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
@@ -1109,6 +1110,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/skill-usage", h.ReportTaskSkillUsage)         // CEREBRO-PATCH(task-skill-usage-route): FIR-2996 explicit runtime-reported skill invocations.
 		r.Post("/tasks/{taskId}/prompt-snapshot", h.ReportTaskPromptSnapshot) // CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 byte-exact per-run production prompt evidence.
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
+		r.Post("/tasks/{taskId}/hook-events", h.EmitRuntimeHookEvent) // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 authenticated runtime-layer hook event channel.
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)

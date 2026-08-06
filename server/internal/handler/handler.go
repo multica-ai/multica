@@ -170,6 +170,7 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-issue-status-workflow-gate): FIR-3692 routes
 	// status changes for active Chain v2 issues through Workflow Hooks.
 	IssueStatusWorkflowGate IssueStatusWorkflowGateInvoker
+	RuntimeHookEvents       RuntimeHookEventEvaluator // CEREBRO-PATCH(workflow-hooks-runtime-events): FIR-3437 daemon-to-server hook event channel.
 	CommentSessionMode      CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
 	SessionModeProfiles     interface {
 		Active(context.Context, pgtype.UUID, sessionmode.Mode) (sessionmode.Config, error)
