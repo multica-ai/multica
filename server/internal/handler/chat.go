@@ -1910,6 +1910,8 @@ func normalizeMessageKind(kind string) string {
 		return protocol.ChatMessageKindNoResponse
 	case protocol.ChatMessageKindOnboardingKickoff:
 		return protocol.ChatMessageKindOnboardingKickoff
+	case protocol.ChatMessageKindOnboardingOpening:
+		return protocol.ChatMessageKindOnboardingOpening
 	default:
 		return protocol.ChatMessageKindMessage
 	}

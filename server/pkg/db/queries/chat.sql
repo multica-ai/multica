@@ -1155,6 +1155,17 @@ WHERE task_id = $1 AND role = 'assistant'
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: TaskHasOnboardingKickoffInput :one
+-- Whether this task's input is the product-authored onboarding kickoff. The
+-- opening it produces renders the starter cards instead of suggestion chips
+-- (MUL-5765), so the quick-actions pass skips that turn.
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE task_id = $1
+      AND role = 'user'
+      AND message_kind = 'onboarding_kickoff'
+);
+
 -- name: GetLatestAssistantChatMessageForSession :one
 -- The session's most recent assistant turn, used as the regeneration target
 -- when the user clicks "refresh" on the quick-actions row (MUL-5149). Only rows

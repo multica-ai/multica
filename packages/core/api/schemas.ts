@@ -423,7 +423,10 @@ export const ChatMessageSchema = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
-  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  message_kind: z
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .catch("message")
+    .optional(),
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),

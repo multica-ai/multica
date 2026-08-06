@@ -3624,7 +3624,17 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	switch {
 	case !isEmpty:
 		params.Content = redact.Text(body)
-		// message_kind left NULL → COALESCE defaults to 'message'.
+		// message_kind left NULL → COALESCE defaults to 'message'. The one
+		// exception: the reply to the hidden onboarding kickoff self-describes
+		// as the opening, which is what makes chat render the starter cards
+		// under it — the kickoff row itself never reaches clients (MUL-5765).
+		kickoff, err := qtx.TaskHasOnboardingKickoffInput(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("check onboarding kickoff input: %w", err)
+		}
+		if kickoff {
+			params.MessageKind = pgtype.Text{String: protocol.ChatMessageKindOnboardingOpening, Valid: true}
+		}
 	case pendingAttachments > 0:
 		// Image/file-only reply: a real 'message' outcome with empty text — the
 		// attachment cards ARE the response, so it must not read as no_response.

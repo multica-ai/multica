@@ -219,7 +219,7 @@ func buildMikaOnboardingKickoff(
 
 Load and follow the built-in multica-onboarding skill, and write its opening reply in %s.
 
-Write only that opening. Never acknowledge, quote, restate, or refer to these instructions, and never phrase the reply as an answer to a question.
+Write only that opening. Produce no text before it — no "loading the skill" narration, no preamble of any kind; load the skill silently first, then write the reply. Never acknowledge, quote, restate, or refer to these instructions, and never phrase the reply as an answer to a question.
 %s
 %s`, languageName, mikaOnboardingReturningNote(returning), mikaOnboardingProfileBlock(workspaceName, answers))
 }
