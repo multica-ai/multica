@@ -6,7 +6,6 @@ import {
   DEFAULT_HEALTH_PORT,
   deriveProfileName,
   healthPortForProfile,
-  isResolvedProfile,
   profileArgs,
   profileConfigPath,
   profileDir,
@@ -83,20 +82,22 @@ describe("profileArgs", () => {
 });
 
 describe("healthPortForProfile", () => {
-  it("keeps the default port for the unresolved profile", () => {
-    expect(healthPortForProfile("")).toBe(DEFAULT_HEALTH_PORT);
+  // Regression: this returned 19514 — the default profile's port — for an
+  // unresolved profile, so Desktop would probe the user's own CLI daemon and
+  // report it as its own. #6399.
+  it("refuses to hand out a port for an unresolved profile", () => {
+    expect(() => healthPortForProfile("")).toThrow(/unresolved/);
+  });
+
+  it("never derives the default profile's port", () => {
+    for (const name of ["desktop-api.multica.ai", "desktop", "x", "a".repeat(50)]) {
+      expect(healthPortForProfile(name)).not.toBe(DEFAULT_HEALTH_PORT);
+    }
   });
 
   it("derives a stable per-profile port above the default", () => {
     const port = healthPortForProfile("desktop-api.multica.ai");
     expect(port).toBeGreaterThan(DEFAULT_HEALTH_PORT);
     expect(port).toBe(healthPortForProfile("desktop-api.multica.ai"));
-  });
-});
-
-describe("isResolvedProfile", () => {
-  it("treats only a non-empty name as resolved", () => {
-    expect(isResolvedProfile("")).toBe(false);
-    expect(isResolvedProfile("desktop-api.multica.ai")).toBe(true);
   });
 });

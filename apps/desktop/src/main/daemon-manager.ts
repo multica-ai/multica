@@ -25,10 +25,8 @@ import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
-  DEFAULT_HEALTH_PORT,
   deriveProfileName,
   healthPortForProfile,
-  isResolvedProfile,
   profileArgs,
   profileConfigPath,
   profileDir,
@@ -65,8 +63,10 @@ const DAEMON_START_EXEC_TIMEOUT_MS = 60_000;
 
 const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 
+// Always a resolved Desktop-owned profile. "Not resolved yet" is represented by
+// `null` at every call site, never by an empty name — see daemon-profile.ts.
 interface ActiveProfile {
-  name: string; // "" = default profile
+  name: string;
   port: number;
 }
 
@@ -242,15 +242,14 @@ async function writeProfileConfig(
  * Returns the Desktop-owned profile for the current target API URL. Creates
  * the profile's config.json on demand with `server_url` pinned to the target.
  *
- * Until the renderer reports its `apiUrl` there is no such profile, and the
- * returned name is empty. That empty name is a "not resolved yet" marker, not
- * a usable profile: `daemon-profile.ts` refuses to turn it into a path or a
- * `--profile` argument, so no caller can silently act on the user's default
- * CLI profile at `~/.multica/`.
+ * Returns `null` until the renderer reports its `apiUrl`. There is no profile
+ * to act on in that window, and callers must do nothing rather than reach for
+ * the user's default CLI profile at `~/.multica/` — neither its files nor its
+ * health port.
  */
-async function resolveActiveProfile(): Promise<ActiveProfile> {
+async function resolveActiveProfile(): Promise<ActiveProfile | null> {
   const target = targetApiBaseUrl;
-  if (!target) return { name: "", port: DEFAULT_HEALTH_PORT };
+  if (!target) return null;
 
   const name = deriveProfileName(target);
   const cfg = await readProfileConfig(name);
@@ -264,14 +263,13 @@ async function resolveActiveProfile(): Promise<ActiveProfile> {
   return { name, port: healthPortForProfile(name) };
 }
 
-async function ensureActiveProfile(): Promise<ActiveProfile> {
+async function ensureActiveProfile(): Promise<ActiveProfile | null> {
   if (activeProfile) return activeProfile;
-  const resolved = await resolveActiveProfile();
-  // Never cache the unresolved placeholder: the target URL arrives over IPC
-  // shortly after startup, and a cached empty name would otherwise persist
-  // until something happened to invalidate it.
-  if (isResolvedProfile(resolved.name)) activeProfile = resolved;
-  return resolved;
+  // Only a resolved profile is cached; the target URL arrives over IPC shortly
+  // after startup, and caching "unresolved" would persist until something
+  // happened to invalidate it.
+  activeProfile = await resolveActiveProfile();
+  return activeProfile;
 }
 
 function invalidateActiveProfile(): void {
@@ -287,6 +285,10 @@ async function fetchHealth(): Promise<DaemonStatus> {
   }
 
   const active = await ensureActiveProfile();
+  // No profile yet means no daemon of ours to probe. Reporting "stopped" is the
+  // honest answer; probing the default port would surface the user's own CLI
+  // daemon as if it were Desktop's.
+  if (!active) return { state: "stopped" };
   const data = await fetchHealthAtPort(active.port);
 
   if (!data || data.status !== "running") {
@@ -550,6 +552,7 @@ async function ensureRunningDaemonVersionMatches(): Promise<
   "restarted" | "deferred" | "ok" | "not_running"
 > {
   const active = await ensureActiveProfile();
+  if (!active) return "not_running";
   const running = await fetchHealthAtPort(active.port);
 
   // Don't try to version-match a daemon we can't restart (e.g. WSL2). Treat it
@@ -646,10 +649,10 @@ async function syncToken(
   userId: string,
 ): Promise<void> {
   const active = await ensureActiveProfile();
-  if (!isResolvedProfile(active.name)) {
-    // No Desktop-owned profile yet — writing here would land the token and
-    // server_url in the user's default CLI config. The renderer re-runs this
-    // once the target URL is set.
+  if (!active) {
+    // Writing here would land the token and server_url in the user's default
+    // CLI config. The renderer awaits setTargetApiUrl before calling this, so
+    // reaching this branch is a real error rather than a normal startup race.
     throw new Error("daemon profile is not resolved yet; token sync skipped");
   }
   const config = await readProfileConfig(active.name);
@@ -723,7 +726,7 @@ async function clearToken(): Promise<void> {
   const active = await ensureActiveProfile();
   // Nothing of ours to clear yet, and the default CLI profile is not ours to
   // strip a token from.
-  if (!isResolvedProfile(active.name)) return;
+  if (!active) return;
   const config = await readProfileConfig(active.name);
   if ("token" in config) {
     delete config.token;
@@ -824,7 +827,7 @@ async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
   const bin = await resolveCliBinary();
   if (!bin) return { probeResult: "error" };
   const active = await ensureActiveProfile();
-  if (!isResolvedProfile(active.name)) return { probeResult: "error" };
+  if (!active) return { probeResult: "error" };
   return new Promise((resolve) => {
     execFile(
       bin,
@@ -893,7 +896,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
   const active = await ensureActiveProfile();
-  if (!isResolvedProfile(active.name)) {
+  if (!active) {
     return { success: false, error: "Waiting for the service address" };
   }
   const existing = await fetchHealthAtPort(active.port);
@@ -946,6 +949,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
  */
 async function lifecycleBlockedByForeignDaemon(): Promise<boolean> {
   const active = await ensureActiveProfile();
+  if (!active) return false;
   return daemonLifecycleUnreachable(
     async () => (await fetchHealthAtPort(active.port))?.os,
     normalizeHostOS(process.platform),
@@ -966,7 +970,7 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
   const active = await ensureActiveProfile();
-  if (!isResolvedProfile(active.name)) return { success: true };
+  if (!active) return { success: true };
   currentState = "stopping";
   // An explicit stop is a clean reset — drop any pending auth-failure verdict.
   authExpired = false;
@@ -1076,9 +1080,7 @@ function startLogTail(win: BrowserWindow, retryCount = 0): void {
     // Before the renderer reports its apiUrl there is no Desktop-owned profile
     // yet, and therefore no log file of ours to tail. Retry rather than reach
     // for the default profile's log.
-    const logPath = isResolvedProfile(active.name)
-      ? profileLogPath(active.name)
-      : null;
+    const logPath = active ? profileLogPath(active.name) : null;
     if (!logPath || !existsSync(logPath)) {
       if (retryCount < LOG_TAIL_MAX_RETRIES) {
         setTimeout(() => startLogTail(win, retryCount + 1), LOG_TAIL_RETRY_MS);
@@ -1221,9 +1223,7 @@ export function setupDaemonManager(
   // (full history, complex search, copy-to-clipboard at scale).
   ipcMain.handle("daemon:open-log-file", async () => {
     const active = await ensureActiveProfile();
-    const logPath = isResolvedProfile(active.name)
-      ? profileLogPath(active.name)
-      : null;
+    const logPath = active ? profileLogPath(active.name) : null;
     if (!logPath || !existsSync(logPath)) {
       return { success: false, error: "Log file not found yet" };
     }

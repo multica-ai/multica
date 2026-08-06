@@ -5,15 +5,14 @@ import { join } from "path";
 export const DEFAULT_HEALTH_PORT = 19514;
 
 /**
- * Empty string is the "target API URL not known yet" state, which exists
- * between main-process startup and the renderer reporting its `apiUrl`.
+ * Desktop owns only `~/.multica/profiles/desktop-<host>/`. The default profile
+ * at `~/.multica/` — config, daemon log, and health port 19514 — belongs to the
+ * user's terminal CLI and must never be read, written, probed, or passed to the
+ * bundled CLI.
  *
- * It is NOT a profile name. Desktop owns only `~/.multica/profiles/desktop-<host>/`;
- * the default profile at `~/.multica/` belongs to the user's terminal CLI and
- * must never be read, written, or passed to the bundled CLI. Resolving an empty
- * name to that directory silently rewrote the user's own `server_url` and
- * `token`, so every path that could reach the filesystem fails loudly instead.
- * See #6399.
+ * Callers signal "target API URL not known yet" with `null`, never with an
+ * empty name, so there is no value that can quietly resolve to the default
+ * profile. This guard is the backstop for that. See #6399.
  */
 export function assertResolvedProfile(profile: string): void {
   if (!profile) {
@@ -21,10 +20,6 @@ export function assertResolvedProfile(profile: string): void {
       "daemon profile is unresolved — refusing to fall back to the default CLI profile",
     );
   }
-}
-
-export function isResolvedProfile(profile: string): boolean {
-  return Boolean(profile);
 }
 
 // Desktop owns a dedicated CLI profile named after the target API host, so it
@@ -40,8 +35,13 @@ export function deriveProfileName(targetUrl: string): string {
   }
 }
 
+/**
+ * Port 19514 itself is the default profile's, so an unresolved profile must
+ * never produce one: probing it would report the user's own CLI daemon as
+ * Desktop's, and lifecycle commands would act on it.
+ */
 export function healthPortForProfile(profile: string): number {
-  if (!profile) return DEFAULT_HEALTH_PORT;
+  assertResolvedProfile(profile);
   let sum = 0;
   for (const b of Buffer.from(profile, "utf-8")) sum += b;
   return DEFAULT_HEALTH_PORT + 1 + (sum % 1000);
