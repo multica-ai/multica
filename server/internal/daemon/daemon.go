@@ -7431,11 +7431,11 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 
 // taskTempBaseDir resolves the parent directory for private per-task temp
 // dirs. The daemon operator can relocate it with MULTICA_AGENT_TEMP_BASE,
-// which must be an absolute path to an existing directory; an invalid value
-// fails task startup instead of silently falling back. Unset keeps the
-// platform default exactly as before. Operators should pick a short path:
-// child tools may bind AF_UNIX sockets under $TMPDIR (sun_path is 108 bytes
-// on Linux, 104 on macOS).
+// which must be an absolute path to an existing, writable directory; an
+// invalid value fails task startup instead of silently falling back. Unset
+// keeps the platform default exactly as before, down to the syscalls made.
+// Operators should pick a short path: child tools may bind AF_UNIX sockets
+// under $TMPDIR (sun_path is 108 bytes on Linux, 104 on macOS).
 func taskTempBaseDir() (string, error) {
 	base := strings.TrimSpace(os.Getenv("MULTICA_AGENT_TEMP_BASE"))
 	if base == "" {
@@ -7451,6 +7451,14 @@ func taskTempBaseDir() (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE is not a directory: %q", base)
 	}
+	// Probe writability here so a read-only or full volume is reported against
+	// the variable the operator set, rather than as a bare mkdir error from
+	// deeper in task startup. Only configured bases pay for the probe.
+	probe, err := os.MkdirTemp(base, ".multica-tempbase-probe-")
+	if err != nil {
+		return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE is not writable: %w", err)
+	}
+	_ = os.Remove(probe)
 	return base, nil
 }
 
