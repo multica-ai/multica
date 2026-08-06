@@ -24,6 +24,19 @@ The QR code is valid for 5 minutes; if it expires before you scan it, click **Sc
 Scanning always creates a brand-new WeCom smart bot — it never re-authorizes an existing one. If you disconnect an agent and connect it again, you get a different bot with a different identity in WeCom; the previous bot is not reused or restored.
 </Callout>
 
+### Enter credentials by hand
+
+Scanning always provisions a NEW bot. To connect a smart bot that already exists in WeCom, click **Enter Bot ID and Secret instead** in the same dialog:
+
+1. In the WeCom admin console, open the smart bot and copy its **Bot ID** and **Secret**.
+2. Paste both into Multica and click **Connect bot**.
+
+Multica verifies the credentials against WeCom before saving anything, so a wrong Secret is reported immediately instead of leaving a bot that never answers. The Secret is stored encrypted and is never displayed again.
+
+A Bot ID can only be connected once at a time. If it is already connected — to another agent in this workspace, to an archived agent, or in a different Multica workspace — Multica says which case it is; disconnect it there first. Reconnecting a bot you previously disconnected works with the same Bot ID.
+
+Manual entry needs only `MULTICA_WECOM_SECRET_KEY`, so it also works on a self-hosted deployment that has no WeCom scan source provisioned — the case where the QR flow is unavailable.
+
 An agent that is already connected no longer shows the scan entry point. Multica does not expose bot renaming or permission management — do that from your WeCom admin console.
 
 ## First use

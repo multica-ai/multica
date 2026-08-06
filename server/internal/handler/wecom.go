@@ -57,9 +57,10 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-store")
 	if h.WecomInstall == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"installations":     []wecomInstallationResponse{},
-			"configured":        false,
-			"install_supported": false,
+			"installations":            []wecomInstallationResponse{},
+			"configured":               false,
+			"install_supported":        false,
+			"manual_install_supported": false,
 		})
 		return
 	}
@@ -83,6 +84,9 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 		"installations":     out,
 		"configured":        true,
 		"install_supported": h.WecomInstall.Configured(),
+		// Manual bot entry needs only the secretbox key, so it can be
+		// available on a deployment where scan-code install is not.
+		"manual_install_supported": h.WecomInstall.ManualConfigured(),
 	})
 }
 
@@ -185,6 +189,130 @@ func (h *Handler) BeginWecomInstall(w http.ResponseWriter, r *http.Request) {
 		SessionID:           res.SessionID,
 		Status:              res.Status,
 		PollIntervalSeconds: 1,
+	})
+}
+
+// manualWecomInstallRequest carries hand-entered bot credentials. The secret is
+// write-only: it is sealed before it reaches the database and never appears in
+// any response or log line.
+type manualWecomInstallRequest struct {
+	BotID  string `json:"bot_id"`
+	Secret string `json:"secret"`
+}
+
+// manualWecomInstallResponse echoes only what the UI needs to render the
+// connected state.
+type manualWecomInstallResponse struct {
+	InstallationID string `json:"installation_id"`
+	BotID          string `json:"bot_id"`
+}
+
+// maxManualInstallBody caps the request body. Both fields are short
+// credentials; anything larger is a malformed or hostile request.
+const maxManualInstallBody = 4 << 10
+
+// ManualWecomInstall (POST /api/workspaces/{id}/wecom/install/manual?agent_id=)
+// connects an EXISTING WeCom smart bot from credentials the user typed in,
+// as the alternative to the scan flow (which always provisions a brand new
+// bot). It is synchronous — the service verifies the credentials against the
+// WeCom long-connection handshake before writing anything — so the response
+// carries the real outcome instead of a session to poll.
+//
+// Authorization matches BeginWecomInstall: per-agent canManageAgent, so an
+// agent owner can connect their own agent without being a workspace admin.
+func (h *Handler) ManualWecomInstall(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.WecomInstall == nil || !h.WecomInstall.ManualConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "wecom install not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	agentIDStr := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	if agentIDStr == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	agentUUID, ok := parseUUIDOrBadRequest(w, agentIDStr, "agent_id")
+	if !ok {
+		return
+	}
+	var req manualWecomInstallRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxManualInstallBody)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found in this workspace")
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	initiatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+
+	inst, err := h.WecomInstall.InstallManual(r.Context(), wecom.InstallManualParams{
+		WorkspaceID: wsUUID,
+		AgentID:     agentUUID,
+		InitiatorID: initiatorUUID,
+		BotID:       req.BotID,
+		Secret:      req.Secret,
+	})
+	if err != nil {
+		// The response body carries a stable code, not prose: the frontend
+		// localizes it (same contract as BeginWecomInstall's conflict codes).
+		switch {
+		case errors.Is(err, wecom.ErrBotCredentialsRequired):
+			writeError(w, http.StatusBadRequest, "bot_credentials_required")
+		case errors.Is(err, wecom.ErrInvalidBotCredentials):
+			writeError(w, http.StatusBadRequest, "invalid_bot_credentials")
+		case errors.Is(err, wecom.ErrVerifyUnavailable):
+			writeError(w, http.StatusBadGateway, "verify_unavailable")
+		case errors.Is(err, wecom.ErrActiveInstallationExists):
+			writeError(w, http.StatusConflict, "installation_conflict")
+		case errors.Is(err, wecom.ErrBotIDOwnedByAnotherWorkspace):
+			writeError(w, http.StatusConflict, "bot_id_owned_by_another_workspace")
+		case errors.Is(err, wecom.ErrBotIDOwnedInThisWorkspace):
+			writeError(w, http.StatusConflict, "bot_id_owned_in_this_workspace")
+		case errors.Is(err, wecom.ErrBotIDOwnedByArchivedAgent):
+			writeError(w, http.StatusConflict, "bot_id_owned_by_archived_agent")
+		case errors.Is(err, wecom.ErrManualInstallUnsupported):
+			writeError(w, http.StatusServiceUnavailable, "wecom install not configured")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to connect wecom bot")
+		}
+		return
+	}
+
+	h.publish(protocol.EventWecomInstallationCreated, uuidToString(wsUUID), "user", userID, map[string]any{
+		"installation_id": uuidToString(inst.ID),
+		"agent_id":        uuidToString(inst.AgentID),
+	})
+	// Wake the ChannelSupervisor so it starts driving the connection now
+	// instead of waiting for the next sweep.
+	if h.ChannelSupervisor != nil {
+		h.ChannelSupervisor.Notify()
+	}
+	botID := ""
+	if cfg, cfgErr := wecom.UnmarshalInstallationConfig(inst.Config); cfgErr == nil {
+		botID = cfg.AppID
+	}
+	writeJSON(w, http.StatusCreated, manualWecomInstallResponse{
+		InstallationID: uuidToString(inst.ID),
+		BotID:          botID,
 	})
 }
 

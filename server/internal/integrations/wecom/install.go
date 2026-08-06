@@ -87,7 +87,39 @@ var (
 	// ErrSessionNotFound: unknown / GC'd session, cross-workspace, or the
 	// caller cannot view this session. Handler maps to 404.
 	ErrSessionNotFound = errors.New("wecom: install session not found")
+
+	// Manual-install sentinels (bot id + secret typed in by hand). The scan
+	// flow cannot hit these: WeCom hands it credentials that are valid by
+	// construction and unique by construction.
+
+	// ErrBotCredentialsRequired: bot_id or secret was empty, over the length
+	// cap, or carried control characters. HTTP 400.
+	ErrBotCredentialsRequired = errors.New("wecom: bot_id and secret are required")
+	// ErrInvalidBotCredentials: WeCom rejected the pair at the subscribe
+	// handshake. HTTP 400.
+	ErrInvalidBotCredentials = errors.New("wecom: bot credentials rejected by wecom")
+	// ErrVerifyUnavailable: the credential probe could not reach WeCom, so
+	// whether the credentials are valid is unknown. HTTP 502 — deliberately
+	// NOT reported as bad credentials.
+	ErrVerifyUnavailable = errors.New("wecom: could not verify bot credentials")
+	// ErrBotIDOwnedByAnotherWorkspace: the (wecom, bot_id) routing slot is
+	// live in a different Multica workspace. HTTP 409.
+	ErrBotIDOwnedByAnotherWorkspace = errors.New("wecom: bot id is connected in another workspace")
+	// ErrBotIDOwnedInThisWorkspace: another agent in this workspace already
+	// holds the bot id. HTTP 409.
+	ErrBotIDOwnedInThisWorkspace = errors.New("wecom: bot id is already connected to another agent in this workspace")
+	// ErrBotIDOwnedByArchivedAgent: the holder is an archived agent, so the
+	// binding is recoverable by unarchiving rather than by rebinding. HTTP 409.
+	ErrBotIDOwnedByArchivedAgent = errors.New("wecom: bot id is held by an archived agent")
+	// ErrManualInstallUnsupported: no secretbox key, so a submitted secret
+	// cannot be sealed. HTTP 503.
+	ErrManualInstallUnsupported = errors.New("wecom: manual install not configured")
 )
+
+// maxBotCredentialLen caps the hand-typed fields. WeCom bot ids and secrets are
+// well under this; the cap exists so a paste accident cannot push an unbounded
+// string into the config JSONB.
+const maxBotCredentialLen = 256
 
 // InstallStore is the narrow slice of the generated queries InstallService
 // needs. WithTx returns the same interface bound to a transaction; the real
@@ -109,6 +141,8 @@ type InstallStore interface {
 	PurgeTerminalWecomInstallSessions(ctx context.Context, arg db.PurgeTerminalWecomInstallSessionsParams) (int64, error)
 	GetAgentInWorkspace(ctx context.Context, arg db.GetAgentInWorkspaceParams) (db.Agent, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (db.User, error)
+	GetChannelInstallationByAppID(ctx context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
+	GetChannelInstallationOwnerByAppID(ctx context.Context, arg db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error)
 	ReclaimDeadChannelInstallationByAppID(ctx context.Context, arg db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error)
 	DeleteRevokedChannelInstallationForReplacement(ctx context.Context, arg db.DeleteRevokedChannelInstallationForReplacementParams) (pgtype.UUID, error)
 	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
@@ -144,6 +178,14 @@ type InstallServiceConfig struct {
 	// Provider talks to the WeCom generate / query_result endpoints. Nil
 	// means maintenance mode.
 	Provider Provider
+	// DialURL is the long-connection endpoint the manual-install credential
+	// probe connects to. Empty means DefaultDialURL.
+	DialURL string
+	// Verify probes a submitted bot id / secret pair. Nil installs a wrapper
+	// around VerifyCredentials; tests inject a fake so the default test path
+	// never dials the network. A *AuthFailedError return means "WeCom rejected
+	// these credentials"; any other error means "could not determine".
+	Verify func(ctx context.Context, botID, secret string) error
 
 	QRTTL                time.Duration
 	GenerateDeadline     time.Duration
@@ -196,6 +238,18 @@ func (c InstallServiceConfig) withDefaults() InstallServiceConfig {
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
+	}
+	if c.Verify == nil {
+		dialURL := c.DialURL
+		logger := c.Logger
+		c.Verify = func(ctx context.Context, botID, secret string) error {
+			return VerifyCredentials(ctx, VerifyCredentialsConfig{
+				DialURL: dialURL,
+				BotID:   botID,
+				Secret:  secret,
+				Logger:  logger,
+			})
+		}
 	}
 	return c
 }
@@ -509,4 +563,259 @@ func uuidsEqual(a, b pgtype.UUID) bool {
 		return false
 	}
 	return a.Bytes == b.Bytes
+}
+
+// bindBotParams is the trusted input to bindBot: the secret is already sealed
+// and base64-encoded, and the bot id is already trimmed.
+type bindBotParams struct {
+	WorkspaceID     pgtype.UUID
+	AgentID         pgtype.UUID
+	InstallerUserID pgtype.UUID
+	BotID           string
+	SecretEncrypted string
+}
+
+// bindUpsertError marks a failure of the UpsertChannelInstallation statement
+// specifically, so callers can tell "the (wecom, bot_id) routing slot is taken"
+// apart from an infrastructure failure on one of the surrounding statements.
+// The scan path renders it as installation_conflict; the manual path resolves
+// the actual live owner and reports which one it is.
+type bindUpsertError struct{ err error }
+
+func (e *bindUpsertError) Error() string { return e.err.Error() }
+func (e *bindUpsertError) Unwrap() error { return e.err }
+
+// bindBot writes the installation row for a bot whose credentials are already
+// established: locale snapshot, dead-owner reclaim, revoked-row replacement,
+// then the upsert. Shared by the scan flow (InstallWorker.finalizeSuccess,
+// which follows it with CompleteWecomInstallSession) and the manual flow
+// (InstallManual, which commits directly) so the two paths cannot drift on the
+// routing-slot cleanup rules.
+//
+// Runs entirely inside the caller's transaction; the caller owns commit and
+// rollback.
+func (s *InstallService) bindBot(ctx context.Context, qtx InstallStore, p bindBotParams) (db.ChannelInstallation, error) {
+	// Locale snapshot from the initiator's user.language. Failure to load
+	// degrades to default locale — an install must not be denied because
+	// the initiator picked an unsupported language.
+	locale := DefaultLocale
+	if user, err := qtx.GetUser(ctx, p.InstallerUserID); err == nil {
+		locale = NormalizeLocale(user.Language.String)
+	}
+
+	// Reclaim any dead installation holding this botid so the upsert below
+	// cannot trip the (channel_type, app_id) unique index on a revoked
+	// ghost owner.
+	if _, err := qtx.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
+		ChannelType: string(TypeWecom),
+		AppID:       p.BotID,
+		WorkspaceID: p.WorkspaceID,
+		AgentID:     p.AgentID,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.ChannelInstallation{}, fmt.Errorf("bind bot: reclaim dead: %w", err)
+	}
+	if _, err := qtx.DeleteRevokedChannelInstallationForReplacement(ctx, db.DeleteRevokedChannelInstallationForReplacementParams{
+		WorkspaceID: p.WorkspaceID,
+		AgentID:     p.AgentID,
+		ChannelType: string(TypeWecom),
+		NewAppID:    p.BotID,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.ChannelInstallation{}, fmt.Errorf("bind bot: delete revoked replacement: %w", err)
+	}
+
+	cfgBytes, err := (InstallationConfig{
+		AppID:           p.BotID,
+		SecretEncrypted: p.SecretEncrypted,
+		Locale:          locale,
+	}).Marshal()
+	if err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("bind bot: marshal config: %w", err)
+	}
+
+	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
+		WorkspaceID:     p.WorkspaceID,
+		AgentID:         p.AgentID,
+		ChannelType:     string(TypeWecom),
+		Config:          cfgBytes,
+		InstallerUserID: p.InstallerUserID,
+	})
+	if err != nil {
+		return db.ChannelInstallation{}, &bindUpsertError{err: err}
+	}
+	return inst, nil
+}
+
+// ManualConfigured reports whether hand-entered bot credentials can be
+// installed. Unlike Configured() it needs only the secretbox key: SourceID and
+// the HTTP Provider exist solely for the scan-code generate / query_result
+// calls, so a deployment that never provisioned a WeCom scan source can still
+// connect a bot by typing its credentials.
+func (s *InstallService) ManualConfigured() bool {
+	return s.cfg.Box != nil
+}
+
+// InstallManualParams is the trusted input from the handler: workspace, agent
+// and initiator are authenticated and authorized (canManageAgent).
+type InstallManualParams struct {
+	WorkspaceID pgtype.UUID
+	AgentID     pgtype.UUID
+	InitiatorID pgtype.UUID
+	BotID       string
+	Secret      string
+}
+
+// InstallManual connects an EXISTING WeCom smart bot from credentials the user
+// typed in, as an alternative to the scan flow (which always provisions a brand
+// new bot). Unlike BeginInstall this is synchronous: there is no generate/poll
+// round trip to keep off the request path, so the caller gets the real outcome
+// — including "that secret is wrong" — in the response.
+//
+// Order matters. The credential probe occupies the bot's connection slot, so
+// every cheap rejection (validation, this agent already connected, bot id owned
+// elsewhere) runs BEFORE it, and the probe never kicks a live connection.
+func (s *InstallService) InstallManual(ctx context.Context, p InstallManualParams) (db.ChannelInstallation, error) {
+	if !s.ManualConfigured() {
+		return db.ChannelInstallation{}, ErrManualInstallUnsupported
+	}
+	botID := strings.TrimSpace(p.BotID)
+	secret := strings.TrimSpace(p.Secret)
+	if !validBotCredential(botID) || !validBotCredential(secret) {
+		return db.ChannelInstallation{}, ErrBotCredentialsRequired
+	}
+
+	// Same product rule as the scan flow: one active WeCom bot per agent,
+	// disconnect before connecting another.
+	if _, err := s.store.GetActiveWecomInstallationForAgent(ctx, db.GetActiveWecomInstallationForAgentParams{
+		WorkspaceID: p.WorkspaceID,
+		AgentID:     p.AgentID,
+	}); err == nil {
+		return db.ChannelInstallation{}, ErrActiveInstallationExists
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return db.ChannelInstallation{}, fmt.Errorf("wecom manual: active install lookup: %w", err)
+	}
+
+	// Cheap accurate rejection before the probe. This is NOT the real guard —
+	// two callers submitting the same bot id concurrently both read no live
+	// owner here — the unique index below is. It exists so the common case
+	// gets a precise message without paying for a WeCom round trip.
+	if err := s.checkBotIDAvailable(ctx, p.WorkspaceID, p.AgentID, botID); err != nil {
+		return db.ChannelInstallation{}, err
+	}
+
+	if err := s.cfg.Verify(ctx, botID, secret); err != nil {
+		var authErr *AuthFailedError
+		if errors.As(err, &authErr) {
+			s.cfg.Logger.InfoContext(ctx, "wecom manual install: credentials rejected",
+				"bot_id", botID,
+				"errcode", authErr.Code,
+				"workspace_id", util.UUIDToString(p.WorkspaceID),
+			)
+			return db.ChannelInstallation{}, ErrInvalidBotCredentials
+		}
+		s.cfg.Logger.WarnContext(ctx, "wecom manual install: verification unavailable",
+			"bot_id", botID,
+			"error", err,
+			"workspace_id", util.UUIDToString(p.WorkspaceID),
+		)
+		return db.ChannelInstallation{}, ErrVerifyUnavailable
+	}
+
+	sealed, err := sealAndEncode(s.cfg.Box, []byte(secret))
+	if err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("wecom manual: seal secret: %w", err)
+	}
+
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("wecom manual: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	inst, err := s.bindBot(ctx, s.store.WithTx(tx), bindBotParams{
+		WorkspaceID:     p.WorkspaceID,
+		AgentID:         p.AgentID,
+		InstallerUserID: p.InitiatorID,
+		BotID:           botID,
+		SecretEncrypted: sealed,
+	})
+	if err != nil {
+		var upsertErr *bindUpsertError
+		if errors.As(err, &upsertErr) {
+			// The routing slot was taken between the pre-check and the insert,
+			// or is held by a row the reclaim gate deliberately spares. Resolve
+			// the live owner on the base store — this tx is aborted.
+			s.cfg.Logger.WarnContext(ctx, "wecom manual install: upsert conflict",
+				"bot_id", botID, "error", err)
+			return db.ChannelInstallation{}, s.botIDConflictErr(ctx, p.WorkspaceID, p.AgentID, botID)
+		}
+		return db.ChannelInstallation{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("wecom manual: commit: %w", err)
+	}
+	return inst, nil
+}
+
+// checkBotIDAvailable rejects a bot id whose (wecom, bot_id) routing slot is
+// held by a LIVE installation. A revoked holder is not a conflict: bindBot's
+// reclaim / replacement statements free it, which is what makes "disconnect,
+// then reconnect the same bot" work.
+func (s *InstallService) checkBotIDAvailable(ctx context.Context, wsID, agentID pgtype.UUID, botID string) error {
+	existing, err := s.store.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
+		ChannelType: string(TypeWecom),
+		AppID:       botID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("wecom manual: bot id lookup: %w", err)
+	}
+	if existing.Status != "active" {
+		return nil
+	}
+	return s.botIDConflictErr(ctx, wsID, agentID, botID)
+}
+
+// botIDConflictErr classifies who holds the routing slot so the caller can
+// render an accurate message instead of a catch-all that always blames another
+// workspace. Mirrors slack.InstallService.liveOwnerConflictErr. A slot that
+// looks free by the time we look (concurrent disconnect) degrades to the
+// cross-workspace sentinel; a retry then succeeds.
+func (s *InstallService) botIDConflictErr(ctx context.Context, wsID, agentID pgtype.UUID, botID string) error {
+	owner, err := s.store.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
+		ChannelType: string(TypeWecom),
+		AppID:       botID,
+	})
+	if err != nil {
+		return ErrBotIDOwnedByAnotherWorkspace
+	}
+	switch {
+	case !uuidsEqual(owner.WorkspaceID, wsID):
+		return ErrBotIDOwnedByAnotherWorkspace
+	case owner.AgentArchivedAt.Valid:
+		return ErrBotIDOwnedByArchivedAgent
+	case uuidsEqual(owner.AgentID, agentID):
+		// Same agent, same bot: the caller's own active installation. The
+		// active-install guard should already have caught this; reaching here
+		// means it was created concurrently.
+		return ErrActiveInstallationExists
+	default:
+		return ErrBotIDOwnedInThisWorkspace
+	}
+}
+
+// validBotCredential enforces the hand-entry limits: non-empty, bounded, and
+// free of control characters (a stray newline from a copy-paste would otherwise
+// end up inside the config JSON and in log lines).
+func validBotCredential(v string) bool {
+	if v == "" || len(v) > maxBotCredentialLen {
+		return false
+	}
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }

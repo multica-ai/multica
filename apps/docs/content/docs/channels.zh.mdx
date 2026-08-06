@@ -13,7 +13,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 | | 飞书 / Lark | 企业微信 | Slack | 钉钉 |
 |---|---|---|---|---|
-| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Multica 中生成二维码，用企业微信扫码授权 —— 每次扫码都会创建一个新的智能机器人 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica |
+| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Multica 中用企业微信扫码授权（每次扫码都会创建一个新的智能机器人），或手动填写已有机器人的 Bot ID 和 Secret | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica |
 | 私聊智能体 | 支持 | 支持 | 支持 | 支持 |
 | 群聊或频道 | @ Bot 后触发 | @ 机器人后触发 | @ Bot 后触发 | @ Bot 后触发 |
 | 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 |

@@ -43,6 +43,8 @@ import {
   ListWecomInstallationsResponseSchema,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   BeginWecomInstallResponseSchema,
+  ManualWecomInstallResponseSchema,
+  MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE,
   MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
   WecomInstallStatusResponseSchema,
   MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
@@ -1316,6 +1318,54 @@ describe("WeCom install schemas", () => {
     );
     expect(parsed.status).toBe("error");
     expect(parsed.error_reason).toBe("internal_error");
+  });
+
+  it("treats a missing manual_install_supported as undefined, not false", () => {
+    // An older backend omits the field. The UI must decide from an explicit
+    // `=== true`, so parsing may not invent a value here.
+    const parsed = parseWithFallback(
+      { installations: [], configured: true, install_supported: true },
+      ListWecomInstallationsResponseSchema,
+      EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.manual_install_supported).toBeUndefined();
+    expect(parsed.install_supported).toBe(true);
+  });
+
+  it("parses a well-formed manual install response", () => {
+    const parsed = parseWithFallback(
+      { installation_id: "inst-1", bot_id: "bot-1" },
+      ManualWecomInstallResponseSchema,
+      MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.installation_id).toBe("inst-1");
+    expect(parsed.bot_id).toBe("bot-1");
+  });
+
+  it("degrades a malformed manual install response to an empty installation id", () => {
+    // The caller refetches the installation list rather than trusting this
+    // payload, so an empty id means "reload and look" instead of a crash.
+    const parsed = parseWithFallback(
+      { installation_id: 42 },
+      ManualWecomInstallResponseSchema,
+      MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.installation_id).toBe("");
+    expect(parsed.bot_id).toBe("");
+  });
+
+  it("defaults a manual install response with no bot_id instead of failing", () => {
+    const parsed = parseWithFallback(
+      { installation_id: "inst-1" },
+      ManualWecomInstallResponseSchema,
+      MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE,
+      { endpoint: "test" },
+    );
+    expect(parsed.installation_id).toBe("inst-1");
+    expect(parsed.bot_id).toBe("");
   });
 });
 

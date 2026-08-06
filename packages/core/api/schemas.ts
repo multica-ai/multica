@@ -48,6 +48,7 @@ import type {
   ListGitHubRepositoriesResponse,
   ListWecomInstallationsResponse,
   BeginWecomInstallResponse,
+  ManualWecomInstallResponse,
   RedeemWecomBindingResponse,
   WecomInstallStatusResponse,
   ListLabelsResponse,
@@ -106,12 +107,14 @@ export const ListWecomInstallationsResponseSchema = z.object({
   installations: z.array(WecomInstallationSchema).default([]),
   configured: z.boolean().optional().default(false),
   install_supported: z.boolean().optional(),
+  manual_install_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
   installations: [],
   configured: false,
   install_supported: false,
+  manual_install_supported: false,
 };
 
 export const BeginWecomInstallResponseSchema = z.object({
@@ -150,6 +153,19 @@ export const RedeemWecomBindingResponseSchema = z.object({
 export const MALFORMED_REDEEM_WECOM_BINDING_RESPONSE: RedeemWecomBindingResponse = {
   workspace_id: "",
   installation_id: "",
+};
+
+export const ManualWecomInstallResponseSchema = z.object({
+  installation_id: z.string(),
+  bot_id: z.string().default(""),
+}).loose();
+
+// An empty installation_id is the "we cannot confirm what happened" fallback:
+// the UI refetches the installation list rather than trusting this payload, so
+// a malformed response degrades to "reload and look" instead of a crash.
+export const MALFORMED_MANUAL_WECOM_INSTALL_RESPONSE: ManualWecomInstallResponse = {
+  installation_id: "",
+  bot_id: "",
 };
 
 export const GitHubConnectResponseSchema = z.object({
