@@ -82,6 +82,7 @@ import { useT } from "../../i18n";
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
+const STARTER_PROMPT_DEBOUNCE_MS = 300;
 
 function appendChatMessageToLatestPageCache(
   qc: ReturnType<typeof useQueryClient>,
@@ -184,8 +185,12 @@ export function ChatWindow() {
     : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
-  const starterPromptInFlightRef = useRef(false);
-  const [starterPromptSubmitting, setStarterPromptSubmitting] = useState(false);
+  const starterPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (starterPromptTimerRef.current) {
+      clearTimeout(starterPromptTimerRef.current);
+    }
+  }, []);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
   // page controller — the skip/apply/consume/reconcile state machine must not
   // diverge between the two composers.
@@ -595,19 +600,14 @@ export function ChatWindow() {
   );
 
   const handleStarterPrompt = useCallback(
-    async (text: string) => {
-      // `disabled` is one render behind. Guard synchronously as well so a
-      // second click cannot enter after session creation settles but before
-      // the first message response publishes the new active session.
-      if (starterPromptInFlightRef.current) return;
-      starterPromptInFlightRef.current = true;
-      setStarterPromptSubmitting(true);
-      try {
-        await handleSend(text);
-      } finally {
-        starterPromptInFlightRef.current = false;
-        setStarterPromptSubmitting(false);
+    (text: string) => {
+      if (starterPromptTimerRef.current) {
+        clearTimeout(starterPromptTimerRef.current);
       }
+      starterPromptTimerRef.current = setTimeout(() => {
+        starterPromptTimerRef.current = null;
+        void handleSend(text);
+      }, STARTER_PROMPT_DEBOUNCE_MS);
     },
     [handleSend],
   );
@@ -889,7 +889,6 @@ export function ChatWindow() {
           hasSessions={sessions.length > 0}
           agentName={activeAgent?.name}
           onPickPrompt={handleStarterPrompt}
-          disabled={starterPromptSubmitting}
         />
       )}
 
@@ -1677,12 +1676,10 @@ function EmptyState({
   hasSessions,
   agentName,
   onPickPrompt,
-  disabled,
 }: {
   hasSessions: boolean;
   agentName?: string;
   onPickPrompt: (text: string) => void;
-  disabled: boolean;
 }) {
   const { t } = useT("chat");
   // First-time experience: the user has never started a chat in this
@@ -1730,9 +1727,8 @@ function EmptyState({
             <button
               key={key}
               type="button"
-              disabled={disabled}
               onClick={() => onPickPrompt(text)}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left text-body text-foreground transition-colors hover:bg-accent hover:border-brand/40 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left text-body text-foreground transition-colors hover:bg-accent hover:border-brand/40"
             >
               <span className="mr-2">{STARTER_ICONS[key]}</span>
               {text}

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 
@@ -214,8 +214,12 @@ beforeEach(() => {
   }));
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("ChatWindow starter prompts", () => {
-  it("single-flights a second starter prompt click while the first send is pending", async () => {
+  it("debounces rapid starter prompt clicks into one send", async () => {
     let resolveSend!: (value: typeof sendResult) => void;
     const pendingSend = new Promise<typeof sendResult>((resolve) => {
       resolveSend = resolve;
@@ -231,11 +235,16 @@ describe("ChatWindow starter prompts", () => {
     const prompt = screen.getByRole("button", {
       name: "📝Summarize what I did today",
     });
-    fireEvent.click(prompt);
-    await waitFor(() => expect(h.sendChatMessage).toHaveBeenCalledTimes(1));
+    vi.useFakeTimers();
 
     fireEvent.click(prompt);
+    fireEvent.click(prompt);
+
+    expect(h.createSession).not.toHaveBeenCalled();
+    expect(h.sendChatMessage).not.toHaveBeenCalled();
+
     await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
       await Promise.resolve();
     });
 
