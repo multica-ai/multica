@@ -430,22 +430,25 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// them from there, the same way codex.go falls back to Codex
 		// rollouts. Bound by sessionID so a concurrent kimi session is
 		// never billed to this task.
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			if scanned, scannedModel := scanKimiSessionUsage(startTime, b.cfg.Env["KIMI_CODE_HOME"], sessionID, opts.ResumeSessionID != ""); acpTokenUsagePresent(scanned) {
-				u = scanned
-				if scannedModel != "" && opts.Model == "" {
-					opts.Model = scannedModel
-				}
-			}
+		fallbackModel := opts.Model
+		if fallbackModel == "" {
+			fallbackModel = "unknown"
 		}
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+		if acpTokenUsagePresent(u) {
+			usageMap = map[string]TokenUsage{fallbackModel: u}
+		} else {
+			// Keyed per model by the scan itself: a task whose subagent
+			// or compaction step ran on a different model must not have
+			// that model's tokens priced at the main model's rate.
+			usageMap = scanKimiSessionUsage(kimiUsageScan{
+				startTime:     startTime,
+				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
+				sessionID:     sessionID,
+				resumed:       opts.ResumeSessionID != "",
+				fallbackModel: fallbackModel,
+			})
 		}
 
 		resCh <- Result{
@@ -517,10 +520,10 @@ const kimiUsageRecordType = "usage.record"
 // kimiWireUsage is one `usage.record` entry from a kimi session wire log.
 //
 // The buckets are mutually exclusive: on a verified two-turn session the
-// records read {inputOther:7694, inputCacheRead:14848, output:21} and
-// {inputOther:49, inputCacheRead:22528, output:21}, and each turn's three
-// fields sum exactly to the `used` figure kimi reports over ACP (22563 and
-// 22598). So `inputOther` is uncached input only and maps straight onto
+// records read {inputOther:4844, inputCacheRead:17664, output:22} and
+// {inputOther:272, inputCacheRead:22272, output:22}, and each turn's three
+// fields sum exactly to the `used` figure kimi reports over ACP (22530 and
+// 22566). So `inputOther` is uncached input only and maps straight onto
 // TokenUsage.InputTokens with no cached-prefix subtraction — unlike the ACP
 // `inputTokens` case excludeACPCachedInput exists to correct.
 type kimiWireUsage struct {
@@ -539,84 +542,106 @@ type kimiWireUsage struct {
 	} `json:"usage"`
 }
 
-// scanKimiSessionUsage sums the usage records kimi-code wrote for sessionID
-// and returns them with the model that produced them.
+// kimiUsageScan parameterises a wire-log scan.
+type kimiUsageScan struct {
+	startTime time.Time
+	kimiHome  string
+	sessionID string
+	// resumed marks a turn that continued an existing kimi session. Those
+	// append to the wire log the previous task already billed, so records are
+	// filtered by their own timestamp, not just by the file's mtime.
+	resumed bool
+	// fallbackModel keys records that carry no model of their own.
+	fallbackModel string
+}
+
+// scanKimiSessionUsage returns the usage kimi-code recorded for this session,
+// bucketed by the model that produced each record.
 //
 // Records are per-LLM-call and incremental, never cumulative: a verified
 // two-step turn logged one record per `llm.request`, with the second call's
 // uncached input far below the first's as the prefix moved into cache. So the
 // total for a task is the plain sum over every record in the session.
 //
-// Subagent turns get their own `agents/<name>/wire.jsonl`, hence the wildcard:
-// billing only `agents/main` would silently undercount delegated work.
-//
-// resumed marks a turn that continued an existing kimi session. Those append
-// to the wire log the previous task already billed, so records are filtered by
-// their own timestamp, not just by the file's mtime.
-func scanKimiSessionUsage(startTime time.Time, kimiHome, sessionID string, resumed bool) (TokenUsage, string) {
-	root := kimiSessionRoot(kimiHome)
-	sessionID = strings.TrimSpace(sessionID)
-	if root == "" || sessionID == "" {
-		return TokenUsage{}, ""
-	}
-	// sessionID comes from the agent, so keep it out of the glob pattern:
-	// a stray `*` or `[` would silently widen the match to another session.
-	matches, err := filepath.Glob(filepath.Join(root, "*", "*", "agents", "*", "wire.jsonl"))
-	if err != nil {
-		return TokenUsage{}, ""
+// Subagent turns get their own `agents/<name>/wire.jsonl` and may run a
+// different model, which is why the result is a map rather than one total:
+// billing only `agents/main` would drop delegated work, and folding every
+// agent into one model name would price it wrong.
+func scanKimiSessionUsage(scan kimiUsageScan) map[string]TokenUsage {
+	root := kimiSessionRoot(scan.kimiHome)
+	if root == "" {
+		return nil
 	}
 
-	var total TokenUsage
-	var model string
-	for _, path := range matches {
-		if !kimiWirePathOwnedBy(path, root, sessionID) {
-			continue
-		}
+	usage := make(map[string]TokenUsage)
+	for _, path := range kimiSessionWireLogs(root, scan.sessionID) {
 		// A wire log untouched since before the turn began belongs to an
 		// earlier run of a resumed session; billing it would re-charge
 		// tokens the previous task already reported.
-		if info, err := os.Stat(path); err != nil || info.ModTime().Before(startTime) {
+		if info, err := os.Stat(path); err != nil || info.ModTime().Before(scan.startTime) {
 			continue
 		}
-		usage, recordModel := parseKimiWireUsage(path, startTime, resumed)
-		total.InputTokens += usage.InputTokens
-		total.OutputTokens += usage.OutputTokens
-		total.CacheReadTokens += usage.CacheReadTokens
-		total.CacheWriteTokens += usage.CacheWriteTokens
-		if recordModel != "" {
-			model = recordModel
+		accumulateKimiWireUsage(usage, path, scan)
+	}
+	if len(usage) == 0 {
+		return nil
+	}
+	return usage
+}
+
+// kimiSessionWireLogs returns the wire logs belonging to sessionID.
+//
+// kimi names the session directory with the ACP session id verbatim
+// (`<root>/<workspace>/<sessionID>/agents/<name>/wire.jsonl`), so the session
+// is addressed by exact path rather than by globbing every session and
+// filtering after: session history only grows, and this runs on the billing
+// path at the end of every task. Building the path also keeps the agent's
+// session id out of a glob pattern, where a `*` or `[` would be read as a
+// wildcard — as would one in a custom KIMI_CODE_HOME.
+func kimiSessionWireLogs(root, sessionID string) []string {
+	sessionID = strings.TrimSpace(sessionID)
+	// Guard the path join: the id comes from the agent.
+	if sessionID == "" || sessionID == "." || sessionID == ".." ||
+		strings.ContainsRune(sessionID, '/') || strings.ContainsRune(sessionID, os.PathSeparator) {
+		return nil
+	}
+
+	workspaces, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, workspace := range workspaces {
+		if !workspace.IsDir() {
+			continue
+		}
+		agentsDir := filepath.Join(root, workspace.Name(), sessionID, "agents")
+		agents, err := os.ReadDir(agentsDir)
+		if err != nil {
+			continue
+		}
+		for _, agent := range agents {
+			if !agent.IsDir() {
+				continue
+			}
+			paths = append(paths, filepath.Join(agentsDir, agent.Name(), "wire.jsonl"))
 		}
 	}
-	return total, model
+	return paths
 }
 
-// kimiWirePathOwnedBy reports whether a wire log sits under sessionID's
-// directory. kimi names that directory with the ACP session id verbatim
-// (`<root>/<workspace>/<sessionID>/agents/<name>/wire.jsonl`), so an exact
-// path-segment comparison is the ownership test.
-func kimiWirePathOwnedBy(path, root, sessionID string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	parts := strings.Split(rel, string(filepath.Separator))
-	// <workspace>/<sessionID>/agents/<name>/wire.jsonl
-	return len(parts) == 5 && parts[1] == sessionID
-}
-
-// parseKimiWireUsage sums the usage records in a single wire log. A malformed
-// or truncated line is skipped rather than failing the scan: the log is
-// appended to live, so the tail can be a partial write, and reporting the
-// records we could read beats reporting nothing.
-func parseKimiWireUsage(path string, startTime time.Time, resumed bool) (TokenUsage, string) {
+// accumulateKimiWireUsage adds one wire log's records into usage, keyed by the
+// model each record names. A malformed or truncated line is skipped rather
+// than failing the scan: the log is appended to live, so the tail can be a
+// partial write, and reporting the records we could read beats reporting
+// nothing.
+func accumulateKimiWireUsage(usage map[string]TokenUsage, path string, scan kimiUsageScan) {
 	file, err := os.Open(path)
 	if err != nil {
-		return TokenUsage{}, ""
+		return
 	}
 	defer file.Close()
 
-	var total TokenUsage
-	var model string
 	scanner := newAgentStreamScanner(file)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -627,18 +652,20 @@ func parseKimiWireUsage(path string, startTime time.Time, resumed bool) (TokenUs
 		if err := json.Unmarshal(line, &record); err != nil || record.Type != kimiUsageRecordType {
 			continue
 		}
-		if !kimiWireRecordInTurn(record.Time, startTime, resumed) {
+		if !kimiWireRecordInTurn(record.Time, scan.startTime, scan.resumed) {
 			continue
 		}
+		model := record.Model
+		if model == "" {
+			model = scan.fallbackModel
+		}
+		total := usage[model]
 		total.InputTokens += record.Usage.InputOther
 		total.OutputTokens += record.Usage.Output
 		total.CacheReadTokens += record.Usage.InputCacheRead
 		total.CacheWriteTokens += record.Usage.InputCacheCreation
-		if record.Model != "" {
-			model = record.Model
-		}
+		usage[model] = total
 	}
-	return total, model
 }
 
 // kimiWireRecordInTurn reports whether a usage record belongs to the turn that
@@ -659,13 +686,21 @@ func kimiWireRecordInTurn(recordTimeMillis int64, startTime time.Time, resumed b
 	return recordTimeMillis >= startTime.UnixMilli()
 }
 
-// kimiSessionRoot resolves kimi's session directory: KIMI_CODE_HOME when the
-// daemon isolates a task's kimi home, then ~/.kimi-code. Mirrors
-// codexSessionRoot, including the stat check — an env var pointing somewhere
-// without a sessions directory falls through to the default rather than
-// disabling the scan.
+// kimiSessionRoot resolves kimi's session directory: an explicitly configured
+// home first, then the ambient KIMI_CODE_HOME, then ~/.kimi-code. Mirrors
+// codexSessionRoot.
+//
+// The env lookup is not redundant with cfg.Env: the kimi subprocess inherits
+// os.Environ() via buildEnv, so a KIMI_CODE_HOME exported to the daemon
+// relocates kimi's sessions without ever appearing in cfg.Env. Reading only
+// cfg.Env would leave the scan looking in ~/.kimi-code while kimi wrote
+// somewhere else. The stat check keeps a home without a sessions directory
+// from disabling the scan.
 func kimiSessionRoot(kimiHome string) string {
-	if kimiHome = strings.TrimSpace(kimiHome); kimiHome != "" {
+	if kimiHome = strings.TrimSpace(kimiHome); kimiHome == "" {
+		kimiHome = strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+	}
+	if kimiHome != "" {
 		dir := filepath.Join(kimiHome, "sessions")
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir

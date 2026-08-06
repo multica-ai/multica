@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -497,6 +498,33 @@ func TestKimiBackendDropsHistoryReplayOnResume(t *testing.T) {
 	}
 }
 
+// kimiScanTotal folds a per-model scan result into one total, for assertions
+// that do not care about model attribution.
+func kimiScanTotal(scan kimiUsageScan) TokenUsage {
+	var total TokenUsage
+	for _, u := range scanKimiSessionUsage(scan) {
+		total.InputTokens += u.InputTokens
+		total.OutputTokens += u.OutputTokens
+		total.CacheReadTokens += u.CacheReadTokens
+		total.CacheWriteTokens += u.CacheWriteTokens
+	}
+	return total
+}
+
+// kimiScanSingle asserts the scan produced exactly one model bucket and
+// returns it with its model name.
+func kimiScanSingle(tb testing.TB, scan kimiUsageScan) (TokenUsage, string) {
+	tb.Helper()
+	byModel := scanKimiSessionUsage(scan)
+	if len(byModel) != 1 {
+		tb.Fatalf("expected exactly one model bucket, got %v", byModel)
+	}
+	for model, u := range byModel {
+		return u, model
+	}
+	return TokenUsage{}, ""
+}
+
 // kimiWireRecordLine is a verbatim `usage.record` line as kimi-code 0.33.0
 // writes it, captured from a real session.
 func kimiWireRecordLine(inputOther, output, cacheRead, cacheCreate int64) string {
@@ -506,8 +534,13 @@ func kimiWireRecordLine(inputOther, output, cacheRead, cacheCreate int64) string
 // kimiWireRecordLineAt stamps the record, so resume tests can place records on
 // either side of a turn boundary.
 func kimiWireRecordLineAt(at time.Time, inputOther, output, cacheRead, cacheCreate int64) string {
-	return fmt.Sprintf(`{"type":"usage.record","model":"moonshot-cn/kimi-k2.7-code","usage":{"inputOther":%d,"output":%d,"inputCacheRead":%d,"inputCacheCreation":%d},"usageScope":"turn","time":%d}`,
-		inputOther, output, cacheRead, cacheCreate, at.UnixMilli())
+	return kimiWireRecordLineFor("moonshot-cn/kimi-k2.7-code", at, inputOther, output, cacheRead, cacheCreate)
+}
+
+// kimiWireRecordLineFor names the model on the record, the way kimi does.
+func kimiWireRecordLineFor(model string, at time.Time, inputOther, output, cacheRead, cacheCreate int64) string {
+	return fmt.Sprintf(`{"type":"usage.record","model":%q,"usage":{"inputOther":%d,"output":%d,"inputCacheRead":%d,"inputCacheCreation":%d},"usageScope":"turn","time":%d}`,
+		model, inputOther, output, cacheRead, cacheCreate, at.UnixMilli())
 }
 
 // kimiWireStepEndLine is the `step.end` loop event kimi writes alongside the
@@ -550,7 +583,7 @@ func TestScanKimiSessionUsageSumsRecordsIgnoringStepEnd(t *testing.T) {
 		kimiWireRecordLine(244, 8, 22528, 0),
 	)
 
-	usage, model := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_abc", false)
+	usage, model := kimiScanSingle(t, kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_abc", fallbackModel: "unknown"})
 
 	if usage.InputTokens != 5127 {
 		t.Errorf("InputTokens = %d, want 5127 (4883+244)", usage.InputTokens)
@@ -577,7 +610,7 @@ func TestScanKimiSessionUsageMapsCacheCreation(t *testing.T) {
 	home := t.TempDir()
 	writeKimiWireLog(t, home, "session_w", "main", kimiWireRecordLine(100, 20, 300, 400))
 
-	usage, _ := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_w", false)
+	usage := kimiScanTotal(kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_w", fallbackModel: "unknown"})
 	if usage.CacheWriteTokens != 400 {
 		t.Errorf("CacheWriteTokens = %d, want 400", usage.CacheWriteTokens)
 	}
@@ -595,7 +628,7 @@ func TestScanKimiSessionUsageBindsToSessionID(t *testing.T) {
 	writeKimiWireLog(t, home, "session_mine", "main", kimiWireRecordLine(10, 1, 0, 0))
 	writeKimiWireLog(t, home, "session_theirs", "main", kimiWireRecordLine(9999, 9999, 9999, 9999))
 
-	usage, _ := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_mine", false)
+	usage := kimiScanTotal(kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_mine", fallbackModel: "unknown"})
 	if usage.InputTokens != 10 || usage.OutputTokens != 1 {
 		t.Fatalf("billed the wrong session: %+v", usage)
 	}
@@ -610,7 +643,7 @@ func TestScanKimiSessionUsageCountsSubagents(t *testing.T) {
 	writeKimiWireLog(t, home, "session_s", "main", kimiWireRecordLine(100, 10, 0, 0))
 	writeKimiWireLog(t, home, "session_s", "subagent-1", kimiWireRecordLine(50, 5, 0, 0))
 
-	usage, _ := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_s", false)
+	usage := kimiScanTotal(kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_s", fallbackModel: "unknown"})
 	if usage.InputTokens != 150 || usage.OutputTokens != 15 {
 		t.Fatalf("subagent usage not counted: %+v", usage)
 	}
@@ -628,7 +661,7 @@ func TestScanKimiSessionUsageSkipsLogsUntouchedSinceStart(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	usage, _ := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_old", false)
+	usage := kimiScanTotal(kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_old", fallbackModel: "unknown"})
 	if acpTokenUsagePresent(usage) {
 		t.Fatalf("re-billed a log from before this turn: %+v", usage)
 	}
@@ -645,7 +678,7 @@ func TestScanKimiSessionUsageSkipsMalformedLines(t *testing.T) {
 		`{"type":"usage.record","model":"x","usage":{"inputOther":7`,
 	)
 
-	usage, _ := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_m", false)
+	usage := kimiScanTotal(kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_m", fallbackModel: "unknown"})
 	if usage.InputTokens != 100 || usage.CacheReadTokens != 200 {
 		t.Fatalf("complete records dropped because of a truncated tail: %+v", usage)
 	}
@@ -668,9 +701,10 @@ while IFS= read -r line; do
     *'"method":"session/prompt"'*)
       dir="$KIMI_CODE_HOME/sessions/wd_test_abc123/session_e2e/agents/main"
       mkdir -p "$dir"
-      # Stamp "now": the scan drops records written before the turn began.
-      now="$(date +%s)000"
-      printf '{"type":"usage.record","model":"moonshot-cn/kimi-k2.7-code","usage":{"inputOther":7694,"output":21,"inputCacheRead":14848,"inputCacheCreation":0},"usageScope":"turn","time":%s}\n' "$now" >> "$dir/wire.jsonl"
+      # The scan drops records stamped before the turn began, so the test
+      # injects the timestamp. ` + "`date +%s`" + ` would truncate to the start of
+      # the current second and land before a sub-second startTime.
+      printf '{"type":"usage.record","model":"moonshot-cn/kimi-k2.7-code","usage":{"inputOther":7694,"output":21,"inputCacheRead":14848,"inputCacheCreation":0},"usageScope":"turn","time":%s}\n' "$KIMI_TEST_RECORD_TIME" >> "$dir/wire.jsonl"
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       exit 0
       ;;
@@ -693,7 +727,12 @@ func TestKimiBackendReportsUsageFromWireLog(t *testing.T) {
 	backend, err := New("kimi", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"KIMI_CODE_HOME": kimiHome},
+		Env: map[string]string{
+			"KIMI_CODE_HOME": kimiHome,
+			// Comfortably after the turn's startTime, so the assertion
+			// tests the scan rather than clock granularity.
+			"KIMI_TEST_RECORD_TIME": strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10),
+		},
 	})
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
@@ -745,7 +784,7 @@ func TestScanKimiSessionUsageSkipsPriorRunOnResume(t *testing.T) {
 		kimiWireRecordLineAt(turnStart.Add(time.Second), 120, 12, 340, 0),   // this task
 	)
 
-	usage, _ := scanKimiSessionUsage(turnStart, home, "session_r", true)
+	usage := kimiScanTotal(kimiUsageScan{startTime: turnStart, kimiHome: home, sessionID: "session_r", resumed: true, fallbackModel: "unknown"})
 
 	if usage.InputTokens != 120 || usage.OutputTokens != 12 || usage.CacheReadTokens != 340 {
 		t.Fatalf("re-billed the previous run on resume: %+v", usage)
@@ -772,10 +811,93 @@ func TestScanKimiSessionUsageUntimedRecords(t *testing.T) {
 			writeKimiWireLog(t, home, "session_u", "main",
 				`{"type":"usage.record","model":"m","usage":{"inputOther":100,"output":0,"inputCacheRead":0,"inputCacheCreation":0}}`)
 
-			usage, _ := scanKimiSessionUsage(time.Now().Add(-time.Minute), home, "session_u", tc.resumed)
+			usage := kimiScanTotal(kimiUsageScan{startTime: time.Now().Add(-time.Minute), kimiHome: home, sessionID: "session_u", resumed: tc.resumed, fallbackModel: "unknown"})
 			if usage.InputTokens != tc.want {
 				t.Errorf("InputTokens = %d, want %d", usage.InputTokens, tc.want)
 			}
 		})
+	}
+}
+
+// TestScanKimiSessionUsageSplitsByModel: a subagent may run a different model
+// from the main agent. Folding both into one bucket prices one of them wrong —
+// cache-read alone spans a 10x range across kimi models.
+func TestScanKimiSessionUsageSplitsByModel(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	now := time.Now()
+	writeKimiWireLog(t, home, "session_mm", "main",
+		kimiWireRecordLineFor("moonshot-cn/kimi-k3", now, 1000, 100, 2000, 0))
+	writeKimiWireLog(t, home, "session_mm", "subagent-1",
+		kimiWireRecordLineFor("moonshot-cn/kimi-k2.5", now, 30, 3, 40, 0))
+
+	byModel := scanKimiSessionUsage(kimiUsageScan{
+		startTime: now.Add(-time.Minute), kimiHome: home,
+		sessionID: "session_mm", fallbackModel: "unknown",
+	})
+
+	if len(byModel) != 2 {
+		t.Fatalf("expected one bucket per model, got %v", byModel)
+	}
+	if got := byModel["moonshot-cn/kimi-k3"]; got.InputTokens != 1000 || got.CacheReadTokens != 2000 {
+		t.Errorf("k3 bucket = %+v", got)
+	}
+	if got := byModel["moonshot-cn/kimi-k2.5"]; got.InputTokens != 30 || got.CacheReadTokens != 40 {
+		t.Errorf("k2.5 bucket = %+v", got)
+	}
+}
+
+// TestScanKimiSessionUsageFallbackModel: a record with no model of its own is
+// billed to the model the task asked for, not dropped.
+func TestScanKimiSessionUsageFallbackModel(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	writeKimiWireLog(t, home, "session_f", "main",
+		fmt.Sprintf(`{"type":"usage.record","usage":{"inputOther":42,"output":1,"inputCacheRead":0,"inputCacheCreation":0},"time":%d}`,
+			time.Now().UnixMilli()))
+
+	byModel := scanKimiSessionUsage(kimiUsageScan{
+		startTime: time.Now().Add(-time.Minute), kimiHome: home,
+		sessionID: "session_f", fallbackModel: "picked-model",
+	})
+	if got := byModel["picked-model"]; got.InputTokens != 42 {
+		t.Fatalf("expected the fallback model to be billed, got %v", byModel)
+	}
+}
+
+// TestKimiSessionRootPrefersConfiguredThenEnv pins the discovery order.
+// The kimi subprocess inherits os.Environ() via buildEnv, so a KIMI_CODE_HOME
+// exported to the daemon relocates kimi's sessions without ever reaching
+// cfg.Env — reading only cfg.Env would scan the wrong directory.
+func TestKimiSessionRootPrefersConfiguredThenEnv(t *testing.T) {
+	configured := t.TempDir()
+	fromEnv := t.TempDir()
+	for _, dir := range []string{configured, fromEnv} {
+		if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	t.Setenv("KIMI_CODE_HOME", fromEnv)
+
+	if got, want := kimiSessionRoot(configured), filepath.Join(configured, "sessions"); got != want {
+		t.Errorf("explicit config should win: got %q, want %q", got, want)
+	}
+	if got, want := kimiSessionRoot(""), filepath.Join(fromEnv, "sessions"); got != want {
+		t.Errorf("ambient KIMI_CODE_HOME should be used: got %q, want %q", got, want)
+	}
+}
+
+// TestKimiSessionWireLogsRejectsTraversal: the session id comes from the
+// agent and is joined into a path.
+func TestKimiSessionWireLogsRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, id := range []string{"", ".", "..", "../escape", "a/b"} {
+		if got := kimiSessionWireLogs(root, id); got != nil {
+			t.Errorf("sessionID %q should be rejected, got %v", id, got)
+		}
 	}
 }
