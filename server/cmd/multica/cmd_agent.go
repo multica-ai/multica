@@ -109,6 +109,32 @@ var agentEnvSetCmd = &cobra.Command{
 	RunE:  runAgentEnvSet,
 }
 
+// Agent cross-workspace grant subcommands (BUS-171). Owner/admin only —
+// this allow-list is what lets a running agent task mint a second, scoped
+// mat_ token into ANOTHER workspace via `multica auth cross-workspace-token`.
+// Widening it is a privilege grant, so every write goes through the audited
+// `/api/agents/{id}/cross-workspace-grants` endpoint, same pattern as
+// `agent env` above.
+
+var agentCrossWorkspaceCmd = &cobra.Command{
+	Use:   "cross-workspace",
+	Short: "Manage the workspaces an agent may mint a cross-workspace token for (audited; owner/admin only)",
+}
+
+var agentCrossWorkspaceGetCmd = &cobra.Command{
+	Use:   "get <agent-id>",
+	Short: "List the workspace IDs an agent is granted cross-workspace access to",
+	Args:  exactArgs(1),
+	RunE:  runAgentCrossWorkspaceGet,
+}
+
+var agentCrossWorkspaceSetCmd = &cobra.Command{
+	Use:   "set <agent-id>",
+	Short: "Replace an agent's cross-workspace grant list wholesale (workspace owner/admin only; every call is recorded)",
+	Args:  exactArgs(1),
+	RunE:  runAgentCrossWorkspaceSet,
+}
+
 var agentSkillsListCmd = &cobra.Command{
 	Use:   "list <agent-id>",
 	Short: "List skills assigned to an agent",
@@ -141,6 +167,7 @@ func init() {
 	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 	agentCmd.AddCommand(agentEnvCmd)
+	agentCmd.AddCommand(agentCrossWorkspaceCmd)
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
 	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
@@ -148,6 +175,9 @@ func init() {
 
 	agentEnvCmd.AddCommand(agentEnvGetCmd)
 	agentEnvCmd.AddCommand(agentEnvSetCmd)
+
+	agentCrossWorkspaceCmd.AddCommand(agentCrossWorkspaceGetCmd)
+	agentCrossWorkspaceCmd.AddCommand(agentCrossWorkspaceSetCmd)
 
 	// agent list
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -243,6 +273,14 @@ func init() {
 	agentEnvSetCmd.Flags().Bool("custom-env-stdin", false, "Read the replacement custom_env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentEnvSetCmd.Flags().String("custom-env-file", "", "Read the replacement custom_env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentEnvSetCmd.Flags().String("output", "json", "Output format: json or table")
+
+	// agent cross-workspace get
+	agentCrossWorkspaceGetCmd.Flags().String("output", "json", "Output format: json or table")
+
+	// agent cross-workspace set. Workspace IDs aren't secret, so a plain
+	// comma-separated flag is fine here (unlike custom-env above).
+	agentCrossWorkspaceSetCmd.Flags().StringSlice("workspace-ids", nil, "Workspace IDs to grant cross-workspace access to (comma-separated; replaces the full list, pass an empty string to clear all)")
+	agentCrossWorkspaceSetCmd.Flags().String("output", "json", "Output format: json or table")
 }
 
 // resolveProfile returns the --profile flag value (empty string means default profile).
@@ -1088,6 +1126,83 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 
 	env, _ := result["custom_env"].(map[string]any)
 	fmt.Printf("Env updated for agent %s (%d keys)\n", args[0], len(env))
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Agent cross-workspace grant subcommands
+// ---------------------------------------------------------------------------
+
+// runAgentCrossWorkspaceGet fetches an agent's cross_workspace_ids
+// allow-list via the audited `/cross-workspace-grants` endpoint (BUS-171).
+func runAgentCrossWorkspaceGet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var resp map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/cross-workspace-grants", &resp); err != nil {
+		return fmt.Errorf("get agent cross-workspace grants: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+
+	headers := []string{"WORKSPACE_ID"}
+	ids, _ := resp["cross_workspace_ids"].([]any)
+	rows := make([][]string, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, []string{fmt.Sprintf("%v", id)})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+// runAgentCrossWorkspaceSet replaces an agent's cross_workspace_ids
+// wholesale via the audited `/cross-workspace-grants` endpoint. Workspace
+// IDs aren't secret, so unlike --custom-env this takes a plain
+// comma-separated flag (same convention as --skill-ids).
+func runAgentCrossWorkspaceSet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	if !cmd.Flags().Changed("workspace-ids") {
+		return fmt.Errorf("--workspace-ids is required (comma-separated workspace IDs; use --workspace-ids '' to clear all)")
+	}
+	ids, _ := cmd.Flags().GetStringSlice("workspace-ids")
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+
+	body := map[string]any{"cross_workspace_ids": cleanIDs}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/cross-workspace-grants", body, &result); err != nil {
+		return fmt.Errorf("update agent cross-workspace grants: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	grantIDs, _ := result["cross_workspace_ids"].([]any)
+	fmt.Printf("Cross-workspace grants updated for agent %s (%d workspace(s))\n", args[0], len(grantIDs))
 	return nil
 }
 

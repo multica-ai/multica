@@ -58,6 +58,19 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
+// authCrossWorkspaceTokenCmd replaces the pre-0.4.11 "unset
+// MULTICA_TOKEN/MULTICA_WORKSPACE_ID and fall back to the owner's config
+// token" trick (BUS-171), which 0.4.11's daemon-task-marker guard correctly
+// closed off. Only callable from inside a daemon-managed agent task — the
+// server rejects any caller whose actor source isn't a genuine task_token —
+// and only for a target workspace the agent's owner/admin has explicitly
+// granted via `multica agent cross-workspace set`.
+var authCrossWorkspaceTokenCmd = &cobra.Command{
+	Use:   "cross-workspace-token",
+	Short: "Mint a scoped mat_ task token for another workspace (agent task context only; requires an owner/admin grant)",
+	RunE:  runAuthCrossWorkspaceToken,
+}
+
 // callbackHostFlag lets users override the host/IP that goes into the OAuth
 // cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
 // auto-detected LAN IP isn't the one the browser can reach.
@@ -68,6 +81,10 @@ const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the 
 func init() {
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
+	authCmd.AddCommand(authCrossWorkspaceTokenCmd)
+
+	authCrossWorkspaceTokenCmd.Flags().String("target-workspace-id", "", "Workspace ID to mint a token for (required; must be on the agent's cross_workspace_ids allow-list)")
+	authCrossWorkspaceTokenCmd.Flags().String("output", "json", "Output format: json (full response) or token (prints only the raw token, for TOKEN=$(...) capture)")
 }
 
 func resolveToken(cmd *cobra.Command) string {
@@ -546,4 +563,44 @@ func runAuthLogout(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintln(os.Stderr, "Token removed. You are now logged out.")
 	return nil
+}
+
+// runAuthCrossWorkspaceToken calls POST /api/tokens/cross-workspace using
+// newAPIClient (not the plain cli.NewAPIClient used by status/logout above),
+// since this command's entire purpose is running inside a daemon-managed
+// task: newAPIClient enforces that MULTICA_TOKEN is already a mat_ token in
+// that context, which is exactly the identity the server's task_token check
+// requires on the other end.
+func runAuthCrossWorkspaceToken(cmd *cobra.Command, _ []string) error {
+	targetWorkspaceID, _ := cmd.Flags().GetString("target-workspace-id")
+	targetWorkspaceID = strings.TrimSpace(targetWorkspaceID)
+	if targetWorkspaceID == "" {
+		return fmt.Errorf("--target-workspace-id is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var resp struct {
+		Token       string `json:"token"`
+		WorkspaceID string `json:"workspace_id"`
+		ExpiresAt   string `json:"expires_at"`
+	}
+	if err := client.PostJSON(ctx, "/api/tokens/cross-workspace", map[string]any{
+		"workspace_id": targetWorkspaceID,
+	}, &resp); err != nil {
+		return fmt.Errorf("mint cross-workspace token: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "token" {
+		fmt.Println(resp.Token)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, resp)
 }
