@@ -48,6 +48,10 @@ vi.mock("./vcs-tab", () => ({
   VCSTab: () => <div data-testid="vcs-tab" />,
 }));
 
+vi.mock("./jira-tab", () => ({
+  JiraTab: () => <div data-testid="jira-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 function renderTab() {
@@ -106,5 +110,11 @@ describe("Settings IntegrationsTab", () => {
     renderTab();
 
     expect(screen.getByTestId("vcs-tab")).toBeInTheDocument();
+  });
+
+  it("always shows the Jira section (configuration is gated inside the tab)", () => {
+    renderTab();
+
+    expect(screen.getByTestId("jira-tab")).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { LarkTab } from "./lark-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
 import { VCSTab } from "./vcs-tab";
+import { JiraTab } from "./jira-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -50,6 +51,9 @@ export function IntegrationsTab() {
       )}
       <SettingsSection title={t(($) => $.slack.section_title)}>
         <SlackTab />
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.jira.section_title)}>
+        <JiraTab />
       </SettingsSection>
       {vcsAvailable && (
         <SettingsSection title={t(($) => $.vcs.section_title)}>
