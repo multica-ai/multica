@@ -408,6 +408,44 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	}
 }
 
+// TestProtocolHeadingInInstructionsGetsNoLeaderBrief is the brief-side half of
+// the MUL-5811 negative regression. IsSquadLeader now comes from the claim's
+// is_leader_task / squad_id, so an ordinary agent that documents a
+// "## Squad Operating Protocol" section in its own instructions must get the
+// ordinary brief — its instructions rendered verbatim under Agent Identity,
+// and not one leader-only branch.
+func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
+	t.Parallel()
+
+	const instructions = "I write docs about squads.\n\n## Squad Operating Protocol\n\nHow leaders dispatch work..."
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:           "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		TriggerCommentID:  "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+		AgentName:         "Docs writer",
+		AgentInstructions: instructions,
+		IsSquadLeader:     false,
+	})
+
+	if !strings.Contains(out, instructions) {
+		t.Fatalf("agent instructions must reach the brief verbatim\n---\n%s", out)
+	}
+	for _, banned := range []string{
+		"### Squad maintenance",
+		"multica squad member set-role",
+		"Squad leader rule:",
+		"multica squad activity",
+		`Squad Operating Protocol's "Own the parent issue status"`,
+		"After this initial dispatch, leave the parent issue `in_progress`",
+	} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("ordinary-agent brief leaked leader-only content %q\n---\n%s", banned, out)
+		}
+	}
+	if !strings.Contains(out, "**Posting your reply as a comment is mandatory**") {
+		t.Fatalf("ordinary-agent brief lost the unconditional reply obligation\n---\n%s", out)
+	}
+}
+
 // Instruction Precedence belongs to the issue workflow only; the issue-less
 // kinds must not inherit it. After MUL-5377 it applies to every issue run,
 // comment-triggered or not, because there is a single issue workflow.

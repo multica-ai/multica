@@ -604,12 +604,21 @@ func buildAutopilotPrompt(task Task) string {
 }
 
 // taskIsSquadLeader reports whether THIS TASK runs the agent as a squad
-// leader, identified (for now) by the squad briefing marker the server
-// appends to Instructions on leader tasks. Leadership is a PER-TASK role —
-// the same agent can be leader one turn and worker the next — so everything
-// gated on this rides the per-turn channel. Making the cached brief fully
-// role-independent (and replacing this marker check with an explicit role
-// signal) is MUL-5811.
+// leader. Leadership is a PER-TASK role — the same agent can be leader one
+// turn and worker the next — and the server already says so explicitly on the
+// wire: `is_leader_task` for issue-bound leader runs, `squad_id` for
+// quick-create runs the squad picker routed to its leader. The claim handler
+// sets each field on exactly the responses it injected a squad-leader
+// briefing into, so these two signals are the authoritative role marker.
+//
+// This used to sniff Instructions for the "## Squad Operating Protocol"
+// heading the briefing starts with, which made role detection depend on
+// user-writable Markdown: any ordinary agent whose own instructions happened
+// to contain that heading was promoted to leader and handed the leader rules
+// (mandatory `multica squad activity`, silent no_action exit). Reading the
+// protocol fields instead removes that failure mode without changing a single
+// byte on any legal path — the server sets them precisely when it injects
+// (MUL-5811).
 func taskIsSquadLeader(task Task) bool {
-	return task.Agent != nil && strings.Contains(task.Agent.Instructions, "## Squad Operating Protocol")
+	return task.IsLeaderTask || task.SquadID != ""
 }

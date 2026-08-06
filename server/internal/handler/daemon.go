@@ -1806,33 +1806,53 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// (No FK on squad_id — see migration 127.) We append (not replace)
 			// so per-agent instructions stay authoritative; the squad briefing
 			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && task.IsLeaderTask && task.SquadID.Valid {
-				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          task.SquadID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					// Parent-status authority is deliberately NARROWER than
-					// briefing injection. Injection is keyed off is_leader_task
-					// (see above) and therefore also fires on the MUL-3724 path,
-					// where the issue belongs to a plain agent and this squad was
-					// only @mentioned for help. Granting status ownership there
-					// would let a guest squad push someone else's in-flight issue
-					// to in_review, so we gate it on the issue actually being
-					// assigned to this squad.
-					ownsIssueStatus := issue.AssigneeType.Valid &&
-						issue.AssigneeType.String == "squad" &&
-						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
-					if strings.TrimSpace(resp.Agent.Instructions) == "" {
-						resp.Agent.Instructions = briefing
-					} else {
-						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+			if task.IsLeaderTask {
+				injected := false
+				if resp.Agent != nil && task.SquadID.Valid {
+					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+						ID:          task.SquadID,
+						WorkspaceID: issue.WorkspaceID,
+					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+						// Parent-status authority is deliberately NARROWER than
+						// briefing injection. Injection is keyed off is_leader_task
+						// (see above) and therefore also fires on the MUL-3724 path,
+						// where the issue belongs to a plain agent and this squad was
+						// only @mentioned for help. Granting status ownership there
+						// would let a guest squad push someone else's in-flight issue
+						// to in_review, so we gate it on the issue actually being
+						// assigned to this squad.
+						ownsIssueStatus := issue.AssigneeType.Valid &&
+							issue.AssigneeType.String == "squad" &&
+							uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
+						if strings.TrimSpace(resp.Agent.Instructions) == "" {
+							resp.Agent.Instructions = briefing
+						} else {
+							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+						}
+						injected = true
+						slog.Debug("injected squad leader briefing",
+							"squad_id", uuidToString(squad.ID),
+							"squad_name", squad.Name,
+							"leader_agent_id", resp.Agent.ID,
+							"owns_issue_status", ownsIssueStatus,
+						)
 					}
-					slog.Debug("injected squad leader briefing",
-						"squad_id", uuidToString(squad.ID),
-						"squad_name", squad.Name,
-						"leader_agent_id", resp.Agent.ID,
-						"owns_issue_status", ownsIssueStatus,
+				}
+				// Every skip above (NULL squad_id, squad hard-deleted, leader
+				// swapped after enqueue) leaves a task the daemon must NOT run
+				// as a leader: it has no roster to delegate to and no protocol
+				// to follow. The daemon derives its leader role from this flag
+				// (MUL-5811), so clearing it here is what keeps
+				// "is_leader_task on the wire ⇔ briefing injected" true, and the
+				// run degrades to an ordinary agent turn exactly as it did when
+				// the daemon inferred the role from the briefing text itself.
+				if !injected {
+					resp.IsLeaderTask = false
+					slog.Warn("squad leader briefing not injected; claim delivered as a non-leader task",
+						"task_id", uuidToString(task.ID),
+						"squad_id", uuidToString(task.SquadID),
+						"agent_id", uuidToString(task.AgentID),
 					)
 				}
 			}

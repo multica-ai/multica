@@ -1162,6 +1162,7 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 		TriggerCommentContent: "Progress update: tests passing.",
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "Worker",
+		IsLeaderTask:          true,
 		Agent: &AgentData{
 			Name:         "Leader",
 			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
@@ -5042,6 +5043,7 @@ func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
 		TriggerCommentContent: "team update posted",
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
+		IsLeaderTask:          true,
 		Agent: &AgentData{
 			Name:         "Lead",
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
@@ -5078,6 +5080,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 		CoalescedComments: []CoalescedCommentData{
 			{ID: "comment-8", ThreadID: "thread-A", Content: "first update"},
 		},
+		IsLeaderTask: true,
 		Agent: &AgentData{
 			Name:         "Lead",
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
@@ -5109,6 +5112,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 	}
 
 	ordinaryTask := leaderTask
+	ordinaryTask.IsLeaderTask = false
 	ordinaryTask.Agent = &AgentData{Name: "Reg", Instructions: "You are a regular agent."}
 	ordinary := BuildPrompt(ordinaryTask, "claude")
 	if !strings.Contains(ordinary, ". Post ONE reply per thread") {

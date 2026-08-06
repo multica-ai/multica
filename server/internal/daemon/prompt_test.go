@@ -249,6 +249,7 @@ func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
 		TriggerCommentContent: "LGTM",
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
+		IsLeaderTask:          true,
 		Agent: &AgentData{
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
 		},
@@ -271,6 +272,7 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 		TriggerCommentContent: "Deploy complete.",
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "deploy-boy",
+		IsLeaderTask:          true,
 		Agent: &AgentData{
 			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
 		},
@@ -278,6 +280,94 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 	if !strings.Contains(out, "Squad leader no_action rule") {
 		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for agent-triggered comments, got:\n%s", out)
+	}
+}
+
+// TestTaskIsSquadLeaderReadsProtocolFields pins the role signal to the wire
+// fields the server sets when (and only when) it injects a squad-leader
+// briefing. The instructions-only row is the regression that motivated
+// MUL-5811: the previous implementation grepped Instructions for
+// "## Squad Operating Protocol", so any agent whose own instructions used that
+// heading was silently promoted to squad leader.
+func TestTaskIsSquadLeaderReadsProtocolFields(t *testing.T) {
+	t.Parallel()
+
+	const briefed = "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER..."
+
+	cases := []struct {
+		name string
+		task Task
+		want bool
+	}{
+		{
+			name: "issue-bound leader task",
+			task: Task{IsLeaderTask: true, Agent: &AgentData{Instructions: briefed}},
+			want: true,
+		},
+		{
+			name: "quick-create routed through a squad picker",
+			task: Task{SquadID: "5f7f7c12-b579-4c6d-aaa0-8ae1d7e72b61", Agent: &AgentData{Instructions: briefed}},
+			want: true,
+		},
+		{
+			name: "leader flag without agent payload",
+			task: Task{IsLeaderTask: true},
+			want: true,
+		},
+		{
+			name: "ordinary agent whose own instructions carry the protocol heading",
+			task: Task{Agent: &AgentData{Instructions: briefed}},
+			want: false,
+		},
+		{
+			name: "ordinary agent",
+			task: Task{Agent: &AgentData{Instructions: "You are a regular agent."}},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := taskIsSquadLeader(tc.task); got != tc.want {
+				t.Fatalf("taskIsSquadLeader(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildPromptProtocolHeadingInInstructionsIsNotALeader is the end-to-end
+// negative regression for MUL-5811: a plain agent that happens to document a
+// "## Squad Operating Protocol" section in its own instructions must get the
+// ordinary comment prompt — no squad activity obligation, no silent-exit
+// licence, and the unconditional reply imperative intact.
+func TestBuildPromptProtocolHeadingInInstructionsIsNotALeader(t *testing.T) {
+	t.Parallel()
+
+	out := BuildPrompt(Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "please take a look",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		Agent: &AgentData{
+			Name:         "Docs writer",
+			Instructions: "I document squads.\n\n## Squad Operating Protocol\n\nHow leaders dispatch work...",
+		},
+	}, "claude")
+
+	for _, banned := range []string{
+		"Squad leader no_action rule",
+		"multica squad activity",
+		"DO NOT post any comment",
+		"Unless your outcome is `no_action`",
+	} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("ordinary agent prompt leaked squad-leader rule %q\n---\n%s", banned, out)
+		}
+	}
+	if !strings.Contains(out, "Post your reply as a comment") {
+		t.Fatalf("ordinary agent prompt lost the unconditional reply imperative\n---\n%s", out)
 	}
 }
 

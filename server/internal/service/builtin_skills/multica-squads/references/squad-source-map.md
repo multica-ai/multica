@@ -99,6 +99,12 @@ Contracts:
   yet. Injection is broader than authority on purpose: it is keyed off
   `is_leader_task`, which also fires for `@squad` mentions on issues owned by
   someone else (MUL-3724);
+- when the claim's defensive gate withholds the briefing (NULL `squad_id`,
+  squad hard-deleted, leader swapped after enqueue), the handler also clears
+  `is_leader_task` on the claim response, so the wire flag means "briefing
+  injected" and the run degrades to an ordinary agent turn. The daemon derives
+  the leader role from that flag (plus `squad_id` for quick-create), never from
+  the briefing text (MUL-5811);
 - `instructions` section appears only when non-empty (squad_briefing.go:110-112);
 - archived agent members are skipped from roster (squad_briefing.go:178-179);
 - agent member roster rows list assigned workspace skills via

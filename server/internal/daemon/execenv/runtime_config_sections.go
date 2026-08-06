@@ -270,9 +270,11 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — repository checkout on a dedicated branch.\n\n")
 	// Squad maintenance is squad-leader surface: an agent that leads no squad
 	// has no squad to change roles in, so this shipped to every run as dead
-	// weight (MUL-5442). IsSquadLeader is agent configuration, not per-run
-	// state, so gating on it keeps the brief byte-stable across runs of one
-	// session (MUL-5377) — the same reason the workflow already branches on it.
+	// weight (MUL-5442). IsSquadLeader is a PER-TASK role (the daemon derives
+	// it from the claim's is_leader_task / squad_id), so gating brief content
+	// on it does cost byte-stability across runs of one session whenever the
+	// role flips — a known, accepted debt tracked in MUL-5811, not a property
+	// of this field.
 	if ctx.IsSquadLeader {
 		b.WriteString("### Squad maintenance\n")
 		b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — change role in place (use this instead of remove+add).\n\n")
@@ -538,8 +540,9 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 // a re-trigger (member update / stage barrier) confirms the overall goal
 // is met; see the Squad Operating Protocol and child-done system comments.
 //
-// ctx.IsSquadLeader is agent configuration, not per-run state, so branching
-// on it does not break byte-stability across runs of one session.
+// ctx.IsSquadLeader is a PER-TASK role, not agent configuration: branching on
+// it here does move brief bytes when the same agent runs leader one turn and
+// worker the next (MUL-5811).
 func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("**Turn mode.** The per-turn user message names this run's mode on a line of its own: `Turn mode: Reply.` (respond to the comment that message carries — it brings the triggering comment's id and your `--parent` value) or `Turn mode: Ownership.` (an assignment or status change started this run). Steps 1–6 are shared; then **apply exactly one mode block, the one the user message named** — they differ on issue status. No mode line → Reply mode, do not change the issue status.\n\n")
 
