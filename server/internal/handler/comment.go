@@ -2335,7 +2335,7 @@ func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStat
 }
 
 // mergeCommentIntoPendingTask folds a newly-arrived comment into the existing
-// QUEUED (not-yet-claimed) task for (issue, agent) instead of dropping it
+// pre-claim task for (issue, agent) instead of dropping it
 // (MUL-4195). It reports HOW it resolved via commentMergeResult so the caller
 // never mislabels a refused/failed merge as success (MUL-4525 §2). No path here
 // enqueues a duplicate: on any failure the original task is kept intact, so the

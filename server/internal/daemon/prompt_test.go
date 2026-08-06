@@ -551,10 +551,9 @@ func TestBuildChatPromptAudience(t *testing.T) {
 }
 
 func TestBuildChatPromptAgentIntro(t *testing.T) {
-	// The proactive self-introduction chat (MUL-4230) has no user message: the
-	// prompt must tell the agent to open the conversation itself, and must NOT
-	// carry the generic "respond to their message" framing or an empty
-	// "User message:" section that would confuse the agent.
+	// Historical proactive-introduction sessions remain readable even though
+	// new agent creation no longer creates one. Their message-less first turn
+	// must not receive the generic "respond to their message" framing.
 	out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatIntro: true})
 	for _, want := range []string{
 		"You were just created",

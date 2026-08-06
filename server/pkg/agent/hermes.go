@@ -156,6 +156,13 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // via the ACP (Agent Communication Protocol) JSON-RPC 2.0 over stdin/stdout.
 // This is the same pattern as Codex but with the ACP protocol instead of
 // the Codex-specific JSON-RPC methods.
+//
+// opts.ThinkingLevel is deliberately not consumed here: Hermes' ACP surface
+// has nowhere to put a reasoning effort (see ThinkingControlSupported in
+// thinking.go for the evidence and the version it was verified against), and
+// the server rejects the field for this provider before a task is ever
+// dispatched. Wire it up here — alongside the model selection below — once
+// Hermes' ACP adapter carries reasoning onto the session.
 type hermesBackend struct {
 	cfg Config
 }
@@ -555,12 +562,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "aborted"
 					finalError = "hermes cancelled the prompt"
 				}
-				// Merge usage from the PromptResponse.
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForHermesNotificationQuiescence(runCtx, activity, readerDone)
@@ -641,12 +643,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		// Build usage map.
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -740,7 +740,7 @@ func waitForHermesPipeDrain(readerDone, stderrDone <-chan struct{}, timeout time
 
 type hermesPromptResult struct {
 	stopReason string
-	usage      TokenUsage
+	usage      acpUsageSnapshot
 	// modelID is the model the agent actually billed this turn against, as
 	// reported on `result._meta.modelId`. Empty for agents that don't report
 	// it. Backends use it to attribute usage when the session handshake
@@ -785,7 +785,7 @@ type hermesClient struct {
 	pendingTools map[string]*pendingToolCall
 
 	usageMu sync.Mutex
-	usage   TokenUsage
+	usage   acpUsageAccumulator
 }
 
 // pendingToolCall buffers state for a tool call while its arguments
@@ -1225,19 +1225,15 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 		stopReason: resp.StopReason,
 		modelID:    parseACPModelIDFromMeta(resp.Meta),
 	}
+	var usage acpUsageSnapshot
 	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
-		pr.usage = parseACPTokenUsage(resp.Usage)
+		usage = parseACPTokenUsageSnapshot(resp.Usage)
 	}
-	// Prefer the standard top-level ACP `usage` field when present. Some
-	// agents (notably xAI Grok Build) put per-turn metering only under
-	// result._meta — either as `_meta.usage` or as flat token counters on
-	// `_meta` itself. Without this fallback, tasks complete with an empty
-	// usage map and Multica's Usage/cost dashboards stay at zero.
-	if !acpTokenUsagePresent(pr.usage) {
-		if metaUsage := parseACPTokenUsageFromMeta(resp.Meta); acpTokenUsagePresent(metaUsage) {
-			pr.usage = metaUsage
-		}
-	}
+	// Some agents (notably xAI Grok Build) put per-turn metering under
+	// result._meta instead of, or in addition to, the standard top-level
+	// usage field. Reconcile both shapes so partial mirrors cannot drop a
+	// cache bucket or provider-reported cost.
+	pr.usage = usage.withFallback(parseACPTokenUsageSnapshotFromMeta(resp.Meta))
 
 	if c.onPromptDone != nil {
 		c.onPromptDone(pr)
@@ -1249,28 +1245,8 @@ func acpTokenUsagePresent(u TokenUsage) bool {
 	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0
 }
 
-// parseACPTokenUsageFromMeta extracts token usage from an ACP result `_meta`
-// object. Grok Build returns shapes like:
-//
-//	{"inputTokens":…,"outputTokens":…,"cachedReadTokens":…,"usage":{…}}
-//
-// Prefer the nested `usage` object when it carries counters; otherwise parse
-// the flat `_meta` fields with the same alias rules as top-level usage.
-func parseACPTokenUsageFromMeta(meta json.RawMessage) TokenUsage {
-	if len(meta) == 0 || string(meta) == "null" {
-		return TokenUsage{}
-	}
-	var envelope struct {
-		Usage json.RawMessage `json:"usage"`
-	}
-	if err := json.Unmarshal(meta, &envelope); err == nil {
-		if len(envelope.Usage) > 0 && string(envelope.Usage) != "null" {
-			if u := parseACPTokenUsage(envelope.Usage); acpTokenUsagePresent(u) {
-				return u
-			}
-		}
-	}
-	return parseACPTokenUsage(meta)
+func acpUsagePresent(u TokenUsage) bool {
+	return acpTokenUsagePresent(u) || u.CostUSDTicks > 0
 }
 
 // parseACPModelIDFromMeta pulls the model id off an ACP result `_meta`
@@ -1756,115 +1732,19 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
-	usage := parseACPTokenUsage(msg.Usage)
+	c.mergeUsage(parseACPTokenUsageSnapshot(msg.Usage))
+}
 
+func (c *hermesClient) mergeUsage(usage acpUsageSnapshot) {
 	c.usageMu.Lock()
-	// Usage updates from ACP are cumulative snapshots, so take the latest.
-	if usage.InputTokens > c.usage.InputTokens {
-		c.usage.InputTokens = usage.InputTokens
-	}
-	if usage.OutputTokens > c.usage.OutputTokens {
-		c.usage.OutputTokens = usage.OutputTokens
-	}
-	if usage.CacheReadTokens > c.usage.CacheReadTokens {
-		c.usage.CacheReadTokens = usage.CacheReadTokens
-	}
-	if usage.CacheWriteTokens > c.usage.CacheWriteTokens {
-		c.usage.CacheWriteTokens = usage.CacheWriteTokens
-	}
-	if usage.CostUSDTicks > c.usage.CostUSDTicks {
-		c.usage.CostUSDTicks = usage.CostUSDTicks
-	}
+	c.usage.merge(usage)
 	c.usageMu.Unlock()
 }
 
-func parseACPTokenUsage(data json.RawMessage) TokenUsage {
-	if len(data) == 0 || string(data) == "null" {
-		return TokenUsage{}
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return TokenUsage{}
-	}
-	usage := TokenUsage{
-		InputTokens:  acpUsageInt64(fields, "inputTokens", "input_tokens"),
-		OutputTokens: acpUsageInt64(fields, "outputTokens", "output_tokens"),
-		CacheReadTokens: acpUsageInt64(fields,
-			"cachedReadTokens",
-			"cacheReadTokens",
-			"cached_input_tokens",
-			"cache_read_tokens",
-			"cache_read_input_tokens",
-		),
-		CacheWriteTokens: acpUsageInt64(fields,
-			"cachedWriteTokens",
-			"cacheWriteTokens",
-			"cache_write_tokens",
-			"cache_creation_input_tokens",
-		),
-		// The provider's own price for this turn, already inclusive of
-		// request-level pricing rules we cannot reconstruct from token
-		// counts (see TokenUsage.CostUSDTicks).
-		CostUSDTicks: acpUsageInt64(fields, "costUsdTicks", "cost_usd_ticks"),
-	}
-	return excludeACPCachedInput(usage, acpUsageInt64(fields, "totalTokens", "total_tokens"))
-}
-
-// excludeACPCachedInput re-buckets a usage record whose `inputTokens` already
-// contains `cachedReadTokens`, so the persisted buckets stay mutually
-// exclusive and dashboard cost math does not charge the cached prefix twice
-// (same normalization codex.go applies via codexUncachedInputTokens).
-//
-// ACP does not specify whether cached reads are counted inside inputTokens.
-// Grok Build counts them inside: a real `grok 0.2.106` turn reports
-// inputTokens=12929, cachedReadTokens=10880, outputTokens=29,
-// totalTokens=12958 — i.e. total == input + output, so the cached prefix is
-// counted once, within input. The same payload's costUsdTicks=75360000
-// ($0.007536) matches exactly (12929-10880) uncached input + 10880 cached
-// read + 29 output at xAI's published grok-4.5 rates, confirming how xAI
-// bills it. Kept raw, that turn is priced as if 12929 tokens were uncached —
-// ~4x the real spend on a cache-heavy turn.
-//
-// `totalTokens` is the only self-describing signal available, so the
-// re-bucketing only happens when it is present and equals input + output.
-// Agents that report exclusive buckets (total == input + cached + output) or
-// omit totalTokens keep their counters untouched.
-func excludeACPCachedInput(usage TokenUsage, totalTokens int64) TokenUsage {
-	if totalTokens <= 0 || usage.CacheReadTokens <= 0 || usage.CacheReadTokens > usage.InputTokens {
-		return usage
-	}
-	if totalTokens != usage.InputTokens+usage.OutputTokens {
-		return usage
-	}
-	usage.InputTokens -= usage.CacheReadTokens
-	return usage
-}
-
-func acpUsageInt64(fields map[string]json.RawMessage, names ...string) int64 {
-	for _, name := range names {
-		raw, ok := fields[name]
-		if !ok {
-			continue
-		}
-		var n json.Number
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if err := dec.Decode(&n); err == nil {
-			if v, err := n.Int64(); err == nil {
-				return v
-			}
-			if f, err := n.Float64(); err == nil {
-				return int64(f)
-			}
-		}
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			if v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
-				return v
-			}
-		}
-	}
-	return 0
+func (c *hermesClient) accumulatedUsage() TokenUsage {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	return c.usage.TokenUsage
 }
 
 // ── Helpers ──

@@ -143,42 +143,42 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
 		// dynamic-discovery backends.
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverAntigravityModels(ctx, executablePath))
 		})
 	case "traecli":
 		// Official TRAE CLI is ACP-native: it returns its model catalog from
 		// session/new. Enumerate it on demand like the other ACP backends
 		// (requires a logged-in traecli; falls back to manual entry on error).
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverTraecliModels(ctx, executablePath))
 		})
 	case "cursor":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverCursorModels(ctx, executablePath)
 		})
 	case "copilot":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverCopilotModels(ctx, executablePath)
 		})
 	case "hermes":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverHermesModels(ctx, executablePath))
 		})
 	case "kimi":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverKimiModels(ctx, executablePath))
 		})
 	case "reasonix":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverReasonixModels(ctx, executablePath))
 		})
 	case "kiro":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, executablePath))
 		})
 	case "qoder", "qoderclicn":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverQoderModels(ctx, executablePath, qoderDefaultBinary(providerType)))
 		})
 	case "opencode":
@@ -190,18 +190,18 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 			return discovered(discoverDevecoModels(ctx, executablePath))
 		})
 	case "pi":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverPiModels(ctx, executablePath))
 		})
 	case "openclaw":
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discovered(discoverOpenclawAgents(ctx, executablePath))
 		})
 	case "codebuddy":
 		// discoverCodebuddyModels owns the thinking annotation too, so the one
 		// `--help` capture feeds both catalogs. Annotating out here would run
 		// the command a second time (MUL-5549).
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverCodebuddyModels(ctx, executablePath)
 		})
 	case "qwen":
@@ -221,7 +221,7 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
 		// UI picker stays usable offline / unauthenticated.
-		return cachedDiscovery(providerType, func() (Catalog, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
 			return discoverGrokModels(ctx, executablePath)
 		})
 	default:
@@ -315,9 +315,9 @@ func modelHasKnownPrefix(model string) bool {
 }
 
 // cachedDiscovery invokes fn and caches the result for modelCacheTTL.
-// The cache is keyed on providerType only; callers that need to
-// distinguish discovery by host/user should include that in the key
-// if we ever introduce such a mode.
+// Callers build the key with discoveryCacheKey so two runtimes of the same
+// protocol family never share one memo entry when they enumerate different
+// binaries.
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
@@ -353,6 +353,13 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	return catalog, nil
 }
 
+// discoveryCacheKey scopes a discovery memo to the binary it enumerated.
+// A custom runtime profile (MUL-3284) runs a different executable under a
+// built-in protocol family, so a provider-only key would let a built-in
+// runtime and a same-family profile runtime on one host serve each other's
+// catalog for the TTL — the same mismatch the daemon's path resolution
+// fixes, reintroduced at the cache layer (MUL-5789). An empty path keeps
+// the bare provider key, which is what a built-in on PATH resolves to.
 func discoveryCacheKey(providerType, executablePath string) string {
 	if executablePath == "" {
 		return providerType
@@ -857,14 +864,36 @@ func parsePiModels(output string) []Model {
 // pattern message is also matched on its own. These are prose, not
 // `provider model` rows; without skipping them the field splitter coins bogus
 // models like `No/models`. See #3729.
+//
+// A pi-family custom runtime profile (MUL-3284) can point at a fork that has
+// no `--list-models` at all. Those exit non-zero printing usage text —
+//
+//	Error: unknown flag: --list-models
+//	Run `omp --help` for available flags.
+//
+// — and the second line has no diagnostic prefix, so it used to be coined into
+// a `Run/`omp` model. Usage hints are matched on their own markers (backtick-
+// quoted commands, `--help`, `usage:`, unknown flag/command) so the picker
+// comes back empty and the UI falls back to manual entry instead of offering
+// garbage IDs. Deliberately narrow: catalog rows are `provider/model` or
+// `provider model …` tokens, none of which carry these markers. The parse-on-
+// non-zero-exit behaviour from #3729 is untouched — older pi really does print
+// its catalog to stderr while exiting non-zero. See #4482.
 func isPiDiscoveryNoise(line string) bool {
 	lower := strings.ToLower(line)
 	if strings.Contains(lower, "no models match pattern") {
 		return true
 	}
-	return strings.HasPrefix(lower, "warning:") ||
+	if strings.HasPrefix(lower, "warning:") ||
 		strings.HasPrefix(lower, "error:") ||
-		strings.HasPrefix(lower, "info:")
+		strings.HasPrefix(lower, "info:") {
+		return true
+	}
+	return strings.Contains(line, "`") ||
+		strings.Contains(lower, "--help") ||
+		strings.Contains(lower, "usage:") ||
+		strings.Contains(lower, "unknown flag") ||
+		strings.Contains(lower, "unknown command")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,

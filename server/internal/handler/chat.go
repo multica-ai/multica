@@ -1033,6 +1033,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list chat messages")
 		return
 	}
+	messages = visibleChatMessages(messages)
 
 	messageIDs := make([]pgtype.UUID, len(messages))
 	for i, m := range messages {
@@ -1066,9 +1067,12 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A session can contain one server-authored onboarding kickoff. Fetch one
+	// extra row beyond the normal lookahead so hiding it cannot make a visible
+	// page appear shorter or lose its next cursor.
 	messages, err := h.Queries.ListChatMessagesPage(r.Context(), db.ListChatMessagesPageParams{
 		ChatSessionID:   session.ID,
-		Limit:           int32(limit + 1),
+		Limit:           int32(limit + 2),
 		BeforeCreatedAt: beforeCreatedAt,
 		BeforeID:        beforeID,
 	})
@@ -1076,6 +1080,7 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list chat messages")
 		return
 	}
+	messages = visibleChatMessages(messages)
 	hasMore := len(messages) > limit
 	if hasMore {
 		messages = messages[:limit]
@@ -1784,16 +1789,15 @@ type ChatLastMessage struct {
 	Role          string  `json:"role"`
 	CreatedAt     string  `json:"created_at"`
 	FailureReason *string `json:"failure_reason"`
-	// MessageKind is 'message' (default) or 'no_response'. Lets the session
-	// list render a localized preview for a no-text-reply turn instead of the
-	// English fallback content the server stores (MUL-4351).
+	// MessageKind is 'message' (default) or 'no_response'. Hidden onboarding
+	// kickoff rows make buildChatLastMessage return nil and are never exposed.
 	MessageKind string `json:"message_kind"`
 }
 
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
 // when there is no last message (the LEFT JOIN produced a NULL timestamp).
 func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text, kind string) *ChatLastMessage {
-	if !at.Valid {
+	if !at.Valid || kind == protocol.ChatMessageKindOnboardingKickoff {
 		return nil
 	}
 	return &ChatLastMessage{
@@ -1818,9 +1822,8 @@ type ChatMessageResponse struct {
 	// ElapsedMs is the wall-clock duration from task creation to terminal
 	// state. Drives "Replied in 38s" / "Failed after 12s" captions.
 	ElapsedMs *int64 `json:"elapsed_ms"`
-	// MessageKind is 'message' (default) or 'no_response' — a completed
-	// direct-chat turn that produced no text reply (MUL-4351). Additive:
-	// clients that don't understand it fall back to the non-empty content.
+	// MessageKind is additive. User-facing list handlers filter onboarding
+	// kickoff rows; clients still understand that kind as a compatibility guard.
 	MessageKind string `json:"message_kind"`
 	// QuickActions are sanitized follow-ups generated with this assistant turn.
 	// Always an empty array for legacy rows and user messages.
@@ -1864,6 +1867,21 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 	}
 }
 
+// visibleChatMessages removes product-authored context that is sent to the
+// agent runtime but is never part of the member-visible conversation. The
+// daemon reads its task-scoped input through ListChatInputMessages, so this
+// user-facing filter does not remove the kickoff from Mika's execution.
+func visibleChatMessages(messages []db.ChatMessage) []db.ChatMessage {
+	visible := make([]db.ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.MessageKind == protocol.ChatMessageKindOnboardingKickoff {
+			continue
+		}
+		visible = append(visible, message)
+	}
+	return visible
+}
+
 func decodeChatQuickActions(raw []byte) []protocol.ChatQuickAction {
 	actions := make([]protocol.ChatQuickAction, 0)
 	if len(raw) == 0 {
@@ -1890,6 +1908,10 @@ func normalizeMessageKind(kind string) string {
 	switch kind {
 	case protocol.ChatMessageKindNoResponse:
 		return protocol.ChatMessageKindNoResponse
+	case protocol.ChatMessageKindOnboardingKickoff:
+		return protocol.ChatMessageKindOnboardingKickoff
+	case protocol.ChatMessageKindOnboardingOpening:
+		return protocol.ChatMessageKindOnboardingOpening
 	default:
 		return protocol.ChatMessageKindMessage
 	}

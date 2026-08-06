@@ -688,6 +688,41 @@ bareword-only-line
 	}
 }
 
+// TestParsePiModelsSkipsForkUsageHints pins the second half of GitHub #4482: a
+// pi-family custom runtime profile can point at a fork with no `--list-models`,
+// which exits printing usage text. Those lines carry no diagnostic prefix, so
+// the field splitter used to coin them into models like `Run/`omp`. An empty
+// catalog is the correct answer — the UI falls back to manual entry, which is
+// strictly better than offering IDs the CLI will reject.
+func TestParsePiModelsSkipsForkUsageHints(t *testing.T) {
+	input := "Error: unknown flag: --list-models\n" +
+		"Run `omp --help` for available flags.\n" +
+		"Usage: omp [command]\n" +
+		"unknown command \"models\" for \"omp\"\n"
+
+	if models := parsePiModels(input); len(models) != 0 {
+		t.Fatalf("expected usage text to yield no models, got %+v", models)
+	}
+}
+
+// TestParsePiModelsKeepsCatalogAlongsideUsageHints pins that the widened noise
+// filter only drops the prose: a real catalog printed next to a usage hint
+// still parses. Without this the #3729 behaviour (catalog on a non-zero exit)
+// could be silently traded away for the #4482 fix.
+func TestParsePiModelsKeepsCatalogAlongsideUsageHints(t *testing.T) {
+	input := "Run `omp --help` for available flags.\n" +
+		"provider  model    context\n" +
+		"opencode  glm-4.7  202.8K\n"
+
+	models := parsePiModels(input)
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "opencode/glm-4.7" {
+		t.Errorf("unexpected model: %+v", models[0])
+	}
+}
+
 // TestDiscoverPiModelsNonZeroExit verifies that discoverPiModels still returns
 // the resolvable catalog when `pi --list-models` exits non-zero. Pi exits
 // non-zero (and warns) when an agent config references stale provider/model

@@ -1,6 +1,19 @@
 {
-  "step_header": {
-    "step_of": "Step {{current}} of {{total}}"
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "Onboarding steps",
+    "about_you": {
+      "label": "About you",
+      "description": "Your role, and what you want done."
+    },
+    "workspace": {
+      "label": "Workspace",
+      "description": "Name it and pick its URL."
+    },
+    "runtime": {
+      "label": "Meet Mika",
+      "description": "Your first agent teammate, and where it runs."
+    }
   },
   "welcome": {
     "wordmark": "Welcome to Multica",
@@ -51,7 +64,6 @@
     "hint_ready": "Looks good. Hit Submit when you're ready."
   },
   "questions": {
-    "eyebrow_about_you": "About you",
     "about_you": {
       "question": "Tell us a bit about you."
     },
@@ -107,18 +119,6 @@
     "hint_pick": "Pick one to continue — or skip if you'd rather not say.",
     "hint_continue": "Looks good. Hit Continue when you're ready."
   },
-  "runtime_aside": {
-    "what_eyebrow": "What's an agent runtime?",
-    "what_prefix": "The \"computer\" you connect is what we internally call an ",
-    "what_term": "agent runtime",
-    "what_suffix": ": a small background process on the computer paired with one AI coding tool — Claude Code, Codex, and so on. One tool, one agent runtime. The agent runtime is what actually executes the tasks your agent picks up.",
-    "good_eyebrow": "Good to know",
-    "swap_title": "Swap anytime",
-    "swap_body": "Each agent's runtime is just a setting. Change it whenever you want.",
-    "add_more_title": "Add more later",
-    "add_more_body": "You can connect another computer for a teammate, or a dedicated one per agent.",
-    "learn_more": "Learn about agent runtimes →"
-  },
   "cli_install": {
     "copy_aria": "Copy",
     "intro": "You'll need an agent runtime on this computer (Claude Code, Codex, Cursor, …) for it to run your agent. Also works on servers and remote dev boxes.",
@@ -127,7 +127,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "Cloud runtimes aren't live yet. Leave your email and we'll reach out when they are.",
-    "intro_warning": "Heads-up: agents can't execute tasks without a runtime — if you hit Skip now, your workspace is read-only until you come back and install one.",
+    "intro_warning": "Heads-up: agents can't execute tasks without a runtime — if you hit Skip now, nothing will run until you come back and install one.",
     "email_label": "Email",
     "email_placeholder": "you@work.com",
     "reason_label": "Why cloud?",
@@ -139,57 +139,20 @@
     "failed_toast": "Failed to join waitlist"
   },
   "welcome_after_onboarding": {
-    "loading_helper": "Preparing your Helper…",
-    "error_title": "Couldn't finish setup",
-    "error_generic": "Something went wrong. Try again.",
-    "retry": "Try again",
-    "dismiss_error": "Dismiss",
-    "error_close": "Close",
-    "user_context_heading": "About me",
-    "user_context_role_label": "Role",
-    "user_context_use_case_label": "What I want to do with Multica",
-    "runtime": {
-      "greeting": "Hi, welcome to Multica",
-      "subtitle": "I'm your first Agent assistant.",
-      "capabilities": "Ask me anything about how to use Multica. You can also have me get things done in your workspace — create issues, set up cron tasks, build new agents…",
-      "section_label": "Pick one or more tasks to start with:",
-      "assign_empty": "Pick one or more",
-      "assign_count": "Assign {{count}} task to me →",
-      "assign_count_plural": "Assign {{count}} tasks to me →",
-      "cards": {
-        "intro": {
-          "subtitle": "Let me explain in 1–2 paragraphs what Multica is and what it can do."
-        },
-        "tour": {
-          "subtitle": "I'll walk you through how issue, agent, squad, autopilot fit together."
-        },
-        "welcome_page": {
-          "subtitle": "I'll build you a single-file HTML slide deck — tailored to your role, ready to copy and open in a browser."
-        }
-      },
-      "success": {
-        "title": "All set!",
-        "subtitle": "Sit tight — your {{agentName}} is on it ☕",
-        "tip_inbox": "When there's progress, you'll see it in your Inbox.",
-        "tip_chat": "Want to chat live? Click the chat bubble at the bottom-right.",
-        "got_it": "Got it →"
-      }
-    },
     "skip": {
       "loading": "Setting up your workspace…",
       "title": "Welcome to Multica!",
-      "subtitle": "We've added two tasks to help you with the next step.",
+      "subtitle": "We've added one issue to help you connect a runtime. When it's ready, start with Mika from Runtimes.",
       "got_it": "Got it",
       "status_in_progress": "In progress",
-      "status_todo": "Todo",
+      "error_title": "We couldn't set that up",
+      "error_body": "The runtime guide didn't get created. You can try again, or connect a runtime from the Runtimes page whenever you're ready.",
+      "retry": "Try again",
+      "dismiss": "Not now",
       "cards": {
         "install_runtime": {
           "title": "Connect a runtime",
-          "subtitle": "Install Codex or Kimi to bring agents online."
-        },
-        "create_agent": {
-          "title": "Create your first agent",
-          "subtitle": "Once a runtime is online, build your first Multica agent."
+          "subtitle": "Install Codex or Kimi, then start the guided Mika chat from Runtimes."
         }
       }
     }
@@ -203,6 +166,7 @@
     "lede_resume": "Resume setup with the workspace you already have, or create a new one alongside it — you can belong to any number of workspaces.",
     "name_label": "Workspace name",
     "name_placeholder": "Acme Inc, My Lab, Side Projects…",
+    "random_name": "Random",
     "url_label": "URL",
     "slug_placeholder": "acme",
     "issue_prefix_label": "Issue prefix",
@@ -225,37 +189,6 @@
     "slug_reserved_error": "That workspace URL is reserved and cannot be used.",
     "slug_conflict_toast": "Choose a different workspace URL",
     "create_failed_toast": "Failed to create workspace",
-    "side_create_eyebrow": "What lives inside a workspace",
-    "side_existing_eyebrow": "Your workspace",
-    "side_things_eyebrow": "Things you'll do here",
-    "side_next_eyebrow": "What's next",
-    "side_preview_name": "Your workspace",
-    "side_preview_slug": "workspace",
-    "perk_assign": "Assign issues to agents like you would a teammate",
-    "perk_chat": "Chat with any agent without creating an issue",
-    "perk_invite": "Invite teammates — they see only this workspace",
-    "perk_switch": "Switch to other workspaces anytime from the top-left",
-    "next_runtime": "Connect a computer so your agents have somewhere to run",
-    "next_agent": "Create Multica Helper from your connected runtime",
-    "next_starter": "Open one onboarding issue for your next step",
-    "preview": {
-      "inbox_label": "Inbox",
-      "inbox_meta": "your notifications",
-      "issues_label": "Issues",
-      "issues_meta": "shared task board",
-      "agents_label": "Agents",
-      "agents_meta": "your AI teammates",
-      "projects_label": "Projects",
-      "projects_meta": "group related issues",
-      "autopilot_label": "Autopilot",
-      "autopilot_meta": "scheduled automation",
-      "runtimes_label": "Runtimes",
-      "runtimes_meta": "where agents run",
-      "skills_label": "Skills",
-      "skills_meta": "reusable playbooks",
-      "more_label": "And more",
-      "more_meta": "and more"
-    },
     "creation_disabled_eyebrow": "Workspace creation is disabled",
     "creation_disabled_headline": "Ask your administrator for an invitation.",
     "creation_disabled_lede": "This Multica instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
@@ -268,8 +201,8 @@
     "scanning_headline": "Connecting this computer…",
     "scanning_lede_prefix": "Your agent works through an AI coding tool you already have — like ",
     "scanning_lede_suffix": ", and others. We're checking this computer for ones you've installed.",
-    "found_headline": "This computer is connected. Pick an agent runtime.",
-    "found_lede": "These are the agent runtimes we found on this computer. Pick one for your first agent — you can switch or add more later.",
+    "found_headline": "Where should Mika run?",
+    "found_lede": "These are the agent runtimes we found on this computer. You can switch it or add more later.",
     "runtime_count_one": "{{count}} agent runtime",
     "runtime_count_other": "{{count}} agent runtimes",
     "status_all_online": "all online",
@@ -281,7 +214,7 @@
     "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
     "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
     "empty_skip_title": "Skip for now",
-    "empty_skip_subtitle": "Enter your workspace in read-only mode. Your agent can't run tasks until an agent runtime is connected on this computer — but you can still browse, plan, and invite teammates.",
+    "empty_skip_subtitle": "Enter your workspace now. Your agent can't run tasks until an agent runtime is connected on this computer — but you can still browse, plan, and invite teammates.",
     "empty_skip_action": "Skip",
     "empty_waitlist_title": "Use a cloud computer",
     "empty_waitlist_subtitle": "We'll run a computer for you in the cloud. Not live yet.",
@@ -290,21 +223,18 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "hint_selected": "Selected: {{name}}",
-    "hint_pick": "Pick an agent runtime above to continue.",
+    "hint_pick": "Pick an agent runtime above to start with Mika.",
     "hint_waiting": "Waiting for the first result…",
     "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace.",
-    "start_exploring": "Start exploring"
+    "continue": "Start with Mika"
   },
   "step_platform": {
     "eyebrow": "Connect a computer",
     "headline": "Connect a computer to run your agent.",
-    "lede": "Your agent runs on a real computer that you connect to Multica. Pick how you want to connect one.",
+    "lede": "Mika, your workspace's Chief of Staff, runs on a real computer that you connect to Multica. Pick how you want to connect one.",
     "hint_default": "Pick a way to connect — or skip and connect a computer later.",
-    "hint_downloaded": "Finish setup on the download page, then come back to this tab.",
     "download_title": "Use this computer",
-    "download_title_after": "Opening the download page…",
-    "download_subtitle": "Install our desktop app to connect this computer. Zero setup — pick your platform on the next page.",
-    "download_subtitle_after": "Opened in a new tab. Pick your installer there, then finish setup on desktop.",
+    "download_subtitle": "Install our desktop app to connect this computer. Opens in a new tab — pick your platform there.",
     "download_button": "Download",
     "cli_title": "Connect from the terminal",
     "cli_subtitle": "Connect a server, remote dev box, or any headless computer. Terminal required.",
@@ -330,6 +260,13 @@
     "stage_stalled_suffix": " is the smoother path — one click and this computer is connected. Close this dialog and pick Desktop, or hit Skip to continue."
   },
   "errors": {
-    "skip_failed": "Failed to finish onboarding"
+    "skip_failed": "Failed to finish onboarding",
+    "mika_setup_failed": "Couldn't start your Mika workspace"
+  },
+  "mika_intro": {
+    "headline": "Meet Mika, your first agent teammate.",
+    "name": "Mika",
+    "role": "Chief of Staff",
+    "blurb": "Tell Mika what you want done. It becomes an issue, with the right agent on it."
   }
 }

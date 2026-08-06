@@ -447,16 +447,11 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				if effectiveModel == "" {
 					effectiveModel = pr.modelID
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
 				// xAI prices the turn itself and reports the result here.
 				// Carrying it through is the only way the ≥200K long-context
 				// surcharge reaches the bill — token counts alone cannot
 				// reconstruct which tier a request hit.
-				c.usage.CostUSDTicks += pr.usage.CostUSDTicks
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForGrokNotificationQuiescence(runCtx, activity, readerDone)
@@ -490,12 +485,10 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// lands before a tool call stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"

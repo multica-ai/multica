@@ -1,19 +1,18 @@
 // onboarding_shim.go — DEPRECATED endpoints kept alive for desktop < v3.
 //
-// Background: v3 moved Helper-agent creation and starter-issue seeding to
-// the frontend welcome hook (packages/views/workspace/welcome-after-onboarding.tsx),
-// which calls generic CreateAgent / CreateIssue. Pre-v3 desktop builds
-// however still call BootstrapOnboardingRuntime / BootstrapOnboardingNoRuntime
-// during their onboarding flow. Server-side removal would break those
-// users during the rollout window where v3 server is live but their
-// desktop hasn't auto-updated yet.
+// Background: pre-v3 desktop builds call BootstrapOnboardingRuntime /
+// BootstrapOnboardingNoRuntime during their onboarding flow. Current
+// clients no longer use the runtime bootstrap path; they create only Mika
+// and start the real interactive onboarding chat before completing setup.
+// Removing this endpoint would still break an old installed desktop
+// talking to a newer server.
 //
 // These handlers are intentionally minimal copies of the pre-v3
 // implementation, condensed to inline DB calls (no OnboardingService /
 // WorkspaceContentService layer — that abstraction died with v3). They
 // remain valid until telemetry on the X-Client-Version header confirms
-// every active desktop install is on a v3+ build, at which point this
-// entire file + the two router entries + the 5 tests should be deleted.
+// every active desktop install has aged out, at which point this entire
+// file + the two router entries + the 5 tests should be deleted.
 //
 // DO NOT add features here. DO NOT change behavior. The contract is "what
 // pre-v3 desktop expects".
@@ -65,12 +64,9 @@ const onboardingAssistantAvatarURL = "data:image/svg+xml,%3Csvg xmlns='http://ww
 
 // onboardingAssistantInstructions is the system prompt persisted on every
 // Multica Helper agent created by this shim. Pre-v3 desktop submits a
-// starter prompt from the workspace OnboardingHelperModal; that prompt
+// starter prompt from the historical workspace OnboardingHelperModal; that prompt
 // becomes the issue body, while this constant becomes the agent's identity
-// block in CLAUDE.md / AGENTS.md / GEMINI.md. v3 frontend has its own
-// in-views copy of this string (`packages/views/onboarding/templates/
-// helper-instructions.ts`) — these two must stay in sync until the shim
-// is removed.
+// block in CLAUDE.md / AGENTS.md / GEMINI.md.
 const onboardingAssistantInstructions = `You are Multica Helper, the built-in AI assistant for this Multica workspace. Your role is to help any member use Multica better — answer questions, give advice, and execute workspace operations on their behalf.
 
 ## What Multica is

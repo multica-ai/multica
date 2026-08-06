@@ -218,6 +218,23 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(chatKeys.messagesPageAll());
     expect(calls).toContainEqual(chatKeys.pendingTaskAll());
   });
+
+  it("invalidates one issue attachment cache after detached channel media binds", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const attachmentChanged = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "issue_attachments:changed")?.[1];
+    expect(attachmentChanged).toBeDefined();
+
+    (attachmentChanged as (payload: unknown) => void)({ issue_id: "issue-1" });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueKeys.attachments("issue-1"),
+    });
+  });
 });
 
 describe("useRealtimeSync — queued chat promotion", () => {

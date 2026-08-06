@@ -162,11 +162,11 @@ func activeThreadID(triggerThreadID, triggerCommentID string) string {
 //
 // provider is retained for caller symmetry and future per-provider tweaks; the
 // guardrail itself is intentionally identical across providers and hosts.
-func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) string {
+func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string, squadLeader bool) string {
 	if triggerCommentID == "" {
 		return ""
 	}
-	return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID)
+	return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID, squadLeader)
 }
 
 // buildCommentReplyInstructionsSlim is the compressed reply-instructions
@@ -182,10 +182,18 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 // canonical `## Comment Formatting` section the same brief carries, so
 // repeating it inline at every comment-triggered step 7 would be
 // duplication, not signal.
-func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID string) string {
+func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID string, squadLeader bool) string {
+	// The squad leader's `no_action` exit (recorded via `squad activity`) is
+	// the one path where posting no comment is correct — the imperative must
+	// carry its own carve-out so a later line never contradicts the
+	// no_action rule injected above it (MUL-5442 #6493 review).
+	lead := "Post your reply as a comment — always use the trigger comment ID below, "
+	if squadLeader {
+		lead = "Unless your outcome is `no_action`, post your reply as a comment — always use the trigger comment ID below, "
+	}
 	if runtimeGOOS == "windows" {
 		return fmt.Sprintf(
-			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+			lead+
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
 				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above):\n\n"+
 				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
@@ -195,7 +203,7 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 		)
 	}
 	return fmt.Sprintf(
-		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+		lead+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
 			"Write the body file first (rules: ## Comment Formatting above — MUL-2904 / #4182):\n\n"+
 			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
@@ -228,7 +236,7 @@ type ThreadReplyTarget struct {
 // before this instruction is emitted, so a per-thread fan-out cannot split it.
 //
 // Returns "" for fewer than two targets; callers keep the single-parent path.
-func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadReplyTarget) string {
+func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadReplyTarget, squadLeader bool) string {
 	if issueID == "" || len(targets) < 2 {
 		return ""
 	}
@@ -262,8 +270,19 @@ func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadRe
 		)
 	}
 
+	// Same carve-out as the single-thread cookbook (MUL-5442 #6493 review):
+	// the leader's no_action exit must not be contradicted by this later
+	// imperative, and the scope sentence must govern the ENTIRE fan-out
+	// block — every obligation below ("multiple replies are required", the
+	// posting order, the per-thread cookbook) sits under the "Otherwise" —
+	// not just the first verb. Ordinary agents keep the unconditional form
+	// byte-for-byte.
+	lead := "This run coalesced comments from %d DISTINCT threads. Post ONE reply per thread"
+	if squadLeader {
+		lead = "This run coalesced comments from %d DISTINCT threads. **If your outcome is `no_action`, skip this ENTIRE fan-out block — post no replies at all and exit via `multica squad activity` as your leader rules direct; everything below applies only otherwise.** Otherwise, post ONE reply per thread"
+	}
 	return fmt.Sprintf(
-		"This run coalesced comments from %d DISTINCT threads. Post ONE reply per thread — %d replies in total — each threaded under its own conversation. This OVERRIDES the general \"post exactly one comment per run\" guidance: for THIS run multiple replies are required and correct. Do NOT merge separate threads into a single comment, and do NOT post more than one reply in the same thread.\n\n"+
+		lead+" — %d replies in total — each threaded under its own conversation. This OVERRIDES the general \"post exactly one comment per run\" guidance: for THIS run multiple replies are required and correct. Do NOT merge separate threads into a single comment, and do NOT post more than one reply in the same thread.\n\n"+
 			"Post the replies in the order listed below — OLDEST thread first, the newest (triggering) thread LAST — so they land in chronological order. Do NOT answer the newest/triggering comment first.\n\n"+
 			"Reply targets, in the order to post them (use the exact `--parent` for each — do NOT reuse `--parent` values from previous turns in this session):\n"+
 			"%s\n"+

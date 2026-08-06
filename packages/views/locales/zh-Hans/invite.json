@@ -10,11 +10,11 @@
   },
   "accepted": {
     "title": "你已加入 {{workspace_name}}！",
-    "redirecting": "正在跳转到 工作区..."
+    "redirecting": "正在跳转到工作区..."
   },
   "declined": {
     "title": "已拒绝邀请",
-    "description": "你将不会加入此 工作区。",
+    "description": "你将不会加入此工作区。",
     "go_to_dashboard": "前往主页"
   },
   "main": {

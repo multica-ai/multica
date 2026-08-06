@@ -399,7 +399,7 @@ func (b *opencodeBackend) handleTextEvent(event opencodeEvent, ch chan<- Message
 
 // handleToolUseEvent processes "tool_use" events from opencode. A single
 // tool_use event contains both the call and result in part.state when the
-// tool has completed (state.status == "completed").
+// tool reaches a terminal state (state.status is "completed" or "error").
 func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Message) {
 	// Extract input from state.input (the tool invocation parameters).
 	var input map[string]any
@@ -415,9 +415,15 @@ func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Mess
 		Input:  input,
 	})
 
-	// If the tool has completed, also emit a tool-result message.
-	if event.Part.State != nil && event.Part.State.Status == "completed" {
-		outputStr := extractToolOutput(event.Part.State.Output)
+	// Pair every terminal tool-use with a tool-result. The daemon uses this
+	// pair to track in-flight tools, so dropping error results would leave its
+	// counter permanently elevated and suppress the normal idle watchdog.
+	state := event.Part.State
+	if state != nil && (state.Status == "completed" || state.Status == "error") {
+		outputStr := extractToolOutput(state.Output)
+		if state.Status == "error" && state.Error != "" {
+			outputStr = state.Error
+		}
 		trySend(ch, Message{
 			Type:   MessageToolResult,
 			Tool:   event.Part.Tool,
@@ -578,6 +584,7 @@ type opencodeToolState struct {
 	Status string          `json:"status,omitempty"`
 	Input  json.RawMessage `json:"input,omitempty"`
 	Output any             `json:"output,omitempty"`
+	Error  string          `json:"error,omitempty"`
 }
 
 // opencodeError represents an error event from opencode.

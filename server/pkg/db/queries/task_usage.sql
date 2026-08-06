@@ -22,6 +22,33 @@ SELECT * FROM task_usage
 WHERE task_id = $1
 ORDER BY model;
 
+-- name: ListIssueTaskUsage :many
+-- Per-(task, provider, model) usage rows for every task on one issue — the
+-- per-run half of GetIssueUsageSummary's issue-wide total.
+--
+-- The model dimension stays on the wire for the same reason the runtime and
+-- dashboard usage rows keep it: cost is priced client-side from a per-model
+-- rate table, and a row that has collapsed two models into one sum can no
+-- longer be priced at all. The execution log sums the rows per task; the usage
+-- panel shows them split.
+--
+-- Ordering is by task then model so the client can group by task_id in one
+-- pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
+-- task_id index (migration 032).
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+ORDER BY tu.task_id, tu.model;
+
 -- name: GetIssueUsageSummary :one
 SELECT
     COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,

@@ -137,7 +137,7 @@ var notifTypeToGroup = map[string]string{
 	"assignee_changed":   "assignments",
 	"status_changed":     "status_changes",
 	"new_comment":        "comments",
-	"mentioned":          "comments",
+	"mentioned":          "mentions",
 	"priority_changed":   "updates",
 	"start_date_changed": "updates",
 	"due_date_changed":   "updates",
@@ -578,7 +578,9 @@ func notifyMentionedMembers(
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		// Skip if mentions/comments are muted by this user
+		// Skip if mentions are muted by this user. This is deliberately a
+		// different group from `comments`: muting comment volume must not
+		// silence someone asking for you by name.
 		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
 			continue
 		}

@@ -700,6 +700,87 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("parses per-run token usage on task runs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "completed",
+              usage: [
+                {
+                  provider: "anthropic",
+                  model: "claude-opus-5",
+                  input_tokens: 96_000,
+                  output_tokens: 34_000,
+                  cache_read_tokens: 712_000,
+                  cache_write_tokens: 50_000,
+                  cost_usd_ticks: 19_990_000_000,
+                },
+              ],
+            },
+            // No usage at all — a run from before usage reporting.
+            { id: "task-2", status: "completed" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    expect(tasks[0]?.usage).toHaveLength(1);
+    expect(tasks[0]?.usage?.[0]).toMatchObject({
+      model: "claude-opus-5",
+      input_tokens: 96_000,
+      cache_read_tokens: 712_000,
+      cost_usd_ticks: 19_990_000_000,
+    });
+    // Absent, not [] — "we have no figure" must stay distinguishable from
+    // "the figure is zero" all the way to the UI.
+    expect(tasks[1]?.usage).toBeUndefined();
+  });
+
+  it("keeps task runs when per-run usage is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            // Usage is not an array at all.
+            { id: "task-1", status: "completed", usage: "1.2M" },
+            // Usage is an array, but an entry has a string where a count belongs.
+            {
+              id: "task-2",
+              status: "completed",
+              usage: [{ model: "claude-opus-5", input_tokens: "many" }],
+            },
+            {
+              id: "task-3",
+              status: "completed",
+              usage: [{ model: "gpt-5.6-terra", input_tokens: 31_000 }],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    // A bad usage payload costs that row its figure and nothing else — the
+    // execution log still lists every run.
+    expect(tasks).toHaveLength(3);
+    expect(tasks[0]?.usage).toBeUndefined();
+    expect(tasks[1]?.usage).toBeUndefined();
+    expect(tasks[2]?.usage?.[0]?.input_tokens).toBe(31_000);
+    expect(tasks[2]?.usage?.[0]?.output_tokens).toBe(0);
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {
@@ -1624,6 +1705,54 @@ describe("ApiClient", () => {
         new ApiClient("https://api.example.test").sendChatMessage("session-1", "hello"),
       ).rejects.toThrow();
     });
+  });
+});
+
+// The onboarding flow acts on a workspace the app has not navigated to, so
+// these calls pass the slug explicitly. The server reads X-Workspace-Slug
+// before ?workspace_id, so the header — not the param — is what has to carry
+// the target workspace.
+describe("ApiClient explicit workspace targeting", () => {
+  function stubOk(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function slugHeaderOf(fetchMock: ReturnType<typeof vi.fn>): unknown {
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    return (init.headers as Record<string, string>)["X-Workspace-Slug"];
+  }
+
+  it("sends the given slug on Mika creation", async () => {
+    const fetchMock = stubOk({ id: "agent-1" });
+    await new ApiClient("https://api.example.test").createMikaAgent(
+      { runtime_id: "runtime-1", language: "en" },
+      "proxima-centauri",
+    );
+    expect(slugHeaderOf(fetchMock)).toBe("proxima-centauri");
+  });
+
+  it("sends the given slug when listing another workspace's runtimes", async () => {
+    const fetchMock = stubOk([]);
+    await new ApiClient("https://api.example.test").listRuntimes(
+      { workspace_id: "ws-2", owner: "me" },
+      "proxima-centauri",
+    );
+    expect(slugHeaderOf(fetchMock)).toBe("proxima-centauri");
+  });
+
+  it("omits the header when no slug is given, leaving the ambient one", async () => {
+    const fetchMock = stubOk([]);
+    await new ApiClient("https://api.example.test").listRuntimes({
+      workspace_id: "ws-2",
+    });
+    expect(slugHeaderOf(fetchMock)).toBeUndefined();
   });
 });
 

@@ -581,6 +581,74 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 	return items, nil
 }
 
+const listIssueTaskUsage = `-- name: ListIssueTaskUsage :many
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+ORDER BY tu.task_id, tu.model
+`
+
+type ListIssueTaskUsageRow struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+}
+
+// Per-(task, provider, model) usage rows for every task on one issue — the
+// per-run half of GetIssueUsageSummary's issue-wide total.
+//
+// The model dimension stays on the wire for the same reason the runtime and
+// dashboard usage rows keep it: cost is priced client-side from a per-model
+// rate table, and a row that has collapsed two models into one sum can no
+// longer be priced at all. The execution log sums the rows per task; the usage
+// panel shows them split.
+//
+// Ordering is by task then model so the client can group by task_id in one
+// pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
+// task_id index (migration 032).
+func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) ([]ListIssueTaskUsageRow, error) {
+	rows, err := q.db.Query(ctx, listIssueTaskUsage, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueTaskUsageRow{}
+	for rows.Next() {
+		var i ListIssueTaskUsageRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())

@@ -111,6 +111,15 @@ type CLIConfig struct {
 	// env, this field, DefaultAutoUpdateCheckInterval.
 	AutoUpdateCheckInterval string `json:"auto_update_check_interval,omitempty"`
 
+	// DisableAutoReload, when true, stops the daemon from restarting into a
+	// multica binary that was replaced on disk out of band. Single-direction
+	// like DisableAutoUpdate, and separate from it on purpose: "don't pull
+	// new versions from GitHub" and "don't follow the binary I installed
+	// myself" are different decisions. Resolution precedence:
+	// --no-auto-reload flag, MULTICA_DAEMON_AUTO_RELOAD=false env, this
+	// field, default (enabled).
+	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same

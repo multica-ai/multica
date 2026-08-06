@@ -68,7 +68,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20,"cacheReadTokens":3,"cacheWriteTokens":2,"costUsdTicks":900}}}\n' "$id"
       ;;
     *)
       printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
@@ -380,11 +380,9 @@ func TestQwenpawBackendUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected usage entry for model 'unknown', got %+v", result.Usage)
 	}
-	if usage.InputTokens != 10 {
-		t.Fatalf("expected 10 input tokens, got %d", usage.InputTokens)
-	}
-	if usage.OutputTokens != 20 {
-		t.Fatalf("expected 20 output tokens, got %d", usage.OutputTokens)
+	want := TokenUsage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 3, CacheWriteTokens: 2, CostUSDTicks: 900}
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}
 }
 

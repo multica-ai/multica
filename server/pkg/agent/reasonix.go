@@ -148,8 +148,6 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	var streamingCurrentTurn atomic.Bool
 	var blockedQuestion atomic.Value // string; set by the stdout reader
 	var statusUsage reasonixStatusUsageTracker
-	var promptUsageMu sync.Mutex
-	var promptUsage TokenUsage
 
 	promptDone := make(chan hermesPromptResult, 1)
 	activity := make(chan struct{}, 1)
@@ -417,9 +415,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 					finalStatus = "failed"
 					finalError = fmt.Sprintf("reasonix returned unsupported stopReason %q", pr.stopReason)
 				}
-				promptUsageMu.Lock()
-				promptUsage = pr.usage
-				promptUsageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 				finalStatus = "failed"
 				finalError = "reasonix returned no prompt completion result"
@@ -458,15 +454,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			}
 		}
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
-		promptUsageMu.Lock()
-		standardPromptUsage := promptUsage
-		promptUsageMu.Unlock()
-		if reasonixUsagePresent(standardPromptUsage) {
-			u = standardPromptUsage
-		}
+		u := c.accumulatedUsage()
 		statusSnapshot, statusModel := statusUsage.snapshot()
 		if !reasonixUsagePresent(u) {
 			u = statusSnapshot

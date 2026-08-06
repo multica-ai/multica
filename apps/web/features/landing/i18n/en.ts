@@ -294,6 +294,35 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.20",
+        date: "2026-08-06",
+        title: "DingTalk bots, a guided first run with Mika, and per-run token costs",
+        changes: [],
+        features: [
+          "Your agents can now live in DingTalk — DM them or @-mention them in a group.",
+          "Signing up now ends with Mika ready to talk, plus cards to start your first task.",
+          "The execution log shows what each run cost, and the whole Issue's total.",
+          "Muting comment notifications no longer hides messages that @-mention you.",
+          "Chat on a phone opens full screen and the composer rides above the keyboard.",
+          "Replacing your multica or agent CLI now takes effect on its own, no restart.",
+        ],
+        improvements: [
+          "Agents read shorter instructions each run, leaving more room for your work.",
+          "Runtimes with no reasoning dial now say so instead of rejecting your setting.",
+          "Issue detail and the discussion list on a phone use more of the screen.",
+          "The execution log header stays on one line instead of wrapping.",
+        ],
+        fixes: [
+          "Images sent with /issue in chat now arrive as attachments on the new Issue.",
+          "An Issue can no longer get stuck forever after one sign-in failure.",
+          "A custom runtime's model list is filled in from its own program.",
+          "The desktop app no longer touches the settings your terminal CLI owns.",
+          "OpenCode sessions keep going after a tool call fails.",
+          "Pi agents on Windows start reliably instead of failing on the prompt.",
+          "Token usage and cost now land for Kimi, Grok, Kiro, Qoder, Trae CLI, and more.",
+        ],
+      },
+      {
         version: "0.4.19",
         date: "2026-08-05",
         title: "Leaner prompts, new runtimes, and a chat message queue",
@@ -1684,7 +1713,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         title: "Smarter Welcome, Live Work Signals & Safer Collaboration",
         changes: [],
         features: [
-          "New users now enter a guided welcome experience where Multica Helper can introduce the workspace, give a tour, or build a slide-style welcome page",
+          "New users now enter a guided Mika conversation that helps them complete one real first task and add specialists only when needed",
           "Issue lists now show when agents are actively working, with per-Issue indicators, hover details, and a quick filter for work in progress",
           "When a child Issue is finished, the parent Issue now receives a platform-generated update and can notify the right parent owner without creating loops",
           "The public site now includes a Contact Sales flow with a business-email form and submission protection",

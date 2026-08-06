@@ -1,6 +1,19 @@
 {
-  "step_header": {
-    "step_of": "ステップ {{current}} / {{total}}"
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "オンボーディングの手順",
+    "about_you": {
+      "label": "あなたについて",
+      "description": "役割と、実現したいこと。"
+    },
+    "workspace": {
+      "label": "ワークスペース",
+      "description": "名前と URL を決める。"
+    },
+    "runtime": {
+      "label": "Mika を知る",
+      "description": "最初のエージェント仲間と、その実行環境。"
+    }
   },
   "welcome": {
     "wordmark": "Multica へようこそ",
@@ -51,7 +64,6 @@
     "hint_ready": "OK です。準備ができたら送信を押してください。"
   },
   "questions": {
-    "eyebrow_about_you": "あなたについて",
     "about_you": {
       "question": "あなたについて少し教えてください。"
     },
@@ -107,18 +119,6 @@
     "hint_pick": "ひとつ選んで続けてください。答えたくない場合はスキップできます。",
     "hint_continue": "いい感じです。準備ができたら「続ける」を押してください。"
   },
-  "runtime_aside": {
-    "what_eyebrow": "エージェントランタイムとは?",
-    "what_prefix": "接続する「コンピュータ」を、私たちは内部的に ",
-    "what_term": "エージェントランタイム",
-    "what_suffix": " と呼んでいます。Claude Code や Codex などの AI コーディングツール 1 つと組み合わさる、コンピュータ上の小さなバックグラウンドプロセスです。1 つのツールに 1 つのエージェントランタイム。エージェントランタイムが、エージェントの引き受けた作業を実際に実行します。",
-    "good_eyebrow": "知っておくと便利",
-    "swap_title": "いつでも切り替え",
-    "swap_body": "各エージェントのランタイムは単なる設定です。いつでも変更できます。",
-    "add_more_title": "あとで追加",
-    "add_more_body": "チームメイト用に別のコンピュータを接続したり、エージェントごとに専用のものを用意したりできます。",
-    "learn_more": "エージェントランタイムについて学ぶ →"
-  },
   "cli_install": {
     "copy_aria": "コピー",
     "intro": "エージェントを実行するには、このコンピュータにエージェントランタイム(Claude Code、Codex、Cursor など)が必要です。サーバーやリモート開発環境でも動作します。",
@@ -127,7 +127,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "クラウドランタイムはまだ提供されていません。メールアドレスを残していただければ、準備ができ次第ご連絡します。",
-    "intro_warning": "注意: ランタイムがないとエージェントは作業を実行できません。今スキップすると、戻ってきてインストールするまでワークスペースは読み取り専用になります。",
+    "intro_warning": "注意: ランタイムがないとエージェントは作業を実行できません。今スキップすると、戻ってきてインストールするまで何も実行されません。",
     "email_label": "メールアドレス",
     "email_placeholder": "you@work.com",
     "reason_label": "クラウドを使いたい理由",
@@ -139,57 +139,20 @@
     "failed_toast": "ウェイトリストに登録できませんでした"
   },
   "welcome_after_onboarding": {
-    "loading_helper": "Helper を準備中…",
-    "error_title": "セットアップを完了できませんでした",
-    "error_generic": "問題が発生しました。もう一度お試しください。",
-    "retry": "もう一度試す",
-    "dismiss_error": "閉じる",
-    "error_close": "閉じる",
-    "user_context_heading": "私について",
-    "user_context_role_label": "役割",
-    "user_context_use_case_label": "Multica でやりたいこと",
-    "runtime": {
-      "greeting": "こんにちは、Multica へようこそ",
-      "subtitle": "私はあなたの最初の Agent アシスタントです。",
-      "capabilities": "Multica の使い方について、何でも聞いてください。ワークスペースでの作業を任せることもできます — タスクの作成、オートパイロットの設定、新しいエージェントの構築など…",
-      "section_label": "まず取り組むタスクを 1 つ以上選んでください:",
-      "assign_empty": "1 つ以上選択",
-      "assign_count": "{{count}} 件のタスクを私に割り当てる →",
-      "assign_count_plural": "{{count}} 件のタスクを私に割り当てる →",
-      "cards": {
-        "intro": {
-          "subtitle": "Multica とは何か、何ができるのかを 1〜2 段落で説明します。"
-        },
-        "tour": {
-          "subtitle": "タスク、エージェント、スクワッド、オートパイロットがどう連携するかをご案内します。"
-        },
-        "welcome_page": {
-          "subtitle": "あなたの役割に合わせた単一ファイルの HTML スライドデックを作成します。コピーしてブラウザで開けます。"
-        }
-      },
-      "success": {
-        "title": "準備完了!",
-        "subtitle": "少々お待ちを — {{agentName}} が対応中です ☕",
-        "tip_inbox": "進捗があると、インボックスに表示されます。",
-        "tip_chat": "ライブでチャットしたいときは、右下のチャットバブルをクリックしてください。",
-        "got_it": "了解 →"
-      }
-    },
     "skip": {
       "loading": "ワークスペースを準備中…",
       "title": "Multica へようこそ!",
-      "subtitle": "次のステップを助けるために、2 つのタスクを追加しました。",
+      "subtitle": "ランタイム接続を案内するタスクを 1 つ追加しました。準備できたら Runtimes から Mika と始められます。",
       "got_it": "了解",
       "status_in_progress": "進行中",
-      "status_todo": "未着手",
+      "error_title": "準備できませんでした",
+      "error_body": "ランタイム案内のタスクを作成できませんでした。再試行するか、準備ができたら Runtimes からランタイムを接続してください。",
+      "retry": "再試行",
+      "dismiss": "後で",
       "cards": {
         "install_runtime": {
           "title": "ランタイムを接続",
-          "subtitle": "Codex または Kimi をインストールして、エージェントをオンラインにしましょう。"
-        },
-        "create_agent": {
-          "title": "最初のエージェントを作成",
-          "subtitle": "ランタイムがオンラインになったら、最初の Multica エージェントを作りましょう。"
+          "subtitle": "Codex または Kimi をインストールし、Runtimes から Mika の案内チャットを始めてください。"
         }
       }
     }
@@ -203,6 +166,7 @@
     "lede_resume": "すでにあるワークスペースでセットアップを続けるか、別に新しいワークスペースを作成してください。いくつでもワークスペースに所属できます。",
     "name_label": "ワークスペース名",
     "name_placeholder": "Acme Inc、My Lab、Side Projects…",
+    "random_name": "ランダム",
     "url_label": "URL",
     "slug_placeholder": "acme",
     "issue_prefix_label": "タスクプレフィックス",
@@ -225,37 +189,6 @@
     "slug_reserved_error": "そのワークスペース URL は予約済みのため使用できません。",
     "slug_conflict_toast": "別のワークスペース URL を選んでください",
     "create_failed_toast": "ワークスペースを作成できませんでした",
-    "side_create_eyebrow": "ワークスペースの中にあるもの",
-    "side_existing_eyebrow": "あなたのワークスペース",
-    "side_things_eyebrow": "ここでできること",
-    "side_next_eyebrow": "次のステップ",
-    "side_preview_name": "あなたのワークスペース",
-    "side_preview_slug": "workspace",
-    "perk_assign": "同僚に任せるようにタスクをエージェントに割り当てる",
-    "perk_chat": "タスクを作らずにどのエージェントともチャット",
-    "perk_invite": "チームメイトを招待 — 招待した人にはこのワークスペースだけが見えます",
-    "perk_switch": "左上からいつでも他のワークスペースに切り替え",
-    "next_runtime": "エージェントが動く場所を用意するためにコンピュータを接続",
-    "next_agent": "接続したランタイムから Multica Helper を作成",
-    "next_starter": "次のステップのためにオンボーディングタスクを 1 つ開く",
-    "preview": {
-      "inbox_label": "インボックス",
-      "inbox_meta": "あなたの通知",
-      "issues_label": "タスク",
-      "issues_meta": "共有のタスクボード",
-      "agents_label": "エージェント",
-      "agents_meta": "あなたの AI チームメイト",
-      "projects_label": "プロジェクト",
-      "projects_meta": "関連するタスクをまとめる",
-      "autopilot_label": "オートパイロット",
-      "autopilot_meta": "スケジュールされた自動化",
-      "runtimes_label": "ランタイム",
-      "runtimes_meta": "エージェントが動く場所",
-      "skills_label": "スキル",
-      "skills_meta": "再利用できるプレイブック",
-      "more_label": "その他",
-      "more_meta": "さらに多くの機能"
-    },
     "creation_disabled_eyebrow": "ワークスペースの作成は無効です",
     "creation_disabled_headline": "管理者に招待を依頼してください。",
     "creation_disabled_lede": "この Multica インスタンスでは新しいワークスペースを作成できません。管理者からワークスペースに招待されたら、招待を承諾して更新し、続けてください。",
@@ -268,8 +201,8 @@
     "scanning_headline": "このコンピュータを接続中…",
     "scanning_lede_prefix": "エージェントは、あなたがすでに持っている AI コーディングツールを通じて作業します — たとえば ",
     "scanning_lede_suffix": " など。このコンピュータにインストール済みのものを確認しています。",
-    "found_headline": "このコンピュータが接続されました。エージェントランタイムを選んでください。",
-    "found_lede": "このコンピュータで見つかったエージェントランタイムです。最初のエージェントに使うものを 1 つ選んでください。あとで切り替えたり追加したりできます。",
+    "found_headline": "Mika はどこで動かしますか？",
+    "found_lede": "このコンピュータで見つかったエージェントランタイムです。あとで切り替えたり追加したりできます。",
     "runtime_count_other": "エージェントランタイム {{count}} 個",
     "status_all_online": "すべてオンライン",
     "status_none_online": "オンラインなし",
@@ -280,7 +213,7 @@
     "empty_lede_prefix": "エージェントランタイムとは、私たちが接続する AI コーディングツールです — たとえば ",
     "empty_lede_suffix": " など。1 つインストールして更新するか、下から進む方法を選んでください。",
     "empty_skip_title": "今はスキップ",
-    "empty_skip_subtitle": "読み取り専用モードでワークスペースに入ります。このコンピュータにエージェントランタイムが接続されるまでエージェントは作業を実行できませんが、閲覧、計画、チームメイトの招待は可能です。",
+    "empty_skip_subtitle": "先にワークスペースに入ります。このコンピュータにエージェントランタイムが接続されるまでエージェントは作業を実行できませんが、閲覧、計画、チームメイトの招待は可能です。",
     "empty_skip_action": "スキップ",
     "empty_waitlist_title": "クラウドコンピュータを使う",
     "empty_waitlist_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
@@ -289,21 +222,18 @@
     "refresh": "更新",
     "refreshing": "更新中…",
     "hint_selected": "選択中: {{name}}",
-    "hint_pick": "続けるには、上でエージェントランタイムを選んでください。",
+    "hint_pick": "Mika と始めるには、上でエージェントランタイムを選んでください。",
     "hint_waiting": "最初の結果を待っています…",
     "hint_skip_or_refresh": "インストール後に更新するか、スキップしてワークスペースに入ってください。",
-    "start_exploring": "探索を始める"
+    "continue": "Mika と始める"
   },
   "step_platform": {
     "eyebrow": "コンピュータを接続",
     "headline": "エージェントを実行するコンピュータを接続しましょう。",
-    "lede": "エージェントは、Multica に接続した実際のコンピュータで実行されます。どう接続するかを選んでください。",
+    "lede": "このワークスペースの参謀長である Mika は、Multica に接続した実際のコンピュータで動きます。どう接続するかを選んでください。",
     "hint_default": "接続方法を選んでください。スキップしてあとでコンピュータを接続することもできます。",
-    "hint_downloaded": "ダウンロードページでセットアップを完了したら、このタブに戻ってください。",
     "download_title": "このコンピュータを使う",
-    "download_title_after": "ダウンロードページを開いています…",
-    "download_subtitle": "デスクトップアプリをインストールして、このコンピュータを接続します。設定不要 — 次のページでプラットフォームを選ぶだけです。",
-    "download_subtitle_after": "新しいタブで開きました。そこでインストーラーを選び、デスクトップでセットアップを完了してください。",
+    "download_subtitle": "デスクトップアプリをインストールして、このコンピュータを接続します。新しいタブで開くので、そこでプラットフォームを選んでください。",
     "download_button": "ダウンロード",
     "cli_title": "ターミナルから接続",
     "cli_subtitle": "サーバー、リモート開発環境、ヘッドレスなコンピュータを接続します。ターミナルが必要です。",
@@ -328,6 +258,13 @@
     "stage_stalled_suffix": "のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。"
   },
   "errors": {
-    "skip_failed": "オンボーディングを完了できませんでした"
+    "skip_failed": "オンボーディングを完了できませんでした",
+    "mika_setup_failed": "Mika ワークスペースを開始できませんでした"
+  },
+  "mika_intro": {
+    "headline": "最初のエージェント仲間、Mika を紹介します。",
+    "name": "Mika",
+    "role": "参謀長",
+    "blurb": "やりたいことを Mika に伝えると、タスクになり、適したエージェントが担当します。"
   }
 }

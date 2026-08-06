@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -80,6 +81,63 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	want := []string{"daemon", "start", "--foreground", "--codex-handshake-timeout", (42 * time.Second).String()}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+// TestBuildDaemonStartArgsForwardsNoAutoReload matters because `daemon start`
+// re-execs itself as a foreground child: a flag the parent parsed but doesn't
+// forward is silently dropped, so the opt-out would appear to work and not.
+func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("no-auto-reload", false, "")
+	if err := cmd.Flags().Set("no-auto-reload", "true"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--no-auto-reload"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+// TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
+// every `daemon start` flag, and a knob registered on only one of them fails at
+// parse time for users who restart rather than start.
+func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
+		if cmd.Flags().Lookup("no-auto-reload") == nil {
+			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
+		}
+	}
+}
+
+// TestPrintDaemonStatusExplainsDeferredRestart: when the daemon has confirmed a
+// version change but is still busy, `daemon status` is where a user finds out.
+// The row is absent otherwise so it reads as an explanation, not a status line.
+func TestPrintDaemonStatusExplainsDeferredRestart(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]any{
+		"status":      "running",
+		"pid":         float64(1234),
+		"uptime":      "1h2m3s",
+		"cli_version": "0.3.7",
+	}
+
+	var idle bytes.Buffer
+	printDaemonStatusReport(&idle, "Daemon", base)
+	if strings.Contains(idle.String(), "Restart pending") {
+		t.Errorf("status output = %q, want no restart row when nothing is pending", idle.String())
+	}
+
+	base["reload_pending_reason"] = "multica binary on disk reports 0.3.8, running 0.3.7"
+	var pending bytes.Buffer
+	printDaemonStatusReport(&pending, "Daemon", base)
+	if !strings.Contains(pending.String(), "0.3.8") {
+		t.Errorf("status output = %q, want the pending restart reason", pending.String())
 	}
 }
 
@@ -739,5 +797,31 @@ func writeDiskUsageFile(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestVersionTemplateMatchesDaemonProbe pins a contract that spans two packages
+// and would otherwise break in silence.
+//
+// The daemon's auto-reload check runs `<binary> --version` and parses the result
+// back into a version string it compares against its own compile-time version
+// (MUL-3269). That only works while cobra's version template keeps rendering
+// "multica <version> ..." as its first line — a reasonable-looking edit here
+// would leave the daemon reading a version that never matches, restarting on
+// every check, and nothing else in the suite would notice.
+func TestVersionTemplateMatchesDaemonProbe(t *testing.T) {
+	tmpl, err := template.New("version").Parse(rootCmd.VersionTemplate())
+	if err != nil {
+		t.Fatalf("parse version template: %v", err)
+	}
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, rootCmd); err != nil {
+		t.Fatalf("render version template: %v", err)
+	}
+
+	if got := daemon.ParseSelfVersion(rendered.String()); got != version {
+		t.Fatalf("daemon.ParseSelfVersion(%q) = %q, want the build version %q — "+
+			"the --version template and the auto-reload probe have diverged",
+			rendered.String(), got, version)
 	}
 }

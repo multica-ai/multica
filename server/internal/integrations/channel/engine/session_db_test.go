@@ -214,6 +214,181 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	}
 }
 
+func TestBindMediaRefs_IssueAttachmentSurvivesChatSessionDeletion(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+	ctx := context.Background()
+
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Fix broken layout [Image]",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Fix broken layout', 'todo', 'none', 'member', $2, 1)
+		RETURNING id
+	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	const key = "workspaces/ws/lark/issue-image"
+	const url = "https://cdn.example.test/issue-image"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, key, url, "pending")
+	if err := session.BindMediaRefs(ctx, BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		IssueID:     issueID,
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: key,
+			StorageURL: url,
+			Filename:   "issue-image.png",
+			MimeType:   "image/png",
+			SizeBytes:  3,
+		}},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if _, exists := pendingMediaObjectState(t, pool, key); exists {
+		t.Fatal("issue bind must clear the intent row in the same transaction")
+	}
+
+	var attachmentID, gotIssueID pgtype.UUID
+	var chatSessionID, chatMessageID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT id, issue_id, chat_session_id, chat_message_id
+		FROM attachment
+		WHERE workspace_id = $1 AND url = $2
+	`, fixture.workspaceID, url).Scan(&attachmentID, &gotIssueID, &chatSessionID, &chatMessageID); err != nil {
+		t.Fatalf("load issue attachment: %v", err)
+	}
+	if gotIssueID != issueID || chatSessionID.Valid || chatMessageID.Valid {
+		t.Fatalf("attachment ownership = issue:%v session:%v message:%v", gotIssueID, chatSessionID, chatMessageID)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, fixture.sessionID); err != nil {
+		t.Fatalf("delete chat session: %v", err)
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE id = $1 AND issue_id = $2`, attachmentID, issueID).Scan(&remaining); err != nil {
+		t.Fatalf("count issue attachment after chat deletion: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("issue attachment rows after chat deletion = %d, want 1", remaining)
+	}
+}
+
+func TestIssueDeleteLockPreventsLateMediaBindFromOrphaningObject(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+	ctx := context.Background()
+
+	appendRes, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Delete while binding [Image]",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'Delete while binding', 'todo', 'none', 'member', $2, 2)
+		RETURNING id`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	const key = "workspaces/ws/lark/delete-race-image"
+	const url = "https://cdn.example.test/delete-race-image"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, key, url, "pending")
+
+	deleteTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin delete transaction: %v", err)
+	}
+	defer deleteTx.Rollback(ctx)
+	deleteQueries := db.New(pool).WithTx(deleteTx)
+	if _, err := deleteQueries.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
+		ID: issueID, WorkspaceID: fixture.workspaceID,
+	}); err != nil {
+		t.Fatalf("lock issue for delete: %v", err)
+	}
+
+	bindTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin bind transaction: %v", err)
+	}
+	defer bindTx.Rollback(ctx)
+	var bindPID int32
+	if err := bindTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&bindPID); err != nil {
+		t.Fatalf("load bind backend pid: %v", err)
+	}
+	bindResult := make(chan error, 1)
+	go func() {
+		_, lockErr := db.New(pool).WithTx(bindTx).LockIssueForChannelMediaBind(context.Background(), db.LockIssueForChannelMediaBindParams{
+			ID: issueID, WorkspaceID: fixture.workspaceID,
+		})
+		bindResult <- lockErr
+	}()
+
+	blocked := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if err := pool.QueryRow(ctx, `SELECT cardinality(pg_blocking_pids($1)) > 0`, bindPID).Scan(&blocked); err != nil {
+			t.Fatalf("inspect bind lock wait: %v", err)
+		}
+		if blocked {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("media bind did not block behind the delete lock")
+	}
+
+	urls, err := deleteQueries.ListAttachmentURLsByIssueOrComments(ctx, issueID)
+	if err != nil {
+		t.Fatalf("list attachment URLs under delete lock: %v", err)
+	}
+	if len(urls) != 0 {
+		t.Fatalf("attachment URLs before blocked bind = %v, want none", urls)
+	}
+	if err := deleteQueries.DeleteIssue(ctx, db.DeleteIssueParams{ID: issueID, WorkspaceID: fixture.workspaceID}); err != nil {
+		t.Fatalf("delete issue: %v", err)
+	}
+	if err := deleteTx.Commit(ctx); err != nil {
+		t.Fatalf("commit issue delete: %v", err)
+	}
+
+	select {
+	case err := <-bindResult:
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("bind lock after delete = %v, want no target row", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("media bind stayed blocked after delete commit")
+	}
+	if state, exists := pendingMediaObjectState(t, pool, key); !exists || state != "pending" {
+		t.Fatalf("intent after delete-first race = (%q, %v), want preserved pending", state, exists)
+	}
+	var attachmentCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attachment WHERE url = $1`, url).Scan(&attachmentCount); err != nil {
+		t.Fatalf("count leaked attachment rows: %v", err)
+	}
+	if attachmentCount != 0 {
+		t.Fatalf("attachment rows after delete-first race = %d, want 0", attachmentCount)
+	}
+}
+
 type failingLinkSessionQueries struct {
 	SessionQueries
 }

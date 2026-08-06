@@ -77,6 +77,51 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 }
 
+// TestHealthHandlerReportsDeferredReload covers the "while waiting to restart,
+// the reason and state are visible" criterion. When trySelfReload has confirmed
+// a multica version change but the daemon was busy at the barrier check, the
+// only way a user can tell why the daemon is still on the old version is this
+// field. It is omitempty, so an idle daemon must not emit the key at all.
+func TestHealthHandlerReportsDeferredReload(t *testing.T) {
+	t.Parallel()
+
+	newHealthProbe := func(t *testing.T) (*Daemon, func() map[string]any) {
+		t.Helper()
+		d := &Daemon{
+			cfg:        Config{CLIVersion: "0.3.7"},
+			workspaces: map[string]*workspaceState{},
+			logger:     slog.Default(),
+		}
+		d.ready.Store(true)
+		return d, func() map[string]any {
+			rec := httptest.NewRecorder()
+			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			var raw map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw response: %v", err)
+			}
+			return raw
+		}
+	}
+
+	t.Run("absent when nothing pending", func(t *testing.T) {
+		_, probe := newHealthProbe(t)
+		if _, present := probe()["reload_pending_reason"]; present {
+			t.Error("reload_pending_reason must be omitted when no restart is pending")
+		}
+	})
+
+	t.Run("explains a deferred restart", func(t *testing.T) {
+		d, probe := newHealthProbe(t)
+		d.setReloadPending("multica binary on disk reports 0.3.8, running 0.3.7")
+
+		got, _ := probe()["reload_pending_reason"].(string)
+		if !strings.Contains(got, "0.3.8") {
+			t.Errorf("reload_pending_reason = %q, want it to name the version on disk", got)
+		}
+	})
+}
+
 // TestHealthHandlerReportsStartingUntilReady pins the liveness/readiness split:
 // the health server binds and answers before preflight finishes, but it must
 // report "starting" until d.ready is set, and only then "running". Otherwise a

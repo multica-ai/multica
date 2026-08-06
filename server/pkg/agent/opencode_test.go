@@ -982,6 +982,33 @@ func TestOpencodeProcessEventsToolErrorThenCleanFinish(t *testing.T) {
 	}
 
 	close(ch)
+	var msgs []Message
+	for msg := range ch {
+		msgs = append(msgs, msg)
+	}
+
+	var toolUses, toolResults int
+	var failedToolResult *Message
+	for i := range msgs {
+		switch msgs[i].Type {
+		case MessageToolUse:
+			toolUses++
+		case MessageToolResult:
+			toolResults++
+			if msgs[i].CallID == "functions.read:1" {
+				failedToolResult = &msgs[i]
+			}
+		}
+	}
+	if toolUses != 2 || toolResults != 2 {
+		t.Fatalf("tool messages are not paired: tool_use=%d tool_result=%d (%+v)", toolUses, toolResults, msgs)
+	}
+	if failedToolResult == nil {
+		t.Fatal("missing tool_result for failed read tool")
+	}
+	if failedToolResult.Output != "File not found: /nonexistent-path-xyz/also-missing.md" {
+		t.Errorf("failed tool output: got %q", failedToolResult.Output)
+	}
 }
 
 // ── Windows native-binary resolution tests ──

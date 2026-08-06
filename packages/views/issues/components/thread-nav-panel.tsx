@@ -223,7 +223,7 @@ function ThreadRow({
       onPointerEnter={() => onHover(thread.id)}
       onPointerLeave={() => onHover(null)}
       className={cn(
-        "relative flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors",
+        "relative flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left outline-none transition-colors",
         "hover:bg-surface-hover data-active:bg-surface-hover",
       )}
     >
@@ -248,7 +248,7 @@ function ThreadRow({
             {formatStamp(prepared.thread.entry.created_at, prepared.group)}
           </span>
         </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
+        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
           <span className="shrink-0">{authorName}</span>
           {thread.replyCount > 0 && (
             <span className="flex shrink-0 items-center gap-0.5 tabular-nums text-faint-foreground">
@@ -574,10 +574,20 @@ export function ThreadNavPanel({
         // pinned. Pointer-entry alone deliberately does not: a glide across
         // the panel on the way somewhere else should not leave it stuck open.
         onFocusCapture={pinned ? undefined : pin}
-        className="flex w-[380px] flex-col gap-0 p-0"
+        // Every band insets its content to the same 14px: the search icon and
+        // the footer sit at px-3.5, while the pill row and the list reach it as
+        // container padding + item padding (6 + 8). At 10 / 18 / 12 the three
+        // bands were close enough to read as a mistake and far enough apart to
+        // see, which is what made the panel feel unsettled rather than dense.
+        // 400px rather than 380 so the wider inset costs no excerpt width.
+        className="flex w-[400px] flex-col gap-0 p-0"
       >
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2.5">
-          <Search className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
+        {/* Search and filters are one header block, so the rule that used to
+            sit between them is gone: at three dividers a 380px popover read as
+            stacked bands rather than as one surface, and the filter row was the
+            thinnest band of the three. */}
+        <div className="flex h-11 shrink-0 items-center gap-2.5 px-3.5">
+          <Search className="size-4 shrink-0 text-faint-foreground" />
           <input
             ref={searchRef}
             role="combobox"
@@ -600,7 +610,10 @@ export function ThreadNavPanel({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+        {/* This divider stays: it is the top edge of a scroll region, and
+            without it the list slides under the pills with nothing marking the
+            boundary. */}
+        <div className="flex shrink-0 items-center gap-1 border-b border-border px-1.5 py-2">
           {filterPills.map((pill) => (
             <button
               key={pill.id}
@@ -611,7 +624,7 @@ export function ThreadNavPanel({
               }}
               data-active={filter === pill.id || undefined}
               className={cn(
-                "flex h-6 items-center gap-1 rounded-full px-2.5 text-caption text-muted-foreground transition-colors",
+                "flex h-7 items-center gap-1 rounded-full px-2 text-caption text-muted-foreground transition-colors",
                 "hover:bg-surface-hover",
                 "data-active:bg-surface-selected data-active:font-medium data-active:text-foreground data-active:hover:bg-surface-selected",
               )}
@@ -630,10 +643,10 @@ export function ThreadNavPanel({
           // Scrolling is an intent signal: the reader is working the list, so
           // the panel should survive the pointer leaving afterwards.
           onScroll={pinned ? undefined : pin}
-          className="max-h-[26rem] min-h-0 flex-1 overflow-y-auto p-1"
+          className="max-h-[26rem] min-h-0 flex-1 overflow-y-auto p-1.5"
         >
           {rows.length === 0 ? (
-            <p className="px-2 py-6 text-center text-caption text-muted-foreground">
+            <p className="px-2 py-8 text-center text-caption text-muted-foreground">
               {t(($) => $.detail.thread_nav.empty)}
             </p>
           ) : (
@@ -642,8 +655,11 @@ export function ThreadNavPanel({
               const showHeader = !prev || prev.group !== row.group;
               return (
                 <div key={row.thread.id}>
+                  {/* Asymmetric on purpose — a day label belongs to the group
+                      under it, so it sits closer to its own first row than to
+                      the previous group's last one. */}
                   {showHeader && (
-                    <p className="px-2 pb-0.5 pt-2 text-micro font-medium text-faint-foreground">
+                    <p className="px-2 pb-1 pt-3 text-micro font-medium text-faint-foreground">
                       {t(($) => $.detail.thread_nav.group[row.group])}
                     </p>
                   )}
@@ -665,7 +681,7 @@ export function ThreadNavPanel({
             same keys the sidebar, command palette, and confirm dialogs draw —
             real keycap chrome and the platform's own glyphs, not arrows typed
             into a translation string. */}
-        <div className="flex h-8 shrink-0 items-center gap-3 border-t border-border px-2.5 text-micro text-muted-foreground">
+        <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border px-3.5 text-micro text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="flex items-center gap-0.5">
               <ShortcutKeycaps shortcut={KEY_UP} />
