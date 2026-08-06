@@ -1,6 +1,6 @@
 ---
 name: s3-scratchpad
-description: Use when a task needs to persist a file that outlives one issue comment, hand a human a downloadable link without a full attachment flow, or share a larger/multi-file artifact across the workspace. Covers uploading, listing, reading back, and presigning objects under this workspace's private agent-scratchpad/<slug>/ S3 prefix via the AWS CLI. Trigger on any task mentioning S3, scratchpad, shared drive, presigned link, or "share this file with a human".
+description: Use when a task needs to persist a file that outlives one issue comment, or share a larger/multi-file artifact across the workspace. Covers uploading, listing, reading back, and presigning objects under this workspace's private agent-scratchpad/<slug>/ S3 prefix via the AWS CLI. Trigger on any task mentioning S3, scratchpad, shared drive, presigned link, or "share this file with a human".
 ---
 
 # S3 Scratchpad Skill
@@ -41,8 +41,11 @@ Use this S3 scratchpad instead when:
 - the file is large enough that repeated attachment uploads are wasteful, or
 - a human needs a direct download link independent of the Multica UI.
 
-These are not mutually exclusive: it is fine to upload to the scratchpad and
-still drop a presigned link in a comment for visibility.
+These are not mutually exclusive: it is fine to upload to the scratchpad for
+durability and *also* attach the file to a comment for visibility. Note that
+"a human needs a direct download link" does **not** mean pasting a presigned
+URL into a comment — that does not survive delivery. See *Share a file with a
+human*, below.
 
 ## Verify identity (once per session, optional)
 
@@ -102,25 +105,66 @@ aws s3api get-object-attributes \
 Useful for picking the right file among several candidates before paying for
 a full download.
 
-## Share a file with a human (presigned link)
+## Share a file with a human — upload it, don't presign it
+
+**A presigned S3 URL does not survive delivery through Multica. Do not paste
+one into a comment or a chat reply.** Every agent-authored comment and chat
+body is passed through the platform's secret redactor
+(`server/pkg/redact`, applied in `server/internal/service/task.go`). One of
+its rules scrubs generic `TOKEN=<value>` patterns, and every presigned URL
+carries an `X-Amz-Security-Token=` query parameter — so the rule fires on
+your own link. Because the value pattern is `\S+`, it eats the token *and
+every query parameter after it*, leaving:
+
+```
+https://...&X-Amz-SignedHeaders=host&X-Amz-Security-[REDACTED CREDENTIAL]
+```
+
+`X-Amz-Signature` sits past that point, so the human receives an unsignable
+URL that returns an S3 error. This is silent from your side: `aws s3 presign`
+exited 0, and you cannot see the redacted form of your own output.
+
+Deliver the bytes instead. Download from the scratchpad, then hand the file to
+the surface's own attachment mechanism:
+
+```bash
+aws s3 cp "s3://g2-agentfarm-dev-uploads/agent-scratchpad/${WORKSPACE_SLUG}/report.pdf" ./report.pdf
+
+# on an issue:
+multica issue comment add <issue-id> --content-file ./body.md --attachment ./report.pdf
+# in a chat session:
+multica attachment upload ./report.pdf
+```
+
+Both produce an `https://agentfarm.g2.com/api/attachments/...` link with no
+signed query parameters, so there is nothing for the redactor to match. That
+link is also authenticated and outlives your session, which a presigned URL
+does not.
+
+**Do not try to route around the redactor.** Splitting the token across
+lines, base64-ing the URL, renaming the parameter, or posting the query
+string in fragments for the human to reassemble all defeat a deliberate
+security control — and the URL it protects grants unauthenticated read access
+to the object to anyone who ends up holding it. If a human explicitly asks
+for a presigned URL anyway, generate it, then tell them in words that the
+redactor will mangle it in this channel and offer the attachment instead.
+
+`aws s3 presign` is still the right tool when the URL is consumed inside your
+own run — handing it to a `curl` in a later step, or to a service that fetches
+by URL — where nothing redacts it:
 
 ```bash
 aws s3 presign "s3://g2-agentfarm-dev-uploads/agent-scratchpad/${WORKSPACE_SLUG}/report.pdf" --expires-in 900
 ```
 
-Paste the resulting `https://...` URL directly into an issue comment or chat
-— it is a normal external link and will not trip the local-path-link guard
-(that guard only blocks `file://` URLs and local filesystem paths, never
-`https://`).
-
-**Two independent clocks, and the shorter one wins.** `--expires-in` sets how
-long the *signature* is valid, but the signature is computed from this
-session's temporary IRSA/STS credentials — once those credentials themselves
-expire, the link stops working even if its own `--expires-in` window hasn't
-elapsed yet. Do not request a long `--expires-in` (hours) expecting a
-long-lived link on that basis alone. Keep it short — under an hour — and
-regenerate on demand if the human needs it again later; do not try to mint
-one durable link up front.
+**For that in-run use, two independent clocks apply and the shorter one
+wins.** `--expires-in` sets how long the *signature* is valid, but the
+signature is computed from this session's temporary IRSA/STS credentials —
+once those credentials themselves expire, the link stops working even if its
+own `--expires-in` window hasn't elapsed yet. Do not request a long
+`--expires-in` (hours) expecting a long-lived link on that basis alone. Keep
+it short — under an hour — and regenerate on demand; do not try to mint one
+durable link up front.
 
 ## What you cannot do here, and why
 
@@ -132,3 +176,7 @@ one durable link up front.
   `agent-scratchpad/${WORKSPACE_SLUG}/*` on this one bucket. This is enforced
   by IAM, not a client-side convention — attempting to reach outside it
   always fails with `AccessDenied`.
+- **No handing a presigned URL to a human through Multica.** The secret
+  redactor strips the signing parameters out of any comment or chat body you
+  write, and it does so silently. Attach the file instead — see *Share a file
+  with a human*, above.
