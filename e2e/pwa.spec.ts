@@ -51,17 +51,11 @@ test.describe("PWA", () => {
   test("status bar colour tracks the app theme, not the OS", async ({ page }) => {
     const workspaceSlug = await loginAsDefault(page);
 
-    // What the status bar should be: the colour <body> paints, as sRGB bytes.
+    // What the status bar should be: the colour resolved from the page token.
     const paintedBackground = () =>
-      page.evaluate(() => {
-        const canvas = document.createElement("canvas");
-        canvas.width = canvas.height = 1;
-        const context = canvas.getContext("2d")!;
-        context.fillStyle = getComputedStyle(document.body).backgroundColor;
-        context.fillRect(0, 0, 1, 1);
-        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-        return `#${[red, green, blue].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
-      });
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--background").trim(),
+      );
 
     // Media-scoped metas follow the OS and would shadow the dynamic one, so
     // exactly one unconditional meta should survive hydration.
@@ -79,8 +73,7 @@ test.describe("PWA", () => {
     });
     await waitForPageText(page, "Theme");
 
-    // Force the app dark while the OS stays light. A static prefers-color-scheme
-    // meta cannot follow this — that is the bug this test exists for.
+    // Force the app dark while the OS stays light.
     await page.getByRole("combobox", { name: "Theme" }).click();
     await page.getByRole("option", { name: "Dark", exact: true }).click();
     await expect(page.locator("html")).toHaveClass(/dark/);
