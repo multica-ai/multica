@@ -1,4 +1,4 @@
-// Package wecom is the WeChat Work (企业微信) smart-bot ("智能机器人" / aibot)
+// Package wecom is the WeCom (企业微信) smart-bot ("智能机器人" / aibot)
 // adapter for the channel-agnostic inbound engine (MUL-3620). It plugs into the
 // same engine.Router / ResolverSet as Feishu and Slack.
 //
@@ -10,7 +10,7 @@
 // aibot_send_msg / aibot_respond_msg / aibot_upload_media_* over the same
 // socket. No public callback URL is required.
 //
-// One installation = one bot = one WebSocket. WeChat allows only one active
+// One installation = one bot = one WebSocket. WeCom allows only one active
 // connection per bot; a second connection kicks the first with a
 // disconnected_event. That single-active-connection guarantee lines up with
 // engine.Supervisor's WS lease, so the multi-replica invariant (at most one
@@ -57,7 +57,7 @@ type Installation struct {
 	InstallerUserID pgtype.UUID
 	Status          InstallationStatus
 
-	// BotID is the smart-bot identifier the WeChat Work admin console
+	// BotID is the smart-bot identifier the WeCom admin console
 	// assigns at bot creation. It is BOTH the auth identity presented in
 	// the aibot_subscribe frame AND the routing key we persist as
 	// config->>'app_id' so GetChannelInstallationByAppID resolves an

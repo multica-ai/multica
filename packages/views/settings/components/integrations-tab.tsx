@@ -17,7 +17,7 @@ import { SettingsSection, SettingsTab } from "./settings-layout";
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
 // — currently Lark, Composio, Slack, the self-hosted Git providers (Forgejo /
-// Gitea / GitLab), and WeChat Work smart-bot, with Linear etc. to follow —
+// Gitea / GitLab), and WeCom smart-bot, with Linear etc. to follow —
 // lives in here under its own section heading so additional integrations slot
 // in without changing the IA. IntegrationsTab is just the host; each
 // integration owns its own description and install flow.

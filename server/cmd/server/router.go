@@ -639,7 +639,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// WebSocket long connection to wss://openws.work.weixin.qq.com; the
 	// Supervisor drives one connection per active wecom installation, gated
 	// by the shared ws_lease_token so multi-replica deployments still hold
-	// at most one active socket per bot (WeChat itself only permits one).
+	// at most one active socket per bot (WeCom itself only permits one).
 	//
 	// Gated by MULTICA_WECOM_SECRET_KEY. Without it, the whole block is
 	// skipped and the wecom Web-UI endpoints return 503; existing deployments
@@ -705,7 +705,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// back over the same aibot WebSocket the inbound loop owns.
 				// Mirrors slack.NewOutbound(...).Register(bus). Without it
 				// the agent's reply lands only in Multica's web UI — the
-				// user in WeChat Work sees no response.
+				// user in WeCom sees no response.
 				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")

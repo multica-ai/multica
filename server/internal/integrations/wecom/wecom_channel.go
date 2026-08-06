@@ -1,7 +1,7 @@
 package wecom
 
 // wecom_channel.go — the Channel + Factory the engine.Supervisor drives, plus
-// the WebSocket run loop for one aibot smart-bot connection. WeChat allows
+// the WebSocket run loop for one aibot smart-bot connection. WeCom allows
 // only one active connection per bot; the Supervisor's WS lease enforces
 // that same "at most one per replica" invariant at the process layer, so the
 // combination gives us a single global connection per installation without
@@ -32,13 +32,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// DefaultWSURL is the aibot long-connection endpoint. WeChat publishes a
+// DefaultWSURL is the aibot long-connection endpoint. WeCom publishes a
 // single global endpoint for every bot; the (bot_id, secret) pair carried in
 // the aibot_subscribe frame after the WS handshake identifies which bot the
 // connection belongs to.
 const DefaultWSURL = "wss://openws.work.weixin.qq.com"
 
-// pingInterval is the client-driven heartbeat cadence. WeChat's docs
+// pingInterval is the client-driven heartbeat cadence. WeCom's docs
 // prescribe 30s; below that they may kill the socket, above that we spam.
 const pingInterval = 30 * time.Second
 
@@ -85,7 +85,7 @@ func (c *wecomChannel) Type() channel.Type { return TypeWecom }
 
 // Capabilities declares what the aibot adapter supports today. Text is the
 // only fully wired capability; attachments arrive as MsgTypeImage / File /
-// Audio / Video but we do not yet download the media (WeChat's aibot API
+// Audio / Video but we do not yet download the media (WeCom's aibot API
 // requires an additional aibot_upload_media_* dance to send back media).
 func (c *wecomChannel) Capabilities() channel.Capability {
 	return channel.CapText
@@ -170,7 +170,7 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 		defer c.senders.clear(c.installationID)
 	}
 
-	// Heartbeat — WeChat kills silent sockets past ~90s. We ping every 30s
+	// Heartbeat — WeCom kills silent sockets past ~90s. We ping every 30s
 	// via the shared writer mutex so it interleaves cleanly with other
 	// outbound frames.
 	pingCtx, pingCancel := context.WithCancel(ctx)
@@ -283,7 +283,7 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			// (voice / image / file) silently — which reads as a broken bot —
 			// answer the same chat with a one-line "text only" receipt, then
 			// stop. Media routing, and dedup'd receipts that never double-answer
-			// a WeChat delivery retry, are a follow-up. Best-effort: a send
+			// a WeCom delivery retry, are a follow-up. Best-effort: a send
 			// failure degrades to the prior silent drop.
 			log.Debug("wecom: non-text message, replying text-only", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
 			if err := sender.sendText(msg.Source.ChatID, aibotChatTypeFromChannel(msg.Source.ChatType), "抱歉，我目前只能处理文字消息。"); err != nil {

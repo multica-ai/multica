@@ -42,7 +42,7 @@ const (
 	eventFeedback     = "feedback_event"
 )
 
-// aibot receiver kinds for aibot_send_msg. WeChat uses ints, not strings.
+// aibot receiver kinds for aibot_send_msg. WeCom uses ints, not strings.
 const (
 	chatTypeSingleInt = 1
 	chatTypeGroupInt  = 2
@@ -106,7 +106,7 @@ type InboundMessage struct {
 	// is the routing key the installation resolver uses.
 	BotID string `json:"bot_id"`
 
-	// MsgID is the WeChat per-message identifier used for two-phase dedup.
+	// MsgID is the WeCom per-message identifier used for two-phase dedup.
 	MsgID string `json:"msg_id,omitempty"`
 
 	// MsgType is the raw wecom type ("text", "image", "event", ...). Media
@@ -146,7 +146,7 @@ type InboundMessage struct {
 //   - group  → ChatType=group, ChatID=chatid,  SenderID=from.userid
 //
 // A user @-mentioning the bot in a group is not distinguishable from a raw
-// group message on the wire — WeChat only forwards to the bot when it was
+// group message on the wire — WeCom only forwards to the bot when it was
 // addressed, so any received group message counts as addressed.
 func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string) channel.InboundMessage {
 	chatType := channel.ChatTypeP2P
@@ -178,7 +178,7 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		Type:           channelMsgType(mc.MsgType),
 		Text:           mc.Text.Content,
 		AddressedToBot: true,
-		// A pure /issue command in WeChat Work should NOT trigger the
+		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
 		// OutboundReplier already sends "✅ 已创建 #N". Letting the agent
 		// see "/issue foo" then produces a "I don't recognize this slash
@@ -252,7 +252,7 @@ func subscribeBody(botID, secret string) map[string]any {
 // content. aibot_send_msg's supported msgtypes are markdown and
 // template_card only — text is NOT accepted on this cmd (contrast
 // aibot_respond_msg, which does accept text). We therefore ship as
-// markdown; the WeChat client renders plain text through the markdown
+// markdown; the WeCom client renders plain text through the markdown
 // path without any special escaping. chatType is 1 for single, 2 for
 // group.
 func sendMsgTextBody(chatID string, chatType int, content string) (map[string]any, error) {

@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 )
 
-// aibot markdown size cap. Enterprise WeChat rejects the whole frame if we
+// aibot markdown size cap. WeCom rejects the whole frame if we
 // push more than ~4096 chars, so we truncate the body on that budget. We
 // use 4000 to leave headroom for the prefix + link suffix.
 const inboxMarkdownMaxLen = 4000

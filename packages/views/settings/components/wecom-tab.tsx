@@ -36,7 +36,7 @@ import type { WecomInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
-// WecomTab is the workspace settings panel for WeChat Work smart-bot
+// WecomTab is the workspace settings panel for WeCom smart-bot
 // installations. Listing is member-visible; the disconnect action is
 // admin-only (the backend enforces it; the UI hides the button for non-
 // admins to match).
@@ -233,7 +233,7 @@ function InstallationRow({
 // WecomAgentBindButton is the per-agent CTA exposed from the agent detail
 // page. Wecom smart-bot uses the bring-your-own-bot model: the button opens
 // a dialog where the admin pastes the bot's stable identifier (bot_id) and
-// its long-connection secret from the WeChat Work admin console.
+// its long-connection secret from the WeCom admin console.
 // Visibility:
 //   1. Non-owner/admin viewers see nothing (the backend gates install/revoke).
 //   2. If this agent already has an active installation, show the connected

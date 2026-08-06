@@ -1,6 +1,6 @@
 package handler
 
-// wecom_web.go — the Web-UI-facing management endpoints for the WeChat Work
+// wecom_web.go — the Web-UI-facing management endpoints for the WeCom
 // smart-bot ("智能机器人" / aibot) integration. Parallel of slack.go: it
 // exposes list / install / revoke over JSON so the Settings page and per-
 // agent Integrations tab can drive wecom.InstallationService.Upsert /
@@ -171,7 +171,7 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 		default:
 			slog.Warn("wecom install failed",
 				"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
-			writeError(w, http.StatusBadRequest, "could not connect the WeCom bot — check the Bot ID and secret from the WeChat Work admin console, and that the bot is a smart bot with the long connection enabled")
+			writeError(w, http.StatusBadRequest, "could not connect the WeCom bot — check the Bot ID and secret from the WeCom admin console, and that the bot is a smart bot with the long connection enabled")
 		}
 		return
 	}

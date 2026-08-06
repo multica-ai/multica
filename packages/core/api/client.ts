@@ -3526,7 +3526,7 @@ export class ApiClient {
       { endpoint: "POST /api/dingtalk/binding/redeem" },
     );
   }
-  // WeChat Work smart-bot ("智能机器人" / aibot) integration. The bot dials a
+  // WeCom smart-bot ("智能机器人" / aibot) integration. The bot dials a
   // WebSocket long connection to wss://openws.work.weixin.qq.com and stays
   // authenticated with (bot_id, secret); no public callback URL is required.
   // These three methods drive the Settings-page BYO Connect dialog + list +
@@ -3536,7 +3536,7 @@ export class ApiClient {
   }
 
   // registerWecomBYO performs a bring-your-own-app install: the admin pastes
-  // the bot id and long-connection secret from the WeChat Work admin console,
+  // the bot id and long-connection secret from the WeCom admin console,
   // and the backend seals the secret with MULTICA_WECOM_SECRET_KEY before
   // persisting, returning the new installation.
   async registerWecomBYO(
@@ -3560,7 +3560,7 @@ export class ApiClient {
   // redeemWecomBindingToken binds the WeCom aibot userid carried by the
   // token to the logged-in Multica user. Called by the /wecom/bind redeem
   // page after the user clicks through the "link your Multica account"
-  // prompt the bot sent in WeChat Work. Status codes:
+  // prompt the bot sent in WeCom. Status codes:
   //   410 Gone      → invalid / expired / already consumed
   //   409 Conflict  → the WeCom user is already bound to a different user
   //   403 Forbidden → the logged-in user is not a workspace member

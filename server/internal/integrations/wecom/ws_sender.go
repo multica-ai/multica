@@ -38,7 +38,7 @@ type Dialer interface {
 // defaultDialer is the production Dialer. Proxy is set explicitly because a
 // zero-valued websocket.Dialer has a nil Proxy and ignores the environment,
 // unlike websocket.DefaultDialer — and self-hosted deployments behind a
-// corporate egress proxy reach the WeChat Work endpoint only through
+// corporate egress proxy reach the WeCom endpoint only through
 // HTTPS_PROXY.
 var defaultDialer Dialer = gorillaDialer{d: &websocket.Dialer{
 	HandshakeTimeout: handshakeTimeout,

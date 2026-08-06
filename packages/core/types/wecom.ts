@@ -1,5 +1,5 @@
 /**
- * A WeChat Work smart-bot ("智能机器人" / aibot) installation bound to a single
+ * A WeCom smart-bot ("智能机器人" / aibot) installation bound to a single
  * Multica agent. Wire shape mirrors `WecomInstallationResponse` in
  * `server/internal/handler/wecom_web.go`. Any new field the backend adds MUST
  * default to optional so older desktop builds keep parsing the response — see
@@ -9,7 +9,7 @@ export interface WecomInstallation {
   id: string;
   workspace_id: string;
   agent_id: string;
-  /** The smart-bot identifier assigned by the WeChat Work admin console. */
+  /** The smart-bot identifier assigned by the WeCom admin console. */
   bot_id: string;
   installer_user_id: string;
   status: "active" | "revoked" | string;
@@ -28,7 +28,7 @@ export interface ListWecomInstallationsResponse {
 }
 
 /** Request body for the Web UI's BYO Connect dialog. Two fields, both copied
- * from the WeChat Work admin console's smart-bot page: the bot's stable
+ * from the WeCom admin console's smart-bot page: the bot's stable
  * identifier and its long-connection secret. The backend seals the secret
  * with the deployment's MULTICA_WECOM_SECRET_KEY before writing it, so
  * plaintext never lands in the DB. */

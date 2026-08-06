@@ -21,14 +21,14 @@ import (
 )
 
 // InstallationParams is the plaintext-bearing input to InstallationService.
-// The caller supplies the raw (BotID, Secret) pair from the WeChat Work
+// The caller supplies the raw (BotID, Secret) pair from the WeCom
 // admin console; the service seals Secret before it touches the DB.
 type InstallationParams struct {
 	WorkspaceID     pgtype.UUID
 	AgentID         pgtype.UUID
 	InstallerUserID pgtype.UUID
 
-	// BotID is the smart-bot identifier shown on the WeChat Work admin
+	// BotID is the smart-bot identifier shown on the WeCom admin
 	// console. Stable per-bot; used as both auth identity in the subscribe
 	// frame and the routing key persisted at config->>'app_id'.
 	BotID string
@@ -144,7 +144,7 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 // instead. Without these the admin reads the raw Postgres text
 // ("duplicate key value violates unique constraint …") in a toast.
 //
-// One bot is one connection: the WeChat Work long connection allows a single
+// One bot is one connection: the WeCom long connection allows a single
 // live subscriber per bot, so two agents cannot share one. The way out is
 // always to free the bot first, which is what each message says.
 var (
@@ -248,7 +248,7 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 }
 
 // validateInstallationParams is a lightweight pre-write check for
-// required fields. It does NOT verify anything against WeChat.
+// required fields. It does NOT verify anything against WeCom.
 func validateInstallationParams(p InstallationParams) error {
 	if !p.WorkspaceID.Valid {
 		return errors.New("wecom: workspace_id is required")

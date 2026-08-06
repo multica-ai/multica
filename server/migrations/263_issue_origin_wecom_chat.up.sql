@@ -1,4 +1,4 @@
--- Extend issue.origin_type to allow the WeChat Work smart-bot (aibot) `/issue`
+-- Extend issue.origin_type to allow the WeCom smart-bot (aibot) `/issue`
 -- command path to stamp issues with origin_type='wecom_chat' + origin_id=
 -- <chat_session.id>. Mirrors 111_issue_origin_lark_chat and
 -- 131_issue_origin_slack_chat — same origin_id semantics (the chat_session
