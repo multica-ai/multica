@@ -1,0 +1,453 @@
+{
+  "page": {
+    "title": "Автопілот",
+    "new_autopilot": "Новий автопілот",
+    "start_blank": "Почати з нуля",
+    "table": {
+      "name": "Назва",
+      "agent": "Агент",
+      "created_by": "Автор",
+      "mode": "Режим",
+      "status": "Статус",
+      "last_run": "Останній запуск",
+      "assignee": "Виконавець",
+      "trigger": "Тригер",
+      "next_run": "Наступний запуск",
+      "created": "Створено"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "Автопілотів поки немає",
+      "hint": "Плануйте повторювані задачі для ваших AI-агентів. Оберіть шаблон або почніть з нуля."
+    },
+    "scope_all": "Усі",
+    "no_matches": "Немає автоматизацій за цими критеріями",
+    "retry": "Повторити"
+  },
+  "status": {
+    "active": "Активний",
+    "paused": "Призупинений",
+    "archived": "Архівований"
+  },
+  "execution_mode": {
+    "create_issue": "Створити задачу",
+    "run_only": "Лише запуск"
+  },
+  "relative_date": {
+    "today": "Сьогодні",
+    "one_day_ago": "1 д тому",
+    "days_ago": "{{count}} д тому",
+    "months_ago": "{{count}} міс тому"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Щоденний дайджест новин",
+      "summary": "Пошук і підсумок сьогоднішніх новин для команди"
+    },
+    "pr_review": {
+      "title": "Нагадування про рев'ю PR",
+      "summary": "Позначати застарілі pull request'и, що чекають на рев'ю"
+    },
+    "bug_triage": {
+      "title": "Тріаж багів",
+      "summary": "Оцінка та пріоритезація нових баг-репортів"
+    },
+    "weekly_progress": {
+      "title": "Щотижневий звіт про прогрес",
+      "summary": "Складання щотижневого підсумку прогресу команди"
+    },
+    "dependency_audit": {
+      "title": "Аудит залежностей",
+      "summary": "Сканування на вразливості безпеки та застарілі пакети"
+    },
+    "documentation_check": {
+      "title": "Перевірка документації",
+      "summary": "Перегляд нещодавніх змін на предмет прогалин у документації"
+    }
+  },
+  "detail": {
+    "not_found": "Автопілот не знайдено",
+    "pause_aria": "Призупинити автопілот",
+    "activate_aria": "Активувати автопілот",
+    "edit": "Редагувати",
+    "run_now": "Запустити зараз",
+    "running": "Виконується...",
+    "toast_triggered": "Автопілот запущено",
+    "toast_trigger_failed": "Не вдалося запустити автопілот",
+    "run_blocked_invocation_not_allowed": "Не запущено — у вас немає дозволу використовувати агента цього автопілота",
+    "run_blocked_runtime_offline": "Не запущено — рантайм агента офлайн",
+    "run_blocked_target_unavailable": "Не запущено — агент недоступний",
+    "run_blocked_attribution": "Не запущено — не вдалося визначити відповідального учасника для запуску",
+    "run_blocked_already_active": "Не запущено — нещодавній запуск уже покриває це",
+    "run_blocked_generic": "Не запущено — запуск було заблоковано",
+    "section_properties": "Властивості",
+    "section_triggers": "Тригери",
+    "section_run_history": "Історія запусків",
+    "section_danger": "Небезпечна зона",
+    "field_agent": "Агент",
+    "field_created_by": "Автор",
+    "field_output_mode": "Режим виводу",
+    "field_project": "Проєкт",
+    "no_project": "Без проєкту",
+    "project_unavailable": "Проєкт недоступний",
+    "field_prompt": "Промпт",
+    "field_subscribers": "Підписники",
+    "field_subscribers_none": "Немає",
+    "add_trigger": "Додати тригер",
+    "no_triggers": "Тригери не налаштовано. Додайте розклад для автоматичного запуску.",
+    "no_runs": "Запусків поки немає. Натисніть «Запустити зараз», щоб запустити вручну.",
+    "delete_button": "Видалити автопілот",
+    "toast_deleted": "Автопілот видалено",
+    "toast_delete_failed": "Не вдалося видалити автопілот",
+    "delete_dialog": {
+      "title": "Видалити автопілот",
+      "description": "Це назавжди видалить \"{{title}}\" разом із тригерами та історією запусків. Цю дію не можна скасувати.",
+      "cancel": "Скасувати",
+      "confirm": "Видалити",
+      "deleting": "Видалення..."
+    }
+  },
+  "access": {
+    "title": "Керувати доступом",
+    "description": "Учасники, яких ви додасте, зможуть редагувати, запускати цей автопілот та керувати його тригерами й вебхуками.",
+    "current_label": "З доступом",
+    "add": "Додати учасника",
+    "search_placeholder": "Пошук учасників…",
+    "no_results": "Учасників не знайдено",
+    "remove_tooltip": "Забрати доступ",
+    "empty": "Доступ поки нікому не надано.",
+    "toast_granted": "Доступ надано",
+    "toast_revoked": "Доступ забрано",
+    "toast_failed": "Не вдалося оновити доступ",
+    "owner_note": "Автор і адміністратори робочого простору завжди мають доступ."
+  },
+  "run_status": {
+    "issue_created": "Задачу створено",
+    "running": "Виконується",
+    "skipped": "Пропущено",
+    "completed": "Завершено",
+    "failed": "Помилка"
+  },
+  "run_source": {
+    "schedule": "Розклад",
+    "manual": "Вручну",
+    "webhook": "Вебхук",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "Задачу прив'язано",
+    "view_log": "Переглянути журнал виконання",
+    "skipped_group": {
+      "label": "Пропущено",
+      "summary": "Пропущених запусків: {{count}}"
+    }
+  },
+  "webhook_payload": {
+    "label": "Подія вебхука:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Копіювати",
+    "copied": "Payload вебхука скопійовано",
+    "copied_short": "Скопійовано",
+    "copy_failed": "Не вдалося скопіювати",
+    "truncated_marker": "[обрізано — натисніть «Копіювати», щоб отримати повний payload]"
+  },
+  "trigger_kind": {
+    "schedule": "Розклад",
+    "webhook": "Вебхук",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "Вимкнено",
+    "deprecated_badge": "Застаріло",
+    "next_label": "Наступний: {{date}}",
+    "webhook_url_label": "URL вебхука",
+    "copy_url": "Копіювати URL",
+    "url_copied": "URL вебхука скопійовано",
+    "url_copy_failed": "Не вдалося скопіювати",
+    "rotate_url": "Змінити URL",
+    "rotate_confirm_title": "Змінити URL вебхука",
+    "rotate_confirm_description": "Поточний URL негайно перестане працювати. Усі зовнішні системи, які його викликають, потрібно буде оновити новим URL. Продовжити?",
+    "rotate_confirm_cancel": "Скасувати",
+    "rotate_confirm_action": "Змінити URL",
+    "rotate_in_progress": "Зміна...",
+    "toast_rotated": "URL вебхука змінено",
+    "toast_rotate_failed": "Не вдалося змінити URL",
+    "toast_deleted": "Тригер видалено",
+    "toast_delete_failed": "Не вдалося видалити тригер",
+    "delete_dialog": {
+      "title": "Видалити тригер",
+      "description": "Цей тригер буде видалено, і автопілот перестане запускатися за цим розкладом. Цю дію не можна скасувати.",
+      "cancel": "Скасувати",
+      "confirm": "Видалити",
+      "deleting": "Видалення..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Доставки вебхуків",
+    "empty": "Доставок вебхуків поки немає. Надішліть POST на URL вебхука, щоб побачити записи тут.",
+    "row": {
+      "attempts": "Спроб: {{count}}",
+      "replay_badge": "Повтор"
+    },
+    "status": {
+      "queued": "У черзі",
+      "dispatched": "Відправлено",
+      "rejected": "Відхилено",
+      "ignored": "Проігноровано",
+      "failed": "Помилка"
+    },
+    "signature": {
+      "not_required": "Без підпису",
+      "valid": "Підпис дійсний",
+      "invalid": "Підпис недійсний",
+      "missing": "Підпис відсутній"
+    },
+    "detail": {
+      "title": "Доставка",
+      "received_at": "Отримано",
+      "last_attempt_at": "Остання спроба",
+      "attempt_count": "Спроби",
+      "dispatch_attempts": "Спроби відправлення",
+      "available_at": "Наступне відправлення",
+      "response_status": "Відповідь",
+      "dedupe_key": "Ключ дедуплікації",
+      "dedupe_source": "Джерело дедуплікації",
+      "content_type": "Content-Type",
+      "replayed_from": "Повторено з",
+      "error_label": "Помилка",
+      "raw_body": "Сире тіло запиту",
+      "selected_headers": "Заголовки",
+      "response_body": "Тіло відповіді"
+    },
+    "replay": {
+      "action": "Повторити",
+      "in_progress": "Повторення...",
+      "toast_success": "Доставку повторено",
+      "toast_failed": "Повтор не вдався",
+      "disabled_invalid_signature": "Не можна повторити — підпис був недійсним",
+      "disabled_rejected": "Не можна повторити відхилену доставку",
+      "disabled_queued": "Ще в черзі — повторіть, коли обробка завершиться"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Додати тригер",
+    "type_label": "Тип",
+    "type_schedule": "Розклад",
+    "type_webhook": "Вебхук",
+    "label_field": "Мітка (необов'язково)",
+    "label_placeholder": "напр. Будні вранці",
+    "webhook_help": "Multica згенерує URL вебхука після збереження. Надішліть на нього POST з будь-яким JSON, щоб запустити цей автопілот.",
+    "submit": "Додати тригер",
+    "submitting": "Додавання...",
+    "toast_added_schedule": "Тригер за розкладом додано",
+    "toast_added_webhook": "Вебхук-тригер додано",
+    "toast_add_failed": "Не вдалося додати тригер"
+  },
+  "dialog": {
+    "sr_create": "Новий автопілот",
+    "sr_edit": "Редагувати автопілот",
+    "header_create": "Новий автопілот",
+    "header_edit": "Редагувати автопілот",
+    "subtitle": "Повторювана AI-задача",
+    "expand": "Розгорнути",
+    "collapse": "Згорнути",
+    "close": "Закрити",
+    "title_placeholder": "Назва автопілота",
+    "runbook_label": "Ранбук",
+    "runbook_hint": "Агент читає його на кожному запуску",
+    "description_placeholder": "# Мета\nЩо має зробити агент?\n\n# Контекст\nДля кого це? Які обмеження?\n\n# Кроки\n1. …\n2. …",
+    "auto_run_hint": "Після збереження запускається автоматично, доки не буде призупинено.",
+    "cancel": "Скасувати",
+    "create": "Створити автопілот",
+    "save": "Зберегти",
+    "creating": "Створення...",
+    "saving": "Збереження...",
+    "toast_created": "Автопілот створено",
+    "toast_create_partial": "Автопілот створено, але розклад не вдалося зберегти",
+    "toast_create_partial_with_reason": "Автопілот створено, але розклад не вдалося зберегти: {{reason}}",
+    "toast_create_failed": "Не вдалося створити автопілот",
+    "toast_updated": "Автопілот оновлено",
+    "toast_update_partial": "Автопілот оновлено, але розклад не вдалося зберегти",
+    "toast_update_partial_with_reason": "Автопілот оновлено, але розклад не вдалося зберегти: {{reason}}",
+    "toast_update_failed": "Не вдалося оновити автопілот",
+    "section_agent": "Агент",
+    "section_assignee": "Виконавець",
+    "select_agent": "Оберіть агента",
+    "select_assignee": "Оберіть агента або сквод",
+    "section_project": "Проєкт",
+    "no_project": "Без проєкту",
+    "section_output_mode": "Режим виводу",
+    "section_subscribers": "Підписники",
+    "subscribers_hint": "Автоматично підписуються на кожну задачу, яку створює цей автопілот",
+    "subscribers_empty": "Немає підписників — додайте колегу, щоб сповіщати його про кожен запуск",
+    "subscribers_add": "Додати підписника",
+    "subscribers_search_placeholder": "Пошук учасників за іменем…",
+    "subscribers_no_results": "Немає відповідних учасників",
+    "subscribers_remove_tooltip": "Видалити",
+    "section_schedule": "Розклад",
+    "section_trigger_kind": "Тригер",
+    "trigger_kind_schedule": "Розклад",
+    "trigger_kind_webhook": "Вебхук",
+    "section_webhook": "Вебхук",
+    "webhook_help_create": "Multica згенерує URL вебхука після створення цього автопілота. Надішліть на цей URL POST з будь-яким JSON, щоб запустити його.",
+    "webhook_help_edit": "Цей автопілот запускається вебхуком. Керуйте URL (копіювання / зміна) на сторінці деталей автопілота.",
+    "webhook_created_title": "Вебхук-автопілот готовий",
+    "webhook_created_description": "Надішліть POST з будь-яким JSON на URL нижче, і автопілот запуститься. Скопіюйте його зараз — його також можна знайти та змінити на сторінці деталей автопілота.",
+    "webhook_created_warning": "Поводьтеся з цим URL як із паролем. Будь-хто, хто його має, може запустити автопілот.",
+    "webhook_created_done": "Готово",
+    "event_filter_label": "Фільтри подій",
+    "event_filter_docs_link_label": "Дізнатися, як працюють фільтри подій",
+    "event_filter_event_placeholder": "напр. workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "Обробляти лише вебхуки, що відповідають цим подіям. Залиште порожнім, щоб приймати всі.",
+    "schedule_disabled_reason": "Цей автопілот має кілька розкладів — редагуйте їх на сторінці деталей.",
+    "output_modes": {
+      "create_issue": {
+        "label": "Створити задачу",
+        "description": "Кожен запуск створює задачу для відстеження"
+      },
+      "run_only": {
+        "label": "Лише запуск",
+        "description": "Тихий запуск, без створення задачі"
+      }
+    }
+  },
+  "schedule_editor": {
+    "time_label": "Час",
+    "time_at": "У певний час",
+    "time_every": "З інтервалом",
+    "every_prefix": "Кожні",
+    "unit_hours": "годин",
+    "unit_minutes": "хвилин",
+    "days_label": "Дні",
+    "days_every": "Щодня",
+    "days_weekly": "Дні тижня",
+    "days_monthly": "День місяця",
+    "monthly_short_month_hint": "Місяці без дня {{day}} пропускаються.",
+    "days_short": {
+      "sun": "Нд",
+      "mon": "Пн",
+      "tue": "Вт",
+      "wed": "Ср",
+      "thu": "Чт",
+      "fri": "Пт",
+      "sat": "Сб"
+    },
+    "timezone_label": "Часовий пояс",
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "натисніть, щоб редагувати",
+    "cron_hint": "Стандартний 5-полевий cron (min hour dom month dow)",
+    "cron_invalid": "Цей cron-вираз недійсний.",
+    "timezone_invalid": "Сервер не розпізнає цей часовий пояс.",
+    "advanced_hint": "Цей вираз використовує можливості, які візуальний редактор не може відобразити. Редагуйте cron-текст напряму або спростіть його, щоб увімкнути елементи керування.",
+    "advanced_unverified": "Не вдалося зв'язатися з сервером для перевірки цього виразу, тому елементи керування вимкнені. Перед збереженням переконайтеся, що cron-текст правильний.",
+    "advanced_checking": "Перевіряємо цей вираз на сервері. Елементи керування вимкнені до відповіді.",
+    "next_runs_label": "Наступні запуски",
+    "next_in": "через {{countdown}}",
+    "preview_unavailable": "Наступні запуски зараз недоступні.",
+    "no_upcoming_runs": "Цей вираз не має майбутніх запусків.",
+    "describe": {
+      "days_every": "Щодня",
+      "days_monthly": "{{day}}-й день місяця",
+      "days_long": {
+        "sun": "Нд",
+        "mon": "Пн",
+        "tue": "Вт",
+        "wed": "Ср",
+        "thu": "Чт",
+        "fri": "Пт",
+        "sat": "Сб"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "О {{time}}",
+      "time_every_hour": "Щогодини о :{{minute}}",
+      "time_every_hours": "Кожні {{interval}} год о :{{minute}}",
+      "time_every_hour_window": "Щогодини",
+      "time_every_hours_window": "Кожні {{interval}} год",
+      "time_every_minute": "Щохвилини",
+      "time_every_minutes": "Кожні {{interval}} хв",
+      "window": "{{from}}–{{to}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}} д {{hours}} год {{minutes}} хв",
+      "hours_minutes": "{{hours}} год {{minutes}} хв",
+      "minutes": "{{minutes}} хв",
+      "less_than_minute": "<1 хв"
+    },
+    "a11y": {
+      "fixed_hour": "Година",
+      "fixed_minute": "Хвилина",
+      "interval": "Інтервал",
+      "interval_unit": "Одиниця інтервалу",
+      "window_start_hour": "Година початку вікна",
+      "window_start_minute": "Хвилина початку вікна",
+      "window_end_hour": "Година завершення вікна",
+      "window_end_minute": "Хвилина завершення вікна",
+      "day_pattern": "Шаблон днів",
+      "day_of_month": "День місяця",
+      "timezone": "Часовий пояс",
+      "days_full": {
+        "sun": "Неділя",
+        "mon": "Понеділок",
+        "tue": "Вівторок",
+        "wed": "Середа",
+        "thu": "Четвер",
+        "fri": "П'ятниця",
+        "sat": "Субота"
+      }
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Фільтрувати агентів або скводи...",
+    "select_agent": "Оберіть агента",
+    "select_assignee": "Оберіть агента або сквод",
+    "agents_group": "Агенти",
+    "squads_group": "Скводи"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Пошук часового поясу..."
+  },
+  "toolbar": {
+    "result_count_title": "Відповідні автоматизації / усі автоматизації",
+    "filter_label": "Фільтр",
+    "filter_active_count_one": "{{count}} фільтр",
+    "filter_active_count_few": "{{count}} фільтри",
+    "filter_active_count_many": "{{count}} фільтрів",
+    "filter_active_count_other": "{{count}} фільтра",
+    "clear_filters": "Очистити фільтри",
+    "section_assignee": "Виконавець",
+    "section_mode": "Режим",
+    "section_trigger": "Тригер",
+    "section_creator": "Автор",
+    "display": "Відображення",
+    "sort_by": "Сортувати за",
+    "direction_asc": "За зростанням",
+    "direction_desc": "За спаданням",
+    "section_columns": "Колонки"
+  },
+  "actions": {
+    "row_menu": "Дії з автоматизацією",
+    "pause": "Призупинити",
+    "resume": "Відновити",
+    "delete": "Видалити",
+    "selected_one": "Обрано: {{count}}",
+    "selected_few": "Обрано: {{count}}",
+    "selected_many": "Обрано: {{count}}",
+    "selected_other": "Обрано: {{count}}",
+    "clear_selection": "Скасувати вибір",
+    "delete_dialog": {
+      "title": "Видалити автоматизацію?",
+      "description_one": "Це назавжди видалить \"{{name}}\" та її історію запусків.",
+      "description_few": "Це назавжди видалить {{count}} автоматизації та їхню історію запусків.",
+      "description_many": "Це назавжди видалить {{count}} автоматизацій та їхню історію запусків.",
+      "description_other": "Це назавжди видалить {{count}} автоматизації та їхню історію запусків.",
+      "warning": "Цю дію не можна скасувати.",
+      "cancel": "Скасувати",
+      "confirm": "Видалити назавжди",
+      "deleting": "Видалення…"
+    }
+  }
+}

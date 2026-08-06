@@ -1,0 +1,75 @@
+{
+  "title": "Оплата (тестова сторінка)",
+  "subtitle": "Прямий прохід до /api/v1/billing/* у multica-cloud. Це не готовий UI — просто всі ендпоїнти на одній сторінці, щоб перевірити проксі та потік Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Баланс",
+    "credits_suffix": "кредитів",
+    "meta": "raw micro: {{micro}} · власник: {{owner}}… · оновлено {{updated}}"
+  },
+  "buy": {
+    "title": "Купити кредити / Керувати оплатою",
+    "no_tiers": "Цінові рівні не налаштовано. Ймовірно, у Cloud не задано ключ Stripe — checkout поверне 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} кредитів",
+    "tier_bonus": " + {{credits}} бонусних",
+    "tier_bonus_with_expiry": " + {{credits}} бонусних ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Відкрити Stripe Billing Portal",
+    "portal_hint": "400 — очікувана відповідь для користувачів, які ще не платили (запис клієнта Stripe відсутній).",
+    "toast_no_url": "Cloud не повернув URL для checkout",
+    "toast_checkout_failed": "Помилка checkout",
+    "toast_no_portal_url": "URL порталу не повернуто",
+    "toast_portal_failed": "Помилка порталу"
+  },
+  "checkout": {
+    "session_label": "Сесія checkout {{prefix}}…",
+    "loading": "Завантаження статусу замовлення…",
+    "fetch_failed": "Не вдалося отримати статус: {{error}}",
+    "fetch_failed_unknown": "невідома помилка",
+    "final_status": "Кінцевий статус: {{status}}",
+    "polling_status": "Опитування статусу… поточний: {{status}}",
+    "status_unknown": "невідомо",
+    "label_order": "Замовлення",
+    "label_tier": "Рівень",
+    "label_charged": "Списано",
+    "charged_value": "{{money}} · {{credits}} кредитів",
+    "charged_with_bonus": "{{money}} · {{credits}} кредитів + {{bonus}} бонусних",
+    "clear_url": "Прибрати з URL"
+  },
+  "transactions": {
+    "title": "Транзакції",
+    "empty": "Транзакцій поки немає.",
+    "credits_value": "{{value}} кредитів",
+    "row_meta": "{{date}} · баланс після: {{balance}} кредитів · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Пакети кредитів",
+    "empty": "Пакетів поки немає.",
+    "remaining_over_total": "{{remaining}} / {{total}} кредитів",
+    "id_suffix": "{{id}}…",
+    "consumed": "Використано: {{value}} кредитів",
+    "expires_suffix": " · спливає {{value}}",
+    "never_expires_suffix": " · безстроково"
+  },
+  "topups": {
+    "title": "Замовлення поповнення",
+    "empty": "Замовлень поповнення поки немає.",
+    "amount_to_credits": "{{money}} → {{credits}} кредитів",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} кредитів + {{bonus}} бонусних",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "Помилка запиту",
+    "refresh": "Оновити",
+    "paging": "сторінка {{page}} / {{totalPages}} · всього {{total}}",
+    "date_dash": "—"
+  }
+}

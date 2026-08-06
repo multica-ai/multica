@@ -1,0 +1,23 @@
+{
+  "role": {
+    "owner": "Власник",
+    "admin": "Адміністратор",
+    "member": "Учасник"
+  },
+  "card": {
+    "unavailable": "Учасник недоступний",
+    "agents_section": "Агенти ({{count}})",
+    "detail_link": "Детальніше →",
+    "more_agents_one": "і ще {{count}} агент",
+    "more_agents_few": "і ще {{count}} агенти",
+    "more_agents_many": "і ще {{count}} агентів",
+    "more_agents_other": "і ще {{count}} агента"
+  },
+  "detail": {
+    "workspace_fallback": "Робочий простір",
+    "members_breadcrumb": "Учасники",
+    "breadcrumb_fallback": "Учасник",
+    "not_found_title": "Учасника не знайдено",
+    "not_found_description": "Можливо, цей учасник залишив робочий простір."
+  }
+}

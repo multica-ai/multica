@@ -1,0 +1,46 @@
+{
+  "title": "Пошук",
+  "description": "Пошук сторінок, задач, проєктів та учасників",
+  "placeholder": "Введіть команду або пошуковий запит...",
+  "groups": {
+    "pages": "Сторінки",
+    "commands": "Команди",
+    "members": "Учасники",
+    "projects": "Проєкти",
+    "issues": "Задачі",
+    "recent": "Нещодавні"
+  },
+  "pages": {
+    "inbox": "Вхідні",
+    "my_issues": "Мої задачі",
+    "issues": "Задачі",
+    "projects": "Проєкти",
+    "agents": "Агенти",
+    "runtimes": "Рантайми",
+    "skills": "Навички",
+    "settings": "Налаштування"
+  },
+  "commands": {
+    "current_theme_aria": "Поточна тема",
+    "new_issue": "Нова задача",
+    "new_project": "Новий проєкт",
+    "copy_issue_link": "Копіювати посилання на задачу",
+    "copy_identifier": "Копіювати ідентифікатор ({{identifier}})",
+    "fold_all_comments": "Згорнути всі коментарі",
+    "unfold_all_comments": "Розгорнути всі коментарі",
+    "switch_to_light": "Перейти на світлу тему",
+    "switch_to_dark": "Перейти на темну тему",
+    "use_system_theme": "Використовувати системну тему"
+  },
+  "toast": {
+    "link_copied": "Посилання скопійовано",
+    "copied_identifier": "Скопійовано {{identifier}}"
+  },
+  "empty": {
+    "no_results": "Нічого не знайдено.",
+    "type_to_search": "Почніть вводити, щоб знайти задачі та проєкти"
+  },
+  "trigger": {
+    "label": "Пошук..."
+  }
+}

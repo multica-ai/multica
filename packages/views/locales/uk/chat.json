@@ -1,0 +1,182 @@
+{
+  "page": {
+    "title": "Чат",
+    "select_prompt": "Виберіть розмову або почніть нову за допомогою +",
+    "agent_link_no_access": "У вас немає доступу до чату з цим агентом."
+  },
+  "fab": {
+    "running": "Multica працює...",
+    "unread_one": "{{count}} непрочитаний чат",
+    "unread_few": "{{count}} непрочитані чати",
+    "unread_many": "{{count}} непрочитаних чатів",
+    "unread_other": "{{count}} непрочитаного чату",
+    "default": "Запитати Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Створіть агента, щоб почати спілкування",
+    "placeholder_archived": "Цю сесію заархівовано",
+    "placeholder_archived_agent": "Цього агента заархівовано",
+    "placeholder_named": "Повідомлення для {{name}}…",
+    "placeholder_default": "Почніть повідомлення…",
+    "send_tooltip": "Надіслати",
+    "stop_tooltip": "Зупинити",
+    "send_failed_toast": "Не вдалося надіслати повідомлення",
+    "send_blocked_toast": "Повідомлення не надіслано — у вас більше немає дозволу використовувати цього агента",
+    "attachment_bind_failed_toast": "Повідомлення надіслано, але файли не прикріпилися. Спробуйте ще раз за мить.",
+    "add_tooltip": "Додати",
+    "upload_file": "Зображення або файли",
+    "project_context": "Контекст проєкту",
+    "change_project_context": "Змінити контекст проєкту",
+    "remove_project_context": "Прибрати контекст проєкту",
+    "no_projects": "Проєктів поки немає",
+    "project_context_unsupported": "Опис проєкту не застосується — демон цього агента потребує оновлення"
+  },
+  "message_list": {
+    "show_details": "Показати деталі",
+    "replied_in": "Відповів за {{elapsed}}",
+    "failed_after": "Помилка через {{elapsed}}",
+    "finished_in": "Завершено за {{elapsed}}",
+    "no_response": "Агент завершив цей хід без текстової відповіді.",
+    "failure": {
+      "agent_error": "Агент натрапив на помилку й не зміг завершити відповідь. Спробуйте ще раз.",
+      "timeout": "Агент працював надто довго й зупинився, не завершивши. Спробуйте ще раз або розбийте запит на менші кроки.",
+      "codex_semantic_inactivity": "Агент перестав відповідати й зупинився, не завершивши. Спробуйте ще раз.",
+      "runtime_offline": "Агент зараз офлайн, тому не зміг відповісти. Спробуйте ще раз, коли він повернеться онлайн.",
+      "runtime_recovery": "Агент перезапустився, не встигнувши завершити. Спробуйте ще раз.",
+      "manual": "Цю відповідь скасовано.",
+      "fallback": "Щось пішло не так, і агент не зміг завершити відповідь. Спробуйте ще раз."
+    },
+    "tools_one": "{{count}} інструмент",
+    "tools_few": "{{count}} інструменти",
+    "tools_many": "{{count}} інструментів",
+    "tools_other": "{{count}} інструмента",
+    "tool_result_named": "Результат {{tool}}: ",
+    "tool_result_unnamed": "результат: ",
+    "process_steps_one": "{{count}} крок",
+    "process_steps_few": "{{count}} кроки",
+    "process_steps_many": "{{count}} кроків",
+    "process_steps_other": "{{count}} кроку",
+    "copy_action": "Копіювати",
+    "copied_toast": "Скопійовано",
+    "copy_failed_toast": "Не вдалося скопіювати",
+    "loading_older": "Завантаження давніших повідомлень…"
+  },
+  "session_history": {
+    "untitled": "Без назви",
+    "time": {
+      "just_now": "щойно",
+      "minutes": "{{count}} хв тому",
+      "hours": "{{count}} год тому",
+      "days": "{{count}} дн тому"
+    },
+    "row_delete_aria": "Видалити сесію чату",
+    "row_rename_aria": "Перейменувати сесію чату",
+    "row_stop_aria": "Зупинити поточний запуск",
+    "stop_action": "Зупинити",
+    "row_subtitle": {
+      "working": "Працює",
+      "completed": "Завершено",
+      "new_reply": "Нова відповідь"
+    },
+    "stop_dialog": {
+      "title": "Зупинити цей запуск?",
+      "description_with_title": "Поточну задачу агента в \"{{title}}\" буде скасовано. Частковий результат залишиться в чаті.",
+      "description_default": "Поточну задачу агента буде скасовано. Частковий результат залишиться в чаті.",
+      "cancel": "Продовжити роботу",
+      "confirm": "Зупинити запуск",
+      "confirming": "Зупинення..."
+    },
+    "delete_dialog": {
+      "title": "Видалити сесію чату",
+      "description_with_title": "\"{{title}}\" та її повідомлення буде остаточно видалено. Цю дію не можна скасувати.",
+      "description_default": "Цю сесію чату та її повідомлення буде остаточно видалено. Цю дію не можна скасувати.",
+      "cancel": "Скасувати",
+      "confirm": "Видалити",
+      "confirming": "Видалення..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Новий чат",
+    "restore_tooltip": "Відновити",
+    "expand_tooltip": "Розгорнути",
+    "minimize_tooltip": "Згорнути",
+    "another_running": "Інший чат виконується",
+    "another_unread": "В іншому чаті є непрочитані відповіді",
+    "running": "Виконується",
+    "unread": "Непрочитане",
+    "no_previous": "Попередніх чатів немає",
+    "untitled": "Новий чат",
+    "my_agents": "Мої агенти",
+    "others": "Інші",
+    "no_agents": "Немає агентів",
+    "history_group": "Історія чатів",
+    "agent_filter_placeholder": "Пошук агентів..."
+  },
+  "empty_state": {
+    "first_time_title": "Спілкуйтеся зі своїми агентами",
+    "first_time_intro": "✨ Вони знають ваш робочий простір —",
+    "first_time_pillars": "задачі, проєкти, навички",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Попросіть підсумок, сплануйте день або передайте швидку задачу.",
+    "returning_title_named": "Привіт, я {{name}}",
+    "returning_title_default": "Вітаємо в Multica",
+    "returning_subtitle": "Спробуйте запитати",
+    "chat_with_named": "Чат з {{name}}"
+  },
+  "starter_prompts": {
+    "list_open": "Покажи мої відкриті задачі за пріоритетом",
+    "summarize_today": "Підсумуй, що я зробив сьогодні",
+    "plan_next": "Сплануй, над чим працювати далі"
+  },
+  "no_agent_banner": "Щоб почати спілкування, потрібен агент.",
+  "archived_agent_banner": "{{name}} заархівовано — ця розмова доступна лише для читання.",
+  "offline_banner": {
+    "fallback_name": "агент",
+    "unstable": "З'єднання {{name}} нестабільне — відповіді можуть затримуватися.",
+    "offline": "{{name}} офлайн — ваше повідомлення буде доставлено, коли агент повернеться."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Офлайн",
+      "reconnecting": "Перепідключення",
+      "queued": "У черзі",
+      "waiting_local_directory": "Очікування локальної директорії",
+      "starting_up": "Запуск",
+      "thinking": "Думає",
+      "typing": "Друкує"
+    },
+    "tools": {
+      "running_command": "Виконує команду",
+      "reading_files": "Читає файли",
+      "searching_code": "Шукає в коді",
+      "making_edits": "Вносить правки",
+      "searching_web": "Шукає в інтернеті",
+      "fallback": "Працює"
+    }
+  },
+  "list": {
+    "typing": "Друкує…",
+    "failed": "Не вдалося надіслати",
+    "you_prefix": "Ви: ",
+    "no_messages": "Повідомлень поки немає",
+    "no_response_preview": "Без текстової відповіді",
+    "quick_agents": "Часті агенти",
+    "add": "Додати",
+    "add_agent": "Додати частого агента",
+    "unpin_agent": "Прибрати з частих",
+    "waiting": "Очікування відповіді",
+    "pin": "Закріпити",
+    "unpin": "Відкріпити",
+    "pinned": "Закріплені",
+    "archive": "Архівувати",
+    "unarchive": "Розархівувати",
+    "archived_title": "Архів"
+  },
+  "header": {
+    "view_profile": "Переглянути профіль агента",
+    "rename": "Перейменувати чат",
+    "archive": "Архівувати чат",
+    "unarchive": "Розархівувати чат",
+    "delete": "Видалити чат"
+  }
+}

@@ -35,6 +35,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   "zh-Hans": "zh-CN",
   ko: "ko-KR",
   ja: "ja-JP",
+  uk: "uk-UA",
 };
 
 

@@ -1,0 +1,63 @@
+{
+  "nav": {
+    "inbox": "Вхідні",
+    "chat": "Чат",
+    "my_issues": "Мої задачі",
+    "issues": "Задачі",
+    "projects": "Проєкти",
+    "autopilots": "Автопілот",
+    "agents": "Агенти",
+    "squads": "Скводи",
+    "usage": "Використання",
+    "runtimes": "Рантайми",
+    "skills": "Навички",
+    "settings": "Налаштування"
+  },
+  "tab": {
+    "issue": "Задача",
+    "project": "Проєкт",
+    "autopilot": "Автопілот",
+    "agent": "Агент",
+    "member": "Учасник",
+    "squad": "Сквод",
+    "skill": "Навичка",
+    "machine": "Машина",
+    "runtime": "Рантайм",
+    "attachment": "Вкладення",
+    "create_agent": "Створити агента",
+    "unknown": "Невідома сторінка"
+  },
+  "help": {
+    "trigger": "Довідка",
+    "docs": "Документація",
+    "changelog": "Журнал змін",
+    "discord": "Discord",
+    "feedback": "Зворотний зв’язок",
+    "server_version": "Версія сервера {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Завантаження робочого простору…",
+    "loading_named_prefix": "Завантаження"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Відкріпити",
+    "workspaces_label": "Робочі простори",
+    "create_workspace": "Створити робочий простір",
+    "pending_invitations_label": "Запрошення в очікуванні",
+    "invitation_workspace_fallback": "Робочий простір",
+    "invitation_join": "Приєднатися",
+    "invitation_decline": "Відхилити",
+    "log_out": "Вийти",
+    "new_issue": "Нова задача",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Закріплені",
+    "workspace_group": "Робочий простір",
+    "configure_group": "Налаштування",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Приєднуйтесь до нашого Discord",
+      "description": "Спілкуйтеся з командою та іншими розробниками.",
+      "dismiss": "Приховати"
+    }
+  }
+}

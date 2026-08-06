@@ -99,6 +99,31 @@ import jaUsage from "./ja/usage.json";
 import jaUi from "./ja/ui.json";
 import jaSquads from "./ja/squads.json";
 import jaBilling from "./ja/billing.json";
+import ukCommon from "./uk/common.json";
+import ukAuth from "./uk/auth.json";
+import ukSettings from "./uk/settings.json";
+import ukIssues from "./uk/issues.json";
+import ukAgents from "./uk/agents.json";
+import ukEditor from "./uk/editor.json";
+import ukOnboarding from "./uk/onboarding.json";
+import ukInvite from "./uk/invite.json";
+import ukLabels from "./uk/labels.json";
+import ukMembers from "./uk/members.json";
+import ukMyIssues from "./uk/my-issues.json";
+import ukSearch from "./uk/search.json";
+import ukInbox from "./uk/inbox.json";
+import ukWorkspace from "./uk/workspace.json";
+import ukProjects from "./uk/projects.json";
+import ukAutopilots from "./uk/autopilots.json";
+import ukSkills from "./uk/skills.json";
+import ukChat from "./uk/chat.json";
+import ukModals from "./uk/modals.json";
+import ukRuntimes from "./uk/runtimes.json";
+import ukLayout from "./uk/layout.json";
+import ukUsage from "./uk/usage.json";
+import ukUi from "./uk/ui.json";
+import ukSquads from "./uk/squads.json";
+import ukBilling from "./uk/billing.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -211,5 +236,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: jaUi,
     squads: jaSquads,
     billing: jaBilling,
+  },
+  uk: {
+    common: ukCommon,
+    auth: ukAuth,
+    settings: ukSettings,
+    issues: ukIssues,
+    agents: ukAgents,
+    editor: ukEditor,
+    onboarding: ukOnboarding,
+    invite: ukInvite,
+    labels: ukLabels,
+    members: ukMembers,
+    "my-issues": ukMyIssues,
+    search: ukSearch,
+    inbox: ukInbox,
+    workspace: ukWorkspace,
+    projects: ukProjects,
+    autopilots: ukAutopilots,
+    skills: ukSkills,
+    chat: ukChat,
+    modals: ukModals,
+    runtimes: ukRuntimes,
+    layout: ukLayout,
+    usage: ukUsage,
+    ui: ukUi,
+    squads: ukSquads,
+    billing: ukBilling,
   },
 };

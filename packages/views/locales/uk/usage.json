@@ -1,0 +1,60 @@
+{
+  "title": "Використання",
+  "subtitle": "Витрати токенів та активність агентів у цьому робочому просторі.",
+  "filter": {
+    "project_label": "Проєкт",
+    "all_projects": "Усі проєкти",
+    "period_label": "Період"
+  },
+  "kpi": {
+    "cost_label": "Вартість · {{days}} дн",
+    "tokens_label": "Токени · {{days}} дн",
+    "tokens_hint": "Вхідні {{input}} · Вихідні {{output}}",
+    "run_time_label": "Час роботи · {{days}} дн",
+    "run_time_hint": "У {{tasks}} завданнях",
+    "tasks_label": "Завдання · {{days}} дн",
+    "tasks_hint": "{{failed}} невдалих"
+  },
+  "dim": {
+    "label": "Розріз",
+    "daily": "Щодня",
+    "weekly": "Щотижня"
+  },
+  "daily": {
+    "title_cost": "Вартість за день",
+    "title_tokens": "Токени за день",
+    "title_time": "Час роботи за день",
+    "title_tasks": "Завдання за день",
+    "metric_cost": "Вартість",
+    "metric_tokens": "Токени",
+    "metric_time": "Час",
+    "metric_tasks": "Завдання",
+    "no_data": "Немає використання за цей період."
+  },
+  "weekly": {
+    "title_cost": "Вартість за тиждень",
+    "title_tokens": "Токени за тиждень",
+    "title_time": "Час роботи за тиждень",
+    "title_tasks": "Завдання за тиждень",
+    "partial_label": "{{range}} (частково · {{covered}} / 7 днів)"
+  },
+  "leaderboard": {
+    "title": "Рейтинг",
+    "caption": "Агентів: {{count}}",
+    "caption_with_deleted": "Агентів: {{count}} · видалених: {{deleted}}",
+    "deleted_agents": "Видалені агенти",
+    "header_agent": "Агент",
+    "header_tokens": "Токени",
+    "header_cost": "Вартість",
+    "header_time": "Час",
+    "header_tasks": "Завдання",
+    "no_data": "Немає активності агентів за цей період."
+  },
+  "empty": {
+    "title": "Використання поки немає",
+    "body": "Щойно агенти почнуть виконувати завдання тут, їхні витрати токенів і час роботи з’являться в цьому огляді."
+  },
+  "duration": {
+    "less_than_minute": "<1 хв"
+  }
+}
