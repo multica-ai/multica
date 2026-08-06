@@ -513,33 +513,13 @@ export function DeleteSkillsDialog({
 // Update-from-source confirmation (single row or batch; creator + URL origin)
 // ---------------------------------------------------------------------------
 
-// A re-import holds a server-side upstream fetch open for up to 45s. Cap a
-// large selection instead of sending it all at once.
+// Send a few re-imports at a time rather than the whole selection at once.
+// Each one already fans out on the server (treeDownloadConcurrency = 8 parallel
+// file downloads), so client-side concurrency multiplies: 4 skills can mean ~32
+// sockets to the upstream host. GitHub also caps unauthenticated API calls at
+// 60/hour per IP — an unbounded batch exhausts that in one click and surfaces
+// as 403s (see doGitHubAPIGet in server/internal/handler/skill.go).
 const UPDATE_BATCH_CONCURRENCY = 4;
-
-// Promise.allSettled with a concurrency cap. Results keep input order.
-async function runBounded<T>(
-  items: T[],
-  fn: (item: T) => Promise<unknown>,
-  limit: number,
-): Promise<PromiseSettledResult<unknown>[]> {
-  const results: PromiseSettledResult<unknown>[] = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    for (let index = next++; index < items.length; index = next++) {
-      const item = items[index] as T;
-      try {
-        results[index] = { status: "fulfilled", value: await fn(item) };
-      } catch (reason) {
-        results[index] = { status: "rejected", reason };
-      }
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
-  );
-  return results;
-}
 
 export function UpdateSkillDialog({
   rows,
@@ -568,11 +548,15 @@ export function UpdateSkillDialog({
   // finished overwrites are already committed and unrecoverable.
   const handleConfirm = async () => {
     setUpdating(true);
-    const results = await runBounded(
-      rows,
-      (row) => api.reimportSkill(row.skill.id),
-      UPDATE_BATCH_CONCURRENCY,
-    );
+    const results: PromiseSettledResult<unknown>[] = [];
+    for (let i = 0; i < rows.length; i += UPDATE_BATCH_CONCURRENCY) {
+      const chunk = rows.slice(i, i + UPDATE_BATCH_CONCURRENCY);
+      results.push(
+        ...(await Promise.allSettled(
+          chunk.map((row) => api.reimportSkill(row.skill.id)),
+        )),
+      );
+    }
     const rejected = results.filter((r) => r.status === "rejected");
     const failed = rejected.length;
     const succeeded = results.length - failed;
