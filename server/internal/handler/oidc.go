@@ -334,7 +334,7 @@ func (h *Handler) resolveOIDCUser(ctx context.Context, issuer, subject, email st
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	identityKey := issuer + "\x00" + subject
+	identityKey := "oidc-identity:" + issuer + "\x1f" + subject
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", identityKey); err != nil {
 		return db.User{}, false, err
 	}
@@ -352,7 +352,7 @@ func (h *Handler) resolveOIDCUser(ctx context.Context, issuer, subject, email st
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return db.User{}, false, err
 	}
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "oidc-email\x00"+email); err != nil {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "oidc-email:"+email); err != nil {
 		return db.User{}, false, err
 	}
 	user, isNew, err := h.findOrCreateUserWithQueries(ctx, queries, email)
