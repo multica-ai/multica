@@ -230,10 +230,28 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 	// Read loop. Every frame comes back through the same decode → dispatch
 	// → (maybe) reply path. A single bad frame does NOT tear the socket
 	// down — only transport / handler errors escalate.
-	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 	for {
 		if ctx.Err() != nil {
 			return nil
+		}
+		// Armed immediately before the read, and nowhere else.
+		//
+		// It used to be armed after ReadMessage returned, which put
+		// everything the loop then did inside the window. Only the server's
+		// pong resets the deadline on a quiet bot and our ping goes out every
+		// 30s, so on a loaded pool the next read could time out on a socket
+		// that was perfectly healthy. The idle window should measure idleness.
+		//
+		// The error is no longer discarded: a socket that refuses a deadline
+		// is not one to keep reading from.
+		if err := conn.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+			// The shutdown path closes the socket, and a closed socket
+			// refuses a deadline. That is an ordinary stop, not a failure to
+			// report to the Supervisor.
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("wecom: set read deadline: %w", err)
 		}
 		typ, payload, err := conn.ReadMessage()
 		if err != nil {
@@ -242,7 +260,6 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 			}
 			return fmt.Errorf("wecom: read: %w", err)
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 		if typ != websocket.TextMessage && typ != websocket.BinaryMessage {
 			continue
 		}
