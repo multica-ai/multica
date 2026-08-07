@@ -63,6 +63,38 @@ func AudienceOf(channelType, chatType string) ChatAudience {
 	}
 }
 
+// ChannelCarriesFiles reports whether an adapter can put a file the agent
+// produced into the conversation. It is the delivery half of the two-layer
+// channel policy (MUL-4899), and it is a per-adapter capability rather than a
+// property of having a channel: `multica attachment upload` binds the file to
+// the Multica chat reply on every surface, and whether that reaches the reader
+// depends on whether the adapter goes back for it. WeCom does — it reads the
+// bound attachment out of object storage and sends it into the chat behind the
+// answer (integrations/wecom/outbound_media.go). Slack and Lark do not, so
+// their briefs still say to describe the file in words.
+//
+// Every channel type this package knows is named below rather than left to the
+// default, so adding a fourth adapter surfaces here as a decision to make. An
+// unrecognized type — a channel the server added that this daemon build has no
+// constant for — answers false, which is the safe direction: the agent is told
+// to describe its file in words, and the worst case is a file that could have
+// been delivered was not. False the other way would have the agent write "see
+// the attached chart" into a conversation that never receives one.
+//
+// Web / mobile chat is not answered here. It has no channel type at all and is
+// handled by its own branch, which points at the attachment card the browser
+// renders rather than at an IM message.
+func ChannelCarriesFiles(channelType string) bool {
+	switch channelType {
+	case ChannelTypeWecom:
+		return true
+	case ChannelTypeSlack, ChannelTypeFeishu:
+		return false
+	default:
+		return false
+	}
+}
+
 // ChannelDisplayName renders a chat_channel_type for prompt / brief copy.
 // Unknown types fall through to the raw discriminator rather than a generic
 // placeholder, so a channel added server-side without a mapping here still
