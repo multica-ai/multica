@@ -242,14 +242,14 @@ func newSlackFactory(deps ChannelDeps) channel.Factory {
 		}
 		appToken, err := decryptToken(ic.AppTokenEncrypted, deps.Decrypt)
 		if err != nil {
-			return nil, fmt.Errorf("slack: decrypt app token: %w", err)
+			return nil, fmt.Errorf("%w: slack: decrypt app token: %w", channel.ErrNeedsReauth, err)
 		}
 		if appToken == "" {
-			return nil, errors.New("slack: installation has no app-level token")
+			return nil, fmt.Errorf("%w: slack: installation has no app-level token", channel.ErrNeedsReauth)
 		}
 		botToken, err := decryptToken(ic.BotTokenEncrypted, deps.Decrypt)
 		if err != nil {
-			return nil, fmt.Errorf("slack: decrypt bot token: %w", err)
+			return nil, fmt.Errorf("%w: slack: decrypt bot token: %w", channel.ErrNeedsReauth, err)
 		}
 		return &slackChannel{
 			appID:     ic.AppID,

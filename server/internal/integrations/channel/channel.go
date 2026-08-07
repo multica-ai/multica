@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
 
 // Type identifies an inbound channel platform — the discriminator the
@@ -18,6 +19,12 @@ const (
 	// not a separate Type.
 	TypeFeishu Type = "feishu"
 )
+
+// ErrNeedsReauth marks an installation credential/config problem that cannot
+// be fixed by reconnect backoff. Supervisors persist the installation as
+// "needs_reauth" so operators see a clear recovery state instead of a row that
+// stays "active" while every reconnect attempt fails.
+var ErrNeedsReauth = errors.New("channel: installation needs re-auth")
 
 // Channel is the platform-agnostic contract every IM integration
 // implements. An adapter keeps ALL platform specifics behind these five

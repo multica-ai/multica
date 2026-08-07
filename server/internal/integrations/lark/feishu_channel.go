@@ -107,7 +107,7 @@ func installationCredentialsFor(inst Installation, resolver CredentialsResolver)
 	}
 	secret, err := resolver.DecryptAppSecret(inst)
 	if err != nil {
-		return InstallationCredentials{}, fmt.Errorf("decrypt app_secret: %w", err)
+		return InstallationCredentials{}, fmt.Errorf("%w: decrypt app_secret: %w", channel.ErrNeedsReauth, err)
 	}
 	creds := InstallationCredentials{
 		AppID:     inst.AppID,
@@ -284,6 +284,10 @@ func (s *channelInstallationStore) ReleaseWSLease(ctx context.Context, arg engin
 		ID:           arg.ID,
 		CurrentToken: pgtype.Text{String: arg.Token, Valid: true},
 	})
+}
+
+func (s *channelInstallationStore) MarkNeedsReauth(ctx context.Context, id pgtype.UUID) error {
+	return s.q.MarkChannelInstallationNeedsReauth(ctx, id)
 }
 
 // rowFingerprint condenses the credential-bearing config of a
