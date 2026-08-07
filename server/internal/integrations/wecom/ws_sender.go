@@ -97,7 +97,7 @@ func (s *wsSender) write(frame map[string]any) error {
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a
 // specific chat. Callers pass channel.ChatType so the aibot chat_type int
 // (1=single, 2=group) is decided at the wecom-side boundary, not the
-// engine's. Used by wecomChannel.Send and OutboundReplier.
+// engine's. Used by OutboundReplier and Outbound.
 func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) error {
 	body, err := sendMsgTextBody(chatID, chatTypeInt, content)
 	if err != nil {
