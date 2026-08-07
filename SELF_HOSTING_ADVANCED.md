@@ -52,6 +52,21 @@ STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / 
 
 > **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
+### Pushover (Optional)
+
+Pushover can deliver login codes in addition to the existing email or log delivery path. It does not replace email/log delivery, so new users can still receive their first code before configuring their Pushover account.
+
+1. [Create a Pushover application](https://pushover.net/apps/build) named `Multica`.
+2. Set its 30-character Application API Token on the backend:
+
+   ```env
+   PUSHOVER_APPLICATION_TOKEN=your_application_api_token
+   ```
+
+3. Restart the backend, then open **Settings → Profile → Pushover**. Enter the User Key shown on the [Pushover dashboard](https://pushover.net/) and enable **Login codes**.
+
+Pushover receives a normal-priority message titled `Multica Login Code` whose body is the six-digit code. The application token is never returned to clients; `/api/config` exposes only whether Pushover is available.
+
 ### Google OAuth (Optional)
 
 | Variable | Description |

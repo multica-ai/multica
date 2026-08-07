@@ -9,6 +9,7 @@ import type {
   SearchIssuesResponse,
   SearchProjectsResponse,
   UpdateMeRequest,
+  UpdatePushoverSettingsRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
   ListIssuesParams,
@@ -682,6 +683,16 @@ export class ApiClient {
     });
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {
       endpoint: "PATCH /api/me",
+    });
+  }
+
+  async updatePushoverSettings(data: UpdatePushoverSettingsRequest): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/pushover", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "PATCH /api/me/pushover",
     });
   }
 

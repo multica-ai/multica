@@ -7,6 +7,7 @@ import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
+import { PushoverTab } from "./pushover-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -17,7 +18,8 @@ import { SettingsSection, SettingsTab } from "./settings-layout";
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
 // — currently Lark, Composio, Slack, the self-hosted Git providers (Forgejo /
-// Gitea / GitLab), and WeCom smart-bot, with Linear etc. to follow —
+// Gitea / GitLab), WeCom smart-bot, and instance-enabled Pushover, with Linear
+// etc. to follow —
 // lives in here under its own section heading so additional integrations slot
 // in without changing the IA. IntegrationsTab is just the host; each
 // integration owns its own description and install flow.
@@ -36,6 +38,7 @@ export function IntegrationsTab() {
   // omitted from /api/config), so the whole section — header included — is
   // hidden there rather than showing an operator-only "missing key" message.
   const vcsAvailable = useConfigStore((s) => s.vcsIntegrationAvailable);
+  const pushoverAvailable = useConfigStore((s) => s.pushoverAvailable);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
@@ -61,6 +64,11 @@ export function IntegrationsTab() {
       <SettingsSection title={t(($) => $.wecom.section_title)}>
         <WecomTab />
       </SettingsSection>
+      {pushoverAvailable && (
+        <SettingsSection title={t(($) => $.pushover.integration.section_title)}>
+          <PushoverTab />
+        </SettingsSection>
+      )}
     </SettingsTab>
   );
 }

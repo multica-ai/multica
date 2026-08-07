@@ -45,6 +45,17 @@ UPDATE "user" SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateUserPushoverSettings :one
+-- Replaces the account-scoped Pushover delivery settings as one unit. The
+-- handler loads the current row first when a request omits either field, so
+-- this query can stay explicit and avoid ambiguous NULL patch semantics.
+UPDATE "user" SET
+    pushover_user_key = $2,
+    pushover_login_codes_enabled = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: MarkUserOnboarded :one
 UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),

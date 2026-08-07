@@ -868,5 +868,32 @@
         "description": "タスクの作成と作業"
       }
     }
+  },
+  "pushover": {
+    "integration": {
+      "section_title": "Pushover",
+      "application_label": "Application API Token",
+      "application_description": "Pushover で \"Multica\" という名前のアプリケーションを作成して Application API Token を生成し、バックエンドの PUSHOVER_APPLICATION_TOKEN に設定します。",
+      "configured": "この Multica インスタンスに設定済み",
+      "create_application": "Pushover アプリケーションを作成"
+    },
+    "profile": {
+      "section_title": "Pushover",
+      "section_description": "Multica から Pushover にも送信するアカウント通知を選択します。",
+      "user_key_label": "User Key",
+      "user_key_description": "Pushover ダッシュボードにログインして User Key を取得します。",
+      "dashboard_link": "Pushover ダッシュボードを開く",
+      "user_key_configured": "User Key は設定済みです",
+      "user_key_placeholder": "Pushover User Key を入力",
+      "login_codes_label": "ログインコード",
+      "login_codes_description": "要求されたログインコードを Pushover にも送信します。",
+      "save": "保存",
+      "saving": "保存中...",
+      "remove_key": "User Key を削除",
+      "saved": "Pushover 設定を保存しました",
+      "save_failed": "Pushover 設定を保存できませんでした",
+      "removed": "Pushover User Key を削除しました",
+      "remove_failed": "Pushover User Key を削除できませんでした"
+    }
   }
 }
