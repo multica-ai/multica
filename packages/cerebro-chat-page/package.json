@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@multica/cerebro-channels": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-inbox-slack-block": "workspace:*",
     "@multica/core": "workspace:*",

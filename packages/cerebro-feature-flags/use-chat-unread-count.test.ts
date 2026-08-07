@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Channel, ChatSession } from "@multica/core/types";
-import { countUnreadConversations } from "./use-chat-unread-count";
+import type { Channel, ChatSession, InboxItem } from "@multica/core/types";
+import { countUnreadConversations } from "./count-unread-conversations";
 import { DEFAULT_PLACEMENT, setPlace, type ChatPlacement } from "./chat-placement";
 
 const ALL_IN_CHAT: ChatPlacement = {
@@ -54,6 +54,32 @@ function session(over: Partial<ChatSession>): ChatSession {
   };
 }
 
+// Full InboxItem shape — partial `as InboxItem[]` fails tsc (TS2352).
+function inboxItem(over: Partial<InboxItem> = {}): InboxItem {
+  return {
+    id: over.id ?? "item",
+    workspace_id: "ws",
+    recipient_type: "member",
+    recipient_id: "me",
+    actor_type: "member",
+    actor_id: "u1",
+    type: "new_comment",
+    severity: "info",
+    route: "inbox",
+    issue_id: "c1",
+    project_id: null,
+    title: "t",
+    body: null,
+    issue_status: null,
+    read: false,
+    archived: false,
+    muted_until: null,
+    created_at: "2026-01-02T00:00:00Z",
+    details: null,
+    ...over,
+  } as InboxItem;
+}
+
 describe("countUnreadConversations", () => {
   it("counts nothing while nothing is placed in Chat", () => {
     const count = countUnreadConversations(
@@ -83,9 +109,9 @@ describe("countUnreadConversations", () => {
     ).toBe(1);
   });
 
-  it("ignores a channel whose only signal is has_unread_activity (rail shows no unread for it)", () => {
-    // FIR-4350 — the rail badges rows on unread_count only, so a mention-only
-    // smart-unread channel must NOT inflate the sidebar badge.
+  it("counts a channel whose only signal is has_unread_activity (smart-unread)", () => {
+    // FIR-4649 — workspace smart-unread is forced on; the Chat rail badges
+    // activity too, so the sidebar badge must match.
     expect(
       countUnreadConversations(
         [channel({ unread_count: 0, has_unread_activity: true })],
@@ -93,7 +119,51 @@ describe("countUnreadConversations", () => {
         [],
         ALL_IN_CHAT,
       ),
-    ).toBe(0);
+    ).toBe(1);
+  });
+
+  it("counts an unread thread once when thread-split is on", () => {
+    const items = [
+      inboxItem({
+        id: "i1",
+        issue_id: "c1",
+        read: false,
+        archived: false,
+        details: { thread_root_id: "root1", comment_id: "cmt1" },
+      }),
+    ];
+    expect(
+      countUnreadConversations(
+        [channel({ unread_count: 0 })],
+        [],
+        [],
+        ALL_IN_CHAT,
+        items,
+        true,
+      ),
+    ).toBe(1);
+  });
+
+  it("does not double-count a channel when it also has a thread", () => {
+    const items = [
+      inboxItem({
+        id: "i1",
+        issue_id: "c1",
+        read: false,
+        archived: false,
+        details: { thread_root_id: "root1", comment_id: "cmt1" },
+      }),
+    ];
+    expect(
+      countUnreadConversations(
+        [channel({ unread_count: 2 })],
+        [],
+        [],
+        ALL_IN_CHAT,
+        items,
+        true,
+      ),
+    ).toBe(2); // channel + thread
   });
 
   it("ignores a read channel", () => {

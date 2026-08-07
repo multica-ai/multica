@@ -6,7 +6,10 @@
   "exports": {
     ".": "./index.tsx",
     "./api": "./api.ts",
-    "./settings-tabs": "./settings-tabs.tsx"
+    "./settings-tabs": "./settings-tabs.tsx",
+    "./channel-thread-entries": "./channel-thread-entries.ts",
+    "./channel-chat-unread": "./channel-chat-unread.ts",
+    "./count-unread-conversations": "./count-unread-conversations.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

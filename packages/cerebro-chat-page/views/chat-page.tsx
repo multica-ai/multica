@@ -27,6 +27,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
+import { useMarkThreadRead } from "@multica/cerebro-channels";
 import { ChannelDetail } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
 import { PageHeader } from "@multica/views/layout/page-header";
@@ -41,6 +42,12 @@ import {
 /** What the detail pane is currently showing. */
 type Selection =
   | { kind: "channel"; channel: Channel }
+  | {
+      kind: "thread";
+      channel: Channel;
+      threadRootId: string;
+      commentId?: string;
+    }
   | { kind: "chat"; sessionId: string | null; agentId?: string };
 
 export function ChatPage() {
@@ -56,6 +63,8 @@ export function ChatPage() {
   const { settings, setSettings } = useChatPageSettings();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const markThreadRead = useMarkThreadRead();
+  const markThreadReadMutate = markThreadRead.mutate;
 
   // FIR-4350 — reuse the sidebar's new-conversation modal so the "+" on the
   // Chat page starts a channel/DM/agent chat exactly like "New message" does.
@@ -66,6 +75,21 @@ export function ChatPage() {
   const openChannel = useCallback((channel: Channel) => {
     setSelection({ kind: "channel", channel });
   }, []);
+  const openThread = useCallback(
+    (args: { channel: Channel; threadRootId: string; commentId?: string }) => {
+      setSelection({
+        kind: "thread",
+        channel: args.channel,
+        threadRootId: args.threadRootId,
+        commentId: args.commentId,
+      });
+      markThreadReadMutate({
+        channelId: args.channel.id,
+        rootId: args.threadRootId,
+      });
+    },
+    [markThreadReadMutate],
+  );
   const openAgentChat = useCallback((agentId: string) => {
     setSelection({ kind: "chat", sessionId: null, agentId });
   }, []);
@@ -80,13 +104,22 @@ export function ChatPage() {
   const showAgents = showsInChat(placement, "agent_chat");
   const nothingInChat = !showChannels && !showPeople && !showAgents;
 
+  const selectedChannelId =
+    selection?.kind === "channel" || selection?.kind === "thread"
+      ? selection.channel.id
+      : null;
+  const selectedThreadRootId =
+    selection?.kind === "thread" ? selection.threadRootId : null;
+
   const rail = nothingInChat ? (
     <EmptyRail onOpenSettings={() => setSettingsOpen(true)} />
   ) : (
     <SlackBlock
       wsId={wsId}
-      selectedChannelId={selection?.kind === "channel" ? selection.channel.id : null}
+      selectedChannelId={selectedChannelId}
+      selectedThreadRootId={selectedThreadRootId}
       onOpenChannel={openChannel}
+      onOpenThread={openThread}
       onOpenAgentChat={openAgentChat}
       onOpenAgentSession={openAgentSession}
       limit={settings.limit}
@@ -213,6 +246,20 @@ function renderDetail(
         // instead of opening a second chat (and so clicking a recent chat from
         // the new-chat state works).
         onSessionCreated={onSessionCreated}
+      />
+    );
+  }
+  if (selection.kind === "thread") {
+    return (
+      <ChannelDetail
+        key={`thread:${selection.channel.id}:${selection.threadRootId}`}
+        channelId={selection.channel.id}
+        initialChannel={selection.channel}
+        initialCommentId={selection.commentId}
+        // FIR-1854 — thread already marked read on select; do not clear the
+        // whole channel (would wipe sibling thread / top-level unreads).
+        suppressAutoMarkRead
+        onArchive={onClose}
       />
     );
   }

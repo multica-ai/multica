@@ -18,6 +18,9 @@ export { useChannelAutoMarkRead } from "./use-channel-auto-mark-read";
 export { useChannelScrollMarkRead, shouldMarkChannelReadOnScroll } from "./use-channel-scroll-mark-read";
 // TECH-3352 — per-user "remind me" (snooze) + "mark as unread" for channels/DMs.
 export { useMuteChannel, useUnmuteChannel, useMarkChannelUnread } from "./state-mutations";
+// FIR-1854 / FIR-4649 — mark one channel/DM thread read (Chat page + dynamic inbox).
+export { useMarkThreadRead, markThreadReadInInbox } from "./use-mark-thread-read";
+export type { MarkThreadReadVars } from "./use-mark-thread-read";
 export { CerebroChannelRowActions } from "./channel-row-actions";
 // CEREBRO-PATCH(issue-comment-cost): FIR-39 per-comment cost badge shared by
 // issue comment cards and channel slack messages (channels reuse the comment

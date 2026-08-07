@@ -107,6 +107,10 @@ jobs:
         # drift from cerebro-augmented core types until the mobile schemas are
         # aligned (follow-up issue). @multica/docs is no longer present in the fork.
         # CEREBRO-PATCH(ci-parallel-turbo): Match the repo's four-way local test concurrency and retain a per-task timing summary.
+        # CEREBRO-PATCH(ci-frontend-turbo-timeout): FIR-4649 — warm cache finishes
+        # in ~6–8 min; cold cache (force-push / rebase) needs ~25–35 min. 40 min
+        # fails only true stalls, not slow-but-progressing monorepo runs.
+        timeout-minutes: 40
         run: pnpm exec turbo build typecheck test --concurrency=4 --continue=dependencies-successful --summarize --filter='!@multica/mobile'
         env:
           CEREBRO_APPS_WORKER_IMAGE: multica/cerebro-app-worker:ci-${{ github.sha }}

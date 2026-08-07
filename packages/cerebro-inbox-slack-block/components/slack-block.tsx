@@ -17,7 +17,7 @@
 // text-muted-foreground, bg-success for the online dot, etc.). No hardcoded
 // colors — see CLAUDE.md CSS Architecture.
 import { useMemo, useState } from "react";
-import { Hash, Star, Settings2, X, Search, Plus } from "lucide-react";
+import { Hash, CornerDownRight, Star, Settings2, X, Search, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   channelListOptions,
@@ -25,13 +25,19 @@ import {
   useCreateChannel,
 } from "@multica/core/channels";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { inboxListOptions } from "@multica/core/inbox/queries";
 import {
   memberListOptions,
   agentListOptions,
 } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
-import { conversationKindOfChannel } from "@multica/cerebro-feature-flags";
+import {
+  buildUnreadChannelThreads,
+  channelChatUnreadBadge,
+  conversationKindOfChannel,
+  useFeatureFlag,
+} from "@multica/cerebro-feature-flags";
 import {
   useChannelFavoritesStore,
   actorKey,
@@ -52,6 +58,11 @@ import { canAssignAgent } from "@multica/views/issues/components";
 import type { Channel } from "@multica/core/types";
 import { useMemberPresence } from "../hooks/use-member-presence";
 import { useChannelTyping } from "../hooks/use-channel-typing";
+import {
+  applyChatRailLimit,
+  partitionChatRail,
+  railLimitKind,
+} from "../partition-chat-rail";
 
 export type TeamSort = "name" | "recent";
 export type TeamGroupBy = "type" | "none";
@@ -59,7 +70,15 @@ export type TeamGroupBy = "type" | "none";
 export interface SlackBlockProps {
   wsId: string;
   selectedChannelId: string | null;
+  /** FIR-4649 — when a thread row is open, its root id (null otherwise). */
+  selectedThreadRootId?: string | null;
   onOpenChannel: (channel: Channel) => void;
+  /** FIR-4649 — open an unread channel/DM thread in the detail pane. */
+  onOpenThread?: (args: {
+    channel: Channel;
+    threadRootId: string;
+    commentId?: string;
+  }) => void;
   /** Rows to show. Per kind when grouped by type, a shared total when flat.
    *  0 = all. Default 10. */
   limit?: number;
@@ -137,11 +156,13 @@ const GROUP_OPTIONS: Array<{ label: string; value: TeamGroupBy }> = [
 
 type ChatItem = {
   key: string;
-  kind: "channel" | "person" | "agent";
+  kind: "channel" | "person" | "agent" | "thread";
   name: string;
   recency: number;
   unread: number;
   starred: boolean;
+  /** Cap bucket — threads count toward their parent channel/DM kind. */
+  limitKind: "channel" | "person" | "agent";
   favKey?: FavoriteKey;
   channel?: Channel;
   userId?: string;
@@ -150,6 +171,9 @@ type ChatItem = {
   /** TECH-3664 — id of the agent's most-recent unread chat session, if any.
    *  Set so clicking an unread agent row opens that session. */
   sessionId?: string;
+  /** FIR-4649 — unread thread row fields. */
+  threadRootId?: string;
+  commentId?: string;
 };
 
 /** Most-recent activity timestamp for a conversation (ms), 0 when none. */
@@ -181,7 +205,9 @@ function dmWithMember(
 export function SlackBlock({
   wsId,
   selectedChannelId,
+  selectedThreadRootId = null,
   onOpenChannel,
+  onOpenThread,
   limit,
   onSetLimit,
   sort = "recent",
@@ -207,6 +233,7 @@ export function SlackBlock({
   onRemove,
 }: SlackBlockProps) {
   const selfUserId = useAuthStore((s) => s.user?.id);
+  const threadSplitEnabled = useFeatureFlag("cerebro_inbox_thread_split");
   // `channels` (non-archived) backs DM↔member matching so inbox-archived DMs
   // stay hidden from People. `rosterChannels` (include-archived) backs the
   // Channels group so a named channel persists in the chat roster even after
@@ -214,6 +241,11 @@ export function SlackBlock({
   const { data: channels = [] } = useQuery(channelListOptions(wsId));
   const { data: rosterChannels = [] } = useQuery(channelRosterListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // FIR-4649 — same inbox feed the dynamic inbox uses to split unread threads.
+  const { data: rawInbox = [] } = useQuery({
+    ...inboxListOptions(wsId),
+    enabled: !!wsId && threadSplitEnabled,
+  });
   // Agents + their chat sessions are only fetched when the user opts in.
   const { data: agents = [] } = useQuery({
     ...agentListOptions(wsId),
@@ -307,8 +339,10 @@ export function SlackBlock({
         kind: "channel",
         name: c.title || "Group",
         recency: channelRecency(c),
-        unread: c.unread_count ?? 0,
+        // FIR-4649 — smart-unread activity (has_unread_activity) counts too.
+        unread: channelChatUnreadBadge(c),
         starred: favorites.includes(channelKey(c.id)),
+        limitKind: "channel",
         favKey: channelKey(c.id),
         channel: c,
       });
@@ -323,8 +357,9 @@ export function SlackBlock({
         kind: "person",
         name: m.name,
         recency: channelRecency(dm),
-        unread: dm?.unread_count ?? 0,
+        unread: dm ? channelChatUnreadBadge(dm) : 0,
         starred: favorites.includes(actorKey("member", m.user_id)),
+        limitKind: "person",
         favKey: actorKey("member", m.user_id),
         channel: dm,
         userId: m.user_id,
@@ -343,9 +378,41 @@ export function SlackBlock({
           recency: act?.recency ?? 0,
           unread: act?.unread ? 1 : 0,
           starred: false,
+          limitKind: "agent",
           agentId: a.id,
           sessionId: act?.unreadSessionId,
           online: agentPresence.get(a.id)?.availability === "online",
+        });
+      }
+    }
+
+    // FIR-4649 — unread channel/DM threads as their own rows (parity with
+    // dynamic inbox FIR-1854), so a reply is not invisible when the channel
+    // lives only on the Chat page.
+    if (threadSplitEnabled && onOpenThread) {
+      const channelMap = new Map<string, Channel>();
+      for (const c of rosterChannels) channelMap.set(c.id, c);
+      for (const c of channels) channelMap.set(c.id, c);
+      for (const t of buildUnreadChannelThreads(rawInbox, channelMap)) {
+        const show =
+          conversationKindOfChannel(t.channel.kind) === "channel"
+            ? showChannels
+            : showPeople;
+        if (!show) continue;
+        const parentTitle = t.channel.title?.trim() || (t.channel.kind === "dm" ? "DM" : "Channel");
+        const preview = t.item.details?.thread_root_preview?.trim();
+        items.push({
+          key: `thread:${t.threadRootId}`,
+          kind: "thread",
+          name: preview ? `${parentTitle}: ${preview}` : `${parentTitle} thread`,
+          recency: t.time,
+          unread: t.unreadCount,
+          starred: favorites.includes(channelKey(t.channelId)),
+          limitKind: railLimitKind("thread", t.channel.kind),
+          favKey: channelKey(t.channelId),
+          channel: t.channel,
+          threadRootId: t.threadRootId,
+          commentId: t.item.details?.comment_id,
         });
       }
     }
@@ -365,18 +432,23 @@ export function SlackBlock({
     selfUserId,
     memberRole,
     onlineUserIds,
+    threadSplitEnabled,
+    onOpenThread,
+    rawInbox,
   ]);
 
-  // Search → sort (starred first, optional unread-first, then chosen order) → cap.
+  // Search → sort (unread first when on, then starred, then chosen order) →
+  // cap. FIR-4649 — unreads sort ahead of Favorites so the shared limit never
+  // drops an unread behind a full starred/read quota (see applyChatRailLimit).
   const shownItems = useMemo(() => {
     const filtered = normalizedSearch
       ? allItems.filter((it) => it.name.toLowerCase().includes(normalizedSearch))
       : allItems;
     const sorted = filtered.slice().sort((a, b) => {
-      if (a.starred !== b.starred) return a.starred ? -1 : 1;
       if (unreadFirst && (a.unread > 0) !== (b.unread > 0)) {
         return a.unread > 0 ? -1 : 1;
       }
+      if (a.starred !== b.starred) return a.starred ? -1 : 1;
       if (sort === "recent") {
         const d = b.recency - a.recency;
         if (d !== 0) return d;
@@ -384,22 +456,7 @@ export function SlackBlock({
       return a.name.localeCompare(b.name);
     });
     const effective = limit == null ? DEFAULT_LIMIT : limit;
-    if (effective <= 0) return sorted;
-    // TECH-3665 — when grouped by type (the default), the limit is applied PER
-    // KIND so the Channels group is always shown by default. With a single
-    // global cap, busier People/DM rows ranked higher by recency could push
-    // every channel past the cap, leaving the Channels group empty even though
-    // the workspace has channels. The flat list keeps one shared total cap.
-    if (groupBy === "type") {
-      const perKind = new Map<ChatItem["kind"], number>();
-      return sorted.filter((it) => {
-        const taken = perKind.get(it.kind) ?? 0;
-        if (taken >= effective) return false;
-        perKind.set(it.kind, taken + 1);
-        return true;
-      });
-    }
-    return sorted.slice(0, effective);
+    return applyChatRailLimit(sorted, effective, groupBy, unreadFirst);
   }, [allItems, normalizedSearch, unreadFirst, sort, limit, groupBy]);
 
   const onlineCount = useMemo(
@@ -431,12 +488,23 @@ export function SlackBlock({
       // otherwise the row starts a fresh chat as before.
       if (it.sessionId && onOpenAgentSession) onOpenAgentSession(it.sessionId);
       else onOpenAgentChat(it.agentId);
+    } else if (it.kind === "thread" && it.channel && it.threadRootId && onOpenThread) {
+      onOpenThread({
+        channel: it.channel,
+        threadRootId: it.threadRootId,
+        commentId: it.commentId,
+      });
     } else if (it.kind === "channel" && it.channel) onOpenChannel(it.channel);
     else if (it.kind === "person" && it.userId) void openMember(it.userId);
   };
 
   const renderRow = (it: ChatItem) => {
-    const isSelected = it.channel != null && it.channel.id === selectedChannelId;
+    const isSelected =
+      it.kind === "thread"
+        ? it.threadRootId != null && it.threadRootId === selectedThreadRootId
+        : it.channel != null &&
+          it.channel.id === selectedChannelId &&
+          !selectedThreadRootId;
     const isTyping =
       it.kind === "person" &&
       it.channel != null &&
@@ -460,6 +528,10 @@ export function SlackBlock({
               <span className="flex size-6 items-center justify-center text-muted-foreground">
                 <Hash className="size-4" />
               </span>
+            ) : it.kind === "thread" ? (
+              <span className="flex size-6 items-center justify-center text-muted-foreground">
+                <CornerDownRight className="size-4" />
+              </span>
             ) : it.kind === "agent" ? (
               <ActorAvatar actorType="agent" actorId={it.agentId!} size={24} />
             ) : (
@@ -477,7 +549,11 @@ export function SlackBlock({
             )}
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="truncate text-foreground">{it.name}</span>
+            <span
+              className={`truncate ${it.unread > 0 ? "font-semibold text-foreground" : "text-foreground"}`}
+            >
+              {it.name}
+            </span>
             {isTyping && (
               <span className="shrink-0 text-xs italic text-brand">typing…</span>
             )}
@@ -510,25 +586,34 @@ export function SlackBlock({
     );
   };
 
-  // FIR-4350 — starred conversations get their OWN "Favorites" section at the
-  // very top, across all kinds, instead of floating to the top of their type
-  // group. Everything below is the non-starred set.
-  const favoriteItems = shownItems.filter((i) => i.starred);
-  const nonFavorite = shownItems.filter((i) => !i.starred);
-
-  // TECH-3664 — when "Unread first" is on, every unread conversation (channel,
-  // person OR agent) floats into ONE block below Favorites, with a thin
-  // horizontal divider under it; the rest are grouped/flat below as chosen.
-  // shownItems is already sorted (starred → unread → recency/name), so the
-  // partition preserves order within each block.
-  const unreadItems = unreadFirst ? nonFavorite.filter((i) => i.unread > 0) : [];
-  const restItems = unreadFirst ? nonFavorite.filter((i) => i.unread === 0) : nonFavorite;
+  // FIR-4649 — Slack order: Unread (every type) → Favorites (starred+read) →
+  // the rest grouped/flat. Same unread signal the Chat badge uses.
+  const {
+    unread: unreadItems,
+    favorites: favoriteItems,
+    rest: restItems,
+  } = partitionChatRail(shownItems, unreadFirst);
 
   let groups: Array<{ label: string; items: ChatItem[] }>;
   if (groupBy === "type") {
     groups = [
-      { label: "Channels", items: restItems.filter((i) => i.kind === "channel") },
-      { label: "People", items: restItems.filter((i) => i.kind === "person") },
+      {
+        label: "Channels",
+        items: restItems.filter(
+          (i) =>
+            i.kind === "channel" ||
+            (i.kind === "thread" && i.channel?.kind === "channel"),
+        ),
+      },
+      {
+        label: "People",
+        items: restItems.filter(
+          (i) =>
+            i.kind === "person" ||
+            (i.kind === "thread" &&
+              (i.channel?.kind === "dm" || i.channel?.kind === "group")),
+        ),
+      },
       { label: "Agents", items: restItems.filter((i) => i.kind === "agent") },
     ].filter((g) => g.items.length > 0);
   } else {
@@ -726,29 +811,32 @@ export function SlackBlock({
           </p>
         ) : (
           <div className="flex flex-col gap-3" data-testid="chat-list">
-            {/* FIR-4350 — Favorites block across all kinds, above everything
-                else, with a divider when anything follows. */}
+            {/* FIR-4649 — Unread first (Slack): every unread conversation of
+                any type, above Favorites and the type groups. */}
+            {unreadItems.length > 0 && (
+              <div className="flex flex-col gap-1" data-testid="unread-group">
+                <h3 className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Unread
+                </h3>
+                {unreadItems.map(renderRow)}
+                {(favoriteItems.length > 0 || groups.length > 0) && (
+                  <hr
+                    data-testid="unread-divider"
+                    className="mt-2 border-t border-border"
+                  />
+                )}
+              </div>
+            )}
+            {/* FIR-4350 / FIR-4649 — Favorites = starred that are already read;
+                starred+unread live in the Unread block above. */}
             {favoriteItems.length > 0 && (
               <div className="flex flex-col gap-1" data-testid="favorites-group">
                 <h3 className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Favorites
                 </h3>
                 {favoriteItems.map(renderRow)}
-                {(unreadItems.length > 0 || groups.length > 0) && (
-                  <hr className="mt-2 border-t border-border" />
-                )}
-              </div>
-            )}
-            {/* TECH-3664 — unread block across all kinds, with a thin divider
-                under it, kept above the grouped/flat read rows. */}
-            {unreadItems.length > 0 && (
-              <div className="flex flex-col gap-1" data-testid="unread-group">
-                {unreadItems.map(renderRow)}
                 {groups.length > 0 && (
-                  <hr
-                    data-testid="unread-divider"
-                    className="mt-2 border-t border-border"
-                  />
+                  <hr className="mt-2 border-t border-border" />
                 )}
               </div>
             )}
