@@ -13,6 +13,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -118,7 +119,7 @@ func TestPostPrivate_AddressesUserWithSingleChatType(t *testing.T) {
 
 	const senderUserID = "SENDER_USERID"
 	const secretURL = "https://multica.example/wecom/bind?token=SECRET_TOKEN"
-	if err := r.postPrivate(inst, senderUserID, secretURL); err != nil {
+	if err := r.postPrivate(context.Background(), inst, senderUserID, secretURL); err != nil {
 		t.Fatalf("postPrivate: %v", err)
 	}
 
@@ -144,7 +145,7 @@ func TestPost_AddressesRoomChatID(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: "SENDER_USERID",
 	}}
-	if err := r.post(nil, inst, msg, "a token-less line"); err != nil {
+	if err := r.post(context.Background(), inst, msg, "a token-less line"); err != nil {
 		t.Fatalf("post: %v", err)
 	}
 
@@ -277,7 +278,7 @@ func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
 	reg := newSendersRegistry()
 	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
 	conn := &recordingConn{}
-	reg.set(inst.ID, newWSSender(conn, nil))
+	reg.set(inst.ID, conn.autoAck(newWSSender(conn, nil)))
 	r := NewOutboundReplier(OutboundReplierConfig{
 		Senders: reg,
 		AppURL:  "https://multica.example",
@@ -325,5 +326,42 @@ func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
 	}
 	if privateFrames != 1 {
 		t.Errorf("expected exactly one privately-addressed frame, got %d", privateFrames)
+	}
+}
+
+// TestPost_HonoursTheCallersDeadline guards the budget the calling code
+// already believed it had. Bus delivery is synchronous, so the reply path runs
+// on the publishing goroutine; outbound.go and handleInboxNew each build a
+// bounded ctx precisely so a stalled WeCom round trip cannot hold it. Waiting
+// for the server's verdict on a hardcoded context.Background() made those
+// bounds decorative — a lost ack cost the full ackTimeout per subscriber, in
+// series, on an HTTP handler's goroutine.
+//
+// A ctx that is already done is the cheap, deterministic stand-in: it must come
+// back at once rather than serve out the ack wait.
+func TestPost_HonoursTheCallersDeadline(t *testing.T) {
+	t.Parallel()
+	r, inst, _ := newReplierWithConn(t)
+
+	msg := channel.InboundMessage{Source: channel.Source{
+		ChatID:   "GROUP_CHAT_ID",
+		ChatType: channel.ChatTypeGroup,
+		SenderID: "SENDER_USERID",
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- r.post(ctx, inst, msg, "a line nobody is waiting for") }()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("post on a cancelled ctx returned %v, want context.Canceled", err)
+		}
+	case <-time.After(ackTimeout / 2):
+		t.Fatal("post ignored the caller's cancelled ctx and sat on the ack wait — " +
+			"the deadline the publishing goroutine budgeted for is not being applied")
 	}
 }

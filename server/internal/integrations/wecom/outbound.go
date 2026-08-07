@@ -136,7 +136,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return errors.New("wecom: connection not ready on this replica")
 	}
 	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
-	return sender.sendText(binding.ChannelChatID, chatType, content)
+	return sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
 }
 
 // chatDoneContent extracts the reply text from an EventChatDone payload
@@ -228,7 +228,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	// Smart-bot inbox notifications are 1:1 pushes to the bound user. The
 	// binding row's channel_user_id is the bot-scoped T-* userid — WeCom
 	// treats that as the chatid for a single (chat_type=1) send.
-	if err := sender.sendText(binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
+	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
 		o.logger.WarnContext(ctx, "wecom outbound: inbox push failed",
 			"error", err, "installation_id", uuidStringPub(binding.InstallationID),
 			"recipient_id", recipientIDStr)
