@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
+
+const platformAgentCLIDesktopBundledOnlyEnv = "MULTICA_PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY"
 
 // shellResolveTTL bounds how long one login-shell PATH resolution is reused
 // across probeAgentCLIs calls.
@@ -235,7 +238,17 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
-	if e, ok := probe("MULTICA_PLATFORM_AGENT_CLI_PATH", "platform-agent-cli", ""); ok {
+	if strings.TrimSpace(os.Getenv(platformAgentCLIDesktopBundledOnlyEnv)) == "1" {
+		// Desktop owns this runtime. In bundled-only mode, require the absolute
+		// path Desktop resolved from its resources directory and never rescue a
+		// missing bundle through PATH or the user's login shell.
+		cmd := strings.TrimSpace(os.Getenv("MULTICA_PLATFORM_AGENT_CLI_PATH"))
+		if filepath.IsAbs(cmd) {
+			if path, err := resolveAgentExecutablePath(cmd); err == nil {
+				agents["platform-agent-cli"] = AgentEntry{Path: path, Command: cmd}
+			}
+		}
+	} else if e, ok := probe("MULTICA_PLATFORM_AGENT_CLI_PATH", "platform-agent-cli", ""); ok {
 		agents["platform-agent-cli"] = e
 	}
 	return agents

@@ -2,6 +2,7 @@ import { join } from "path";
 import { describe, expect, it } from "vitest";
 
 import {
+  PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV,
   PLATFORM_AGENT_CLI_PATH_ENV,
   bundledPlatformAgentPath,
   withBundledPlatformAgentPath,
@@ -43,6 +44,7 @@ describe("withBundledPlatformAgentPath", () => {
 
     expect(result).toEqual({
       PATH: "/usr/bin",
+      [PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV]: "1",
       [PLATFORM_AGENT_CLI_PATH_ENV]: "/workspace/apps/desktop/resources/bin/platform-agent-cli",
     });
   });
@@ -60,11 +62,37 @@ describe("withBundledPlatformAgentPath", () => {
       () => false,
     );
 
-    expect(result).toEqual({ PATH: "/usr/bin" });
+    expect(result).toEqual({
+      PATH: "/usr/bin",
+      [PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV]: "1",
+    });
     expect(sourceEnv).toEqual({
       PATH: "/usr/bin",
       [PLATFORM_AGENT_CLI_PATH_ENV]: "/stale/platform-agent-cli",
     });
     expect(result).not.toBe(sourceEnv);
+  });
+
+  it("removes differently-cased inherited path keys before entering bundled-only mode", () => {
+    const result = withBundledPlatformAgentPath(
+      {
+        PATH: "C:/Windows/System32",
+        multica_platform_agent_cli_path: "C:/stale/platform-agent-cli.exe",
+        Multica_Platform_Agent_Cli_Desktop_Bundled_Only: "0",
+      },
+      "C:/Multica/resources/app.asar",
+      "win32",
+      () => false,
+    );
+
+    expect(result).toEqual({
+      PATH: "C:/Windows/System32",
+      [PLATFORM_AGENT_CLI_DESKTOP_BUNDLED_ONLY_ENV]: "1",
+    });
+    expect(
+      Object.keys(result).filter(
+        (key) => key.toUpperCase() === PLATFORM_AGENT_CLI_PATH_ENV,
+      ),
+    ).toEqual([]);
   });
 });
