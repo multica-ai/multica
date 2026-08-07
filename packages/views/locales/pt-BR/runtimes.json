@@ -267,7 +267,9 @@
       "completed": "Atualização concluída. O daemon está reiniciando...",
       "failed": "Falha na atualização",
       "timeout": "Tempo esgotado"
-    }
+    },
+    "local_build": "Build local",
+    "local_build_title": "Este runtime informa uma versão que não é de release, então o Multica não consegue saber se há uma atualização disponível. Atualize-o pela própria máquina."
   },
   "charts": {
     "heatmap_less": "Menos",
@@ -443,5 +445,14 @@
     "table_cache_r": "Cache L",
     "table_cache_w": "Cache E",
     "no_data": "Ainda não há dados de uso"
+  },
+  "mika_setup": {
+    "title": "Seu runtime está pronto. Comece com a Mika.",
+    "description": "A Mika transforma seu objetivo em uma issue, coordena o agent certo e ajuda você a adicionar especialistas reutilizáveis quando seu fluxo de trabalho precisar.",
+    "action": "Começar com a Mika",
+    "failed": "Não foi possível iniciar a Mika",
+    "dialog_title": "Onde a Mika deve rodar?",
+    "dialog_description": "Escolha o runtime que a Mika vai usar. Você pode alterar isso depois nas configurações.",
+    "cancel": "Cancelar"
   }
 }

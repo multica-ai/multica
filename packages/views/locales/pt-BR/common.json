@@ -75,5 +75,35 @@
   "expandable_description": {
     "expand": "Mostrar mais",
     "collapse": "Mostrar menos"
+  },
+  "dingtalk_bind": {
+    "page_title": "Vincule sua conta do DingTalk",
+    "redeeming": "Vinculando sua conta…",
+    "needs_auth_description": "Entre no Multica para concluir a vinculação. O token no link vincula sua conta do DingTalk a este usuário do Multica, então você precisa estar logado primeiro.",
+    "sign_in": "Entrar",
+    "done_title": "Você está vinculado.",
+    "done_description": "Sua próxima mensagem para o bot no DingTalk vai direto para o agent. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, mande uma mensagem para o bot no DingTalk novamente para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Mande uma mensagem para o bot no DingTalk novamente para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Mande uma mensagem para o bot novamente para obter um novo.",
+    "error_already_bound": "Esta conta do DingTalk já está vinculada a outro usuário do Multica. Transferências de conta precisam passar por uma desvinculação explícita primeiro.",
+    "error_not_member": "Você está logado em uma conta do Multica que não é membro deste workspace.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, contate o admin do workspace."
+  },
+  "wecom_bind": {
+    "page_title": "Vincule sua conta do Multica",
+    "redeeming": "Vinculando sua conta…",
+    "needs_auth_description": "Entre no Multica para concluir a vinculação. O token no link vincula sua identidade do WeCom a este usuário do Multica, então você precisa estar logado primeiro.",
+    "sign_in": "Entrar",
+    "done_title": "Você está vinculado.",
+    "done_description": "Sua próxima mensagem para o bot inteligente no WeCom vai direto para o agent. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, mande uma mensagem para o bot no WeCom novamente para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Mande uma mensagem para o bot no WeCom novamente para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Mande uma mensagem para o bot novamente para obter um novo.",
+    "error_already_bound": "Esta identidade do WeCom já está vinculada a outro usuário do Multica. Transferências de conta precisam passar por uma desvinculação explícita primeiro.",
+    "error_not_member": "Você está logado em uma conta do Multica que não é membro deste workspace.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, contate o admin do workspace."
   }
 }

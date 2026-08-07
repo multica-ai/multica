@@ -448,7 +448,14 @@
     "instructions": {
       "intro": "Defina o system prompt usado em cada task. Markdown é compatível.",
       "system_prompt_label": "System prompt",
-      "placeholder": "Defina a função, a especialidade e o estilo de trabalho deste agent.\n\n# Exemplo\nVocê é um engenheiro de frontend especializado em React e TypeScript.\n\n## Estilo de trabalho\n- Escreva PRs pequenos e focados — um commit por mudança lógica\n- Prefira composição em vez de herança\n- Sempre adicione testes unitários para novos componentes\n\n## Restrições\n- Não modifique os tipos em shared/ sem aprovação explícita\n- Siga os padrões de componentes existentes em features/"
+      "placeholder": "Defina a função, a especialidade e o estilo de trabalho deste agent.\n\n# Exemplo\nVocê é um engenheiro de frontend especializado em React e TypeScript.\n\n## Estilo de trabalho\n- Escreva PRs pequenos e focados — um commit por mudança lógica\n- Prefira composição em vez de herança\n- Sempre adicione testes unitários para novos componentes\n\n## Restrições\n- Não modifique os tipos em shared/ sem aprovação explícita\n- Siga os padrões de componentes existentes em features/",
+      "system_layer_label": "Mantido pelo Multica",
+      "system_layer_hint": "Atualiza a cada versão do Multica. Você não pode editá-lo, e suas notas abaixo nunca são sobrescritas.",
+      "system_layer_show": "Mostrar",
+      "system_layer_hide": "Ocultar",
+      "workspace_notes_label": "Notas do workspace",
+      "workspace_notes_intro": "Adicione o contexto e as preferências da sua equipe abaixo. Elas se aplicam sobre as instruções que o Multica mantém para este agent. Markdown é suportado.",
+      "workspace_notes_placeholder": "Adicione um contexto que este agent deve ter sempre.\n\n# Exemplo\nNosso repositório principal é github.com/acme/platform.\nEscreva as issues em inglês mesmo quando conversamos em chinês.\nNão fazemos deploy às sextas-feiras."
     },
     "env": {
       "intro_readonly": "Injetado no processo do agent na inicialização. Somente owners e admins do workspace podem ler ou editar os valores; toda revelação e edição fica registrada no audit log do workspace.",
@@ -817,7 +824,13 @@
     "copy_workdir": "Copiar diretório de trabalho",
     "close": "Fechar",
     "fact_created": "Criado {{time}}",
-    "fact_took": "Levou {{duration}}"
+    "fact_took": "Levou {{duration}}",
+    "details_input": "Entrada",
+    "details_output": "Saída",
+    "details_cache_read": "Leitura de cache",
+    "details_cache_write": "Escrita de cache",
+    "details_cost": "Custo",
+    "usage_chip_title": "Tokens e custo estimado desta execução"
   },
   "task_failure": {
     "agent_error": "Erro de execução do agent",

@@ -29,7 +29,8 @@
     "change_project_context": "Alterar contexto do projeto",
     "remove_project_context": "Remover contexto do projeto",
     "no_projects": "Ainda não há projetos",
-    "project_context_unsupported": "A descrição do projeto não será aplicada — o daemon deste agent precisa de uma atualização"
+    "project_context_unsupported": "A descrição do projeto não será aplicada — o daemon deste agent precisa de uma atualização",
+    "queue_send_tooltip": "Enfileirar mensagem"
   },
   "message_list": {
     "show_details": "Mostrar detalhes",
@@ -157,7 +158,8 @@
       "waiting_local_directory": "Aguardando diretório local",
       "starting_up": "Iniciando",
       "thinking": "Pensando",
-      "typing": "Digitando"
+      "typing": "Digitando",
+      "retrying": "Tentando novamente"
     },
     "tools": {
       "running_command": "Executando um comando",
@@ -192,5 +194,38 @@
     "archive": "Arquivar chat",
     "unarchive": "Desarquivar chat",
     "delete": "Excluir chat"
+  },
+  "queue": {
+    "title_one": "{{count}} mensagem na fila",
+    "title_other": "{{count}} mensagens na fila",
+    "clear": "Limpar tudo",
+    "steer": "Direcionar",
+    "steer_unavailable": "Direcionar fica disponível depois que a resposta atual começa",
+    "steer_unavailable_toast": "Direcionar está indisponível. Atualizando a fila.",
+    "edit": "Editar mensagem na fila",
+    "remove": "Remover mensagem na fila",
+    "more": "Mais ações da fila",
+    "fallback": "Mensagem na fila",
+    "action_failed_toast": "Não foi possível atualizar a mensagem na fila"
+  },
+  "onboarding_cards": {
+    "aria_label": "Formas de começar",
+    "cta": "Começar",
+    "board": {
+      "title": "Monte um quadro em minutos",
+      "desc": "Me diga o objetivo — eu crio o projeto, divido as issues e defino as prioridades.",
+      "prompt": "Transforme nossos objetivos atuais em um quadro de projeto"
+    },
+    "delegate": {
+      "title": "Me passe uma coisa primeiro",
+      "desc": "Uma pesquisa rápida, por exemplo — os resultados voltam como uma issue e um relatório.",
+      "prompt": "Tire uma coisa da minha lista: faça uma pesquisa rápida e me devolva os resultados como um relatório"
+    },
+    "digest": {
+      "title": "Deixe o resumo diário se escrever sozinho",
+      "desc": "Um resumo matinal do progresso do workspace, direto na sua inbox.",
+      "prompt": "Configure uma automação diária que publique um resumo matinal do progresso do workspace"
+    },
+    "digest_badge": "Diário 9:00"
   }
 }

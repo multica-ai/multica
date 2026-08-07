@@ -114,24 +114,82 @@
       "navigation": "Navegação"
     },
     "actions": {
-      "openSearch": { "label": "Abrir busca", "description": "Busque e execute comandos de qualquer lugar." },
-      "createIssue": { "label": "Criar issue", "description": "Abra seu fluxo preferido de criação de issue." },
-      "toggleSidebar": { "label": "Alternar barra lateral", "description": "Mostrar ou ocultar a barra lateral principal." },
-      "toggleChat": { "label": "Alternar janela de chat", "description": "Abrir ou fechar a janela de chat flutuante. Ao abrir, o foco vai para o campo de mensagem." },
-      "findInIssue": { "label": "Buscar na issue", "description": "Buscar dentro do detalhe da issue aberta." },
-      "send": { "label": "Enviar", "description": "Enviar mensagens de chat, comentários, respostas, feedback e prompts, e criar issues na caixa de diálogo de criação." },
-      "goInbox": { "label": "Ir para a Caixa de Entrada", "description": "Abrir a caixa de entrada do workspace." },
-      "goChat": { "label": "Ir para o Chat", "description": "Abrir o chat do workspace." },
-      "goMyIssues": { "label": "Ir para Minhas Issues", "description": "Abrir issues atribuídas a você." },
-      "goIssues": { "label": "Ir para Issues", "description": "Abrir a lista de issues." },
-      "goProjects": { "label": "Ir para Projetos", "description": "Abrir a lista de projetos." },
-      "goAutopilots": { "label": "Ir para Autopilot", "description": "Abrir as automações do workspace." },
-      "goAgents": { "label": "Ir para Agents", "description": "Abrir a lista de agents." },
-      "goSquads": { "label": "Ir para Squads", "description": "Abrir a lista de squads." },
-      "goUsage": { "label": "Ir para Uso", "description": "Abrir análises de uso." },
-      "goRuntimes": { "label": "Ir para Runtimes", "description": "Abrir a configuração de runtime." },
-      "goSkills": { "label": "Ir para Skills", "description": "Abrir a biblioteca de skills." },
-      "goSettings": { "label": "Ir para Configurações", "description": "Abrir as configurações do workspace." }
+      "openSearch": {
+        "label": "Abrir busca",
+        "description": "Busque e execute comandos de qualquer lugar."
+      },
+      "createIssue": {
+        "label": "Criar issue",
+        "description": "Abra seu fluxo preferido de criação de issue."
+      },
+      "toggleSidebar": {
+        "label": "Alternar barra lateral",
+        "description": "Mostrar ou ocultar a barra lateral principal."
+      },
+      "toggleChat": {
+        "label": "Alternar janela de chat",
+        "description": "Abrir ou fechar a janela de chat flutuante. Ao abrir, o foco vai para o campo de mensagem."
+      },
+      "findInIssue": {
+        "label": "Buscar na issue",
+        "description": "Buscar dentro do detalhe da issue aberta."
+      },
+      "send": {
+        "label": "Enviar",
+        "description": "Enviar mensagens de chat, comentários, respostas, feedback e prompts, e criar issues na caixa de diálogo de criação."
+      },
+      "goInbox": {
+        "label": "Ir para a Caixa de Entrada",
+        "description": "Abrir a caixa de entrada do workspace."
+      },
+      "goChat": {
+        "label": "Ir para o Chat",
+        "description": "Abrir o chat do workspace."
+      },
+      "goMyIssues": {
+        "label": "Ir para Minhas Issues",
+        "description": "Abrir issues atribuídas a você."
+      },
+      "goIssues": {
+        "label": "Ir para Issues",
+        "description": "Abrir a lista de issues."
+      },
+      "goProjects": {
+        "label": "Ir para Projetos",
+        "description": "Abrir a lista de projetos."
+      },
+      "goAutopilots": {
+        "label": "Ir para Autopilot",
+        "description": "Abrir as automações do workspace."
+      },
+      "goAgents": {
+        "label": "Ir para Agents",
+        "description": "Abrir a lista de agents."
+      },
+      "goSquads": {
+        "label": "Ir para Squads",
+        "description": "Abrir a lista de squads."
+      },
+      "goUsage": {
+        "label": "Ir para Uso",
+        "description": "Abrir análises de uso."
+      },
+      "goRuntimes": {
+        "label": "Ir para Runtimes",
+        "description": "Abrir a configuração de runtime."
+      },
+      "goSkills": {
+        "label": "Ir para Skills",
+        "description": "Abrir a biblioteca de skills."
+      },
+      "goSettings": {
+        "label": "Ir para Configurações",
+        "description": "Abrir as configurações do workspace."
+      },
+      "openThreadNav": {
+        "label": "Abrir navegador de threads",
+        "description": "Liste, busque e navegue entre as threads de comentários da issue aberta."
+      }
     },
     "fixed": {
       "title": "Atalhos fixos do sistema",
@@ -339,6 +397,10 @@
       "agent_activity": {
         "label": "Atividade do agent",
         "description": "Quando uma task do agent é concluída ou falha"
+      },
+      "mentions": {
+        "label": "Menções",
+        "description": "Quando alguém menciona você com @, incluindo @all e @squad"
       }
     },
     "system": {
@@ -789,5 +851,81 @@
         "description": "Cria e trabalha em issues"
       }
     }
+  },
+  "dingtalk": {
+    "section_title": "DingTalk",
+    "page_description": "Conecte cada Agent do Multica ao seu próprio robô do DingTalk. Os membros podem mandar DM para o bot, mencioná-lo com @ em um grupo e digitar /issue para criar uma nova issue do Multica.",
+    "not_enabled_title": "Integração com o DingTalk não habilitada",
+    "not_enabled_description_prefix": "Defina",
+    "not_enabled_description_suffix": "no servidor para habilitar as instalações de robôs do DingTalk.",
+    "not_enabled_self_host_hint": "Self-hosters: veja o README do projeto para mais detalhes.",
+    "connected_bots": "Bots conectados",
+    "loading": "Carregando…",
+    "empty_title": "Nenhum bot conectado ainda",
+    "empty_description_prefix": "Abra um Agent neste workspace e clique em",
+    "empty_description_cta": "Conectar DingTalk",
+    "empty_description_suffix": "para instalar um robô para ele.",
+    "revoked_badge": "revogado",
+    "installed_at_label": "Instalado {{when}}",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando…",
+    "disconnect_confirm_title": "Desconectar este bot do DingTalk?",
+    "disconnect_confirm_description": "O bot vai parar de receber mensagens do DingTalk para este workspace. A linha da instalação é mantida para auditoria; você pode reconectar o bot depois.",
+    "disconnect_confirm_cancel": "Cancelar",
+    "toast_disconnected": "Bot do DingTalk desconectado",
+    "toast_disconnect_failed": "Falha ao desconectar",
+    "bind_button": "Conectar DingTalk",
+    "bind_button_title": "Conectar {{agent}} a um bot do DingTalk",
+    "agent_bot_connected_label": "Conectado ao DingTalk",
+    "agent_bot_disconnect_tooltip": "Desvincule este bot do DingTalk do Agent. O bot vai parar de receber mensagens do DingTalk.",
+    "byo_dialog_title": "Conectar um bot do DingTalk",
+    "byo_docs_link": "Passo a passo: conecte seu agent do Multica ao DingTalk",
+    "byo_appkey_label": "AppKey (client id)",
+    "byo_appsecret_label": "AppSecret (client secret)",
+    "byo_submit": "Conectar",
+    "byo_submitting": "Conectando…",
+    "byo_cancel": "Cancelar",
+    "byo_success_toast": "Bot do DingTalk conectado",
+    "byo_failed_toast": "Não foi possível conectar o bot do DingTalk"
+  },
+  "wecom": {
+    "section_title": "WeCom",
+    "page_description": "Conecte cada Agent do Multica ao seu próprio bot inteligente do WeCom. Os membros mandam mensagem para o bot no WeCom e o Agent responde por uma conexão WebSocket longa — nenhuma URL de callback pública é necessária.",
+    "not_enabled_title": "Integração com o WeCom não habilitada",
+    "not_enabled_description_prefix": "Defina",
+    "not_enabled_description_suffix": "no servidor para habilitar as instalações de bots inteligentes do WeCom.",
+    "not_enabled_self_host_hint": "Self-hosters: veja o README do projeto para mais detalhes.",
+    "preview_title": "Instalação do WeCom em breve",
+    "preview_description": "A chave em repouso está definida, mas este deployment ainda não habilitou totalmente as instalações do WeCom.",
+    "connected_bots": "Bots conectados",
+    "loading": "Carregando…",
+    "empty_title": "Nenhum bot conectado ainda",
+    "empty_description_prefix": "Abra um Agent neste workspace e clique em",
+    "empty_description_cta": "Conectar WeCom",
+    "empty_description_suffix": "para instalar um bot inteligente para ele.",
+    "revoked_badge": "revogado",
+    "bot_id_label": "ID do bot: {{botId}}",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando…",
+    "disconnect_confirm_title": "Desconectar este bot do WeCom?",
+    "disconnect_confirm_description": "O bot vai parar de receber mensagens do WeCom para este workspace. A linha da instalação é mantida para auditoria; você pode reinstalar depois a partir do mesmo Agent.",
+    "disconnect_confirm_cancel": "Cancelar",
+    "toast_disconnected": "Bot do WeCom desconectado",
+    "toast_disconnect_failed": "Falha ao desconectar",
+    "bind_button": "Conectar WeCom",
+    "bind_button_title": "Conectar {{agent}} a um bot inteligente do WeCom",
+    "agent_bot_connected_label": "Conectado ao WeCom",
+    "agent_bot_connected_label_with_id": "Conectado ao WeCom — {{botId}}",
+    "agent_bot_disconnect_tooltip": "Desvincule este bot inteligente do Agent. O bot vai parar de receber mensagens do WeCom.",
+    "byo_dialog_title": "Conectar um bot inteligente do WeCom",
+    "byo_bot_id_label": "ID do bot",
+    "byo_bot_id_placeholder": "ex.: aibot_xxxxxxxxxxxxxxxx",
+    "byo_secret_label": "Segredo da conexão longa",
+    "byo_secret_placeholder": "Cole o segredo mostrado uma única vez no console",
+    "byo_submit": "Conectar",
+    "byo_submitting": "Conectando…",
+    "byo_cancel": "Cancelar",
+    "byo_success_toast": "Bot do WeCom conectado",
+    "byo_failed_toast": "Não foi possível conectar o bot do WeCom"
   }
 }

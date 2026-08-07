@@ -35,7 +35,11 @@
     "delete": "Excluir",
     "link_copied": "Link copiado",
     "copy_link_failed": "Falha ao copiar o link",
-    "canvas_label": "Tela da imagem. Arraste para navegar, role para dar zoom, clique duas vezes para alternar o tamanho real."
+    "canvas_label": "Tela da imagem. Arraste para navegar, role para dar zoom, clique duas vezes para alternar o tamanho real.",
+    "previous": "Imagem anterior",
+    "next": "Próxima imagem",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "Essa imagem não está mais disponível — foi ignorada."
   },
   "canvas": {
     "zoom_in": "Aumentar zoom",
@@ -68,7 +72,8 @@
     "no_results": "Nenhum resultado",
     "group_current": "Página atual",
     "group_recent": "Visualizados recentemente",
-    "group_search": "Resultados da busca"
+    "group_search": "Resultados da busca",
+    "group_cancelled": "Cancelado"
   },
   "slash_command": {
     "no_skills_configured": "Nenhuma skill configurada",

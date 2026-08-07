@@ -70,7 +70,6 @@
     "section_description": "Descrição",
     "prop_start_date": "Data de início",
     "prop_due_date": "Data de entrega",
-    "clear_date": "Limpar data",
     "description_placeholder": "Adicionar descrição...",
     "description_hint": "Compartilhado com agents como contexto para cada task deste projeto.",
     "empty_issues_title": "Nenhuma issue vinculada",
@@ -79,7 +78,9 @@
     "no_issues_yet": "Ainda não há issues",
     "toast_link_copied": "Link copiado",
     "toast_project_deleted": "Projeto excluído",
-    "toast_move_issue_failed": "Falha ao mover a issue"
+    "toast_move_issue_failed": "Falha ao mover a issue",
+    "no_start_date": "Sem data de início",
+    "no_due_date": "Sem data de vencimento"
   },
   "resources": {
     "section_header": "Recursos",
@@ -126,7 +127,6 @@
   },
   "picker": {
     "no_project": "Nenhum projeto",
-    "remove": "Remover do projeto",
     "empty": "Ainda não há projetos",
     "search_placeholder": "Buscar projetos..."
   },

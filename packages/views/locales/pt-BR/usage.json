@@ -1,6 +1,5 @@
 {
   "title": "Uso",
-  "subtitle": "Consumo de tokens e atividade de agents neste workspace.",
   "filter": {
     "project_label": "Projeto",
     "all_projects": "Todos os projetos",
@@ -30,7 +29,6 @@
     "metric_tokens": "Tokens",
     "metric_time": "Tempo",
     "metric_tasks": "Tasks",
-    "metric_errors": "Erros",
     "no_data": "Nenhum uso neste período.",
     "metric_label": "Métrica"
   },
@@ -72,7 +70,12 @@
     "show_reasons": "Mostrar códigos de erro",
     "hide_reasons": "Ocultar códigos de erro",
     "show_all": "Mostrar todos os {{count}}",
-    "show_less": "Mostrar top {{count}}"
+    "show_less": "Mostrar top {{count}}",
+    "kpi_failed_label": "Tasks com falha · {{days}}D",
+    "kpi_failed_hint": "De {{total}} execuções",
+    "kpi_rate_label": "Taxa de falha · {{days}}D",
+    "kpi_agents_label": "Agents afetados · {{days}}D",
+    "kpi_agents_hint": "Pior {{name}} · {{count}}"
   },
   "leaderboard": {
     "title": "Ranking",
@@ -96,5 +99,10 @@
   },
   "duration": {
     "less_than_minute": "<1m"
+  },
+  "tab_usage": "Uso",
+  "header": {
+    "timezone_and_updated": "{{tz}} · atualizado {{time}}",
+    "refresh": "Atualizar"
   }
 }

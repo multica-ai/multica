@@ -246,7 +246,6 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadados",
     "section_details": "Detalhes",
-    "section_token_usage": "Uso de tokens",
     "section_quick_actions": "Ações rápidas",
     "quick_actions_more": "Mostrar mais {{count}}",
     "quick_action_runs_as": "Executa como {{name}}",
@@ -295,11 +294,6 @@
     "prop_created_by": "Criado por",
     "prop_created": "Criado",
     "prop_updated": "Atualizado",
-    "prop_input": "Entrada",
-    "prop_output": "Saída",
-    "prop_cache": "Cache",
-    "prop_cache_value": "{{read}} leitura / {{write}} gravação",
-    "prop_runs": "Execuções",
     "activity_section": "Atividade",
     "subscribe": "Inscrever-se",
     "unsubscribe": "Cancelar inscrição",
@@ -333,7 +327,29 @@
     "link_copy_failed": "Falha ao copiar o link",
     "workdir_path_copied": "Caminho do workdir copiado",
     "workdir_path_copy_failed": "Falha ao copiar o caminho do workdir",
-    "workdir_path_unavailable": "Nenhum workdir local ainda — a issue ainda não foi executada por um agent local"
+    "workdir_path_unavailable": "Nenhum workdir local ainda — a issue ainda não foi executada por um agent local",
+    "unsubscribe_subtree_succeeded": "Você cancelou a inscrição nesta issue e nas suas sub-issues.",
+    "subscription_update_failed": "Não foi possível atualizar a inscrição. Tente novamente.",
+    "thread_nav": {
+      "button_label_one": "Threads de comentários ({{count}})",
+      "button_label_other": "Threads de comentários ({{count}})",
+      "search_placeholder": "Buscar threads ou autores",
+      "match_count_one": "{{count}} resultado",
+      "match_count_other": "{{count}} resultados",
+      "filter_all": "Todas",
+      "filter_unresolved": "Não resolvidas",
+      "filter_resolved": "Resolvidas",
+      "filter_mine": "@eu",
+      "group": {
+        "today": "Hoje",
+        "yesterday": "Ontem",
+        "earlier": "Anteriores"
+      },
+      "empty": "Nenhuma thread corresponde",
+      "hint_select": "selecionar",
+      "hint_jump": "pular",
+      "hint_close": "fechar"
+    }
   },
   "timeline": {
     "loading": "Carregando..."
@@ -521,7 +537,8 @@
       "source_owner_fallback": "Sem responsável preciso — atribuído ao proprietário do agent",
       "source_backfill": "Atribuição preenchida retroativamente",
       "source_unattributed": "Nenhum membro responsável identificado"
-    }
+    },
+    "usage_total_tooltip": "Uso de tokens desta issue — clique para ver o detalhamento por execução"
   },
   "terminate_dialog": {
     "title": "Parar esta task?",
@@ -584,14 +601,14 @@
   "pickers": {
     "custom_property": {
       "empty": "Vazio",
-      "clear_action": "Limpar",
       "true_label": "Sim",
       "false_label": "Não",
       "value_placeholder": "Digite um valor…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
       "open_link": "Abrir link",
-      "archived_hint": "Propriedade arquivada — o valor é somente leitura"
+      "archived_hint": "Propriedade arquivada — o valor é somente leitura",
+      "none": "Sem valor"
     },
     "filter_options_aria": "Opções de filtro",
     "no_results": "Nenhum resultado",
@@ -606,11 +623,11 @@
     },
     "start_date": {
       "trigger_label": "Data de início",
-      "clear_action": "Limpar data"
+      "none": "Sem data de início"
     },
     "due_date": {
       "trigger_label": "Data de vencimento",
-      "clear_action": "Limpar data"
+      "none": "Sem data de vencimento"
     },
     "label": {
       "trigger_label": "Adicionar etiqueta",
@@ -651,5 +668,34 @@
     "row_backlog_hint": "mantém o agent pausado",
     "row_todo_label": "A fazer",
     "row_todo_hint": "inicia o agent"
+  },
+  "usage_detail": {
+    "title": "Detalhamento de uso",
+    "subtitle_one": "{{identifier}} · {{count}} execução",
+    "subtitle_other": "{{identifier}} · {{count}} execuções",
+    "empty": "Nenhuma execução nesta issue registrou uso de tokens ainda.",
+    "kpi_cost": "Custo",
+    "kpi_cost_hint_one": "{{count}} execução com falha representa {{pct}}%",
+    "kpi_cost_hint_other": "{{count}} execuções com falha representam {{pct}}%",
+    "kpi_cache": "Economia de cache",
+    "kpi_cache_hint": "{{pct}}% de acerto · {{reads}} de leitura",
+    "kpi_tokens": "Tokens",
+    "kpi_tokens_hint": "{{input}} de entrada · {{output}} de saída",
+    "by_agent": "Por agent",
+    "by_agent_total": "Total {{cost}}",
+    "col_run": "Execução",
+    "col_model": "Modelo",
+    "col_duration": "Duração",
+    "col_input": "Entr.",
+    "col_output": "Saída",
+    "col_cache_read": "Cache L",
+    "col_cache_write": "Cache E",
+    "col_tokens": "Tokens",
+    "col_cost": "Custo",
+    "total": "Total",
+    "note_unpriced_one": "{{count}} execução não tem uso registrado e não é contabilizada no total.",
+    "note_unpriced_other": "{{count}} execuções não têm uso registrado e não são contabilizadas no total.",
+    "note_unmapped": "Não há preço registrado para {{models}}; os tokens são contabilizados, mas o custo não.",
+    "note_estimate": "O custo é estimado com base nas tarifas publicadas dos modelos, exceto quando o provedor informou seu próprio valor."
   }
 }
