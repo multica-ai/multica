@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 )
 
 // ACP permission option kinds, from the Agent Client Protocol
@@ -57,11 +58,18 @@ type acpPermissionRequest struct {
 	} `json:"options"`
 }
 
-// acpToolName derives the canonical tool key from an ACP tool call. ACP sends a
-// human title ("read: main.go") rather than the tool name, so this reuses the
-// same title→name mapping the session-update path already uses, and falls back
-// to the explicit name field that some ACP backends do send.
+// acpToolName derives the canonical tool key from an ACP tool call. rawInput is
+// read first because it is the only field that carries a real tool name: a live
+// hermes run on 2026-08-07 sent the title "Approve edit: /tmp/x.txt" for a
+// write_file call and "delete in root path: rm -rf ." for a terminal call, and
+// both titles resolve to prose no inventory can match, so the policy would deny
+// every edit and every dangerous command. The title→name mapping the
+// session-update path uses stays as the fallback for the shapes that do carry a
+// title, and the explicit name field after it for other ACP backends.
 func acpToolName(req acpPermissionRequest) string {
+	if name := acpToolNameFromRawInput(req); name != "" {
+		return name
+	}
 	if name := hermesToolNameFromTitle(req.ToolCall.Title, req.ToolCall.Kind); name != "" {
 		return name
 	}
@@ -72,6 +80,25 @@ func acpToolName(req acpPermissionRequest) string {
 		return req.ToolCall.Title
 	}
 	return "unknown"
+}
+
+// acpToolNameFromRawInput reads the tool name out of the arguments the agent is
+// about to run with. Two shapes were measured in the live hermes run:
+// an edit approval carries {"tool":"write_file","arguments":{...}}, and a
+// dangerous-command approval carries {"command":...,"description":...} with
+// kind "execute", which is hermes' terminal tool and nothing else.
+func acpToolNameFromRawInput(req acpPermissionRequest) string {
+	if name, ok := req.ToolCall.RawInput["tool"].(string); ok {
+		if name = strings.TrimSpace(name); name != "" {
+			return name
+		}
+	}
+	_, hasCommand := req.ToolCall.RawInput["command"]
+	_, hasDescription := req.ToolCall.RawInput["description"]
+	if hasCommand && hasDescription && req.ToolCall.Kind == "execute" {
+		return "terminal"
+	}
+	return ""
 }
 
 // acpSelectOption picks the option id to answer with. On allow it takes a

@@ -148,22 +148,56 @@ var providerInventories = map[string]providerInventory{
 	// survivable: the probe error path keeps the static row.
 	"opencode": {Probe: probeOpencodeTools},
 
-	// `hermes tools list` answers non-interactively, but at TOOLSET grain
-	// ("web", "terminal", "file" — 23 groups), while hermes calls MCP tools as
-	// "server:tool" and its built-ins by individual name. Reporting the group
-	// names would create capability rows that no call ever matches: the admin
-	// table would look governable while the mandate still denied everything —
-	// strictly worse than an empty inventory. `hermes tools --summary` would give
-	// the per-tool breakdown but refuses to run without a TTY, so the daemon
-	// cannot use it. Needs the individual-tool source (ACP session or the
-	// per-toolset expansion) before a probe is safe.
-	"hermes": {Reason: "hermes tools list reports toolset groups, not the individual tool names hermes sends to tool-policy resolve; --summary requires a TTY"},
+	// Hermes had no entry that could be measured, so every hermes runtime
+	// reported discovery_method="not_measured" with zero tools and the claim-time
+	// guard in daemon_effective_tools_cerebro.go rejected EVERY task with HTTP
+	// 500 ("failed to resolve agent tool mandate"). Live evidence, MUL-4634:
+	// runtime 97afbd97 on sara.local failed 1.529 consecutive claims between
+	// 2026-08-06 16:27 and 2026-08-07 10:00 while claude, codex and opencode on
+	// the same host claimed normally.
+	//
+	// The hermes CLI still has no command that lists individual tool names, all
+	// four channels re-checked against hermes 0.16.0 on 2026-08-07: `hermes tools
+	// list` answers at TOOLSET grain (23 groups), `hermes tools --summary` is the
+	// same grain and refuses to run without a TTY, `hermes prompt-size --json`
+	// reports a count and no names ("tools": {"count": 32}), and `hermes mcp
+	// serve` exposes the conversation gateway (conversations_list, messages_send,
+	// …), not the agent's own inventory.
+	//
+	// What IS measurable is the two channels hermes actually calls through, both
+	// measured in live `hermes acp` runs on 2026-08-07:
+	//
+	//   - MCP tools. Hermes registers them as `mcp_<server>_<tool>` with every
+	//     character outside [A-Za-z0-9_] replaced by "_" (tools/mcp_tool.py,
+	//     sanitize_mcp_name_component). Live: a call to the Multica MCP server's
+	//     get_me arrived as tool call `mcp_multica_get_me`. The probe asks the
+	//     same `multica mcp serve` process the daemon hands hermes, and spells
+	//     the answer the way hermes will spell it at call time.
+	//   - Hermes' own built-ins, which never cross the MCP wire and are therefore
+	//     structurally invisible to that probe. Native lists the ones observed
+	//     executing in those runs — hermes logs `tool <name> completed` for each:
+	//     terminal, read_file, write_file, patch, search_files, todo.
+	//
+	// Native is deliberately NOT the full 32-tool surface: the rest were not
+	// observed, and this file does not hand-type unmeasured names. That is safe
+	// because of what the gate actually sees. Hermes asks its ACP client for
+	// permission on exactly two paths — file edits (write_file, patch, via
+	// acp_adapter/edit_approval.py) and dangerous shell commands (terminal, via
+	// acp_adapter/permissions.py) — and all three are listed here. Every other
+	// built-in executes without ever reaching /tool-policy/resolve; see the
+	// measured note in server/internal/cerebro/localtoolpolicy/provider_adapter.go.
+	"hermes": {Probe: probeHermesTools, Native: []string{
+		"terminal", "read_file", "write_file", "patch", "search_files", "todo",
+	}},
 
-	// Kimi and Kiro are the same ACP family as hermes and share its blocker.
-	// Neither CLI is installed on any Firtal host today, so nothing about their
-	// tool-listing surface has been verified — do not guess a command shape.
-	"kimi": {Reason: "ACP runtime, same toolset-grain blocker as hermes; CLI not installed on any Firtal host, tool-listing surface unverified"},
-	"kiro": {Reason: "ACP runtime, same toolset-grain blocker as hermes; CLI not installed on any Firtal host, tool-listing surface unverified"},
+	// Kimi and Kiro are the same ACP family as hermes, but neither CLI is
+	// installed on any Firtal host today, so nothing about their tool-listing
+	// surface or their call-time spelling has been measured. probeHermesTools is
+	// not reused for them: it encodes hermes' own MCP spelling, and a
+	// row spelled for the wrong runtime matches no call. Measure one live run
+	// per CLI first — do not guess a command shape.
+	"kimi": {Reason: "ACP runtime; CLI not installed on any Firtal host, tool-listing surface and call-time spelling unverified"},
+	"kiro": {Reason: "ACP runtime; CLI not installed on any Firtal host, tool-listing surface and call-time spelling unverified"},
 
 	// Codex, cursor and gemini carry curated static tool lists that match their
 	// live call names and are exposing tools correctly today (5, 8 and 5 rows).
@@ -389,23 +423,30 @@ func freeLoopbackPort() (int, error) {
 	return port, nil
 }
 
-// hermesToolsetLine matches one row of `hermes tools list`. Unused by any probe
-// today — kept with the parser test as the documented starting point for the
-// hermes work, so the next implementer does not have to rediscover the format.
-var hermesToolsetLine = regexp.MustCompile(`^\s*[^\s]+\s+(enabled|disabled)\s+(\S+)`)
+// hermesMCPToolPrefix and hermesUnsafeToolChar reproduce how hermes renames an
+// MCP tool before it calls it: `mcp_<server>_<tool>`, with every character
+// outside [A-Za-z0-9_] replaced by an underscore (hermes-agent
+// tools/mcp_tool.py, sanitize_mcp_name_component). Measured on 2026-08-07 in a
+// live `hermes acp` run against the same `multica mcp serve` process the daemon
+// hands hermes: the MCP tool get_me arrived as mcp_multica_get_me.
+const hermesMCPToolPrefix = "mcp_multica_"
 
-// parseHermesToolsets extracts the enabled toolset names from `hermes tools list`.
-// Toolset grain is why hermes has no probe — see providerInventories["hermes"].
-func parseHermesToolsets(output string) []string {
-	names := []string{}
-	for _, line := range strings.Split(output, "\n") {
-		match := hermesToolsetLine.FindStringSubmatch(line)
-		if match == nil || match[1] != "enabled" {
-			continue
-		}
-		names = append(names, match[2])
+var hermesUnsafeToolChar = regexp.MustCompile(`[^A-Za-z0-9_]`)
+
+// probeHermesTools measures the Multica MCP channel and spells every answer the
+// way hermes spells it at call time. Hermes' own built-ins are not on this
+// channel and no hermes command lists them — they are the Native names on
+// providerInventories["hermes"].
+func probeHermesTools(ctx context.Context, _ string) ([]string, error) {
+	tools, err := probeMulticaMCPTools(ctx, "")
+	if err != nil {
+		return nil, err
 	}
-	return names
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, hermesMCPToolPrefix+hermesUnsafeToolChar.ReplaceAllString(tool, "_"))
+	}
+	return names, nil
 }
 
 func dedupeToolNames(in []string) []string {
