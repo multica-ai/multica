@@ -2,19 +2,21 @@ package wecom
 
 // media_stream.go — an attachment that never has to fit in memory.
 //
-// The ingest used to hold each attachment twice: the whole ciphertext from
-// the download, then the whole plaintext from the decrypt, both live at once
-// while the upload ran. The engine caps concurrent media resolutions at eight,
-// and the resource cap is 100 MiB, so the worst case a perfectly ordinary
-// workspace could reach — four people sending two large files each — was
-// eight times two hundred megabytes of live heap. On a self-hosted box that
-// is an OOM, and the process it kills is serving Lark, Slack and DingTalk as
-// well.
+// The buffered path in media_download.go holds each attachment twice: the
+// whole ciphertext from the download, then the whole plaintext from the
+// decrypt, both live at once while the upload runs. The engine caps concurrent
+// media resolutions at eight, and the resource cap is 100 MiB, so the worst
+// case a perfectly ordinary workspace can reach — four people sending two
+// large files each — is eight times two hundred megabytes of live heap. On a
+// self-hosted box that is an OOM, and the process it kills is serving Lark,
+// Slack and DingTalk as well. That path remains only as the fallback for a
+// storage backend without UploadStream; both shipped backends have one, so
+// this file is what a real deployment runs.
 //
-// Two temp files instead. Ciphertext lands in the first as it arrives,
-// decrypts block by block into the second, and uploads from there. Peak heap
-// per attachment becomes one buffer, and the number that used to multiply is
-// bounded by disk instead.
+// One temp file instead, and the ciphertext never reaches disk at all: it
+// streams from the socket, decrypts block by block into the file, and the
+// upload reads back from there. Peak heap per attachment becomes one buffer,
+// and the number that would otherwise multiply is bounded by disk.
 //
 // The temp file is also what makes the streaming upload possible at all.
 // S3Storage.UploadStream requires an exact ContentLength, and the plaintext

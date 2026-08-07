@@ -8,7 +8,12 @@ package wecom
 // ranges, which is what the guard is actually for.
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"testing"
 )
 
@@ -82,5 +87,49 @@ func TestAnUnparseableCidrIsReportedNotIgnored(t *testing.T) {
 	}
 	if !publicAddrOnly(netip.MustParseAddr("198.18.0.80")) {
 		t.Error("the valid entry was dropped because a sibling was malformed")
+	}
+}
+
+// The dangerous shape of this switch is an operator pasting the widest CIDR
+// there is. `0.0.0.0/0` must still not reach the loopback the backend's own
+// admin endpoints listen on: the allow-list is consulted only inside the
+// reservedMediaPrefixes loop, and loopback, private and link-local are refused
+// before that loop is reached.
+//
+// Driven through the real dialer against a real listening server, not through
+// publicAddrOnly alone. A policy that answers "no" while the transport
+// connects anyway is exactly the failure a predicate-level test cannot see, so
+// the assertion that matters is that the server was never reached.
+func TestAWideOpenAllowListStillCannotReachLoopback(t *testing.T) {
+	var reached bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.Write([]byte("the backend's own admin endpoint"))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+
+	withAllowed(t, "0.0.0.0/0", "::/0")
+
+	// Both spellings of the same loopback: the IPv4-mapped form reports none
+	// of the IPv4 predicates until it is unmapped, which is the trick the
+	// guard has to survive whether or not an allow-list is in play.
+	for _, resolved := range []string{"127.0.0.1", "::ffff:127.0.0.1"} {
+		reached = false
+		client := newMediaHTTPClient(mediaGuard{
+			resolve: staticResolver{addr: netip.MustParseAddr(resolved)},
+		})
+		_, err := downloadMedia(context.Background(),
+			client, "http://cos.example.com:"+u.Port()+"/object")
+		if !errors.Is(err, ErrMediaAddrBlocked) {
+			t.Errorf("resolving to %s under a 0.0.0.0/0 allow-list: err = %v, want the guard's refusal", resolved, err)
+		}
+		if reached {
+			t.Errorf("resolving to %s under a 0.0.0.0/0 allow-list opened a socket to loopback — the guard's core promise is broken", resolved)
+		}
 	}
 }
