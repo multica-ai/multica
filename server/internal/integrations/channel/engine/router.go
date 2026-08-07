@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,6 +41,10 @@ type Router struct {
 	reader SessionReader
 
 	batcher *pendingBatcher
+	// batchSeq mints RunBatchIDs. It lives here rather than in the batcher so
+	// the id is minted the same way with batching disabled, where every
+	// message is its own run.
+	batchSeq atomic.Uint64
 
 	replyTimeout time.Duration
 	mediaTimeout time.Duration
@@ -228,10 +233,11 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// Typing indicator on ingest, detached so the reaction HTTP call never
 	// blocks the connector ACK path.
 	if res.Outcome == OutcomeIngested && res.runScheduled && set.Typing != nil {
+		batch := res.runBatch
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
-			set.Typing.OnIngested(tctx, inst, msg, res.ChatSessionID)
+			set.Typing.OnIngested(tctx, inst, msg, res.ChatSessionID, batch)
 		}()
 	}
 	r.scheduleReply(set, inst, msg, res)
@@ -482,7 +488,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    and the OutboundReplier still fires — only the debounced run trigger
 	//    (and therefore the typing indicator) is suppressed.
 	if !msg.SkipAgentRun {
-		r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+		res.runBatch = r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
 		res.runScheduled = true
 	}
 	if resolveMedia {
@@ -636,21 +642,31 @@ func (r *Router) finishMediaQueue(key string, done chan struct{}) {
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it
-// inline when batching is disabled).
-func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID) {
+// inline when batching is disabled) and returns the run batch this message was
+// collected into — the debouncer's own answer, taken under the lock that
+// decides it, so a caller never has to infer the boundary from arrival times.
+//
+// With batching disabled each message is its own run, so it gets a fresh id.
+func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID) RunBatchID {
 	key := keyForSession(sessionID)
 	fresh := msg.ForceFresh
+	batch := RunBatchID(r.batchSeq.Add(1))
 	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
-		return
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh), batch)
+		return batch
 	}
 	if fresh {
 		r.markPendingFresh(key)
 	}
-	flush := func() {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
+	// The batcher hands the flush the id of the batch it is answering, not the
+	// one minted here: a message that JOINS an armed window re-arms the flush,
+	// and that flush belongs to the batch already collecting. Passing it as an
+	// argument rather than capturing it keeps the two in one place — the
+	// batcher's lock — with nothing for a firing timer to race against.
+	flush := func(answering RunBatchID) {
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh), answering)
 	}
-	r.batcher.Schedule(key, flush)
+	return r.batcher.Schedule(key, batch, flush)
 }
 
 // chatRunFlushTimeout bounds the detached flush (session reload + enqueue +
@@ -660,7 +676,12 @@ const chatRunFlushTimeout = 10 * time.Second
 // flushChatRun is the debounced run-trigger: reload session, enqueue exactly
 // one chat task for the window, and emit the offline/archived notice (only
 // known here now) via the replier. Errors are logged, not returned.
-func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool) {
+//
+// batch is the run this flush is answering. It is reported to the
+// TypingNotifier either way — with the task id when one was created, or as
+// settled when none was — so a platform holding per-run state learns which of
+// its rounds this was without inferring it from ordering.
+func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool, batch RunBatchID) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -671,10 +692,14 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		}
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
-		r.clearTyping(ctx, set, sessionID)
+		r.clearTyping(ctx, set, sessionID, batch)
 		return
 	}
-	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+	task, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh)
+	if err == nil {
+		r.bindTyping(ctx, set, sessionID, batch, task.ID)
+	}
+	if err != nil {
 		if forceFresh {
 			// ForceFresh belongs to the first successfully queued run, not the
 			// first attempt. Preserve it across offline, archived, or transient
@@ -685,7 +710,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		// the platform's bus-driven typing clear can never fire. Clear the
 		// indicator here (before any notice) so the "processing" reaction does
 		// not stick on the user's message.
-		r.clearTyping(ctx, set, sessionID)
+		r.clearTyping(ctx, set, sessionID, batch)
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentOffline)
@@ -698,12 +723,22 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 	}
 }
 
-// clearTyping asks the platform to drop the "processing" indicator for a session
-// whose flush produced no task run. A nil TypingNotifier (platform without the
-// feature) is a no-op.
-func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgtype.UUID) {
+// clearTyping asks the platform to drop the "processing" indicator for the run
+// batch whose flush produced no task. A nil TypingNotifier (platform without
+// the feature) is a no-op.
+func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgtype.UUID, batch RunBatchID) {
 	if set.Typing != nil {
-		set.Typing.OnSettled(ctx, sessionID)
+		set.Typing.OnSettled(ctx, sessionID, batch)
+	}
+}
+
+// bindTyping tells the platform which task the batch's flush created. This is
+// the binding a per-run indicator needs to match a task lifecycle event to the
+// indicator it belongs to; without it the platform is left inferring it from
+// arrival order. A nil TypingNotifier is a no-op.
+func (r *Router) bindTyping(ctx context.Context, set ResolverSet, sessionID pgtype.UUID, batch RunBatchID, taskID pgtype.UUID) {
+	if set.Typing != nil {
+		set.Typing.OnRunStarted(ctx, sessionID, batch, taskID)
 	}
 }
 

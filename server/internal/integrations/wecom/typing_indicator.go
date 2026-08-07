@@ -56,6 +56,10 @@ const (
 	streamCopyNotStarted = "已收到，但这条暂时没能开始处理。"
 	// streamCopyFailed — the run failed.
 	streamCopyFailed = "⚠️ 这次没跑通，请稍后再试一次。"
+	// streamCopyCancelled — the run was cancelled, so no answer is coming.
+	// Separate copy from streamCopyFailed on purpose: "试一次" invites a retry
+	// of something the user just stopped on purpose.
+	streamCopyCancelled = "⏹️ 这次处理已取消。"
 	// streamCopyStillWorking — the run outlived the protocol's stream window,
 	// so we close the bubble ourselves and answer separately later.
 	streamCopyStillWorking = "还在处理，完成后我再单独回复你。"
@@ -141,12 +145,13 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 	}
 }
 
-// OnIngested paints a "working on it" bubble for the round this message
-// starts and records what it takes to come back and fill it in. A message
-// inside the debounce window joins the round already on screen; a message
-// past it — one that will wait behind the run in flight — opens a bubble of
-// its own immediately, because a wait with nothing on screen reads as a
-// message that was lost. The bubble carries no words while it waits: the
+// OnIngested paints a "working on it" bubble for the run this message belongs
+// to and records what it takes to come back and fill it in. Which run that is
+// comes from batch — the engine debouncer's own verdict, decided under the
+// lock that arms the window — so the first message of a run paints a bubble
+// and the rest join it, and a message the debouncer gave a run of its own gets
+// a bubble of its own immediately, because a wait with nothing on screen reads
+// as a message that was lost. The bubble carries no words while it waits: the
 // think tag renders as the client's own animated dots, which is the receipt,
 // and words would need a language before there is anything to say.
 //
@@ -154,8 +159,8 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 // nothing here needs to be quick for the ACK's sake — but everything here is
 // best-effort: a bubble that fails to open costs the user a few seconds of
 // uncertainty, and the answer still arrives as a plain message.
-func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
-	if m.senders == nil || m.streams == nil || !sessionID.Valid {
+func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, batch engine.RunBatchID) {
+	if m.senders == nil || m.streams == nil || !sessionID.Valid || batch == 0 {
 		return
 	}
 	// A standalone /issue is answered by the replier and deliberately never
@@ -164,15 +169,6 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 	if msg.SkipAgentRun {
 		return
 	}
-	// Stamp the arrival now, before the lookups below. Whether two messages
-	// belong to one round is a question about when they were SENT, and the
-	// engine's debouncer answers it from arrival. Reading the clock after a
-	// decode and a database round trip answers a different question — one that
-	// a loaded pool can move by seconds — so the two would disagree: a message
-	// the debouncer gave its own run could be folded into the previous round
-	// here, leaving it with no bubble and no receipt, or the reverse, leaving
-	// one run with two spinners.
-	arrivedAt := m.streams.clock()
 	wm, err := wecomMsgFromRaw(msg)
 	if err != nil {
 		m.log.WarnContext(ctx, "wecom typing: cannot read the inbound envelope",
@@ -199,12 +195,12 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 		InstallationID: inst.ID,
 		ChatID:         chatID,
 		ChatType:       aibotChatTypeFromChannel(msg.Source.ChatType),
-		CreatedAt:      arrivedAt,
 	}
-	if m.streams.open(sessionID, h) == roundJoined {
-		// Inside the debounce window: the batcher is about to fold this
-		// message into the round whose bubble is already on screen, and that
-		// bubble is this message's receipt too.
+	if m.streams.open(sessionID, batch, h) != roundOpened {
+		// roundJoined — the batcher folded this message into a run whose
+		// bubble is already on screen, and that bubble is this message's
+		// receipt too. roundFinished — this goroutine outlived the run it was
+		// painting for, and a bubble now would be one nothing ever closes.
 		return
 	}
 
@@ -233,13 +229,28 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 			m.log.DebugContext(ctx, "wecom typing: opening frame did not land, keeping the handle",
 				"chat_session_id", util.UUIDToString(sessionID), "error", err)
 		default:
-			m.streams.drop(sessionID, h.StreamID)
+			m.streams.drop(sessionID, batch)
 			m.log.WarnContext(ctx, "wecom typing: opening frame refused",
 				"chat_session_id", util.UUIDToString(sessionID), "error", err)
 			return
 		}
 	}
-	m.armGuard(sessionID, h)
+	m.armGuard(sessionID, batch)
+}
+
+// OnRunStarted files the task the debounced flush created for this run. It is
+// the binding every later ending is matched on: the answer, the failure and
+// the cancellation all name a task, and this is what turns that name into "the
+// bubble this question opened" without reading anything off arrival order.
+//
+// It can arrive before OnIngested has painted the bubble — the Router detaches
+// the ingest goroutine and the flush runs on the batcher's timer — so the
+// store files the run either way and the bubble attaches to it when it lands.
+func (m *TypingIndicatorManager) OnRunStarted(_ context.Context, sessionID pgtype.UUID, batch engine.RunBatchID, taskID pgtype.UUID) {
+	if m.streams == nil || !sessionID.Valid || !taskID.Valid {
+		return
+	}
+	m.streams.bind(sessionID, batch, util.UUIDToString(taskID))
 }
 
 // OnSettled closes the bubble of a round that never became a run — agent
@@ -249,16 +260,19 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 // is deliberately thin because the replier's own notice follows as a separate
 // message with the reason.
 //
-// The TAIL is the right bubble: OnSettled answers the flush that just
-// settled, which is the newest round — the ones ahead of it belong to runs
-// that are already real and end through their own events.
-func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+// batch names which bubble: the flush that settled reports the run it was
+// answering, so a session with several rounds open closes the right one
+// instead of whichever happens to be newest.
+func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID, batch engine.RunBatchID) {
 	m.closeBubble(ctx, sessionID,
-		func(s *streamStore) (streamHandle, bool) { return s.takeTail(sessionID, roundOver) },
+		func(s *streamStore) (streamHandle, bool) { return s.takeBatch(sessionID, batch, roundOver) },
 		streamCopyNotStarted, "settled")
 }
 
-// Register subscribes the manager to the run failure event.
+// Register subscribes the manager to the two ways a run ends without an
+// answer. Both have to be here or the bubble outlives its run: a failure and a
+// cancellation each publish nothing the outbound subscriber reads, so nothing
+// else would ever seal that stream.
 //
 // EventChatDone is deliberately NOT subscribed here: the answer belongs in the
 // bubble, and only the outbound subscriber holds the answer. Registering for
@@ -266,6 +280,7 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 // underneath it.
 func (m *TypingIndicatorManager) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, m.handleTaskFailed)
+	bus.Subscribe(protocol.EventTaskCancelled, m.handleTaskCancelled)
 }
 
 // handleTaskFailed says a run died, in the bubble if there still is one and as
@@ -293,6 +308,18 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	if m.streams == nil {
 		return
 	}
+	// An attempt the platform is already retrying is not an ending. FailTask
+	// publishes task:failed for it anyway — the web card has to clear — and
+	// flags it retry_pending so consumers stay quiet; taskFailedFields even
+	// withholds the error text, and dingtalk's outbound already honours it.
+	// Closing the bubble here would tell the user "这次没跑通" about an attempt
+	// whose replacement is already queued, and the retry's answer would then
+	// land underneath a bubble that had declared failure. The round stays open
+	// for the attempt that reports the real outcome; the retry clone's own
+	// events find it through the batch owner it inherited (roundTaker).
+	if retryPending(e) {
+		return
+	}
 	if m.bindings == nil && m.streams.depth() == 0 && m.streams.remembered() == 0 {
 		// Nothing open, nothing owed, and no way to find a chat: no reason to
 		// read a row for someone else's run.
@@ -306,11 +333,75 @@ func (m *TypingIndicatorManager) handleTaskFailed(e events.Event) {
 	defer cancel()
 	taskID := taskIDFromEvent(e)
 	if m.closeBubble(ctx, sessionID,
-		func(s *streamStore) (streamHandle, bool) { return s.takeTask(sessionID, taskID, roundOver) },
+		func(*streamStore) (streamHandle, bool) {
+			return m.rounds().take(ctx, sessionID, taskID, roundOver)
+		},
 		streamCopyFailed, "task failed") {
 		return
 	}
 	m.sayTheRunFailed(ctx, sessionID, taskID)
+}
+
+// handleTaskCancelled seals the bubble of a run the user stopped.
+//
+// Cancellation is a terminal state that publishes no chat:done and no
+// task:failed, so without this the bubble spins for the full five minutes and
+// the guard then promises a separate reply — about a run the user cancelled
+// themselves, that will never come. Every cancel path lands here: CancelTask
+// for a running or queued task, CancelQueuedChatTasks for the follow-ups
+// behind it, and the agent-level and issue-level bulk cancels, which all
+// broadcast task:cancelled per row. A session with several rounds open
+// therefore gets one closing frame per cancelled run, each on its own bubble,
+// because the round is matched by the task id the flush bound to it.
+//
+// Unlike a failure this does NOT go looking in the binding row when no round
+// is on file. streamCopyFailed is the only "that run did not go through" WeCom
+// ever produces, which is why a failure is worth chasing an address for; a
+// cancellation was performed by the user, and chasing it would turn one
+// "cancel all tasks" click into a message in every chat that agent serves —
+// including sessions where WeCom never showed a bubble at all.
+func (m *TypingIndicatorManager) handleTaskCancelled(e events.Event) {
+	if m.streams == nil {
+		return
+	}
+	if m.streams.depth() == 0 && m.streams.remembered() == 0 {
+		return
+	}
+	sessionID, ok := m.sessionFor(e)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
+	defer cancel()
+	taskID := taskIDFromEvent(e)
+	if m.closeBubble(ctx, sessionID,
+		func(*streamStore) (streamHandle, bool) {
+			return m.rounds().take(ctx, sessionID, taskID, roundOver)
+		},
+		streamCopyCancelled, "task cancelled") {
+		return
+	}
+	// No bubble left. If the guard already closed one for this run it promised
+	// a separate reply, and that promise is now void — say so, in the chat the
+	// promise was made in.
+	m.settleOwedEnding(ctx, sessionID, streamCopyCancelled)
+}
+
+// rounds builds the matcher that turns a task id on an event into the round it
+// belongs to.
+func (m *TypingIndicatorManager) rounds() roundTaker {
+	return roundTaker{streams: m.streams, tasks: m.tasks, log: m.log}
+}
+
+// retryPending reports whether FailTask has already created a retry child for
+// this attempt. taskFailedFields sets it on every task:failed payload.
+func retryPending(e events.Event) bool {
+	p, ok := e.Payload.(map[string]any)
+	if !ok {
+		return false
+	}
+	pending, _ := p["retry_pending"].(bool)
+	return pending
 }
 
 // sayTheRunFailed delivers the failure to a round whose bubble is already gone.
@@ -344,8 +435,27 @@ func (m *TypingIndicatorManager) sayTheRunFailed(ctx context.Context, sessionID 
 		// same news from repeating it.
 		m.streams.remember(sessionID, addr, roundOver, taskID)
 	}
-	if err := m.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, streamCopyFailed); err != nil {
-		m.log.WarnContext(ctx, "wecom typing: could not say the run failed",
+	m.sayAsPlainMessage(ctx, sessionID, addr, streamCopyFailed)
+}
+
+// settleOwedEnding keeps the guard's promise and nothing more. It speaks only
+// for a round the guard closed early — the one case where words are owed and
+// no bubble is left to put them in — and stays silent when the store has no
+// outstanding promise, which is every round that already ended properly.
+func (m *TypingIndicatorManager) settleOwedEnding(ctx context.Context, sessionID pgtype.UUID, text string) {
+	if m.senders == nil {
+		return
+	}
+	addr, verdict := m.streams.claimEnding(sessionID)
+	if verdict != roundOwesAnEnding {
+		return
+	}
+	m.sayAsPlainMessage(ctx, sessionID, addr, text)
+}
+
+func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionID pgtype.UUID, addr roundAddress, text string) {
+	if err := m.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, text); err != nil {
+		m.log.WarnContext(ctx, "wecom typing: could not deliver a run's ending",
 			"chat_session_id", util.UUIDToString(sessionID),
 			"installation_id", util.UUIDToString(addr.InstallationID), "error", err)
 	}
@@ -452,14 +562,14 @@ func taskIDFromEvent(e events.Event) string {
 // stops accepting frames for a stream past streamMaxAge, so a bubble that
 // outlives the window — a long run, or a round stuck in the queue behind one —
 // would otherwise become a spinner we can no longer touch. The guard closes
-// exactly the bubble it was armed for, by stream id: with several bubbles open
-// in one session, a timer that took the head could seal a newer round's bubble
+// exactly the round it was armed for, by batch: with several bubbles open in
+// one session, a timer that took the head could seal a newer round's bubble
 // with an older round's promise.
 //
 // This is the one closer that does not end the round. Its copy says the reply
 // is coming separately, and the run is still going — so the handle it consumes
 // leaves a note behind, and whatever the run does next is said against that.
-func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, h streamHandle) {
+func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, batch engine.RunBatchID) {
 	if m.guardAfter <= 0 {
 		return
 	}
@@ -467,15 +577,15 @@ func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, h streamHandle)
 		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
 		defer cancel()
 		m.closeBubble(ctx, sessionID,
-			func(s *streamStore) (streamHandle, bool) { return s.takeStream(sessionID, h.StreamID, roundContinues) },
+			func(s *streamStore) (streamHandle, bool) { return s.takeBatch(sessionID, batch, roundContinues) },
 			streamCopyStillWorking, "window expiring")
 	})
-	m.streams.arm(sessionID, h.StreamID, t)
+	m.streams.arm(sessionID, batch, t)
 }
 
 // closeBubble seals one bubble with text, if take finds one to seal, and
-// reports whether it did. take names WHICH bubble — the failed task's, the
-// settled flush's (tail), the guard's own (by stream id) — and consuming the
+// reports whether it did. take names WHICH bubble — the ended run's, by the
+// task id the flush bound; the settled or guarded run's, by batch — and consuming the
 // handle inside the store makes this idempotent: two closers racing produce one
 // closing frame. The ending each take carries is what the caller's words amount
 // to for the round; every closer ends it except the guard, whose copy promises

@@ -720,9 +720,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Bindings: queries,
 					Logger:   slog.Default(),
 				})
-				// Subscribes task:failed: a failed run publishes no chat:done,
-				// so this is the sole path that stops the bubble spinning
-				// after a failure.
+				// Subscribes task:failed and task:cancelled: neither a failed
+				// nor a cancelled run publishes chat:done, so this is the
+				// sole path that stops the bubble spinning once a run ends
+				// without an answer.
 				wecomTyping.Register(bus)
 
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(

@@ -20,11 +20,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// fakeOutboundQueries is an in-memory stand-in for the four queries Outbound
+// fakeOutboundQueries is an in-memory stand-in for the queries Outbound
 // uses. A nil error field returns the row; a non-nil one is returned as-is
 // (use pgx.ErrNoRows to exercise the "not a wecom session" / "no binding"
 // branches).
@@ -37,6 +38,12 @@ type fakeOutboundQueries struct {
 	memberErr      error
 	workspace      db.Workspace
 	workspaceErr   error
+	// tasks answers the retry-clone lookup: the round is bound under the turn
+	// that owns the input batch, and a clone reaches it through
+	// chat_input_task_id.
+	tasks    map[string]db.AgentTaskQueue
+	taskErr  error
+	taskGets int
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -50,6 +57,17 @@ func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.Fi
 }
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
+}
+func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
+	f.taskGets++
+	if f.taskErr != nil {
+		return db.AgentTaskQueue{}, f.taskErr
+	}
+	task, ok := f.tasks[util.UUIDToString(id)]
+	if !ok {
+		return db.AgentTaskQueue{}, pgx.ErrNoRows
+	}
+	return task, nil
 }
 
 func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUID, *recordingConn) {
