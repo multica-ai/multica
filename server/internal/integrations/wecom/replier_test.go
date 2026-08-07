@@ -36,6 +36,23 @@ func (f fakeBinder) Mint(context.Context, pgtype.UUID, pgtype.UUID, string) (Bin
 type recordingConn struct {
 	mu     sync.Mutex
 	frames []frameEnvelope
+
+	// sender, when set, makes this double answer its writes the way the real
+	// server does: an ack frame echoing the req_id with errcode 0. Senders
+	// that read their verdict block until one arrives, so a double that never
+	// answers turns every send into a 5-second timeout.
+	//
+	// Set refuseCode to make the server refuse instead.
+	sender     *wsSender
+	refuseCode int
+	refuseMsg  string
+}
+
+// autoAck wires the double to answer the sender's writes. Call it after
+// newWSSender, which needs the conn first.
+func (c *recordingConn) autoAck(s *wsSender) *wsSender {
+	c.sender = s
+	return s
 }
 
 func (c *recordingConn) WriteMessage(_ int, data []byte) error {
@@ -45,7 +62,16 @@ func (c *recordingConn) WriteMessage(_ int, data []byte) error {
 	}
 	c.mu.Lock()
 	c.frames = append(c.frames, env)
+	s := c.sender
+	code, msg := c.refuseCode, c.refuseMsg
 	c.mu.Unlock()
+	if s != nil {
+		s.routeResponse(frameEnvelope{
+			Headers: frameHeaders{ReqID: env.Headers.ReqID},
+			ErrCode: code,
+			ErrMsg:  msg,
+		})
+	}
 	return nil
 }
 func (c *recordingConn) ReadMessage() (int, []byte, error) { return 0, nil, nil }
@@ -73,7 +99,7 @@ func newReplierWithConn(t *testing.T) (*OutboundReplier, engine.ResolvedInstalla
 	reg := newSendersRegistry()
 	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
 	conn := &recordingConn{}
-	reg.set(inst.ID, newWSSender(conn, nil))
+	reg.set(inst.ID, conn.autoAck(newWSSender(conn, nil)))
 	r := NewOutboundReplier(OutboundReplierConfig{Senders: reg, AppURL: "https://multica.example"})
 	return r, inst, conn
 }
@@ -137,7 +163,7 @@ func TestSendBindingPrompt_GroupNeverLeaksToken(t *testing.T) {
 	reg := newSendersRegistry()
 	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
 	conn := &recordingConn{}
-	reg.set(inst.ID, newWSSender(conn, nil))
+	reg.set(inst.ID, conn.autoAck(newWSSender(conn, nil)))
 	r := NewOutboundReplier(OutboundReplierConfig{
 		Binding: nil, // set the interface field directly with the fake below
 		Senders: reg,
@@ -209,7 +235,7 @@ func TestSendBindingPrompt_P2PSendsOnlyPrivately(t *testing.T) {
 	reg := newSendersRegistry()
 	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
 	conn := &recordingConn{}
-	reg.set(inst.ID, newWSSender(conn, nil))
+	reg.set(inst.ID, conn.autoAck(newWSSender(conn, nil)))
 	r := NewOutboundReplier(OutboundReplierConfig{Senders: reg, AppURL: "https://multica.example"})
 	r.binding = fakeBinder{raw: rawToken}
 

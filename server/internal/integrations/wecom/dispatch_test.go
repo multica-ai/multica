@@ -40,7 +40,7 @@ func TestDispatchFrame_TextReachesHandler(t *testing.T) {
 		return nil
 	})
 	conn := &recordingConn{}
-	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "text", "hello"), newWSSender(conn, nil), slog.Default())
+	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "text", "hello"), conn.autoAck(newWSSender(conn, nil)), slog.Default())
 	if err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestDispatchFrame_NonTextGetsReceiptAndSkipsHandler(t *testing.T) {
 		return nil
 	})
 	conn := &recordingConn{}
-	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "image", ""), newWSSender(conn, nil), slog.Default())
+	err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "image", ""), conn.autoAck(newWSSender(conn, nil)), slog.Default())
 	if err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestDispatchFrame_ServerPingIsPonged(t *testing.T) {
 	t.Parallel()
 	c := testChannel(func(context.Context, channel.InboundMessage) error { return nil })
 	conn := &recordingConn{}
-	err := c.dispatchFrame(context.Background(), frameEnvelope{Cmd: cmdServerPing, Headers: frameHeaders{ReqID: "r1"}}, newWSSender(conn, nil), slog.Default())
+	err := c.dispatchFrame(context.Background(), frameEnvelope{Cmd: cmdServerPing, Headers: frameHeaders{ReqID: "r1"}}, conn.autoAck(newWSSender(conn, nil)), slog.Default())
 	if err != nil {
 		t.Fatalf("dispatchFrame: %v", err)
 	}
