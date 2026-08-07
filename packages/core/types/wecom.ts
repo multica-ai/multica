@@ -25,6 +25,10 @@ export interface ListWecomInstallationsResponse {
    * a separate flag for parity with Slack / Lark; optional so a desktop build
    * that predates it treats it as off. */
   install_supported?: boolean;
+  /** Whether the QR scan-code install is available. It needs a QR provider on
+   * top of the secret key, so it can be off where the BYO path works. Optional
+   * so a desktop build that predates it treats it as off and shows only BYO. */
+  scan_install_supported?: boolean;
 }
 
 /** Request body for the Web UI's BYO Connect dialog. The first two fields are
@@ -50,4 +54,39 @@ export interface RedeemWecomBindingTokenResponse {
   workspace_id: string;
   installation_id: string;
   wecom_user_id: string;
+}
+
+/** Response to POST /wecom/install/begin. Nothing exists yet at this point —
+ * the QR is fetched out of band by the install worker, so the client polls
+ * `session_id` until the status carries one. */
+export interface BeginWecomInstallResponse {
+  session_id: string;
+  status: "creating" | "pending" | "success" | "error" | string;
+  /** How long the client should wait before its next status poll. */
+  poll_interval_seconds: number;
+}
+
+/** One scan-install status poll.
+ *
+ * `qr_code_url` and `expires_in_seconds` are present only while the status is
+ * "pending": there is nothing to render before the QR has been generated, and
+ * nothing to render once it has been scanned or has expired. */
+export interface WecomInstallStatusResponse {
+  status: "creating" | "pending" | "success" | "error" | string;
+  qr_code_url?: string;
+  expires_in_seconds?: number;
+  poll_interval_seconds: number;
+  /** Set once the bot is bound, on status === "success". */
+  installation_id?: string;
+  /** Stable machine code the UI switches on to pick its copy. */
+  error_reason?:
+    | "expired"
+    | "generate_failed"
+    | "integration_unconfigured"
+    | "installation_conflict"
+    | "wecom_protocol_error"
+    | "internal_error"
+    | string;
+  /** Operator-facing detail. Shown only as supplementary text. */
+  error_message?: string;
 }

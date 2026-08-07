@@ -35,6 +35,7 @@ import { wecomInstallationsOptions, wecomKeys } from "@multica/core/wecom";
 import { errorCode } from "@multica/core/api";
 import { api } from "@multica/core/api";
 import type { WecomInstallation } from "@multica/core/types";
+import { WecomScanInstallDialog } from "./wecom-scan-install-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
@@ -258,6 +259,7 @@ export function WecomAgentBindButton({
   const user = useAuthStore((s) => s.user);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [botId, setBotId] = useState("");
   const [secret, setSecret] = useState("");
   const [botName, setBotName] = useState("");
@@ -268,6 +270,9 @@ export function WecomAgentBindButton({
     enabled: !!wsId,
   });
   const installSupported = listing?.install_supported === true;
+  // Scan needs a QR provider on top of the secret key, so it can be off where
+  // BYO works. When it is off the dialog shows only the BYO fields.
+  const scanSupported = listing?.scan_install_supported === true;
 
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
@@ -395,6 +400,36 @@ export function WecomAgentBindButton({
           </DialogHeader>
 
           <div className="space-y-4">
+            {scanSupported && (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  className="w-full rounded-md border p-3 text-left transition-colors hover:bg-accent"
+                  onClick={() => {
+                    setDialogOpen(false);
+                    setScanOpen(true);
+                  }}
+                  disabled={submitting}
+                  data-testid="wecom-scan-option"
+                >
+                  <span className="text-body font-medium">
+                    {t(($) => $.wecom.scan_option_title)}
+                  </span>
+                  <span className="text-caption text-muted-foreground mt-0.5 block">
+                    {t(($) => $.wecom.scan_option_description)}
+                  </span>
+                </button>
+                <div className="space-y-0.5">
+                  <p className="text-body font-medium">
+                    {t(($) => $.wecom.byo_option_title)}
+                  </p>
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.wecom.byo_option_description)}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="wecom-byo-bot-id">
                 {t(($) => $.wecom.byo_bot_id_label)}
@@ -470,6 +505,15 @@ export function WecomAgentBindButton({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {scanOpen && (
+        <WecomScanInstallDialog
+          wsId={wsId}
+          agentId={agentId}
+          agentName={agentName}
+          onClose={() => setScanOpen(false)}
+        />
+      )}
     </div>
   );
 }

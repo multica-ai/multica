@@ -269,6 +269,9 @@ deleted_channel_user_bindings AS (
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
 ),
+deleted_wecom_install_sessions AS (
+    DELETE FROM wecom_install_session WHERE workspace_id = $1
+),
 deleted_channel_outbound_send_attempts AS (
     DELETE FROM channel_outbound_send_attempt WHERE workspace_id = $1
 ),
