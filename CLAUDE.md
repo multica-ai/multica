@@ -79,6 +79,8 @@ Use the repo scripts as the source of truth. Common commands:
 make dev              # auto-setup and start the app
 make start            # start backend + frontend
 make stop             # stop app processes for this checkout
+make db-drop          # permanently drop this checkout's local database
+make remove-worktree WORKTREE=../path  # drop a linked worktree DB, then remove it
 make server           # run Go server only
 make daemon           # run local daemon
 make test             # Go tests
