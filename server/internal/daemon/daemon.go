@@ -903,6 +903,10 @@ func (d *Daemon) resolveAuth() error {
 		return fmt.Errorf("not authenticated: run %s first", loginHint)
 	}
 	d.client.SetToken(cfg.Token)
+	// CEREBRO-PATCH(probe-identity-from-profile): MUL-4634 hand the same
+	// credentials to the Multica MCP tool probe, which starts its own
+	// mcp serve child and would otherwise run unauthenticated.
+	setProbeIdentity(cfg.Token, d.cfg.ServerBaseURL)
 	d.logger.Info("authenticated")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
@@ -972,7 +976,7 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
@@ -990,11 +994,22 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		runtimes = append(runtimes, map[string]any{
 			"name":    displayName,
 			"type":    name,
 			"version": version,
 			"status":  "online",
+			// CEREBRO-PATCH(register-capability-snapshot): MUL-4634 publish the
+			// measured tool inventory with the registration itself. The server
+			// has always accepted (and persisted) it here, but the daemon only
+			// ever sent capabilities on the HTTP heartbeat — which
+			// runHeartbeatTick skips for every runtime whose WebSocket
+			// heartbeat is fresh. On a WS-connected daemon that left the
+			// snapshot from whichever build registered first, so a probe added
+			// in a later release never reached the server and
+			// cerebroEffectiveToolsForClaim kept rejecting every claim with
+			// HTTP 500.
+			"capabilities": providerCapabilities(name, entry.Path),
 		})
 	}
 
@@ -1066,7 +1081,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // treat that as "unknown, do not overwrite a previously-stored signature"
 // (otherwise a transient 5xx would silently flip the daemon into thinking the
 // workspace has zero profiles).
-func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
+func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]any, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
 		// Best-effort: never fail registration because profiles couldn't be
@@ -1159,12 +1174,15 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		d.logger.Info("registering custom runtime profile",
 			"workspace_id", workspaceID, "profile_id", profile.ID,
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
-		*runtimes = append(*runtimes, map[string]string{
+		*runtimes = append(*runtimes, map[string]any{
 			"name":       displayName,
 			"type":       profile.ProtocolFamily,
 			"version":    version,
 			"status":     "online",
 			"profile_id": profile.ID,
+			// Same snapshot as the built-in path above; a custom profile routes
+			// through the same provider and needs the same inventory to claim.
+			"capabilities": providerCapabilities(profile.ProtocolFamily, resolved),
 		})
 	}
 	return profileSetSignature(resp.RuntimeProfiles)
