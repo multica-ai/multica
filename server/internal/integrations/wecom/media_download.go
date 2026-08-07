@@ -26,9 +26,11 @@ import (
 // is the ceiling for everything: whatever arrives above it is not something
 // the callback was supposed to hand us.
 //
-// The body is buffered whole — CBC decryption needs the tail before the head
-// can be trusted — so this is also the per-download memory bound, multiplied
-// by the router's media concurrency.
+// On this path the body is buffered whole — CBC decryption needs the tail
+// before the head can be trusted — so the ceiling is also the per-download
+// memory bound, multiplied by the router's media concurrency. This path is the
+// fallback: a storage backend implementing UploadStream (both shipped ones do)
+// goes through media_stream.go instead, where the same ceiling bounds disk.
 const maxMediaBytes = 100 << 20
 
 // mediaDownloadTimeout caps a single fetch. The router already runs media

@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,16 +153,38 @@ func (bindTestIssues) PublishAttachmentsChanged(context.Context, db.Issue, pgtyp
 // would need a live runtime, and the run trigger is not what is under test —
 // but the media-ready promotion IS called on the media path, so it is
 // recorded rather than ignored.
-type bindTestTasks struct{ promoted int }
+//
+// The counter is guarded because the two sides sit on different goroutines:
+// the Router calls the promotion from the detached media goroutine it spawns
+// in enqueueMedia, while the test reads the count on its own. The database
+// poll the test waits on is not a synchronisation edge between them — it
+// observes the bind transaction, which commits one call EARLIER than this one
+// in resolveAndBindMedia, so an unguarded read is both a data race and, on the
+// wrong interleaving, a read of zero.
+type bindTestTasks struct {
+	mu       sync.Mutex
+	promoted int
+}
 
-func (bindTestTasks) EnqueueChatTask(context.Context, db.ChatSession, pgtype.UUID, bool) (db.AgentTaskQueue, error) {
+func (*bindTestTasks) EnqueueChatTask(context.Context, db.ChatSession, pgtype.UUID, bool) (db.AgentTaskQueue, error) {
 	return db.AgentTaskQueue{}, nil
 }
 func (b *bindTestTasks) PromoteChannelChatTasksIfMediaReady(context.Context, pgtype.UUID) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.promoted++
 	return nil
 }
-func (bindTestTasks) PromoteDeferredChannelIssueTask(context.Context, pgtype.UUID) error { return nil }
+func (*bindTestTasks) PromoteDeferredChannelIssueTask(context.Context, pgtype.UUID) error {
+	return nil
+}
+
+// promotions is the only way to read the counter from the test goroutine.
+func (b *bindTestTasks) promotions() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.promoted
+}
 
 // wecomImageCallback builds the inbound envelope for a standalone image,
 // through the real frame decoder so the fixture cannot drift from the wire.
@@ -265,7 +288,12 @@ func TestInboundImageBecomesAnAttachmentOnTheChatMessage(t *testing.T) {
 			`SELECT count(*) FROM attachment WHERE chat_message_id = $1`, chatMessageID).Scan(&attachments); err != nil {
 			t.Fatalf("count attachments: %v", err)
 		}
-		if attachments > 0 || time.Now().After(deadline) {
+		// Both, not just the attachment row: the promotion is the call AFTER
+		// the bind transaction in resolveAndBindMedia, so an attachment row is
+		// not evidence that the media goroutine has reached the end of its
+		// work. Waiting on the row alone leaves assertion 4 reading a counter
+		// that is still about to be incremented.
+		if (attachments > 0 && tasks.promotions() > 0) || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -330,7 +358,7 @@ func TestInboundImageBecomesAnAttachmentOnTheChatMessage(t *testing.T) {
 	if pendingUntil.Valid {
 		t.Errorf("channel_media_pending_until = %v, want NULL after binding", pendingUntil.Time)
 	}
-	if tasks.promoted == 0 {
+	if tasks.promotions() == 0 {
 		t.Error("PromoteChannelChatTasksIfMediaReady was never called")
 	}
 }

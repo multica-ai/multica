@@ -240,12 +240,6 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 	})
 }
 
-// BindMedia is a no-op for wecom. The wecom ResolverSet registers no
-// MediaResolver, so the Router never resolves media for a wecom message
-// (resolveMedia stays false) and this method is never called at runtime; it
-// exists only to satisfy engine.SessionBinder. If wecom gains inbound media
-// support, wire this to a BindMediaRefs on the session store, mirroring the
-// lark binder.
 // BindMedia attaches the objects the resolver stored to the message they came
 // with. Until the media resolver existed this was correctly a no-op — there
 // was nothing to bind — and returning nil reads to the Router as "bound

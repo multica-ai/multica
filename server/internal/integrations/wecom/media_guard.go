@@ -77,8 +77,6 @@ var reservedMediaPrefixes = []netip.Prefix{
 // rather than the test harness's address.
 type addrPolicy func(netip.Addr) bool
 
-// publicAddrOnly is the production policy: everything that is not routable
-// public internet is refused.
 // mediaAllowedPrefixes are ranges an operator has declared safe for media
 // fetches despite looking reserved. It exists for one real deployment shape:
 // a machine behind a fake-IP proxy, where the resolver answers every public
@@ -117,6 +115,8 @@ func SetMediaAllowedPrefixes(cidrs []string) []error {
 	return errs
 }
 
+// publicAddrOnly is the production policy: everything that is not routable
+// public internet is refused.
 func publicAddrOnly(a netip.Addr) bool {
 	// An IPv4-mapped IPv6 address (::ffff:127.0.0.1) reports none of the IPv4
 	// predicates until it is unmapped, which is the whole trick.
