@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The vendored reference doc shows generate / query_result fields at the top
@@ -132,4 +133,84 @@ func TestHTTPProviderQueryResultSuccessWithoutBotInfo(t *testing.T) {
 	if _, err := p.QueryResult(context.Background(), "sc-1"); err == nil {
 		t.Fatal("expected an error when success carries no bot_info")
 	}
+}
+
+// The scode is a bearer credential: per install.go, whoever holds it can finish
+// creating the bot. It travels in the query string, and *url.Error.Error()
+// prints the URL it failed on — query string included. install_worker.go logs
+// these at Warn from inside the poll loop, so one sustained upstream hiccup
+// wrote a live, redeemable scode to the log over and over. Everything else
+// about this credential is careful: it is sealed at rest, NULLed on both
+// terminal paths, and never returned by any endpoint.
+func TestHTTPProviderTransportErrorsNeverCarryTheScode(t *testing.T) {
+	const scode = "SUPER-SECRET-SCODE-abc123"
+	// Accept the connection and hang up without answering: WeCom hiccuping, an
+	// LB dropping the connection, a DNS blip. net/http surfaces this as
+	// *url.Error{Op: "Get", URL: <full url>, Err: EOF}.
+	hangup := func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}
+
+	t.Run("query_result", func(t *testing.T) {
+		p, _ := newTestProvider(t, hangup)
+		_, err := p.QueryResult(context.Background(), scode)
+		if err == nil {
+			t.Fatal("expected a transport error")
+		}
+		if strings.Contains(err.Error(), scode) {
+			t.Errorf("error leaks the scode: %q", err)
+		}
+		if strings.Contains(err.Error(), "?") {
+			t.Errorf("error carries a query string, so the next credential put there leaks too: %q", err)
+		}
+		// Still has to be diagnosable: which call, against which endpoint, why.
+		if !strings.Contains(err.Error(), "/ai/qc/query_result") {
+			t.Errorf("error = %q, want it to name the endpoint that failed", err)
+		}
+	})
+
+	t.Run("generate", func(t *testing.T) {
+		p, _ := newTestProvider(t, hangup)
+		_, err := p.Generate(context.Background())
+		if err == nil {
+			t.Fatal("expected a transport error")
+		}
+		if strings.Contains(err.Error(), "?") {
+			t.Errorf("error carries a query string: %q", err)
+		}
+		if !strings.Contains(err.Error(), "/ai/qc/generate") {
+			t.Errorf("error = %q, want it to name the endpoint that failed", err)
+		}
+	})
+
+	// A timeout is the likelier trigger than a hangup — a wedged upstream, which
+	// is also the case that repeats every poll interval. net/http reports it as
+	// *url.Error too, so it must be scrubbed by the same path.
+	t.Run("upstream timeout", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done() // hold until the client gives up
+		}))
+		t.Cleanup(srv.Close)
+		p, err := NewHTTPProvider(HTTPProviderConfig{
+			BaseURL:    srv.URL,
+			SourceID:   "multica",
+			HTTPClient: srv.Client(),
+			Timeout:    50 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("NewHTTPProvider: %v", err)
+		}
+
+		_, err = p.QueryResult(context.Background(), scode)
+		if err == nil {
+			t.Fatal("expected a timeout error")
+		}
+		if strings.Contains(err.Error(), scode) {
+			t.Errorf("timeout error leaks the scode: %q", err)
+		}
+	})
 }
