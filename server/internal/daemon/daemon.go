@@ -91,11 +91,22 @@ const (
 // shrink it, same as the other timing knobs in this package.
 var pendingWorkHintMinInterval = time.Second
 
+// repoCheckoutModeFor picks the Git metadata layout for a task's
+// `multica repo checkout`. Codex's sandbox resolves a linked worktree's gitdir
+// to the shared cache and keeps it read-only even when the task workdir is an
+// explicit writable root, so `git add` / `git commit` fail from inside the
+// checkout. Task-local metadata is the fix on Linux (multica-ai/multica#2925)
+// and on Windows native sandbox (multica-ai/multica#6449).
 func repoCheckoutModeFor(provider, goos string) string {
-	if provider == "codex" && goos == "linux" {
-		return repoCheckoutModeIsolated
+	if provider != "codex" {
+		return ""
 	}
-	return ""
+	switch goos {
+	case "linux", "windows":
+		return repoCheckoutModeIsolated
+	default:
+		return ""
+	}
 }
 
 var (
