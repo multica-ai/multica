@@ -125,6 +125,23 @@ func TestReply_AgentOfflineAndArchived_PostNotices(t *testing.T) {
 	}
 }
 
+func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		outcome engine.Outcome
+		want    string
+	}{
+		{engine.OutcomeFreshPending, freshPendingText},
+		{engine.OutcomeIssueUsage, issueUsageText},
+	} {
+		sender := &fakeReplySender{}
+		r := newTestReplier(&fakeBindingMinter{}, sender)
+		r.Reply(context.Background(), testResolvedInstallation(t), testInboundForReply(), engine.Result{Outcome: tc.outcome})
+		if sender.calls != 1 || sender.sent == nil || sender.sent.Text != tc.want {
+			t.Errorf("outcome %s: got %d sends, text %q, want %q", tc.outcome, sender.calls, textOrEmpty(sender.sent), tc.want)
+		}
+	}
+}
+
 func TestReply_IngestedWithIssue_Confirms(t *testing.T) {
 	sender := &fakeReplySender{}
 	r := newTestReplier(&fakeBindingMinter{}, sender)

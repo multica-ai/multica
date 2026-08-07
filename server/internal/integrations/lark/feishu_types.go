@@ -72,6 +72,10 @@ const (
 	OutcomeNeedsBinding Outcome = "needs_binding"
 	// OutcomeIngested — the message landed and a run was (or will be) enqueued.
 	OutcomeIngested Outcome = "ingested"
+	// OutcomeFreshPending — a bare /new was persisted for the next chat turn.
+	OutcomeFreshPending Outcome = "fresh_pending"
+	// OutcomeIssueUsage — /issue was sent without its required title.
+	OutcomeIssueUsage Outcome = "issue_usage"
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.

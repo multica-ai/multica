@@ -73,6 +73,7 @@ func NewResolverSet(
 // production value.
 type engineSessionBinder interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 }
 
@@ -214,6 +215,10 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:      p.SessionID,
@@ -223,6 +228,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		CommandText:    p.Message.Text, // wecom has no enrichment; command == body
 		MessageID:      p.Message.MessageID,
 		ClaimToken:     p.ClaimToken,
+		ForceFresh:     p.Message.ForceFresh,
 	})
 }
 

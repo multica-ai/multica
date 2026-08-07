@@ -26,6 +26,8 @@ const (
 	OutcomeDropped       Outcome = "dropped"
 	OutcomeNeedsBinding  Outcome = "needs_binding"
 	OutcomeIngested      Outcome = "ingested"
+	OutcomeFreshPending  Outcome = "fresh_pending"
+	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
 )
@@ -195,6 +197,7 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
 	BindMedia(ctx context.Context, p BindMediaParams) error
 }
