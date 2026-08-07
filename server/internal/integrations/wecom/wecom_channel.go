@@ -201,7 +201,8 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 	//
 	// A full queue BLOCKS the read loop rather than dropping. Backpressure
 	// costs a reconnect; dropping costs a user's message with nothing to say
-	// so.
+	// so. That only holds while somebody is still receiving, so the read
+	// loop's send also watches cbDone — see the send site below.
 	callbacks := make(chan frameEnvelope, callbackQueueDepth)
 	cbDone := make(chan struct{})
 	var cbErr error
@@ -210,8 +211,10 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 		for env := range callbacks {
 			if e := c.dispatchFrame(ctx, env, sender, log); e != nil {
 				cbErr = e
-				// Wake the read loop; it is parked in ReadMessage and a
-				// cancelled context alone will not move it.
+				// Wake the read loop if it is parked in ReadMessage; a
+				// cancelled context alone will not move it. A read loop
+				// parked on the queue send is woken by cbDone instead —
+				// closing a socket does not move a channel send.
 				_ = conn.Close()
 				return
 			}
@@ -221,8 +224,11 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 		close(callbacks)
 		<-cbDone
 		// The worker's error is the real cause; the read error that followed
-		// it is just the socket we closed to get here.
-		if cbErr != nil {
+		// it is just the socket we closed to get here. Only on a live ctx: a
+		// shutdown or a lease-loss cancel that catches a callback mid-flight
+		// is an ordinary stop, and promoting that callback's error would
+		// report a spurious "connection exited with error".
+		if cbErr != nil && ctx.Err() == nil {
 			err = cbErr
 		}
 	}()
@@ -273,6 +279,19 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 		case cmdMsgCallback, cmdEventCallback:
 			select {
 			case callbacks <- env:
+			case <-cbDone:
+				// The worker has stopped, so this send has no receiver — and
+				// no closer either: the queue is closed by a defer that
+				// cannot run until this loop returns. With a full queue that
+				// is a permanent park, because the worker's conn.Close()
+				// wakes a read loop sitting in ReadMessage, not one sitting
+				// on a send, and ctx stays live on this path. Nothing would
+				// ever reconnect: the Supervisor would keep renewing the
+				// lease for a connection that had stopped reading.
+				//
+				// Return and let the deferred handler substitute the
+				// worker's error, which is the real cause.
+				return nil
 			case <-ctx.Done():
 				return nil
 			}
