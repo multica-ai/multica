@@ -52,7 +52,7 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 
 *Claude Code, Codex, Cursor, Kimi — you don't pick one. You hire them all.*
 
-- **[20 agent CLIs](#runtimes) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
+- **[21 agent CLIs](#runtimes) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
 - **[Agents as teammates](https://multica.ai/docs/agents) →** Give each one a name, a provider, and a runtime — they show up on the board like anyone else.
 - **[Squads](https://multica.ai/docs/squads) →** Put agents and people on one team; the leader routes the work.
 - **[Skills](https://multica.ai/docs/skills) →** Turn a solved problem into a playbook every agent reuses.
@@ -162,6 +162,7 @@ authenticated, so switching providers is a dropdown, not a migration.
 | Qwen Code | `qwen` | QwenPaw | `qwenpaw` |
 | Reasonix | `reasonix` | Trae CLI | `traecli` |
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
+| Dim | `dim` | | |
 
 Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·
 [Providers](https://multica.ai/docs/providers)

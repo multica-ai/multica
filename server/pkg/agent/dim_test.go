@@ -1,0 +1,194 @@
+package agent
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestNewReturnsDimBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("dim", Config{ExecutablePath: "/nonexistent/dim"})
+	if err != nil {
+		t.Fatalf("New(dim) error: %v", err)
+	}
+	if _, ok := b.(*dimBackend); !ok {
+		t.Fatalf("expected *dimBackend, got %T", b)
+	}
+}
+
+func TestDimModelSelectionSupported(t *testing.T) {
+	t.Parallel()
+	// Dim's session/set_model is session-scoped, so model override works.
+	if !ModelSelectionSupported("dim") {
+		t.Fatal("ModelSelectionSupported(dim) should return true")
+	}
+}
+
+// fakeDimACPScript impersonates `dim acp` for unit tests. Dim sessions are
+// bound to the creating process (session/load from another process fails with
+// "held by another process"), so this fake only supports session/new — the
+// backend must never send session/load. It records every request line to
+// DIM_REQUESTS_FILE so tests can assert which RPCs were (and were not) sent.
+func fakeDimACPScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  if [ -n "$DIM_REQUESTS_FILE" ]; then
+    printf '%s\n' "$line" >> "$DIM_REQUESTS_FILE"
+  fi
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"dimcode","version":"0.3.2"},"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false}}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_dim_new","models":{"availableModels":[{"modelId":"dim/model-a","name":"Model A"}],"currentModelId":"dim/model-a"}}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      # The real dim ACP server rejects cross-process loads; a fake that
+      # answers is fine — the point is the backend must never send it.
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session held by another process"}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":20}}}\n' "$id"
+      ;;
+    *'"method":"session/close"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`
+}
+
+func writeFakeDimScript(t *testing.T, requestsFile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "dim")
+	if err := os.WriteFile(bin, []byte(fakeDimACPScript()), 0o755); err != nil {
+		t.Fatalf("write fake dim: %v", err)
+	}
+	return bin
+}
+
+func newDimTestBackend(t *testing.T, requestsFile string) Backend {
+	t.Helper()
+	bin := writeFakeDimScript(t, requestsFile)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("dim", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+		Env:            map[string]string{"DIM_REQUESTS_FILE": requestsFile},
+	})
+	if err != nil {
+		t.Fatalf("New(dim) error: %v", err)
+	}
+	return b
+}
+
+func readDimRequests(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read dim requests: %v", err)
+	}
+	return string(data)
+}
+
+// TestDimSessionNew verifies the happy path: initialize → session/new →
+// set_config_option(permission/mode) → prompt, with a fresh session.
+func TestDimSessionNew(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackend(t, requestsFile)
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.SessionID != "ses_dim_new" {
+		t.Fatalf("expected session id ses_dim_new, got %q", result.SessionID)
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	if strings.Contains(reqs, "session/load") {
+		t.Fatal("backend must never send session/load (dim sessions are process-bound)")
+	}
+	// The ACP server hardcodes read-only permission; the backend must raise
+	// it to full-access and pin agent mode before the prompt.
+	if !strings.Contains(reqs, `"configId":"permission"`) || !strings.Contains(reqs, `"value":"full-access"`) {
+		t.Fatal("expected set_config_option permission=full-access")
+	}
+	if !strings.Contains(reqs, `"configId":"mode"`) || !strings.Contains(reqs, `"value":"agent"`) {
+		t.Fatal("expected set_config_option mode=agent")
+	}
+	if !strings.Contains(reqs, "session/prompt") {
+		t.Fatal("expected session/prompt")
+	}
+	if !strings.Contains(reqs, "session/close") {
+		t.Fatal("expected best-effort session/close at the end")
+	}
+}
+
+// TestDimResumeStartsFresh verifies that when the daemon asks to resume a
+// prior session, the backend ignores it, starts a fresh session, and reports
+// ResumeRejected so the daemon classifies the run correctly — instead of
+// failing on a session/load that dim would refuse ("held by another process").
+func TestDimResumeStartsFresh(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackend(t, requestsFile)
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		ResumeSessionID: "ses_prior",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.SessionID != "ses_dim_new" {
+		t.Fatalf("expected a fresh session id, got %q", result.SessionID)
+	}
+	if !result.ResumeRejected {
+		t.Fatal("expected ResumeRejected=true when a resume was requested but dim cannot resume")
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	if strings.Contains(reqs, "session/load") {
+		t.Fatal("backend must never send session/load even when a resume was requested")
+	}
+	if !strings.Contains(reqs, "session/new") {
+		t.Fatal("expected a fresh session/new")
+	}
+}

@@ -167,6 +167,7 @@ var acpDeliverableCases = []acpDeliverableCase{
 	{backend: "hermes", binary: "hermes", notification: "session/update"},
 	{backend: "kimi", binary: "kimi", notification: "session/update"},
 	{backend: "reasonix", binary: "reasonix", notification: "session/update"},
+	{backend: "dim", binary: "dim", notification: "session/update"},
 	{backend: "traecli", binary: "traecli", notification: "session/update"},
 	{backend: "grok", binary: "grok", notification: "session/update"},
 	{backend: "kiro", binary: "kiro-cli", notification: "session/notification", camelUpdates: true},
@@ -230,6 +231,15 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_deliverable"}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/close"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
       pre='` + acpDeliverableNarration + `'

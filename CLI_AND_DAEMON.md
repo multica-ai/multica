@@ -217,6 +217,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
 | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix` | DeepSeek-focused ACP coding agent (run `reasonix setup` first) |
+| Dim | `dim` | DimCode ACP coding agent (speaks the ACP protocol via `dim acp`) |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/product-overview/what-is-qoder-cli-cn) | `qoderclicn` | Qoder CN ACP coding agent |
@@ -316,6 +317,8 @@ Agent-specific overrides:
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
 | `MULTICA_REASONIX_PATH` | Custom path to the `reasonix` binary |
 | `MULTICA_REASONIX_MODEL` | Override the Reasonix model used |
+| `MULTICA_DIM_PATH` | Custom path to the `dim` binary |
+| `MULTICA_DIM_MODEL` | Override the Dim model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |

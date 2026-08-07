@@ -23,6 +23,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "qwen",
   "qwenpaw",
   "traecli",
+  "dim",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {
