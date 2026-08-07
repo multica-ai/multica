@@ -59,7 +59,7 @@ func (h *Handler) StartMikaOnboarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, ok := h.gateChatSessionForUser(
+	session, ok := h.gatePublicChatSessionForUser(
 		w,
 		r,
 		userID,
@@ -90,7 +90,7 @@ func (h *Handler) StartMikaOnboarding(w http.ResponseWriter, r *http.Request) {
 	// the *first* member's agent — so an owner check would 403 the exact race
 	// that handler's advisory lock exists to survive: the loser gets a valid
 	// Mika, opens a session, and then cannot start onboarding at all. The two
-	// gates that matter already ran: gateChatSessionForUser proved the session
+	// gates that matter already ran: gatePublicChatSessionForUser proved the session
 	// is the caller's, and canInvokeAgent below proves they may invoke Mika.
 	if agent.ArchivedAt.Valid {
 		writeError(w, http.StatusConflict, "chat agent is archived")

@@ -19,6 +19,34 @@ WHERE id = $1;
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetPublicChatSessionInWorkspace :one
+-- A channel command is a durable control-plane record, not a public chat turn.
+-- Channel-created sessions therefore become public only after they contain a
+-- non-command message. Empty first-party sessions stay public so the member can
+-- open a newly-created Web Chat and send its first message. channel_ingested is
+-- the immutable fallback when a channel binding has since been removed.
+SELECT cs.* FROM chat_session AS cs
+WHERE cs.id = $1
+  AND cs.workspace_id = $2
+  AND (
+    EXISTS (
+      SELECT 1 FROM chat_message AS public_message
+      WHERE public_message.chat_session_id = cs.id
+        AND public_message.message_kind != 'channel_command'
+    )
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM channel_chat_session_binding AS binding
+        WHERE binding.chat_session_id = cs.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_message AS channel_message
+        WHERE channel_message.chat_session_id = cs.id
+          AND channel_message.channel_ingested
+      )
+    )
+  );
+
 -- name: ListChatSessionsByCreator :many
 -- IM-style list: each active session with its unread *count* (assistant
 -- messages after the read cursor), a preview of the latest message, and
@@ -38,10 +66,25 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+  AND (
+    lm.created_at IS NOT NULL
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM channel_chat_session_binding AS binding
+        WHERE binding.chat_session_id = cs.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_message AS channel_message
+        WHERE channel_message.chat_session_id = cs.id
+          AND channel_message.channel_ingested
+      )
+    )
+  )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAllChatSessionsByCreator :many
@@ -69,10 +112,25 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (
+    lm.created_at IS NOT NULL
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM channel_chat_session_binding AS binding
+        WHERE binding.chat_session_id = cs.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_message AS channel_message
+        WHERE channel_message.chat_session_id = cs.id
+          AND channel_message.channel_ingested
+      )
+    )
+  )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAgentBuilderSessionsByCreator :many
@@ -418,8 +476,9 @@ WHERE id = $1 AND role = 'user';
 -- Seals the trailing channel-message batch to its task. The task row and these
 -- links are committed together, so an older in-flight task cannot absorb a
 -- newer media message and a later assistant row cannot hide that message.
--- channel_command turns were already handled synchronously by Router; keeping
--- them visible but unowned prevents both immediate and delayed re-execution.
+-- channel_command turns were already handled synchronously by Router. They stay
+-- durable for channel orchestration but remain unowned and absent from public
+-- Chat projections, preventing both immediate and delayed re-execution.
 UPDATE chat_message AS message
 SET task_id = @task_id
 WHERE message.chat_session_id = @chat_session_id
@@ -473,6 +532,7 @@ RETURNING *;
 -- claimed during the backoff and then becomes the visible claimed head.
 SELECT message.* FROM chat_message AS message
 WHERE message.chat_session_id = $1
+  AND message.message_kind != 'channel_command'
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -675,6 +735,7 @@ WHERE queued_input.chat_session_id = $1
 -- name: ListChatMessagesPage :many
 SELECT message.* FROM chat_message AS message
 WHERE message.chat_session_id = $1
+  AND message.message_kind != 'channel_command'
   AND NOT (
     message.role = 'user'
     AND EXISTS (

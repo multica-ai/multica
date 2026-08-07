@@ -988,6 +988,64 @@ func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.U
 	return i, err
 }
 
+const getPublicChatSessionInWorkspace = `-- name: GetPublicChatSessionInWorkspace :one
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id FROM chat_session AS cs
+WHERE cs.id = $1
+  AND cs.workspace_id = $2
+  AND (
+    EXISTS (
+      SELECT 1 FROM chat_message AS public_message
+      WHERE public_message.chat_session_id = cs.id
+        AND public_message.message_kind != 'channel_command'
+    )
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM channel_chat_session_binding AS binding
+        WHERE binding.chat_session_id = cs.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_message AS channel_message
+        WHERE channel_message.chat_session_id = cs.id
+          AND channel_message.channel_ingested
+      )
+    )
+  )
+`
+
+type GetPublicChatSessionInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A channel command is a durable control-plane record, not a public chat turn.
+// Channel-created sessions therefore become public only after they contain a
+// non-command message. Empty first-party sessions stay public so the member can
+// open a newly-created Web Chat and send its first message. channel_ingested is
+// the immutable fallback when a channel binding has since been removed.
+func (q *Queries) GetPublicChatSessionInWorkspace(ctx context.Context, arg GetPublicChatSessionInWorkspaceParams) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, getPublicChatSessionInWorkspace, arg.ID, arg.WorkspaceID)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnreadSince,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+		&i.ProjectID,
+	)
+	return i, err
+}
+
 const hasActiveChatTaskForSession = `-- name: HasActiveChatTaskForSession :one
 SELECT EXISTS (
   SELECT 1 FROM agent_task_queue
@@ -1117,8 +1175,9 @@ type LinkUnownedChannelChatMessagesToTaskParams struct {
 // Seals the trailing channel-message batch to its task. The task row and these
 // links are committed together, so an older in-flight task cannot absorb a
 // newer media message and a later assistant row cannot hide that message.
-// channel_command turns were already handled synchronously by Router; keeping
-// them visible but unowned prevents both immediate and delayed re-execution.
+// channel_command turns were already handled synchronously by Router. They stay
+// durable for channel orchestration but remain unowned and absent from public
+// Chat projections, preventing both immediate and delayed re-execution.
 func (q *Queries) LinkUnownedChannelChatMessagesToTask(ctx context.Context, arg LinkUnownedChannelChatMessagesToTaskParams) error {
 	_, err := q.db.Exec(ctx, linkUnownedChannelChatMessagesToTask, arg.TaskID, arg.ChatSessionID)
 	return err
@@ -1250,10 +1309,25 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (
+    lm.created_at IS NOT NULL
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM channel_chat_session_binding AS binding
+        WHERE binding.chat_session_id = cs.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_message AS channel_message
+        WHERE channel_message.chat_session_id = cs.id
+          AND channel_message.channel_ingested
+      )
+    )
+  )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC
 `
 
@@ -1419,6 +1493,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 const listChatMessages = `-- name: ListChatMessages :many
 SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions FROM chat_message AS message
 WHERE message.chat_session_id = $1
+  AND message.message_kind != 'channel_command'
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -1565,6 +1640,7 @@ func (q *Queries) ListChatMessagesForLegacyTask(ctx context.Context, chatSession
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
 SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions FROM chat_message AS message
 WHERE message.chat_session_id = $1
+  AND message.message_kind != 'channel_command'
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -1661,10 +1737,25 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+  AND (
+    lm.created_at IS NOT NULL
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM channel_chat_session_binding AS binding
+        WHERE binding.chat_session_id = cs.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_message AS channel_message
+        WHERE channel_message.chat_session_id = cs.id
+          AND channel_message.channel_ingested
+      )
+    )
+  )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC
 `
 

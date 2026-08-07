@@ -285,6 +285,28 @@ func (h *Handler) gateChatSessionForUser(w http.ResponseWriter, r *http.Request,
 	return session, true
 }
 
+// gatePublicChatSessionForUser adds the member-visible projection boundary to
+// the normal ownership and private-agent checks. Internal channel commands stay
+// durable, but a session containing only those commands is not a public Chat.
+// Cleanup and recovery operations keep using the lower-level ownership gates
+// so an empty bound session can still be archived or deleted and a member's
+// own cancelled draft is never stranded. Every ordinary Chat interaction uses
+// this gate so a cached hidden session ID cannot resurrect a command-only Chat.
+func (h *Handler) gatePublicChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return db.ChatSession{}, false
+	}
+	if _, err := h.Queries.GetPublicChatSessionInWorkspace(r.Context(), db.GetPublicChatSessionInWorkspaceParams{
+		ID:          session.ID,
+		WorkspaceID: session.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "chat session not found")
+		return db.ChatSession{}, false
+	}
+	return session, true
+}
+
 func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -293,7 +315,7 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -331,7 +353,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -448,7 +470,7 @@ func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -738,7 +760,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// workspace role (or the agent's owner) may have changed since — keep
 	// stale sessions from being a back-door into a private agent the user
 	// can no longer reach. Agent senders bypass to preserve A2A collaboration.
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -772,7 +794,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-run the INVOKE gate on every send, not just the softer view gate in
-	// gateChatSessionForUser (MUL-4525). canAccessPrivateAgent lets a workspace
+	// gatePublicChatSessionForUser (MUL-4525). canAccessPrivateAgent lets a workspace
 	// admin keep reading a transcript, but sending a message enqueues a run and
 	// must satisfy canInvokeAgent — which has no admin bypass. A session created
 	// while the user could invoke the agent must stop enqueuing work the instant
@@ -947,7 +969,7 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -967,7 +989,7 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 	// The refresh no longer runs the agent, but it is still a user-triggered
 	// spend against that agent's conversation, so it keeps clearing the same
 	// INVOKE gate as a send (MUL-4525) rather than the softer view gate in
-	// gateChatSessionForUser. Deliberately NOT relaxed as a side effect of
+	// gatePublicChatSessionForUser. Deliberately NOT relaxed as a side effect of
 	// moving generation server-side.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
@@ -1023,7 +1045,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -1056,7 +1078,7 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -1156,7 +1178,7 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -1472,7 +1494,7 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -1526,7 +1548,7 @@ func (h *Handler) PrioritizeQueuedChatTask(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -1598,7 +1620,7 @@ func (h *Handler) ClearQueuedChatTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}

@@ -303,9 +303,9 @@ type BindMediaInput struct {
 	MediaRefs            []channel.MediaRef
 }
 
-// channelCommandMessageKind marks a visible user turn handled synchronously by
-// Router. It remains an ordinary public message, but the task batch seal omits
-// it so the agent cannot execute the command again on a later turn.
+// channelCommandMessageKind marks a durable control-plane turn handled
+// synchronously by Router. Public Chat projections omit it, and the task batch
+// seal does too so the agent cannot execute the command again on a later turn.
 const channelCommandMessageKind = "channel_command"
 
 // AppendUserMessage writes the user message into the chat_session (touching it
