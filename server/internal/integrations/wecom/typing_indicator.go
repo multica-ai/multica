@@ -54,7 +54,10 @@ const (
 	// archived, or the enqueue failed); the replier's own notice follows as a
 	// separate message with the detail.
 	streamCopyNotStarted = "已收到，但这条暂时没能开始处理。"
-	// streamCopyFailed — the run failed.
+	// streamCopyFailed — the run ended without producing an answer, whether it
+	// failed or was cancelled. The two are one outcome to the person watching
+	// the bubble, and naming which one it was would explain nothing they can
+	// act on.
 	streamCopyFailed = "⚠️ 这次没跑通，请稍后再试一次。"
 	// streamCopyStillWorking — the run outlived the protocol's stream window,
 	// so we close the bubble ourselves and answer separately later.
@@ -258,7 +261,9 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 		streamCopyNotStarted, "settled")
 }
 
-// Register subscribes the manager to the run failure event.
+// Register subscribes the manager to the two events that end a run without an
+// answer. Both close the bubble the question opened, so both go to the same
+// handler.
 //
 // EventChatDone is deliberately NOT subscribed here: the answer belongs in the
 // bubble, and only the outbound subscriber holds the answer. Registering for
@@ -266,10 +271,18 @@ func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype
 // underneath it.
 func (m *TypingIndicatorManager) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, m.handleTaskFailed)
+	// A cancelled task ends the run just as finally as a failed one, and the
+	// bubble is on screen either way. The engine cancels a turn it cannot
+	// serve — a task claimed with no user input attached, for one — and
+	// publishes task:cancelled rather than task:failed. Without this the
+	// spinner outlives the run it was painted for and never resolves: the
+	// user is left watching a bubble for an answer nobody is producing.
+	bus.Subscribe(protocol.EventTaskCancelled, m.handleTaskFailed)
 }
 
-// handleTaskFailed says a run died, in the bubble if there still is one and as
-// a plain message if there is not.
+// handleTaskFailed says a run ended without an answer — failed or cancelled,
+// which the user experiences identically — in the bubble if there still is one
+// and as a plain message if there is not.
 //
 // task:failed has two publishers and they do not agree on the payload.
 // broadcastTaskEvent, which FailTask uses, carries chat_session_id.
