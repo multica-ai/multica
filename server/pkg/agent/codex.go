@@ -195,6 +195,23 @@ const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available model
 
 var errCodexProcessExited = errors.New("codex process exited")
 
+type appServerProcessExitedError struct {
+	provider string
+	cause    error
+	causes   []error
+}
+
+func (e *appServerProcessExitedError) Error() string {
+	if e.cause != nil {
+		return fmt.Sprintf("%s process exited: %v", e.provider, e.cause)
+	}
+	return e.provider + " process exited"
+}
+
+func (e *appServerProcessExitedError) Unwrap() []error {
+	return e.causes
+}
+
 type codexTimeoutKind int
 
 const (
@@ -210,6 +227,7 @@ type codexTimeoutDiagnostic struct {
 	ThreadID     string
 	TurnID       string
 	Model        string
+	Provider     string
 	CodexVersion string
 }
 
@@ -257,7 +275,15 @@ func (o *codexFirstItemWaitObservation) snapshot() (time.Duration, string, codex
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
-	cfg Config
+	cfg    Config
+	policy *appServerPolicy
+}
+
+func (b *codexBackend) appServerPolicy() appServerPolicy {
+	if b.policy == nil {
+		return codexAppServerPolicy
+	}
+	return *b.policy
 }
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -818,6 +844,8 @@ func isCodexBareTomlKey(s string) bool {
 }
 
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	policy := b.appServerPolicy()
+	opts = policy.execOptions(opts)
 	firstSession, err := b.executeOnce(ctx, prompt, opts, 1)
 	if err != nil {
 		return nil, err
@@ -868,16 +896,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			result, ok := <-session.Result
 			if !ok {
 				flushHeldPins()
-				resCh <- Result{Status: "failed", Error: "codex attempt closed without result"}
+				resCh <- Result{Status: "failed", Error: policy.provider + " attempt closed without result"}
 				return
 			}
-			retryReason := ""
-			switch {
-			case result.codexInitializeRetrySafe:
-				retryReason = "initialize"
-			case result.codexStartupRefreshRetrySafe:
-				retryReason = "model_catalog_refresh"
-			}
+			retryReason := appServerRetryReason(policy, result)
 			if retryReason == "" || attempt == 2 {
 				flushHeldPins()
 				resCh <- result
@@ -919,12 +941,15 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
+	policy := b.appServerPolicy()
+	opts = policy.execOptions(opts)
+	provider := policy.provider
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "codex"
+		execPath = policy.defaultExecutable
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", provider, execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -948,7 +973,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// inline env-bearing TOML would defeat the redaction. Writing through
 	// config.toml at 0o600 keeps the secret values out of argv and logs.
 	codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
-	if codexHome != "" {
+	if policy.manageCodexConfig && codexHome != "" {
 		if err := ensureCodexMcpConfig(filepath.Join(codexHome, "config.toml"), opts.McpConfig, b.cfg.Logger); err != nil {
 			// Fail closed when we can't materialise the managed config.
 			// Warning-and-launching would silently fall back to the
@@ -959,7 +984,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			cancel()
 			return nil, fmt.Errorf("apply codex mcp_config: %w", err)
 		}
-	} else if hasManagedCodexMcpConfig(opts.McpConfig) {
+	} else if policy.manageCodexConfig && hasManagedCodexMcpConfig(opts.McpConfig) {
 		// Managed mcp_config saved but no CODEX_HOME to anchor it.
 		// Same reasoning as above: silently launching would inherit
 		// whatever MCP setup the host user has, which is the wrong
@@ -968,14 +993,18 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		return nil, fmt.Errorf("codex: mcp_config is set but CODEX_HOME env var is not configured; cannot apply managed MCP")
 	}
 
-	if codexHome != "" {
+	if policy.manageCodexConfig && codexHome != "" {
 		// The daemon owns shell_environment_policy in the task-local config.
 		// Codex -c/--config overrides are last-wins, so remove user-provided
 		// root or profile policy overrides before building the final argv.
 		opts.ExtraArgs = filterCodexShellEnvConfigOverrides(opts.ExtraArgs, b.cfg.Logger)
 		opts.CustomArgs = filterCodexShellEnvConfigOverrides(opts.CustomArgs, b.cfg.Logger)
 	}
-	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
+	launchOpts := opts
+	if !policy.allowCodexLaunchOverrides {
+		launchOpts.ServiceTier = ""
+	}
+	codexArgs := buildCodexArgs(launchOpts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)
 	// Run codex in its own process group so a cancel-on-stuck cleanup
@@ -1011,12 +1040,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("codex stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", provider, err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("codex stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", provider, err)
 	}
 	// Codex stderr can contain auth/provider diagnostics. Capture a bounded
 	// tail and emit it only through the sanitizer in the cleanup event.
@@ -1025,7 +1054,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start codex: %w", err)
+		return nil, fmt.Errorf("start %s: %w", provider, err)
 	}
 	activeLaunches := activeCodexLaunches.Add(1)
 	for {
@@ -1064,6 +1093,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	c := &codexClient{
 		cfg:                  b.cfg,
+		provider:             provider,
 		stdin:                stdin,
 		pending:              make(map[int]*pendingRPC),
 		processDone:          make(chan struct{}),
@@ -1132,10 +1162,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// the response" apart from "codex died". startOrResumeThread needs
 			// that distinction to report an oversized resume as a rejected
 			// resume rather than a crash (MUL-5722).
-			c.markProcessExited(fmt.Errorf("%w: %w", errCodexProcessExited, err))
+			c.markProcessExited(c.processExitedError(err))
 			return
 		}
-		c.markProcessExited(errCodexProcessExited)
+		c.markProcessExited(c.processExitedError(nil))
 	}()
 
 	// drainAndWait closes stdin so codex shuts down, then joins cmd.Wait().
@@ -1317,7 +1347,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("codex initialize failed: %v", err)
+			finalError = fmt.Sprintf("%s initialize failed: %v", provider, err)
 			contextEnded := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 			if !timedOut && !contextEnded {
 				// Timeout stderr is untrusted provider output and may echo opaque
@@ -1326,9 +1356,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// the race against the per-RPC handshake timeout.
 				// Keep it out of persisted/user-visible Results; cleanup lifecycle
 				// still records bounded byte/truncation metadata.
-				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+				finalError = withAgentStderr(finalError, provider, sanitizeCodexDiagnostic(stderrBuf.Tail()))
 			}
-			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
+			retrySafe := policy.allowCodexStartupRetry && timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
 			if timedOut && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"
 			} else if timedOut && cleanupConfirmed && !codexInitializeRetrySupported() {
@@ -1457,7 +1487,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			default:
 				drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 				finalStatus = "failed"
-				finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+				finalError = withAgentStderr(fmt.Sprintf("%s turn/start failed: %v", provider, err), provider, sanitizeCodexDiagnostic(stderrBuf.Tail()))
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
@@ -1487,7 +1517,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			if runCtx.Err() == context.DeadlineExceeded {
 				finishFirstItemWait("execution_timeout")
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("codex timed out after %s", timeout)
+				finalError = fmt.Sprintf("%s timed out after %s", provider, timeout)
 			} else {
 				finishFirstItemWait("cancelled")
 				finalStatus = "aborted"
@@ -1570,7 +1600,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 						finalStatus = "failed"
 						processExitErr = c.getProcessErr()
 						if processExitErr == nil {
-							processExitErr = errCodexProcessExited
+							processExitErr = c.processExitedError(nil)
 						}
 						finalError = processExitErr.Error()
 					}
@@ -1589,10 +1619,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		drainAndWait()
 
 		if processExitErr != nil {
-			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			finalError = withAgentStderr(processExitErr.Error(), provider, sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 		stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
+			timeoutDiagnostic.Provider = provider
 			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrTail)
 		}
@@ -1604,7 +1635,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// require (cleanupConfirmed plus platform support) rather than a bare
 		// ProcessState check: on Windows the daemon cannot prove the whole tree
 		// is gone, and a surviving app-server would race the retry.
-		startupRefreshRetrySafe := timeoutDiagnostic.Kind == codexTimeoutFirstTurnNoProgress &&
+		startupRefreshRetrySafe := policy.allowCodexStartupRetry && timeoutDiagnostic.Kind == codexTimeoutFirstTurnNoProgress &&
 			!firstTurnProgressObserved &&
 			strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) &&
 			cleanupConfirmed && codexInitializeRetrySupported()
@@ -1770,7 +1801,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		} else {
 			if isCodexTransportError(err) {
 				logger.Warn("codex thread/resume failed due to transport error; not falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
-				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
+				return "", false, fmt.Errorf("%s thread/resume failed: %w", c.appServerProvider(), err)
 			}
 			logger.Warn("codex thread/resume failed; falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
 		}
@@ -1812,11 +1843,11 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
-		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
+		return "", false, fmt.Errorf("%s thread/start failed: %w", c.appServerProvider(), err)
 	}
 	threadID := extractThreadID(startResult)
 	if threadID == "" {
-		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
+		return "", false, fmt.Errorf("%s thread/start returned no thread ID", c.appServerProvider())
 	}
 	logger.Info("codex lifecycle",
 		"phase", "thread_start_response",
@@ -1934,26 +1965,38 @@ func isCodexFirstTurnProgressActivity(activity string) bool {
 
 func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail string) string {
 	stderrTail = sanitizeCodexDiagnostic(stderrTail)
+	provider := diag.Provider
+	if provider == "" {
+		provider = codexAppServerPolicy.provider
+	}
 	var msg string
 	switch diag.Kind {
 	case codexTimeoutFirstTurnNoProgress:
+		marker := CodexFirstTurnNoProgressMarker
+		if provider != codexAppServerPolicy.provider {
+			marker = provider + " app-server no progress timeout"
+		}
 		msg = fmt.Sprintf("%s after %s: received turn start but no item, message, tool, turn/completed, or error event (%s)",
-			CodexFirstTurnNoProgressMarker,
+			marker,
 			diag.Timeout,
 			formatCodexDiagnosticFields(diag),
 		)
 	case codexTimeoutSemanticInactivity:
+		marker := CodexSemanticInactivityMarker
+		if provider != codexAppServerPolicy.provider {
+			marker = provider + " semantic inactivity timeout"
+		}
 		msg = fmt.Sprintf("%s after %s without agent progress (last activity: %s; %s)",
-			CodexSemanticInactivityMarker,
+			marker,
 			diag.Timeout,
 			nonEmptyCodexDiagnosticValue(diag.LastActivity),
 			formatCodexDiagnosticFields(diag),
 		)
 	default:
-		msg = "codex timed out"
+		msg = provider + " timed out"
 	}
 	msg = appendCodexKnownStderrHint(msg, stderrTail)
-	return withAgentStderr(msg, "codex", stderrTail)
+	return withAgentStderr(msg, provider, stderrTail)
 }
 
 func formatCodexDiagnosticFields(diag codexTimeoutDiagnostic) string {
@@ -2062,6 +2105,7 @@ func describeCodexSemanticActivity(msg Message) string {
 
 type codexClient struct {
 	cfg                Config
+	provider           string
 	stdin              interface{ Write([]byte) (int, error) }
 	mu                 sync.Mutex
 	nextID             int
@@ -2103,6 +2147,27 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+}
+
+func (c *codexClient) appServerProvider() string {
+	if c.provider == "" {
+		return codexAppServerPolicy.provider
+	}
+	return c.provider
+}
+
+func (c *codexClient) processExitedError(cause error) error {
+	if c.appServerProvider() == codexAppServerPolicy.provider {
+		if cause != nil {
+			return fmt.Errorf("%w: %w", errCodexProcessExited, cause)
+		}
+		return errCodexProcessExited
+	}
+	causes := []error{errCodexProcessExited}
+	if cause != nil {
+		causes = append(causes, cause)
+	}
+	return &appServerProcessExitedError{provider: c.appServerProvider(), cause: cause, causes: causes}
 }
 
 // codexTurnNotificationGate keeps resume-time history replay from mutating the
@@ -2199,12 +2264,17 @@ type rpcResult struct {
 }
 
 type codexHandshakeTimeoutError struct {
-	Method  string
-	Timeout time.Duration
+	Method   string
+	Timeout  time.Duration
+	Provider string
 }
 
 func (e *codexHandshakeTimeoutError) Error() string {
-	return fmt.Sprintf("%s: %s did not respond after %s", CodexHandshakeTimeoutMarker, e.Method, e.Timeout)
+	marker := CodexHandshakeTimeoutMarker
+	if e.Provider != "" && e.Provider != codexAppServerPolicy.provider {
+		marker = e.Provider + " app-server handshake timeout"
+	}
+	return fmt.Sprintf("%s: %s did not respond after %s", marker, e.Method, e.Timeout)
 }
 
 func (e *codexHandshakeTimeoutError) Unwrap() error {
@@ -2235,7 +2305,7 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	requestCtx := ctx
 	cancelRequest := func() {}
 	if c.handshakeTimeout > 0 && isCodexHandshakeRPC(method) {
-		timeoutErr := &codexHandshakeTimeoutError{Method: method, Timeout: c.handshakeTimeout}
+		timeoutErr := &codexHandshakeTimeoutError{Method: method, Timeout: c.handshakeTimeout, Provider: c.appServerProvider()}
 		requestCtx, cancelRequest = context.WithTimeoutCause(ctx, c.handshakeTimeout, timeoutErr)
 	}
 	defer cancelRequest()
@@ -2301,7 +2371,7 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 			return nil, codexRequestContextError(requestCtx)
 		}
 		if err == nil {
-			err = errCodexProcessExited
+			err = c.processExitedError(nil)
 		}
 		return nil, err
 	case <-requestCtx.Done():
@@ -2358,7 +2428,7 @@ func (c *codexClient) closeAllPending(err error) {
 
 func (c *codexClient) markProcessExited(err error) {
 	if err == nil {
-		err = errCodexProcessExited
+		err = c.processExitedError(nil)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

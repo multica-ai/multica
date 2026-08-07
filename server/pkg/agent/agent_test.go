@@ -29,8 +29,20 @@ func TestNewReturnsCodexBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(codex) error: %v", err)
 	}
-	if _, ok := b.(*codexBackend); !ok {
+	codex, ok := b.(*codexBackend)
+	if !ok {
 		t.Fatalf("expected *codexBackend, got %T", b)
+	}
+	if policy := codex.appServerPolicy(); policy.provider != "codex" ||
+		!policy.manageCodexConfig || !policy.allowCodexLaunchOverrides ||
+		!policy.allowCodexTurnOverrides || !policy.allowCodexStartupRetry {
+		t.Fatalf("New(codex) lost Codex app-server behavior: %+v", policy)
+	}
+	var zero codexBackend
+	if policy := zero.appServerPolicy(); policy.provider != "codex" ||
+		!policy.manageCodexConfig || !policy.allowCodexLaunchOverrides ||
+		!policy.allowCodexTurnOverrides || !policy.allowCodexStartupRetry {
+		t.Fatalf("zero-value codexBackend lost historical defaults: %+v", policy)
 	}
 }
 

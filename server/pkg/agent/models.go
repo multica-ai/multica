@@ -129,6 +129,8 @@ const modelCacheTTL = 60 * time.Second
 // "" to use the provider's default name on PATH.
 func ListModels(ctx context.Context, providerType, executablePath string) (Catalog, error) {
 	switch providerType {
+	case "platform-agent-cli":
+		return Catalog{Models: []Model{}}, nil
 	case "claude":
 		models := claudeStaticModels()
 		annotateClaudeThinking(ctx, models, executablePath)
@@ -243,6 +245,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
+	case "platform-agent-cli":
+		return false
 	case "qwenpaw":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's

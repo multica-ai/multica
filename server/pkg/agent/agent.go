@@ -1,5 +1,5 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
+// coding agents (Claude Code, CodeBuddy, Codex, Platform Agent, Copilot, OpenCode, DevEco Code,
 // OpenClaw, Hermes, Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
 // Trae, Grok, Qwen Code, QwenPaw). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
@@ -245,7 +245,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw".
+// Supported types: "claude", "codebuddy", "codex", "platform-agent-cli", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -336,7 +336,9 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "codebuddy":
 		return &codebuddyBackend{cfg: cfg}, nil
 	case "codex":
-		return &codexBackend{cfg: cfg}, nil
+		return &codexBackend{cfg: cfg, policy: &codexAppServerPolicy}, nil
+	case "platform-agent-cli":
+		return newPlatformAgentBackend(cfg), nil
 	case "copilot":
 		return &copilotBackend{cfg: cfg}, nil
 	case "opencode":
@@ -370,7 +372,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, platform-agent-cli, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
 	}
 }
 
@@ -386,26 +388,27 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (non-interactive)",
-	"claude":      "claude (stream-json)",
-	"codebuddy":   "codebuddy (stream-json)",
-	"codex":       "codex app-server",
-	"copilot":     "copilot (json)",
-	"cursor":      "cursor-agent (stream-json)",
-	"deveco":      "deveco run (json)",
-	"hermes":      "hermes acp",
-	"kimi":        "kimi acp",
-	"reasonix":    "reasonix acp",
-	"kiro":        "kiro-cli acp",
-	"openclaw":    "openclaw agent (json)",
-	"opencode":    "opencode run (json)",
-	"pi":          "pi (json mode)",
-	"qoder":       "qodercli --acp",
-	"qoderclicn":  "qoderclicn --acp",
-	"traecli":     "traecli acp serve",
-	"grok":        "grok agent stdio",
-	"qwen":        "qwen -p (stream-json)",
-	"qwenpaw":     "qwenpaw acp",
+	"antigravity":        "agy -p (non-interactive)",
+	"claude":             "claude (stream-json)",
+	"codebuddy":          "codebuddy (stream-json)",
+	"codex":              "codex app-server",
+	"platform-agent-cli": "platform-agent-cli app-server",
+	"copilot":            "copilot (json)",
+	"cursor":             "cursor-agent (stream-json)",
+	"deveco":             "deveco run (json)",
+	"hermes":             "hermes acp",
+	"kimi":               "kimi acp",
+	"reasonix":           "reasonix acp",
+	"kiro":               "kiro-cli acp",
+	"openclaw":           "openclaw agent (json)",
+	"opencode":           "opencode run (json)",
+	"pi":                 "pi (json mode)",
+	"qoder":              "qodercli --acp",
+	"qoderclicn":         "qoderclicn --acp",
+	"traecli":            "traecli acp serve",
+	"grok":               "grok agent stdio",
+	"qwen":               "qwen -p (stream-json)",
+	"qwenpaw":            "qwenpaw acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

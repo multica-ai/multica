@@ -15,10 +15,9 @@ import (
 	"time"
 )
 
-// TestPlatformAgentCLIRealCodexCompatibility drives an external Platform Agent
-// CLI through Multica's production Codex backend and verifies the minimum
-// app-server lifecycle used by custom runtime profiles.
-func TestPlatformAgentCLIRealCodexCompatibility(t *testing.T) {
+// TestPlatformAgentCLIRealRuntime drives an external Platform Agent CLI through
+// Multica's built-in backend and verifies the minimum app-server lifecycle.
+func TestPlatformAgentCLIRealRuntime(t *testing.T) {
 	requireRealAgentSmoke(t)
 	if testing.Short() {
 		t.Skip("skipping external Platform Agent CLI smoke test in -short mode")
@@ -54,14 +53,13 @@ func TestPlatformAgentCLIRealCodexCompatibility(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	backend, err := New("codex", Config{
+	backend, err := New("platform-agent-cli", Config{
 		ExecutablePath: path,
 		CLIVersion:     version,
-		CodexVersion:   version,
 		Logger:         logger,
 	})
 	if err != nil {
-		t.Fatalf("new Codex backend: %v", err)
+		t.Fatalf("new Platform Agent backend: %v", err)
 	}
 
 	const prompt = "multica source integration smoke"
@@ -104,7 +102,7 @@ func TestPlatformAgentCLIRealCodexCompatibility(t *testing.T) {
 		t.Fatalf("output=%q, want %q", result.Output, wantOutput)
 	}
 	if result.SessionID == "" {
-		t.Fatal("expected a non-empty Codex thread session ID")
+		t.Fatal("expected a non-empty app-server thread session ID")
 	}
 
 	textMessages := 0
