@@ -34,6 +34,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -78,6 +79,44 @@ type addrPolicy func(netip.Addr) bool
 
 // publicAddrOnly is the production policy: everything that is not routable
 // public internet is refused.
+// mediaAllowedPrefixes are ranges an operator has declared safe for media
+// fetches despite looking reserved. It exists for one real deployment shape:
+// a machine behind a fake-IP proxy, where the resolver answers every public
+// hostname with an address out of 198.18.0.0/15 and the proxy forwards the
+// traffic onward. On such a machine WeCom's own COS host is indistinguishable
+// from a link-local metadata endpoint by address alone, so the guard refuses
+// every attachment and inbound media stops working entirely.
+//
+// Empty by default. Widening this is a decision with a cost: whatever range is
+// listed here can be reached by a URL somebody else controls, which is exactly
+// what the guard exists to prevent. It is opt-in per deployment, and worth
+// setting only where the operator knows the range belongs to their proxy.
+var mediaAllowedPrefixes []netip.Prefix
+
+// SetMediaAllowedPrefixes declares ranges the media guard may dial. Called at
+// boot from MULTICA_WECOM_MEDIA_ALLOW_CIDRS. An unparseable entry is reported
+// and skipped rather than silently widening or silently narrowing the guard.
+func SetMediaAllowedPrefixes(cidrs []string) []error {
+	var (
+		out  []netip.Prefix
+		errs []error
+	)
+	for _, raw := range cidrs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("wecom: media allow cidr %q: %w", raw, err))
+			continue
+		}
+		out = append(out, p)
+	}
+	mediaAllowedPrefixes = out
+	return errs
+}
+
 func publicAddrOnly(a netip.Addr) bool {
 	// An IPv4-mapped IPv6 address (::ffff:127.0.0.1) reports none of the IPv4
 	// predicates until it is unmapped, which is the whole trick.
@@ -92,6 +131,15 @@ func publicAddrOnly(a netip.Addr) bool {
 	}
 	for _, p := range reservedMediaPrefixes {
 		if p.Contains(a) {
+			// An operator may have declared this range theirs — a fake-IP
+			// proxy's pool is the case this exists for. Checked only for
+			// addresses the guard would otherwise refuse, so an empty
+			// allow-list leaves the guard exactly as strict as before.
+			for _, allowed := range mediaAllowedPrefixes {
+				if allowed.Contains(a) {
+					return true
+				}
+			}
 			return false
 		}
 	}

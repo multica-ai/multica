@@ -84,6 +84,7 @@ type engineSessionBinder interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
 	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
+	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
 
 // ---- installation routing ----
@@ -247,17 +248,35 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		MessageID:      p.Message.MessageID,
 		ClaimToken:     p.ClaimToken,
 		ForceFresh:     p.Message.ForceFresh,
+		// How long the chat task waits before it runs. Without this the run
+		// fires the moment the message lands and the agent is handed the
+		// "[Image]" placeholder while the download is still going.
+		MediaPendingSeconds: p.MediaPendingSeconds,
 	})
 }
 
-// BindMedia is a no-op for wecom. The wecom ResolverSet registers no
-// MediaResolver, so the Router never resolves media for a wecom message
-// (resolveMedia stays false) and this method is never called at runtime; it
-// exists only to satisfy engine.SessionBinder. If wecom gains inbound media
-// support, wire this to a BindMediaRefs on the session store, mirroring the
-// lark binder.
+// BindMedia attaches the objects the resolver stored to the message they came
+// with. Until the media resolver existed this was correctly a no-op — there
+// was nothing to bind — and returning nil reads to the Router as "bound
+// fine", so leaving it that way once media resolves means every attachment is
+// downloaded, decrypted, stored, and then silently discarded.
+//
+// IssueID is what makes an /issue turn's attachments belong to the issue
+// rather than to the chat message that created it; the other issue fields are
+// what let the description reference them. Feishu passes all of them
+// (lark/feishu_resolvers.go:223).
 func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
-	return nil
+	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
+	})
 }
 
 // ---- audit ----
