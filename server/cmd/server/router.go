@@ -947,7 +947,46 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 		}
 	} else {
-		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")	}
+		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+	}
+
+	// ShareCRM (纷享销客) uses one outbound SSE connection per BYO installation.
+	// The appSecret is encrypted at rest; the integration is inert unless
+	// MULTICA_SHARECRM_SECRET_KEY is configured.
+	if sharecrmKey, err := secretbox.LoadKey("MULTICA_SHARECRM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(sharecrmKey)
+		if err != nil {
+			slog.Error("sharecrm: secretbox.New failed; integration disabled", "error", err)
+		} else {
+			sharecrmClient := sharecrm.NewClient(nil)
+			bindingSvc := sharecrm.NewBindingTokenService(queries, pool)
+			h.ShareCRMBindingTokens = bindingSvc
+			replier := sharecrm.NewOutboundReplier(sharecrm.OutboundReplierConfig{
+				Binding: bindingSvc,
+				Decrypt: box.Open,
+				Client:  sharecrmClient,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+			ack := sharecrm.NewAckNotifier(sharecrmClient, box.Open, slog.Default())
+			channelRouter.Register(sharecrm.TypeShareCRM, sharecrm.NewShareCRMResolverSet(queries, pool, replier, ack))
+			sharecrm.NewOutbound(queries, box.Open, sharecrmClient, slog.Default()).Register(bus)
+			sharecrm.RegisterShareCRM(channelRegistry, sharecrm.ChannelDeps{
+				Decrypt: box.Open,
+				Client:  sharecrmClient,
+				Logger:  slog.Default(),
+			})
+			installSvc, installErr := sharecrm.NewInstallService(queries, pool, box, slog.Default())
+			if installErr != nil {
+				slog.Error("sharecrm: InstallService init failed; install disabled", "error", installErr)
+			} else {
+				h.ShareCRMInstall = installSvc
+			}
+			slog.Info("sharecrm integration enabled (BYO per-installation SSE mode)")
+		}
+	} else {
+		slog.Info("sharecrm integration disabled (MULTICA_SHARECRM_SECRET_KEY not set)")
+	}
 
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at
 	// install, one getUpdates long-polling loop per active installation
@@ -1046,46 +1085,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				}
 			}
 		}
-	}
-
-	// ShareCRM (纷享销客) uses one outbound SSE connection per BYO installation.
-	// The appSecret is encrypted at rest; the integration is inert unless
-	// MULTICA_SHARECRM_SECRET_KEY is configured.
-	if sharecrmKey, err := secretbox.LoadKey("MULTICA_SHARECRM_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(sharecrmKey)
-		if err != nil {
-			slog.Error("sharecrm: secretbox.New failed; integration disabled", "error", err)
-		} else {
-			sharecrmClient := sharecrm.NewClient(nil)
-			bindingSvc := sharecrm.NewBindingTokenService(queries, pool)
-			h.ShareCRMBindingTokens = bindingSvc
-			replier := sharecrm.NewOutboundReplier(sharecrm.OutboundReplierConfig{
-				Binding: bindingSvc,
-				Decrypt: box.Open,
-				Client:  sharecrmClient,
-				AppURL:  appURLFromEnv(),
-				Logger:  slog.Default(),
-			})
-			ack := sharecrm.NewAckNotifier(sharecrmClient, box.Open, slog.Default())
-			channelRouter.Register(sharecrm.TypeShareCRM, sharecrm.NewShareCRMResolverSet(queries, pool, replier, ack))
-			sharecrm.NewOutbound(queries, box.Open, sharecrmClient, slog.Default()).Register(bus)
-			sharecrm.RegisterShareCRM(channelRegistry, sharecrm.ChannelDeps{
-				Decrypt: box.Open,
-				Client:  sharecrmClient,
-				Logger:  slog.Default(),
-			})
-			installSvc, installErr := sharecrm.NewInstallService(queries, pool, box, slog.Default())
-			if installErr != nil {
-				slog.Error("sharecrm: InstallService init failed; install disabled", "error", installErr)
-			} else {
-				h.ShareCRMInstall = installSvc
-			}
-			slog.Info("sharecrm integration enabled (BYO per-installation SSE mode)")
-		}
 	} else {
-		slog.Info("sharecrm integration disabled (MULTICA_SHARECRM_SECRET_KEY not set)")
-	}
- else {
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
 	}
 
