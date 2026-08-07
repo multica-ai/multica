@@ -408,7 +408,7 @@ export function WecomAgentBindButton({
                 spellCheck={false}
                 disabled={submitting}
               />
-              <p className="text-muted-foreground text-xs">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.wecom.byo_bot_name_hint)}
               </p>
             </div>
