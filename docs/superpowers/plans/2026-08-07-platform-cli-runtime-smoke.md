@@ -167,7 +167,7 @@ Run:
 ```bash
 cd server
 MULTICA_RUN_REAL_AGENT_SMOKE=1 \
-MULTICA_PLATFORM_AGENT_CLI_PATH=/bin/false \
+MULTICA_PLATFORM_AGENT_CLI_PATH=/usr/bin/false \
 go test -tags=agentintegration ./pkg/agent \
   -run TestPlatformAgentCLIRealCodexCompatibility -count=1 -v
 ```
