@@ -38,6 +38,8 @@ type fakeOutboundQueries struct {
 	memberErr      error
 	workspace      db.Workspace
 	workspaceErr   error
+	attachments    []db.Attachment
+	attachmentsErr error
 	// tasks answers the retry-clone lookup: the round is bound under the turn
 	// that owns the input batch, and a clone reaches it through
 	// chat_input_task_id. A task with no row here reads as pgx.ErrNoRows —
@@ -85,6 +87,9 @@ func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.Fi
 }
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
+}
+func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	return f.attachments, f.attachmentsErr
 }
 func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.taskGets++
