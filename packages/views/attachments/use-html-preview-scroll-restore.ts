@@ -93,6 +93,10 @@ export function useHtmlPreviewScrollRestore(
     height: 0,
   });
   const targetTopRef = useRef<number>(targetTop);
+  // Token for which we have already issued a `restore` this document's
+  // lifetime. Reset implicitly when contentKey changes (the value no longer
+  // matches expectedTokenRef), so the next document gets exactly one restore.
+  const restoreIssuedForRef = useRef<string | null>(null);
 
   // Update "latest value" refs DURING RENDER (not in an effect) so that the
   // iframe's ref callback — which runs in commit BEFORE useLayoutEffect —
@@ -103,6 +107,10 @@ export function useHtmlPreviewScrollRestore(
   targetTopRef.current = targetTop;
   if (lastReportRef.current.token !== contentKey) {
     lastReportRef.current = { token: contentKey, y: 0, height: 0 };
+  }
+  // A content change must allow a fresh restore for the new document.
+  if (restoreIssuedForRef.current !== contentKey) {
+    restoreIssuedForRef.current = null;
   }
 
   const postToIframe = useCallback(
@@ -129,13 +137,21 @@ export function useHtmlPreviewScrollRestore(
 
   const sendRestore = useCallback(() => {
     if (!restoreActive) return;
+    const token = expectedTokenRef.current;
+    // At most one restore per document. The in-iframe bridge's restoring
+    // session (ResizeObserver) holds the target across later content growth,
+    // so re-sending restore is unnecessary — and re-sending it on every
+    // `ready` (which the bridge emits in reply to every `request-sync`) would
+    // recreate the restoring session in a loop.
+    if (restoreIssuedForRef.current === token) return;
     const target = targetTopRef.current;
     if (target <= 0) return;
+    restoreIssuedForRef.current = token;
     postToIframe({
       [BRIDGE_MARK]: BRIDGE_MARK,
       kind: "restore",
       y: target,
-      token: expectedTokenRef.current,
+      token,
     });
   }, [postToIframe, restoreActive]);
 
@@ -183,10 +199,12 @@ export function useHtmlPreviewScrollRestore(
       const height = typeof data.height === "number" ? data.height : 0;
       lastReportRef.current = { token: expectedTokenRef.current, y, height };
       if (data.kind === "ready") {
-        // New document has parsed — (re)issue sync request and restore.
-        // request-sync is a no-op if the document has already reported;
-        // restore is a no-op when target is 0.
-        sendRequestSync();
+        // The document has parsed and announced its position. This is the
+        // right moment to restore (it can accept scrollTo now). Do NOT reply
+        // with another `request-sync`: the bridge answers every request-sync
+        // with a ready, so ready → request-sync → ready would loop forever.
+        // request-sync is sent only from the ref/onLoad handshake, each of
+        // which gets exactly one ready in reply.
         sendRestore();
       }
     },

@@ -240,4 +240,65 @@ describe("useHtmlPreviewScrollRestore", () => {
     // Fragment-nav shim is still applied too.
     expect(srcDoc).toContain("scrollIntoView");
   });
+
+  it("handshake is bounded: ready never triggers request-sync and restore is sent at most once", () => {
+    // Regression for the P0 ready → request-sync → ready infinite loop.
+    const text = "<p>bounded handshake body content here</p>";
+    const contentKey = hashString(text);
+    const { adapter } = makeAdapter({ top: 420, height: 9000, contentKey });
+    const { result } = renderWith(text, adapter);
+
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const postSpy = vi
+      .spyOn(iframe.contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+
+    // The two legitimate handshake moments: ref attach and load.
+    (result.current.iframeRef as (el: HTMLIFrameElement | null) => void)(iframe);
+    result.current.onLoad();
+
+    const requestSyncAfterHandshake = postSpy.mock.calls.filter(
+      (c) => c[0]?.kind === "request-sync",
+    ).length;
+    const restoreAfterHandshake = postSpy.mock.calls.filter(
+      (c) => c[0]?.kind === "restore",
+    ).length;
+    // One request-sync from the ref callback, one from onLoad — never more.
+    expect(requestSyncAfterHandshake).toBe(2);
+    // Restore issued once despite both handshake points trying.
+    expect(restoreAfterHandshake).toBe(1);
+
+    postSpy.mockClear();
+
+    // Simulate the bridge replying with several ready messages (it announces
+    // on DOMContentLoaded + load AND answers each request-sync). NONE of these
+    // may cause the parent to send another request-sync (that was the loop).
+    for (let i = 0; i < 5; i++) {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: iframe.contentWindow,
+          data: {
+            __multica: "__multica",
+            kind: "ready",
+            y: 100 + i,
+            height: 9000,
+            token: contentKey,
+          },
+        }),
+      );
+    }
+
+    const requestSyncAfterReady = postSpy.mock.calls.filter(
+      (c) => c[0]?.kind === "request-sync",
+    ).length;
+    const restoreAfterReady = postSpy.mock.calls.filter(
+      (c) => c[0]?.kind === "restore",
+    ).length;
+    expect(requestSyncAfterReady).toBe(0);
+    expect(restoreAfterReady).toBe(0);
+
+    postSpy.mockRestore();
+    document.body.removeChild(iframe);
+  });
 });

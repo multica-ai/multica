@@ -161,4 +161,97 @@ test.describe("iframe scroll bridge (real Chromium, sandboxed srcdoc)", () => {
     await page.waitForTimeout(200);
     expect(await frame.evaluate(() => window.scrollY)).toBe(0);
   });
+
+  test("parent handshake is bounded (no ready→request-sync→ready loop) and restores once", async ({
+    page,
+  }) => {
+    // Faithful in-page port of the PARENT side of useHtmlPreviewScrollRestore:
+    //   - request-sync is sent only from the ref/onLoad handshake points;
+    //   - on `ready` the parent records position and issues restore AT MOST
+    //     ONCE per token — it never replies with another request-sync.
+    // Before the fix, ready → request-sync → ready looped forever.
+    const targetTop = 540;
+    await page.setContent(pageWithIframe("<p>loaded</p>"));
+    const counts = await page.evaluate(
+      ([token, target]) =>
+        new Promise<{
+          ready: number;
+          requestSync: number;
+          restore: number;
+          scroll: number;
+        }>((resolve) => {
+          const MARK = "__multica";
+          const iframe = document.querySelector<HTMLIFrameElement>("#f")!;
+          let restoreIssued = false;
+          let requestSync = 0;
+          let restore = 0;
+          let ready = 0;
+          let scroll = 0;
+
+          function post(msg: Record<string, unknown>) {
+            iframe.contentWindow!.postMessage({ [MARK]: MARK, token, ...msg }, "*");
+          }
+          function sendRequestSync() {
+            requestSync++;
+            post({ kind: "request-sync" });
+          }
+          function sendRestore() {
+            if (restoreIssued) return;
+            if (target <= 0) return;
+            restoreIssued = true;
+            restore++;
+            post({ kind: "restore", y: target });
+          }
+
+          window.addEventListener("message", (e) => {
+            if (e.source !== iframe.contentWindow) return;
+            const d = e.data as
+              | { __multica?: string; token?: string; kind?: string }
+              | undefined;
+            if (!d || d.__multica !== MARK || d.token !== token) return;
+            if (d.kind === "ready") {
+              ready++;
+              // THE FIX: record + restore, but do NOT send request-sync here.
+              sendRestore();
+            } else if (d.kind === "scroll") {
+              scroll++;
+            }
+          });
+
+          // Ref callback (element attached) and onLoad each fire exactly one
+          // request-sync — the only two legitimate request-sync moments.
+          sendRequestSync();
+          iframe.addEventListener("load", () => {
+            sendRequestSync();
+            sendRestore();
+          });
+
+          // Let any would-be loop run; then snapshot the counts twice.
+          window.setTimeout(() => {
+            const first = { ready, requestSync, restore, scroll };
+            window.setTimeout(() => {
+              resolve({
+                ready: ready - first.ready,
+                requestSync: requestSync - first.requestSync,
+                restore: restore - first.restore,
+                scroll: scroll - first.scroll,
+              });
+              // We resolve with the DELTA — it must be all zeros (no loop).
+            }, 400);
+          }, 600);
+        }),
+      [TOKEN, targetTop],
+    );
+
+    // No messages were added in the 400ms observation window → no loop.
+    expect(counts).toEqual({ ready: 0, requestSync: 0, restore: 0, scroll: 0 });
+
+    // Restore actually happened in the iframe (proves the handshake still
+    // completes, not just that it went quiet).
+    const handle = await page.$("#f");
+    const frame = await handle!.contentFrame();
+    await expect
+      .poll(async () => frame!.evaluate(() => window.scrollY), { timeout: 5000 })
+      .toBe(targetTop);
+  });
 });
