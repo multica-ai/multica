@@ -110,8 +110,8 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
 
   // ShareCRM account-bind route
   // `/sharecrm/bind` is a global pre-workspace route where a member links their
-  // ShareCRM (企信) identity. Reserve the prefix so a workspace slug cannot shadow
-  // it.
+  // ShareCRM (纷享销客) identity. Reserve the prefix so a workspace slug cannot
+  // shadow it.
   "sharecrm",
 
   // Backend ops / observability
