@@ -107,11 +107,15 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 	args := buildCodebuddyArgs(opts, b.cfg.Logger)
 
-	// If the caller provided an MCP config, write it to a temp file and pass
-	// --mcp-config <path> so the agent uses a controlled set of MCP servers.
-	// Gated on the same three-state check buildCodebuddyArgs uses for
-	// --strict-mcp-config, so the two never disagree: a JSON `null` means
-	// "inherit the runtime configuration", not "managed empty set".
+	// A managed agent config is written to a temp file and added with
+	// --mcp-config, which ADDS to whatever CodeBuddy loads from its own user,
+	// project and local scopes — buildCodebuddyArgs never passes
+	// --strict-mcp-config, so those stay on. A managed entry wins a same-name
+	// collision natively.
+	//
+	// Three-state, as everywhere else: a JSON `null` means "inherit the runtime
+	// configuration" and skips the flag entirely, while an explicitly empty
+	// object is a managed set that happens to contain no servers.
 	var mcpConfigPath string
 	var mcpFileCleanup func()
 	if hasManagedMcpConfig(opts.McpConfig) {

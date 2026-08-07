@@ -314,9 +314,13 @@ func TestStripJSONC(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			stripped, err := stripJSONC([]byte(tc.in))
+			if err != nil {
+				t.Fatalf("stripJSONC %q: %v", tc.in, err)
+			}
 			var got map[string]any
-			if err := json.Unmarshal(stripJSONC([]byte(tc.in)), &got); err != nil {
-				t.Fatalf("unmarshal %q -> %q: %v", tc.in, stripJSONC([]byte(tc.in)), err)
+			if err := json.Unmarshal(stripped, &got); err != nil {
+				t.Fatalf("unmarshal %q -> %q: %v", tc.in, stripped, err)
 			}
 			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tc.want) {
 				t.Fatalf("got %#v, want %#v", got, tc.want)
@@ -328,8 +332,12 @@ func TestStripJSONC(t *testing.T) {
 // A trailing comma that is NOT trailing must survive: blanking it would merge
 // two array elements into one.
 func TestStripJSONCKeepsSeparatorCommas(t *testing.T) {
+	stripped, err := stripJSONC([]byte(`["a","b",]`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var got []any
-	if err := json.Unmarshal(stripJSONC([]byte(`["a","b",]`)), &got); err != nil {
+	if err := json.Unmarshal(stripped, &got); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
@@ -341,8 +349,12 @@ func TestStripJSONCKeepsSeparatorCommas(t *testing.T) {
 // a config the CLI would reject must not be silently accepted here.
 func TestStripJSONCLeavesMalformedInputInvalid(t *testing.T) {
 	for _, in := range []string{`[1,,,]`, `{"a":1,,}`, `[1,,2]`} {
+		stripped, err := stripJSONC([]byte(in))
+		if err != nil {
+			continue
+		}
 		var got any
-		if err := json.Unmarshal(stripJSONC([]byte(in)), &got); err == nil {
+		if err := json.Unmarshal(stripped, &got); err == nil {
 			t.Fatalf("%q must stay invalid, got %#v", in, got)
 		}
 	}
@@ -355,12 +367,56 @@ func TestStripJSONCPreservesByteLength(t *testing.T) {
 		"{\n  // c\n  \"a\": 1,\n}\n",
 		`{/* block */"a":1,}`,
 		`{"a":"// not a comment"}`,
-		`{/* unterminated "a":1`,
+		`{/**/"a":1}`,
 		"{}",
 	} {
-		if got, want := len(stripJSONC([]byte(in))), len(in); got != want {
-			t.Fatalf("%q: length %d, want %d (%q)", in, got, want, stripJSONC([]byte(in)))
+		stripped, err := stripJSONC([]byte(in))
+		if err != nil {
+			t.Fatalf("stripJSONC %q: %v", in, err)
 		}
+		if got, want := len(stripped), len(in); got != want {
+			t.Fatalf("%q: length %d, want %d (%q)", in, got, want, stripped)
+		}
+	}
+}
+
+// A file CodeBuddy itself rejects must not produce an inventory listing. The
+// CLI answers "No MCP servers configured" for both of these; blanking an
+// unterminated comment to EOF would instead have turned the first into valid
+// JSON, and letting the opener's `*` double as the closer's would have made
+// `/*/` a complete comment.
+func TestStripJSONCRejectsUnterminatedBlockComment(t *testing.T) {
+	cases := map[string]string{
+		"unterminated":              `{"mcpServers":{}} /* oops`,
+		"opener not closer":         `/*/ {"mcpServers":{}}`,
+		"unterminated after opener": `/*`,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			if stripped, err := stripJSONC([]byte(in)); err == nil {
+				t.Fatalf("%q must fail to parse, got %q", in, stripped)
+			}
+		})
+	}
+}
+
+// The same input must reach the caller as a parse error, so the inventory
+// surfaces the problem rather than silently reporting zero servers.
+func TestListRuntimeLocalMcpServersCodebuddyRejectsUnterminatedComment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
+	configDir := filepath.Join(home, ".codebuddy")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := `{"mcpServers":{"buddy":{"command":"buddy-cmd"}}} /* oops`
+	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := listRuntimeLocalMcpServers("codebuddy"); err == nil {
+		t.Fatal("expected a parse error for a config CodeBuddy itself rejects")
 	}
 }
 

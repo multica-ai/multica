@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,7 +123,11 @@ func unmarshalRuntimeMcpConfig(raw []byte, format string) (map[string]any, error
 			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
 		}
 	case "jsonc":
-		if err := json.Unmarshal(stripJSONC(raw), &cfg); err != nil {
+		stripped, err := stripJSONC(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+		if err := json.Unmarshal(stripped, &cfg); err != nil {
 			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
 		}
 	default:
@@ -147,7 +152,13 @@ func unmarshalRuntimeMcpConfig(raw []byte, format string) (map[string]any, error
 // pragmatic subset of JSONC covering what CodeBuddy's MCP files use in
 // practice; anything it cannot repair is reported as a parse error rather than
 // guessed at.
-func stripJSONC(raw []byte) []byte {
+//
+// An unterminated `/*` is an error rather than a blank-to-EOF, so the Agent >
+// MCP tab cannot list servers out of a file CodeBuddy itself rejects. Verified:
+// the CLI reports "No MCP servers configured" for both an unterminated comment
+// and the `/*/` near-miss, where the opener's `*` must not double as the
+// closer's.
+func stripJSONC(raw []byte) ([]byte, error) {
 	out := make([]byte, 0, len(raw))
 	// Offset into out of the one comma still eligible for removal, or -1.
 	// Reset by any value token, so only a genuinely trailing comma is dropped.
@@ -186,13 +197,17 @@ func stripJSONC(raw []byte) []byte {
 				out = append(out, raw[i])
 			}
 		case c == '/' && i+1 < len(raw) && raw[i+1] == '*':
-			// Blank the whole comment, newlines included, so line numbers and
-			// the total byte count both survive. An unterminated comment
-			// blanks to EOF and the caller reports the resulting parse error.
+			// Consume the opener first so `/*/` cannot reuse its own `*` as the
+			// closer's, then blank the body, newlines included, so line numbers
+			// and the total byte count both survive.
+			out = append(out, ' ', ' ')
+			i += 2
+			closed := false
 			for i < len(raw) {
 				if raw[i] == '*' && i+1 < len(raw) && raw[i+1] == '/' {
 					out = append(out, ' ', ' ')
 					i++ // consume '*'; the loop's i++ consumes '/'
+					closed = true
 					break
 				}
 				if raw[i] == '\n' {
@@ -201,6 +216,9 @@ func stripJSONC(raw []byte) []byte {
 					out = append(out, ' ')
 				}
 				i++
+			}
+			if !closed {
+				return nil, errors.New("unterminated block comment")
 			}
 		case c == ',':
 			lastComma = len(out)
@@ -218,7 +236,7 @@ func stripJSONC(raw []byte) []byte {
 			out = append(out, c)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // loadRuntimeMcpServerConfigs returns full, secret-bearing runtime MCP entries
