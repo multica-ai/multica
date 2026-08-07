@@ -763,29 +763,40 @@ func TestIsolatedCheckoutCloneWithoutHardlinksIsIndependent(t *testing.T) {
 		t.Fatalf("clone must not borrow cache objects via alternates, err=%v", err)
 	}
 
-	cacheObjects := objectFiles(t, filepath.Join(barePath, "objects"))
-	if len(cacheObjects) == 0 {
-		t.Fatal("cache has no object files; test would pass vacuously")
+	assertObjectsAreNotHardLinked(t, barePath, checkoutPath)
+}
+
+// assertObjectsAreNotHardLinked fails if an object file present in both the
+// cache and the checkout is the same underlying file. os.SameFile compares
+// dev+inode on Unix and the volume serial + file index on Windows, either of
+// which identifies a hard link. Both "nothing in the cache" and "nothing in
+// common" are failures, so the assertion cannot pass vacuously.
+func assertObjectsAreNotHardLinked(t *testing.T, barePath, checkoutPath string) {
+	t.Helper()
+	cacheObjects := filepath.Join(barePath, "objects")
+	checkoutObjects := filepath.Join(checkoutPath, ".git", "objects")
+
+	names := objectFiles(t, cacheObjects)
+	if len(names) == 0 {
+		t.Fatal("cache has no object files; assertion would pass vacuously")
 	}
-	shared := 0
-	for _, rel := range cacheObjects {
-		cloned, err := os.Stat(filepath.Join(checkoutPath, ".git", "objects", rel))
+	compared := 0
+	for _, rel := range names {
+		cloned, err := os.Stat(filepath.Join(checkoutObjects, rel))
 		if err != nil {
-			continue // packed differently in the clone; nothing to compare
+			continue // repacked differently in the checkout; nothing to compare
 		}
-		cached, err := os.Stat(filepath.Join(barePath, "objects", rel))
+		cached, err := os.Stat(filepath.Join(cacheObjects, rel))
 		if err != nil {
 			t.Fatalf("stat cache object %s: %v", rel, err)
 		}
-		// os.SameFile identifies hard links on both Unix (dev+inode) and
-		// Windows (volume serial + file index).
 		if os.SameFile(cached, cloned) {
 			t.Errorf("object %s is hard-linked to the shared cache", rel)
 		}
-		shared++
+		compared++
 	}
-	if shared == 0 {
-		t.Fatal("no cache object was found in the clone; test would pass vacuously")
+	if compared == 0 {
+		t.Fatal("no cache object was found in the checkout; assertion would pass vacuously")
 	}
 }
 
