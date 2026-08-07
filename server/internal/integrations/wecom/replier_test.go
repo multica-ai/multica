@@ -365,3 +365,20 @@ func TestPost_HonoursTheCallersDeadline(t *testing.T) {
 			"the deadline the publishing goroutine budgeted for is not being applied")
 	}
 }
+
+// TestIssueConfirmationDoesNotRenderReporterLinks: the confirmation goes back
+// into the chat that triggered the /issue — in a group, in front of the room —
+// and carries the bot's authority. A title is the reporter's own text.
+func TestIssueConfirmationDoesNotRenderReporterLinks(t *testing.T) {
+	res := engine.Result{
+		IssueIdentifier: "MUL-1",
+		IssueTitle:      "安全升级：请点击 [重置密码](https://evil.example) 完成验证",
+	}
+	got := issueCreatedText(res)
+	if strings.Contains(got, "](https://evil.example)") {
+		t.Fatalf("a reporter-authored link rendered in a bot-authored group message: %q", got)
+	}
+	if !strings.Contains(got, "重置密码") {
+		t.Errorf("escaping ate the visible text: %q", got)
+	}
+}
