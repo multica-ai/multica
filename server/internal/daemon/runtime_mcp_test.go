@@ -181,3 +181,109 @@ func TestMergeRuntimeAndAgentMcpConfigNullKeepsNativeInheritance(t *testing.T) {
 		}
 	}
 }
+
+// CodeBuddy is a Claude Code fork but keeps its own config file and plugin
+// root. Reading ~/.claude.json for it leaked Claude's servers into CodeBuddy
+// launches while dropping CodeBuddy's own (MUL-5846).
+func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"claude-only":{"command":"claude-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codebuddy.json"), []byte(`{"mcpServers":{"buddy":{"command":"buddy-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A Claude plugin server must not be attributed to CodeBuddy either:
+	// CodeBuddy plugins live under ~/.workbuddy, not ~/.claude/plugins.
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	if err := os.WriteFile(filepath.Join(installPath, "mcp.json"), []byte(`{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("codebuddy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(servers) != 1 || servers[0].Name != "buddy" {
+		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigCodebuddyReadsItsOwnConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"claude-only":{"command":"claude-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codebuddy.json"), []byte(`{"mcpServers":{"buddy":{"command":"buddy-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		McpServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(merged, &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.McpServers) != 2 {
+		t.Fatalf("merged servers = %#v", document.McpServers)
+	}
+	if _, ok := document.McpServers["claude-only"]; ok {
+		t.Fatalf("Claude's servers must not leak into a CodeBuddy launch: %#v", document.McpServers)
+	}
+	if got := document.McpServers["buddy"]["command"]; got != "buddy-cmd" {
+		t.Fatalf("buddy command = %#v", got)
+	}
+}
+
+func TestListRuntimeLocalMcpServersKimi(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KIMI_CODE_HOME", "")
+	kimiHome := filepath.Join(home, ".kimi-code")
+	if err := os.MkdirAll(kimiHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kimiHome, "mcp.json"), []byte(`{"mcpServers":{"paper":{"url":"https://paper.example/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("kimi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(servers) != 1 || servers[0].Name != "paper" {
+		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+}
+
+// kimi merges <KIMI_CODE_HOME>/mcp.json with the ephemeral `mcpServers` array
+// the ACP backend sends in session/new, and a duplicate name spawns the server
+// twice. So kimi is inventory-only: the task-local merge must leave the agent's
+// config untouched.
+func TestMergeRuntimeAndAgentMcpConfigKimiIsPassthrough(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KIMI_CODE_HOME", "")
+	kimiHome := filepath.Join(home, ".kimi-code")
+	if err := os.MkdirAll(kimiHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kimiHome, "mcp.json"), []byte(`{"mcpServers":{"paper":{"url":"https://paper.example/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	agentConfig := json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`)
+	merged, err := mergeRuntimeAndAgentMcpConfig("kimi", agentConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(merged) != string(agentConfig) {
+		t.Fatalf("kimi merge must be a passthrough, got %s", merged)
+	}
+}

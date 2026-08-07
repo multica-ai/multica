@@ -89,8 +89,14 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 
 	var path, key, format string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
+	case "codebuddy":
+		// CodeBuddy is a Claude Code fork but keeps its own config file and
+		// plugin root (`~/.codebuddy.json`, `~/.workbuddy/`). Reading Claude's
+		// file here leaked Claude's servers into CodeBuddy launches while
+		// dropping the ones CodeBuddy itself was configured with.
+		path, key, format = filepath.Join(home, ".codebuddy.json"), "mcpServers", "json"
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -139,7 +145,7 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 	}
 
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		// User configuration has the same precedence Claude uses: plugin
 		// servers only fill names not already defined by the user.
 		for name, entry := range loadClaudePluginMcpServerConfigs(home) {
@@ -213,8 +219,20 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	var path, key, source string
 	var format string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
+	case "codebuddy":
+		path, key, source, format = filepath.Join(home, ".codebuddy.json"), "mcpServers", "User config", "json"
+	case "kimi":
+		// Inventory only — kimi is deliberately absent from
+		// loadRuntimeMcpServerConfigs. `kimi acp` merges this file with the
+		// ephemeral `mcpServers` we send in session/new, so merging it in
+		// again would spawn every user server twice.
+		kimiHome := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+		if kimiHome == "" {
+			kimiHome = filepath.Join(home, ".kimi-code")
+		}
+		path, key, source, format = filepath.Join(kimiHome, "mcp.json"), "mcpServers", "User config", "json"
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -261,7 +279,7 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 	}
 
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		out = append(out, listClaudePluginMcpServers(home)...)
 	}
 

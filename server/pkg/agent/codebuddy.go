@@ -41,7 +41,6 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		// CodeBuddy's interactive tools have no UI to render in under the
 		// daemon's headless stream-json transport. AskUserQuestion and
@@ -59,6 +58,15 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// (PermissionUtils.matchPermissionRules), so a comma-joined string
 		// would match nothing despite what the CLI's own help text claims.
 		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
+	}
+	if hasManagedMcpConfig(opts.McpConfig) {
+		// Same contract as claude.go: a saved agent-level config is
+		// authoritative (including an explicitly empty object) and strict mode
+		// pins CodeBuddy to it. With no managed config the flag MUST stay off —
+		// `--strict-mcp-config` means "only use servers from --mcp-config", so
+		// passing it without a config launched every CodeBuddy agent with zero
+		// MCP servers and silently ignored the user's own ~/.codebuddy.json.
+		args = append(args, "--strict-mcp-config")
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -96,9 +104,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers.
+	// Gated on the same three-state check buildCodebuddyArgs uses for
+	// --strict-mcp-config, so the two never disagree: a JSON `null` means
+	// "inherit the runtime configuration", not "managed empty set".
 	var mcpConfigPath string
 	var mcpFileCleanup func()
-	if len(opts.McpConfig) > 0 {
+	if hasManagedMcpConfig(opts.McpConfig) {
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()

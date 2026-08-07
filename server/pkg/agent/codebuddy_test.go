@@ -26,7 +26,6 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 		"--model", "claude-sonnet-4-20250514",
@@ -40,6 +39,43 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 	for i, want := range expected {
 		if args[i] != want {
 			t.Fatalf("args[%d] = %q, want %q\nfull args: %v", i, args[i], want, args)
+		}
+	}
+}
+
+// `--strict-mcp-config` means "only use servers from --mcp-config". Passing it
+// unconditionally launched every CodeBuddy agent without a Multica-managed
+// config with zero MCP servers, silently ignoring the user's own
+// ~/.codebuddy.json (MUL-5846).
+func TestBuildCodebuddyArgsOmitsStrictMCPWithoutManagedConfig(t *testing.T) {
+	t.Parallel()
+
+	for _, mcpConfig := range []json.RawMessage{nil, json.RawMessage("null"), json.RawMessage("  \n")} {
+		args := buildCodebuddyArgs(ExecOptions{McpConfig: mcpConfig}, slog.Default())
+		for _, arg := range args {
+			if arg == "--strict-mcp-config" {
+				t.Fatalf("mcp_config %q must inherit runtime MCP servers, got %v", string(mcpConfig), args)
+			}
+		}
+	}
+}
+
+func TestBuildCodebuddyArgsUsesStrictMCPForManagedConfig(t *testing.T) {
+	t.Parallel()
+
+	// An explicitly empty object is still a managed set: the agent asked for
+	// "no MCP servers", which strict mode is what enforces.
+	for _, mcpConfig := range []string{`{}`, `{"mcpServers":{"paper":{"command":"paper"}}}`} {
+		args := buildCodebuddyArgs(ExecOptions{McpConfig: json.RawMessage(mcpConfig)}, slog.Default())
+		found := false
+		for _, arg := range args {
+			if arg == "--strict-mcp-config" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("managed MCP config %q must enable strict mode, got %v", mcpConfig, args)
 		}
 	}
 }
