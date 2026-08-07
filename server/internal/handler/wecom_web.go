@@ -106,13 +106,19 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 }
 
 // RegisterWecomBYORequest is the body an admin submits from the Web UI's
-// BYO dialog. Two fields: the bot's stable identifier (BotID) and its
-// long-connection secret. The secret is written straight through the
-// secretbox so plaintext never lives on this file's stack past the
-// wecom.InstallationService.Upsert call.
+// BYO dialog. The bot's stable identifier (BotID) and its long-connection
+// secret are copied from the WeCom admin console; the secret is written
+// straight through the secretbox so plaintext never lives on this file's
+// stack past the wecom.InstallationService.Upsert call.
 type RegisterWecomBYORequest struct {
 	BotID  string `json:"bot_id"`
 	Secret string `json:"secret"`
+
+	// BotName is the bot's name as it appears in a chat. Optional, and used
+	// for one thing: recognising the bot's own @-mention in a group, which
+	// WeCom delivers as literal text. Omitting it on a re-install of the same
+	// bot keeps whatever name the row already carries.
+	BotName string `json:"bot_name,omitempty"`
 }
 
 // RegisterWecomBYO (POST /api/workspaces/{id}/wecom/install/byo?agent_id=…)
@@ -168,6 +174,7 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 		InstallerUserID: initiatorUUID,
 		BotID:           strings.TrimSpace(body.BotID),
 		Secret:          strings.TrimSpace(body.Secret),
+		BotDisplayName:  strings.TrimSpace(body.BotName),
 	})
 	if err != nil {
 		// One bot is one live long connection, so the (wecom, bot_id) slot has

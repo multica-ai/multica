@@ -22,7 +22,7 @@ func TestChannelMessageFromCallback_GroupKeepsSenderDistinctFromChat(t *testing.
 	mc.From.UserID = "SENDER_USERID"
 	mc.Text.Content = "hello"
 
-	msg := channelMessageFromCallback("bot-1", mc, "req-1")
+	msg := channelMessageFromCallback("bot-1", "", mc, "req-1")
 
 	if msg.Source.ChatType != channel.ChatTypeGroup {
 		t.Errorf("chat type = %v, want group", msg.Source.ChatType)
@@ -42,7 +42,7 @@ func TestChannelMessageFromCallback_P2PFallsBackChatIDToSender(t *testing.T) {
 	mc := aibotMsgCallback{MsgID: "m2", ChatID: "", ChatType: "single", MsgType: "text"}
 	mc.From.UserID = "USER_A"
 
-	msg := channelMessageFromCallback("bot-1", mc, "req-2")
+	msg := channelMessageFromCallback("bot-1", "", mc, "req-2")
 
 	if msg.Source.ChatType != channel.ChatTypeP2P {
 		t.Errorf("chat type = %v, want p2p", msg.Source.ChatType)

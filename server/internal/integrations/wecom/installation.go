@@ -36,6 +36,12 @@ type InstallationParams struct {
 	// Secret is the plaintext long-connection secret shown once at bot
 	// creation on the admin console. Sealed at the service boundary.
 	Secret string
+
+	// BotDisplayName is the bot's name as it appears in a chat. Optional;
+	// see Installation.BotDisplayName for why it exists and what an empty
+	// value falls back to. Empty on a re-install of the SAME bot keeps
+	// whatever is already on the row.
+	BotDisplayName string
 }
 
 // InstallationService creates, refreshes and revokes wecom smart-bot
@@ -181,13 +187,6 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	if err != nil {
 		return Installation{}, fmt.Errorf("wecom: encrypt secret: %w", err)
 	}
-	cfg, err := encodeInstallConfig(Installation{
-		BotID:           p.BotID,
-		SecretEncrypted: sealed,
-	})
-	if err != nil {
-		return Installation{}, err
-	}
 
 	// Reclaim-then-upsert. UpsertChannelInstallation conflicts on
 	// (workspace_id, agent_id, channel_type), but the (channel_type, app_id)
@@ -216,6 +215,31 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		return Installation{}, fmt.Errorf("wecom: reclaim dead installation: %w", err)
 	}
 
+	// The row this upsert is about to overwrite, read on the tx handle so it is
+	// serialized with the write. Zero when this is a first install.
+	carried, err := currentInstallation(ctx, qtx.Queries, p.WorkspaceID, p.AgentID)
+	if err != nil {
+		return Installation{}, err
+	}
+	// The chat name is optional in the dialog, so an admin rotating a leaked
+	// secret leaves it blank — and blanking it would put group slash commands
+	// back to the whitespace guess that this field exists to replace. Keep what
+	// is on the row. A bot SWAP is different: the old name belongs to the old
+	// bot, and carrying it would make the new bot answer to a mention that is
+	// not its own.
+	displayName := p.BotDisplayName
+	if displayName == "" && carried.BotID == p.BotID {
+		displayName = carried.BotDisplayName
+	}
+	cfg, err := encodeInstallConfig(Installation{
+		BotID:           p.BotID,
+		SecretEncrypted: sealed,
+		BotDisplayName:  displayName,
+	})
+	if err != nil {
+		return Installation{}, err
+	}
+
 	row, err := qtx.Queries.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
 		WorkspaceID:     p.WorkspaceID,
 		AgentID:         p.AgentID,
@@ -236,6 +260,29 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		return Installation{}, fmt.Errorf("wecom: commit install tx: %w", err)
 	}
 	return installationFromRow(row)
+}
+
+// currentInstallation reads the (workspace, agent, wecom) row an upsert is
+// about to replace, or the zero Installation when there is none.
+//
+// There is no query keyed on that triple — the conflict key of the upsert is
+// not something any read path needed until now — so this filters the
+// workspace's wecom rows, of which there are a handful. Running it on the
+// caller's queries handle is what makes it serializable with the write.
+func currentInstallation(ctx context.Context, q *db.Queries, workspaceID, agentID pgtype.UUID) (Installation, error) {
+	rows, err := q.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
+		WorkspaceID: workspaceID,
+		ChannelType: channelTypeWecom,
+	})
+	if err != nil {
+		return Installation{}, fmt.Errorf("wecom: read current installation: %w", err)
+	}
+	for _, row := range rows {
+		if row.AgentID == agentID {
+			return installationFromRow(row)
+		}
+	}
+	return Installation{}, nil
 }
 
 // Sentinels for the one conflict Upsert cannot resolve: the bot is already

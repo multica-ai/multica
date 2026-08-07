@@ -133,6 +133,39 @@ describe("WecomAgentBindButton", () => {
     );
   });
 
+  // The bot's chat name reaches the server, and only when it was typed.
+  //
+  // WeCom delivers a group @-mention as literal text with no structured
+  // mention list, so a name containing a space ("Multica Bot") swallows the
+  // slash command typed after it. The name is the only way to tell where the
+  // mention ends — and it cannot be discovered, because the smart bot exposes
+  // no REST surface to ask. Left blank, the request omits it entirely so a
+  // re-install keeps whatever name the row already carries.
+  it("sends the bot's chat name when one is given, and omits it when not", async () => {
+    mockRegisterBYO.mockResolvedValue({ id: "i-1" });
+    renderUI(<WecomAgentBindButton agentId="agent-1" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aib94");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cret");
+    await userEvent.type(screen.getByTestId("wecom-byo-bot-name"), "  Multica Bot  ");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+
+    await waitFor(() => expect(mockRegisterBYO).toHaveBeenCalled());
+    expect(mockRegisterBYO.mock.calls[0]?.[2].bot_name).toBe("Multica Bot");
+
+    cleanup();
+    mockRegisterBYO.mockClear();
+    mockRegisterBYO.mockResolvedValue({ id: "i-2" });
+    renderUI(<WecomAgentBindButton agentId="agent-2" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.type(await screen.findByTestId("wecom-byo-bot-id"), "aib95");
+    await userEvent.type(screen.getByTestId("wecom-byo-secret"), "s3cret");
+    await userEvent.click(screen.getByTestId("wecom-byo-submit"));
+
+    await waitFor(() => expect(mockRegisterBYO).toHaveBeenCalled());
+    expect(mockRegisterBYO.mock.calls[0]?.[2].bot_name).toBeUndefined();
+  });
+
   it("shows the connected badge (not the CTA) when the agent has an active install", () => {
     installationsRef.current = {
       installations: [{ id: "i1", agent_id: "agent-1", bot_id: "aibot_x", status: "active" }],

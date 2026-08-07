@@ -68,6 +68,10 @@ type wecomChannel struct {
 	installationID pgtype.UUID
 	botID          string
 	secret         string
+	// botDisplayName is what this bot is called in a chat, from the
+	// installation config. Empty on every installation that has not filled it
+	// in; see stripLeadingMentions for what an empty name falls back to.
+	botDisplayName string
 	handler        channel.InboundHandler
 	dialer         Dialer
 	wsURL          string
@@ -368,7 +372,7 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			log.Warn("wecom: bad aibot_msg_callback body", "error", err)
 			return nil
 		}
-		msg := channelMessageFromCallback(c.botID, mc, env.Headers.ReqID)
+		msg := channelMessageFromCallback(c.botID, c.botDisplayName, mc, env.Headers.ReqID)
 		if mc.MsgType != "text" {
 			// Iteration 1 routes only text. Rather than drop other types
 			// (voice / image / file) silently — which reads as a broken bot —
@@ -552,6 +556,7 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 			installationID: cfg.ID,
 			botID:          creds.BotID,
 			secret:         creds.Secret,
+			botDisplayName: ic.BotDisplayName,
 			handler:        cfg.Handler,
 			dialer:         deps.Dialer,
 			wsURL:          deps.WSURL,

@@ -73,7 +73,7 @@ func TestSessionBinder_AppendUsesTextAsCommand(t *testing.T) {
 		t.Fatalf("AppendMessage: %v", err)
 	}
 	if fb.appendIn.Body != "/issue do a thing" || fb.appendIn.CommandText != "/issue do a thing" {
-		t.Errorf("append body/command = %q/%q, want both to equal the text (wecom has no enrichment)", fb.appendIn.Body, fb.appendIn.CommandText)
+		t.Errorf("append body/command = %q/%q, want both to equal the text (no adapter command source to prefer)", fb.appendIn.Body, fb.appendIn.CommandText)
 	}
 }
 
