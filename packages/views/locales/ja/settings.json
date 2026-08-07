@@ -726,7 +726,7 @@
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "各 Multica エージェントを専用の WeCom スマートボットに接続します。WebSocket ロングコネクションで受信するため、公開コールバック URL は不要です。",
+    "page_description": "Multica の各エージェントを専用の WeCom（企业微信）スマートボットに接続します。メンバーはボットに DM を送り、グループで @ メンションし、/issue と入力して Multica の issue を作成できます。WebSocket ロングコネクションで応答するため、公開コールバック URL は不要です。",
     "not_enabled_title": "WeCom 連携が有効化されていません",
     "not_enabled_description_prefix": "サーバー側で",
     "not_enabled_description_suffix": "を設定すると WeCom スマートボットのインストールが有効になります。",

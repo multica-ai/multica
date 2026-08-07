@@ -831,7 +831,7 @@
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "각 Multica 에이전트를 전용 WeCom 스마트봇에 연결합니다. WebSocket 롱 커넥션으로 메시지를 받으므로 공개 콜백 URL이 필요 없어요.",
+    "page_description": "각 Multica 에이전트를 전용 WeCom(企业微信) 스마트 봇에 연결합니다. 멤버는 봇에게 DM을 보내고, 그룹에서 @ 멘션하고, /issue를 입력해 Multica issue를 만들 수 있어요. WebSocket 롱 커넥션으로 응답하므로 공개 콜백 URL이 필요 없어요.",
     "not_enabled_title": "WeCom 통합이 활성화되지 않았어요",
     "not_enabled_description_prefix": "서버에서",
     "not_enabled_description_suffix": "를 설정하면 WeCom 스마트봇 설치가 활성화돼요.",

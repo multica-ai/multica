@@ -727,7 +727,7 @@
   },
   "wecom": {
     "section_title": "WeCom",
-    "page_description": "Connect each Multica Agent to its own WeCom smart bot. Members message the bot in WeCom and the Agent replies through a long WebSocket connection — no public callback URL is required.",
+    "page_description": "Connect each Multica Agent to its own WeCom (企业微信) smart bot. Members can DM the bot, @ it in groups, and type /issue to spin up a new Multica issue. The Agent replies over a long WebSocket connection, so no public callback URL is required.",
     "not_enabled_title": "WeCom integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable WeCom smart-bot installations.",
