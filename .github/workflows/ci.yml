@@ -398,9 +398,15 @@ jobs:
         # objects are private copies rather than NTFS hard links sharing one
         # file and one security descriptor with the daemon-owned cache. The
         # cross-volume test covers what a hard link cannot express at all.
+        # Scoped to the two windows-tagged tests by exact name. A prefix match
+        # also caught the package's cross-platform isolated-checkout test,
+        # which cannot run here: repocache derives a cache directory name from
+        # the full source repo path, so a t.TempDir() path that already embeds
+        # a long test name doubles and blows past MAX_PATH. That test belongs
+        # to the ubuntu backend job, which runs the whole package.
         # -v so a skip (single-volume runner) is visible instead of passing
         # silently as "ok".
-        run: go test ./internal/daemon/repocache -v -run '^TestIsolatedCheckout' -count=1 -timeout=5m
+        run: go test ./internal/daemon/repocache -v -run '^(TestIsolatedCheckoutIsCommittableOnWindows|TestIsolatedCheckoutAcrossVolumesOnWindows)$' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server
