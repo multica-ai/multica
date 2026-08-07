@@ -333,6 +333,7 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  SkillSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -2240,6 +2241,22 @@ export class ApiClient {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Re-imports a URL-sourced skill in place from its stored config.origin.
+  // No body — the server reads the source URL from the skill's provenance.
+  //
+  // A malformed body returns null instead of throwing. A 2xx here means the
+  // server already committed the overwrite, so a parse failure is contract
+  // drift, not a failed update. Callers ignore the return value and refetch
+  // through query invalidation.
+  async reimportSkill(id: string): Promise<Skill | null> {
+    const raw = await this.fetch<unknown>(`/api/skills/${id}/reimport`, {
+      method: "POST",
+    });
+    return parseWithFallback<Skill | null>(raw, SkillSchema, null, {
+      endpoint: "POST /api/skills/:id/reimport",
     });
   }
 

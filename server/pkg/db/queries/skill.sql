@@ -23,6 +23,15 @@ WHERE id = $1;
 SELECT * FROM skill
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetSkillInWorkspaceForUpdate :one
+-- Row-locking read used by the overwrite path. The lock turns the caller's
+-- updated_at comparison into a real compare-and-set. Without it, under READ
+-- COMMITTED, a concurrent edit can commit between the read and the UPDATE, and
+-- the overwrite discards it.
+SELECT * FROM skill
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: GetSkillByWorkspaceAndName :one
 -- Used by agent-template materialization to implement find-or-create: when a
 -- template references a skill by name that already exists in the workspace,
