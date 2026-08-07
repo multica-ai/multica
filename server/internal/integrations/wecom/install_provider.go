@@ -150,22 +150,47 @@ func (p *HTTPProvider) getJSON(ctx context.Context, requestURL string, out any) 
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
-		return fmt.Errorf("wecom provider: build request: %w", err)
+		return fmt.Errorf("wecom provider: build request: %w", withoutURL(err))
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := p.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("wecom provider: http: %w", err)
+		return fmt.Errorf("wecom provider: http: %w", withoutURL(err))
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
-		return fmt.Errorf("wecom provider: read: %w", err)
+		return fmt.Errorf("wecom provider: read: %w", withoutURL(err))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("wecom provider: http %d", resp.StatusCode)
 	}
 	return decodeProviderBody(body, out)
+}
+
+// withoutURL strips the URL out of a *url.Error, keeping host and path.
+//
+// The scode rides in the query string, and *url.Error.Error() prints the URL it
+// failed on in full. The worker logs these errors at Warn from inside the poll
+// loop, so one sustained upstream outage would write a live scode — a bearer
+// credential for "finish creating this bot", per install.go — to the log
+// repeatedly, during exactly the window where it is still redeemable. Every
+// other path treats it as a secret: sealed at rest under the bot-secret key,
+// NULLed by both terminal statements, never returned by any endpoint.
+//
+// Host and path survive because they name which call broke without naming the
+// credential; url.Parse errors carry the raw URL too, so both call sites route
+// through here.
+func withoutURL(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
+	}
+	endpoint := "unknown endpoint"
+	if u, perr := url.Parse(uerr.URL); perr == nil && u.Host+u.Path != "" {
+		endpoint = u.Host + u.Path
+	}
+	return fmt.Errorf("%s %s: %w", uerr.Op, endpoint, uerr.Err)
 }
 
 // decodeProviderBody unwraps the `data` object generate and query_result nest
