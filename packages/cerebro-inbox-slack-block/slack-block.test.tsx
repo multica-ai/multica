@@ -191,11 +191,23 @@ vi.mock("@multica/core/auth", () => ({
 }));
 
 // FIR-4350 — SlackBlock no longer self-gates on a flag (the mount gates it), so
-// there is no useFeatureFlag here. It reads conversationKindOfChannel to decide
-// which placement gate (channel vs DM) a roster row obeys.
+// there is no useFeatureFlag here historically. FIR-4649 adds unread helpers +
+// the thread-split flag used by the rail.
 vi.mock("@multica/cerebro-feature-flags", () => ({
   conversationKindOfChannel: (k: string | undefined) =>
     k === "dm" || k === "group" ? "dm" : "channel",
+  useFeatureFlag: () => false,
+  channelChatUnreadBadge: (c: { unread_count?: number; has_unread_activity?: boolean }) =>
+    (c.unread_count ?? 0) > 0
+      ? c.unread_count!
+      : c.has_unread_activity === true
+        ? 1
+        : 0,
+  buildUnreadChannelThreads: () => [],
+}));
+
+vi.mock("@multica/core/inbox/queries", () => ({
+  inboxListOptions: () => ({ queryKey: ["inbox", "ws", "list"] }),
 }));
 
 // Favorites store: selector over the mutable favState. Starred tests seed
@@ -525,14 +537,14 @@ describe("SlackBlock", () => {
   });
 
   // TECH-3494 — "Unread first" is a default setting under Group by, not a
-  // mutually-exclusive group mode.
+  // mutually-exclusive group mode. FIR-4649 — the Unread section is labeled.
   it("defaults to unread-first inside the type grouping", async () => {
     await act(async () => {
       renderBlock();
     });
     expect(screen.getByText("Channels")).toBeInTheDocument();
     expect(screen.getByText("People")).toBeInTheDocument();
-    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.getByText("Unread")).toBeInTheDocument();
     expect(screen.queryByText("Read")).not.toBeInTheDocument();
     expect(screen.getByText(/Unread first/)).toHaveTextContent("✓");
   });
@@ -551,7 +563,8 @@ describe("SlackBlock", () => {
     });
     expect(screen.queryByText("Channels")).not.toBeInTheDocument();
     expect(screen.queryByText("People")).not.toBeInTheDocument();
-    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    // Flat list still has the Unread section when unread-first is on.
+    expect(screen.getByText("Unread")).toBeInTheDocument();
     expect(screen.queryByText("Read")).not.toBeInTheDocument();
     // Rows are still there, just ungrouped.
     expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -568,21 +581,32 @@ describe("SlackBlock", () => {
       .map((button) => button.textContent);
     expect(rows).toEqual(expect.arrayContaining(["Alice", "general", "Bob"]));
     expect(rows.indexOf("Alice")).toBeLessThan(rows.indexOf("Bob"));
-    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.getByText("Unread")).toBeInTheDocument();
     expect(screen.queryByText("Read")).not.toBeInTheDocument();
   });
 
   // TECH-3494 #1/#4 — one total limit across all kinds, no per-group scroll.
+  // FIR-4649 — with unread-first on, unreads are never capped, so Alice
+  // (unread) always survives; the cap of 1 trims the READ tail to Bob only.
   it("caps the total rows across all kinds and has no inner scroll container", async () => {
     await act(async () => {
-      renderBlock({ limit: 1, groupBy: "none", sort: "name" });
+      renderBlock({ limit: 1, groupBy: "none", sort: "name", unreadFirst: true });
+    });
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument(); // one read slot
+    expect(screen.queryByText("general")).not.toBeInTheDocument();
+    // Old per-group scroll container is gone.
+    expect(screen.queryByTestId("people-list")).not.toBeInTheDocument();
+  });
+
+  it("caps read rows when unread-first is off", async () => {
+    await act(async () => {
+      renderBlock({ limit: 1, groupBy: "none", sort: "name", unreadFirst: false });
     });
     // Sorted by name: Alice first. Bob and the channel fall outside the cap.
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.queryByText("Bob")).not.toBeInTheDocument();
     expect(screen.queryByText("general")).not.toBeInTheDocument();
-    // Old per-group scroll container is gone.
-    expect(screen.queryByTestId("people-list")).not.toBeInTheDocument();
   });
 
   // TECH-3665 — when grouped by type, the limit is per kind so the Channels
@@ -716,15 +740,17 @@ describe("SlackBlock", () => {
     expect(onSetUnreadFirst).toHaveBeenCalledWith(false);
   });
 
-  // TECH-3664 — unread conversations float into ONE block at the very top
-  // (across channels/people/agents) with a thin divider under it; the rest stay
-  // grouped below. Alice's DM is unread; Bob and #general are read.
+  // TECH-3664 / FIR-4649 — unread conversations float into ONE labeled block
+  // at the very top (across channels/people/agents/threads) with a thin
+  // divider under it; the rest stay grouped below. Alice's DM is unread; Bob
+  // and #general are read.
   it("floats unread into a top block with a divider, above the grouped rest", async () => {
     await act(async () => {
       renderBlock({ unreadFirst: true, groupBy: "type" });
     });
 
     const unread = screen.getByTestId("unread-group");
+    expect(within(unread).getByText("Unread")).toBeInTheDocument();
     expect(within(unread).getByText("Alice")).toBeInTheDocument();
     expect(within(unread).queryByText("Bob")).not.toBeInTheDocument();
     expect(screen.getByTestId("unread-divider")).toBeInTheDocument();
@@ -733,14 +759,17 @@ describe("SlackBlock", () => {
     expect(screen.getByText("People")).toBeInTheDocument();
   });
 
-  // FIR-4350 — a starred conversation sits in its OWN Favorites section at the
-  // very top, above even the unread block. Bob (starred, read) comes before
-  // Alice (unread, not starred).
-  it("places a starred row in the Favorites section above the unread block", async () => {
-    favState.keys = ["member:bob"]; // Bob starred + read; Alice unread
+  // FIR-4649 — Unread sits ABOVE Favorites (Slack). A starred+unread row lives
+  // in Unread, not Favorites; starred+read stays in Favorites below.
+  it("places Unread above Favorites; starred+unread join the Unread block", async () => {
+    favState.keys = ["member:bob", "member:alice"]; // Bob starred+read; Alice starred+unread
     await act(async () => {
       renderBlock({ unreadFirst: true, groupBy: "none" });
     });
+
+    const unread = screen.getByTestId("unread-group");
+    expect(within(unread).getByTestId("presence-dot-alice")).toBeInTheDocument();
+    expect(within(unread).queryByTestId("presence-dot-bob")).not.toBeInTheDocument();
 
     const favorites = screen.getByTestId("favorites-group");
     expect(within(favorites).getByTestId("presence-dot-bob")).toBeInTheDocument();
@@ -749,19 +778,28 @@ describe("SlackBlock", () => {
     const order = screen
       .getAllByTestId(/^presence-dot-/)
       .map((d) => d.getAttribute("data-testid"));
-    // Bob (starred, in Favorites) comes before Alice (unread).
-    expect(order.indexOf("presence-dot-bob")).toBeLessThan(
-      order.indexOf("presence-dot-alice"),
+    // Alice (unread) comes before Bob (starred, read).
+    expect(order.indexOf("presence-dot-alice")).toBeLessThan(
+      order.indexOf("presence-dot-bob"),
     );
   });
 
   it("does not render a divider when there are no read rows to separate", async () => {
-    // Only Alice's unread DM survives the cap, so nothing sits below the block.
+    // unread-first off + limit 1 → only Alice (name-sorted). With unread-first
+    // on, the read cap would still keep one read row and draw a divider.
+    await act(async () => {
+      renderBlock({ unreadFirst: false, groupBy: "none", limit: 1, sort: "name" });
+    });
+    expect(screen.queryByTestId("unread-group")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("unread-divider")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Unread divider when a read row sits below", async () => {
     await act(async () => {
       renderBlock({ unreadFirst: true, groupBy: "none", limit: 1, sort: "name" });
     });
     expect(screen.getByTestId("unread-group")).toBeInTheDocument();
-    expect(screen.queryByTestId("unread-divider")).not.toBeInTheDocument();
+    expect(screen.getByTestId("unread-divider")).toBeInTheDocument();
   });
 
   // TECH-3664 — clicking an agent that shows "New" opens its UNREAD session

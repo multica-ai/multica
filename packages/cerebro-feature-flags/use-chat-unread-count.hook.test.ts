@@ -18,9 +18,13 @@ import type { Channel } from "@multica/core/types";
 const { listChannels } = vi.hoisted(() => ({ listChannels: vi.fn() }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { listChannels, listChatSessions: vi.fn(async () => []) },
+  api: {
+    listChannels,
+    listChatSessions: vi.fn(async () => []),
+    listInbox: vi.fn(async () => []),
+  },
 }));
-vi.mock("./index", () => ({ useFeatureFlag: () => true }));
+vi.mock("./api", () => ({ useFeatureFlag: () => true }));
 vi.mock("./use-chat-placement", () => ({
   useChatPlacement: () => ({
     placement: {

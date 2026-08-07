@@ -72,6 +72,14 @@ export {
 export { useChatPlacement } from "./use-chat-placement";
 export { isConversationHidden, useHiddenConversationKinds } from "./chat-inbox-hiding";
 export { countUnreadConversations, useChatUnreadCount } from "./use-chat-unread-count";
+export {
+  channelHasChatUnread,
+  channelChatUnreadBadge,
+} from "./channel-chat-unread";
+export {
+  buildUnreadChannelThreads,
+  type UnreadChannelThread,
+} from "./channel-thread-entries";
 export { ChatPlacementSettings } from "./chat-placement-settings";
 export {
   CHAT_PAGE_SETTINGS_KEY,

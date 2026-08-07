@@ -52,6 +52,10 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
   ChatPlacementSettings: () => <div data-testid="placement-settings" />,
 }));
 
+vi.mock("@multica/cerebro-channels", () => ({
+  useMarkThreadRead: () => ({ mutate: vi.fn() }),
+}));
+
 vi.mock("@multica/core/modals", () => ({
   useModalStore: Object.assign(() => undefined, {
     getState: () => ({ open: openModal }),
