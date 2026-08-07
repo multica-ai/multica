@@ -145,8 +145,15 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	if err != nil {
 		return fmt.Errorf("wecom: mint binding token: %w", err)
 	}
-	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
-	text := "👋 请先绑定你的 Multica 账号，才能与我对话：\n" + bindURL + "\n（链接 15 分钟内有效）"
+	// The throttle suppressed the mint: a live link is already with this user.
+	// Only its hash was ever stored, so there is no URL to rebuild — point
+	// them at the message they already have. The throttle window is far
+	// shorter than the TTL, so that link still has most of its life left.
+	text := "👋 绑定链接刚才已私发给你，请在与我的单聊里点击完成绑定。"
+	if !token.Reused {
+		bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
+		text = "👋 请先绑定你的 Multica 账号，才能与我对话：\n" + bindURL + "\n（链接 15 分钟内有效）"
+	}
 	// A binding token is a bearer credential: binding.Redeem only checks that
 	// the redeemer belongs to the token's workspace, and the bind page redeems
 	// on load as whoever is signed in. Sending it to msg.Source.ChatID — which

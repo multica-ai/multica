@@ -25,9 +25,17 @@ import (
 )
 
 // fakeBinder mints a fixed, recognizable raw token without touching a DB.
-type fakeBinder struct{ raw string }
+// With reused set it behaves like the throttle suppressing a mint: no raw
+// secret, only the live token's expiry.
+type fakeBinder struct {
+	raw    string
+	reused bool
+}
 
 func (f fakeBinder) Mint(context.Context, pgtype.UUID, pgtype.UUID, string) (BindingToken, error) {
+	if f.reused {
+		return BindingToken{ExpiresAt: time.Now().Add(14 * time.Minute), Reused: true}, nil
+	}
 	return BindingToken{Raw: f.raw, ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
 }
 
@@ -226,5 +234,70 @@ func TestSendBindingPrompt_P2PSendsOnlyPrivately(t *testing.T) {
 	body := conn.sendBody(t, 0)
 	if body["chatid"] != "USER_A" || body["chat_type"] != float64(chatTypeSingleInt) {
 		t.Errorf("p2p token frame = %v, want USER_A at chat_type 1", body)
+	}
+}
+
+// TestSendBindingPrompt_ThrottledSendsNoURL: when the throttle suppresses a
+// mint there is no raw secret to build a link from — the hash is all the table
+// ever held. Building the URL anyway yields "?token=" with nothing after it,
+// which is a dead link the user will tap and be refused by. The reply must
+// point them at the message they already have instead, and the room must
+// still get its answer.
+func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
+	t.Parallel()
+	const senderID = "SENDER_USERID"
+	const groupID = "GROUP_CHAT_ID"
+
+	reg := newSendersRegistry()
+	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
+	conn := &recordingConn{}
+	reg.set(inst.ID, newWSSender(conn, nil))
+	r := NewOutboundReplier(OutboundReplierConfig{
+		Senders: reg,
+		AppURL:  "https://multica.example",
+	})
+	r.binding = fakeBinder{reused: true}
+
+	msg := channel.InboundMessage{Source: channel.Source{
+		ChatID:   groupID,
+		ChatType: channel.ChatTypeGroup,
+		SenderID: senderID,
+	}}
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}); err != nil {
+		t.Fatalf("sendBindingPrompt: %v", err)
+	}
+
+	conn.mu.Lock()
+	frames := append([]frameEnvelope(nil), conn.frames...)
+	conn.mu.Unlock()
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames (private notice + group ack), got %d", len(frames))
+	}
+
+	privateFrames := 0
+	for i := range frames {
+		var body map[string]any
+		if err := json.Unmarshal(frames[i].Body, &body); err != nil {
+			t.Fatalf("decode frame %d: %v", i, err)
+		}
+		content := ""
+		if md, ok := body["markdown"].(map[string]any); ok {
+			content, _ = md["content"].(string)
+		}
+		if strings.Contains(content, "token=") {
+			t.Errorf("a throttled prompt built a URL with no token in it: %q", content)
+		}
+		if strings.Contains(content, "https://multica.example") {
+			t.Errorf("a throttled prompt must not carry a bind link at all: %q", content)
+		}
+		if chatID, _ := body["chatid"].(string); chatID == senderID {
+			privateFrames++
+			if body["chat_type"] != float64(chatTypeSingleInt) {
+				t.Errorf("private frame chat_type = %v, want single (1)", body["chat_type"])
+			}
+		}
+	}
+	if privateFrames != 1 {
+		t.Errorf("expected exactly one privately-addressed frame, got %d", privateFrames)
 	}
 }
