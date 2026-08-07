@@ -386,8 +386,14 @@ func (c *wecomChannel) Send(ctx context.Context, out channel.OutboundMessage) (c
 	// rather than keep a second, heuristic outbound path alive.
 	_ = ctx
 	_ = out
-	return channel.SendResult{}, errors.New("wecom: Channel.Send not supported; outbound goes through OutboundReplier/Outbound")
+	return channel.SendResult{}, ErrSendNotSupported
 }
+
+// ErrSendNotSupported is returned by wecomChannel.Send. WeCom's generic
+// Channel.Send seam has no honest implementation — channel.OutboundMessage
+// carries no chat_type, and outbound already flows through OutboundReplier /
+// Outbound, which read the chat type off the inbound frame.
+var ErrSendNotSupported = errors.New("wecom: Channel.Send is not supported; outbound goes through OutboundReplier/Outbound")
 
 // ---- factory ----
 

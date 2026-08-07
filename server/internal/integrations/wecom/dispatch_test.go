@@ -125,7 +125,22 @@ func TestChannelGetters(t *testing.T) {
 	if err := c.Disconnect(context.Background()); err != nil {
 		t.Errorf("Disconnect() = %v, want nil", err)
 	}
-	if _, err := c.Send(context.Background(), channel.OutboundMessage{}); err == nil {
-		t.Error("Send() should report not-supported")
+	if _, err := c.Send(context.Background(), channel.OutboundMessage{}); !errors.Is(err, ErrSendNotSupported) {
+		t.Errorf("Send() = %v, want ErrSendNotSupported", err)
+	}
+}
+
+// TestSend_NeverGuessesChatType pins the fix for the removed len(ChatID)>32
+// heuristic: Send must reject regardless of ChatID length — a long id must not
+// route as a group send, a short one must not route as a private send. If a
+// length heuristic ever comes back, one of these stops returning the sentinel.
+func TestSend_NeverGuessesChatType(t *testing.T) {
+	t.Parallel()
+	c := testChannel(func(context.Context, channel.InboundMessage) error { return nil })
+	for _, chatID := range []string{"short", "a-very-long-chat-id-well-over-thirty-two-characters-long"} {
+		_, err := c.Send(context.Background(), channel.OutboundMessage{ChatID: chatID, Text: "hi"})
+		if !errors.Is(err, ErrSendNotSupported) {
+			t.Errorf("Send(ChatID=%q) = %v, want ErrSendNotSupported (no length heuristic)", chatID, err)
+		}
 	}
 }
