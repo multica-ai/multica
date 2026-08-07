@@ -13,7 +13,10 @@ package wecom
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
@@ -277,4 +280,176 @@ func aibotChatTypeFromChannel(t channel.ChatType) int {
 		return chatTypeGroupInt
 	}
 	return chatTypeSingleInt
+}
+
+// ---- streaming replies ----
+
+// streamContentLimit is aibot's cap on stream.content: 20480 bytes of utf8
+// (https://developer.work.weixin.qq.com/document/path/101031). Content is a
+// FULL replacement of the bubble's body on every frame, never a delta, so this
+// bounds the whole answer rather than one chunk of it.
+const streamContentLimit = 20480
+
+// streamThinkingPlaceholder is what the opening frame says. Per 101031 a
+// content carrying <think></think> renders as the client's own thinking
+// affordance — the animated dots — which is exactly the "working on it" bubble
+// we want and costs no copy in any language. Tencent's own OpenClaw plugin
+// opens its streams with the same literal.
+const streamThinkingPlaceholder = "<think></think>"
+
+// aibot errcodes worth branching on. Neither of the two stream codes is in the
+// published error tables; both come from Tencent's OpenClaw plugin, which
+// handles them in production.
+const (
+	// errcodeStreamExpired — the stream ran past its window and the server
+	// will not take another frame for it. The two sources disagree on how long
+	// that window is: the long-connection doc says 10 minutes, while the
+	// plugin's own comment puts it at 6. streamMaxAge takes the shorter number
+	// (stream_store.go) — being early costs a fallback message, being late
+	// costs the answer.
+	errcodeStreamExpired = 846608
+
+	// errcodeStreamBadReqID — this req_id may not carry a stream. An event
+	// callback's req_id looks usable and is not; only a message callback's
+	// works, so the event path has to use aibot_send_msg.
+	errcodeStreamBadReqID = 846605
+)
+
+// streamError is a server rejection of a stream frame, carrying the errcode so
+// callers can tell "this bubble is beyond saving" from "that frame did not
+// land".
+type streamError struct {
+	Code int
+	Msg  string
+}
+
+func (e *streamError) Error() string {
+	return fmt.Sprintf("wecom: stream frame rejected errcode=%d errmsg=%s", e.Code, e.Msg)
+}
+
+// Unusable reports whether the rejection means this stream can never be
+// written to again — the caller must fall back to a plain message rather than
+// retry.
+func (e *streamError) Unusable() bool {
+	return e.Code == errcodeStreamExpired || e.Code == errcodeStreamBadReqID
+}
+
+// streamUnusable is the package-level predicate over any error, so callers do
+// not each re-implement the type assertion.
+func streamUnusable(err error) bool {
+	var se *streamError
+	if errors.As(err, &se) {
+		return se.Unusable()
+	}
+	return false
+}
+
+// respondStreamBody builds an aibot_respond_msg body carrying one frame of a
+// streaming reply. finish=false paints or updates the bubble; finish=true
+// seals it, after which the message is immutable.
+//
+// The blank-closing-frame check is the one rule that is not obvious from the
+// wire format: WeCom ignores content with nothing visible in it, so a closing
+// frame of spaces closes nothing and leaves the user with a bubble that spins
+// forever. Refusing here means every caller inherits the check.
+func respondStreamBody(streamID, content string, finish bool) (map[string]any, error) {
+	if streamID == "" {
+		return nil, errors.New("wecom: stream frame requires a stream id")
+	}
+	if finish {
+		content = defuseThinkTags(content)
+	}
+	content = truncateStreamContent(content)
+	if finish && !hasVisibleChar(content) {
+		return nil, errors.New("wecom: closing stream frame needs visible content")
+	}
+	return map[string]any{
+		"msgtype": "stream",
+		"stream": map[string]any{
+			"id":      streamID,
+			"finish":  finish,
+			"content": content,
+		},
+	}, nil
+}
+
+// defuseThinkTags stops an answer that talks about <think> from being read as
+// one.
+//
+// The tag is the client's, not ours: per 101031 a stream body wrapped in
+// <think></think> renders as WeCom's own collapsed thinking affordance, which
+// is what the opening frame is built from. An answer that happens to contain
+// the literal — quoting a prompt, explaining this very feature, pasting XML —
+// gets the same treatment, and half the reply disappears into a fold with no
+// edit and no unsend to undo it with.
+//
+// A zero-width space after the angle bracket is enough: the scanner no longer
+// matches, and the reader sees the same characters they would have seen. Only
+// the tag's own opening is touched, so comparisons, generics and HTML samples
+// in the rest of the answer come through as written. Callers apply this to
+// closing frames only — the opening frame IS the affordance.
+func defuseThinkTags(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	const zwsp = "​"
+	var b strings.Builder
+	last := 0
+	// Indexing s directly, never a case-folded copy of it. Walking s while
+	// reading strings.ToLower(s) at the same offsets looks equivalent and is
+	// not: case folding does not preserve length. U+212A KELVIN SIGN is three
+	// bytes and lowercases to a one-byte "k", so the folded copy can be
+	// SHORTER than the original and an offset taken from s can be past its
+	// end. "KK<x" — two Kelvin signs and an angle bracket — is enough to slice
+	// out of range, and the string being scanned is the agent's own answer, so
+	// any text a user can talk the agent into echoing would take the backend
+	// down with it.
+	for i := 0; i < len(s); i++ {
+		if s[i] != '<' {
+			continue
+		}
+		j := i + 1
+		if j < len(s) && s[j] == '/' {
+			j++
+		}
+		if j+len("think") > len(s) || !strings.EqualFold(s[j:j+len("think")], "think") {
+			continue
+		}
+		b.WriteString(s[last : i+1])
+		b.WriteString(zwsp)
+		last = i + 1
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// truncateStreamContent cuts content to the protocol's byte limit on a
+// character boundary. An answer that arrives clipped still answers; one the
+// server rejects for length does not.
+func truncateStreamContent(s string) string {
+	if len(s) <= streamContentLimit {
+		return s
+	}
+	const ellipsis = "…"
+	cut := streamContentLimit - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
+}
+
+// hasVisibleChar reports whether s contains anything the WeCom client will
+// render. Whitespace and control runes do not count — that is the whole point:
+// a closing frame the server considers empty is discarded, and the bubble it
+// was meant to seal spins for good.
+func hasVisibleChar(s string) bool {
+	for _, r := range s {
+		if !unicode.IsSpace(r) && !unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
