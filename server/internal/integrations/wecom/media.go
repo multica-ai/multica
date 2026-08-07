@@ -27,15 +27,16 @@ import (
 )
 
 // Bounds on WeCom media ingest (spec §5.6). maxMediaCiphertextBytes is the
-// plaintext cap (100 MiB) plus one AES block of PKCS#7 padding — the wire
-// ciphertext can legitimately be up to that many bytes larger than the
-// plaintext it decrypts to. maxMediaRedirects is the max number of redirect
+// plaintext cap (100 MiB) plus one full mediaPadBlock of PKCS#7 padding — the
+// wire ciphertext can legitimately be up to that many bytes larger than the
+// plaintext it decrypts to. The slack is 32, not one 16-byte AES block: WeCom
+// pads to a 32-byte block (see mediaPadBlock in crypto.go). maxMediaRedirects is the max number of redirect
 // hops followed, re-validating the destination on every hop (dialAllowedAddr
 // runs on every new connection, including each redirect target).
 // mimeSniffBytes is how much of the DECRYPTED plaintext is sniffed for MIME
 // detection (never the ciphertext, which sniffs as random bytes).
 const (
-	maxMediaCiphertextBytes int64 = 100<<20 + 32
+	maxMediaCiphertextBytes int64 = 100<<20 + mediaPadBlock
 	maxMediaRedirects             = 3
 	defaultMediaConcurrency       = 2
 	mimeSniffBytes                = 512

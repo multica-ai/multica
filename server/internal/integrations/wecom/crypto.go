@@ -17,6 +17,17 @@ import (
 const (
 	aesKeySize   = 32
 	aesBlockSize = aes.BlockSize
+	// mediaPadBlock is the PKCS#7 block WeCom pads media plaintext to: 32
+	// bytes, NOT the 16-byte AES block. This matches its callback-mode
+	// WXBizMsgCrypt libraries (PKCS7Encoder block_size = 32) and spec §3
+	// ("PKCS#7 填充至 32 字节倍数"); §5.6's "100 MiB + 32 bytes" download
+	// allowance is the same 32 as worst-case pad overhead.
+	//
+	// Capping at 16 rejected every attachment whose pad landed in 17..32 —
+	// exactly half of all pad lengths. Raising the cap cannot misread a
+	// 16-padded sender: PKCS#7's final byte *is* the pad length, so a
+	// 16-padded tail still reads 16.
+	mediaPadBlock = 32
 )
 
 // Sentinel errors surfaced by aeskey decoding and CBC/PKCS#7 decryption.
@@ -87,7 +98,7 @@ func removePKCS7Padding(data []byte) ([]byte, error) {
 		return nil, ErrInvalidPKCS7Padding
 	}
 	pad := int(data[n-1])
-	if pad == 0 || pad > aesBlockSize || pad > n {
+	if pad == 0 || pad > mediaPadBlock || pad > n {
 		return nil, ErrInvalidPKCS7Padding
 	}
 	if !bytes.Equal(data[n-pad:], bytes.Repeat([]byte{byte(pad)}, pad)) {
@@ -99,17 +110,22 @@ func removePKCS7Padding(data []byte) ([]byte, error) {
 // streamingCBCDecryptor decrypts an AES-256-CBC + PKCS#7 stream one block at
 // a time without ever buffering the full ciphertext or plaintext in memory
 // (spec §5.6 item 3: ciphertext lives in a 0600 temp file; this type is what
-// streams it to the second temp file). It holds back the most recently
-// decrypted block so the true final block — the one carrying the PKCS#7
-// pad — is only written, unpadded, once Close confirms no further ciphertext
-// follows.
+// streams it to the second temp file).
+//
+// It holds back the last mediaPadBlock (32) bytes of plaintext — two AES
+// blocks — because WeCom pads to a 32-byte block, so a pad of 17..32 spans two
+// blocks. Holding back only one block writes the first half of the padding to
+// dst before finish() ever sees it, which both corrupts the output and leaves
+// finish() looking at a tail that cannot be unpadded.
 type streamingCBCDecryptor struct {
 	mode    cipher.BlockMode
 	dst     io.Writer
 	written int64
 
-	pending     [aesBlockSize]byte
-	havePending bool
+	// pending holds the most recent pendingLen plaintext bytes, always a
+	// multiple of aesBlockSize and never more than mediaPadBlock.
+	pending    [mediaPadBlock]byte
+	pendingLen int
 }
 
 // newStreamingCBCDecryptor constructs a decryptor writing plaintext to dst
@@ -164,14 +180,19 @@ func (d *streamingCBCDecryptor) writeBlock(ciphertext []byte) error {
 	}
 	var plain [aesBlockSize]byte
 	d.mode.CryptBlocks(plain[:], ciphertext)
-	if d.havePending {
-		if _, err := d.dst.Write(d.pending[:]); err != nil {
+
+	if d.pendingLen == mediaPadBlock {
+		// Buffer full: the oldest block can no longer be part of the padding,
+		// so flush it and shift the newer one down.
+		if _, err := d.dst.Write(d.pending[:aesBlockSize]); err != nil {
 			return err
 		}
 		d.written += aesBlockSize
+		copy(d.pending[:aesBlockSize], d.pending[aesBlockSize:])
+		d.pendingLen = aesBlockSize
 	}
-	d.pending = plain
-	d.havePending = true
+	copy(d.pending[d.pendingLen:d.pendingLen+aesBlockSize], plain[:])
+	d.pendingLen += aesBlockSize
 	return nil
 }
 
@@ -179,10 +200,10 @@ func (d *streamingCBCDecryptor) writeBlock(ciphertext []byte) error {
 // the remainder. It is an error to call finish before any block was fed —
 // that means the ciphertext was empty, which is never valid PKCS#7 input.
 func (d *streamingCBCDecryptor) finish() error {
-	if !d.havePending {
+	if d.pendingLen == 0 {
 		return ErrCiphertextNotBlockAligned
 	}
-	unpadded, err := removePKCS7Padding(d.pending[:])
+	unpadded, err := removePKCS7Padding(d.pending[:d.pendingLen])
 	if err != nil {
 		return err
 	}

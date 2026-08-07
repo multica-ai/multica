@@ -189,6 +189,10 @@ func TestDecryptFromReader_RandomRoundTrip(t *testing.T) {
 		if _, err := rand.Read(plain); err != nil {
 			t.Fatalf("rand.Read: %v", err)
 		}
+		// Deliberately the 16-byte block here: this case is the
+		// backward-compatibility half, proving a 16-padded sender still
+		// round-trips. WeCom's real 32-byte block is covered by
+		// TestDecryptFromReader_WeComPadsTo32.
 		padLen := aesBlockSize - (plainLen % aesBlockSize)
 		padded := append(append([]byte{}, plain...), bytes.Repeat([]byte{byte(padLen)}, padLen)...)
 

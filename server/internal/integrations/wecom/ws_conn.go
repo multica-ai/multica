@@ -55,6 +55,15 @@ func (e *DisconnectedKickError) Error() string {
 	return fmt.Sprintf("wecom: disconnected_event kick: %s", e.Reason)
 }
 
+// minReadTimeout floors the derived ReadTimeout (see withDefaults).
+const minReadTimeout = 30 * time.Second
+
+// osDeadline builds an absolute deadline for SetReadDeadline / SetWriteDeadline
+// from the REAL clock, never cfg.Now. The kernel compares these against wall
+// time, so a fake or frozen clock injected for tests would otherwise produce a
+// deadline permanently in the past and fail every I/O immediately.
+func osDeadline(d time.Duration) time.Time { return time.Now().Add(d) }
+
 // WSDialer is the subset of *websocket.Dialer Conn consumes; tests
 // inject a fake pointing at an httptest server.
 type WSDialer interface {
@@ -128,7 +137,12 @@ type ConnConfig struct {
 	OnWelcome func(context.Context, WelcomeContext)
 
 	// Timing knobs. All zero values fall back to production defaults.
-	PingInterval      time.Duration // default 20s
+	PingInterval time.Duration // default 20s
+	// ReadTimeout bounds how long readPump waits for ANY inbound frame
+	// before declaring the peer dead. It must exceed PingInterval so a
+	// healthy idle link — where the only inbound traffic is the response to
+	// our own heartbeat — is never torn down; default 3x PingInterval.
+	ReadTimeout       time.Duration // default 3x PingInterval
 	SubscribeTimeout  time.Duration // default 10s
 	WriteTimeout      time.Duration // default 10s
 	RequestTimeout    time.Duration // default 15s (SendRequest wait cap)
@@ -153,6 +167,19 @@ func (c ConnConfig) withDefaults() ConnConfig {
 	}
 	if c.PingInterval == 0 {
 		c.PingInterval = 20 * time.Second
+	}
+	if c.ReadTimeout == 0 {
+		// Three ping intervals tolerates two consecutive unanswered
+		// heartbeats before declaring the peer dead. Floored, because a small
+		// PingInterval is usually chosen to make pings frequent — not to make
+		// liveness hair-trigger — and a sub-second window would drop healthy
+		// connections on an ordinary GC pause. Tests that exercise liveness
+		// set ReadTimeout explicitly.
+		if derived := 3 * c.PingInterval; derived > minReadTimeout {
+			c.ReadTimeout = derived
+		} else {
+			c.ReadTimeout = minReadTimeout
+		}
 	}
 	if c.SubscribeTimeout == 0 {
 		c.SubscribeTimeout = 10 * time.Second
@@ -416,8 +443,10 @@ func (c *Conn) subscribe(ctx context.Context, conn WSConn) error {
 	if f.ErrCode != 0 {
 		return &AuthFailedError{Code: f.ErrCode, Msg: f.ErrMsg}
 	}
-	// Clear per-handshake deadlines so pumps own them going forward.
-	_ = conn.SetReadDeadline(time.Time{})
+	// Clear the handshake write deadline; writeOne sets its own per frame.
+	// The READ deadline is deliberately NOT cleared to zero here — readPump
+	// re-arms it before every ReadMessage, and a zero deadline in between
+	// would leave a window with no liveness bound at all.
 	_ = conn.SetWriteDeadline(time.Time{})
 	return nil
 }
@@ -472,8 +501,7 @@ func (c *Conn) writePump(ctx context.Context, conn WSConn, hi, lo <-chan writeRe
 }
 
 func (c *Conn) writeOne(conn WSConn, wr writeReq) error {
-	deadline := c.cfg.Now().Add(c.cfg.WriteTimeout)
-	if err := conn.SetWriteDeadline(deadline); err != nil {
+	if err := conn.SetWriteDeadline(osDeadline(c.cfg.WriteTimeout)); err != nil {
 		return err
 	}
 	return conn.WriteMessage(websocket.TextMessage, wr.data)
@@ -485,6 +513,20 @@ func (c *Conn) writeOne(conn WSConn, wr writeReq) error {
 // selects against ctx so it never blocks past teardown.
 func (c *Conn) readPump(ctx context.Context, conn WSConn, msgQ, eventQ, welcomeQ chan Frame, log *slog.Logger) error {
 	for {
+		// Re-arm before every read. ANY inbound frame proves the peer is
+		// alive, so the deadline is effectively refreshed by traffic — on an
+		// otherwise idle connection the response to our own heartbeat is what
+		// keeps it moving. Without this the read blocks forever on a
+		// half-open TCP connection (writes keep succeeding into the kernel
+		// send buffer, so writePump never errors either) and Run never
+		// returns, so Supervisor never redials: spec §9 requires an
+		// unanswered heartbeat to close the connection and reconnect.
+		if err := conn.SetReadDeadline(osDeadline(c.cfg.ReadTimeout)); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("wecom: set read deadline: %w", err)
+		}
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
 			if ctx.Err() != nil {
