@@ -78,6 +78,14 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 	body := inboxItemBody(item)
 	link := inboxItemLink(item, workspaceID, slug)
 
+	// title and body are written by a member. They land inside an aibot
+	// markdown card the recipient has every reason to trust — it comes from
+	// the bot, not from the author — so link syntax in them must not render.
+	// An issue titled "[click here](http://evil.example)" arrived as a
+	// working link.
+	title = escapeInboxMarkdown(title)
+	body = escapeInboxMarkdown(body)
+
 	var b strings.Builder
 	b.WriteString("**[")
 	b.WriteString(inboxTypeLabel(typeStr))
@@ -105,10 +113,21 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 		suffix = "\n[查看详情](" + link + ")"
 	}
 	room := inboxMarkdownMaxLen - utf8.RuneCountInString(prefix) - utf8.RuneCountInString(suffix) - 4 // "\n...\n"
-	if room <= 0 {
-		return prefix + suffix
+	if room > 0 {
+		return prefix + "\n" + truncateRunes(body, room) + "..." + suffix
 	}
-	return prefix + "\n" + truncateRunes(body, room) + "..." + suffix
+	// No room for any body means the prefix itself is the problem — a long
+	// enough title pushes prefix+suffix past the cap on its own, and
+	// returning it unchanged means WeCom refuses the whole frame while the
+	// sender is told it was delivered. Truncate the title so what goes out
+	// always fits.
+	fixed := utf8.RuneCountInString(prefix) - utf8.RuneCountInString(title)
+	titleRoom := inboxMarkdownMaxLen - fixed - utf8.RuneCountInString(suffix) - 3 // "..."
+	if titleRoom < 0 {
+		titleRoom = 0
+	}
+	return "**[" + inboxTypeLabel(typeStr) + "] " +
+		trimDanglingEscape(truncateRunes(title, titleRoom)) + "...**" + suffix
 }
 
 // inboxItemBody extracts the body/description string from an inbox_item map.
@@ -162,6 +181,48 @@ func inboxItemIssueID(item map[string]any) string {
 		return v
 	}
 	return ""
+}
+
+// escapeInboxMarkdown neutralizes link syntax in member-authored text.
+// aibot markdown renders [text](url) as a link, and the card carries the
+// bot's authority, so an issue title is not a place a link may be smuggled
+// in from.
+func escapeInboxMarkdown(s string) string {
+	if !strings.ContainsAny(s, "[]()!") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for _, r := range s {
+		switch r {
+		case '[', ']', '(', ')':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '!':
+			// Only meaningful immediately before a link, but escaping it
+			// unconditionally is simpler than tracking position and costs an
+			// exclamation mark a backslash it does not need.
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// trimDanglingEscape drops a trailing backslash left behind by truncating in
+// the middle of an escape pair — it would otherwise escape whatever the
+// truncation marker puts next to it.
+func trimDanglingEscape(s string) string {
+	n := 0
+	for i := len(s) - 1; i >= 0 && s[i] == '\\'; i-- {
+		n++
+	}
+	if n%2 == 1 {
+		return s[:len(s)-1]
+	}
+	return s
 }
 
 // truncateRunes trims s to at most maxRunes runes. Rune-based rather than

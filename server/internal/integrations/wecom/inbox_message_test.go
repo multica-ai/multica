@@ -3,6 +3,7 @@ package wecom
 import (
 	"os"
 	"strings"
+	"unicode/utf8"
 	"testing"
 )
 
@@ -130,5 +131,39 @@ func TestTruncateRunes(t *testing.T) {
 		if got := truncateRunes(tc.in, tc.max); got != tc.expect {
 			t.Errorf("truncateRunes(%q,%d)=%q; want %q", tc.in, tc.max, got, tc.expect)
 		}
+	}
+}
+
+// TestInboxCardDoesNotRenderMemberAuthoredLinks: the card carries the bot's
+// authority — it arrives from the bot, not from whoever wrote the issue — so
+// link syntax in a member-written title must not render as a link.
+func TestInboxCardDoesNotRenderMemberAuthoredLinks(t *testing.T) {
+	item := map[string]any{
+		"type":  "mentioned",
+		"title": "[click here](http://evil.example)",
+		"body":  "and the body [too](http://evil.example)",
+	}
+	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	if strings.Contains(out, "](http://evil.example)") {
+		t.Fatalf("member-authored link syntax rendered as a link in a bot-authored card: %q", out)
+	}
+	if !strings.Contains(out, "click here") {
+		t.Errorf("escaping ate the visible text: %q", out)
+	}
+}
+
+// TestInboxCardFitsTheCapEvenWithAHugeTitle: WeCom refuses the whole frame
+// past the cap, and the sender is told it was delivered — so a card that does
+// not fit is a message silently lost, not a message truncated.
+func TestInboxCardFitsTheCapEvenWithAHugeTitle(t *testing.T) {
+	huge := strings.Repeat("标题", 4000) // far past inboxMarkdownMaxLen on its own
+	t.Setenv("MULTICA_APP_URL", "https://multica.example")
+	item := map[string]any{"type": "mentioned", "title": huge, "body": "body"}
+	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
+		t.Fatalf("card is %d runes, cap is %d — WeCom refuses the frame and the push is lost", n, inboxMarkdownMaxLen)
+	}
+	if !strings.Contains(out, "查看详情") {
+		t.Errorf("the view-detail affordance was dropped: %q", out[:120])
 	}
 }
