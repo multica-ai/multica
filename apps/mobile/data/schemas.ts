@@ -40,6 +40,18 @@ import type {
 } from "@multica/core/types";
 import { IssueSchema } from "@multica/core/api/schemas";
 
+export interface PublicAuthConfig {
+  oidcProviderName?: string;
+}
+
+export const PublicAuthConfigSchema = z.object({
+  oidc_provider_name: z.string().optional(),
+}).loose().transform((value) => ({
+  oidcProviderName: value.oidc_provider_name,
+}));
+
+export const EMPTY_PUBLIC_AUTH_CONFIG: PublicAuthConfig = {};
+
 /** Upload response. Only fields mobile actually consumes — `url` to put
  *  into the markdown link, `filename` for the `[📎 name](url)` form, `id`
  *  for future linking. `.loose()` so the server can add fields without

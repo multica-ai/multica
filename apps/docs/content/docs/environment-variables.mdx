@@ -91,6 +91,28 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 | `GOOGLE_CLIENT_SECRET` | empty | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Must exactly match the callback URL in the Google Console |
 
+**Takes effect at runtime**: the frontend reads these settings via `/api/config` at runtime, so **changing them requires no frontend rebuild or redeploy** — restart the server and they apply.
+
+Full setup (including Google Cloud Console steps) is in [Sign-in and signup configuration](/auth-setup#google-sign-in).
+
+### Generic OpenID Connect configuration
+
+Configure one discovery-capable OIDC provider, such as Authentik or GitLab. Leave `OIDC_ISSUER_URL` empty to disable the button.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OIDC_ISSUER_URL` | empty | Exact issuer URL advertised by the provider's discovery document |
+| `OIDC_CLIENT_ID` | empty | OIDC client ID |
+| `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
+| `OIDC_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Registered frontend callback URL |
+| `OIDC_PROVIDER_NAME` | `OpenID Connect` | Login button label, for example `Authentik` or `GitLab` |
+| `OIDC_SCOPES` | `openid profile email` | Space-separated scopes; `openid` is always added |
+| `OIDC_ALLOWED_GROUPS` | empty | Optional comma-separated group allowlist; access requires one exact match |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim containing a group string or array; GitLab can use `groups_direct` |
+| `OIDC_REQUIRE_VERIFIED_EMAIL` | `true` | Reject accounts unless the provider returns `email_verified=true` |
+
+The authorization flow uses discovery, signed ID token validation, state, nonce, and PKCE. Full setup is in [Sign-in and signup configuration](/auth-setup#generic-openid-connect).
+
 ### Signup scope
 
 | Variable | Default | Description |
