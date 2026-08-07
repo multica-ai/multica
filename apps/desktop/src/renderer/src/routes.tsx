@@ -6,6 +6,7 @@ import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
+import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import {
   RuntimeDetailPage,
@@ -196,6 +197,11 @@ export const appRoutes: RouteObject[] = [
           {
             path: "agents/new/ai",
             element: <AiCreateAgentPage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/ai/:sessionId",
+            element: <AiBuilderSessionPage />,
             handle: { title: "Create Agent" },
           },
           {

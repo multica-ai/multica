@@ -306,7 +306,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         dmPending={permissionsLoading}
         onDm={handleDm}
         onAssign={handleAssign}
-        onArchive={() => setConfirmArchive(true)}
+        onArchive={
+          agent.system_key ? undefined : () => setConfirmArchive(true)
+        }
       />
 
       {!canEdit.allowed && (
@@ -439,7 +441,9 @@ function DetailHeader({
   dmPending: boolean;
   onDm: () => void;
   onAssign: () => void;
-  onArchive: () => void;
+  /** Absent for Multica's built-in agents, which the server refuses to
+   *  archive — the menu hides the action rather than offering a failure. */
+  onArchive?: () => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -532,13 +536,12 @@ function DetailHeader({
               />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={onArchive}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                {t(($) => $.detail.more_archive)}
-              </DropdownMenuItem>
+              {onArchive && (
+                <DropdownMenuItem variant="destructive" onClick={onArchive}>
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t(($) => $.detail.more_archive)}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
             ) : null}

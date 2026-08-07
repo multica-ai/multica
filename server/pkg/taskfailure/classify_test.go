@@ -40,6 +40,11 @@ func TestClassifyRules(t *testing.T) {
 		{"prompt is too long", "API Error: prompt is too long: 250000 tokens > 200000 maximum", ReasonAgentContextOverflow},
 		{"context size has been exceeded", "context size has been exceeded; consider /compact", ReasonAgentContextOverflow},
 		{"token limit", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+		// GH #6360, verbatim from Claude Code 2.1.x. The turn is not
+		// rejected with a 400 — the response comes back with stop_reason
+		// "model_context_window_exceeded" and the CLI prints this line.
+		{"claude code context window limit", "API Error: The model has reached its context window limit.", ReasonAgentContextOverflow},
+		{"raw stop reason", `{"stop_reason":"model_context_window_exceeded"}`, ReasonAgentContextOverflow},
 
 		// 2. Missing config.
 		{"missing env var", "Missing environment variable: `MIFY_API_KEY`.", ReasonAgentMissingConfig},
@@ -108,6 +113,14 @@ func TestClassifyRules(t *testing.T) {
 		{"context deadline exceeded", "context deadline exceeded", ReasonAgentProviderNetwork},
 		{"wrapped context deadline", `Post "https://api.example.com/v1": context deadline exceeded`, ReasonAgentProviderNetwork},
 		{"http client timeout", `Get "https://api.example.com": net/http: request canceled (Client.Timeout exceeded while awaiting headers)`, ReasonAgentProviderNetwork},
+		// #6522: all three OpenCode terminal-signal guard failures are silent
+		// provider stream cuts. The two "terminal signal" variants used to hit
+		// rule 13 by accident (the word "signal") and the empty-step one fell
+		// to agent_error.unknown; neither bucket is retryable.
+		{"opencode step open at EOF", "opencode stream ended without a terminal signal (step still open at EOF)", ReasonAgentProviderNetwork},
+		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
+		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
+		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},
@@ -351,6 +364,58 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			reason: "",
 			raw:    legacyErr,
 			want:   Reason(""),
+		},
+
+		// --- GH #6360: response-side context overflow. An un-upgraded daemon
+		// classifies the wordings below as the catchall, which is on no resume
+		// blacklist — so without this the over-full session stays pinned and
+		// every later comment on the issue replays the same overflow.
+		{
+			name:   "old daemon catchall on the claude code wording is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "API Error: The model has reached its context window limit.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			name:   "old daemon catchall on the raw stop reason is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    `{"stop_reason":"model_context_window_exceeded"}`,
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			name:   "pre-MUL-1949 coarse reason on the overflow is upgraded",
+			reason: "agent_error",
+			raw:    "API Error: The model has reached its context window limit.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			// The witness is matched case-insensitively, like Classify's.
+			name:   "witness casing does not defeat the upgrade",
+			reason: string(ReasonAgentUnknown),
+			raw:    "API ERROR: THE MODEL HAS REACHED ITS CONTEXT WINDOW LIMIT.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			// A current daemon already classified it; nothing to do.
+			name:   "current daemon overflow reason passes through",
+			reason: string(ReasonAgentContextOverflow),
+			raw:    "API Error: The model has reached its context window limit.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			// A refined reason means the old daemon matched an earlier rule on
+			// this same text. That is a stronger statement about what ended the
+			// run than the witness is, so it is left alone.
+			name:   "refined reason with the overflow witness is left alone",
+			reason: string(ReasonAgentProcessFailure),
+			raw:    "claude exited with error: exit status 1: The model has reached its context window limit.",
+			want:   ReasonAgentProcessFailure,
+		},
+		{
+			name:   "catchall without an overflow witness is left alone",
+			reason: string(ReasonAgentUnknown),
+			raw:    "API Error: the model is overloaded",
+			want:   ReasonAgentUnknown,
 		},
 	}
 

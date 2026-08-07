@@ -330,8 +330,9 @@ jobs:
       - name: Test Windows agent launcher argv/stdin handling
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the
-        # official cursor-agent.ps1 ends in `& node.exe index.js $args`, and
-        # PowerShell re-serialises $args onto the child command line. Under
+        # official cursor-agent.ps1 and pi.ps1 launch native children with
+        # `$args`, and PowerShell re-serialises them onto the child command
+        # line. Under
         # Legacy native argument passing (powershell.exe 5.1, pwsh <= 7.2) a
         # prompt holding embedded quotes is re-tokenised and fragments like
         # `-X` become flags (#5649). Only a real PowerShell host proves this,
@@ -340,7 +341,23 @@ jobs:
         # the backend job still runs the full package on Linux.
         # -v so a silent skip (no PowerShell host resolved, or a -run pattern
         # that stops matching) is visible in the log instead of passing as "ok".
-        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+
+      - name: Test Windows OpenCode oversized prompt reaches stdin
+        working-directory: server
+        # #6538: the daemon inlined the whole task prompt as an argv element,
+        # so every OpenCode task whose prompt cleared CreateProcess's 32,767
+        # character lpCommandLine limit failed to start at all, with Go
+        # reporting ERROR_FILENAME_EXCED_RANGE as the misleading "The filename
+        # or extension is too long". Only a real CreateProcess enforces that
+        # ceiling, so this cannot run in the ubuntu backend job. The test
+        # spawns a native .exe directly (a Chocolatey-installed opencode.exe is
+        # a real PE binary, not a .cmd shim) with an oversized prompt and pins
+        # that the process starts, argv stays free of the prompt, and the full
+        # payload arrives on stdin.
+        # -v so a silent skip or a -run pattern that stops matching is visible
+        # in the log instead of passing as "ok".
+        run: go test ./pkg/agent -v -run '^TestOpencodeExecuteOversizedPromptStartsOnWindows$' -count=1 -timeout=5m
 
       - name: Test bounded Codex cleanup with inherited stdout descendant
         working-directory: server
@@ -369,6 +386,27 @@ jobs:
         # -v so a skip (no node on the runner) is visible instead of passing
         # silently as "ok".
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
+
+      - name: Test Windows isolated repo checkout is committable
+        working-directory: server
+        # #6449: on Windows the daemon now hands Codex tasks a checkout whose
+        # .git lives inside the task workdir, because a linked worktree's
+        # external gitdir stays read-only under the native sandbox and breaks
+        # `git add` / `git commit` at the end of a task. Two of the guarantees
+        # are claims about Windows itself and cannot be made on ubuntu: that
+        # Git puts the gitdir inside the task directory, and that the clone's
+        # objects are private copies rather than NTFS hard links sharing one
+        # file and one security descriptor with the daemon-owned cache. The
+        # cross-volume test covers what a hard link cannot express at all.
+        # Scoped to the two windows-tagged tests by exact name. A prefix match
+        # also caught the package's cross-platform isolated-checkout test,
+        # which cannot run here: repocache derives a cache directory name from
+        # the full source repo path, so a t.TempDir() path that already embeds
+        # a long test name doubles and blows past MAX_PATH. That test belongs
+        # to the ubuntu backend job, which runs the whole package.
+        # -v so a skip (single-volume runner) is visible instead of passing
+        # silently as "ok".
+        run: go test ./internal/daemon/repocache -v -run '^(TestIsolatedCheckoutIsCommittableOnWindows|TestIsolatedCheckoutAcrossVolumesOnWindows)$' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server

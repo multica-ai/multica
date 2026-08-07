@@ -19,10 +19,12 @@ Multica is an AI-native task management platform for small teams, with agents as
 - `apps/web/`: Next.js App Router.
 - `apps/desktop/`: Electron desktop app.
 - `apps/mobile/`: Expo / React Native iOS app. Read `apps/mobile/CLAUDE.md` before touching it.
+- `apps/docs/`: Fumadocs documentation site.
 - `packages/core/`: headless business logic, API client, React Query hooks, Zustand stores.
 - `packages/ui/`: atomic UI components only.
 - `packages/views/`: shared business pages/components for web and desktop.
 - `packages/tsconfig/`: shared TypeScript config.
+- `packages/eslint-config/`: shared ESLint config.
 
 Shared packages export raw `.ts` / `.tsx` and are compiled by consuming apps. Dependency direction is `views -> core + ui`; `core` and `ui` must stay independent.
 
@@ -181,9 +183,12 @@ Root-level reminders:
 ## UI Rules
 
 - Prefer shadcn/Base UI components over custom implementations. Add them with `pnpm ui:add <component>` from the repo root.
-- Use design tokens and semantic classes; avoid hardcoded colors.
+- The Pro `@reui` registry is configured in `packages/ui/components.json`; add items with `pnpm ui:add @reui/<name>` and answer `n` to every overwrite prompt so local component customizations survive. It reads `REUI_LICENSE_KEY` from the environment — agents get it from their Multica agent environment, humans export it in their own shell. Never write the key into a repo file.
+- ReUI ships source, not a dependency: route the vendored output to our layout (new primitives to `packages/ui/components/ui/`, compositions to `packages/views/<domain>/`) and rewrite it to our conventions before committing.
+- Use design tokens and semantic classes; avoid hardcoded colors. Font sizes come from the role-named `--text-*` scale in `packages/ui/styles/tokens.css` (`text-caption`, `text-body`, `text-title`, …), which is the authoritative list — not Tailwind's default `text-sm` / `text-base` ramp.
+- An active/selected state must stay identifiable while hovered. Express it on a dimension hover does not touch (weight, text color), or define the `data-active:hover:` compound explicitly — otherwise hovering a selected row visually downgrades it to plain hover.
 - Do not introduce extra local state unless the design requires it.
-- Handle overflow, long text, scrolling, alignment, and spacing deliberately.
+- Handle overflow, long text, scrolling, alignment, and spacing deliberately. Prefer more spacing over adding a divider.
 - If a component is identical between web and desktop, it belongs in a shared package.
 
 ## Testing

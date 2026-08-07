@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -125,8 +124,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		finalStatus := "completed"
 		var finalError string
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
@@ -353,8 +351,7 @@ func readAntigravityTranscriptOutput(logPath, conversationID string) string {
 	defer f.Close()
 
 	var parts []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(f)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {

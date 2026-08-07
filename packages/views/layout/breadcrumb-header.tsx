@@ -30,6 +30,8 @@ interface BreadcrumbHeaderProps {
   leaf: ReactNode;
   /** Right-side actions. Wrapped in a `shrink-0` flex row; omit for none. */
   actions?: ReactNode;
+  /** Far-left slot; replaces the mobile sidebar trigger. See `PageHeader`. */
+  leading?: ReactNode;
   className?: string;
 }
 
@@ -41,9 +43,9 @@ interface BreadcrumbHeaderProps {
  * The mental model is identical everywhere: the leading crumbs are the thing's
  * real containers and clicking one navigates up to it.
  */
-export function BreadcrumbHeader({ segments, leaf, actions, className }: BreadcrumbHeaderProps) {
+export function BreadcrumbHeader({ segments, leaf, actions, leading, className }: BreadcrumbHeaderProps) {
   return (
-    <PageHeader className={cn("gap-2 bg-background text-body", className)}>
+    <PageHeader leading={leading} className={cn("gap-2 bg-background text-body", className)}>
       <div className="flex flex-1 items-center gap-1.5 min-w-0">
         {segments.map((segment) => (
           <Fragment key={segment.href}>

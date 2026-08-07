@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // batchFixture wires a Daemon against a fake server that serves a configurable
@@ -39,6 +41,9 @@ type batchFixture struct {
 	registered []registeredCall
 	// probes counts detectAgentVersion calls per executable path.
 	probes map[string]int
+	// probeVersion is what the version probe stub reports; defaults to "9.9.9".
+	// Changing it mid-test simulates an in-place agent CLI upgrade.
+	probeVersion string
 	// probeErr, when set, is consulted by the version probe stub before it
 	// succeeds. It receives the executable path and the 1-based attempt count
 	// for that path, and returns a non-nil error to fail that attempt.
@@ -52,6 +57,70 @@ type batchFixture struct {
 	// best-effort profile fetch failing while a discovery-driven registration
 	// is in flight.
 	profilesFail bool
+	// deregistered accumulates every runtime ID sent to /api/daemon/deregister,
+	// so a test can assert the server was actually told to stop routing work.
+	deregistered []string
+	// registerDelay, when non-zero, makes the register handler sleep before
+	// recording the call, widening the window in which two unserialized
+	// register calls for the same workspace would overlap.
+	registerDelay time.Duration
+	// registerGate, when set, is invoked by the register handler (off fx.mu)
+	// with the workspace ID before the response is built. A test blocks in it to
+	// hold one register in flight while it drives another state change, which is
+	// how the "response predates a verdict" interleaves are made deterministic
+	// instead of timing-dependent.
+	registerGate func(workspaceID string)
+	// registerInFlight / registerMaxInFlight track how many register handlers
+	// run at once, so a test can assert same-workspace serialization.
+	registerInFlight    int
+	registerMaxInFlight int
+	// deregisterGate, when set, is invoked by the deregister handler (off fx.mu)
+	// with the runtime IDs before they are applied. A test blocks in it to hold
+	// one cleanup in flight while it drives a recovery, which is how the
+	// "an older cleanup outlives a newer recovery" interleave is made
+	// deterministic instead of timing-dependent.
+	deregisterGate func(runtimeIDs []string)
+	// stableRuntimeIDs makes the register handler return ONE id per
+	// (workspace, runtime) rather than a fresh one per call, mirroring the
+	// server's UpsertAgentRuntime: re-registering a provider returns the row
+	// that already exists. A cleanup can only undo a recovery when the two name
+	// the same row, so that interleave is invisible without this.
+	stableRuntimeIDs bool
+	runtimeIDs       map[string]string // "<workspace>|<profile_id or type>" -> runtime ID
+	// online is the server's view of each runtime row: register puts it online,
+	// deregister takes it offline. This is what a test asserts on when the
+	// question is "which side won", rather than "was a call made".
+	online map[string]bool
+}
+
+// enableStableRuntimeIDs must be called before the first registration.
+func (fx *batchFixture) enableStableRuntimeIDs() {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.stableRuntimeIDs = true
+}
+
+// setDeregisterGate installs a hook the deregister handler calls before the
+// rows are taken offline.
+func (fx *batchFixture) setDeregisterGate(fn func(runtimeIDs []string)) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.deregisterGate = fn
+}
+
+// runtimeIDFor returns the server-side runtime ID for a workspace's provider
+// (or profile), which only exists under enableStableRuntimeIDs.
+func (fx *batchFixture) runtimeIDFor(workspaceID, key string) string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return fx.runtimeIDs[workspaceID+"|"+key]
+}
+
+// runtimeOnline reports the server's current status for a runtime row.
+func (fx *batchFixture) runtimeOnline(id string) bool {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return fx.online[id]
 }
 
 // failRegister toggles register failure for every workspace.
@@ -96,6 +165,9 @@ func (fx *batchFixture) profilesShouldFail() bool {
 type registeredCall struct {
 	workspaceID string
 	types       []string
+	// versions maps runtime type -> the version that call reported, so a test
+	// can assert the server was told about an in-place CLI upgrade.
+	versions map[string]string
 }
 
 func (fx *batchFixture) setWorkspaces(ws ...WorkspaceInfo) {
@@ -108,6 +180,27 @@ func (fx *batchFixture) probeCount(path string) int {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
 	return fx.probes[path]
+}
+
+// setProbeVersion changes what `<cli> --version` reports from now on.
+func (fx *batchFixture) setProbeVersion(version string) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.probeVersion = version
+}
+
+// registeredVersionFor returns the version the LAST Register call for a
+// workspace reported for a provider.
+func (fx *batchFixture) registeredVersionFor(workspaceID, provider string) string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	var version string
+	for _, call := range fx.registered {
+		if call.workspaceID == workspaceID {
+			version = call.versions[provider]
+		}
+	}
+	return version
 }
 
 func (fx *batchFixture) setProbeErr(fn func(path string, attempt int) error) {
@@ -132,6 +225,43 @@ func (fx *batchFixture) registrationFor(workspaceID string) ([]string, int) {
 	return types, calls
 }
 
+// deregisteredCount returns how many runtime IDs were deregistered server-side.
+func (fx *batchFixture) deregisteredCount() int {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return len(fx.deregistered)
+}
+
+// deregisteredIDs copies the runtime IDs deregistered server-side, in order.
+func (fx *batchFixture) deregisteredIDs() []string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return append([]string(nil), fx.deregistered...)
+}
+
+// setRegisterDelay makes every register call linger, so a test can detect two
+// of them overlapping when they should be serialized.
+// setRegisterGate installs a hook the register handler calls before responding.
+func (fx *batchFixture) setRegisterGate(fn func(workspaceID string)) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.registerGate = fn
+}
+
+func (fx *batchFixture) setRegisterDelay(d time.Duration) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.registerDelay = d
+}
+
+// maxRegisterInFlight reports the peak number of concurrently running
+// register handlers.
+func (fx *batchFixture) maxRegisterInFlight() int {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return fx.registerMaxInFlight
+}
+
 func (fx *batchFixture) registerCallCount() int {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
@@ -141,8 +271,11 @@ func (fx *batchFixture) registerCallCount() int {
 func newBatchFixture(t *testing.T) *batchFixture {
 	t.Helper()
 	fx := &batchFixture{
-		profiles: make(map[string][]RuntimeProfile),
-		probes:   make(map[string]int),
+		profiles:     make(map[string][]RuntimeProfile),
+		probes:       make(map[string]int),
+		probeVersion: "9.9.9",
+		runtimeIDs:   make(map[string]string),
+		online:       make(map[string]bool),
 	}
 
 	origDetect := detectAgentVersion
@@ -156,13 +289,14 @@ func newBatchFixture(t *testing.T) *batchFixture {
 		fx.probes[path]++
 		attempt := fx.probes[path]
 		probeErr := fx.probeErr
+		version := fx.probeVersion
 		fx.mu.Unlock()
 		if probeErr != nil {
 			if err := probeErr(path, attempt); err != nil {
 				return "", err
 			}
 		}
-		return "9.9.9", nil
+		return version, nil
 	}
 	checkAgentMinVersion = func(_, _ string) error { return nil }
 
@@ -181,28 +315,81 @@ func newBatchFixture(t *testing.T) *batchFixture {
 				Runtimes    []map[string]string `json:"runtimes"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.mu.Lock()
+			fx.registerInFlight++
+			if fx.registerInFlight > fx.registerMaxInFlight {
+				fx.registerMaxInFlight = fx.registerInFlight
+			}
+			delay := fx.registerDelay
+			gate := fx.registerGate
+			fx.mu.Unlock()
+			if gate != nil {
+				gate(body.WorkspaceID)
+			}
+			defer func() {
+				fx.mu.Lock()
+				fx.registerInFlight--
+				fx.mu.Unlock()
+			}()
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			if fx.registerShouldFail(body.WorkspaceID) {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"error":"injected register failure"}`))
 				return
 			}
-			call := registeredCall{workspaceID: body.WorkspaceID}
+			call := registeredCall{workspaceID: body.WorkspaceID, versions: map[string]string{}}
 			var resp RegisterResponse
+			fx.mu.Lock()
 			for _, rt := range body.Runtimes {
 				call.types = append(call.types, rt["type"])
+				call.versions[rt["type"]] = rt["version"]
+				// Mirror UpsertAgentRuntime: a re-register of a row that already
+				// exists returns that row's ID rather than minting a new one.
+				id := "rt-" + strconv.Itoa(int(runtimeSeq.Add(1)))
+				if fx.stableRuntimeIDs {
+					key := body.WorkspaceID + "|" + rt["type"]
+					if rt["profile_id"] != "" {
+						key = body.WorkspaceID + "|" + rt["profile_id"]
+					}
+					if existing, ok := fx.runtimeIDs[key]; ok {
+						id = existing
+					} else {
+						fx.runtimeIDs[key] = id
+					}
+				}
+				fx.online[id] = true
 				resp.Runtimes = append(resp.Runtimes, Runtime{
-					ID:        "rt-" + strconv.Itoa(int(runtimeSeq.Add(1))),
+					ID:        id,
 					Name:      rt["name"],
 					Provider:  rt["type"],
 					Status:    "online",
 					ProfileID: rt["profile_id"],
 				})
 			}
-			fx.mu.Lock()
 			fx.registered = append(fx.registered, call)
 			fx.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
+		case r.URL.Path == "/api/daemon/deregister":
+			var body struct {
+				RuntimeIDs []string `json:"runtime_ids"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.mu.Lock()
+			gate := fx.deregisterGate
+			fx.mu.Unlock()
+			if gate != nil {
+				gate(body.RuntimeIDs)
+			}
+			fx.mu.Lock()
+			fx.deregistered = append(fx.deregistered, body.RuntimeIDs...)
+			for _, id := range body.RuntimeIDs {
+				fx.online[id] = false
+			}
+			fx.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):
 			if fx.profilesShouldFail() {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -368,7 +555,7 @@ func TestRegisterRuntimesForWorkspace_ProbesOnStandaloneCall(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/fake/claude"}}
 
 	for i := 1; i <= 2; i++ {
-		if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+		if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
 			t.Fatalf("register #%d: %v", i, err)
 		}
 		if got := fx.probeCount("/fake/claude"); got != i {
@@ -458,7 +645,7 @@ func TestDetectBuiltinRuntimes_DropsProviderAfterRetriesExhausted(t *testing.T) 
 		return nil
 	})
 
-	runtimes := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _, _ := d.detectBuiltinRuntimes(context.Background())
 
 	if got := fx.probeCount("/fake/codex"); got != runtimeVersionProbeAttempts {
 		t.Errorf("probed /fake/codex %d times, want %d (retry must stay bounded)", got, runtimeVersionProbeAttempts)
@@ -483,7 +670,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe(t *testing.T) {
 		return errors.New("signal: killed")
 	})
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {
@@ -557,7 +744,7 @@ func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := probes.Load(); got != 2 {
@@ -565,13 +752,16 @@ func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing
 	}
 }
 
-// TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion documents the
-// cost of the case the retry cannot tell apart: a self-heal candidate rejected
-// by the min-version gate leaves the stale path in place, and the outer probe
-// then fails fast — indistinguishable from a transient failure, so the attempt
-// is retried. The verdict is deterministic, so that retry is wasted work; what
-// matters is that it stays bounded and cheap (every probe in it fails fast).
-func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.T) {
+// TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict covers the
+// downgrade shape a version manager produces: the pinned path is deleted and the
+// command now resolves to a binary below the minimum supported version.
+//
+// The self-heal refuses to adopt it — correctly, it must never be launched — but
+// that refusal IS the below-minimum verdict, and swallowing it made the outer
+// probe fall back to the vanished path, fail, and report "version detection
+// failed" instead. That reads as transient by design, which leaves the runtime
+// online and claiming tasks for a CLI that cannot start.
+func TestDetectBuiltinRuntimes_SelfHealRejectionIsABelowMinimumVerdict(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH/exec-bit stub layout is POSIX-specific")
 	}
@@ -585,7 +775,7 @@ func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.
 	})
 	checkAgentMinVersion = func(_, version string) error {
 		if version == "0.0.1" {
-			return errors.New("version too old")
+			return &agent.BelowMinimumError{AgentType: "codex", Detected: version, Minimum: "1.0.0"}
 		}
 		return nil
 	}
@@ -593,12 +783,25 @@ func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.
 	d := freshDaemon("")
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	runtimes, belowMin, _ := d.detectBuiltinRuntimes(context.Background())
+	if len(runtimes) != 0 {
 		t.Fatalf("detected %v (healed path %q), want none: a below-minimum candidate must not be adopted", runtimes, healed)
 	}
-	// Two attempts, each paying one self-heal probe plus one outer probe.
-	if got := probes.Load(); got != int32(2*runtimeVersionProbeAttempts) {
-		t.Errorf("ran %d version probes, want %d (%d bounded attempts)", got, 2*runtimeVersionProbeAttempts, runtimeVersionProbeAttempts)
+	// The refusal is the verdict, not a probe failure. Without carrying it out of
+	// the heal, the loop goes on to probe the vanished pinned path, can only
+	// report "version detection failed", and the runtime stays online serving a
+	// CLI that cannot launch.
+	if belowMin["codex"] != "0.0.1" {
+		t.Errorf("below-minimum verdict = %v, want codex 0.0.1", belowMin)
+	}
+	// Unlike the direct below-minimum case, the heal verdict gets the bounded
+	// fast-failure retry before it is returned: the heal re-resolves PATH per
+	// attempt, and mid-upgrade a stale sibling install can shadow the
+	// not-yet-published new binary — so the demotable verdict is only returned
+	// once the retry reached the same conclusion. One probe per attempt, both
+	// on the healed candidate (the outer probe of the vanished path never runs).
+	if got := probes.Load(); got != 2 {
+		t.Errorf("ran %d version probes, want 2 (one per bounded attempt)", got)
 	}
 }
 
@@ -608,16 +811,16 @@ func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.
 func TestDetectBuiltinRuntimes_DoesNotRetryMinVersionRejection(t *testing.T) {
 	fx := newBatchFixture(t)
 	stubProbeRetry(t, time.Millisecond, time.Second)
-	checkAgentMinVersion = func(provider, _ string) error {
+	checkAgentMinVersion = func(provider, version string) error {
 		if provider == "codex" {
-			return errors.New("version too old")
+			return &agent.BelowMinimumError{AgentType: provider, Detected: version, Minimum: "1.0.0"}
 		}
 		return nil
 	}
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
 
-	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+	if runtimes, _, _ := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
 		t.Fatalf("detected %v, want none", runtimes)
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {
@@ -643,7 +846,7 @@ func TestRegisterRuntimesForWorkspaceBatch_DoesNotMutateSharedPayload(t *testing
 	builtins := []map[string]string{
 		{"name": "Claude Code", "type": "claude", "version": "9.9.9", "status": "online"},
 	}
-	if _, _, err := d.registerRuntimesForWorkspaceBatch(context.Background(), "ws-1", builtins); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspaceBatchLocked(context.Background(), "ws-1", builtins); err != nil {
 		t.Fatalf("batch register: %v", err)
 	}
 

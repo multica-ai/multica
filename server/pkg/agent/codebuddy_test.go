@@ -26,7 +26,6 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 		"--model", "claude-sonnet-4-20250514",
@@ -40,6 +39,29 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 	for i, want := range expected {
 		if args[i] != want {
 			t.Fatalf("args[%d] = %q, want %q\nfull args: %v", i, args[i], want, args)
+		}
+	}
+}
+
+// --strict-mcp-config must never be passed, with or without a managed config.
+// It means "only use servers from --mcp-config" and drops CodeBuddy's user,
+// project and local scopes; measured against the real CLI, strict + a managed
+// config loaded ONLY the managed server, and strict alone loaded nothing at
+// all. The union is what mergeRuntimeAndAgentMcpConfig promises (MUL-5846).
+func TestBuildCodebuddyArgsNeverPassesStrictMCP(t *testing.T) {
+	t.Parallel()
+
+	for _, mcpConfig := range []json.RawMessage{
+		nil,
+		json.RawMessage("null"),
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{"paper":{"command":"paper"}}}`),
+	} {
+		args := buildCodebuddyArgs(ExecOptions{McpConfig: mcpConfig}, slog.Default())
+		for _, arg := range args {
+			if arg == "--strict-mcp-config" {
+				t.Fatalf("mcp_config %q must not disable CodeBuddy's own MCP scopes, got %v", string(mcpConfig), args)
+			}
 		}
 	}
 }
@@ -362,7 +384,8 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "codebuddy says hi" {
 		t.Fatalf("expected output 'codebuddy says hi', got %q", output)

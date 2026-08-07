@@ -25,6 +25,9 @@ export interface CreateIssueRequest {
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
+  /** Authoritative description the editor had adopted before producing this
+   * update. The server uses it to merge channel media that landed meanwhile. */
+  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;

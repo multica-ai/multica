@@ -15,7 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
-func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
+func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	t.Parallel()
 
 	d := &Daemon{
@@ -28,7 +28,9 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		workspaces: map[string]*workspaceState{},
 		logger:     slog.Default(),
 	}
-	d.activeTasks.Store(3)
+	d.activeTasks.Store(2)
+	d.runningTasks.Store(1)
+	d.resourceWaitTasks.Store(1)
 	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -41,7 +43,9 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 
 	// Decode into a raw map so the test locks in the exact wire-level JSON
 	// keys — the desktop TS client depends on snake_case (cli_version,
-	// active_task_count), so a silent struct-tag rename must fail here.
+	// active_task_count), so a silent struct-tag rename must fail here. The
+	// execution/wait split is additive: active_task_count keeps its ownership
+	// semantics for old clients and restart barriers.
 	var raw map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw response: %v", err)
@@ -50,8 +54,14 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		t.Errorf("cli_version key: got %v, want %q", got, want)
 	}
 	// JSON numbers decode to float64 through map[string]any.
-	if got, want := raw["active_task_count"], float64(3); got != want {
+	if got, want := raw["active_task_count"], float64(2); got != want {
 		t.Errorf("active_task_count key: got %v, want %v", got, want)
+	}
+	if got, want := raw["running_task_count"], float64(1); got != want {
+		t.Errorf("running_task_count key: got %v, want %v", got, want)
+	}
+	if got, want := raw["resource_wait_task_count"], float64(1); got != want {
+		t.Errorf("resource_wait_task_count key: got %v, want %v", got, want)
 	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
@@ -72,9 +82,60 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if resp.CLIVersion != "v9.9.9" {
 		t.Errorf("CLIVersion: got %q, want %q", resp.CLIVersion, "v9.9.9")
 	}
-	if resp.ActiveTaskCount != 3 {
-		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	if resp.ActiveTaskCount != 2 {
+		t.Errorf("ActiveTaskCount: got %d, want 2", resp.ActiveTaskCount)
 	}
+	if resp.RunningTaskCount != 1 {
+		t.Errorf("RunningTaskCount: got %d, want 1", resp.RunningTaskCount)
+	}
+	if resp.ResourceWaitTaskCount != 1 {
+		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+}
+
+// TestHealthHandlerReportsDeferredReload covers the "while waiting to restart,
+// the reason and state are visible" criterion. When trySelfReload has confirmed
+// a multica version change but the daemon was busy at the barrier check, the
+// only way a user can tell why the daemon is still on the old version is this
+// field. It is omitempty, so an idle daemon must not emit the key at all.
+func TestHealthHandlerReportsDeferredReload(t *testing.T) {
+	t.Parallel()
+
+	newHealthProbe := func(t *testing.T) (*Daemon, func() map[string]any) {
+		t.Helper()
+		d := &Daemon{
+			cfg:        Config{CLIVersion: "0.3.7"},
+			workspaces: map[string]*workspaceState{},
+			logger:     slog.Default(),
+		}
+		d.ready.Store(true)
+		return d, func() map[string]any {
+			rec := httptest.NewRecorder()
+			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			var raw map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw response: %v", err)
+			}
+			return raw
+		}
+	}
+
+	t.Run("absent when nothing pending", func(t *testing.T) {
+		_, probe := newHealthProbe(t)
+		if _, present := probe()["reload_pending_reason"]; present {
+			t.Error("reload_pending_reason must be omitted when no restart is pending")
+		}
+	})
+
+	t.Run("explains a deferred restart", func(t *testing.T) {
+		d, probe := newHealthProbe(t)
+		d.setReloadPending("multica binary on disk reports 0.3.8, running 0.3.7")
+
+		got, _ := probe()["reload_pending_reason"].(string)
+		if !strings.Contains(got, "0.3.8") {
+			t.Errorf("reload_pending_reason = %q, want it to name the version on disk", got)
+		}
+	})
 }
 
 // TestHealthHandlerReportsStartingUntilReady pins the liveness/readiness split:

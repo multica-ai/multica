@@ -768,6 +768,7 @@ func TestDispatchResultFromEngine(t *testing.T) {
 		Outcome:         engine.OutcomeNeedsBinding,
 		Sender:          "ou_user",
 		IssueIdentifier: "MUL-7",
+		IssueDuplicate:  true,
 	})
 	if res.Outcome != OutcomeNeedsBinding {
 		t.Fatalf("outcome not mapped: %q", res.Outcome)
@@ -777,5 +778,8 @@ func TestDispatchResultFromEngine(t *testing.T) {
 	}
 	if res.IssueIdentifier != "MUL-7" {
 		t.Fatalf("issue identifier not mapped: %q", res.IssueIdentifier)
+	}
+	if !res.IssueDuplicate {
+		t.Fatal("issue duplicate flag not mapped")
 	}
 }

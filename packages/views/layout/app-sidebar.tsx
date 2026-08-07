@@ -45,6 +45,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -65,7 +66,6 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
@@ -360,6 +360,18 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
+  // On a phone the sidebar is a Sheet covering the page, so navigating out of
+  // it has to dismiss it — otherwise the destination renders underneath and the
+  // tap reads as "nothing happened". Closing on `pathname` rather than on each
+  // link's onClick covers every route out of here at once: the nav groups, the
+  // pinned items, the workspace switcher's programmatic push, and anything
+  // added later. `setOpenMobile` is a no-op on desktop, where the sheet is not
+  // the sidebar's rendering at all.
+  const { setOpenMobile } = useSidebar();
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
+
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
     queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
@@ -574,9 +586,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     ))}
                     {!workspaceCreationDisabled && (
                       <DropdownMenuItem
-                        onClick={() =>
-                          useModalStore.getState().open("create-workspace")
-                        }
+                        onClick={() => push(paths.newWorkspace())}
                       >
                         <Plus className="h-3.5 w-3.5" />
                         {t(($) => $.sidebar.create_workspace)}

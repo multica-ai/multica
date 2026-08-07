@@ -31,7 +31,7 @@
     "archived": "보관됨"
   },
   "execution_mode": {
-    "create_issue": "이슈 생성",
+    "create_issue": "태스크 생성",
     "run_only": "실행만"
   },
   "relative_date": {
@@ -126,7 +126,7 @@
     "owner_note": "작성자와 워크스페이스 관리자는 항상 접근할 수 있습니다."
   },
   "run_status": {
-    "issue_created": "이슈 생성됨",
+    "issue_created": "태스크 생성됨",
     "running": "실행 중",
     "skipped": "건너뜀",
     "completed": "완료됨",
@@ -139,7 +139,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "이슈 연결됨",
+    "issue_linked": "태스크 연결됨",
     "view_log": "실행 로그 보기",
     "skipped_group": {
       "label": "건너뜀",
@@ -286,7 +286,7 @@
     "section_project": "프로젝트",
     "no_project": "프로젝트 없음",
     "section_subscribers": "구독자",
-    "subscribers_hint": "이 오토파일럿이 만드는 모든 이슈를 자동으로 구독합니다",
+    "subscribers_hint": "이 오토파일럿이 만드는 모든 태스크를 자동으로 구독합니다",
     "subscribers_empty": "구독자가 없습니다. 팀원을 추가하면 매번 알림을 받습니다",
     "subscribers_add": "구독자 추가",
     "subscribers_search_placeholder": "이름으로 멤버 검색…",
@@ -316,12 +316,12 @@
     "error_assignee_required": "실행할 에이전트 또는 스쿼드를 선택하세요.",
     "output_modes": {
       "create_issue": {
-        "label": "이슈 생성",
-        "description": "실행할 때마다 추적 가능한 이슈를 만듭니다"
+        "label": "태스크 생성",
+        "description": "실행할 때마다 추적 가능한 태스크를 만듭니다"
       },
       "run_only": {
         "label": "실행만",
-        "description": "이슈를 만들지 않고 조용히 실행합니다"
+        "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
     }
   },

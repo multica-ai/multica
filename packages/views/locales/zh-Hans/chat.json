@@ -17,6 +17,7 @@
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
+    "queue_send_tooltip": "排队发送",
     "stop_tooltip": "停止",
     "send_failed_toast": "发送消息失败",
     "send_blocked_toast": "消息未发送——你已没有该智能体的使用权限",
@@ -29,6 +30,18 @@
     "remove_project_context": "移除项目上下文",
     "no_projects": "还没有项目",
     "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级"
+  },
+  "queue": {
+    "title_other": "{{count}} 条排队消息",
+    "clear": "全部清空",
+    "steer": "引导",
+    "steer_unavailable": "当前回复开始后才能引导",
+    "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
+    "edit": "编辑排队消息",
+    "remove": "移除排队消息",
+    "more": "更多队列操作",
+    "fallback": "排队消息",
+    "action_failed_toast": "无法更新排队消息"
   },
   "message_list": {
     "show_details": "查看详情",
@@ -78,14 +91,14 @@
     "row_stop_aria": "停止当前运行",
     "stop_action": "停止",
     "row_subtitle": {
-      "working": "运行中",
+      "working": "处理中",
       "completed": "已完成",
       "new_reply": "新回复"
     },
     "stop_dialog": {
       "title": "停止这次运行？",
-      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体任务。已产生的内容会保留在对话里。",
-      "description_default": "这会取消当前智能体任务。已产生的内容会保留在对话里。",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体 task。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体 task。已产生的内容会保留在对话里。",
       "cancel": "继续运行",
       "confirm": "停止运行",
       "confirming": "停止中..."
@@ -121,7 +134,7 @@
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",
-    "first_time_pillars": "issue、项目、skill",
+    "first_time_pillars": "任务、项目、skill",
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
@@ -133,6 +146,26 @@
     "list_open": "按优先级列出我未完成的任务",
     "summarize_today": "总结一下我今天做了什么",
     "plan_next": "规划接下来该做什么"
+  },
+  "onboarding_cards": {
+    "aria_label": "开始方式",
+    "cta": "开始",
+    "board": {
+      "title": "几分钟搭好任务看板",
+      "desc": "告诉我目标，我来建项目、拆任务、排好优先级。",
+      "prompt": "把我们的目标整理成一个项目看板"
+    },
+    "delegate": {
+      "title": "先交给我一件事",
+      "desc": "比如一次调研——结果会变成任务和报告交回来。",
+      "prompt": "先交给你一件事：帮我做一次调研，把结果整理成报告交回来"
+    },
+    "digest": {
+      "title": "让日报自己写好",
+      "desc": "每天自动汇总工作区进展，发到你的收件箱。",
+      "prompt": "帮我建一个每天早上自动汇总工作区进展的日报自动化"
+    },
+    "digest_badge": "每天 9:00"
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "archived_agent_banner": "{{name}} 已归档——此会话为只读。",
@@ -150,6 +183,7 @@
     "stages": {
       "offline": "离线",
       "reconnecting": "重连中",
+      "retrying": "重试中",
       "queued": "排队中",
       "waiting_local_directory": "等待本地目录释放",
       "starting_up": "启动中",

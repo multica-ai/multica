@@ -25,8 +25,9 @@ var attachmentDownloadCmd = &cobra.Command{
 	Example: `  # Download an image attachment to the current directory
   $ multica attachment download abc123
 
-  # Download to a specific directory
-  $ multica attachment download abc123 -o /tmp/images`,
+  # Download to a directory inside the working directory (keep agent
+  # downloads out of /tmp and other machine-shared paths, MUL-4252)
+  $ multica attachment download abc123 -o ./attachments`,
 	Args: exactArgs(1),
 	RunE: runAttachmentDownload,
 }
@@ -156,8 +157,15 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("download file: %w", err)
 	}
 
-	// Write to the output directory.
+	// Write to the output directory, creating it if needed so `-o` works
+	// against a directory that does not exist yet (the help example's
+	// `-o ./attachments` in a clean workdir).
 	outputDir, _ := cmd.Flags().GetString("output-dir")
+	if outputDir != "" {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return fmt.Errorf("create output directory: %w", err)
+		}
+	}
 	destPath := filepath.Join(outputDir, filename)
 
 	if err := os.WriteFile(destPath, data, 0o644); err != nil {

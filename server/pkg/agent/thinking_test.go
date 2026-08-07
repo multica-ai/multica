@@ -468,7 +468,7 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
 		{"opencode", "bad value", false}, // spaces are not valid variant names
 		{"hermes", "", true},
-		{"hermes", "low", false}, // hermes has no thinking concept
+		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
 		{"grok", "", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
@@ -483,6 +483,52 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {
 			t.Errorf("IsKnownThinkingValue(%q, %q) = %v, want %v",
 				tc.provider, tc.value, got, tc.want)
+		}
+	}
+}
+
+// TestThinkingControlSupported pins which runtimes Multica can actually hand a
+// per-agent effort to. The distinction drives the API's rejection copy, so a
+// provider must not drift into "supported" without a real injection path.
+func TestThinkingControlSupported(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		provider string
+		want     bool
+	}{
+		{"claude", true},
+		{"codebuddy", true},
+		{"grok", true},
+		{"codex", true},    // dynamic catalog, validated per model by the daemon
+		{"opencode", true}, // dynamic variant names from opencode.json
+		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
+		{"kimi", false},
+		{"qwenpaw", false},
+		{"", false},
+		{"not-a-runtime", false},
+	}
+	for _, tc := range tests {
+		if got := ThinkingControlSupported(tc.provider); got != tc.want {
+			t.Errorf("ThinkingControlSupported(%q) = %v, want %v", tc.provider, got, tc.want)
+		}
+	}
+}
+
+// TestThinkingControlSupportedMatchesTokenGate keeps the capability predicate
+// and the value gate from disagreeing: if a provider accepts any non-empty
+// token it must report the capability, and if it reports none it must accept
+// nothing but the empty "runtime default" sentinel. Otherwise the API can
+// reject a level while claiming the runtime supports one, or vice versa.
+func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
+	t.Parallel()
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "hermes", "kimi", "cursor"}
+	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
+	// provider with any reasoning control accepts it.
+	for _, provider := range providers {
+		accepts := IsKnownThinkingValue(provider, "medium")
+		if got := ThinkingControlSupported(provider); got != accepts {
+			t.Errorf("provider %q: ThinkingControlSupported = %v but IsKnownThinkingValue(%q, \"medium\") = %v",
+				provider, got, provider, accepts)
 		}
 	}
 }

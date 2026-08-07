@@ -1,3 +1,5 @@
+import type { ChatSession } from "./chat";
+
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
 export type AgentRuntimeMode = "local" | "cloud";
@@ -115,6 +117,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "pi",
   "cursor",
   "kimi",
+  "reasonix",
   "kiro",
   "antigravity",
   "qoder",
@@ -122,6 +125,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "traecli",
   "grok",
   "qwen",
+  "qwenpaw",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -368,6 +372,52 @@ export interface AgentTask {
    * user-facing task surfaces; older backends omit it — render conditionally.
    */
   attribution?: TaskAttribution;
+  /**
+   * This run's own token consumption, one entry per (provider, model) it used.
+   * Present on the issue execution-log endpoint only; the daemon claim path
+   * omits it.
+   *
+   * `undefined` (old backend, or a surface that doesn't hydrate it) and `[]`
+   * (backend hydrated, this run has no recorded usage) both mean "no number to
+   * show" and must render as an em dash, never as 0 — a run that predates usage
+   * reporting was not free, we just don't know what it cost.
+   */
+  usage?: TaskUsage[];
+}
+
+/**
+ * One (provider, model) slice of a single run's token usage.
+ *
+ * Field names deliberately match {@link RuntimeUsage} so the same
+ * `estimateCost` / `estimateCostBreakdown` / `estimateCacheSavings` helpers in
+ * `packages/views/runtimes/utils.ts` price a run and a runtime-day identically
+ * — there is exactly one cost formula in the product.
+ *
+ * `cost_usd_ticks` is the provider's own price for this slice (1e-10 USD),
+ * absent when it reported none; those tokens get estimated from the rate table
+ * instead. Unlike the aggregate rows there is no `uncosted_*` split here: a
+ * `task_usage` row is priced or it isn't, so "uncosted" is just "all of them
+ * when cost_usd_ticks is absent", which is what the estimator already assumes.
+ */
+export interface TaskUsage {
+  provider?: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+}
+
+/**
+ * Response of the Mika bootstrap endpoint: the workspace's Mika plus the
+ * caller's conversation with it, resolved together server-side so two clients
+ * cannot each open their own onboarding session.
+ */
+export interface MikaBootstrapResponse extends Agent {
+  /** Absent only when the server could not resolve the session; retry the
+   *  same call rather than creating one client-side. */
+  onboarding_session?: ChatSession;
 }
 
 export interface Agent {
@@ -385,7 +435,16 @@ export interface Agent {
   runtime_bound?: boolean;
   name: string;
   description: string;
+  /** What this agent's owner wrote. For a system agent this holds only the
+   *  workspace's own notes — the product half is `system_instructions`. */
   instructions: string;
+  /** Set for product-defined agents (e.g. "mika"). Absent for user- and
+   *  template-created agents. Identity for "maintained by Multica" checks —
+   *  never the display name, which owners may change. */
+  system_key?: string;
+  /** Read-only product half of a system agent's prompt, served from the
+   *  backend binary. Absent for ordinary agents. */
+  system_instructions?: string;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -981,6 +1040,11 @@ export interface DashboardAgentRunTime {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+  // Runs the user stopped mid-flight. Disjoint from `failed_count`, and
+  // both are subsets of `task_count` — the succeeded count is the
+  // remainder. A stopped run still occupied an agent and still spent
+  // tokens, so its seconds belong in `total_seconds`.
+  cancelled_count: number;
 }
 
 // One (date) bucket of terminal-task run-time + counts for the workspace
@@ -992,6 +1056,8 @@ export interface DashboardRunTimeDaily {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+  // See DashboardAgentRunTime.cancelled_count.
+  cancelled_count: number;
 }
 
 // One (date, failure_reason) bucket of terminal-task counts for the workspace

@@ -684,6 +684,48 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindChannelBindingForMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+// Outbound notification lookup: given a Multica member and a channel_type,
+// return the (installation, channel_user_id) that outbound push should
+// target. The wecom smart-bot inbox-notification path uses this to decide
+// whether to deliver via the bot at all — no row means "unbound member,
+// fall back to the legacy path (TOF/RTX)".
+//
+// If a member has bound multiple installations of the same channel_type in
+// one workspace (multi-bot org), the most-recently-bound wins — matches
+// FindReusableChannelUserBinding's tiebreak so the two lookups agree.
+func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChannelBindingForMemberParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findChannelBindingForMember, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
@@ -784,6 +826,35 @@ type GetChannelChatSessionBindingBySessionParams struct {
 // chat_session is never treated as a Feishu reply target.
 func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, arg GetChannelChatSessionBindingBySessionParams) (ChannelChatSessionBinding, error) {
 	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySession, arg.ChatSessionID, arg.ChannelType)
+	var i ChannelChatSessionBinding
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelChatID,
+		&i.ChatType,
+		&i.LastMessageID,
+		&i.LastThreadID,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getChannelChatSessionBindingBySessionAny = `-- name: GetChannelChatSessionBindingBySessionAny :one
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
+WHERE chat_session_id = $1
+`
+
+// Channel-agnostic reverse lookup: which channel, if any, is behind this
+// chat_session? UNIQUE (chat_session_id) guarantees at most one row, so a
+// caller that only needs to READ the binding never has to name the channel it
+// is hoping for — and therefore cannot go blind on a channel added later.
+// The channel_type-scoped variant above stays for the outbound senders, which
+// are per-platform by construction and must not deliver into a foreign one.
+func (q *Queries) GetChannelChatSessionBindingBySessionAny(ctx context.Context, chatSessionID pgtype.UUID) (ChannelChatSessionBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySessionAny, chatSessionID)
 	var i ChannelChatSessionBinding
 	err := row.Scan(
 		&i.ID,

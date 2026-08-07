@@ -228,7 +228,7 @@ Each hook registers a single `ws.onReconnect(cb)` that invalidates **only the qu
 |---|---|
 | `useInboxRealtime` | `inboxKeys.list(wsId)` |
 | `useMyIssuesRealtime` | `issueKeys.myAll(wsId)` |
-| `useIssueRealtime(id)` | `issueKeys.detail(wsId, id)` + `issueKeys.timeline(wsId, id)` |
+| `useIssueRealtime(id)` | detail + timeline + attachments + active tasks + task history for that issue |
 
 No global "invalidate everything on reconnect" sweep. The fanout would be every screen the user has ever visited in this session refetching simultaneously — wasteful on cellular and prone to rate-limiting the server in low-signal areas where reconnects happen frequently.
 

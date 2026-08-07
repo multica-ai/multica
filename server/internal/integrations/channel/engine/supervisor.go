@@ -481,6 +481,7 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		// run it under a child context, and renew the lease in parallel.
 		ch, err := s.registry.Build(channel.Config{
 			Type:    inst.ChannelType,
+			ID:      inst.ID,
 			Raw:     inst.Config,
 			Handler: s.handler,
 		})

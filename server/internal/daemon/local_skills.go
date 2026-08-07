@@ -160,6 +160,12 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		providerRoot = filepath.Join(home, ".hermes", "skills")
 	case "kimi":
 		providerRoot = filepath.Join(home, ".kimi", "skills")
+	case "reasonix":
+		reasonixHome := strings.TrimSpace(os.Getenv("REASONIX_HOME"))
+		if reasonixHome == "" {
+			reasonixHome = filepath.Join(home, ".reasonix")
+		}
+		providerRoot = filepath.Join(reasonixHome, "skills")
 	case "kiro":
 		providerRoot = filepath.Join(home, ".kiro", "skills")
 	case "qoder":
@@ -191,6 +197,26 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			qwenHome = filepath.Join(home, ".qwen")
 		}
 		providerRoot = filepath.Join(qwenHome, "skills")
+	case "qwenpaw":
+		// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
+		// QwenPaw's global ~/.qwenpaw directory, which owns settings,
+		// sessions, credentials and personal skills. The runtime
+		// resolves its root from QWENPAW_WORKING_DIR → COPAW_WORKING_DIR
+		// → ~/.copaw (legacy) → ~/.qwenpaw (default).
+		// See constant.py in the QwenPaw source.
+		qwenpawHome := strings.TrimSpace(os.Getenv("QWENPAW_WORKING_DIR"))
+		if qwenpawHome == "" {
+			qwenpawHome = strings.TrimSpace(os.Getenv("COPAW_WORKING_DIR"))
+		}
+		if qwenpawHome == "" {
+			legacyCopaw := filepath.Join(home, ".copaw")
+			if _, err := os.Stat(legacyCopaw); err == nil {
+				qwenpawHome = legacyCopaw
+			} else {
+				qwenpawHome = filepath.Join(home, ".qwenpaw")
+			}
+		}
+		providerRoot = filepath.Join(qwenpawHome, "skill_pool")
 	default:
 		return nil, false, nil
 	}

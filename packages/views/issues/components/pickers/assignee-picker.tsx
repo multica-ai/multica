@@ -175,19 +175,20 @@ function AssigneePickerImpl({
         )
       }
     >
-      {/* Unassigned option — hidden when search is active */}
-      {!query && (
-        <PickerItem
-          selected={!mixed && !assigneeType && !assigneeId}
-          onClick={() => {
-            onUpdate({ assignee_type: null, assignee_id: null });
-            setOpen(false);
-          }}
-        >
-          <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
-        </PickerItem>
-      )}
+      {/* Unassigned — always the first row, search active or not. Every
+          picker in the app puts the empty value there, so "clear this field"
+          never moves. */}
+      <PickerItem
+        emptyValue
+        selected={!mixed && !assigneeType && !assigneeId}
+        onClick={() => {
+          onUpdate({ assignee_type: null, assignee_id: null });
+          setOpen(false);
+        }}
+      >
+        <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
+      </PickerItem>
 
       {/* Members */}
       {filteredMembers.length > 0 && (

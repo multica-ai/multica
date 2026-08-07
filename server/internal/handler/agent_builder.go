@@ -235,6 +235,16 @@ type SaveAgentBuilderDraftRequest struct {
 // Whole-object last-write-wins is correct here because a conversation has one
 // editor on one screen — a field-level merge could only reconstruct a state the
 // user never saw.
+//
+// The upsert runs under LockChatSessionForDraftWrite, the row lock the delete
+// path already takes, and re-checks the session inside it. Unlocked, this
+// handler's read and its write are two statements a delete can commit between:
+// the client autosaves on a debounce, so a discard confirmed mid-window used to
+// leave a draft hanging off a session that no longer exists — invisible to the
+// UI, and reachable by no prune but the workspace teardown. agent_builder_draft
+// has no chat_session FK to reject that INSERT, so the lock is what makes the
+// two orderings the only ones: either the save commits first and the delete
+// prunes it, or the delete commits first and the save finds nothing to write to.
 func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -262,13 +272,11 @@ func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) 
 
 	// Creator-only, and only for a builder carrier — the same two gates the
 	// runtime switch applies. Without the carrier check this would be a way to
-	// hang arbitrary JSON off any chat session the caller owns.
+	// hang arbitrary JSON off any chat session the caller owns. Both are decided
+	// on this unlocked read: workspace, creator and carrier are immutable for a
+	// given session, so nothing the lock below could observe would change them.
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
 	if !ok {
-		return
-	}
-	if session.Status != "active" {
-		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return
 	}
 	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
@@ -281,11 +289,42 @@ func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if _, err := h.Queries.UpsertAgentBuilderDraft(r.Context(), db.UpsertAgentBuilderDraftParams{
-		ChatSessionID: session.ID,
-		WorkspaceID:   session.WorkspaceID,
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save agent builder draft")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Everything a concurrent writer can still change about this session —
+	// whether it exists at all, and whether it is still active — is decided here,
+	// under the lock, on a re-read row. A save that blocked on a delete or an
+	// archive resumes holding the values it read before blocking, so the earlier
+	// read cannot be trusted for either.
+	locked, err := qtx.LockChatSessionForDraftWrite(r.Context(), session.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "chat session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+	if locked.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+
+	if _, err := qtx.UpsertAgentBuilderDraft(r.Context(), db.UpsertAgentBuilderDraftParams{
+		ChatSessionID: locked.ID,
+		WorkspaceID:   locked.WorkspaceID,
 		Draft:         req.Draft,
 	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save agent builder draft")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent builder draft")
 		return
 	}

@@ -107,36 +107,37 @@ Conventional 格式：`feat(scope)`、`fix(scope)`、`refactor(scope)`、`docs`�
 
 这是每个翻译 PR 都必须遵守的术语表。原本在 `packages/views/locales/glossary.md`，那个文件现在是个 stub，指向这一页。
 
-### 核心区分：实体 vs 概念
+### 核心区分：日常词 vs Multica 专有词
 
 Multica 的产品名词分两类：
 
-- **实体（typed entity）** —— 有 URL、有数据库 row、是 API 响应里某种 type 的东西。中文里**用小写英文**呈现，视觉上像类型名，告诉读者"这是 Multica 系统里的特定实体"。
-- **概念（concept）** —— 不是数据库实体的普通名词。**完整翻译成中文**，CN 用户看不到生硬的英文。
+- **日常词** —— 用户会直接说出口的词。**完整翻译成中文**，是不是数据库实体都一样：`issue` → 任务、`workspace` → 工作区、`project` → 项目。
+- **Multica 专有词** —— 中文里没有对应词的概念（`skill`），或用户可能要照着敲、照着比对的 schema 标识符（`todo`、`in_progress`、`task_id`）。**用小写英文**呈现，读起来像类型名。
 
-这套规则与 `apps/docs/content/docs/*.zh.mdx` 完全对齐 —— docs 是已经实战 20+ 篇的 CN voice 标准。
+其余规则以 `apps/docs/content/docs/*.zh.mdx` 为准 —— docs 是已经实战 20+ 篇的 CN voice 标准。但 docs 正文里的 `issue` 还没换成「任务」，正在单独清理；这个词以下面的表格为准，不要参考那些页面。
 
-### 实体词的混合规则（`issue` / `skill` / `task`）
+### `issue` 就是产品里的「任务」，必须翻译
 
-`issue` / `skill` / `task` 是 Multica 的核心实体。schema 字段、API 字段、产品 UI 标签都用英文。中文里采用**混合规则** —— 词出现在哪里决定怎么写：
+`issue` 是这个「用户提出、智能体去做的事」的英文产品名。在英文之外的每种语言里，它就是当地最日常的那个「任务」词：
 
-| 场景 | 写法 | 例 |
-| --- | --- | --- |
-| **UI 短句 / 状态名 / 代码上下文** | 小写英文 | "排队中的 task"、"创建子 issue"、"为智能体注入 skill" |
-| **doc 标题 / 章节标题** | 首字母大写英文，**或**对应中文术语 | "Issue 与项目"、"Skills"、"执行任务" |
-| **doc 正文长篇讨论中作为主语** | 中文术语，首次出现配括号英文 | "**执行任务**（task）是智能体每一次工作的单位" |
-| **API / DB 字段** | 永远 `task` / `issue` / `skill` | `task_id`、`issue_status`、`skill_uuid` |
+| 实体 | en | zh-Hans | ja | ko |
+| --- | --- | --- | --- | --- |
+| 提交出来的一件事（`issue`） | Issue | **任务** | **タスク** | **태스크** |
+| 智能体的一次执行（`task`） | Task | `task` | **作業** | **작업** |
 
-中文术语对照：
+这两个词用户都看得到，而且**不是一回事** —— 一个任务下面可以跑很多次执行。任何一种语言都不能把两者写成同一个词，所以「执行」在每种语言里都保留一个视觉上区分得开的写法。
 
-- `task` ↔ `执行任务`（上下文清楚后可简写为"任务"）
-- `issue` 没有公认中文译法 —— 保留英文；标题可大写为 `Issue`
-- `skill` 没有公认中文译法 —— 保留英文；标题可大写为 `Skills`
+不跟着改的部分：
 
-**为什么 `issue` / `skill` / `task` 不强制译，而 `project` / `autopilot` 必译**：
+- **API / DB 字段**永远是 `issue` / `task` / `skill`：`issue_status`、`task_id`、`skill_uuid`。
+- **代码引用和字面命令**保持英文：`multica issue ...`、Slack 与飞书的 `/issue` 斜杠命令。
+- **`skill`** 在中文里仍用小写英文 —— Multica 特有概念，没有公认中文译法；标题可大写为 `Skills`。
+- **表示「问题」的 issue** 不是这个实体：机器卡片上的 `{{count}} issues` 是 `{{count}} 个异常`，不是 `任务`。
 
-- **`issue` / `task`**：dev 团队习惯说英文，"任务"在中文里和"工作"几乎同义太空泛，"工单"是 IT 工单语义，"议题"是 GitHub 风格但用户场景不匹配 —— 三个候选都不如 `issue` 准确。**但**在长篇 doc 正文里，重复 50 次 `task` 节奏不顺，所以正文允许用 `执行任务`，UI 短句、状态名仍保持小写英文。
-- **`skill`**：Multica 特有概念，没有公认中文译法。
+**为什么 `issue` 要译，而 `skill` 不译**：用户每天都在提任务、看任务，而 "issue" 这个词在中文、日文、韩文里除了开发圈黑话之外没有含义，当地人本来就用「任务」在说这件事。`skill` 则是 Multica 特有概念，没有哪个中文词能承载它的意思。
+
+其它产品名词同样按「有没有稳定的本地日常词」来判断：
+
 - **`project` 翻成"项目"**：中文里早就稳定的日常词。飞书 / Tower / Teambition / PingCode / GitHub Projects 中文版 0 例外都翻译成"项目"，没有产品保留 `project`。
 - **`autopilot` 翻成"自动化"**：autopilot 在中文里联想到特斯拉的"自动驾驶"，跟产品功能（按周期跑 task）对应不上。Notion / 飞书都用"自动化"，是行业共识。
 
@@ -211,7 +212,7 @@ UI 里展示这些值时保持英文（必要时用 code-style 包起来）：
 
 英文词（实体名 + 品牌名 + 缩写）与中文之间**加单空格**：
 
-- "Create new issue" → "新建 issue"
+- "Create new issue" → "新建任务"（`任务` 是中文，不加空格）
 - "Assign to agent" → "分配给智能体"
 - "Configure runtime" → "配置运行时"
 - "Stop daemon" → "停止守护进程"
@@ -229,13 +230,13 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 
 // zh-Hans/issues.json
 {
-  "issue_count_other": "{{count}} 个 issue"
+  "issue_count_other": "{{count}} 个任务"
 }
 ```
 
 常见计数格式：
 
-- `{{count}} issues` → `{{count}} 个 issue`
+- `{{count}} issues` → `{{count}} 个任务`
 - `{{count}} agents` → `{{count}} 个智能体`
 - `{{count}} workspaces` → `{{count}} 个工作区`
 - `{{count}} comments` → `{{count}} 条评论`
@@ -300,7 +301,7 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 - **错误信息**：温和但明确，"无法保存修改" 优于 "保存修改失败了！"
 - **按钮**：动词开头，2-4 字最佳。"取消"、"保存修改"、"立即同步"
 - **Tooltip**：完整短句。"复制链接到剪贴板"
-- **placeholder**：示例性提示。"输入 issue 标题..."
+- **placeholder**：示例性提示。"输入任务标题..."
 
 ### 拿不准的时候去哪查
 

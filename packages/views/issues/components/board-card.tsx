@@ -6,6 +6,7 @@ import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Issue, IssueProperty, Project, UpdateIssueRequest } from "@multica/core/types";
+import { stripChannelMediaMarkers } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { propertyListOptions } from "@multica/core/properties";
@@ -33,8 +34,13 @@ function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
-function descriptionPreview(markdown: string): string {
-  return markdown
+// Flatten description Markdown into the card's one-line preview. Channel-media
+// provenance is server-owned merge metadata, not authored content, so it is
+// stripped first: the image Markdown it annotates is removed a line below, and
+// without this the bare HTML comment survives every remaining pass and becomes
+// visible preview text. Exported for tests.
+export function descriptionPreview(markdown: string): string {
+  return stripChannelMediaMarkers(markdown)
     .replace(/!file\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")

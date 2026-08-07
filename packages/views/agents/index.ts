@@ -3,4 +3,5 @@ export {
   ChooseCreateMethodPage,
   ManualCreateAgentPage,
   AiCreateAgentPage,
+  AiBuilderSessionPage,
 } from "./create";

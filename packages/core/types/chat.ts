@@ -12,8 +12,16 @@ export interface ChatPinnedAgent {
  * server or a future kind never breaks rendering.
  * - "message"     — an ordinary user/assistant message.
  * - "no_response" — a completed direct-chat turn that produced no text reply.
+ * - "onboarding_kickoff" — a product-authored opening input that is sent to
+ *   Mika but never rendered as a member message.
+ * - "onboarding_opening" — Mika's reply to the kickoff; chat renders the
+ *   onboarding starter cards under it instead of quick-action chips.
  */
-export type ChatMessageKind = "message" | "no_response";
+export type ChatMessageKind =
+  | "message"
+  | "no_response"
+  | "onboarding_kickoff"
+  | "onboarding_opening";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in
@@ -170,6 +178,13 @@ export interface ChatMessagesPage {
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
+  /** True when the server supports queued follow-up sends. */
+  supports_queue?: boolean;
+  /**
+   * True only when this task was accepted behind another in-flight task in
+   * the same chat session. Optional for compatibility with older servers.
+   */
+  queued?: boolean;
   /**
    * Server-authoritative task creation time. Optimistic StatusPill seed
    * uses this as its anchor so the timer starts from the real `0s` —
@@ -184,6 +199,18 @@ export interface SendChatMessageResponse {
    * compat with servers that predate the field.
    */
   attachment_ids?: string[];
+}
+
+export interface StartMikaOnboardingResponse {
+  /** True only for the request that wrote the opening. */
+  started: boolean;
+  /**
+   * The opening message, already persisted and final. No agent runs to
+   * produce it, so there is no task to await — a `started` response means the
+   * member's first message from Mika is in the transcript right now.
+   */
+  message_id?: string;
+  created_at?: string;
 }
 
 export interface CancelledChatMessage {
@@ -237,8 +264,29 @@ export interface ChatDraftRestoresResponse {
  * task_id/status only, then this query catches up with the real created_at
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
+export interface ChatQueuedTask {
+  task_id: string;
+  status: string;
+  created_at: string;
+  message_id?: string;
+  content?: string;
+}
+
+export interface PrioritizeQueuedChatTaskResponse {
+  task_id: string;
+  /** Server-authoritative task to stop after the selected task is prioritized. */
+  active_task_id?: string;
+}
+
 export interface ChatPendingTask {
   task_id?: string;
   status?: string;
   created_at?: string;
+  /** Explicit capability gate; absent on servers predating follow-up queues. */
+  supports_queue?: boolean;
+  /**
+   * Ordered follow-ups behind the root task. The root may itself still have
+   * database status `queued` before claim, but is never duplicated here.
+   */
+  queued_tasks?: ChatQueuedTask[];
 }

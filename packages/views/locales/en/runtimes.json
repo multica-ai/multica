@@ -27,6 +27,15 @@
       "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
     }
   },
+  "mika_setup": {
+    "title": "Your runtime is ready. Start with Mika.",
+    "description": "Mika turns your goal into an issue, coordinates the right agent, and helps you add reusable specialists when your workflow needs them.",
+    "action": "Start with Mika",
+    "failed": "Couldn't start Mika",
+    "dialog_title": "Where should Mika run?",
+    "dialog_description": "Pick the runtime Mika will use. You can change it later in settings.",
+    "cancel": "Cancel"
+  },
   "machine": {
     "search_placeholder": "Search machines…",
     "filters": {
@@ -255,6 +264,8 @@
     "managed_by_desktop_title": "The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI.",
     "read_only": "Read-only",
     "read_only_title": "Only runtime owners and workspace admins can update the CLI.",
+    "local_build": "Local build",
+    "local_build_title": "This runtime reports a non-release version, so Multica cannot tell whether an upgrade is available. Update it from the machine itself.",
     "latest": "Latest",
     "available": "available",
     "action": "Update",

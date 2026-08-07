@@ -1,20 +1,33 @@
 {
-  "step_header": {
-    "step_of": "第 {{current}} 步 / 共 {{total}} 步"
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "引导步骤",
+    "about_you": {
+      "label": "关于你",
+      "description": "你的角色，和你想完成的事。"
+    },
+    "workspace": {
+      "label": "工作区",
+      "description": "起个名字，定个网址。"
+    },
+    "runtime": {
+      "label": "认识 Mika",
+      "description": "你的第一个智能体队友，以及它在哪运行。"
+    }
   },
   "welcome": {
     "wordmark": "欢迎使用 Multica",
     "headline_line1": "你的 AI 队友，",
     "headline_line2": "在",
     "headline_emphasis": "同一个工作区。",
-    "lede": "像分配给同事一样把 task 交给它们——它们会接手、推进状态、完成后留下评论。",
+    "lede": "像给同事派活一样把任务交给它们——它们会接手、更新状态，做完还会留下评论。",
     "lede_web": "桌面端自带运行时，无需安装。在 web 端继续可以连接你自己的 CLI。",
-    "lede_desktop": "完成本流程后，真实的智能体会回复你创建的第一个 issue。",
+    "lede_desktop": "走完这几步，就会有真实的智能体来回复你的第一个任务。",
     "download_desktop": "下载桌面端",
     "continue_on_web": "在 web 端继续",
     "start_exploring": "开始探索",
-    "skip_existing": "我之前做过了",
-    "illustration_caption": "每个 issue、每条对话、每个决策——团队和智能体共享同一份上下文。",
+    "skip_existing": "我已经用过了",
+    "illustration_caption": "每个任务、每条对话、每个决策——团队和智能体共享同一份上下文。",
     "illustration": {
       "card1_actor_name": "你",
       "card1_actor_initial": "N",
@@ -25,10 +38,10 @@
       "card2_actor_name": "内容智能体",
       "card2_body": "好的，正在拉取研究智能体的引述，围绕\"节省的时间\"展开...",
       "card3_actor_name": "研究智能体",
-      "card3_body": "本周用户访谈整理完成 —— 12 通电话、4 个反复出现的主题、3 段可引用语。",
+      "card3_body": "本周用户访谈整理完成——12 场访谈、4 个反复出现的主题、3 段可引用语。",
       "card3_timestamp": "15 分钟前",
       "card4_actor_name": "审稿智能体",
-      "card4_body": "已审完周一那版草稿 —— 留了 4 条语气批注。等新一版。",
+      "card4_body": "已审完周一那版草稿——留了 4 条语气批注。等新一版。",
       "card5_actor_name": "编码智能体",
       "card5_body_prefix": "已发布 ",
       "card5_body_suffix": " 标记的导出功能，PR 里附了预览链接。",
@@ -46,12 +59,11 @@
   },
   "source_backfill": {
     "eyebrow": "顺便问一句",
-    "lede": "一个小问题——能帮我们更了解像你一样的用户。答完立刻回到你正在做的事。",
+    "lede": "就一个小问题——帮我们了解都是哪些人在用 Multica。回答一次，马上回到手上的事。",
     "submit": "提交",
     "hint_ready": "看起来不错，准备好就点提交。"
   },
   "questions": {
-    "eyebrow_about_you": "关于你",
     "about_you": {
       "question": "简单介绍一下你自己。"
     },
@@ -63,17 +75,17 @@
       "social_linkedin": "LinkedIn",
       "social_youtube": "YouTube",
       "social_github": "GitHub",
-      "social_misc": "其他社区",
+      "social_misc": "其他社交平台",
       "blog_newsletter": "博客 / Newsletter",
-      "ai_assistant": "ChatGPT / Claude / Cursor 推荐",
-      "from_work": "工作场景接触到",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "在工作中接触到",
       "event_conference": "线下活动 / Meetup",
       "dont_remember": "想不起来了",
       "other": "其他",
       "other_placeholder": "例如：一档播客"
     },
     "role": {
-      "question": "你是什么角色？",
+      "question": "哪一项最符合你？",
       "engineer": "工程师 / 开发者",
       "product": "产品经理",
       "designer": "设计师",
@@ -94,7 +106,7 @@
       "plan_research": "计划、头脑风暴、调研",
       "write_publish": "写作、编辑、发布",
       "automate_ops": "自动化日常运营",
-      "evaluate": "先逛逛看看",
+      "evaluate": "只是随便看看",
       "other": "其他",
       "other_placeholder": "例如：协调学习小组"
     }
@@ -104,20 +116,8 @@
     "other_aria": "描述其他选项"
   },
   "step_question": {
-    "hint_pick": "选一项继续 —— 不想说也可以跳过。",
+    "hint_pick": "选一项继续——不想说也可以跳过。",
     "hint_continue": "可以了。准备好就点继续。"
-  },
-  "runtime_aside": {
-    "what_eyebrow": "什么是 agent 运行时？",
-    "what_prefix": "你连接的「电脑」就是我们内部所说的 ",
-    "what_term": "agent 运行时",
-    "what_suffix": "：电脑上的一个小型后台进程，配上一款 AI 编程工具（Claude Code、Codex 等）。一款工具对应一个 agent 运行时。它代替你的智能体执行接到的 task。",
-    "good_eyebrow": "需要知道",
-    "swap_title": "随时切换",
-    "swap_body": "每个智能体的运行时只是一个设置。想换就换。",
-    "add_more_title": "之后再加",
-    "add_more_body": "可以为团队再连接一台电脑，或给每个智能体一台专属电脑。",
-    "learn_more": "了解 agent 运行时 →"
   },
   "cli_install": {
     "copy_aria": "复制",
@@ -127,69 +127,32 @@
   },
   "cloud_waitlist": {
     "intro_main": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
-    "intro_warning": "提示：没有运行时，智能体无法执行 task —— 如果现在跳过，工作区会是只读状态，直到你回来安装一个。",
+    "intro_warning": "提示：没有运行时，智能体无法执行 task——如果现在跳过，在你回来装一个之前不会有任何 task 运行。",
     "email_label": "邮箱",
     "email_placeholder": "you@work.com",
     "reason_label": "为什么选择云？",
     "optional": "选填",
     "reason_placeholder": "例如：希望智能体 24/7 运行，或团队在不同设备协作。",
-    "join": "加入候补",
+    "join": "加入候补名单",
     "on_list": "已在候补名单",
     "success_toast": "已加入候补名单。云运行时上线时会通过邮件通知你。",
     "failed_toast": "加入候补名单失败"
   },
   "welcome_after_onboarding": {
-    "loading_helper": "正在为你准备 Helper……",
-    "error_title": "准备失败",
-    "error_generic": "出了点问题，请重试。",
-    "retry": "重试",
-    "dismiss_error": "知道了",
-    "error_close": "关闭",
-    "user_context_heading": "关于我",
-    "user_context_role_label": "角色",
-    "user_context_use_case_label": "想用 Multica 做",
-    "runtime": {
-      "greeting": "Hi，欢迎来到 Multica",
-      "subtitle": "我是你的第一个 Agent 助手。",
-      "capabilities": "你可以问我任何关于 Multica 的使用，也可以让我帮你在工作区完成任务 —— 建 issue、定时任务、再建一个 agent……",
-      "section_label": "选一个或多个任务,让我开始干活：",
-      "assign_empty": "选一个或多个",
-      "assign_count": "分配 {{count}} 个任务给我 →",
-      "assign_count_plural": "分配 {{count}} 个任务给我 →",
-      "cards": {
-        "intro": {
-          "subtitle": "让我用 1-2 段话讲清楚 Multica 是什么、能干嘛。"
-        },
-        "tour": {
-          "subtitle": "陪你走一遍 issue、agent、squad、autopilot 怎么配合。"
-        },
-        "welcome_page": {
-          "subtitle": "我用单文件 HTML 演示稿介绍 Multica 能为你做什么，按你的角色定制，复制下来双击就能在浏览器里打开。"
-        }
-      },
-      "success": {
-        "title": "都搞定了！",
-        "subtitle": "稍作等待，你的 {{agentName}} 正在为你工作 ☕",
-        "tip_inbox": "它有进展时，你能在「收件箱」收到通知。",
-        "tip_chat": "想直接聊聊？点右下角的对话气泡就行。",
-        "got_it": "知道了 →"
-      }
-    },
     "skip": {
-      "loading": "正在为你准备工作区……",
+      "loading": "正在为你准备工作区...",
       "title": "欢迎来到 Multica！",
-      "subtitle": "我们为你创建了两个任务，帮助你进行下一步操作。",
+      "subtitle": "我们建了一个任务帮你连接运行时。准备好后，在 \"运行时\" 页面就能开始使用 Mika。",
       "got_it": "知道了",
       "status_in_progress": "进行中",
-      "status_todo": "待办",
+      "error_title": "没能帮你准备好",
+      "error_body": "运行时引导任务没有创建成功。可以重试，也可以随时在\"运行时\"页面自己连接。",
+      "retry": "重试",
+      "dismiss": "暂不",
       "cards": {
         "install_runtime": {
           "title": "连接一个运行时",
-          "subtitle": "安装 Codex 或 Kimi 让 agent 上线。"
-        },
-        "create_agent": {
-          "title": "创建你的第一个 agent",
-          "subtitle": "运行时上线后，把第一个 agent 建出来。"
+          "subtitle": "安装 Codex 或 Kimi，然后从 \"运行时\" 页面进入 Mika 的引导对话。"
         }
       }
     }
@@ -199,22 +162,23 @@
     "eyebrow_resume": "继续，或重新开始",
     "headline_first": "给工作区起个名字。",
     "headline_resume": "继续 {{name}}，或新建一个。",
-    "lede_first": "工作区是 issue、智能体和项目所在的地方。之后可以邀请同事，或再开一个工作区。",
-    "lede_resume": "用已有的工作区继续，或在它旁边再建一个新的 —— 你可以加入任意多个工作区。",
+    "lede_first": "工作区是任务、智能体和项目所在的地方。之后可以邀请同事，或再开一个工作区。",
+    "lede_resume": "用已有的工作区继续，或者另建一个新的——你可以同时属于多个工作区。",
     "name_label": "工作区名称",
-    "name_placeholder": "Acme Inc、我的实验室、副业...",
+    "name_placeholder": "Acme Inc、我的实验室、个人项目...",
+    "random_name": "随机",
     "url_label": "URL",
     "slug_placeholder": "acme",
-    "issue_prefix_label": "issue 前缀",
-    "issue_prefix_prefix": "issue 编号会形如 ",
+    "issue_prefix_label": "任务前缀",
+    "issue_prefix_prefix": "任务编号会像这样 ",
     "issue_prefix_suffix": "。之后可以在设置里修改。",
     "create_new_title": "创建一个新工作区",
-    "create_new_subtitle": "重新开始 —— 给工作的另一面留一个独立空间。",
+    "create_new_subtitle": "另起一个——把另一类工作放进单独的空间。",
     "hint_opening": "正在打开 {{name}}。",
     "hint_creating": "正在创建 {{name}}。",
     "hint_creating_pending": "正在创建 {{name}}...",
     "hint_creating_fallback": "你的工作区",
-    "hint_name_first": "先给工作区起个名字才能创建。",
+    "hint_name_first": "填好工作区名称就能创建。",
     "hint_pick": "选择你的工作区或开一个新的。",
     "cta_open": "打开 {{name}}",
     "cta_create_named": "创建 {{name}}",
@@ -225,38 +189,7 @@
     "slug_reserved_error": "该工作区 URL 是系统保留的，无法使用。",
     "slug_conflict_toast": "请换一个工作区 URL",
     "create_failed_toast": "创建工作区失败",
-    "side_create_eyebrow": "工作区里有什么",
-    "side_existing_eyebrow": "你的工作区",
-    "side_things_eyebrow": "你会在这里做什么",
-    "side_next_eyebrow": "接下来",
-    "side_preview_name": "你的工作区",
-    "side_preview_slug": "workspace",
-    "perk_assign": "像分配给同事一样把 issue 分配给智能体",
-    "perk_chat": "无需创建 issue，直接和任意智能体对话",
-    "perk_invite": "邀请同事 —— 他们只会看到这个工作区",
-    "perk_switch": "随时从左上角切换到其他工作区",
-    "next_runtime": "连接一台电脑，给智能体一个跑的地方",
-    "next_agent": "用你连接的运行时创建 Multica Helper",
-    "next_starter": "打开一个上手引导 issue，继续下一步",
-    "preview": {
-      "inbox_label": "收件箱",
-      "inbox_meta": "你的通知",
-      "issues_label": "Issues",
-      "issues_meta": "共享任务面板",
-      "agents_label": "智能体",
-      "agents_meta": "你的 AI 队友",
-      "projects_label": "项目",
-      "projects_meta": "把相关 issue 分组",
-      "autopilot_label": "自动化",
-      "autopilot_meta": "定时自动化",
-      "runtimes_label": "运行时",
-      "runtimes_meta": "智能体跑的地方",
-      "skills_label": "Skills",
-      "skills_meta": "可复用的剧本",
-      "more_label": "更多",
-      "more_meta": "等等"
-    },
-    "creation_disabled_eyebrow": "已禁用创建工作区",
+    "creation_disabled_eyebrow": "工作区创建已禁用",
     "creation_disabled_headline": "请联系管理员邀请你加入工作区。",
     "creation_disabled_lede": "该 Multica 实例不允许创建新的工作区。等管理员把你邀请到某个工作区后，接受邀请并刷新即可继续。",
     "creation_disabled_logout": "退出登录",
@@ -265,11 +198,11 @@
     "creation_disabled_lede_resume": "该实例已禁用创建工作区，继续进入你已有的工作区即可。"
   },
   "step_runtime": {
-    "scanning_headline": "正在连接这台电脑…",
+    "scanning_headline": "正在连接这台电脑...",
     "scanning_lede_prefix": "你的智能体借助本机已安装的 AI 编程工具运行，例如 ",
     "scanning_lede_suffix": " 等。我们正在检测这台电脑上装了哪些。",
-    "found_headline": "这台电脑已连接。选一个 agent 运行时。",
-    "found_lede": "以下是在这台电脑上找到的 agent 运行时。挑一个支撑你的第一个智能体 —— 之后可以随时切换或再加。",
+    "found_headline": "让 Mika 在哪台电脑上运行？",
+    "found_lede": "以下是在这台电脑上找到的 agent 运行时。之后可以随时切换，或添加更多。",
     "runtime_count_other": "{{count}} 个 agent 运行时",
     "status_all_online": "全部在线",
     "status_none_online": "全部离线",
@@ -277,33 +210,30 @@
     "online_label": "在线",
     "offline_label": "离线",
     "empty_headline": "这台电脑上还没有可用的 agent 运行时。",
-    "empty_lede_prefix": "agent 运行时是我们接管的 AI 编程工具，比如 ",
-    "empty_lede_suffix": "。装好其中之一后点刷新，或在下面挑一条路。",
+    "empty_lede_prefix": "agent 运行时就是我们要连接的 AI 编程工具，比如 ",
+    "empty_lede_suffix": "。装好任意一个后点刷新，或从下面选择一种方式。",
     "empty_skip_title": "暂时跳过",
-    "empty_skip_subtitle": "进入工作区（只读模式）。在这台电脑上连接 agent 运行时之前，智能体无法执行 task —— 但你仍可以浏览、规划、邀请同事。",
+    "empty_skip_subtitle": "先进入工作区。在这台电脑上连接 agent 运行时之前，智能体无法执行 task——但你仍可以浏览、规划、邀请同事。",
     "empty_skip_action": "跳过",
-    "empty_waitlist_title": "改用云电脑",
+    "empty_waitlist_title": "使用云电脑",
     "empty_waitlist_subtitle": "我们会在云上为你运行一台电脑。尚未上线。",
     "empty_waitlist_action": "即将推出",
     "skip": "暂时跳过",
     "refresh": "刷新",
-    "refreshing": "正在刷新…",
+    "refreshing": "正在刷新...",
     "hint_selected": "已选择：{{name}}",
-    "hint_pick": "在上方选一个 agent 运行时继续。",
+    "hint_pick": "在上方选一个 agent 运行时，就可以开始使用 Mika。",
     "hint_waiting": "等待第一个结果...",
     "hint_skip_or_refresh": "装好后点刷新，或跳过进入工作区。",
-    "start_exploring": "开始探索"
+    "continue": "开始使用 Mika"
   },
   "step_platform": {
     "eyebrow": "连接一台电脑",
     "headline": "连接一台电脑来运行你的智能体。",
-    "lede": "你的智能体运行在你连接到 Multica 的一台真实电脑上。选一种你想要的连接方式。",
-    "hint_default": "在上方选一种方式 —— 或先跳过，之后再连接电脑。",
-    "hint_downloaded": "在下载页完成安装，然后回到此标签页。",
+    "lede": "Mika 是这个工作区的参谋长，运行在你连接到 Multica 的一台真实电脑上。选择一种连接方式。",
+    "hint_default": "在上方选一种方式——或先跳过，之后再连接电脑。",
     "download_title": "使用这台电脑",
-    "download_title_after": "正在打开下载页...",
-    "download_subtitle": "安装我们的桌面端来连接这台电脑。零配置 —— 下一页选你的平台。",
-    "download_subtitle_after": "已在新标签页打开。在那里选安装包，然后在桌面端完成设置。",
+    "download_subtitle": "安装我们的桌面端来连接这台电脑。会在新标签页打开，在那里选你的平台。",
     "download_button": "下载",
     "cli_title": "通过终端连接",
     "cli_subtitle": "连接一台服务器、远程开发机或任意无头电脑。需要终端。",
@@ -320,14 +250,21 @@
     "stage_normal_prefix": "运行上面的命令。当 ",
     "stage_normal_suffix": " 完成浏览器登录后，你的电脑会自动出现在这里（通常 10–30 秒）。",
     "stage_midway_prefix": "仍在监听。请确保完成了 ",
-    "stage_midway_suffix": " 打开的浏览器标签页 —— 需要批准登录后，你的电脑才能连接。",
+    "stage_midway_suffix": " 打开的浏览器标签页——需要批准登录后，你的电脑才能连接。",
     "stage_slow_prefix": "比平时慢一些。请检查运行 ",
     "stage_slow_suffix": " 的终端是否有错误。",
-    "stage_stalled_prefix": "还没有任何信号传来。如果你不太习惯终端，",
+    "stage_stalled_prefix": "目前还没有收到连接。如果你不太习惯终端，",
     "stage_stalled_term": "桌面端",
-    "stage_stalled_suffix": " 更顺手 —— 一键搞定，这台电脑就连接好了。关闭这个对话框选择桌面端，或点跳过继续。"
+    "stage_stalled_suffix": " 更顺手——一键搞定，这台电脑就连接好了。关闭这个对话框选择桌面端，或点跳过继续。"
   },
   "errors": {
-    "skip_failed": "完成上手引导失败"
+    "skip_failed": "完成上手引导失败",
+    "mika_setup_failed": "无法启动 Mika 工作区"
+  },
+  "mika_intro": {
+    "headline": "认识一下 Mika，你的第一个智能体队友。",
+    "name": "Mika",
+    "role": "参谋长",
+    "blurb": "把你想做的事告诉 Mika，它会变成一个任务，并交给合适的智能体处理。"
   }
 }

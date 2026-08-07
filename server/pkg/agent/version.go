@@ -151,8 +151,26 @@ func (v semver) lessThan(other semver) bool {
 	return v.Patch < other.Patch
 }
 
+// BelowMinimumError reports a version that parsed successfully and is below
+// the configured minimum. It is a distinct type so callers can tell a
+// CONFIRMED too-old verdict apart from "could not parse the version": only
+// the former is evidence strong enough to act on (taking a runtime offline),
+// while an unreadable version must be treated like any other failed
+// detection and leave working runtimes alone.
+type BelowMinimumError struct {
+	AgentType string
+	Detected  string
+	Minimum   string
+}
+
+func (e *BelowMinimumError) Error() string {
+	return fmt.Sprintf("%s version %s is below minimum required %s — please upgrade", e.AgentType, e.Detected, e.Minimum)
+}
+
 // CheckMinVersion validates that detectedVersion meets the minimum for agentType.
-// Returns nil if the version is acceptable or no minimum is defined.
+// Returns nil if the version is acceptable or no minimum is defined, a
+// *BelowMinimumError when the version parsed and is confirmed too old, and a
+// plain error when the version could not be parsed at all.
 func CheckMinVersion(agentType, detectedVersion string) error {
 	minRaw, ok := MinVersions[agentType]
 	if !ok {
@@ -167,7 +185,7 @@ func CheckMinVersion(agentType, detectedVersion string) error {
 		return fmt.Errorf("cannot parse detected %s version %q: %w", agentType, detectedVersion, err)
 	}
 	if detected.lessThan(min) {
-		return fmt.Errorf("%s version %s is below minimum required %s — please upgrade", agentType, detectedVersion, minRaw)
+		return &BelowMinimumError{AgentType: agentType, Detected: detectedVersion, Minimum: minRaw}
 	}
 	return nil
 }

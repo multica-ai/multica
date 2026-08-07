@@ -62,13 +62,12 @@ function SubmitButton({
         <Square className="fill-current" aria-hidden="true" />
       </Button>
     );
-    if (!stopTooltip) return stopButton;
-    return (
+    return stopTooltip ? (
       <Tooltip>
         <TooltipTrigger render={stopButton} />
         <TooltipContent side="top">{stopTooltip}</TooltipContent>
       </Tooltip>
-    );
+    ) : stopButton;
   }
 
   const submitButton = (
@@ -77,7 +76,7 @@ function SubmitButton({
       className="rounded-full"
       disabled={disabled || loading || busy}
       aria-disabled={busy || undefined}
-      aria-busy={busy || undefined}
+      aria-busy={loading || busy || undefined}
       onClick={onClick}
       aria-label={ariaLabel}
     >
@@ -93,13 +92,15 @@ function SubmitButton({
       )}
     </Button>
   );
-  if (!tooltip) return submitButton;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={submitButton} />
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
+  const submitControl = !tooltip
+    ? submitButton
+    : (
+        <Tooltip>
+          <TooltipTrigger render={submitButton} />
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      );
+  return submitControl;
 }
 
 export { SubmitButton, type SubmitButtonProps };

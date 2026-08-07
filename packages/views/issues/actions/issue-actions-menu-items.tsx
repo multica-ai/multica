@@ -24,7 +24,7 @@ import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
 import {
   ALL_STATUSES,
-  PRIORITY_ORDER,
+  PRIORITY_DISPLAY_ORDER,
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -174,7 +174,7 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.priority)}
         </P.SubTrigger>
         <P.SubContent>
-          {PRIORITY_ORDER.map((p) => (
+          {PRIORITY_DISPLAY_ORDER.map((p) => (
             <P.Item key={p} onClick={() => updateField({ priority: p })}>
               <span
                 className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
