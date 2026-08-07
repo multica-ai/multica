@@ -22,9 +22,11 @@ const (
 	// missed at the seam.
 	reconcileOverlapWindow = 5 * time.Minute
 
-	// reconcileInitialLookback bounds the first scan on a fresh cursor. Older
-	// terminal tasks are deliberately not resurrected: delivering a
-	// day-old reply into a live chat is worse than not delivering it.
+	// reconcileInitialLookback is the ceiling on how far back any scan reaches.
+	// Older terminal tasks are deliberately not resurrected: delivering a
+	// day-old reply into a live chat is worse than not delivering it. It is not
+	// a seed for a fresh cursor — see the created_at floor in sweep, and the
+	// column comment on channel_outbound_reconcile_state.
 	reconcileInitialLookback = 24 * time.Hour
 
 	// reconcileSettleDelay keeps the scan window's trailing edge behind now().
@@ -238,10 +240,15 @@ func (r *Reconciler) sweep(ctx context.Context) {
 	}
 
 	now := r.now()
-	initialCursor := now.Add(-reconcileInitialLookback)
 	state, err := r.q.ClaimChannelOutboundReconcileState(ctx, db.ClaimChannelOutboundReconcileStateParams{
 		ChannelType: r.channelType,
-		CursorAt:    pgtype.Timestamptz{Time: initialCursor, Valid: true},
+		// A cursor born at now(), not one backdated by the lookback. On a
+		// deployment that predates the queue, channel_outbound_queue starts
+		// empty while the old direct-socket path has already delivered
+		// everything in that window — and absence of a queue row is exactly
+		// what this scan reads as "never delivered". A backdated seed therefore
+		// re-sends a day of replies into live chats, which aibot cannot unsend.
+		CursorAt: pgtype.Timestamptz{Time: now, Valid: true},
 	})
 	if err != nil {
 		// No row means another replica holds the lease. Not a problem: that is
@@ -258,9 +265,26 @@ func (r *Reconciler) sweep(ctx context.Context) {
 	lease := state.LeaseToken.String
 
 	windowEnd := now.Add(-reconcileSettleDelay)
-	windowStart := initialCursor.Add(-reconcileOverlapWindow)
+	windowStart := now
 	if state.CursorAt.Valid {
-		windowStart = state.CursorAt.Time.Add(-reconcileOverlapWindow)
+		windowStart = state.CursorAt.Time
+	}
+	windowStart = windowStart.Add(-reconcileOverlapWindow)
+	// Clamp to the lookback ceiling. A cursor stalled for days — a replica down,
+	// or enqueues gated off — would otherwise resurrect replies whose 'sent'
+	// tombstones the purge has already removed, so nothing is left to suppress
+	// the re-enqueue: sentRetention is shorter than the stall.
+	if floor := now.Add(-reconcileInitialLookback); windowStart.Before(floor) {
+		windowStart = floor
+	}
+	// Never scan behind the queue's own epoch for this channel. Nothing that
+	// finished before the cursor row existed can be missing from a table that
+	// did not exist either, so a window reaching back past created_at is reading
+	// absence of evidence as evidence of absence. This has to be checked every
+	// sweep, not just the first: the cursor advances to windowEnd immediately,
+	// which puts cursor_at behind created_at.
+	if state.CreatedAt.Valid && windowStart.Before(state.CreatedAt.Time) {
+		windowStart = state.CreatedAt.Time
 	}
 
 	if !r.enqueueOK() {

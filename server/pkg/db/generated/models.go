@@ -388,6 +388,7 @@ type ChannelOutboundReconcileState struct {
 	CursorAt       pgtype.Timestamptz `json:"cursor_at"`
 	LeaseToken     pgtype.Text        `json:"lease_token"`
 	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
