@@ -65,7 +65,15 @@ Pushover can deliver login codes in addition to the existing email or log delive
 
 3. Restart the backend, then open **Settings → Profile → Pushover**. Enter the User Key shown on the [Pushover dashboard](https://pushover.net/). Multica connects automatically and enables **Login codes** by default.
 
-Use **Send Test Notification** to verify delivery before relying on the integration. Pushover receives a normal-priority login message titled `Multica Login Code` whose body is the six-digit code. The application token is never returned to clients; `/api/config` exposes only whether Pushover is available. The Integrations page always shows setup status, while the Profile section appears only when the application token is configured.
+The Pushover card under **Settings → Integrations** is always visible so administrators can discover the server configuration and see whether it is enabled:
+
+![Pushover integration status](docs/assets/pushover-integration-status.jpg)
+
+Only the per-user Profile controls are hidden when `PUSHOVER_APPLICATION_TOKEN` is not configured. Once connected, members can disconnect their User Key, send a test notification, or opt out of individual notification types without a separate Save action:
+
+![Pushover profile settings](docs/assets/pushover-profile-settings.jpg)
+
+Use **Send Test Notification** to verify delivery before relying on the integration. Pushover receives a normal-priority login message titled `Multica Login Code` whose body is the six-digit code. The application token is never returned to clients; `/api/config` exposes only whether Pushover is available.
 
 ### Google OAuth (Optional)
 
