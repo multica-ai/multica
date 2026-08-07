@@ -44,6 +44,10 @@ import (
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	// GetAgentTask serves two readers on this path. The origin gate reads the
+	// row to get at the channel_ingested stamp; the round matcher reads it to
+	// resolve an auto-retry clone back to the turn that owns its input batch,
+	// which is the id the round was bound under.
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
@@ -56,6 +60,7 @@ type outboundQueries interface {
 // event bus; sessions with no wecom binding are silently ignored.
 type Outbound struct {
 	q       outboundQueries
+	tasks   taskLookup
 	senders *sendersRegistry
 	streams *streamStore
 	logger  *slog.Logger
@@ -73,7 +78,7 @@ func NewOutbound(q outboundQueries, senders *sendersRegistry, streams *streamSto
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Outbound{q: q, senders: senders, streams: streams, logger: logger}
+	return &Outbound{q: q, tasks: q, senders: senders, streams: streams, logger: logger}
 }
 
 // Register subscribes to the chat-done event on the bus.
@@ -149,7 +154,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// The bubble this run's round opened, if there is one. Taken up front and
 	// unconditionally: from here on this turn owns it, and a handle left in
 	// the store after the turn ends is a handle pointing at a sealed message.
-	if handle, streaming := o.takeStream(sessionID, e); streaming {
+	if handle, streaming := o.takeStream(ctx, sessionID, e); streaming {
 		// A bubble on screen has to end in words. An empty completion is a
 		// legitimate outcome — the agent had nothing to add — but an endless
 		// spinner is not, so the copy stands in for the silence. For a round
@@ -230,14 +235,16 @@ func chatDoneTaskID(e events.Event) (pgtype.UUID, bool) {
 }
 
 // takeStream claims the bubble this run's round opened, so the answer can
-// replace it in place. The task id is what picks the right one when a session
-// has more than one round open: the head is the running round, but only until
-// a guard has already closed it.
-func (o *Outbound) takeStream(sessionID pgtype.UUID, e events.Event) (streamHandle, bool) {
+// replace it in place. The task id picks it — the one the debounced flush
+// bound to the round when it created the run — so a session with several
+// rounds open never has to guess which bubble an answer belongs in, and an
+// auto-retry's answer still finds the round its first attempt opened.
+func (o *Outbound) takeStream(ctx context.Context, sessionID pgtype.UUID, e events.Event) (streamHandle, bool) {
 	if o.streams == nil || o.senders == nil {
 		return streamHandle{}, false
 	}
-	return o.streams.takeTask(sessionID, taskIDFromEvent(e), roundOver)
+	taker := roundTaker{streams: o.streams, tasks: o.tasks, log: o.logger}
+	return taker.take(ctx, sessionID, taskIDFromEvent(e), roundOver)
 }
 
 // finishStream writes the answer into the bubble and seals it. A failure here

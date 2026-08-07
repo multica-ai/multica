@@ -293,7 +293,7 @@ func dispatchResultFromEngine(res engine.Result) DispatchResult {
 
 type feishuTypingNotifier struct{ mgr *TypingIndicatorManager }
 
-func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, _ engine.RunBatchID) {
 	larkInst, ok := inst.Platform.(Installation)
 	if !ok {
 		return
@@ -302,10 +302,15 @@ func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.Resol
 	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime)
 }
 
+// OnRunStarted is a no-op: the reaction is per SESSION, not per run, so
+// nothing here needs the task id the flush created.
+func (r *feishuTypingNotifier) OnRunStarted(context.Context, pgtype.UUID, engine.RunBatchID, pgtype.UUID) {
+}
+
 // OnSettled clears the reaction when the run trigger enqueued no task (agent
 // offline / archived, or an enqueue failure) — the Patcher's bus-driven clear on
 // chat-done / task-failed never fires for those, so without this the Typing
 // reaction sticks.
-func (r *feishuTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+func (r *feishuTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID, _ engine.RunBatchID) {
 	r.mgr.Clear(ctx, sessionID)
 }
