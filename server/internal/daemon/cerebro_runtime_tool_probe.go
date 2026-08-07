@@ -35,6 +35,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/mcpscan"
@@ -344,7 +345,48 @@ func multicaProbeEnv() map[string]string {
 			out[key] = value
 		}
 	}
+	// CEREBRO-PATCH(probe-identity-from-profile): MUL-4634. The daemon is
+	// normally started from launchd or a plain nohup with no MULTICA_TOKEN in
+	// its environment, and the mcp serve child then reads the DEFAULT profile,
+	// finds no token and exits with "not authenticated" before the handshake.
+	// Every provider measured through this channel (hermes, pi) therefore
+	// reported not_measured with zero tools, and cerebroEffectiveToolsForClaim
+	// rejected every claim with HTTP 500 - 1.529 consecutive failures on
+	// sara.local. The daemon has already resolved its own profile credentials by
+	// then, so the channel uses those unless the environment supplies its own.
+	token, serverURL := probeIdentity()
+	if out["MULTICA_TOKEN"] == "" && token != "" {
+		out["MULTICA_TOKEN"] = token
+	}
+	if out["MULTICA_SERVER_URL"] == "" && serverURL != "" {
+		out["MULTICA_SERVER_URL"] = serverURL
+	}
 	return out
+}
+
+// probeIdentityState holds the daemon's own credentials for the Multica MCP
+// probe. It is deliberately not an os.Setenv: the daemon spawns every agent
+// process with a task-scoped token, and putting its own long-lived token in the
+// process environment would hand that token to all of them.
+var probeIdentityState struct {
+	sync.RWMutex
+	token     string
+	serverURL string
+}
+
+// setProbeIdentity records the credentials the Multica MCP channel starts with.
+// Called once the daemon has resolved its profile, before any runtime registers.
+func setProbeIdentity(token, serverURL string) {
+	probeIdentityState.Lock()
+	defer probeIdentityState.Unlock()
+	probeIdentityState.token = token
+	probeIdentityState.serverURL = serverURL
+}
+
+func probeIdentity() (token, serverURL string) {
+	probeIdentityState.RLock()
+	defer probeIdentityState.RUnlock()
+	return probeIdentityState.token, probeIdentityState.serverURL
 }
 
 // probeOpencodeTools starts opencode's headless server on a loopback port and
