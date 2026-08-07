@@ -578,11 +578,15 @@ func scanKimiSessionUsage(scan kimiUsageScan) map[string]TokenUsage {
 	}
 
 	usage := make(map[string]TokenUsage)
+	// Some filesystems round mtimes down to whole seconds. Compare against a
+	// cutoff at the same precision so a log written during this turn is not
+	// discarded before its authoritative per-record timestamps are checked.
+	mtimeCutoff := scan.startTime.Truncate(time.Second)
 	for _, path := range kimiSessionWireLogs(root, scan.sessionID) {
-		// A wire log untouched since before the turn began belongs to an
-		// earlier run of a resumed session; billing it would re-charge
-		// tokens the previous task already reported.
-		if info, err := os.Stat(path); err != nil || info.ModTime().Before(scan.startTime) {
+		// A wire log clearly untouched since before the turn began belongs to
+		// an earlier run of a resumed session. The record-level filter below
+		// remains the authority at the turn boundary.
+		if info, err := os.Stat(path); err != nil || info.ModTime().Before(mtimeCutoff) {
 			continue
 		}
 		accumulateKimiWireUsage(usage, path, scan)
