@@ -38,6 +38,7 @@ import { LabelsTab } from "./labels-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
+import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "shortcuts", "issue", "chat", "notifications", "tokens"] as const;
@@ -157,7 +158,13 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           tab merges into the card top, and a tinted panel under the first tabs
           breaks that seam (MUL-4439). Zoning comes from the divider instead. */}
       <div className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
-        <h1 className="sr-only text-body font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
+        {/* This page builds its own chrome instead of a PageHeader, so it has
+            to supply the nav trigger itself — below `xl` the nav is a sheet or
+            auto-collapsed, and settings has no other way back to it. */}
+        <div className="flex items-center">
+          <CollapsedNavTrigger />
+          <h1 className="sr-only text-body font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
+        </div>
         <TabsList
           variant="line"
           className="flex w-max min-w-full flex-row items-center gap-1 p-0 md:w-full md:flex-col md:items-stretch"
