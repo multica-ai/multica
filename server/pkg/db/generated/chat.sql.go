@@ -1254,9 +1254,14 @@ WHERE message.chat_session_id = $2
   AND NOT EXISTS (
       SELECT 1
       FROM chat_message AS prior
+      LEFT JOIN agent_task_queue AS prior_turn
+        ON prior_turn.id = prior.task_id
+      LEFT JOIN agent_task_queue AS prior_batch
+        ON prior_batch.id = COALESCE(prior_turn.chat_input_task_id, prior_turn.id)
       WHERE prior.chat_session_id = $2
         AND prior.role != 'user'
         AND (prior.created_at, prior.id) > (message.created_at, message.id)
+        AND (prior_batch.id IS NULL OR prior_batch.created_at > message.created_at)
   )
 `
 
@@ -1271,6 +1276,23 @@ type LinkUnownedChannelChatMessagesToTaskParams struct {
 // channel_command turns were already handled synchronously by Router. They stay
 // durable for channel orchestration but remain unowned and absent from public
 // Chat projections, preventing both immediate and delayed re-execution.
+//
+// The boundary is "already answered", not "something newer exists". A reply can
+// only be a reply TO this message if the turn that wrote it started AFTER the
+// message arrived; a turn already running when the message landed had sealed
+// its own input batch before the message existed, so its reply — however late
+// it lands — answers an earlier batch and must not become a boundary. Without
+// that qualifier, a predecessor completing inside the debounce window (message
+// at 18:31:17.7, predecessor reply at 18:31:20.2, seal at 18:31:20.7) sealed
+// ZERO rows: the new task owned an empty input batch and the claim path
+// cancelled it, losing the user's message with no reply (GH #6591).
+//
+// The reply's turn is compared through COALESCE(chat_input_task_id, id): an
+// auto-retry clone gets a fresh id while inheriting the root's batch, and it is
+// the ROOT's creation time that says which messages that batch could contain.
+// A non-user row with no task (or whose task row is gone) still counts as a
+// boundary — unattributable output is treated as possibly answering, so the
+// pre-ownership rows of a legacy session are never swept into a new batch.
 func (q *Queries) LinkUnownedChannelChatMessagesToTask(ctx context.Context, arg LinkUnownedChannelChatMessagesToTaskParams) error {
 	_, err := q.db.Exec(ctx, linkUnownedChannelChatMessagesToTask, arg.TaskID, arg.ChatSessionID)
 	return err
