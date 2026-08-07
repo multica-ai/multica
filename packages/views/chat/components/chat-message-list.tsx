@@ -45,6 +45,7 @@ import type {
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
+import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { formatElapsedMs } from "../lib/format";
@@ -206,6 +207,18 @@ export function ChatMessageList({
     return null;
   }, [messages]);
 
+  // Mika's onboarding opening self-describes (message_kind stamped by the
+  // completion path — the hidden kickoff row never reaches clients) and
+  // carries the product's starter cards instead of that turn's quick-action
+  // chips (MUL-5765).
+  const starterCardsMessageId = useMemo(
+    () =>
+      messages.find(
+        (m) => m.role === "assistant" && m.message_kind === "onboarding_opening",
+      )?.id ?? null,
+    [messages],
+  );
+
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
   // timeline (and pill) to avoid rendering the same content in two places
@@ -337,6 +350,7 @@ export function ChatMessageList({
               onRegenerateQuickActions={onRegenerateQuickActions}
               latestAssistantMessageId={latestAssistantMessageId}
               quickActionsPendingMessageId={quickActionsPendingMessageId}
+              starterCardsMessageId={starterCardsMessageId}
             />
           </div>
         )}
@@ -401,6 +415,7 @@ const MessageBubble = memo(function MessageBubble({
   onRegenerateQuickActions,
   latestAssistantMessageId,
   quickActionsPendingMessageId,
+  starterCardsMessageId,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -410,6 +425,7 @@ const MessageBubble = memo(function MessageBubble({
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
   latestAssistantMessageId: string | null;
   quickActionsPendingMessageId: string | null;
+  starterCardsMessageId: string | null;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -464,6 +480,7 @@ const MessageBubble = memo(function MessageBubble({
       onRegenerateQuickActions={onRegenerateQuickActions}
       canRegenerateQuickActions={message.id === latestAssistantMessageId}
       quickActionsPending={quickActionsPendingMessageId === message.id}
+      showStarterCards={message.id === starterCardsMessageId}
     />
   );
 });
@@ -495,6 +512,7 @@ function AssistantMessage({
   onRegenerateQuickActions,
   canRegenerateQuickActions = false,
   quickActionsPending = false,
+  showStarterCards = false,
 }: {
   taskId: string | null;
   message?: ChatMessage;
@@ -505,6 +523,8 @@ function AssistantMessage({
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
   canRegenerateQuickActions?: boolean;
   quickActionsPending?: boolean;
+  /** This turn is Mika's onboarding opening — render starter cards, not chips. */
+  showStarterCards?: boolean;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -580,7 +600,14 @@ function AssistantMessage({
             timeline={timeline}
             isPending={isPending}
           />
-          {onQuickAction && (message.quick_actions?.length ?? 0) > 0 ? (
+          {onQuickAction && showStarterCards ? (
+            // The opening's starter cards own this turn's suggestion strip
+            // (MUL-5765); the server skips chip generation for it.
+            <OnboardingStarterCards
+              onPick={onQuickAction}
+              disabled={quickActionsDisabled || isPending}
+            />
+          ) : onQuickAction && (message.quick_actions?.length ?? 0) > 0 ? (
             <QuickActions
               actions={message.quick_actions ?? []}
               disabled={quickActionsDisabled || isPending}

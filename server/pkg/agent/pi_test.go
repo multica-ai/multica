@@ -200,6 +200,12 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 func piEventStreamScript(events []string) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
+	// Real Pi reads the piped prompt to EOF before emitting events, so the fake
+	// must drain stdin too. A fake that exits without reading closes the read end
+	// while the backend is still writing the prompt, and the resulting EPIPE is
+	// reported as "pi prompt write failed" — a load-dependent flake that has
+	// nothing to do with what these tests assert.
+	b.WriteString("cat > /dev/null\n")
 	for _, e := range events {
 		b.WriteString("printf '%s\\n' '")
 		b.WriteString(e)

@@ -3,10 +3,15 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -87,4 +92,113 @@ func kimiSmokeModel() string {
 		return model
 	}
 	return ""
+}
+
+// TestKimiRealMcpConfigReachesSessionSmoke drives the real `kimi acp` binary
+// through this package's own backend with a Multica-shaped agent.mcp_config
+// and asserts the server is actually connected and callable.
+//
+// Users reported that MCP configured in Multica "never reaches kimi", pointing
+// at the bare `kimi acp` launch line as evidence (MUL-5846). That line carries
+// no MCP flags because the CLI has none — kimi takes MCP over ACP session/new
+// instead — so only an end-to-end run against the real binary can settle it.
+// The oracle is the MCP server process itself: it appends to a log when spawned
+// and returns a sentinel from its one tool, so neither a hand-written ACP
+// fixture nor the model's own description of its tools can fake a pass.
+func TestKimiRealMcpConfigReachesSessionSmoke(t *testing.T) {
+	requireRealAgentSmoke(t)
+	if testing.Short() {
+		t.Skip("skipping real-binary smoke test in -short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script MCP fixture is POSIX-only")
+	}
+	path, err := exec.LookPath("kimi")
+	if err != nil {
+		t.Skip("kimi not on PATH; skipping real-binary smoke test")
+	}
+	if version, err := exec.Command(path, "--version").CombinedOutput(); err == nil {
+		t.Logf("kimi CLI version: %s", strings.TrimSpace(string(version)))
+	}
+
+	dir := t.TempDir()
+	spawnLog := filepath.Join(dir, "spawned.log")
+	serverPath := filepath.Join(dir, "mcp-probe")
+	writeTestExecutable(t, serverPath, []byte(stdioMcpProbeScript(spawnLog)))
+
+	backend, err := New("kimi", Config{ExecutablePath: path, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	// Exactly the shape the daemon forwards from agent.mcp_config.
+	mcpConfig := fmt.Sprintf(`{"mcpServers":{"multicaprobe":{"command":%q,"args":[],"env":{}}}}`, serverPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx,
+		"Call the multica_probe_ping tool and reply with exactly what it returned. Do nothing else.",
+		ExecOptions{
+			Timeout:   210 * time.Second,
+			Cwd:       dir,
+			Model:     kimiSmokeModel(),
+			McpConfig: json.RawMessage(mcpConfig),
+		})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	t.Logf("status=%q error=%q output=%q", result.Status, result.Error, result.Output)
+
+	// Ground truth: did kimi actually start the MCP server we configured?
+	spawned, err := os.ReadFile(spawnLog)
+	t.Logf("MCP server saw:\n%s", spawned)
+	if err != nil || !bytes.Contains(spawned, []byte("SPAWNED")) {
+		t.Fatalf("MCP server was never started by kimi (log=%q err=%v) — the managed mcp_config did not reach the session", spawned, err)
+	}
+	if !bytes.Contains(spawned, []byte("tools/list")) {
+		t.Fatalf("kimi started the MCP server but never listed its tools: %q", spawned)
+	}
+	if !strings.Contains(result.Output, "MULTICA_MCP_OK") {
+		t.Fatalf("agent output does not contain the tool's sentinel: %q", result.Output)
+	}
+}
+
+// stdioMcpProbeScript returns a minimal POSIX-sh MCP stdio server. It records
+// every request it receives in spawnLog so the test can assert on the process
+// rather than on anything the model says.
+func stdioMcpProbeScript(spawnLog string) string {
+	return `#!/bin/sh
+LOG=` + fmt.Sprintf("%q", spawnLog) + `
+echo SPAWNED >> "$LOG"
+while IFS= read -r line; do
+  echo "$line" >> "$LOG"
+  id=` + "`" + `printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p'` + "`" + `
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"multica-probe","version":"1.0.0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"multica_probe_ping","description":"Returns MULTICA_MCP_OK.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"MULTICA_MCP_OK"}],"isError":false}}\n' "$id"
+      ;;
+    *'"method":"resources/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"resources":[]}}\n' "$id"
+      ;;
+    *'"method":"prompts/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"prompts":[]}}\n' "$id"
+      ;;
+    *'"id"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`
 }

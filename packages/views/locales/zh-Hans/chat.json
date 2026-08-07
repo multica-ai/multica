@@ -147,6 +147,26 @@
     "summarize_today": "总结一下我今天做了什么",
     "plan_next": "规划接下来该做什么"
   },
+  "onboarding_cards": {
+    "aria_label": "开始方式",
+    "cta": "开始",
+    "board": {
+      "title": "几分钟搭好任务看板",
+      "desc": "告诉我目标，我来建项目、拆任务、排好优先级。",
+      "prompt": "把我们的目标整理成一个项目看板"
+    },
+    "delegate": {
+      "title": "先交给我一件事",
+      "desc": "比如一次调研——结果会变成任务和报告交回来。",
+      "prompt": "先交给你一件事：帮我做一次调研，把结果整理成报告交回来"
+    },
+    "digest": {
+      "title": "让日报自己写好",
+      "desc": "每天自动汇总工作区进展，发到你的收件箱。",
+      "prompt": "帮我建一个每天早上自动汇总工作区进展的日报自动化"
+    },
+    "digest_badge": "每天 9:00"
+  },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "archived_agent_banner": "{{name}} 已归档——此会话为只读。",
   "runtime_required_banner": {

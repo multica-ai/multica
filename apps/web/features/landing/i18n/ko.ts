@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Reasonix, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI 등 15개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 20개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Reasonix, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI 등 15개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 20개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,35 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.20",
+          date: "2026-08-06",
+          title: "DingTalk 봇, Mika와 함께하는 첫 시작, 실행별 토큰 비용",
+          changes: [],
+          features: [
+            "에이전트를 DingTalk에 둘 수 있어요. DM이나 그룹에서 @로 부르면 됩니다.",
+            "가입을 마치면 Mika가 기다리고, 첫 태스크를 시작할 카드도 함께 나옵니다.",
+            "실행 기록에 각 실행의 비용과 태스크 전체 합계가 표시됩니다.",
+            "댓글 알림을 껐어도 @로 이름을 부른 알림은 그대로 옵니다.",
+            "휴대폰 채팅이 전체 화면으로 열리고, 입력창이 키보드 위에 놓입니다.",
+            "multica나 Agent CLI를 바꿔 두면 다시 시작하지 않아도 그대로 반영됩니다.",
+          ],
+          improvements: [
+            "에이전트가 매번 읽는 지시가 짧아져, 그만큼을 실제 작업에 씁니다.",
+            "추론 강도가 없는 런타임은 값이 잘못됐다는 대신 그 사실을 알려 줍니다.",
+            "휴대폰에서 태스크 상세와 논의 목록이 화면을 더 넓게 씁니다.",
+            "실행 기록 제목이 줄바꿈되지 않고 늘 한 줄로 유지됩니다.",
+          ],
+          fixes: [
+            "채팅에서 /issue로 보낸 이미지가 새 태스크의 첨부로 함께 들어갑니다.",
+            "한 번의 로그인 실패로 태스크가 영구히 막히지 않습니다.",
+            "사용자 지정 런타임의 모델 목록이 해당 런타임의 프로그램에서 채워집니다.",
+            "데스크톱이 터미널 CLI가 가진 설정을 건드리지 않습니다.",
+            "OpenCode 세션이 도구 호출 실패 후에도 계속 이어집니다.",
+            "Windows의 Pi 에이전트가 프롬프트에서 실패하지 않고 안정적으로 시작합니다.",
+            "Kimi, Grok, Kiro, Qoder, Trae CLI 등의 사용량과 비용도 기록됩니다.",
+          ],
+        },
         {
           version: "0.4.19",
           date: "2026-08-05",

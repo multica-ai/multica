@@ -30,7 +30,6 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
 | Hermes | `hermes` | ✓ | ✓ | 실행별 `HERMES_HOME/skills/` |
 | Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
-| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
@@ -38,6 +37,8 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | 실행별 워크스페이스 `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
 "Multica의 MCP 관리"는 에이전트 설정에 MCP server를 입력하면 Multica가 실행 전에 해당 도구로 전달할 수 있다는 뜻입니다. 도구 자체에 다른 MCP 설정 방법이 없다는 뜻은 아닙니다.
@@ -47,6 +48,8 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 에이전트를 만들 때 모델 목록은 해당 런타임에서 가져옵니다. 일부 도구는 고정된 모델 이름을 제공하고, 일부는 로컬 설정, 로그인 계정, 구독 권한에 따라 사용 가능한 모델을 반환합니다.
 
 모델을 선택하지 않으면 Multica가 해당 도구의 기본 설정을 사용합니다. 목록이 비어 있다면 런타임이 온라인이고 도구에 로그인되어 있는지 확인한 뒤 모델 목록을 새로 고치세요.
+
+QwenPaw만 예외입니다. Multica에서 고른 모델을 받아들이지 않으므로 선택 상자가 비활성 상태로 "런타임에서 관리"라고 표시됩니다. 모델은 QwenPaw 자체 설정에서 선택하세요. QwenPaw의 모델 목록이 비어 있는 것은 정상이며 런타임이 오프라인이라는 뜻이 아닙니다.
 
 <Callout type="info">
 도구마다 모델 이름이 다를 수 있습니다. AI 코딩 도구를 바꾸면 기존 모델 값은 새 도구에서 유효하지 않으므로 다시 선택해야 합니다.

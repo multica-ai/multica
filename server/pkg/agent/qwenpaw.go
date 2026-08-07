@@ -71,7 +71,13 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	// `qwenpaw acp` runs the ACP agent loop over stdio. The daemon
 	// auto-approves in hermesClient.handleAgentRequest by selecting
 	// a safe granting option for each session/request_permission request.
-	qwenpawArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, qwenpawBlockedArgs, b.cfg.Logger)...)
+	//
+	// ExtraArgs (MULTICA_QWENPAW_ARGS, daemon-wide) precede CustomArgs
+	// (per-agent), matching the documented precedence and the other backends
+	// that accept both.
+	qwenpawArgs := []string{"acp"}
+	qwenpawArgs = append(qwenpawArgs, filterCustomArgs(opts.ExtraArgs, qwenpawBlockedArgs, b.cfg.Logger)...)
+	qwenpawArgs = append(qwenpawArgs, filterCustomArgs(opts.CustomArgs, qwenpawBlockedArgs, b.cfg.Logger)...)
 
 	// Inject --workspace for per-task isolation. This is blocked in
 	// qwenpawBlockedArgs so user-defined custom_args cannot override it.
@@ -197,7 +203,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			return
 		}
 
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "qwenpaw", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "qwenpaw", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
@@ -317,10 +323,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 					duration := time.Since(startTime)
 					b.cfg.Logger.Info("qwenpaw prompt cancelled", "stopReason", pr.stopReason, "duration", duration.Round(time.Millisecond).String())
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
 		}
@@ -340,12 +343,10 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			// QwenPaw's model selection is unsupported — the backend never
 			// sends opts.Model to the agent. Always attribute usage to
 			// "unknown" rather than a model that was never applied.

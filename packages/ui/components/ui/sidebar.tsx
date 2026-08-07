@@ -6,7 +6,7 @@ import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
 import { useTranslation } from "react-i18next"
 
-import { useIsMobile } from "@multica/ui/hooks/use-mobile"
+import { useIsCompact } from "@multica/ui/hooks/use-mobile"
 import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { Input } from "@multica/ui/components/ui/input"
@@ -35,6 +35,10 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_DRAG_THRESHOLD = 2
+// Tailwind `lg`–`xl`: wide enough to keep a two-pane list/detail surface, too
+// narrow to also spend 256px on the nav. The nav starts collapsed here and the
+// header's trigger brings it back.
+const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
 
 function clampSidebarWidth(width: number) {
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width))
@@ -46,7 +50,12 @@ type SidebarContextProps = {
   setOpen: (open: boolean) => void
   openMobile: boolean
   setOpenMobile: (open: boolean) => void
-  isMobile: boolean
+  /**
+   * The sidebar is an overlay sheet rather than a column in the main flow.
+   * True below the compact breakpoint, which covers tablets and folded inner
+   * screens as well as phones, not phones alone.
+   */
+  isCompact: boolean
   toggleSidebar: () => void
 }
 
@@ -94,7 +103,7 @@ function SidebarProvider({
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
-  const isMobile = useIsMobile()
+  const isCompact = useIsCompact()
   const [openMobile, setOpenMobile] = React.useState(false)
 
   const [width, _setWidth] = React.useState(SIDEBAR_WIDTH_DEFAULT)
@@ -132,10 +141,42 @@ function SidebarProvider({
     [setOpenProp, open]
   )
 
+  // Auto-collapse across the `lg`–`xl` band. Only the two crossings are
+  // automated: entering it parks the state we came in with and closes the nav,
+  // leaving it restores that state. Anything the user does in between — most
+  // of all re-opening the nav — is left alone until the next crossing.
+  //
+  // `setOpen`'s identity changes with `open`, so the listener reads both
+  // through a ref instead of resubscribing on every toggle. The ref is seeded
+  // at first render and refreshed after each commit — declared above the
+  // listener so on mount it is already current when that effect first runs.
+  const latest = React.useRef({ open, setOpen })
+  React.useEffect(() => {
+    latest.current = { open, setOpen }
+  })
+  const parkedOpenRef = React.useRef<boolean | null>(null)
+  React.useEffect(() => {
+    const mql = window.matchMedia(SIDEBAR_AUTO_COLLAPSE_QUERY)
+    const apply = (matches: boolean) => {
+      if (matches) {
+        if (parkedOpenRef.current !== null) return
+        parkedOpenRef.current = latest.current.open
+        latest.current.setOpen(false)
+      } else if (parkedOpenRef.current !== null) {
+        latest.current.setOpen(parkedOpenRef.current)
+        parkedOpenRef.current = null
+      }
+    }
+    apply(mql.matches)
+    const onChange = (e: MediaQueryListEvent) => apply(e.matches)
+    mql.addEventListener("change", onChange)
+    return () => mql.removeEventListener("change", onChange)
+  }, [])
+
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
-  }, [isMobile, setOpen, setOpenMobile])
+    return isCompact ? setOpenMobile((open) => !open) : setOpen((open) => !open)
+  }, [isCompact, setOpen, setOpenMobile])
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
@@ -146,12 +187,12 @@ function SidebarProvider({
       state,
       open,
       setOpen,
-      isMobile,
+      isCompact,
       openMobile,
       setOpenMobile,
       toggleSidebar,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isCompact, openMobile, setOpenMobile, toggleSidebar]
   )
   const resizeContextValue = React.useMemo<SidebarResizeContextProps>(
     () => ({
@@ -198,7 +239,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const { isCompact, state, openMobile, setOpenMobile } = useSidebar()
 
   if (collapsible === "none") {
     return (
@@ -215,7 +256,7 @@ function Sidebar({
     )
   }
 
-  if (isMobile) {
+  if (isCompact) {
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
@@ -241,9 +282,13 @@ function Sidebar({
     )
   }
 
+  // `lg`, not `md`: this CSS gate has to agree with the `useIsCompact()` gate
+  // that chose the in-flow branch over the sheet above. While they disagreed,
+  // every load between the two breakpoints painted a 256px sidebar for one
+  // frame before the hook resolved and collapsed it into a sheet.
   return (
     <div
-      className="group peer hidden text-sidebar-foreground md:block"
+      className="group peer hidden text-sidebar-foreground lg:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -266,7 +311,7 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none md:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none lg:flex",
           "data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
@@ -470,7 +515,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-page-canvas md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:ring-1 md:peer-data-[variant=inset]:ring-surface-border md:peer-data-[variant=inset]:shadow-[var(--surface-shadow)] md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-full flex-1 flex-col bg-page-canvas lg:peer-data-[variant=inset]:m-2 lg:peer-data-[variant=inset]:ml-0 lg:peer-data-[variant=inset]:rounded-xl lg:peer-data-[variant=inset]:ring-1 lg:peer-data-[variant=inset]:ring-surface-border lg:peer-data-[variant=inset]:shadow-[var(--surface-shadow)] lg:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}
@@ -672,7 +717,7 @@ function SidebarMenuButton({
     isActive?: boolean
     tooltip?: string | React.ComponentProps<typeof TooltipContent>
   } & VariantProps<typeof sidebarMenuButtonVariants>) {
-  const { isMobile, state } = useSidebar()
+  const { isCompact, state } = useSidebar()
   const comp = useRender({
     defaultTagName: "button",
     props: mergeProps<"button">(
@@ -706,7 +751,7 @@ function SidebarMenuButton({
       <TooltipContent
         side="right"
         align="center"
-        hidden={state !== "collapsed" || isMobile}
+        hidden={state !== "collapsed" || isCompact}
         {...tooltip}
       />
     </Tooltip>

@@ -324,6 +324,8 @@ export interface TaskFailedPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+  failure_reason?: string;
+  retry_pending?: boolean;
 }
 
 export interface TaskCancelledPayload {

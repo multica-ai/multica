@@ -166,12 +166,13 @@ func TestFeishuSessionBinder_BindMediaMapping(t *testing.T) {
 		WorkspaceID: binderUUID(2),
 		Sender:      binderUUID(7),
 		IssueID:     binderUUID(8),
+		Body:        "[Image]",
 		MediaRefs:   []channel.MediaRef{ref},
 	}); err != nil {
 		t.Fatalf("BindMedia: %v", err)
 	}
 	got := f.mediaIn
-	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || got.IssueID != binderUUID(8) || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+	if got.MessageID != binderUUID(4) || got.SessionID != binderUUID(1) || got.WorkspaceID != binderUUID(2) || got.Sender != binderUUID(7) || got.IssueID != binderUUID(8) || got.Body != "[Image]" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
 		t.Fatalf("media mapping wrong: %+v", got)
 	}
 }

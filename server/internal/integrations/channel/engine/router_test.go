@@ -573,8 +573,8 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
 		t.Fatalf("resolved media not bound after append: %+v", h.binder.boundMedia().MediaRefs)
 	}
-	if h.binder.boundMedia().IssueID.Valid {
-		t.Fatalf("plain chat media unexpectedly targeted issue %v", h.binder.boundMedia().IssueID)
+	if got := h.binder.boundMedia(); got.IssueID.Valid || got.Body != "hello" {
+		t.Fatalf("plain chat media target/body = issue:%v body:%q", got.IssueID, got.Body)
 	}
 }
 
@@ -843,8 +843,8 @@ func TestRouter_IssueCommandWithMediaBindsWithoutChatRun(t *testing.T) {
 	if h.tasks.calls() != 0 {
 		t.Fatalf("media completion must not enqueue a chat task, calls=%d", h.tasks.calls())
 	}
-	if got := h.binder.boundMedia(); len(got.MediaRefs) != 1 {
-		t.Fatalf("bound media refs = %+v", got.MediaRefs)
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 1 || got.IssueID != h.issues.result.Issue.ID || got.Body != "hello" {
+		t.Fatalf("bound issue media = %+v", got)
 	}
 }
 

@@ -9,7 +9,42 @@ import (
 	"time"
 )
 
-const emptySuccessfulStreamResult = "The agent completed without a final response."
+// assistantTurn is the classified outcome of one assistant stream event.
+//
+// The stream-json backends parse different wire shapes but share one question
+// per event: may a fallback answer captured earlier in the run survive it?
+type assistantTurn struct {
+	text     string
+	toolUses int
+	// understood is false when the event's message body failed to parse, or
+	// carried a content block type the backend does not handle. In both cases
+	// the backend cannot tell whether the model delivered its answer inside
+	// that event, so an earlier fallback must not outlive it.
+	understood bool
+}
+
+// resolveFallback returns the empty-result fallback after this turn, given the
+// fallback held before it. It is the single place the three stream-json
+// backends encode which turns may leave an answer behind.
+func (t assistantTurn) resolveFallback(prior string) string {
+	switch {
+	case t.toolUses > 0 || !t.understood:
+		// A turn that invokes a tool is intermediate even when it also
+		// contains narration. An unreadable turn tells us nothing at all —
+		// the model may have answered in a shape we failed to parse. Neither
+		// may leave a stale answer behind for the terminal result to adopt:
+		// that is how pre-tool narration would reach a user as the final
+		// answer (#6006), which the fail-closed contract below exists to stop.
+		return ""
+	case t.text != "":
+		return t.text
+	default:
+		// Understood, text-less and tool-less — a thinking-only turn. It
+		// carries neither an answer nor an intermediacy signal, so it must
+		// leave an answer the model already delivered untouched.
+		return prior
+	}
+}
 
 // streamTerminalState keeps the user-facing final answer separate from the
 // streamed assistant turns. Assistant messages are still emitted through the
@@ -40,6 +75,17 @@ type streamTerminalState struct {
 // stream-json protocol completed: success requires a result event. Failed runs
 // always return an empty output so upstream issue/chat fallbacks can never
 // mistake a partial transcript for a final answer.
+//
+// A SUCCESSFUL run with no deliverable text returns an empty output for the same
+// reason. Empty is the platform's signal for "this turn produced no final text",
+// and every delivery surface already owns a decision keyed on it: an issue task
+// skips the synthesized fallback comment, a direct chat writes a localized
+// no_response outcome, and a Slack/Lark channel drops the turn rather than push
+// a placeholder outward. Returning prose here instead makes the output non-empty
+// and silently defeats all three at once — that is how an English sentinel
+// reached a Lark thread (GH #6462). Which words a user sees, and in which
+// language, belongs to each delivery surface; the stream parser only reports
+// whether text exists.
 func finalizeStreamResult(
 	provider string,
 	timeout time.Duration,
@@ -112,10 +158,7 @@ func finalizeStreamResult(
 	if state.finalResultText != "" {
 		return status, state.finalResultText, ""
 	}
-	if state.lastAssistantText != "" {
-		return status, state.lastAssistantText, ""
-	}
-	return status, emptySuccessfulStreamResult, ""
+	return status, state.lastAssistantText, ""
 }
 
 type streamProtocolObservation struct {
@@ -149,6 +192,16 @@ type streamProtocolObservation struct {
 	unhandledEventTypeCount int
 	unhandledEventTypes     string
 	unhandledSubtypeCount   int
+	// unreadableAssistantCount reports assistant events whose message body did
+	// not parse, or that carried a content block type the backend does not
+	// handle. Unlike unhandledEventTypeCount (a TOP-LEVEL event type we skip),
+	// this counts events we accepted and then could not fully read.
+	//
+	// Non-zero means the run dropped its empty-result fallback defensively, so
+	// a task that ended with no final text may have had an answer we could not
+	// see. It is the first number to check when a known-good agent starts
+	// returning empty outputs after a CLI upgrade.
+	unreadableAssistantCount int
 }
 
 // logStreamProtocolObservation records only protocol metadata. It deliberately
@@ -174,6 +227,7 @@ func logStreamProtocolObservation(logger *slog.Logger, obs streamProtocolObserva
 		"unhandled_event_type_count", obs.unhandledEventTypeCount,
 		"unhandled_event_types", obs.unhandledEventTypes,
 		"unhandled_subtype_count", obs.unhandledSubtypeCount,
+		"unreadable_assistant_count", obs.unreadableAssistantCount,
 		"anthropic_base_url_configured", obs.anthropicBaseURLConfigured,
 	)
 }

@@ -23,11 +23,17 @@ func TestEventContent(t *testing.T) {
 			"⚠️ task timed out",
 		},
 		{
-			// Failure broadcasts without an error text (a retry-pending
-			// failure — the publisher omits `error` then — or the reaper
-			// sweep) write no transcript message either — stay silent.
+			// Retry-pending failures stay silent even if a mixed-version
+			// publisher accidentally includes an error string.
+			"task failed with retry pending",
+			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"error": "task timed out", "failure_reason": "timeout", "retry_pending": true}},
+			"",
+		},
+		{
+			// Failure broadcasts without an error text have nothing safe to
+			// deliver and stay silent.
 			"task failed without error",
-			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"failure_reason": "timeout", "retry_pending": true}},
+			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"failure_reason": "timeout", "retry_pending": false}},
 			"",
 		},
 		{

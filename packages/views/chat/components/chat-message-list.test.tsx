@@ -410,3 +410,93 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(await screen.findByText(FALLBACK)).toBeInTheDocument();
   });
 });
+
+describe("ChatMessageList onboarding starter cards", () => {
+  // The opening self-describes: the completion path stamps Mika's reply to the
+  // hidden kickoff with message_kind "onboarding_opening" (the kickoff row
+  // itself never reaches clients).
+  const opening = {
+    id: "opening",
+    chat_session_id: "s1",
+    role: "assistant" as const,
+    content: "Hi, I'm Mika.",
+    task_id: null,
+    created_at: new Date(1).toISOString(),
+    message_kind: "onboarding_opening" as const,
+    quick_actions: [{ label: "LLM chip", prompt: "llm prompt" }],
+  };
+
+  function renderCards(overrides: Partial<Parameters<typeof ChatMessageList>[0]> = {}) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[opening]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={vi.fn()}
+            {...overrides}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("renders the three cards under the opening and hides that turn's chips", async () => {
+    renderCards();
+    expect(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Hand me one thing first" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Let the daily digest write itself" }),
+    ).toBeEnabled();
+    // The cards own the opening's suggestion strip — no chip row beside them.
+    expect(screen.queryByRole("button", { name: "LLM chip" })).toBeNull();
+    expect(screen.queryByText("Follow-up questions")).toBeNull();
+  });
+
+  it("sends the card's fixed prompt through the quick-action path", async () => {
+    const onQuickAction = vi.fn();
+    renderCards({ onQuickAction });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    );
+    expect(onQuickAction).toHaveBeenCalledWith({
+      label: "Get a board up in minutes",
+      prompt: "Turn our current goals into a project board",
+    });
+  });
+
+  it("follows the chips' disabled rule while a task runs", async () => {
+    renderCards({ quickActionsDisabled: true });
+    expect(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeDisabled();
+  });
+
+  it("renders ordinary chips, not cards, for an unstamped assistant turn", async () => {
+    renderCards({ messages: [{ ...opening, message_kind: "message" as const }] });
+    expect(await screen.findByRole("button", { name: "LLM chip" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeNull();
+  });
+
+  it("attaches cards only to the stamped opening; later turns keep chips", async () => {
+    const followUp = {
+      id: "follow-up",
+      chat_session_id: "s1",
+      role: "assistant" as const,
+      content: "Anything else?",
+      task_id: null,
+      created_at: new Date(2).toISOString(),
+      quick_actions: [{ label: "Later chip", prompt: "later" }],
+    };
+    renderCards({ messages: [opening, followUp] });
+    expect(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
+  });
+});

@@ -343,6 +343,22 @@ jobs:
         # that stops matching) is visible in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
 
+      - name: Test Windows OpenCode oversized prompt reaches stdin
+        working-directory: server
+        # #6538: the daemon inlined the whole task prompt as an argv element,
+        # so every OpenCode task whose prompt cleared CreateProcess's 32,767
+        # character lpCommandLine limit failed to start at all, with Go
+        # reporting ERROR_FILENAME_EXCED_RANGE as the misleading "The filename
+        # or extension is too long". Only a real CreateProcess enforces that
+        # ceiling, so this cannot run in the ubuntu backend job. The test
+        # spawns a native .exe directly (a Chocolatey-installed opencode.exe is
+        # a real PE binary, not a .cmd shim) with an oversized prompt and pins
+        # that the process starts, argv stays free of the prompt, and the full
+        # payload arrives on stdin.
+        # -v so a silent skip or a -run pattern that stops matching is visible
+        # in the log instead of passing as "ok".
+        run: go test ./pkg/agent -v -run '^TestOpencodeExecuteOversizedPromptStartsOnWindows$' -count=1 -timeout=5m
+
       - name: Test bounded Codex cleanup with inherited stdout descendant
         working-directory: server
         # Windows cannot prove whole-tree termination without a Job Object,

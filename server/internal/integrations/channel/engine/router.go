@@ -458,8 +458,18 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
-	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
-	res.runScheduled = true
+	//
+	//    SkipAgentRun lets an adapter opt this message out of the agent turn —
+	//    used by wecom for standalone /issue commands where the engine has
+	//    already done the meaningful work (created the issue, sent the
+	//    "✅ Created #N" reply via OutboundReplier) and an agent reply would
+	//    just quote the slash command back. The chat_message is still durable
+	//    and the OutboundReplier still fires — only the debounced run trigger
+	//    (and therefore the typing indicator) is suppressed.
+	if !msg.SkipAgentRun {
+		r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+		res.runScheduled = true
+	}
 	if resolveMedia {
 		r.enqueueMedia(set, inst, identity, appendRes.MessageID, msg, sessionID, mediaIssue, deferredIssueTaskID, localMediaDeadline)
 	}
@@ -562,6 +572,7 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 		WorkspaceID: inst.WorkspaceID,
 		Sender:      identity.UserID,
 		IssueID:     issue.ID,
+		Body:        resolved.Text,
 		MediaRefs:   resolved.MediaRefs,
 	})
 	if bindErr != nil {

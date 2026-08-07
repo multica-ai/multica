@@ -12,6 +12,7 @@ func TestBuildMikaOnboardingKickoffSelectsSkillWithKnownContext(t *testing.T) {
 	prompt := buildMikaOnboardingKickoff(
 		"Simplified Chinese",
 		"Venus",
+		"Asia/Shanghai",
 		questionnaireAnswers{
 			Role:    "engineer",
 			UseCase: stringOrSlice{"ship_code", "plan_research"},
@@ -45,7 +46,7 @@ func TestBuildMikaOnboardingKickoffSelectsSkillWithKnownContext(t *testing.T) {
 // below, Mika's first visible reply reads as an answer to a question nobody
 // asked (MUL-4230).
 func TestBuildMikaOnboardingKickoffFramesMikaAsOpeningTheConversation(t *testing.T) {
-	prompt := buildMikaOnboardingKickoff("English", "Venus", questionnaireAnswers{}, false)
+	prompt := buildMikaOnboardingKickoff("English", "Venus", "Asia/Shanghai", questionnaireAnswers{}, false)
 
 	for _, want := range []string{
 		"not a message from the member",
@@ -61,7 +62,7 @@ func TestBuildMikaOnboardingKickoffFramesMikaAsOpeningTheConversation(t *testing
 
 func TestBuildMikaOnboardingKickoffProfileVariants(t *testing.T) {
 	t.Run("skipped questionnaire tells Mika to stay neutral", func(t *testing.T) {
-		prompt := buildMikaOnboardingKickoff("English", "Venus", questionnaireAnswers{
+		prompt := buildMikaOnboardingKickoff("English", "Venus", "Asia/Shanghai", questionnaireAnswers{
 			RoleSkipped:    true,
 			UseCaseSkipped: true,
 		}, false)
@@ -74,7 +75,7 @@ func TestBuildMikaOnboardingKickoffProfileVariants(t *testing.T) {
 	})
 
 	t.Run("other answers carry the member's own words", func(t *testing.T) {
-		prompt := buildMikaOnboardingKickoff("English", "Venus", questionnaireAnswers{
+		prompt := buildMikaOnboardingKickoff("English", "Venus", "Asia/Shanghai", questionnaireAnswers{
 			Role:         "other",
 			RoleOther:    "support lead",
 			UseCase:      stringOrSlice{"other"},
@@ -88,6 +89,46 @@ func TestBuildMikaOnboardingKickoffProfileVariants(t *testing.T) {
 			if !strings.Contains(prompt, want) {
 				t.Fatalf("kickoff missing %q:\n%s", want, prompt)
 			}
+		}
+	})
+}
+
+// The digest starter play schedules a recurring autopilot, and the trigger API
+// defaults an absent timezone to UTC. The member's zone therefore has to reach
+// the model, and its absence has to be visible rather than silent — otherwise
+// the skill proposes "every morning at 09:00" and the member outside UTC gets
+// an afternoon digest (MUL-5765).
+func TestBuildMikaOnboardingKickoffCarriesMemberTimezone(t *testing.T) {
+	t.Run("known zone travels with the profile", func(t *testing.T) {
+		prompt := buildMikaOnboardingKickoff("English", "Venus", "Asia/Shanghai", questionnaireAnswers{
+			Role: "engineer",
+		}, false)
+		if !strings.Contains(prompt, `Member IANA timezone: "Asia/Shanghai"`) {
+			t.Fatalf("kickoff missing the member timezone:\n%s", prompt)
+		}
+	})
+
+	t.Run("an unset zone is stated, not omitted", func(t *testing.T) {
+		prompt := buildMikaOnboardingKickoff("English", "Venus", "", questionnaireAnswers{
+			Role: "engineer",
+		}, false)
+		if !strings.Contains(prompt, "Member IANA timezone: unknown") {
+			t.Fatalf("kickoff must say the timezone is unknown:\n%s", prompt)
+		}
+	})
+
+	// The digest card is clickable whether or not the questionnaire was
+	// answered, so the zone must survive the skipped-profile early return.
+	t.Run("survives a skipped questionnaire", func(t *testing.T) {
+		prompt := buildMikaOnboardingKickoff("English", "Venus", "Europe/Berlin", questionnaireAnswers{
+			RoleSkipped:    true,
+			UseCaseSkipped: true,
+		}, false)
+		if !strings.Contains(prompt, `Member IANA timezone: "Europe/Berlin"`) {
+			t.Fatalf("skipped profile dropped the timezone:\n%s", prompt)
+		}
+		if !strings.Contains(prompt, "skipped the profile questions") {
+			t.Fatalf("skipped profile lost its neutrality note:\n%s", prompt)
 		}
 	})
 }
@@ -119,12 +160,12 @@ func TestVisibleChatMessagesHidesOnboardingKickoff(t *testing.T) {
 // A member creating their second workspace should not be re-taught the
 // product; one line of context is enough for the model to compress the intro.
 func TestBuildMikaOnboardingKickoffMarksAReturningMember(t *testing.T) {
-	fresh := buildMikaOnboardingKickoff("English", "Venus", questionnaireAnswers{}, false)
+	fresh := buildMikaOnboardingKickoff("English", "Venus", "Asia/Shanghai", questionnaireAnswers{}, false)
 	if strings.Contains(fresh, "completed onboarding in another workspace") {
 		t.Fatalf("first-run kickoff must not claim prior onboarding:\n%s", fresh)
 	}
 
-	returning := buildMikaOnboardingKickoff("English", "Venus", questionnaireAnswers{}, true)
+	returning := buildMikaOnboardingKickoff("English", "Venus", "Asia/Shanghai", questionnaireAnswers{}, true)
 	if !strings.Contains(returning, "completed onboarding in another workspace") {
 		t.Fatalf("returning kickoff missing the prior-onboarding line:\n%s", returning)
 	}

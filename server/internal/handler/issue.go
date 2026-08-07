@@ -543,6 +543,32 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		ELSE 7
 	END`
 
+	// Cancelled issues are abandoned work. statusRank alone cannot keep them
+	// down because it is only a tie-breaker within one relevance tier: a
+	// cancelled issue whose title matches the phrase exactly (tier 1) still
+	// outranks an in_progress issue that merely contains it (tier 3), and a
+	// workspace with many cancelled issues can fill the whole LIMIT window and
+	// push live work off the page entirely. So demote cancelled ahead of
+	// rankExpr — they sort after every other match and are the first rows the
+	// LIMIT drops. Unlike 'done', which is finished work worth referencing,
+	// cancelled work was thrown away. The exception is a direct hit: an exact
+	// identifier or exact title means the user is targeting that one issue and
+	// knows what they asked for.
+	//
+	// The title half reuses tier 1's predicate verbatim, including its quirk:
+	// phraseParam is escapeLike'd, so a title containing _ or % never compares
+	// equal and is not treated as a direct hit. Such an issue is still returned
+	// by number; keeping the two predicates identical matters more than working
+	// around an escaping bug that belongs with tier 1.
+	directHitParts := []string{fmt.Sprintf("LOWER(i.title) = %s", phraseParam)}
+	if hasNum {
+		directHitParts = append(directHitParts, fmt.Sprintf("i.number = %s", numParam))
+	}
+	cancelledRank := fmt.Sprintf(
+		"CASE WHEN i.status = 'cancelled' AND NOT (%s) THEN 1 ELSE 0 END",
+		strings.Join(directHitParts, " OR "),
+	)
+
 	// --- match_source expression ---
 	matchSourceExpr := fmt.Sprintf(`CASE
 		WHEN LOWER(i.title) LIKE %s THEN 'title'
@@ -608,12 +634,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		%s AS matched_comment_content
 	FROM issue i
 	WHERE i.workspace_id = %s AND %s
-	ORDER BY %s, %s, i.updated_at DESC
+	ORDER BY %s, %s, %s, i.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		commentSubquery,
 		wsParam,
 		whereClause,
+		cancelledRank,
 		rankExpr,
 		statusRank,
 		limitParam,

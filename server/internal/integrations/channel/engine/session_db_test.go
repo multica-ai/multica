@@ -389,6 +389,76 @@ func TestIssueDeleteLockPreventsLateMediaBindFromOrphaningObject(t *testing.T) {
 	}
 }
 
+func TestBindMediaRefs_MaterializesInlineImagesInOriginalOrder(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+	body := "[Image]\n这是啥?\n[Image]\n这又是啥?"
+	appendRes, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                body,
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/dingtalk/first", "https://cdn.example.test/first", "pending")
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/dingtalk/second", "https://cdn.example.test/second", "pending")
+	err = session.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		Body:        body,
+		MediaRefs: []channel.MediaRef{
+			{
+				Type: channel.MsgTypeImage, StorageKey: "workspaces/ws/dingtalk/first",
+				StorageURL: "https://cdn.example.test/first", Filename: "first.png", MimeType: "image/png",
+				InlinePlaceholder: "[Image]", InlineIndex: 0,
+			},
+			{
+				Type: channel.MsgTypeImage, StorageKey: "workspaces/ws/dingtalk/second",
+				StorageURL: "https://cdn.example.test/second", Filename: "second.png", MimeType: "image/png",
+				InlinePlaceholder: "[Image]", InlineIndex: 1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+
+	var stored string
+	if err := pool.QueryRow(context.Background(), `SELECT content FROM chat_message WHERE id = $1`, appendRes.MessageID).Scan(&stored); err != nil {
+		t.Fatalf("load message content: %v", err)
+	}
+	rows, err := pool.Query(context.Background(), `
+		SELECT filename, id::text
+		FROM attachment
+		WHERE chat_message_id = $1
+		ORDER BY filename`, appendRes.MessageID)
+	if err != nil {
+		t.Fatalf("load attachment ids: %v", err)
+	}
+	defer rows.Close()
+	ids := map[string]string{}
+	for rows.Next() {
+		var filename, id string
+		if err := rows.Scan(&filename, &id); err != nil {
+			t.Fatalf("scan attachment: %v", err)
+		}
+		ids[filename] = id
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate attachments: %v", err)
+	}
+	want := "![](/api/attachments/" + ids["first.png"] + "/download)\n这是啥?\n" +
+		"![](/api/attachments/" + ids["second.png"] + "/download)\n这又是啥?"
+	if stored != want {
+		t.Fatalf("stored inline body = %q, want %q", stored, want)
+	}
+}
+
 type failingLinkSessionQueries struct {
 	SessionQueries
 }

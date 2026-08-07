@@ -2609,6 +2609,30 @@ func (q *Queries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgt
 	return channel_ingested, err
 }
 
+const taskHasOnboardingKickoffInput = `-- name: TaskHasOnboardingKickoffInput :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE task_id = $1
+      AND role = 'user'
+      AND message_kind = 'onboarding_kickoff'
+)
+`
+
+// Whether this input batch is the product-authored onboarding kickoff. The
+// opening it produces renders the starter cards instead of suggestion chips
+// (MUL-5765), so the quick-actions pass skips that turn.
+//
+// $1 is the INPUT-OWNING task id — COALESCE(task.chat_input_task_id, task.id),
+// i.e. chatInputOwnerID — never a retry clone's own id. The whole retry chain
+// consumes the root's input batch (MUL-4351), so only the root owns the
+// kickoff user row; passing a child's id here silently answers false.
+func (q *Queries) TaskHasOnboardingKickoffInput(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, taskHasOnboardingKickoffInput, taskID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const touchChatSession = `-- name: TouchChatSession :exec
 UPDATE chat_session SET updated_at = now()
 WHERE id = $1
@@ -2617,6 +2641,33 @@ WHERE id = $1
 func (q *Queries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, touchChatSession, id)
 	return err
+}
+
+const updateChatMessageContentForChannelMedia = `-- name: UpdateChatMessageContentForChannelMedia :execrows
+UPDATE chat_message
+SET content = $1
+WHERE id = $2
+  AND chat_session_id = $3
+  AND role = 'user'
+  AND channel_ingested
+`
+
+type UpdateChatMessageContentForChannelMediaParams struct {
+	Content       string      `json:"content"`
+	ID            pgtype.UUID `json:"id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+}
+
+// Channel messages are immutable user turns. Media resolution may finish after
+// the initial append, so materialize stable inline attachment references in the
+// same transaction that binds those attachments. The provenance and role guards
+// prevent this narrow post-append path from rewriting ordinary web/agent rows.
+func (q *Queries) UpdateChatMessageContentForChannelMedia(ctx context.Context, arg UpdateChatMessageContentForChannelMediaParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateChatMessageContentForChannelMedia, arg.Content, arg.ID, arg.ChatSessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateChatSessionProject = `-- name: UpdateChatSessionProject :one

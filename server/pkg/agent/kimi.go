@@ -231,7 +231,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// advertise. See the matching comment in hermes.go for the why —
 		// shipping an http/sse entry to a stdio-only runtime tanks the
 		// whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
@@ -375,17 +375,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "kimi cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
 				// kimi-code 0.33.0 sends no usage at all on this path,
-				// so these two are inert today; they exist so a future
+				// so this is inert today; it exists so a future
 				// kimi that does populate the ACP result is billed
-				// correctly instead of silently dropping its cache
-				// split. scanKimiSessionUsage below is the live path.
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
-				c.usageMu.Unlock()
+				// correctly instead of silently dropping cache or cost
+				// fields. scanKimiSessionUsage below is the live path.
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kimiReaderDrainGrace)
@@ -415,9 +410,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		// Fallback: kimi-code 0.33.0 exports no token counters over ACP.
 		// Its session/prompt result carries only stopReason, and its
@@ -449,6 +442,17 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				resumed:       opts.ResumeSessionID != "",
 				fallbackModel: fallbackModel,
 			})
+			// A future Kimi build may expose provider cost before it exposes
+			// token buckets over ACP. Preserve that cost alongside the current
+			// wire-log fallback instead of dropping either source.
+			if u.CostUSDTicks > 0 {
+				modelUsage := usageMap[fallbackModel]
+				modelUsage.CostUSDTicks = u.CostUSDTicks
+				if usageMap == nil {
+					usageMap = make(map[string]TokenUsage)
+				}
+				usageMap[fallbackModel] = modelUsage
+			}
 		}
 
 		resCh <- Result{
@@ -574,11 +578,15 @@ func scanKimiSessionUsage(scan kimiUsageScan) map[string]TokenUsage {
 	}
 
 	usage := make(map[string]TokenUsage)
+	// Some filesystems round mtimes down to whole seconds. Compare against a
+	// cutoff at the same precision so a log written during this turn is not
+	// discarded before its authoritative per-record timestamps are checked.
+	mtimeCutoff := scan.startTime.Truncate(time.Second)
 	for _, path := range kimiSessionWireLogs(root, scan.sessionID) {
-		// A wire log untouched since before the turn began belongs to an
-		// earlier run of a resumed session; billing it would re-charge
-		// tokens the previous task already reported.
-		if info, err := os.Stat(path); err != nil || info.ModTime().Before(scan.startTime) {
+		// A wire log clearly untouched since before the turn began belongs to
+		// an earlier run of a resumed session. The record-level filter below
+		// remains the authority at the turn boundary.
+		if info, err := os.Stat(path); err != nil || info.ModTime().Before(mtimeCutoff) {
 			continue
 		}
 		accumulateKimiWireUsage(usage, path, scan)

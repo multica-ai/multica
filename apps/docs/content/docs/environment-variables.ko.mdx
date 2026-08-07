@@ -209,7 +209,7 @@ API key와 base URL이 모두 비어 있으면 서버 측 LLM 생성이 꺼지�
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 실행 태스크 작업 디렉터리의 루트 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 실행 태스크 디렉터리 유지 |
 
-각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`와 `MULTICA_<PROVIDER>_MODEL`로 명령 경로와 기본 모델을 덮어쓸 수 있습니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code 네 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`입니다. 예시:
+각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`와 `MULTICA_<PROVIDER>_MODEL`로 명령 경로와 기본 모델을 덮어쓸 수 있습니다. QwenPaw만 예외로, Multica가 모델을 전달하지 않기 때문에 `MULTICA_QWENPAW_MODEL`이 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

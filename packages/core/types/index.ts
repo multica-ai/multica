@@ -198,6 +198,12 @@ export type {
   RedeemDingTalkBindingTokenResponse,
 } from "./dingtalk";
 export type {
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RegisterWecomBYORequest,
+  RedeemWecomBindingTokenResponse,
+} from "./wecom";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

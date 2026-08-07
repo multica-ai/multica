@@ -116,6 +116,28 @@ func TestInboundFromCallback_RichTextKeepsCommandSourceAndImagePositions(t *test
 	}
 }
 
+func TestInboundFromCallback_RichTextTracksGeneratedMarkersPastUserPlaceholders(t *testing.T) {
+	cb := textCallback(convTypeP2P, false)
+	cb.Msgtype = "richText"
+	cb.Content = json.RawMessage(`{"richText":[
+		{"text":"/new Use [Image] literally"},
+		{"type":"picture","downloadCode":"dl-1"},
+		{"text":" and another [Image] literally"},
+		{"type":"picture","downloadCode":"dl-2"}
+	]}`)
+	msg, ok := inboundFromCallback(cb, "appkey-A")
+	if !ok || !msg.ForceFresh || strings.Contains(msg.Text, "/new") {
+		t.Fatalf("expected normalized richText /new message: ok=%v msg=%+v", ok, msg)
+	}
+	raw, err := decodeDingTalkRaw(msg)
+	if err != nil || len(raw.Media) != 2 {
+		t.Fatalf("raw media = %+v, err=%v", raw.Media, err)
+	}
+	if raw.Media[0].InlineIndex != 1 || raw.Media[1].InlineIndex != 3 {
+		t.Fatalf("generated marker positions = %+v, want occurrences 1 and 3", raw.Media)
+	}
+}
+
 func TestInboundFromCallback_RichTextDoesNotPrivatelyComposeFreshAndIssue(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
 	cb.Msgtype = "richText"

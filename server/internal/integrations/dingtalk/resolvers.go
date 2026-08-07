@@ -275,6 +275,7 @@ func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams)
 		WorkspaceID: p.WorkspaceID,
 		Sender:      p.Sender,
 		IssueID:     p.IssueID,
+		Body:        p.Body,
 		MediaRefs:   p.MediaRefs,
 	})
 }

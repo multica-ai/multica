@@ -605,13 +605,13 @@ func deriveSquadMemberStatus(
 	archived bool,
 	runtimeStatus pgtype.Text,
 	lastSeen pgtype.Timestamptz,
-	hasActiveTask bool,
+	hasWorkingTask bool,
 	now time.Time,
 ) string {
 	if archived {
 		return "archived"
 	}
-	if hasActiveTask {
+	if hasWorkingTask {
 		return "working"
 	}
 	if !runtimeStatus.Valid {
@@ -630,10 +630,10 @@ func deriveSquadMemberStatus(
 }
 
 // ListSquadMemberStatus returns one entry per squad member with derived
-// status, the issues each agent member is currently running, and the last
-// observed runtime activity. The endpoint is read-only and inherits the
-// workspace-membership guard from the route middleware — any member of the
-// workspace can read it.
+// status, the issues each agent member is currently running or waiting to run,
+// and the last observed runtime activity. The endpoint is read-only and
+// inherits the workspace-membership guard from the route middleware — any
+// member of the workspace can read it.
 func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) {
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
@@ -655,7 +655,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 	type memberAcc struct {
 		response       SquadMemberStatusResponse
 		archived       bool
-		hasActiveTask  bool
+		hasWorkingTask bool
 		runtimeStatus  pgtype.Text
 		runtimeSeenAt  pgtype.Timestamptz
 		latestActiveAt pgtype.Timestamptz
@@ -685,13 +685,15 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		// A dispatched/running task occupies an agent slot even when it
-		// has no associated issue (chat / quick-create tasks set
-		// agent_task_queue.issue_id = NULL). The `working` bucket is
-		// defined by task presence, not by whether we can render an
-		// issue link, so flag the agent here regardless of issue_id.
+		// Keep waiting_local_directory rows available for issue visibility,
+		// but only dispatched/running work drives the `working` bucket. A
+		// working task may have no issue (chat / quick-create), so decide the
+		// bucket independently from whether an issue link can be rendered.
 		if row.TaskID.Valid {
-			entry.hasActiveTask = true
+			if row.TaskStatus.Valid &&
+				(row.TaskStatus.String == "dispatched" || row.TaskStatus.String == "running") {
+				entry.hasWorkingTask = true
+			}
 
 			if row.TaskIssueID.Valid {
 				brief := SquadActiveIssueBrief{
@@ -725,7 +727,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 				entry.archived,
 				entry.runtimeStatus,
 				entry.runtimeSeenAt,
-				entry.hasActiveTask,
+				entry.hasWorkingTask,
 				now,
 			)
 			entry.response.Status = &status

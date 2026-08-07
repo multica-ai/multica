@@ -1547,6 +1547,10 @@ SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 `
 
+// waiting_local_directory remains capacity-bearing until resume admission has
+// an atomic reservation/CAS gate. Consequently a waiter-only agent is reported
+// idle by RefreshAgentStatusFromTasks but still cannot claim additional work;
+// removing it here alone could exceed max_concurrent_tasks when it resumes.
 func (q *Queries) CountRunningTasks(ctx context.Context, agentID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countRunningTasks, agentID)
 	var count int64
@@ -6033,16 +6037,25 @@ func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID 
 }
 
 const refreshAgentStatusFromTasks = `-- name: RefreshAgentStatusFromTasks :one
+WITH desired AS (
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM agent_task_queue q
+        WHERE q.agent_id = $1 AND q.status IN ('dispatched', 'running')
+    ) THEN 'working' ELSE 'idle' END AS status
+)
 UPDATE agent AS a
-SET status = CASE WHEN EXISTS (
-    SELECT 1 FROM agent_task_queue q
-    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running', 'waiting_local_directory')
-) THEN 'working' ELSE 'idle' END,
+SET status = desired.status,
     updated_at = now()
-WHERE a.id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
+FROM desired
+WHERE a.id = $1 AND a.status IS DISTINCT FROM desired.status
+RETURNING a.id, a.workspace_id, a.name, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility, a.status, a.max_concurrent_tasks, a.owner_id, a.created_at, a.updated_at, a.description, a.runtime_id, a.instructions, a.archived_at, a.archived_by, a.custom_env, a.custom_args, a.mcp_config, a.model, a.thinking_level, a.composio_toolkit_allowlist, a.permission_mode, a.kind, a.system_key, a.disabled_runtime_skills, a.service_tier
 `
 
+// Persisted agent.status has no queued/resource-wait bucket. Keep dispatched
+// as working because the daemon is actively preparing that task, but do not
+// let a task parked on a local_directory mutex masquerade as executing work.
+// The status guard makes a correct status a no-op: :one returns no rows, so
+// callers neither rewrite updated_at nor publish a redundant status event.
 func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
 	row := q.db.QueryRow(ctx, refreshAgentStatusFromTasks, id)
 	var i Agent

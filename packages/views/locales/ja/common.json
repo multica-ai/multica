@@ -90,5 +90,20 @@
   "expandable_description": {
     "expand": "詳細を表示",
     "collapse": "折りたたむ"
+  },
+  "wecom_bind": {
+    "page_title": "Multica アカウントをリンク",
+    "redeeming": "アカウントをリンク中…",
+    "needs_auth_description": "リンクを完了するには Multica にサインインしてください。トークンは WeCom の ID を、サインイン中の Multica ユーザーに紐付けます。",
+    "sign_in": "サインイン",
+    "done_title": "リンクされました。",
+    "done_description": "次回 WeCom でスマートボットに送るメッセージはそのままエージェントに届きます。このタブは閉じて構いません。",
+    "error_title": "リンクを完了できませんでした",
+    "error_admin_hint": "繰り返し失敗する場合は、WeCom でボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_missing_token": "リンクにトークンがありません。WeCom でボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_expired": "リンクが無効または期限切れです（有効期限は 15 分）。ボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_already_bound": "この WeCom ID は別の Multica ユーザーにリンクされています。アカウントの移行には明示的な解除が必要です。",
+    "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
+    "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
   }
 }

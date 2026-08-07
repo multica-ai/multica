@@ -195,6 +195,11 @@ const (
 	// the runtime receives a normal immutable chat input batch. User-facing
 	// APIs filter it out; clients also ignore the kind defensively.
 	ChatMessageKindOnboardingKickoff = "onboarding_kickoff"
+	// ChatMessageKindOnboardingOpening marks the assistant reply produced by
+	// the onboarding kickoff. The kickoff row itself never reaches clients, so
+	// the opening self-describes: chat renders the starter cards under this
+	// kind instead of quick-action chips (MUL-5765).
+	ChatMessageKindOnboardingOpening = "onboarding_opening"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat

@@ -14,11 +14,14 @@ export interface ChatPinnedAgent {
  * - "no_response" — a completed direct-chat turn that produced no text reply.
  * - "onboarding_kickoff" — a product-authored opening input that is sent to
  *   Mika but never rendered as a member message.
+ * - "onboarding_opening" — Mika's reply to the kickoff; chat renders the
+ *   onboarding starter cards under it instead of quick-action chips.
  */
 export type ChatMessageKind =
   | "message"
   | "no_response"
-  | "onboarding_kickoff";
+  | "onboarding_kickoff"
+  | "onboarding_opening";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in

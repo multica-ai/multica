@@ -397,6 +397,18 @@ UPDATE chat_message
 SET channel_media_pending_until = NULL
 WHERE id = $1 AND chat_session_id = $2;
 
+-- name: UpdateChatMessageContentForChannelMedia :execrows
+-- Channel messages are immutable user turns. Media resolution may finish after
+-- the initial append, so materialize stable inline attachment references in the
+-- same transaction that binds those attachments. The provenance and role guards
+-- prevent this narrow post-append path from rewriting ordinary web/agent rows.
+UPDATE chat_message
+SET content = sqlc.arg(content)
+WHERE id = sqlc.arg(id)
+  AND chat_session_id = sqlc.arg(chat_session_id)
+  AND role = 'user'
+  AND channel_ingested;
+
 -- name: LinkChatMessageToTask :exec
 UPDATE chat_message
 SET task_id = $2
@@ -1161,6 +1173,22 @@ SELECT * FROM chat_message
 WHERE task_id = $1 AND role = 'assistant'
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: TaskHasOnboardingKickoffInput :one
+-- Whether this input batch is the product-authored onboarding kickoff. The
+-- opening it produces renders the starter cards instead of suggestion chips
+-- (MUL-5765), so the quick-actions pass skips that turn.
+--
+-- $1 is the INPUT-OWNING task id — COALESCE(task.chat_input_task_id, task.id),
+-- i.e. chatInputOwnerID — never a retry clone's own id. The whole retry chain
+-- consumes the root's input batch (MUL-4351), so only the root owns the
+-- kickoff user row; passing a child's id here silently answers false.
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE task_id = $1
+      AND role = 'user'
+      AND message_kind = 'onboarding_kickoff'
+);
 
 -- name: GetLatestAssistantChatMessageForSession :one
 -- The session's most recent assistant turn, used as the regeneration target
