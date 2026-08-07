@@ -96,6 +96,18 @@ type Installation struct {
 	// stripLeadingMentions, which is correct for a single-word name and is
 	// what every existing installation gets.
 	BotDisplayName string
+
+	// PrincipalUserID names the Multica user this bot is operated on behalf
+	// of, for the case where an admin installs it for a colleague. Empty —
+	// which is every row that exists today — means the installer, and
+	// InstallerUserID above is what callers should read.
+	//
+	// Nothing sets it and nothing reads it for behaviour: it is carried, not
+	// consumed. Install preserves whatever the row already holds
+	// (installation.go), so whoever does start writing it does not also have
+	// to fix a re-install that silently drops it — which is the failure this
+	// field's handling exists to rule out, not the reading of it.
+	PrincipalUserID string
 }
 
 // InstallationCredentials is the plaintext-bearing view the WebSocket
@@ -120,6 +132,13 @@ type installConfig struct {
 	// existing row; absent means the whitespace heuristic, which is what the
 	// adapter did before this field existed.
 	BotDisplayName string `json:"bot_display_name,omitempty"`
+
+	// PrincipalUserID is optional, and absent on every row written before
+	// this field existed; absent means the installer. omitempty keeps it a
+	// key that only appears once somebody sets it, so an installation that
+	// never does encodes byte-for-byte the config it encoded before — no
+	// migration, and no rewrite of rows already in the table.
+	PrincipalUserID string `json:"principal_user_id,omitempty"`
 }
 
 // encodeInstallConfig marshals an Installation's config-bearing fields into
@@ -133,6 +152,7 @@ func encodeInstallConfig(inst Installation) ([]byte, error) {
 		BotID:           inst.BotID,
 		SecretEncrypted: inst.SecretEncrypted,
 		BotDisplayName:  inst.BotDisplayName,
+		PrincipalUserID: inst.PrincipalUserID,
 	})
 }
 
@@ -155,5 +175,6 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		BotID:           cfg.BotID,
 		SecretEncrypted: cfg.SecretEncrypted,
 		BotDisplayName:  cfg.BotDisplayName,
+		PrincipalUserID: cfg.PrincipalUserID,
 	}, nil
 }
