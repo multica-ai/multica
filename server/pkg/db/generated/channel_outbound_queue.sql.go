@@ -19,7 +19,7 @@ SET cursor_at = $2,
     updated_at = now()
 WHERE channel_type = $1
   AND lease_token = $3
-RETURNING channel_type, cursor_at, lease_token, lease_expires_at, updated_at
+RETURNING channel_type, cursor_at, lease_token, lease_expires_at, created_at, updated_at
 `
 
 type AdvanceChannelOutboundReconcileStateParams struct {
@@ -40,6 +40,7 @@ func (q *Queries) AdvanceChannelOutboundReconcileState(ctx context.Context, arg 
 		&i.CursorAt,
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
+		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -146,7 +147,7 @@ SET lease_token = gen_random_uuid()::text,
     updated_at = now()
 FROM candidate
 WHERE s.channel_type = candidate.channel_type
-RETURNING s.channel_type, s.cursor_at, s.lease_token, s.lease_expires_at, s.updated_at
+RETURNING s.channel_type, s.cursor_at, s.lease_token, s.lease_expires_at, s.created_at, s.updated_at
 `
 
 type ClaimChannelOutboundReconcileStateParams struct {
@@ -169,6 +170,7 @@ func (q *Queries) ClaimChannelOutboundReconcileState(ctx context.Context, arg Cl
 		&i.CursorAt,
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
+		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err

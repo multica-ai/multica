@@ -23,6 +23,15 @@ type fakeReconcilerStore struct {
 	claimState    db.ChannelOutboundReconcileState
 	claimStateErr error
 
+	// cursorAbsent models a deployment where no cursor row exists yet, so the
+	// claim query's upsert is what creates it. The seed value the Reconciler
+	// passes is then what the first scan window is built from, which is the
+	// difference between a first sweep that scans nothing and one that
+	// backfills every reply the pre-queue path already delivered.
+	cursorAbsent    bool
+	cursorCreatedAt time.Time
+	seededCursorAt  time.Time
+
 	candidates    [][]db.ListChannelOutboundReconcileCandidatesRow
 	candidatesErr error
 	listCalls     []db.ListChannelOutboundReconcileCandidatesParams
@@ -41,7 +50,20 @@ type fakeReconcilerStore struct {
 	purgedAttempts         int
 }
 
-func (s *fakeReconcilerStore) ClaimChannelOutboundReconcileState(context.Context, db.ClaimChannelOutboundReconcileStateParams) (db.ChannelOutboundReconcileState, error) {
+func (s *fakeReconcilerStore) ClaimChannelOutboundReconcileState(_ context.Context, arg db.ClaimChannelOutboundReconcileStateParams) (db.ChannelOutboundReconcileState, error) {
+	if s.cursorAbsent {
+		// INSERT ... ON CONFLICT DO NOTHING then claim: the row is born with the
+		// caller's seed as cursor_at and the database's now() as created_at.
+		s.cursorAbsent = false
+		s.seededCursorAt = arg.CursorAt.Time
+		s.cursorCreatedAt = time.Now()
+		s.claimState = db.ChannelOutboundReconcileState{
+			ChannelType: testChannelType,
+			CursorAt:    arg.CursorAt,
+			CreatedAt:   pgtype.Timestamptz{Time: s.cursorCreatedAt, Valid: true},
+			LeaseToken:  pgtype.Text{String: testCursorLease, Valid: true},
+		}
+	}
 	return s.claimState, s.claimStateErr
 }
 
@@ -55,12 +77,26 @@ func (s *fakeReconcilerStore) ListChannelOutboundReconcileCandidates(_ context.C
 	}
 	page := s.candidates[0]
 	s.candidates = s.candidates[1:]
-	return page, nil
+	// Mirror the query's window predicate (completed_at > start AND <= end).
+	// Without it the fake hands back rows the real scan could never see, and a
+	// change to how the window is computed reads as having changed nothing.
+	kept := make([]db.ListChannelOutboundReconcileCandidatesRow, 0, len(page))
+	for _, row := range page {
+		if row.CompletedAt.Valid &&
+			row.CompletedAt.Time.After(arg.WindowStart.Time) &&
+			!row.CompletedAt.Time.After(arg.WindowEnd.Time) {
+			kept = append(kept, row)
+		}
+	}
+	return kept, nil
 }
 
 func (s *fakeReconcilerStore) AdvanceChannelOutboundReconcileState(_ context.Context, arg db.AdvanceChannelOutboundReconcileStateParams) (db.ChannelOutboundReconcileState, error) {
 	s.advanced = append(s.advanced, arg)
-	return db.ChannelOutboundReconcileState{}, nil
+	// Model the commit so a test can sweep more than once: the next claim sees
+	// the cursor this sweep left behind.
+	s.claimState.CursorAt = arg.CursorAt
+	return s.claimState, nil
 }
 
 func (s *fakeReconcilerStore) ReleaseChannelOutboundReconcileState(_ context.Context, arg db.ReleaseChannelOutboundReconcileStateParams) error {
@@ -128,10 +164,13 @@ func candidateRow(t *testing.T, status string) db.ListChannelOutboundReconcileCa
 	}
 }
 
+// leasedCursor is a mature deployment's cursor: the row has existed far longer
+// than any scan window, so its created_at never constrains the window.
 func leasedCursor(cursorAt time.Time) db.ChannelOutboundReconcileState {
 	return db.ChannelOutboundReconcileState{
 		ChannelType: testChannelType,
 		CursorAt:    pgtype.Timestamptz{Time: cursorAt, Valid: true},
+		CreatedAt:   pgtype.Timestamptz{Time: time.Now().Add(-7 * 24 * time.Hour), Valid: true},
 		LeaseToken:  pgtype.Text{String: testCursorLease, Valid: true},
 	}
 }
@@ -409,6 +448,103 @@ func TestReconciler_ScanWindowOverlapsAndLags(t *testing.T) {
 	}
 	if call.ChannelType != testChannelType {
 		t.Errorf("channel_type = %q, want %q", call.ChannelType, testChannelType)
+	}
+}
+
+// Upgrading a running deployment starts with an empty channel_outbound_queue
+// (migration 265 creates it) and no cursor row. "Already delivered" is only ever
+// tested as "has a queue row", and the pre-queue path wrote straight to the
+// socket, so every terminal task in the seed window looks like a reply the
+// realtime path missed. Nothing that finished before the queue existed can be
+// missing from it, so a fresh cursor must not scan behind its own creation —
+// otherwise every user who talked to the bot that day gets the whole day
+// re-posted, once and unrecallably.
+func TestReconciler_FreshCursorDoesNotBackfillAlreadyDeliveredReplies(t *testing.T) {
+	t.Parallel()
+	// A reply the old path really did deliver: terminal two hours ago, and no
+	// queue row anywhere, because that path never wrote one.
+	delivered := candidateRow(t, "completed")
+	delivered.CompletedAt = pgtype.Timestamptz{Time: time.Now().Add(-2 * time.Hour), Valid: true}
+	store := &fakeReconcilerStore{
+		cursorAbsent:    true,
+		candidates:      [][]db.ListChannelOutboundReconcileCandidatesRow{{delivered}},
+		channelIngested: true,
+	}
+	producerStore := &fakeProducerStore{}
+	builder := &fakeBuilder{kinds: []string{"chat_done"}, ok: true, req: validRequest(t)}
+	r := newTestReconciler(t, store, builder, producerStore, nil)
+
+	r.sweep(context.Background())
+
+	if len(store.listCalls) != 1 {
+		t.Fatalf("scan calls = %d, want 1", len(store.listCalls))
+	}
+	if got := store.listCalls[0].WindowStart.Time; got.Before(store.cursorCreatedAt) {
+		t.Errorf("window start = %v reaches behind the cursor's creation (%v): a fresh cursor re-delivers every reply the pre-queue path already sent",
+			got, store.cursorCreatedAt)
+	}
+	if got := len(producerStore.rows); got != 0 {
+		t.Errorf("enqueued %d rows on a fresh cursor, want 0 — those replies were already delivered", got)
+	}
+	// cursor_at means "everything up to here has been considered". Seeding it a
+	// day in the past asserts a scan that never ran, which misreads as progress
+	// to anything else looking at the row.
+	if store.seededCursorAt.Before(store.cursorCreatedAt.Add(-time.Minute)) {
+		t.Errorf("cursor seeded at %v, a day before the row was created (%v): cursor_at would claim scan progress that never happened",
+			store.seededCursorAt, store.cursorCreatedAt)
+	}
+}
+
+// The floor has to be durable, not a one-off seed adjustment: the cursor
+// advances to windowEnd on the first sweep, so the second sweep's
+// cursor-minus-overlap reaches back before the queue existed all over again.
+func TestReconciler_CursorCreationFloorsEveryWindowNotJustTheFirst(t *testing.T) {
+	t.Parallel()
+	store := &fakeReconcilerStore{
+		cursorAbsent:    true,
+		candidates:      [][]db.ListChannelOutboundReconcileCandidatesRow{nil, nil},
+		channelIngested: true,
+	}
+	builder := &fakeBuilder{kinds: []string{"chat_done"}, ok: true, req: validRequest(t)}
+	r := newTestReconciler(t, store, builder, &fakeProducerStore{}, nil)
+
+	r.sweep(context.Background()) // creates and advances the cursor
+	r.sweep(context.Background()) // cursor_at is now windowEnd, i.e. behind created_at
+
+	if len(store.listCalls) != 2 {
+		t.Fatalf("scan calls = %d, want 2", len(store.listCalls))
+	}
+	for i, call := range store.listCalls {
+		if call.WindowStart.Time.Before(store.cursorCreatedAt) {
+			t.Errorf("sweep %d: window start = %v reaches behind the cursor's creation (%v)",
+				i+1, call.WindowStart.Time, store.cursorCreatedAt)
+		}
+	}
+}
+
+// reconcileInitialLookback is the ceiling on how far back any scan reaches. A
+// cursor stalled for a week (a replica down, or the integration disabled) must
+// not resurrect a week of replies whose sent-tombstones the purge already
+// removed — sentRetention is only 24h, so those rows no longer suppress a
+// re-enqueue.
+func TestReconciler_StalledCursorIsClampedToTheLookbackCeiling(t *testing.T) {
+	t.Parallel()
+	store := &fakeReconcilerStore{
+		claimState: leasedCursor(time.Now().Add(-7 * 24 * time.Hour)),
+		candidates: [][]db.ListChannelOutboundReconcileCandidatesRow{nil},
+	}
+	builder := &fakeBuilder{kinds: []string{"chat_done"}, ok: true}
+	r := newTestReconciler(t, store, builder, &fakeProducerStore{}, nil)
+
+	r.sweep(context.Background())
+
+	if len(store.listCalls) != 1 {
+		t.Fatalf("scan calls = %d, want 1", len(store.listCalls))
+	}
+	floor := time.Now().Add(-reconcileInitialLookback)
+	if got := store.listCalls[0].WindowStart.Time; got.Before(floor.Add(-time.Minute)) {
+		t.Errorf("window start = %v, want no earlier than the %v lookback ceiling (%v)",
+			got, reconcileInitialLookback, floor)
 	}
 }
 

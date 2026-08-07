@@ -12,13 +12,18 @@
 -- separate lock table — a replica claims the cursor, scans its window, then
 -- advances or releases.
 --
--- No created_at: the row is created lazily by the claim query's upsert and
--- lives for the deployment's lifetime, so its insert time carries no
--- information worth a column.
+-- created_at is the queue's own epoch for this channel. The reconciler decides
+-- "already delivered" by the absence of a channel_outbound_queue row, so any
+-- window reaching back before this row existed classifies every reply the
+-- pre-queue path delivered as missing and re-sends it. Flooring the scan at
+-- created_at makes that impossible by construction rather than by choosing a
+-- lucky seed, and it has to be a column because the cursor advances past its
+-- own creation on the first sweep.
 CREATE TABLE channel_outbound_reconcile_state (
     channel_type       TEXT PRIMARY KEY,
     cursor_at          TIMESTAMPTZ NOT NULL,
     lease_token        TEXT,
     lease_expires_at   TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
