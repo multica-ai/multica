@@ -142,6 +142,59 @@ WHERE id = $1
 RETURNING *;
 
 -- =====================
+-- Rate window ledger
+-- =====================
+
+-- name: LockChannelOutboundRateWindow :exec
+-- Serializes the check-then-record sequence for one external chat target.
+-- Without it, two workers draining the same target both COUNT under the limit
+-- and both send, so the gate leaks exactly as many sends as there are
+-- concurrent drainers.
+--
+-- The field separator is chr(1), not chr(0): PostgreSQL rejects a NUL byte in
+-- any text value, so chr(0) makes this lock fail with SQLSTATE 54000 on every
+-- outbound send. chr(1) keeps the "cannot occur inside a uuid, a smallint
+-- rendering, or a chat id" property that the separator exists for.
+--
+-- Transaction-scoped, so the lock is released by COMMIT/ROLLBACK and a worker
+-- that dies mid-check cannot wedge a target.
+SELECT pg_advisory_xact_lock(
+    hashtext('channel_outbound_rate'),
+    hashtext(
+        (sqlc.arg('installation_id')::uuid)::text
+        || chr(1)
+        || (sqlc.arg('target_chat_type')::smallint)::text
+        || chr(1)
+        || sqlc.arg('target_chat_id')::text
+    )
+);
+
+-- name: CountChannelOutboundAttemptsSince :one
+SELECT COUNT(*)::bigint AS attempt_count
+FROM channel_outbound_send_attempt
+WHERE installation_id = $1
+  AND target_chat_type = $2
+  AND target_chat_id = $3
+  AND attempted_at >= $4;
+
+-- name: RecordChannelOutboundSendAttempt :one
+-- Written immediately before the frame is handed to the socket, so an
+-- ambiguous write still counts toward the platform's quota.
+INSERT INTO channel_outbound_send_attempt (
+    queue_id,
+    installation_id,
+    workspace_id,
+    chat_session_id,
+    target_chat_id,
+    target_chat_type
+) VALUES (
+    $1, $2, $3,
+    sqlc.narg('chat_session_id'),
+    $4, $5
+)
+RETURNING *;
+
+-- =====================
 -- Lifecycle cleanup
 -- =====================
 
@@ -160,7 +213,9 @@ WHERE installation_id = $1
 
 -- name: FailChannelOutboundBySession :exec
 -- Archive path: fail unsent queue rows for a session that is no longer a
--- deliverable target.
+-- deliverable target. The attempt ledger is deliberately NOT cleared — those
+-- sends already happened and still count against the platform's per-target
+-- quota, which is keyed on the chat, not on our session.
 UPDATE channel_outbound_queue
 SET status = 'failed',
     payload = '{}'::jsonb,
@@ -203,15 +258,29 @@ WHERE q.status = 'queued'
   );
 
 -- name: DeleteChannelOutboundBySession :exec
--- Hard delete path (DeleteChatSession): remove queue rows keyed by
--- chat_session_id before the session row itself is deleted.
+-- Hard delete path (DeleteChatSession): remove queue and attempt-ledger rows
+-- keyed by chat_session_id before the session row itself is deleted.
+WITH deleted_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt a
+    WHERE a.chat_session_id = $1
+)
 DELETE FROM channel_outbound_queue q
 WHERE q.chat_session_id = $1;
 
 -- name: DeleteChannelOutboundByInstallation :exec
 -- Installation hard-delete helper used by replacement/reclaim/runtime paths.
+WITH deleted_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt a
+    WHERE a.installation_id = $1
+)
 DELETE FROM channel_outbound_queue q
 WHERE q.installation_id = $1;
+
+-- name: PurgeChannelOutboundSendAttemptsBefore :exec
+-- The ledger is the input to a sliding-window count, not history, so retention
+-- only has to outlast the widest window the gate looks back over.
+DELETE FROM channel_outbound_send_attempt
+WHERE attempted_at < $1;
 
 -- name: PurgeSentChannelOutboundQueueBefore :exec
 -- Sent queue rows past their retention window. They are kept past delivery

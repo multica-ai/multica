@@ -43,6 +43,11 @@ const (
 	// because they are the record of what failed and why.
 	sentRetention   = 24 * time.Hour
 	failedRetention = 7 * 24 * time.Hour
+
+	// sendAttemptRetention bounds the rate gate's ledger. It only has to
+	// outlast the widest window any gate looks back over; the rows are a
+	// sliding-window count, not history.
+	sendAttemptRetention = 24 * time.Hour
 )
 
 // Candidate is one terminal task the reconciler found without a queue row.
@@ -84,6 +89,7 @@ type ReconcilerStore interface {
 	FailUndeliverableChannelOutbound(ctx context.Context) error
 	PurgeSentChannelOutboundQueueBefore(ctx context.Context, cutoff pgtype.Timestamptz) error
 	PurgeFailedChannelOutboundQueueBefore(ctx context.Context, cutoff pgtype.Timestamptz) error
+	PurgeChannelOutboundSendAttemptsBefore(ctx context.Context, cutoff pgtype.Timestamptz) error
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 }
@@ -381,6 +387,11 @@ func (r *Reconciler) reconcileCandidate(ctx context.Context, row db.ListChannelO
 
 func (r *Reconciler) purge(ctx context.Context) error {
 	now := r.now()
+	if err := r.q.PurgeChannelOutboundSendAttemptsBefore(ctx, pgtype.Timestamptz{
+		Time: now.Add(-sendAttemptRetention), Valid: true,
+	}); err != nil {
+		return err
+	}
 	if err := r.q.PurgeSentChannelOutboundQueueBefore(ctx, pgtype.Timestamptz{
 		Time: now.Add(-sentRetention), Valid: true,
 	}); err != nil {

@@ -38,6 +38,7 @@ type fakeReconcilerStore struct {
 	failUndeliverableCalls int
 	purgedSent             int
 	purgedFailed           int
+	purgedAttempts         int
 }
 
 func (s *fakeReconcilerStore) ClaimChannelOutboundReconcileState(context.Context, db.ClaimChannelOutboundReconcileStateParams) (db.ChannelOutboundReconcileState, error) {
@@ -69,6 +70,11 @@ func (s *fakeReconcilerStore) ReleaseChannelOutboundReconcileState(_ context.Con
 
 func (s *fakeReconcilerStore) FailUndeliverableChannelOutbound(context.Context) error {
 	s.failUndeliverableCalls++
+	return nil
+}
+
+func (s *fakeReconcilerStore) PurgeChannelOutboundSendAttemptsBefore(context.Context, pgtype.Timestamptz) error {
+	s.purgedAttempts++
 	return nil
 }
 
@@ -441,8 +447,11 @@ func TestReconciler_PurgeSweepsBothRetentionWindows(t *testing.T) {
 	if err := r.purge(context.Background()); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
-	if store.purgedSent != 1 || store.purgedFailed != 1 {
-		t.Errorf("purges = sent:%d failed:%d, want 1 each", store.purgedSent, store.purgedFailed)
+	// All three retention windows, including the rate gate's attempt ledger —
+	// the ledger is a sliding-window count, so unbounded growth is pure waste.
+	if store.purgedSent != 1 || store.purgedFailed != 1 || store.purgedAttempts != 1 {
+		t.Errorf("purges = sent:%d failed:%d attempts:%d, want 1 each",
+			store.purgedSent, store.purgedFailed, store.purgedAttempts)
 	}
 }
 

@@ -225,6 +225,34 @@ func (q *Queries) CompleteClaimedChannelOutbound(ctx context.Context, arg Comple
 	return i, err
 }
 
+const countChannelOutboundAttemptsSince = `-- name: CountChannelOutboundAttemptsSince :one
+SELECT COUNT(*)::bigint AS attempt_count
+FROM channel_outbound_send_attempt
+WHERE installation_id = $1
+  AND target_chat_type = $2
+  AND target_chat_id = $3
+  AND attempted_at >= $4
+`
+
+type CountChannelOutboundAttemptsSinceParams struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	TargetChatType int16              `json:"target_chat_type"`
+	TargetChatID   string             `json:"target_chat_id"`
+	AttemptedAt    pgtype.Timestamptz `json:"attempted_at"`
+}
+
+func (q *Queries) CountChannelOutboundAttemptsSince(ctx context.Context, arg CountChannelOutboundAttemptsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countChannelOutboundAttemptsSince,
+		arg.InstallationID,
+		arg.TargetChatType,
+		arg.TargetChatID,
+		arg.AttemptedAt,
+	)
+	var attempt_count int64
+	err := row.Scan(&attempt_count)
+	return attempt_count, err
+}
+
 const deferClaimedChannelOutbound = `-- name: DeferClaimedChannelOutbound :one
 UPDATE channel_outbound_queue
 SET next_attempt_at = $3,
@@ -277,6 +305,10 @@ func (q *Queries) DeferClaimedChannelOutbound(ctx context.Context, arg DeferClai
 }
 
 const deleteChannelOutboundByInstallation = `-- name: DeleteChannelOutboundByInstallation :exec
+WITH deleted_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt a
+    WHERE a.installation_id = $1
+)
 DELETE FROM channel_outbound_queue q
 WHERE q.installation_id = $1
 `
@@ -288,12 +320,16 @@ func (q *Queries) DeleteChannelOutboundByInstallation(ctx context.Context, insta
 }
 
 const deleteChannelOutboundBySession = `-- name: DeleteChannelOutboundBySession :exec
+WITH deleted_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt a
+    WHERE a.chat_session_id = $1
+)
 DELETE FROM channel_outbound_queue q
 WHERE q.chat_session_id = $1
 `
 
-// Hard delete path (DeleteChatSession): remove queue rows keyed by
-// chat_session_id before the session row itself is deleted.
+// Hard delete path (DeleteChatSession): remove queue and attempt-ledger rows
+// keyed by chat_session_id before the session row itself is deleted.
 func (q *Queries) DeleteChannelOutboundBySession(ctx context.Context, chatSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteChannelOutboundBySession, chatSessionID)
 	return err
@@ -433,7 +469,9 @@ WHERE chat_session_id = $1
 `
 
 // Archive path: fail unsent queue rows for a session that is no longer a
-// deliverable target.
+// deliverable target. The attempt ledger is deliberately NOT cleared — those
+// sends already happened and still count against the platform's per-target
+// quota, which is keyed on the chat, not on our session.
 func (q *Queries) FailChannelOutboundBySession(ctx context.Context, chatSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, failChannelOutboundBySession, chatSessionID)
 	return err
@@ -633,6 +671,58 @@ func (q *Queries) ListChannelOutboundReconcileCandidates(ctx context.Context, ar
 	return items, nil
 }
 
+const lockChannelOutboundRateWindow = `-- name: LockChannelOutboundRateWindow :exec
+
+SELECT pg_advisory_xact_lock(
+    hashtext('channel_outbound_rate'),
+    hashtext(
+        ($1::uuid)::text
+        || chr(1)
+        || ($2::smallint)::text
+        || chr(1)
+        || $3::text
+    )
+)
+`
+
+type LockChannelOutboundRateWindowParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	TargetChatType int16       `json:"target_chat_type"`
+	TargetChatID   string      `json:"target_chat_id"`
+}
+
+// =====================
+// Rate window ledger
+// =====================
+// Serializes the check-then-record sequence for one external chat target.
+// Without it, two workers draining the same target both COUNT under the limit
+// and both send, so the gate leaks exactly as many sends as there are
+// concurrent drainers.
+//
+// The field separator is chr(1), not chr(0): PostgreSQL rejects a NUL byte in
+// any text value, so chr(0) makes this lock fail with SQLSTATE 54000 on every
+// outbound send. chr(1) keeps the "cannot occur inside a uuid, a smallint
+// rendering, or a chat id" property that the separator exists for.
+//
+// Transaction-scoped, so the lock is released by COMMIT/ROLLBACK and a worker
+// that dies mid-check cannot wedge a target.
+func (q *Queries) LockChannelOutboundRateWindow(ctx context.Context, arg LockChannelOutboundRateWindowParams) error {
+	_, err := q.db.Exec(ctx, lockChannelOutboundRateWindow, arg.InstallationID, arg.TargetChatType, arg.TargetChatID)
+	return err
+}
+
+const purgeChannelOutboundSendAttemptsBefore = `-- name: PurgeChannelOutboundSendAttemptsBefore :exec
+DELETE FROM channel_outbound_send_attempt
+WHERE attempted_at < $1
+`
+
+// The ledger is the input to a sliding-window count, not history, so retention
+// only has to outlast the widest window the gate looks back over.
+func (q *Queries) PurgeChannelOutboundSendAttemptsBefore(ctx context.Context, attemptedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, purgeChannelOutboundSendAttemptsBefore, attemptedAt)
+	return err
+}
+
 const purgeFailedChannelOutboundQueueBefore = `-- name: PurgeFailedChannelOutboundQueueBefore :exec
 DELETE FROM channel_outbound_queue
 WHERE status = 'failed'
@@ -658,6 +748,56 @@ WHERE status = 'sent'
 func (q *Queries) PurgeSentChannelOutboundQueueBefore(ctx context.Context, updatedAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, purgeSentChannelOutboundQueueBefore, updatedAt)
 	return err
+}
+
+const recordChannelOutboundSendAttempt = `-- name: RecordChannelOutboundSendAttempt :one
+INSERT INTO channel_outbound_send_attempt (
+    queue_id,
+    installation_id,
+    workspace_id,
+    chat_session_id,
+    target_chat_id,
+    target_chat_type
+) VALUES (
+    $1, $2, $3,
+    $6,
+    $4, $5
+)
+RETURNING id, queue_id, installation_id, workspace_id, chat_session_id, target_chat_id, target_chat_type, attempted_at
+`
+
+type RecordChannelOutboundSendAttemptParams struct {
+	QueueID        pgtype.UUID `json:"queue_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	TargetChatID   string      `json:"target_chat_id"`
+	TargetChatType int16       `json:"target_chat_type"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+}
+
+// Written immediately before the frame is handed to the socket, so an
+// ambiguous write still counts toward the platform's quota.
+func (q *Queries) RecordChannelOutboundSendAttempt(ctx context.Context, arg RecordChannelOutboundSendAttemptParams) (ChannelOutboundSendAttempt, error) {
+	row := q.db.QueryRow(ctx, recordChannelOutboundSendAttempt,
+		arg.QueueID,
+		arg.InstallationID,
+		arg.WorkspaceID,
+		arg.TargetChatID,
+		arg.TargetChatType,
+		arg.ChatSessionID,
+	)
+	var i ChannelOutboundSendAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.QueueID,
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.ChatSessionID,
+		&i.TargetChatID,
+		&i.TargetChatType,
+		&i.AttemptedAt,
+	)
+	return i, err
 }
 
 const releaseChannelOutboundReconcileState = `-- name: ReleaseChannelOutboundReconcileState :exec

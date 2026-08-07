@@ -229,6 +229,10 @@ cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM dead)
 ),
+cleared_outbound_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt
+    WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_outbound_queue AS (
     DELETE FROM channel_outbound_queue
     WHERE installation_id IN (SELECT id FROM dead)
@@ -278,6 +282,9 @@ cleared_user_bindings AS (
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_outbound_send_attempts AS (
+    DELETE FROM channel_outbound_send_attempt WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_outbound_queue AS (
     DELETE FROM channel_outbound_queue WHERE installation_id IN (SELECT id FROM doomed)

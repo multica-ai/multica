@@ -43,6 +43,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"channel_outbound_card_message":    workspaceDelete,
 	"channel_outbound_queue":           workspaceDelete,
 	"channel_outbound_reconcile_state": workspaceDeleteKeep,
+	"channel_outbound_send_attempt":    workspaceDelete,
 	"channel_user_binding":             workspaceDelete,
 	"chat_draft_restore":               workspaceDelete,
 	"chat_message":                     workspaceDelete,
