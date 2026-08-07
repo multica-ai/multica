@@ -94,6 +94,7 @@ On the agent's detail page you can keep adjusting:
 | Setting | What it does |
 |---|---|
 | **Concurrency limit** | How many tasks the agent can run at the same time. The default is 6; tasks beyond the cap keep queuing. |
+| **Queue wait timeout** | How long a queued task may wait before being marked `timeout`. New agents default to **120 minutes**; set it blank or `0` to fall back to the system default. See [Tasks](/tasks#what-happens-when-a-task-times-out). |
 | **Environment variables** | Inject variables when the AI coding tool starts. |
 | **Custom arguments** | Appended item by item to the AI coding tool's CLI arguments. |
 | **MCP** | Provide MCP server configuration for AI coding tools that support it. |

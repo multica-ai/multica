@@ -88,7 +88,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
-| `queued_expired` | Queued for over 2 hours with no runtime claiming it | Confirm the runtime is online, then retry |
+| `queued_expired` | Queued longer than the system default (or the agent's own **Queue wait timeout** override) with no runtime claiming it | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
@@ -143,7 +143,7 @@ The numbers below reflect the server's default configuration, for quick cross-ch
 | State | Meaning | Timeout and consequence |
 | --- | --- | --- |
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
-| `queued` | Waiting for a runtime to claim it | Fails after **2 hours** unclaimed; not retried automatically |
+| `queued` | Waiting for a runtime to claim it | Fails after **2 hours** unclaimed, or sooner if the agent sets a shorter **Queue wait timeout**; not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
 | `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its tasks fail with it |
