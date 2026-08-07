@@ -25,6 +25,9 @@ export interface CreateIssueRequest {
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
+  /** Authoritative description the editor had adopted before producing this
+   * update. The server uses it to merge channel media that landed meanwhile. */
+  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
@@ -397,7 +400,11 @@ export type IssueTableFacetSpec =
   | { kind: "creator" }
   | { kind: "project" }
   | { kind: "label" }
-  | { kind: "property"; property_id: string };
+  | { kind: "property"; property_id: string }
+  /** Agents running issue work inside this surface. `key` is the agent id,
+   *  `count` its running-task count. Evaluated against the surface's own scope
+   *  and filters, so the header chip counts the same rows the list shows. */
+  | { kind: "working_agents" };
 
 export interface IssueTableFacetsRequest {
   query: IssueTableQuerySpec;
@@ -421,6 +428,15 @@ export interface IssueTableFacetsResponse {
   query_fingerprint: string;
   total: number;
   facets: IssueTableFacet[];
+}
+
+/** One agent running issue work inside a single issue surface. Projected from
+ *  the `working_agents` facet, so the count is already narrowed by that
+ *  surface's scope and every active filter. Name/avatar are resolved from the
+ *  workspace agent directory, not carried here. */
+export interface WorkingAgentSummary {
+  id: string;
+  running_task_count: number;
 }
 
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */

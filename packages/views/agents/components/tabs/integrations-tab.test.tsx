@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
@@ -61,6 +61,13 @@ vi.mock("@multica/core/slack", () => ({
   }),
 }));
 
+vi.mock("@multica/core/wecom", () => ({
+  wecomInstallationsOptions: () => ({
+    queryKey: ["wecom", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
 vi.mock("@multica/core/auth", () => {
   const useAuthStore = Object.assign(
     (sel?: (s: { user: { id: string } }) => unknown) =>
@@ -94,11 +101,21 @@ vi.mock("../../../settings/components/slack-tab", () => ({
   ),
 }));
 
+// Same stubbing rationale for WeCom smart-bot: the shared bind entry has
+// its own coverage in wecom-tab.test.tsx (when added); here it's a marker.
+vi.mock("../../../settings/components/wecom-tab", () => ({
+  WecomAgentBindButton: ({ agentId }: { agentId: string }) => (
+    <div data-testid="wecom-bind-button" data-agent-id={agentId} />
+  ),
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, agents: enAgents, settings: enSettings },
 };
+
+afterEach(cleanup);
 
 const agent: Agent = {
   id: "agent-1",
@@ -182,27 +199,30 @@ describe("IntegrationsTab", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={{ ...agent, owner_id: "user-2" }} />);
     expect(
-      screen.getByText(/Only workspace owners and admins can connect an agent/i),
-    ).toBeTruthy();
+      screen.getAllByText(/Only workspace owners and admins can connect an agent/i).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
+    expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
   });
 
   it("lets a non-admin agent owner bind Lark but keeps Slack admin-only", () => {
     // The agent's owner (user-1) is only a plain workspace member. Lark
     // authorizes the agent owner (canManageAgent), so the Lark bind entry
-    // renders and receives owner_id; Slack's routes stay admin-only, so it
-    // shows the read-only note instead of a CTA (MUL-4213).
+    // renders and receives owner_id; Slack, DingTalk and WeCom routes stay
+    // admin-only, so each shows the read-only note instead of a CTA (MUL-4213).
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={agent} />);
     const larkButton = screen.getByTestId("lark-bind-button");
     expect(larkButton.getAttribute("data-agent-id")).toBe("agent-1");
     expect(larkButton.getAttribute("data-agent-owner-id")).toBe("user-1");
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
-    // The Slack section falls back to the shared members note.
+    expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
+    // The Slack, DingTalk and WeCom sections each fall back to the shared
+    // members note.
     expect(
-      screen.getByText(/Only workspace owners and admins can connect an agent/i),
-    ).toBeTruthy();
+      screen.getAllByText(/Only workspace owners and admins can connect an agent/i),
+    ).toHaveLength(3);
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {

@@ -163,3 +163,23 @@ export function agentTemplateDetailOptions(slug: string) {
     gcTime: 30 * 60 * 1000,
   });
 }
+
+/** Unfinished agent-creation conversations, scoped to the caller. */
+export const agentBuilderSessionKeys = {
+  all: (wsId: string) => ["workspace", wsId, "agent-builder-sessions"] as const,
+  list: (wsId: string) => [...agentBuilderSessionKeys.all(wsId), "list"] as const,
+};
+
+export function agentBuilderSessionListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: agentBuilderSessionKeys.list(wsId),
+    queryFn: () => api.listAgentBuilderSessions(),
+    enabled: wsId.length > 0,
+    // Overrides the client-wide `staleTime: Infinity`. This list changes
+    // through work done on another screen — starting a conversation, sending a
+    // turn, an agent finally being created — and the surfaces that render it
+    // mount on demand. Cached forever it would show the state of the first
+    // visit: a user who just held a conversation comes back to "no drafts".
+    staleTime: 0,
+  });
+}

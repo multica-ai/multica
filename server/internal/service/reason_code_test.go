@@ -30,17 +30,19 @@ func TestDispatchFailReasonCode(t *testing.T) {
 }
 
 // TestAgentReadinessReasonCode is the regression for Elon must-fix 2, case 2: a
-// runtime-availability failure (no runtime bound, or a bound-but-offline
-// runtime) must map to runtime_offline, and an archived agent to
-// target_unavailable — decided from the agent's own state, not the reason text.
+// runtime-availability failure must be classified from the agent's own state,
+// not from the reason text. Since MUL-5559 the two runtime failures are
+// deliberately distinct: an agent with NO runtime needs to be bound to one
+// (agent_runtime_required), while a bound-but-offline runtime needs the machine
+// back (runtime_offline). Collapsing them sends the user looking for a computer
+// that does not exist.
 func TestAgentReadinessReasonCode(t *testing.T) {
 	validRuntime := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	archivedAt := pgtype.Timestamptz{Valid: true}
 
-	// No runtime bound (the "agent has no runtime bound" case that previously
-	// fell through the substring classifier to generic).
-	if got := agentReadinessReasonCode(db.Agent{}); got != dispatch.ReasonRuntimeOffline {
-		t.Errorf("no runtime bound: got %q, want runtime_offline", got)
+	// No runtime bound — the state an agent lands in when its runtime is deleted.
+	if got := agentReadinessReasonCode(db.Agent{}); got != dispatch.ReasonAgentRuntimeRequired {
+		t.Errorf("no runtime bound: got %q, want agent_runtime_required", got)
 	}
 	// Bound runtime that is offline at dispatch time.
 	if got := agentReadinessReasonCode(db.Agent{RuntimeID: validRuntime}); got != dispatch.ReasonRuntimeOffline {

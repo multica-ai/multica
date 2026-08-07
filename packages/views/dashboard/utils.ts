@@ -390,21 +390,32 @@ export function aggregateWeeklyTasks(
   weekCount: number,
 ): WeeklyTasksData[] {
   const shells = buildWeekShells(tz, weekCount);
-  const buckets = new Map<string, { completed: number; failed: number }>();
+  const buckets = new Map<
+    string,
+    { completed: number; failed: number; cancelled: number }
+  >();
   for (const shell of shells)
-    buckets.set(shell.weekStart, { completed: 0, failed: 0 });
+    buckets.set(shell.weekStart, { completed: 0, failed: 0, cancelled: 0 });
   for (const r of rows) {
     const wkStart = weekStartIso(r.date);
     const bucket = buckets.get(wkStart);
     if (!bucket) continue;
     const failed = r.failed_count;
-    const completed = Math.max(0, r.task_count - failed);
+    const cancelled = r.cancelled_count;
+    const completed = Math.max(0, r.task_count - failed - cancelled);
     bucket.completed += completed;
     bucket.failed += failed;
+    bucket.cancelled += cancelled;
   }
   return shells.map((s) => {
-    const b = buckets.get(s.weekStart) ?? { completed: 0, failed: 0 };
-    return { ...s, completed: b.completed, failed: b.failed };
+    const b =
+      buckets.get(s.weekStart) ?? { completed: 0, failed: 0, cancelled: 0 };
+    return {
+      ...s,
+      completed: b.completed,
+      failed: b.failed,
+      cancelled: b.cancelled,
+    };
   });
 }
 
@@ -420,19 +431,23 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
     }));
 }
 
-// Per-date run-time rows → one row per date with `completed` and `failed`
-// counts for the DailyTasksChart's stacked bar (failed_count is a subset
-// of task_count, so completed = task_count - failed_count).
+// Per-date run-time rows → one row per date with `completed`, `failed` and
+// `cancelled` counts for the DailyTasksChart's stacked bar. failed_count and
+// cancelled_count are disjoint subsets of task_count, so the succeeded count
+// is the remainder. Subtracting cancelled matters: without it a run the user
+// stopped would render in the green "completed" segment.
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
   return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
-      const completed = Math.max(0, r.task_count - failed);
+      const cancelled = r.cancelled_count;
+      const completed = Math.max(0, r.task_count - failed - cancelled);
       return {
         date: r.date,
         label: formatDateLabel(r.date),
         completed,
         failed,
+        cancelled,
       };
     });
 }

@@ -415,6 +415,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["agents_skill_toggles"] {
 		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
 	}
+	if !cfg.FeatureFlags["settings_resource_labels"] {
+		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
+	}
 
 	withComposioMCPAppsFlag(t, h, true)
 	w = httptest.NewRecorder()

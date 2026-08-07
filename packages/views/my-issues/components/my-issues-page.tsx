@@ -37,6 +37,7 @@ export function MyIssuesPage() {
           renderHeader={({ controller }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
+              workingAgents={controller.workingAgents}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}

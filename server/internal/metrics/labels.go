@@ -127,12 +127,16 @@ var (
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",
+		"reasonix":      "reasonix",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
 		"deveco":        "deveco",
 		"pi":            "pi",
+		"qoder":         "qoder",
+		"qoderclicn":    "qoderclicn",
 		"qwen":          "qwen",
+		"traecli":       "traecli",
 		"other":         "other",
 	}
 	knownTerminalStatuses = map[string]string{

@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` also archives those agents and cancels their active tasks.
+Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active tasks.
 
 See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom profiles.
 
@@ -279,7 +279,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
 | | `logs` | View daemon logs | `--follow`, `--lines` |
 | | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (also archives bound agents and cancels their tasks) |
+| `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (unbinds bound agents, preserves their data, and cancels their tasks) |
 | | `profile list/create/update/delete` | Manage custom runtime profiles | |
 | | `profile set-path/unset-path <profile-id>` | Pin a local executable path (local only, never uploaded to the server) | |
 

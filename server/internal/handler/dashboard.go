@@ -25,6 +25,15 @@ import (
 // ?project_id=<uuid> to scope the rollup to a single project. With no
 // project_id the data spans the whole workspace.
 //
+// Cutoff convention: the three date-bucketed series use parseSinceParamInTZ
+// (N+1 calendar days, the surplus day trimmed client-side with `-(days-1)`),
+// and the three per-AGENT rollups use parseExactSinceParamInTZ (exactly N).
+// Rows without a date cannot be trimmed client-side, so serving them off the
+// N+1 cutoff makes the leaderboard and the Run time / Tasks KPIs cover one
+// calendar day more than the chart and the Cost / Tokens KPIs beside them —
+// at 1D that let a single agent's row read higher than the workspace total
+// (MUL-5551). Keep the two halves of each pair on matching windows.
+//
 // Cost is computed client-side from a per-model pricing table — the model
 // dimension is intentionally preserved on the wire (same convention as the
 // per-runtime usage endpoints).
@@ -265,9 +274,15 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// "By agent" has no date grouping in the SQL — tz only determines
-	// the cutoff boundary, not the bucket axis.
+	// the cutoff boundary, not the bucket axis. Which is exactly why the
+	// cutoff must be the EXACT N-day one: the client trims the surplus day
+	// `parseSinceParamInTZ` hands back with `-(days-1)`, and a response
+	// carrying no date cannot be trimmed that way. On the N+1 cutoff this
+	// leaderboard covered one calendar day more than the Tokens/Cost KPI and
+	// the chart directly above it, so at 1D a single agent's row could read
+	// higher than the workspace total (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
@@ -348,18 +363,21 @@ func (h *Handler) listDashboardUsageByAgent(
 }
 
 // DashboardAgentRunTimeResponse is one agent's total terminal-task run time
-// over the window. Includes failed tasks so the dashboard can surface how
-// much execution time was spent on runs that didn't succeed.
+// over the window. Includes failed and cancelled tasks so the dashboard can
+// surface how much execution time was spent on runs that didn't succeed.
+// FailedCount and CancelledCount are disjoint subsets of TaskCount; the
+// client derives the succeeded count as the remainder.
 type DashboardAgentRunTimeResponse struct {
-	AgentID      string `json:"agent_id"`
-	TotalSeconds int64  `json:"total_seconds"`
-	TaskCount    int32  `json:"task_count"`
-	FailedCount  int32  `json:"failed_count"`
+	AgentID        string `json:"agent_id"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
 }
 
 // GetDashboardAgentRunTime returns per-agent total task run time (seconds)
 // and task counts for the workspace, optionally scoped to a project. Only
-// terminal tasks (completed or failed) with both started_at and
+// terminal tasks (completed, failed, or cancelled) with both started_at and
 // completed_at populated contribute, since queued/running tasks have no
 // finite duration.
 func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Request) {
@@ -377,9 +395,14 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Cutoff in the viewer's tz so the "last N days" window matches the
-	// per-agent cost card (GetDashboardUsageByAgent).
+	// per-agent cost card (GetDashboardUsageByAgent). Exact N-day cutoff for
+	// the same reason: these rows carry no date, so the client cannot trim
+	// the extra calendar day `parseSinceParamInTZ` returns. This response
+	// feeds BOTH the leaderboard's Time/Tasks columns and the Run time /
+	// Tasks KPI tiles, so the N+1 cutoff put those two tiles on a wider
+	// window than the Cost / Tokens tiles beside them (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -394,10 +417,11 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	resp := make([]DashboardAgentRunTimeResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = DashboardAgentRunTimeResponse{
-			AgentID:      uuidToString(row.AgentID),
-			TotalSeconds: row.TotalSeconds,
-			TaskCount:    row.TaskCount,
-			FailedCount:  row.FailedCount,
+			AgentID:        uuidToString(row.AgentID),
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
 		}
 	}
 	writeJSON(w, http.StatusOK, foldRestrictedAgentRunTime(resp, restricted))
@@ -421,6 +445,7 @@ func foldRestrictedAgentRunTime(
 			dst.TotalSeconds += src.TotalSeconds
 			dst.TaskCount += src.TaskCount
 			dst.FailedCount += src.FailedCount
+			dst.CancelledCount += src.CancelledCount
 			return dst
 		},
 	)
@@ -428,19 +453,21 @@ func foldRestrictedAgentRunTime(
 
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run
 // time and counts. Powers the workspace dashboard's daily Time and Tasks
-// charts — same toggle as Tokens / Cost, different metric.
+// charts — same toggle as Tokens / Cost, different metric. FailedCount and
+// CancelledCount are disjoint subsets of TaskCount.
 type DashboardRunTimeDailyResponse struct {
-	Date         string `json:"date"`
-	TotalSeconds int64  `json:"total_seconds"`
-	TaskCount    int32  `json:"task_count"`
-	FailedCount  int32  `json:"failed_count"`
+	Date           string `json:"date"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
 }
 
 // GetDashboardRunTimeDaily returns per-date total task run time and task
 // counts for the workspace, optionally scoped to a project. Only terminal
-// tasks (completed or failed) with both started_at and completed_at
-// populated contribute. Bucketed by completed_at so the day boundaries
-// line up with the per-agent run-time card.
+// tasks (completed, failed, or cancelled) with both started_at and
+// completed_at populated contribute. Bucketed by completed_at so the day
+// boundaries line up with the per-agent run-time card.
 func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
@@ -469,10 +496,11 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	resp := make([]DashboardRunTimeDailyResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = DashboardRunTimeDailyResponse{
-			Date:         row.Date.Time.Format("2006-01-02"),
-			TotalSeconds: row.TotalSeconds,
-			TaskCount:    row.TaskCount,
-			FailedCount:  row.FailedCount,
+			Date:           row.Date.Time.Format("2006-01-02"),
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

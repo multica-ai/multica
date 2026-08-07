@@ -14,7 +14,7 @@
     "name": "Multica",
     "email": "support@multica.ai"
   },
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",

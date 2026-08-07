@@ -383,14 +383,39 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		}
 		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
 	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Autopilot assignment takes FOR SHARE on the squad before locking its
+	// leader Agent. Take the exclusive side in the same order so leader
+	// rotation and active Autopilot saves cannot leave an automation pointing
+	// at an unbound effective Agent.
+	if _, err := qtx.LockSquadForUpdate(r.Context(), db.LockSquadForUpdateParams{
+		ID:          squad.ID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+
+	newLeaderRuntimeBound := true
 	if req.LeaderID != nil {
 		lid, ok := parseUUIDOrBadRequest(w, *req.LeaderID, "leader_id")
 		if !ok {
 			return
 		}
-		// Validate new leader is an agent in workspace.
-		newLeader, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID: lid, WorkspaceID: wsUUID,
+		// Stabilize runtime_id through commit. Runtime teardown takes FOR UPDATE
+		// on this row and follows the same Agent→Autopilot lock order, so
+		// whichever operation starts first produces a complete result.
+		newLeader, err := qtx.LockAgentForAutopilotAssignment(r.Context(), db.LockAgentForAutopilotAssignmentParams{
+			ID:          lid,
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
@@ -402,19 +427,39 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Ensure new leader is a squad member; auto-add if not.
-		isMember, _ := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
+		isMember, err := qtx.IsSquadMember(r.Context(), db.IsSquadMemberParams{
 			SquadID: squad.ID, MemberType: "agent", MemberID: lid,
 		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update squad")
+			return
+		}
 		if !isMember {
-			h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
+			if _, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
 				SquadID: squad.ID, MemberType: "agent", MemberID: lid, Role: "leader",
-			})
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update squad")
+				return
+			}
 		}
 		params.LeaderID = lid
+		newLeaderRuntimeBound = newLeader.RuntimeID.Valid
 	}
 
-	updated, err := h.Queries.UpdateSquad(r.Context(), params)
+	updated, err := qtx.UpdateSquad(r.Context(), params)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+	var pausedAutopilots []db.Autopilot
+	if req.LeaderID != nil && !newLeaderRuntimeBound {
+		pausedAutopilots, err = qtx.PauseAutopilotsByUnrunnableSquad(r.Context(), squad.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update squad")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update squad")
 		return
 	}
@@ -425,6 +470,11 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
+	for _, autopilot := range pausedAutopilots {
+		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+			"autopilot": autopilotToResponse(autopilot, nil),
+		})
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -555,13 +605,13 @@ func deriveSquadMemberStatus(
 	archived bool,
 	runtimeStatus pgtype.Text,
 	lastSeen pgtype.Timestamptz,
-	hasActiveTask bool,
+	hasWorkingTask bool,
 	now time.Time,
 ) string {
 	if archived {
 		return "archived"
 	}
-	if hasActiveTask {
+	if hasWorkingTask {
 		return "working"
 	}
 	if !runtimeStatus.Valid {
@@ -580,10 +630,10 @@ func deriveSquadMemberStatus(
 }
 
 // ListSquadMemberStatus returns one entry per squad member with derived
-// status, the issues each agent member is currently running, and the last
-// observed runtime activity. The endpoint is read-only and inherits the
-// workspace-membership guard from the route middleware — any member of the
-// workspace can read it.
+// status, the issues each agent member is currently running or waiting to run,
+// and the last observed runtime activity. The endpoint is read-only and
+// inherits the workspace-membership guard from the route middleware — any
+// member of the workspace can read it.
 func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) {
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
@@ -605,7 +655,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 	type memberAcc struct {
 		response       SquadMemberStatusResponse
 		archived       bool
-		hasActiveTask  bool
+		hasWorkingTask bool
 		runtimeStatus  pgtype.Text
 		runtimeSeenAt  pgtype.Timestamptz
 		latestActiveAt pgtype.Timestamptz
@@ -635,13 +685,15 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		// A dispatched/running task occupies an agent slot even when it
-		// has no associated issue (chat / quick-create tasks set
-		// agent_task_queue.issue_id = NULL). The `working` bucket is
-		// defined by task presence, not by whether we can render an
-		// issue link, so flag the agent here regardless of issue_id.
+		// Keep waiting_local_directory rows available for issue visibility,
+		// but only dispatched/running work drives the `working` bucket. A
+		// working task may have no issue (chat / quick-create), so decide the
+		// bucket independently from whether an issue link can be rendered.
 		if row.TaskID.Valid {
-			entry.hasActiveTask = true
+			if row.TaskStatus.Valid &&
+				(row.TaskStatus.String == "dispatched" || row.TaskStatus.String == "running") {
+				entry.hasWorkingTask = true
+			}
 
 			if row.TaskIssueID.Valid {
 				brief := SquadActiveIssueBrief{
@@ -675,7 +727,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 				entry.archived,
 				entry.runtimeStatus,
 				entry.runtimeSeenAt,
-				entry.hasActiveTask,
+				entry.hasWorkingTask,
 				now,
 			)
 			entry.response.Status = &status

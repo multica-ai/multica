@@ -6,8 +6,9 @@
  * workspace switching in Settings, so a command-palette here would
  * duplicate them (see feedback_mobile_ia_main_vs_more).
  *
- * Result categories, ordering (projects first, issues second), debounce
- * (300ms), abort policy, and Recent rendering mirror the web source.
+ * Result categories, ordering (live projects, then live issues, then a
+ * trailing Cancelled section — see lib/search-rows.ts), debounce (300ms),
+ * abort policy, and Recent rendering mirror the web source.
  * Highlight + snippet line for `match_source` matches preserves the
  * "why did this match" signal users rely on when scanning results.
  */
@@ -46,6 +47,7 @@ import {
 import { issueDetailOptions } from "@/data/queries/issues";
 import { STATUS_LABEL } from "@/lib/issue-status";
 import { projectStatusLabel } from "@/lib/project-status";
+import { buildSearchRows, type RowItem } from "@/lib/search-rows";
 
 const DEBOUNCE_MS = 300;
 const ISSUE_LIMIT = 20;
@@ -115,12 +117,8 @@ function HighlightText({
 // =====================================================
 // Row item types — drives the single FlatList render
 // =====================================================
-
-type RowItem =
-  | { kind: "header"; key: string; title: string }
-  | { kind: "issue"; key: string; issue: SearchIssueResult; query: string }
-  | { kind: "project"; key: string; project: SearchProjectResult; query: string }
-  | { kind: "recent"; key: string; issue: Issue };
+// RowItem + buildSearchRows live in lib/search-rows.ts so the ordering rules
+// (including the cancelled partition) are testable without mounting the screen.
 
 function issueIconColor(status: IssueStatus): string {
   // Tag color for the status label at the end of an issue row.
@@ -389,35 +387,19 @@ export default function SearchModal() {
     results.issues.length > 0 || results.projects.length > 0;
 
   // Build the FlatList data. One flat array of discriminated rows means a
-  // single virtualised list covers Recent (empty-state) and (Projects +
-  // Issues) results without nesting SectionList inside another scroller.
-  const data = useMemo<RowItem[]>(() => {
-    if (!trimmedQuery) {
-      if (recentIssues.length === 0) return [];
-      return [
-        { kind: "header", key: "h-recent", title: "Recent" },
-        ...recentIssues.map<RowItem>((issue) => ({
-          kind: "recent",
-          key: `r-${issue.id}`,
-          issue,
-        })),
-      ];
-    }
-    const items: RowItem[] = [];
-    if (results.projects.length > 0) {
-      items.push({ kind: "header", key: "h-projects", title: "Projects" });
-      for (const p of results.projects) {
-        items.push({ kind: "project", key: `p-${p.id}`, project: p, query: trimmedQuery });
-      }
-    }
-    if (results.issues.length > 0) {
-      items.push({ kind: "header", key: "h-issues", title: "Issues" });
-      for (const it of results.issues) {
-        items.push({ kind: "issue", key: `i-${it.id}`, issue: it, query: trimmedQuery });
-      }
-    }
-    return items;
-  }, [trimmedQuery, recentIssues, results]);
+  // single virtualised list covers Recent (empty-state) and the search results
+  // without nesting SectionList inside another scroller. Ordering lives in
+  // buildSearchRows (lib/search-rows.ts).
+  const data = useMemo<RowItem[]>(
+    () =>
+      buildSearchRows({
+        query,
+        issues: results.issues,
+        projects: results.projects,
+        recentIssues,
+      }),
+    [query, results, recentIssues],
+  );
 
   const renderItem = useCallback<ListRenderItem<RowItem>>(
     ({ item }) => {

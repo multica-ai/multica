@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -65,6 +66,13 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 		output.Filters.LabelIDs = nil
 	case "property":
 		delete(output.Filters.Properties, facet.PropertyID)
+	case "working_agents":
+		// Disjunctive like every other facet: drop this facet's own dimension so
+		// the answer is "who would you see if you turned the agents-working
+		// filter ON", which is also the answer while it is already on. That
+		// makes the header chip's count stable across the toggle.
+		output.Filters.WorkingIssueIDs = nil
+		output.Filters.WorkingOnly = false
 	}
 	return output
 }
@@ -194,6 +202,25 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		query = fmt.Sprintf(`SELECT COALESCE(i.project_id::text, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, compiled.where)
 	case "label":
 		query = fmt.Sprintf(`SELECT itl.label_id::text, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN issue_to_label itl ON itl.issue_id = i.id WHERE %s GROUP BY itl.label_id`, compiled.where)
+	case "working_agents":
+		// One row per agent currently running issue work inside THIS surface,
+		// with its running-task count. Same predicate as
+		// ListWorkspaceWorkingAgents with type=issue (chat > autopilot > issue
+		// precedence, user-authored non-archived agents only), but the issue set
+		// comes from the surface's own compiled scope + filters instead of a
+		// second, independent workspace-wide definition. That is what keeps the
+		// header chip's count equal to the rows clicking it leaves (MUL-5525).
+		query = fmt.Sprintf(`SELECT a.id::text, COUNT(*)::bigint
+FROM issue i
+JOIN agent_task_queue atq ON atq.issue_id = i.id
+JOIN agent a ON a.id = atq.agent_id AND a.workspace_id = i.workspace_id
+WHERE %s
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+  AND atq.status = 'running'
+  AND atq.chat_session_id IS NULL
+  AND atq.autopilot_run_id IS NULL
+GROUP BY a.id`, compiled.where)
 	case "property":
 		propertyID, err := util.ParseUUID(facet.PropertyID)
 		if err != nil {
@@ -254,10 +281,50 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		writeIssueTableQueryFailure(w, r, "failed to list table facets")
 		return response, false
 	}
+	if facet.Kind == "working_agents" {
+		values, ok := h.filterAccessibleAgentFacetValues(w, r, compiled.workspaceID, response.Values)
+		if !ok {
+			return response, false
+		}
+		response.Values = values
+	}
 	sort.Slice(response.Values, func(i, j int) bool {
 		return strings.Compare(response.Values[i].Key, response.Values[j].Key) < 0
 	})
 	return response, true
+}
+
+// The working-agents facet keys are agent ids, so it discloses agent identity
+// and must pass the same visibility gate as every other workspace-wide agent
+// aggregation: a private or non-allow-listed agent is never exposed by its id,
+// its count, or even its presence.
+func (h *Handler) filterAccessibleAgentFacetValues(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceUUID pgtype.UUID,
+	values []issueTableFacetValueResponse,
+) ([]issueTableFacetValueResponse, bool) {
+	if len(values) == 0 {
+		return values, true
+	}
+	workspaceID := util.UUIDToString(workspaceUUID)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return nil, false
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+		return nil, false
+	}
+	filtered := make([]issueTableFacetValueResponse, 0, len(values))
+	for _, value := range values {
+		if _, permitted := allowed[value.Key]; permitted {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered, true
 }
 
 func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {

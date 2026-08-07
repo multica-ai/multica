@@ -16,7 +16,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
-import { AgentRuntimeBadge } from "../../common/agent-runtime-badge";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 import { VisibilityBadge } from "./visibility-badge";
@@ -76,19 +75,16 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           availability dot is surfaced here; last-task state lives in the
           agents list and the agent detail page. */}
       <div className="flex items-start gap-3">
-        {/* Base avatar + runtime badge rather than the ActorAvatar wrapper:
-            this card IS a hover-card payload, so it must not nest another
-            hover card or profile link inside itself. */}
-        <span className="relative inline-flex shrink-0">
-          <ActorAvatarBase
-            name={agent.name}
-            initials={initials}
-            avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
-            isAgent
-            size="xl"
-          />
-          <AgentRuntimeBadge agentId={agent.id} size="xl" />
-        </span>
+        {/* Base avatar rather than the ActorAvatar wrapper: this card IS a
+            hover-card payload, so it must not nest another hover card or
+            profile link inside itself. */}
+        <ActorAvatarBase
+          name={agent.name}
+          initials={initials}
+          avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
+          isAgent
+          size="xl"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-body font-semibold">{agent.name}</p>

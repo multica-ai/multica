@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, ExternalLink } from "lucide-react";
+import { CalendarDays, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import type { Issue, IssueProperty, IssuePropertyValue } from "@multica/core/types";
 import {
@@ -123,19 +123,21 @@ export function CustomPropertyValueInput({
     </span>
   );
 
-  const clearFooter = hasValue ? (
-    <Button
-      variant="ghost"
-      size="xs"
+  // Empty value as the first row, not a footer button — the position every
+  // other picker uses for "no value", and being a real row it can carry the
+  // checkmark when the property is unset.
+  const emptyRow = (
+    <PickerItem
+      emptyValue
+      selected={!hasValue}
       onClick={() => {
         clear();
         setOpen(false);
       }}
-      className="w-full justify-start text-muted-foreground hover:text-foreground"
     >
-      {t(($) => $.pickers.custom_property.clear_action)}
-    </Button>
-  ) : undefined;
+      <span className="text-muted-foreground">{t(($) => $.pickers.custom_property.none)}</span>
+    </PickerItem>
+  );
 
   // Archived (or unknown-type) definitions: read-only display; the only
   // offered action is Clear so stale values can still be cleaned up.
@@ -153,8 +155,8 @@ export function CustomPropertyValueInput({
         align="start"
         trigger={valueTrigger}
         triggerRender={triggerRender}
-        footer={clearFooter}
       >
+        {emptyRow}
         <p className="px-2 py-1.5 text-caption text-muted-foreground">
           {t(($) => $.pickers.custom_property.archived_hint)}
         </p>
@@ -173,8 +175,8 @@ export function CustomPropertyValueInput({
           searchable={options.length > 7}
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           {options.map((option) => (
             <PickerItem
               key={option.id}
@@ -209,8 +211,8 @@ export function CustomPropertyValueInput({
           searchable={options.length > 7}
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           {options.map((option) => (
             <PickerItem
               key={option.id}
@@ -235,6 +237,20 @@ export function CustomPropertyValueInput({
             {valueTrigger}
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
+            {/* Empty value above the calendar — same position as DateOnlyPicker. */}
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-3 border-b px-3 py-2 text-left text-body transition-colors hover:bg-accent"
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
+                {t(($) => $.pickers.custom_property.none)}
+              </span>
+              <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
+            </button>
             <Calendar
               mode="single"
               selected={date}
@@ -244,21 +260,6 @@ export function CustomPropertyValueInput({
                 setOpen(false);
               }}
             />
-            {date && (
-              <div className="border-t px-3 py-2">
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => {
-                    clear();
-                    setOpen(false);
-                  }}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  {t(($) => $.pickers.custom_property.clear_action)}
-                </Button>
-              </div>
-            )}
           </PopoverContent>
         </Popover>
       );
@@ -271,8 +272,8 @@ export function CustomPropertyValueInput({
           align="start"
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           <PickerItem
             selected={value === true}
             onClick={() => {

@@ -1,5 +1,2 @@
 export { LabelChip } from "./label-chip";
-export {
-  ResourceLabelPicker,
-  useResourceLabelsEnabled,
-} from "./resource-label-picker";
+export { ResourceLabelPicker } from "./resource-label-picker";

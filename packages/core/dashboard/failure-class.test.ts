@@ -19,6 +19,10 @@ describe("failureClassOf", () => {
     // with the substrate failures an operator fixes by checking the daemon.
     expect(failureClassOf("skill_bundle_unavailable")).toBe("runtime");
     expect(failureClassOf("agent_error.process_failure")).toBe("agent");
+    // MUL-5722: the daemon and the provider are both healthy — codex could
+    // not hand its own stored thread back — so this reads as an agent-side
+    // failure, not a runtime one.
+    expect(failureClassOf("codex_resume_oversized")).toBe("agent");
   });
 
   it("keeps pre-MUL-1949 coarse reasons countable", () => {

@@ -87,6 +87,8 @@ interface ChatInputProps {
   uploadEnabled?: boolean;
   onStop?: () => void;
   isRunning?: boolean;
+  /** Enabled only after the server explicitly advertises follow-up queues. */
+  allowSubmitWhileRunning?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -96,6 +98,7 @@ interface ChatInputProps {
    *  as opposed to the session itself being archived — swaps the placeholder
    *  copy so the read-only reason reads accurately. */
   agentArchived?: boolean;
+  agentRuntimeRequired?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
@@ -133,9 +136,11 @@ export function ChatInput({
   uploadEnabled: uploadAllowed,
   onStop,
   isRunning,
+  allowSubmitWhileRunning,
   disabled,
   noAgent,
   agentArchived,
+  agentRuntimeRequired,
   agentName,
   leftAdornment,
   contextItems,
@@ -429,8 +434,12 @@ export function ChatInput({
       editorScrubbedRef.current = false;
       // These states disable the SubmitButton, but Mod+Enter bypasses it — so a
       // read-only or busy composer must still refuse the keyboard path.
-      if (isRunning || disabled || noAgent) {
-        logger.debug("input.send skipped", { isRunning, disabled, noAgent });
+      if (disabled || noAgent || (isRunning && !allowSubmitWhileRunning)) {
+        logger.debug("input.send skipped", {
+          disabled,
+          noAgent,
+          runningWithoutQueueSupport: !!isRunning && !allowSubmitWhileRunning,
+        });
         return false;
       }
       // The editor is still holding a DIFFERENT draft's document than the one
@@ -527,6 +536,8 @@ export function ChatInput({
     : disabled
       ? agentArchived
         ? t(($) => $.input.placeholder_archived_agent)
+        : agentRuntimeRequired
+          ? t(($) => $.input.placeholder_runtime_required)
         : t(($) => $.input.placeholder_archived)
       : agentName
         ? t(($) => $.input.placeholder_named, { name: agentName })
@@ -558,6 +569,10 @@ export function ChatInput({
         // spilling out of it.
         "flex max-h-[50%] min-h-0 flex-col pb-3 pt-0",
         CHAT_GUTTER,
+        // Static elevation, NOT queue-conditional: ChatQueue tucks its bottom
+        // edge under this surface (z-0 + negative margin on its side), and the
+        // composer simply always paints on top. Its own chrome never varies.
+        "relative z-10",
         // Outer wrapper carries the disabled cursor. Inner card sets
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
@@ -566,6 +581,7 @@ export function ChatInput({
       )}
     >
       <div
+        data-slot="chat-input-surface"
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
           // max-h-96 is the absolute ceiling on top of the wrapper's 50%: on a
@@ -603,7 +619,7 @@ export function ChatInput({
                     disabled={!projectSelectionEnabled}
                     aria-label={t(($) => $.input.change_project_context)}
                     title={t(($) => $.input.change_project_context)}
-                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 pr-7 text-caption font-medium text-foreground transition-colors hover:bg-accent/60"
+                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 text-caption font-medium text-foreground transition-colors hover:bg-accent/60"
                   />
                 }
               />
@@ -671,15 +687,28 @@ export function ChatInput({
             disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
             loading={submitting}
             busy={gate.uploading}
-            running={isRunning}
+            // Queue-capable runs reuse this one action slot: an empty composer
+            // offers Stop, while live content swaps it to Queue Send. Older
+            // servers cannot accept follow-ups, so they remain stop-only. An
+            // upload blocks submit, so it also falls back to Stop rather than
+            // removing chat's only cancellation path; the attachment node
+            // remains the visible upload-progress surface in the editor.
+            running={
+              !!isRunning &&
+              (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
+            }
             onStop={onStop}
             tooltip={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : sendShortcut
-                ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                : t(($) => $.input.send_tooltip)}
+              : isRunning
+                ? t(($) => $.input.queue_send_tooltip)
+                : sendShortcut
+                  ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+                  : t(($) => $.input.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
+              : isRunning
+                ? t(($) => $.input.queue_send_tooltip)
               : t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
             stopAriaLabel={t(($) => $.input.stop_tooltip)}

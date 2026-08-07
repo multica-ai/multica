@@ -14,12 +14,13 @@ import {
 } from "@multica/ui/components/ui/chart";
 import { useT } from "../../../i18n";
 
-// Weekly counterpart of DailyTasksChart — same completed/failed stacked
-// bar, but each bar groups a Mon–Sun calendar week. Partial-week bars at
-// half opacity match WeeklyCostChart / WeeklyTokensChart so the in-progress
-// week reads as visually subordinate everywhere.
+// Weekly counterpart of DailyTasksChart — same completed/cancelled/failed
+// stacked bar, but each bar groups a Mon–Sun calendar week. Partial-week
+// bars at half opacity match WeeklyCostChart / WeeklyTokensChart so the
+// in-progress week reads as visually subordinate everywhere.
 const weeklyTasksChartConfig = {
   completed: { label: "Completed", color: "var(--chart-1)" },
+  cancelled: { label: "Cancelled", color: "var(--chart-3)" },
   failed: { label: "Failed", color: "var(--chart-5)" },
 } satisfies ChartConfig;
 
@@ -32,6 +33,7 @@ export interface WeeklyTasksData {
   daysCovered: number;
   completed: number;
   failed: number;
+  cancelled: number;
 }
 
 export function WeeklyTasksChart({ data }: { data: WeeklyTasksData[] }) {
@@ -56,7 +58,7 @@ export function WeeklyTasksChart({ data }: { data: WeeklyTasksData[] }) {
           axisLine={false}
           tickMargin={8}
           allowDecimals={false}
-          width={40}
+          width="auto"
         />
         <ChartTooltip
           content={
@@ -100,6 +102,16 @@ export function WeeklyTasksChart({ data }: { data: WeeklyTasksData[] }) {
         >
           {data.map((d) => (
             <Cell key={`${d.weekStart}-c`} fillOpacity={d.partial ? 0.5 : 1} />
+          ))}
+        </Bar>
+        <Bar
+          dataKey="cancelled"
+          stackId="tasks"
+          fill="var(--color-cancelled)"
+          radius={[0, 0, 0, 0]}
+        >
+          {data.map((d) => (
+            <Cell key={`${d.weekStart}-x`} fillOpacity={d.partial ? 0.5 : 1} />
           ))}
         </Bar>
         <Bar

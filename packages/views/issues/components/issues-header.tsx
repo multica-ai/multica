@@ -50,7 +50,7 @@ import { Calendar } from "@multica/ui/components/ui/calendar";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   ALL_STATUSES,
-  PRIORITY_ORDER,
+  PRIORITY_DISPLAY_ORDER,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
@@ -65,6 +65,7 @@ import type {
   IssueProperty,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  WorkingAgentSummary,
 } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -697,7 +698,10 @@ function DateSubContent({
         <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={field} onValueChange={(next) => setFieldValue(next as IssueDateField)}>
           {(["created_at", "updated_at"] as const).map((option) => (
-            <DropdownMenuRadioItem key={option} value={option}>
+            // Picking the date field is a parameter for the presets below, not
+            // the final action — keep the menu open so the user can continue
+            // to a preset or the custom range.
+            <DropdownMenuRadioItem key={option} value={option} closeOnClick={false}>
               {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
             </DropdownMenuRadioItem>
           ))}
@@ -794,6 +798,7 @@ export function ViewRefreshIndicator({ active }: { active: boolean }) {
 
 export function IssuesHeader({
   scopedIssues,
+  workingAgents,
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
@@ -803,6 +808,9 @@ export function IssuesHeader({
   onTableFacetChange,
 }: {
   scopedIssues: Issue[];
+  /** See IssueSurfaceController.workingAgents — the surface-scoped projection
+   *  behind the agents-working chip. */
+  workingAgents: WorkingAgentSummary[] | undefined;
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
@@ -897,6 +905,7 @@ export function IssuesHeader({
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
+            agents={workingAgents}
           />
           <IssueDisplayControls
             scopedIssues={scopedIssues}
@@ -1184,7 +1193,7 @@ export function IssueDisplayControls({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-44">
-                {PRIORITY_ORDER.map((p) => {
+                {PRIORITY_DISPLAY_ORDER.map((p) => {
                   const checked = priorityFilters.includes(p);
                   const count = counts.priority.get(p) ?? 0;
                   return (

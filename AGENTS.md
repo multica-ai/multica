@@ -17,10 +17,13 @@ Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared package
 - `server/` - Go backend (Chi router, sqlc, gorilla/websocket)
 - `apps/web/` - Next.js frontend (App Router)
 - `apps/desktop/` - Electron desktop app
+- `apps/mobile/` - Expo / React Native iOS app (read `apps/mobile/CLAUDE.md` first)
+- `apps/docs/` - Fumadocs documentation site
 - `packages/core/` - Headless business logic (Zustand stores, React Query hooks, API client)
 - `packages/ui/` - Atomic UI components (shadcn/Base UI, zero business logic)
 - `packages/views/` - Shared business pages/components
 - `packages/tsconfig/` - Shared TypeScript config
+- `packages/eslint-config/` - Shared ESLint config
 
 ### State Management (critical)
 

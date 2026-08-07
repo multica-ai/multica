@@ -11,10 +11,6 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import {
-  AgentRuntimeBadge,
-  RUNTIME_BADGE_MIN_AVATAR_PX,
-} from "./agent-runtime-badge";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
@@ -56,18 +52,6 @@ interface ActorAvatarProps {
    */
   showStatusDot?: boolean;
   /**
-   * Overlay the provider mark of the agent's runtime at the avatar's top-right.
-   * Use on identity/config surfaces — the agent's own page, its profile card,
-   * a chat session header — where "what is running underneath this?" is a live
-   * question. Has no effect for non-agent actors.
-   *
-   * Independent of `showStatusDot`, and the two are designed to coexist: they
-   * sit at opposite ends of the circle and answer different questions (can it
-   * take work right now, vs what backs it). No-ops below
-   * {@link RUNTIME_BADGE_MIN_AVATAR_PX} — see that constant for why.
-   */
-  showRuntimeBadge?: boolean;
-  /**
    * When `enableHoverCard` is on for an agent, choose which payload to
    * render. See {@link AgentHoverCardVariant}. Defaults to `"profile"` so
    * existing call sites keep their identity-card behaviour.
@@ -92,7 +76,6 @@ export function ActorAvatar({
   className,
   enableHoverCard,
   showStatusDot,
-  showRuntimeBadge,
   hoverCardVariant = "profile",
   profileLink,
 }: ActorAvatarProps) {
@@ -111,23 +94,19 @@ export function ActorAvatar({
     />
   );
 
-  // Optional overlays. Only meaningful for agents — members have no presence
-  // backbone and no runtime. Wrapping unconditionally with relative inline-flex
-  // would create extra DOM for every avatar; we only wrap when an overlay is
+  // Optional presence overlay. Only meaningful for agents — members have no
+  // presence backbone. Wrapping unconditionally with relative inline-flex
+  // would create extra DOM for every avatar; we only wrap when the dot is
   // asked for.
-  const isAgent = actorType === "agent";
-  const wrapDot = showStatusDot && isAgent;
-  const wrapBadge = showRuntimeBadge && isAgent;
-  const dotted =
-    wrapDot || wrapBadge ? (
-      <span className="relative inline-flex">
-        {avatar}
-        {wrapBadge && <AgentRuntimeBadge agentId={actorId} size={size} />}
-        {wrapDot && <AgentStatusDot agentId={actorId} size={size} />}
-      </span>
-    ) : (
-      avatar
-    );
+  const wrapDot = showStatusDot && actorType === "agent";
+  const dotted = wrapDot ? (
+    <span className="relative inline-flex">
+      {avatar}
+      <AgentStatusDot agentId={actorId} size={size} />
+    </span>
+  ) : (
+    avatar
+  );
   const shouldLinkToProfile =
     profileLink ??
     (actorType === "member" || actorType === "agent" || actorType === "squad");
@@ -236,7 +215,6 @@ export function AgentStatusDot({ agentId, size }: { agentId: string; size?: Avat
     />
   );
 }
-
 
 /**
  * Wraps an agent avatar in a hover-card. The trigger is keyboard-focusable

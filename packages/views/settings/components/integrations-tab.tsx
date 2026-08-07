@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { LarkTab } from "./lark-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
+import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
+import { WecomTab } from "./wecom-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -14,18 +16,15 @@ import { SettingsSection, SettingsTab } from "./settings-layout";
 
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
-// — currently Lark, Composio, Slack, and the self-hosted Git providers (Forgejo /
-// Gitea / GitLab), with Linear etc. to follow — lives in here under its own
-// section heading so additional integrations slot in without changing the IA.
-// IntegrationsTab is just the host; each integration owns its own description
-// and install flow.
+// — currently Lark, Composio, Slack, the self-hosted Git providers (Forgejo /
+// Gitea / GitLab), and WeCom smart-bot, with Linear etc. to follow —
+// lives in here under its own section heading so additional integrations slot
+// in without changing the IA. IntegrationsTab is just the host; each
+// integration owns its own description and install flow.
 export function IntegrationsTab() {
   const { t } = useT("settings");
 
   const composioEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
-  // Composio is hidden entirely until the feature is enabled and a key is
-  // configured server-side. A 503 from the toolkits endpoint means the server
-  // withheld the integration despite the frontend flag being on.
   const composioToolkits = useQuery({
     ...composioToolkitsOptions(),
     enabled: composioEnabled,
@@ -51,11 +50,17 @@ export function IntegrationsTab() {
       <SettingsSection title={t(($) => $.slack.section_title)}>
         <SlackTab />
       </SettingsSection>
+      <SettingsSection title={t(($) => $.dingtalk.section_title)}>
+        <DingTalkTab />
+      </SettingsSection>
       {vcsAvailable && (
         <SettingsSection title={t(($) => $.vcs.section_title)}>
           <VCSTab />
         </SettingsSection>
       )}
+      <SettingsSection title={t(($) => $.wecom.section_title)}>
+        <WecomTab />
+      </SettingsSection>
     </SettingsTab>
   );
 }

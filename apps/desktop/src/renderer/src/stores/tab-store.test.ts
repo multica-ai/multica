@@ -518,6 +518,170 @@ describe("bulk tab closing", () => {
   });
 });
 
+describe("closeTab activation order (MUL-5665)", () => {
+  // Tabs are appended at the end of the strip, so the tab you opened from a
+  // list is rarely that list's neighbour. Landing on a positional neighbour
+  // dropped users on a page they hadn't looked at in a while.
+  it("activates the last visited tab, not the positional neighbour", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+
+    store.setActiveTab(issuesId);
+    store.setActiveTab(agentsId);
+    store.closeTab(agentsId);
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.activeTabId).toBe(issuesId); // positional would give Projects
+    expect(group.recentTabIds).toEqual([]);
+  });
+
+  it("walks back through the visit history as tabs keep closing", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+    const settingsId = store.addTab("/acme/settings", "Settings");
+
+    store.setActiveTab(projectsId);
+    store.setActiveTab(agentsId);
+    store.setActiveTab(settingsId);
+    expect(useTabStore.getState().byWorkspace.acme.recentTabIds).toEqual([
+      agentsId,
+      projectsId,
+      issuesId,
+    ]);
+
+    store.closeTab(settingsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(agentsId);
+    store.closeTab(agentsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(projectsId);
+    store.closeTab(projectsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("counts a revisit once — the most recent visit wins", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+
+    store.setActiveTab(projectsId); // recent: [issues]
+    store.setActiveTab(issuesId); // recent: [projects]
+    store.setActiveTab(agentsId); // recent: [issues, projects]
+
+    expect(useTabStore.getState().byWorkspace.acme.recentTabIds).toEqual([
+      issuesId,
+      projectsId,
+    ]);
+    store.closeTab(agentsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("drops a closed background tab from the visit history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+
+    store.setActiveTab(projectsId);
+    store.setActiveTab(agentsId); // recent: [projects, issues]
+
+    store.closeTab(projectsId); // not the active tab
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.activeTabId).toBe(agentsId); // untouched
+    expect(group.recentTabIds).toEqual([issuesId]);
+
+    store.closeTab(agentsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("falls back to the positional neighbour when no other tab was ever visited", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    store.addTab("/acme/agents", "Agents");
+
+    // addTab never activates, so the active tab has no visit history behind it.
+    store.closeTab(issuesId);
+
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(projectsId);
+  });
+
+  it("opening a tab in a new tab and closing it returns to the opener", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.addTab("/acme/projects", "Projects");
+    const detailId = store.openTab("/acme/issues/bug-42", "Bug 42", {
+      activate: true,
+    });
+
+    store.closeTab(detailId);
+
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("closeOtherTabs keeps only surviving tabs in the visit history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+    store.togglePin(issuesId);
+    store.setActiveTab(issuesId);
+    store.setActiveTab(projectsId);
+    store.setActiveTab(agentsId); // recent: [projects, issues]
+
+    store.closeOtherTabs(agentsId);
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((t) => t.id)).toEqual([issuesId, agentsId]);
+    expect(group.recentTabIds).toEqual([issuesId]); // projects is gone
+    expect(group.activeTabId).toBe(agentsId);
+  });
+
+  it("keeps each workspace's visit history to itself", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const acmeIssuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const acmeProjectsId = store.addTab("/acme/projects", "Projects");
+    store.setActiveTab(acmeProjectsId);
+
+    store.switchWorkspace("butter");
+    const butterIssuesId = useTabStore.getState().byWorkspace.butter.tabs[0].id;
+    const butterAgentsId = store.addTab("/butter/agents", "Agents");
+    store.setActiveTab(butterAgentsId);
+    store.closeTab(butterAgentsId);
+
+    const state = useTabStore.getState();
+    expect(state.byWorkspace.butter.activeTabId).toBe(butterIssuesId);
+    expect(state.byWorkspace.acme.recentTabIds).toEqual([acmeIssuesId]);
+  });
+
+  it("reseeding the last tab of a workspace starts a fresh visit history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    store.setActiveTab(projectsId);
+    store.closeTab(issuesId);
+
+    store.closeTab(projectsId); // last tab — reseeds the default
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs).toHaveLength(1);
+    expect(group.recentTabIds).toEqual([]);
+    expect(group.activeTabId).toBe(group.tabs[0].id);
+  });
+});
+
 describe("togglePin", () => {
   it("flips a tab's pinned state", () => {
     const store = useTabStore.getState();
@@ -762,5 +926,57 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
     const tab = rehydrate(persistedTab("/acme/squads"));
     expect(tab).not.toHaveProperty("icon");
     expect(tab.url).toBe("/acme/squads");
+  });
+
+  function rehydrateGroup(
+    activeTabId: string,
+    urls: Record<string, string>,
+    recentTabIds?: unknown,
+  ): WorkspaceTabGroup {
+    return mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId,
+            recentTabIds,
+            tabs: Object.entries(urls).map(([id, url]) =>
+              persistedTab(url, { id }),
+            ),
+          },
+        },
+      },
+      emptyState(),
+    ).byWorkspace.acme;
+  }
+
+  it("restores the MRU order so the first close after a restart still returns there", () => {
+    const group = rehydrateGroup(
+      "t3",
+      { t1: "/acme/issues", t2: "/acme/projects", t3: "/acme/agents" },
+      ["t1", "t2"],
+    );
+    expect(group.recentTabIds).toEqual(["t1", "t2"]);
+
+    useTabStore.setState({
+      activeWorkspaceSlug: "acme",
+      byWorkspace: { acme: group },
+    });
+    useTabStore.getState().closeTab("t3");
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe("t1");
+  });
+
+  it("sanitizes an MRU order carrying dropped, duplicate, or active tab ids", () => {
+    const group = rehydrateGroup(
+      "t2",
+      { t1: "/acme/issues", t2: "/acme/projects" },
+      ["gone", "t1", "t1", "t2", 7],
+    );
+    expect(group.recentTabIds).toEqual(["t1"]);
+  });
+
+  it("defaults the MRU order to empty for payloads written before it existed", () => {
+    const group = rehydrateGroup("t1", { t1: "/acme/issues" });
+    expect(group.recentTabIds).toEqual([]);
   });
 });

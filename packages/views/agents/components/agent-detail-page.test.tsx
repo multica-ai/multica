@@ -42,6 +42,8 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 vi.mock("@multica/core/agents", () => ({
+  isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
+    agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -207,5 +209,30 @@ describe("AgentDetailPage DM button", () => {
     // The archived banner is the signal the page has settled past loading.
     await screen.findByText(/This agent is archived/);
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
+  });
+
+  it("explains an unbound agent and blocks run actions without losing the profile", async () => {
+    agentsRef.current = [
+      {
+        ...baseAgent,
+        owner_id: "user-1",
+        runtime_id: "",
+        runtime_bound: false,
+      },
+    ];
+    renderPage();
+
+    expect(
+      await screen.findByText(/needs a runtime before it can run/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Bind runtime" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "DM" }));
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Bind a runtime before running this agent.",
+    );
+    expect(mockModalOpen).not.toHaveBeenCalled();
   });
 });

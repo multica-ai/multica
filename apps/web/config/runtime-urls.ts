@@ -44,7 +44,15 @@ export function resolveDocsUrl(env: RuntimeEnv): string | undefined {
 export function resolveDevRemoteApiUrl(env: RuntimeEnv): string {
   const configured = resolveRemoteApiUrl(env);
   if (configured) return configured;
-  const backendPort = env.BACKEND_PORT?.trim() || "8080";
+  // Next writes process.env.PORT with the frontend listener port before it
+  // evaluates next.config.ts. Treating that generic variable as a backend port
+  // would make every dev rewrite point back to the frontend itself. Only the
+  // backend-specific aliases are safe fallbacks in this process.
+  const backendPort =
+    env.BACKEND_PORT?.trim() ||
+    env.API_PORT?.trim() ||
+    env.SERVER_PORT?.trim() ||
+    "8080";
   return `http://localhost:${backendPort}`;
 }
 

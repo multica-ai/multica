@@ -106,7 +106,11 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3,"costUsdTicks":900}}}\n' "$id"
+      if [ -n "$KIRO_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
       exit 0
       ;;
   esac
@@ -198,8 +202,8 @@ func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected usage under current model auto, got %+v", result.Usage)
 	}
-	if usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 }
 
@@ -1006,8 +1010,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)
@@ -1103,7 +1107,6 @@ func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
 		t.Fatalf("session/load.mcpServers: got %v, want one entry named fetch", servers)
 	}
 }
-
 
 // TestIsKiroOversizedHistoryImage pins the detector for the GH #5975 shape: a
 // resumed conversation whose history replays an image exceeding the provider's
@@ -1276,5 +1279,45 @@ func TestKiroFreshOversizedHistoryImageDoesNotSignalResumeRejected(t *testing.T)
 	}
 	if result.SessionID != "ses_fresh" {
 		t.Fatalf("expected the fresh session id, got %q", result.SessionID)
+	}
+}
+
+// TestKiroDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. kiro ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestKiroDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
+
+	backend, err := New("kiro", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIRO_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "loaded tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }

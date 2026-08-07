@@ -36,10 +36,10 @@ const (
 // → OnboardingPathUnknown so legacy clients still complete cleanly, just
 // without a funnel-ready label.
 //
-// `workspace_id` is retained for analytics enrichment; the v2 code path
-// used it to seed an install-runtime issue inside the same transaction,
-// but in v3 every workspace-content seeding lives in the frontend
-// welcome hook (see packages/views/workspace/welcome-after-onboarding.tsx).
+// `workspace_id` is retained for analytics enrichment. The handler itself
+// does not create agents; current runtime-connected clients create their
+// Mika onboarding chat before calling this endpoint. The explicit no-runtime
+// path still seeds one setup guide from the frontend.
 type completeOnboardingRequest struct {
 	CompletionPath string `json:"completion_path,omitempty"`
 	WorkspaceID    string `json:"workspace_id,omitempty"`
@@ -62,10 +62,10 @@ var validCompletionPaths = map[string]struct{}{
 // 200 OK (for client-side retries) but skip the event so the funnel
 // counts honest first-completion.
 //
-// V3 has no in-handler seeding side effect: workspace content (Helper
-// agent, starter issues, install-runtime guides) is created by the
-// frontend welcome hook via the generic CreateAgent / CreateIssue
-// endpoints. This handler does one thing: flip the field.
+// Current clients have no in-handler agent-creation side effect. The
+// runtime-connected flow creates Mika and starts its onboarding chat first,
+// while the explicit no-runtime path may create a setup-guide issue after
+// navigation. This handler itself does one thing: flip the field.
 func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

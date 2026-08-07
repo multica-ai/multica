@@ -27,7 +27,17 @@ vi.mock("./terminate-task-confirm-dialog", () => ({
   TerminateTaskConfirmDialog: () => null,
 }));
 
-import { ActiveTaskRow, TaskCommentCoverage } from "./execution-log-section";
+import {
+  ActiveTaskRow,
+  ExecutionLogSection,
+  TaskCommentCoverage,
+  IssueUsageTotal,
+} from "./execution-log-section";
+import type { TaskUsage } from "@multica/core/types";
+import { act, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { issueKeys } from "@multica/core/issues/queries";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -214,5 +224,177 @@ describe("TaskCommentCoverage", () => {
     );
 
     expect(screen.getByText("包含 3 条评论")).toBeInTheDocument();
+  });
+});
+
+// claude-opus-5 at 5 / 25 / 0.50 / 6.25 per million.
+function usageSlice(overrides: Partial<TaskUsage> = {}): TaskUsage {
+  return {
+    provider: "anthropic",
+    model: "claude-opus-5",
+    input_tokens: 96_000,
+    output_tokens: 34_000,
+    cache_read_tokens: 712_000,
+    cache_write_tokens: 50_000,
+    ...overrides,
+  };
+}
+
+describe("per-run token usage", () => {
+  // An active row shows only its timer. The daemon reports usage once, after
+  // the run returns, and that write publishes no realtime event — so no
+  // running task carries usage in production. Asserting a token figure here
+  // would only prove that a hand-written fixture renders.
+  it("shows a running row's timer, and no token figure even if usage exists", () => {
+    renderWithI18n(
+      <ActiveTaskRow
+        task={makeTask({ usage: [usageSlice()] })}
+        issueId="issue-1"
+      />,
+    );
+
+    expect(screen.getByText("5m 04s")).toBeInTheDocument();
+    expect(screen.queryByText("892K")).not.toBeInTheDocument();
+    // And no em dash either — mid-run, "no figure yet" is not a claim worth
+    // making next to a ticking timer.
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+});
+
+// The sidebar this section lives in is a resizable panel — 260px minimum,
+// 320px default, 420px maximum — so the header's three items (section label,
+// active-run count, issue total) have to hold a width the component does not
+// choose. They stopped holding it once the total moved into the header: at the
+// 260px minimum the row has 227px and the full header wants ~238px, and the
+// label was the only item that could give. It gave by breaking "Execution log"
+// across two lines (MUL-5804). These tests pin the contract that replaced that:
+// one line always, and a width tier that drops the token figure whole.
+describe("execution log header geometry", () => {
+  function renderSection(tasks: AgentTask[]) {
+    // Seed the cache instead of mocking the API: the query is fresh for 30s,
+    // so `listTasksByIssue` is never reached and the section renders its real
+    // header markup.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+    return renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  function headerOf(): HTMLElement {
+    const label = screen.getByText("Execution log");
+    const header = label.closest("div");
+    if (!header) throw new Error("header row not found");
+    return header;
+  }
+
+  const completed = makeTask({
+    status: "completed",
+    completed_at: "2026-06-08T08:04:00Z",
+    usage: [usageSlice()],
+  });
+
+  it("keeps the section label on one line", () => {
+    renderSection([completed]);
+
+    const label = screen.getByText("Execution log");
+    // The label is the only header item allowed to shrink, so it is the one
+    // that must carry nowrap + ellipsis. A heading that reflows mid-phrase
+    // reads as broken; an ellipsis reads as a narrow column.
+    expect(label.className).toContain("truncate");
+    expect(label.closest("button")?.className).toContain("whitespace-nowrap");
+  });
+
+  it("tiers on the sidebar's width, not the viewport's", () => {
+    const { container } = renderSection([completed]);
+
+    // Two sidebars of different widths can be open in one window (desktop
+    // split panes, the mobile sheet), so a `lg:` variant would tier this
+    // header on a width that has nothing to do with the panel it sits in.
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("@container/execution-log");
+    for (const el of headerOf().querySelectorAll("*")) {
+      // classList, not className: the chevron is an SVG, whose className is an
+      // SVGAnimatedString.
+      for (const cls of el.classList) {
+        expect(cls).not.toMatch(/^(sm|md|lg|xl|2xl):/);
+      }
+    }
+  });
+
+  it("drops the token figure whole rather than clipping a number", () => {
+    const { unmount } = renderSection([completed]);
+    let header = within(headerOf());
+
+    // Below the tier the tokens and their separator leave together and the
+    // cost stays — never a clipped "$2.0…", which would read as a different
+    // figure than the issue actually spent.
+    const cost = header.getByText("$2.00");
+    expect(header.getByText("892K").className).toContain(
+      "@max-[14rem]/execution-log:hidden",
+    );
+    expect(header.getByText("·").className).toContain(
+      "@max-[14rem]/execution-log:hidden",
+    );
+    expect(cost.className).not.toContain("hidden");
+    // And the pill itself never truncates — that is what would clip a digit.
+    const pill = cost.closest("button");
+    expect(pill?.className).toContain("shrink-0");
+    expect(pill?.className).not.toContain("truncate");
+
+    // An active run puts the count chip in the same row, which is the shape
+    // that actually runs out of width — so it tiers earlier. At rest the total
+    // fits the 260px minimum whole and should not be tiered away with it.
+    unmount();
+    renderSection([completed, makeTask({ status: "running" })]);
+    header = within(headerOf());
+    expect(header.getByText("892K").className).toContain(
+      "@max-[16rem]/execution-log:hidden",
+    );
+  });
+});
+
+describe("IssueUsageTotal pricing", () => {
+  afterEach(() => {
+    useCustomPricingStore.setState({ pricings: {} });
+  });
+
+  it("recomputes when a custom model rate is saved", () => {
+    // `estimateCost` reads the custom-rate store imperatively, so nothing
+    // re-renders this on a rate change unless the component subscribes. Before
+    // that subscription existed the figure stayed stale until the task list
+    // happened to refetch.
+    const unpriced: TaskUsage = {
+      provider: "acme",
+      model: "totally-made-up-model",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+    const task = makeTask({ status: "completed", usage: [unpriced] });
+
+    renderWithI18n(
+      <IssueUsageTotal tasks={[task]} alone onOpen={() => {}} />,
+    );
+
+    // No rate on file for this model yet.
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+
+    act(() => {
+      useCustomPricingStore.getState().setCustomPricing("acme/totally-made-up-model", {
+        input: 7,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+    });
+
+    // 1M input tokens at $7/M, without any refetch.
+    expect(screen.getByText("$7.00")).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 // Frontend analytics glue. Thin wrapper over posthog-js.
 //
-// The source-of-truth event catalog is `docs/analytics.md`. This module only
+// The source-of-truth event catalog is `server/internal/analytics/events.go`. This module only
 // handles the two things the backend can't do itself: attribution capture on
 // first anonymous pageview, and person-identity merge on login. Every funnel
 // event (signup, workspace_created, runtime_registered, issue_executed,
@@ -117,7 +117,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // our funnel is set up: signup is the first real funnel step.
     person_profiles: "identified_only",
     // Turn off every on-by-default auto-capture surface. Our funnel is
-    // narrow and explicit (the events in docs/analytics.md + a manual
+    // narrow and explicit (the events in server/internal/analytics/events.go + a manual
     // $pageview). Autocapture floods the Activity view with anonymous
     // "clicked button" / "clicked link" noise, burns the billed event
     // budget, and risks capturing user-typed content in input values.

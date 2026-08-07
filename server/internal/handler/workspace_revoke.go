@@ -50,6 +50,19 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 
 	qtx := h.Queries.WithTx(tx)
 
+	// Taken FIRST, before this tx touches member or issue_subscriber. The
+	// delegated auto-subscribe rule takes the same (workspace, user) lock, so
+	// a run that is mid-decomposition cannot slip a new subscriber row in
+	// between this tx's membership delete and its subscription cleanup below.
+	// First also means every holder acquires it in the same order, so these
+	// paths cannot deadlock against each other (MUL-5483 review round 7).
+	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
 		WorkspaceID: workspaceID,
 		OwnerID:     userID,
@@ -135,6 +148,30 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	if err := qtx.DeleteAgentInvocationTargetsByMember(ctx, db.DeleteAgentInvocationTargetsByMemberParams{
 		WorkspaceID: workspaceID,
 		TargetID:    userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// A private quick action is visible and runnable ONLY by its creator
+	// (quick_action carries no FK, so nothing removes it implicitly). Once the
+	// creator is gone the row is unreachable by every remaining member while
+	// still consuming the workspace's active-action limit, so drop those in
+	// the same tx. Public actions are workspace furniture and survive.
+	if err := qtx.DeletePrivateQuickActionsByCreator(ctx, db.DeletePrivateQuickActionsByCreatorParams{
+		WorkspaceID: workspaceID,
+		CreatedByID: userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// issue_subscriber carries no FK either (same MUL-3515 rule as the two
+	// prunes above), and MUL-5483 gave agents a path that writes member
+	// subscriber rows on their own initiative. Dropping them in this tx is what
+	// stops a departed member from accruing inbox rows, and stops a re-invite
+	// from silently restoring visibility of everything they used to watch.
+	if err := qtx.DeleteSubscriptionsByMember(ctx, db.DeleteSubscriptionsByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
 	}); err != nil {
 		return empty, err
 	}

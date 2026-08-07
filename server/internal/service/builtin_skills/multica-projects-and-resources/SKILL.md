@@ -55,6 +55,26 @@ For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkou
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 
+## Referring to a project in a comment
+
+A project has no `MUL-123`-style identifier, so writing its title as prose
+produces dead text — there is nothing for the reader's client to autolink. Use
+the mention-link form instead, with the project UUID from
+`multica project list --output json`:
+
+    [Roadmap](mention://project/<project-id>)
+
+Every client makes it navigable, with different presentation: web and desktop
+render a chip carrying the project's icon and current title, while mobile
+renders an ordinary link that opens the project on tap. Unlike `@agent` /
+`@squad`, it is a pure link: `util.MentionRe` does not even include `project`,
+so it enqueues nothing and notifies nobody — the same no-side-effect contract
+as an `issue` mention.
+
+Prefer this form over pasting the project's URL. Web and desktop do unfurl a
+bare in-app project URL into that same chip, but mobile does not — there a
+pasted URL is handed to the system browser and takes the reader out of the app.
+
 ## When to add a resource
 
 Add/update a project resource when the user asks for durable project context: "把这个 GitHub repo 绑到项目上", "以后都用这个 repo", "agent 总是拿不到这个项目的仓库", or "这个项目要在我的本地目录里跑".

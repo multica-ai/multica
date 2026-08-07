@@ -30,7 +30,8 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output)
@@ -69,7 +70,8 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output)
@@ -279,7 +281,8 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output)

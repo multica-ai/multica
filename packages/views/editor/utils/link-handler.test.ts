@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { openLink, toInternalAppPath } from "./link-handler";
+import {
+  openLink,
+  parseWorkspaceEntityLink,
+  toInternalAppPath,
+} from "./link-handler";
 
 const APP_ORIGIN = "https://app.multica.ai";
 
@@ -105,5 +109,133 @@ describe("openLink", () => {
   it("leaves a path that already carries a slug alone", () => {
     openLink("/other/issues/MUL-1", "acme", APP_ORIGIN);
     expect(navigatedPaths()).toEqual(["/other/issues/MUL-1"]);
+  });
+});
+
+describe("parseWorkspaceEntityLink", () => {
+  const PROJECT_ID = "8f14e45f-ceea-4d0e-a1a2-9b1c0d3e4f5a";
+  const ISSUE_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
+
+  it("parses an absolute project URL on the app origin", () => {
+    expect(
+      parseWorkspaceEntityLink(
+        `${APP_ORIGIN}/acme/projects/${PROJECT_ID}`,
+        APP_ORIGIN,
+      ),
+    ).toEqual({ kind: "project", id: PROJECT_ID, slug: "acme" });
+  });
+
+  it("parses an absolute issue URL on the app origin", () => {
+    expect(
+      parseWorkspaceEntityLink(`${APP_ORIGIN}/acme/issues/${ISSUE_ID}`, APP_ORIGIN),
+    ).toEqual({ kind: "issue", id: ISSUE_ID, slug: "acme" });
+  });
+
+  it("parses a site-relative path without needing an app origin", () => {
+    expect(parseWorkspaceEntityLink(`/acme/projects/${PROJECT_ID}`)).toEqual({
+      kind: "project",
+      id: PROJECT_ID,
+      slug: "acme",
+    });
+  });
+
+  it("reports a null slug for the slugless legacy form", () => {
+    expect(parseWorkspaceEntityLink(`/projects/${PROJECT_ID}`)).toEqual({
+      kind: "project",
+      id: PROJECT_ID,
+      slug: null,
+    });
+  });
+
+  it("returns null for another origin", () => {
+    expect(
+      parseWorkspaceEntityLink(
+        `https://evil.example/acme/projects/${PROJECT_ID}`,
+        APP_ORIGIN,
+      ),
+    ).toBeNull();
+  });
+
+  // A leading slash does not mean "this site". Both of these name another host
+  // and a browser follows them there, so the parser has to resolve the href
+  // rather than test its prefix.
+  it("returns null for a host-bearing href that still starts with a slash", () => {
+    expect(
+      parseWorkspaceEntityLink(`//evil.example/projects/${PROJECT_ID}`, APP_ORIGIN),
+    ).toBeNull();
+    // Backslashes are normalised to slashes, so this names evil.example too —
+    // and it slips past a `//` prefix test.
+    expect(
+      parseWorkspaceEntityLink(`/\\evil.example/projects/${PROJECT_ID}`, APP_ORIGIN),
+    ).toBeNull();
+  });
+
+  it("returns null for a non-http scheme", () => {
+    expect(parseWorkspaceEntityLink("javascript:alert(1)", APP_ORIGIN)).toBeNull();
+  });
+
+  // The slugless form resolves against the current workspace either way; the
+  // two spellings must not disagree about that.
+  it("treats the slugless form the same whether or not it carries the origin", () => {
+    expect(
+      parseWorkspaceEntityLink(`${APP_ORIGIN}/projects/${PROJECT_ID}`, APP_ORIGIN),
+    ).toEqual({ kind: "project", id: PROJECT_ID, slug: null });
+  });
+
+  it("returns null for a list page", () => {
+    expect(parseWorkspaceEntityLink("/acme/projects")).toBeNull();
+  });
+
+  it("returns null for a deeper route under the entity", () => {
+    expect(
+      parseWorkspaceEntityLink(`/acme/projects/${PROJECT_ID}/settings`),
+    ).toBeNull();
+  });
+
+  it("returns null for an entity route this parser has no chip for", () => {
+    expect(parseWorkspaceEntityLink(`/acme/agents/${PROJECT_ID}`)).toBeNull();
+  });
+
+  // A query string or fragment addresses something narrower than the entity
+  // page, and a chip cannot carry it.
+  it("returns null when the link carries a query string or fragment", () => {
+    expect(
+      parseWorkspaceEntityLink(`/acme/projects/${PROJECT_ID}?tab=issues`),
+    ).toBeNull();
+    expect(
+      parseWorkspaceEntityLink(`/acme/issues/${ISSUE_ID}#comment-3`),
+    ).toBeNull();
+  });
+
+  // `copyLink` / `openInNewTab` build `paths.issueDetail(identifier || id)` and
+  // the issue route rewrites a UUID URL back to the identifier, so this — not
+  // the UUID form — is what a user actually copies out of the app.
+  it("parses an issue addressed by identifier", () => {
+    expect(parseWorkspaceEntityLink("/acme/issues/MUL-1")).toEqual({
+      kind: "issue",
+      id: "MUL-1",
+      slug: "acme",
+    });
+  });
+
+  // A project has no shorthand, so an identifier-shaped id under /projects/
+  // addresses nothing this parser could resolve.
+  it("returns null for an identifier-shaped project id", () => {
+    expect(parseWorkspaceEntityLink("/acme/projects/MUL-1")).toBeNull();
+  });
+
+  it("returns null for an id that is neither a UUID nor an identifier", () => {
+    expect(parseWorkspaceEntityLink("/acme/issues/roadmap")).toBeNull();
+    // Lowercase is not the identifier form — matching it would turn ordinary
+    // hyphenated path segments into entity references.
+    expect(parseWorkspaceEntityLink("/acme/issues/mul-1")).toBeNull();
+  });
+
+  it("returns null when the slug position holds a reserved slug", () => {
+    expect(parseWorkspaceEntityLink(`/login/projects/${PROJECT_ID}`)).toBeNull();
+  });
+
+  it("returns null for a malformed percent-escape", () => {
+    expect(parseWorkspaceEntityLink("/acme/projects/%E0%A4%A")).toBeNull();
   });
 });

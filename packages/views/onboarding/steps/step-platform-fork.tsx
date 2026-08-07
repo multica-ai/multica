@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Download } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ArrowRight, Download, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -11,14 +11,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
-import { DragStrip } from "@multica/views/platform";
-import { StepHeader } from "../components/step-header";
-import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
-import { CompactRuntimeRow } from "../components/compact-runtime-row";
+import {
+  StepFooter,
+  StepHeading,
+} from "../components/step-shell";
+import {
+  MikaRuntimeChoice,
+  type MikaRuntimeSelection,
+} from "../../runtimes/components/mika-runtime-choice";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { useT } from "../../i18n";
 
@@ -53,147 +56,118 @@ const DOWNLOAD_PAGE_URL = "/download";
 
 export function StepPlatformFork({
   wsId,
+  wsSlug,
   onNext,
-  onBack,
   cliInstructions,
 }: {
   wsId: string;
-  onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
-  onBack?: () => void;
+  /** Slug of the target workspace. Sent explicitly so the runtime list reads
+   *  the workspace being set up rather than whichever one the app is currently
+   *  showing. */
+  wsSlug?: string;
+  onNext: (runtime: AgentRuntime | null, model?: string) => void | Promise<void>;
   /** Platform-specific CLI install card, rendered inside the CLI dialog. */
   cliInstructions?: ReactNode;
 }) {
   const { t } = useT("onboarding");
-  const mainRef = useRef<HTMLElement>(null);
-  const fadeStyle = useScrollFade(mainRef);
 
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [downloaded, setDownloaded] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [model, setModel] = useState("");
 
-  const picker = useRuntimePicker(wsId);
+  const picker = useRuntimePicker(wsId, wsSlug);
 
   const pickDesktop = () => {
+    // No post-click state. `noopener` makes window.open return null by spec
+    // whether it opened or was blocked, so this cannot know which happened —
+    // and the copy it used to flip to ("Opened in a new tab.") was a claim we
+    // had no way to stand behind. The card states the intent up front
+    // instead, which is true either way.
     window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
-    setDownloaded(true);
   };
 
   const handleOpenCli = () => {
     setDialog("cli");
   };
 
-  const handleCliConnect = () => {
-    if (!picker.selected) return;
-    setDialog(null);
-    onNext(picker.selected);
+  const handleCliConnect = async () => {
+    if (!picker.selected || connecting) return;
+    setConnecting(true);
+    try {
+      await onNext(picker.selected, model || undefined);
+      setDialog(null);
+    } finally {
+      setConnecting(false);
+    }
   };
 
-  const footerHint = (() => {
-    if (downloaded) {
-      return t(($) => $.step_platform.hint_downloaded);
-    }
-    return t(($) => $.step_platform.hint_default);
-  })();
+  const footerHint = t(($) => $.step_platform.hint_default);
 
   return (
-    <div className="animate-onboarding-enter grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px]">
-      {/* Left — DragStrip + 3-region app shell */}
-      <div className="flex min-h-0 flex-col">
-        <DragStrip />
+    <>
+      <div className="flex flex-col gap-8 pt-2 sm:pt-6">
+        {/* The eyebrow read "Connect a computer" directly above a headline
+            that starts with the same three words. The block has no eyebrow
+            slot and the rail already names the step, so it goes. */}
+        <StepHeading
+          title={t(($) => $.step_platform.headline)}
+          description={t(($) => $.step_platform.lede)}
+        />
 
-        <header className="flex shrink-0 items-center gap-4 bg-background px-6 py-3 sm:px-10 md:px-14 lg:px-16">
-          {onBack ? (
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-body text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {t(($) => $.common.back)}
-            </button>
-          ) : (
-            <span aria-hidden className="w-0" />
-          )}
-          <div className="flex-1">
-            <StepHeader currentStep="runtime" />
-          </div>
-        </header>
+        <div className="flex flex-col gap-2">
+          <ForkPrimary onClick={pickDesktop} />
 
-        <main
-          ref={mainRef}
-          style={fadeStyle}
-          className="min-h-0 flex-1 overflow-y-auto"
-        >
-          <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
-            <div className="mb-2 text-caption font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              {t(($) => $.step_platform.eyebrow)}
-            </div>
-            <h1 className="text-balance font-serif text-display font-medium leading-[1.1] tracking-tight text-foreground">
-              {t(($) => $.step_platform.headline)}
-            </h1>
-            <p className="mt-4 max-w-[560px] text-body-lg leading-[1.55] text-muted-foreground">
-              {t(($) => $.step_platform.lede)}
-            </p>
+          <ForkAlt
+            title={t(($) => $.step_platform.cli_title)}
+            subtitle={t(($) => $.step_platform.cli_subtitle)}
+            actionLabel={t(($) => $.step_platform.cli_action)}
+            onAction={handleOpenCli}
+          />
 
-            <div className="mt-10 flex max-w-[560px] flex-col gap-3.5">
-              <ForkPrimary onClick={pickDesktop} downloaded={downloaded} />
+          <ForkAlt
+            title={t(($) => $.step_platform.cloud_title)}
+            subtitle={t(($) => $.step_platform.cloud_subtitle)}
+            actionLabel={t(($) => $.step_platform.cloud_action)}
+            disabled
+          />
+        </div>
 
-              <ForkAlt
-                title={t(($) => $.step_platform.cli_title)}
-                subtitle={t(($) => $.step_platform.cli_subtitle)}
-                actionLabel={t(($) => $.step_platform.cli_action)}
-                onAction={handleOpenCli}
-              />
-
-              <ForkAlt
-                title={t(($) => $.step_platform.cloud_title)}
-                subtitle={t(($) => $.step_platform.cloud_subtitle)}
-                actionLabel={t(($) => $.step_platform.cloud_action)}
-                disabled
-              />
-            </div>
-
-            {/* Inline action bar — hint on the left, Skip on the right.
-                Advancement for the CLI path is owned by the CLI
-                dialog's own "Connect & continue" button; Skip creates
-                the single self-serve onboarding issue. */}
-            <div className="mt-8 flex max-w-[560px] flex-wrap items-center justify-between gap-x-4 gap-y-2">
-              <span
-                aria-live="polite"
-                className="text-caption text-muted-foreground"
-              >
-                {footerHint}
-              </span>
-              <Button variant="secondary" onClick={() => onNext(null)}>
-                {t(($) => $.step_runtime.skip)}
-              </Button>
-            </div>
-          </div>
-        </main>
       </div>
 
-      {/* Right — always-visible aside */}
-      <aside className="hidden min-h-0 border-l bg-muted/40 lg:flex lg:flex-col">
-        <DragStrip />
-        <div className="min-h-0 flex-1 overflow-y-auto px-12 py-12">
-          <RuntimeAsidePanel />
-        </div>
-      </aside>
+      {/* Advancement for the CLI path is owned by the CLI dialog's own
+          "Connect & continue" button; Skip creates the single self-serve
+          onboarding issue. */}
+      <StepFooter hint={footerHint}>
+        <Button
+          variant="ghost"
+          className="w-full"
+          onClick={() => onNext(null)}
+        >
+          {t(($) => $.step_runtime.skip)}
+        </Button>
+      </StepFooter>
 
-      <CliInstallDialog
-        open={dialog === "cli"}
-        onClose={() => setDialog(null)}
-        onConnect={handleCliConnect}
-        runtimes={picker.runtimes}
-        selectedId={picker.selectedId}
-        onSelect={picker.setSelectedId}
-        hasRuntimes={picker.hasRuntimes}
-        canConnect={picker.selected !== null}
-        selectedName={
-          picker.selected ? runtimeDisplayLabel(picker.selected) : null
+    <CliInstallDialog
+      open={dialog === "cli"}
+      onClose={() => setDialog(null)}
+      onConnect={handleCliConnect}
+      runtimes={picker.runtimes}
+      choice={{ runtimeId: picker.selectedId ?? "", model }}
+      onChoiceChange={(next) => {
+        if (next.runtimeId !== picker.selectedId) {
+          picker.setSelectedId(next.runtimeId);
         }
-        cliInstructions={cliInstructions}
-      />
-    </div>
+        setModel(next.model);
+      }}
+      hasRuntimes={picker.hasRuntimes}
+      canConnect={picker.selected !== null}
+      selectedName={
+        picker.selected ? runtimeDisplayLabel(picker.selected) : null
+      }
+      connecting={connecting}
+      cliInstructions={cliInstructions}
+    />
+    </>
   );
 }
 
@@ -201,13 +175,7 @@ export function StepPlatformFork({
 // Fork cards
 // ------------------------------------------------------------
 
-function ForkPrimary({
-  onClick,
-  downloaded,
-}: {
-  onClick: () => void;
-  downloaded: boolean;
-}) {
+function ForkPrimary({ onClick }: { onClick: () => void }) {
   const { t } = useT("onboarding");
   return (
     <button
@@ -221,14 +189,10 @@ function ForkPrimary({
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-title font-medium tracking-tight">
           <Download className="h-4 w-4" aria-hidden />
-          {downloaded
-            ? t(($) => $.step_platform.download_title_after)
-            : t(($) => $.step_platform.download_title)}
+          {t(($) => $.step_platform.download_title)}
         </div>
         <div className="mt-1 text-label text-background/60">
-          {downloaded
-            ? t(($) => $.step_platform.download_subtitle_after)
-            : t(($) => $.step_platform.download_subtitle)}
+          {t(($) => $.step_platform.download_subtitle)}
         </div>
       </div>
       <span
@@ -308,22 +272,24 @@ function CliInstallDialog({
   onClose,
   onConnect,
   runtimes,
-  selectedId,
-  onSelect,
+  choice,
+  onChoiceChange,
   hasRuntimes,
   canConnect,
   selectedName,
+  connecting,
   cliInstructions,
 }: {
   open: boolean;
   onClose: () => void;
-  onConnect: () => void;
+  onConnect: () => void | Promise<void>;
   runtimes: AgentRuntime[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  choice: MikaRuntimeSelection;
+  onChoiceChange: (next: MikaRuntimeSelection) => void;
   hasRuntimes: boolean;
   canConnect: boolean;
   selectedName: string | null;
+  connecting: boolean;
   cliInstructions?: ReactNode;
 }) {
   const { t } = useT("onboarding");
@@ -351,16 +317,13 @@ function CliInstallDialog({
               {/* Cap the runtime list at ~4 rows visible, scroll the rest.
                   Keeps the commands above always reachable even when
                   a user has many machines registered. */}
-              <div className="flex max-h-[240px] flex-col gap-2 overflow-y-auto">
-                {runtimes.map((rt) => (
-                  <CompactRuntimeRow
-                    key={rt.id}
-                    runtime={rt}
-                    selected={rt.id === selectedId}
-                    onSelect={() => onSelect(rt.id)}
-                  />
-                ))}
-              </div>
+              <MikaRuntimeChoice
+                layout="list"
+                runtimes={runtimes}
+                value={choice}
+                onChange={onChoiceChange}
+                disabled={connecting}
+              />
             </>
           ) : (
             <CliWaitingStatus dialogOpen={open} />
@@ -383,8 +346,9 @@ function CliInstallDialog({
             <Button variant="ghost" onClick={onClose}>
               {t(($) => $.common.cancel)}
             </Button>
-            <Button disabled={!canConnect} onClick={onConnect}>
-              {t(($) => $.step_runtime.start_exploring)}
+            <Button disabled={!canConnect || connecting} onClick={onConnect}>
+              {connecting && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t(($) => $.step_runtime.continue)}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>

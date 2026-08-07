@@ -60,7 +60,10 @@ vi.mock("./link-hover-card", () => ({
   LinkHoverCard: () => null,
 }));
 
-vi.mock("./utils/link-handler", () => ({
+// Partial: only navigation is stubbed. The pure URL predicates stay real so
+// these autolink fixtures assert the renderer's actual link/chip dispatch.
+vi.mock("./utils/link-handler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./utils/link-handler")>()),
   openLink: vi.fn(),
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
 }));

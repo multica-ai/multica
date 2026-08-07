@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatMessage, ChatMessagesPage, ChatPendingTask } from "@multica/core/types";
@@ -6,6 +6,7 @@ import {
   hasInFlightPendingTask,
   isStillOnComposeTarget,
   planProjectContextChange,
+  seedAcceptedPendingTask,
 } from "./use-chat-controller";
 
 // hasInFlightPendingTask is the discriminator the stale-session self-heal uses
@@ -53,6 +54,82 @@ describe("hasInFlightPendingTask", () => {
       created_at: "2026-07-08T00:00:00Z",
     });
     expect(hasInFlightPendingTask(qc, sid)).toBe(true);
+  });
+});
+
+describe("seedAcceptedPendingTask", () => {
+  it("keeps an idle send as the current head instead of putting it in the queue", () => {
+    const qc = new QueryClient();
+
+    seedAcceptedPendingTask(qc, sid, {
+      task_id: "task-1",
+      created_at: "2026-07-08T00:00:00Z",
+      message_id: "message-1",
+      content: "accepted prompt",
+      supports_queue: true,
+      queued: false,
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sid))).toMatchObject({
+      task_id: "task-1",
+      message_id: "message-1",
+      queued_tasks: [],
+    });
+  });
+
+  it("adds a server-confirmed follow-up behind the current head", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sid), {
+      task_id: "task-active",
+      status: "running",
+      created_at: "2026-07-08T00:00:00Z",
+      queued_tasks: [],
+    });
+
+    seedAcceptedPendingTask(qc, sid, {
+      task_id: "task-next",
+      created_at: "2026-07-08T00:00:01Z",
+      message_id: "message-next",
+      content: "follow up",
+      supports_queue: true,
+      queued: true,
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sid))).toMatchObject({
+      task_id: "task-active",
+      queued_tasks: [expect.objectContaining({ task_id: "task-next" })],
+    });
+  });
+
+  it("keeps a task dispatched before the send response and refetches authority", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sid), {
+      task_id: "task-1",
+      status: "dispatched",
+      created_at: "2026-07-08T00:00:00Z",
+      queued_tasks: [],
+    });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    seedAcceptedPendingTask(qc, sid, {
+      task_id: "task-1",
+      created_at: "2026-07-08T00:00:00Z",
+      message_id: "message-1",
+      content: "accepted prompt",
+      supports_queue: true,
+      queued: false,
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sid))).toEqual(
+      expect.objectContaining({
+        task_id: "task-1",
+        status: "dispatched",
+        message_id: "message-1",
+        content: "accepted prompt",
+        queued_tasks: [],
+      }),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.pendingTask(sid) });
   });
 });
 

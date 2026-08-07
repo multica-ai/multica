@@ -794,18 +794,112 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := qtx.DeleteChatPinnedAgentsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("delete workspace chat pins failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
-		return
+	// Keep the relationship graph in the application layer. Each step is a
+	// set-based delete scoped by workspace_id; the legacy cascades remain only
+	// as an expand-phase safety net until a later schema contract.
+	ctx := r.Context()
+	deleteSteps := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "set teardown mode",
+			run:  func() error { return qtx.SetWorkspaceTeardownMode(ctx) },
+		},
+		{
+			name: "prepare relationship graph",
+			run:  func() error { return qtx.PrepareWorkspaceDeletionLinks(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete chat pins",
+			run:  func() error { return qtx.DeleteChatPinnedAgentsByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
+			// This is the first stage that touches usage rollups. Keep the
+			// global rollup lock out of relationship preparation so unrelated
+			// workspaces skip the shortest possible rollup window.
+			name: "lock task usage rollup",
+			run:  func() error { return qtx.LockTaskUsageRollupForWorkspaceDelete(ctx) },
+		},
+		{
+			name: "delete leaf data",
+			run:  func() error { return qtx.DeleteWorkspaceLeafData(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilot runs",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilotRuns(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete tasks",
+			run:  func() error { return qtx.DeleteWorkspaceTasks(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete chat messages",
+			run:  func() error { return qtx.DeleteWorkspaceChatMessages(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete communication roots",
+			run:  func() error { return qtx.DeleteWorkspaceCommunicationRoots(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete comments",
+			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete issue roots",
+			run:  func() error { return qtx.DeleteWorkspaceIssueRoots(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilot children",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilotChildren(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilots",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilots(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete pull requests",
+			run:  func() error { return qtx.DeleteWorkspacePullRequests(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete integrations",
+			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete squads and skills",
+			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete agents",
+			run:  func() error { return qtx.DeleteWorkspaceAgents(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete runtimes and projects",
+			run:  func() error { return qtx.DeleteWorkspaceRuntimesAndProjects(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete administration data",
+			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
+		},
+		{
+			// At this point workspaceMember has resolved → workspaceID is a
+			// valid UUID, so reuse the resolved value. The existing final
+			// statement also sweeps any expand-phase compatibility leftovers.
+			name: "delete workspace",
+			run:  func() error { return qtx.DeleteWorkspace(ctx, requester.WorkspaceID) },
+		},
 	}
-
-	// At this point workspaceMember has resolved → workspaceID is a valid UUID
-	// (the lookup would have errored otherwise), so reuse the resolved value.
-	if err := qtx.DeleteWorkspace(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
-		return
+	for _, step := range deleteSteps {
+		if err := step.run(); err != nil {
+			slog.Warn("workspace delete step failed", append(
+				logger.RequestAttrs(r),
+				"error", err,
+				"workspace_id", workspaceID,
+				"step", step.name,
+			)...)
+			writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+			return
+		}
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {

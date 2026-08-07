@@ -12,6 +12,11 @@ import type { useT } from "../i18n";
 // that blamed permission alone sent people to audit agent visibility settings over
 // what was really a mistyped mention uuid (MUL-5548), so both labels name the two
 // possibilities instead.
+//
+// `agent_runtime_required` and `runtime_offline` are kept apart for the same
+// reason (MUL-5559): an unbound agent has no machine to reconnect, so "runtime
+// offline" copy sends the user looking for a computer that does not exist. The
+// fix it needs is binding the agent to a runtime.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
 // Full sentence — for tooltips and other surfaces with room to explain.
@@ -23,6 +28,8 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_target_unavailable);
     case "runtime_offline":
       return t(($) => $.comment.trigger_blocked_runtime_offline);
+    case "agent_runtime_required":
+      return t(($) => $.comment.trigger_blocked_agent_runtime_required);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -38,6 +45,8 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_target_unavailable);
     case "runtime_offline":
       return t(($) => $.comment.trigger_blocked_short_runtime_offline);
+    case "agent_runtime_required":
+      return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

@@ -44,6 +44,14 @@ WHERE id = $1;
 SELECT * FROM autopilot
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockAutopilotForUpdate :one
+-- UpdateAutopilot is a patch assembled from a pre-transaction snapshot. Lock
+-- and compare that row before applying the patch so a concurrent retarget or
+-- Runtime teardown cannot be overwritten by stale assignee/status fields.
+SELECT * FROM autopilot
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -62,6 +70,10 @@ UPDATE autopilot SET
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
+    pause_reason = CASE
+      WHEN sqlc.narg('status')::text IS NOT NULL THEN NULL
+      ELSE pause_reason
+    END,
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
@@ -71,8 +83,45 @@ RETURNING *;
 
 -- name: ArchiveAutopilot :exec
 UPDATE autopilot
-SET status = 'archived', updated_at = now()
+SET status = 'archived', pause_reason = NULL, updated_at = now()
 WHERE id = $1;
+
+-- name: PauseAutopilotsByUnboundAgents :many
+-- A runtime delete is a persistent admission failure, not a per-tick event.
+-- Pause direct-agent automations and squad automations whose leader was
+-- unbound, preserving the full configuration for an explicit resume after
+-- rebind. Restrict to active so repeated teardown/retry is idempotent.
+UPDATE autopilot a
+SET status = 'paused',
+    pause_reason = 'agent_runtime_required',
+    updated_at = now()
+WHERE a.status = 'active'
+  AND (
+    (a.assignee_type = 'agent' AND a.assignee_id = ANY(@agent_ids::uuid[]))
+    OR (
+      a.assignee_type = 'squad'
+      AND EXISTS (
+        SELECT 1
+        FROM squad s
+        WHERE s.id = a.assignee_id
+          AND s.leader_id = ANY(@agent_ids::uuid[])
+      )
+    )
+  )
+RETURNING a.*;
+
+-- name: PauseAutopilotsByUnrunnableSquad :many
+-- Rotating a squad to an already-unbound leader has the same persistent
+-- admission failure as Runtime teardown. Pause only automations assigned to
+-- this squad; direct automations targeting that Agent are unrelated.
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'agent_runtime_required',
+    updated_at = now()
+WHERE status = 'active'
+  AND assignee_type = 'squad'
+  AND assignee_id = @squad_id
+RETURNING *;
 
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()
@@ -480,7 +529,7 @@ ORDER BY s.failed DESC, a.id ASC;
 -- raced first), letting the caller treat that as a benign no-op rather than
 -- an error.
 UPDATE autopilot
-SET status = 'paused', updated_at = now()
+SET status = 'paused', pause_reason = NULL, updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING *;
 

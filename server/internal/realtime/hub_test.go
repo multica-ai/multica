@@ -463,3 +463,113 @@ func TestCheckOrigin(t *testing.T) {
 		})
 	}
 }
+
+// waitFor polls cond until it holds or the deadline expires. Hub registration
+// and the metrics bump both happen off the connection's own goroutine, so
+// asserting on them right after a read would race.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// The token-auth path reads its first frame before the caller has presented
+// any credential, so the read limit has to be in place by then (#6210).
+func TestHandleWebSocket_RejectsOversizedFrameBeforeAuth(t *testing.T) {
+	hub, server := newTestHub(t)
+	defer server.Close()
+
+	before := M.InboundTooLargeTotal.Load()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?workspace_id=" + testWorkspaceID
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	// Write errors are expected here: the server rejects the frame from its
+	// declared length and closes before the payload is drained.
+	_ = conn.WriteMessage(websocket.TextMessage, bytes.Repeat([]byte("a"), inboundReadLimit+1))
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); !websocket.IsCloseError(err, websocket.CloseMessageTooBig) {
+		t.Fatalf("read after oversized pre-auth frame = %v, want close code %d", err, websocket.CloseMessageTooBig)
+	}
+
+	waitFor(t, "inbound_too_large_total to increment", func() bool {
+		return M.InboundTooLargeTotal.Load()-before == 1
+	})
+	if n := totalClients(hub); n != 0 {
+		t.Fatalf("oversized pre-auth frame registered %d clients, want 0", n)
+	}
+}
+
+func TestReadPump_RejectsOversizedFrameAfterAuth(t *testing.T) {
+	hub, server := newTestHub(t)
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	waitFor(t, "client registration", func() bool { return totalClients(hub) == 1 })
+	before := M.InboundTooLargeTotal.Load()
+
+	oversized, err := json.Marshal(map[string]any{
+		"type": "ping",
+		"pad":  string(bytes.Repeat([]byte("a"), inboundReadLimit)),
+	})
+	if err != nil {
+		t.Fatalf("marshal oversized frame: %v", err)
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, oversized)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); !websocket.IsCloseError(err, websocket.CloseMessageTooBig) {
+		t.Fatalf("read after oversized frame = %v, want close code %d", err, websocket.CloseMessageTooBig)
+	}
+
+	waitFor(t, "inbound_too_large_total to increment", func() bool {
+		return M.InboundTooLargeTotal.Load()-before == 1
+	})
+	waitFor(t, "client to be unregistered", func() bool { return totalClients(hub) == 0 })
+}
+
+// The limit must not clip legitimate traffic: real frames are ~1 KiB, so
+// anything comfortably below the cap has to keep working.
+func TestReadPump_AcceptsFrameUnderReadLimit(t *testing.T) {
+	_, server := newTestHub(t)
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	frame, err := json.Marshal(map[string]any{
+		"type": "ping",
+		"pad":  string(bytes.Repeat([]byte("a"), inboundReadLimit/2)),
+	})
+	if err != nil {
+		t.Fatalf("marshal ping frame: %v", err)
+	}
+	if len(frame) >= inboundReadLimit {
+		t.Fatalf("test frame is %d bytes, not under the %d byte limit", len(frame), inboundReadLimit)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read pong: %v", err)
+	}
+	if !strings.Contains(string(raw), "pong") {
+		t.Fatalf("got %s, want a pong frame", raw)
+	}
+}

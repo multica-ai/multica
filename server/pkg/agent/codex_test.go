@@ -1935,6 +1935,9 @@ func TestCodexTurnInput(t *testing.T) {
 	t.Parallel()
 
 	const prompt = "do the task"
+	// Stands in for whatever the daemon computed for this surface; the backend
+	// only carries it, so the exact wording is the caller's business.
+	const chatNotice = "[System notice] the previous conversation context could not be restored.\n\n"
 	text := func(input []map[string]any) string {
 		if len(input) != 1 {
 			t.Fatalf("expected a single input block, got %d", len(input))
@@ -1945,7 +1948,7 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Resume expected but the backend fell back to a fresh thread → disclose,
 	// and the original prompt must still be delivered.
-	fallback := text(codexTurnInput(prompt, true, false))
+	fallback := text(codexTurnInput(prompt, true, false, chatNotice))
 	if !strings.Contains(fallback, "previous conversation context could not be restored") {
 		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
 	}
@@ -1955,11 +1958,33 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Successful resume, or an ordinary fresh start with no resume expected →
 	// no notice, prompt delivered verbatim.
-	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+	if got := text(codexTurnInput(prompt, true, true, chatNotice)); got != prompt {
 		t.Errorf("successful resume must not add a notice, got:\n%s", got)
 	}
-	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+	if got := text(codexTurnInput(prompt, false, false, chatNotice)); got != prompt {
 		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
+// TestCodexTurnInputNoticeMatchesWhatTheSurfaceLost is the MUL-5722 half of the
+// continuity notice. An issue's discussion survives in its comments, which the
+// agent re-reads every turn, so ordering it to announce "the previous context
+// was lost" tells the user the discussion is gone when none of it is. The
+// notice still has to fire — the agent must not silently assume continuity —
+// but on that surface it informs the agent instead of scripting an apology.
+func TestCodexTurnInputSuppressesNoticeWhenCallerAlreadyDisclosed(t *testing.T) {
+	t.Parallel()
+
+	// An empty notice is how the caller says "the prompt already carries it".
+	// Honouring that is the backend's half of the no-duplicate guarantee: on
+	// the daemon's fresh-session retry the prompt already ends with the
+	// continuity notice, and before MUL-5722 this path prepended a second copy
+	// of the same paragraph into the same turn.
+	const prompt = "do the task"
+	input := codexTurnInput(prompt, true, false, "")
+	got, _ := input[0]["text"].(string)
+	if got != prompt {
+		t.Fatalf("empty notice must leave the prompt untouched, got:\n%s", got)
 	}
 }
 
@@ -2411,7 +2436,8 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	if failure["retry_safe"] != false || failure["retry_attempted"] != false {
 		t.Fatalf("thread/start timeout must remain fail-closed: %v", failure)
 	}
-	if failure["stderr_model_refresh_timeout_count"] != float64(1) ||
+	if failure["stderr_model_refresh_failure_count"] != float64(1) ||
+		failure["stderr_model_refresh_timeout_count"] != float64(1) ||
 		failure["stderr_mcp_init_transport_count"] != float64(1) ||
 		failure["stderr_bare_timeout_count"] != float64(0) {
 		t.Fatalf("unexpected stderr classification: %v", failure)
@@ -2745,7 +2771,12 @@ func TestClassifyCodexStartupStderr(t *testing.T) {
 		{
 			name:   "model refresh timeout",
 			stderr: "failed to refresh available models: timeout waiting for child process to exit",
-			want:   codexStderrClassification{modelRefreshTimeout: 1},
+			want:   codexStderrClassification{modelRefreshFailure: 1, modelRefreshTimeout: 1},
+		},
+		{
+			name:   "model refresh non-timeout failure",
+			stderr: "failed to refresh available models: stream disconnected before completion",
+			want:   codexStderrClassification{modelRefreshFailure: 1},
 		},
 		{
 			name:   "mcp init transport",
@@ -2953,6 +2984,136 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteFirstItemWaitLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	// The helper budget owns the complete subtest, including a possible
+	// two-attempt retry chain, while ExecOptions.Timeout applies per attempt.
+	// Keep the helper deadline away from race-instrumented subprocess jitter.
+	const firstItemWaitTestBudget = 20 * time.Second
+
+	t.Run("successful progress emits a latency sample", func(t *testing.T) {
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+			`read line`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-first-item-ok"}}}'`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-first-item-ok","turn":{"id":"turn-first-item-ok"}}}'`+"\n"+
+			`sleep 0.03`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-first-item-ok","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-first-item-ok","turn":{"id":"turn-first-item-ok","status":"completed"}}}'`+"\n")
+
+		var logs bytes.Buffer
+		result, _ := executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{
+			Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+			TaskID:        "task-first-item-ok",
+			RuntimeID:     "runtime-first-item-ok",
+			DaemonVersion: "daemon-test",
+			CodexVersion:  "codex-test",
+		}, ExecOptions{
+			Timeout:                   5 * time.Second,
+			SemanticInactivityTimeout: 5 * time.Second,
+		}, firstItemWaitTestBudget)
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got %+v", result)
+		}
+
+		entry := findCodexLifecyclePhase(t, parseJSONLogEntries(t, logs.String()), "first_item_wait")
+		for key, want := range map[string]any{
+			"task_id":                     "task-first-item-ok",
+			"runtime_id":                  "runtime-first-item-ok",
+			"attempt":                     float64(1),
+			"active_launches":             float64(1),
+			"method":                      "turn/start",
+			"thread_id":                   "thr-first-item-ok",
+			"turn_id":                     "turn-first-item-ok",
+			"outcome":                     "progress",
+			"timeout":                     "4s",
+			"semantic_inactivity_timeout": "5s",
+			"codex_version":               "codex-test",
+			"daemon_version":              "daemon-test",
+			"cleanup_confirmed":           true,
+			"reaped":                      true,
+			"retry_safe":                  false,
+		} {
+			if got := entry[key]; got != want {
+				t.Fatalf("entry[%s]=%v, want %v; entry=%v", key, got, want, entry)
+			}
+		}
+		if latency, ok := entry["latency_ms"].(float64); !ok || latency <= 0 {
+			t.Fatalf("missing/invalid latency_ms: %v", entry)
+		}
+		if entry["stderr_model_refresh_failure_count"] != float64(0) ||
+			entry["stderr_model_refresh_timeout_count"] != float64(0) ||
+			entry["stderr_mcp_init_transport_count"] != float64(0) ||
+			entry["stderr_bare_timeout_count"] != float64(0) {
+			t.Fatalf("successful wait has unexpected stderr classification: %v", entry)
+		}
+	})
+
+	t.Run("catalog failure is classified on every timed-out attempt", func(t *testing.T) {
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`DIR="$(dirname "$0")"`+"\n"+
+			`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+			`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+			`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+			`read line`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-first-item-timeout"}}}'`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-first-item-timeout","turn":{"id":"turn-first-item-timeout"}}}'`+"\n"+
+			`echo 'ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion' >&2`+"\n"+
+			`sleep 2`+"\n")
+
+		var logs bytes.Buffer
+		result, _ := executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{
+			Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+			TaskID:        "task-first-item-timeout",
+			RuntimeID:     "runtime-first-item-timeout",
+			DaemonVersion: "daemon-test",
+			CodexVersion:  "codex-test",
+		}, ExecOptions{
+			Timeout:                   5 * time.Second,
+			SemanticInactivityTimeout: 100 * time.Millisecond,
+		}, firstItemWaitTestBudget)
+		if result.Status != "timeout" {
+			t.Fatalf("expected timeout after the bounded retry, got %+v", result)
+		}
+		assertCodexAttemptCount(t, fakePath, "2")
+
+		var waits []map[string]any
+		for _, entry := range parseJSONLogEntries(t, logs.String()) {
+			if entry["msg"] == "codex lifecycle" && entry["phase"] == "first_item_wait" {
+				waits = append(waits, entry)
+			}
+		}
+		if len(waits) != 2 {
+			t.Fatalf("expected one first-item sample per attempt, got %d: %v", len(waits), waits)
+		}
+		for i, entry := range waits {
+			if entry["attempt"] != float64(i+1) || entry["outcome"] != "no_progress_timeout" ||
+				entry["retry_safe"] != true || entry["cleanup_confirmed"] != true {
+				t.Fatalf("unexpected timeout lifecycle entry: %v", entry)
+			}
+			if entry["stderr_model_refresh_failure_count"] != float64(1) ||
+				entry["stderr_model_refresh_timeout_count"] != float64(0) ||
+				entry["stderr_mcp_init_transport_count"] != float64(0) ||
+				entry["stderr_bare_timeout_count"] != float64(0) {
+				t.Fatalf("catalog failure was misclassified: %v", entry)
+			}
+		}
+	})
+}
+
 func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2997,8 +3158,8 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	}
 
 	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
-	// single stdout line larger than the daemon's bufio.Scanner cap (10 MB),
-	// which trips "bufio.Scanner: token too long" in the reader goroutine.
+	// single stdout line larger than agentStreamMaxLineBytes, which trips
+	// "bufio.Scanner: token too long" in the reader goroutine.
 	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
 	// stopped consuming the pipe, codex was blocked writing into a full
 	// stdout buffer, stdin.Close never unblocked codex, and the deferred
@@ -3019,12 +3180,13 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
-		// Emit a > 10 MB single line with no embedded newline. printf
+		// Emit a single line past the cap with no embedded newline. printf
 		// avoids the trailing newline echo would add; head + tr generates
-		// the bulk payload in pure POSIX shell. The scanner errors out at
-		// 10 MB even though we write 11 MB.
+		// the bulk payload in pure POSIX shell. The size is derived from
+		// the production constant so raising the cap cannot silently turn
+		// this regression test into a no-op.
 		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
-		`head -c 11000000 /dev/zero | tr '\0' 'x'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
 		`printf '"}}\n'`+"\n"+
 		// Hold the process open without reading more stdin. Pre-fix this
 		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
@@ -3057,6 +3219,15 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
 			result.SessionID)
 	}
+	// MUL-5722 layer 2: an unreadable resume response is a rejected resume,
+	// and this flag is the positive evidence shouldRetryWithFreshSession
+	// requires. Without it #5715's gate stops the retry dead (codex is in
+	// neither the ResumeRejected-capable nor the undetectable set), and the
+	// next turn resumes the same oversized thread forever.
+	if !result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=true so the daemon retries on a fresh session; error=%q",
+			result.Error)
+	}
 	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
 	// round-trip should complete in ~1-2 s. Pre-fix this test would block
 	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
@@ -3065,6 +3236,50 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	if elapsed > 5*time.Second {
 		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
 			elapsed)
+	}
+}
+
+func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testing.T) {
+	// Not t.Parallel(): mutates codexGracefulShutdownTimeoutNanos globally,
+	// same as its sibling above.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// The overflow guard is scoped to resumes on purpose. A run with no prior
+	// session that overflows on the thread/start response is a different
+	// failure: there is no session pointer to drop, so reporting a resume
+	// rejection would send the daemon looking for a cure that does not apply
+	// — and ResumeRejected is documented as positive evidence, not a generic
+	// "something went wrong" flag.
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Same oversized single line, but answering thread/start rather than
+		// thread/resume because the caller passed no ResumeSessionID.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q", result.Error)
+	}
+	if result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=false without a prior session, error=%q", result.Error)
 	}
 }
 
@@ -3396,8 +3611,12 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 		`fi`+"\n")
 
 	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
-		ResumeSessionID:           "thr-prior",
-		ResumeExpected:            true,
+		ResumeSessionID: "thr-prior",
+		ResumeExpected:  true,
+		// Supplied by the daemon since MUL-5722: this package no longer holds
+		// the wording, because only the caller knows whether the surface's
+		// conversation can still be read.
+		ResumeContinuityNotice:    "[System notice] the previous conversation context could not be restored.\n\n",
 		Timeout:                   20 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, 20*time.Second)
@@ -3426,8 +3645,8 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 	if !strings.Contains(string(second), "thread/start") {
 		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
 	}
-	// ResumeExpected survives the cleared pointer, so the agent is told the
-	// prior context could not be restored.
+	// ResumeExpected survives the cleared pointer, so the caller's notice is
+	// still prepended and the agent is told the prior context is gone.
 	if !strings.Contains(string(second), "previous conversation context could not be restored") {
 		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
 	}
@@ -3642,7 +3861,13 @@ func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 // the wait, so retry-exercising tests can ask for more than the default.
 func executeFakeCodexCollectingMessages(t *testing.T, fakePath string, opts ExecOptions, budget time.Duration) (Result, []Message) {
 	t.Helper()
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	return executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{Logger: slog.Default()}, opts, budget)
+}
+
+func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string, cfg Config, opts ExecOptions, budget time.Duration) (Result, []Message) {
+	t.Helper()
+	cfg.ExecutablePath = fakePath
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
@@ -5207,5 +5432,86 @@ func TestCodexPatchApplyStillTruncatesNonSecretPayload(t *testing.T) {
 	// The caller's slice is deliberately left alone: redaction copies first.
 	if original, _ := changes[0].(map[string]any)["content"].(string); len(original) != len(body) {
 		t.Fatalf("codexPatchInput must not mutate its argument: %d != %d", len(original), len(body))
+	}
+}
+
+func TestCodexResumeOverflowError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		errText string
+		want    bool
+	}{
+		{
+			// The exact text executeOnce puts in Result.Error for this failure.
+			name:    "resume overflow",
+			errText: "codex thread/resume failed: codex process exited: bufio.Scanner: token too long",
+			want:    true,
+		},
+		{
+			// Both markers required: an overflow on another RPC leaves the
+			// stored thread perfectly resumable, so retiring it cures nothing.
+			name:    "overflow on thread/start",
+			errText: "codex thread/start failed: codex process exited: bufio.Scanner: token too long",
+			want:    false,
+		},
+		{
+			// An ordinary resume rejection already has a recovery path.
+			name:    "resume failure without overflow",
+			errText: "codex thread/resume failed: thread not found",
+			want:    false,
+		},
+		{
+			name:    "unrelated process failure",
+			errText: "codex process exited: exit status 2",
+			want:    false,
+		},
+		{name: "empty", errText: "", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CodexResumeOverflowError(tc.errText); got != tc.want {
+				t.Fatalf("CodexResumeOverflowError(%q) = %v, want %v", tc.errText, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexResumeOverflowErrorMatchesLiveFailureText guards the seam between
+// the two halves of MUL-5722's layer 3: in-process the backend detects the
+// overflow from the typed bufio.ErrTooLong, but the daemon classifies it at
+// report time from the error STRING alone. If the wording produced by
+// startOrResumeThread ever drifts from what the predicate matches, the resume
+// pointer silently stops being retired and the permanent-stall bug returns
+// with every test above still green.
+func TestCodexResumeOverflowErrorMatchesLiveFailureText(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if !CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
 	}
 }

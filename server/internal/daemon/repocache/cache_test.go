@@ -3,12 +3,14 @@ package repocache
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testLogger() *slog.Logger {
@@ -698,6 +700,132 @@ func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {
 	if strings.Contains(string(out), "worktree "+linked.Path+"\n") {
 		t.Fatalf("shared cache retained migrated worktree admin entry:\n%s", out)
 	}
+}
+
+func TestLocalCloneArgsOnlyDisablesHardlinksOnWindows(t *testing.T) {
+	t.Parallel()
+	const barePath, checkoutPath = "/cache/repo.git", "/task/repo"
+
+	for _, tt := range []struct {
+		goos          string
+		wantNoHardlnk bool
+	}{
+		{goos: "windows", wantNoHardlnk: true},
+		{goos: "linux"},
+		{goos: "darwin"},
+	} {
+		t.Run(tt.goos, func(t *testing.T) {
+			t.Parallel()
+			args := localCloneArgs(tt.goos, barePath, checkoutPath)
+			got := false
+			for _, arg := range args {
+				if arg == "--no-hardlinks" {
+					got = true
+				}
+			}
+			if got != tt.wantNoHardlnk {
+				t.Fatalf("localCloneArgs(%q) --no-hardlinks = %v, want %v (args: %v)", tt.goos, got, tt.wantNoHardlnk, args)
+			}
+			// Inserting a flag must never displace the trailing operands.
+			if src, dst := args[len(args)-2], args[len(args)-1]; src != barePath || dst != checkoutPath {
+				t.Fatalf("localCloneArgs(%q) operands = %q %q, want %q %q", tt.goos, src, dst, barePath, checkoutPath)
+			}
+		})
+	}
+}
+
+// TestIsolatedCheckoutCloneWithoutHardlinksIsIndependent runs the exact clone
+// invocation Windows Codex tasks now use (multica-ai/multica#6449) and proves
+// it still yields a usable checkout whose object files are private copies
+// rather than links back into the daemon-owned cache. Kept platform-agnostic
+// so Linux/macOS CI guards the Windows-only flag.
+func TestIsolatedCheckoutCloneWithoutHardlinksIsIndependent(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	baseCommit := gitRefCommit(t, barePath, getRemoteDefaultBranch(barePath))
+	checkoutPath := filepath.Join(t.TempDir(), "repo")
+
+	if out, err := runGitCombinedOutput(localCloneArgs("windows", barePath, checkoutPath)...); err != nil {
+		t.Fatalf("windows-shaped local clone failed: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := runGitCombinedOutput("-C", checkoutPath, "checkout", "--detach", baseCommit); err != nil {
+		t.Fatalf("checkout base commit: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if got := gitHead(t, checkoutPath); got != baseCommit {
+		t.Fatalf("checkout HEAD = %s, want %s", got, baseCommit)
+	}
+	if _, err := os.Stat(filepath.Join(checkoutPath, ".git", "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("clone must not borrow cache objects via alternates, err=%v", err)
+	}
+
+	assertObjectsAreNotHardLinked(t, barePath, checkoutPath)
+}
+
+// assertObjectsAreNotHardLinked fails if an object file present in both the
+// cache and the checkout is the same underlying file. os.SameFile compares
+// dev+inode on Unix and the volume serial + file index on Windows, either of
+// which identifies a hard link. Both "nothing in the cache" and "nothing in
+// common" are failures, so the assertion cannot pass vacuously.
+func assertObjectsAreNotHardLinked(t *testing.T, barePath, checkoutPath string) {
+	t.Helper()
+	cacheObjects := filepath.Join(barePath, "objects")
+	checkoutObjects := filepath.Join(checkoutPath, ".git", "objects")
+
+	names := objectFiles(t, cacheObjects)
+	if len(names) == 0 {
+		t.Fatal("cache has no object files; assertion would pass vacuously")
+	}
+	compared := 0
+	for _, rel := range names {
+		cloned, err := os.Stat(filepath.Join(checkoutObjects, rel))
+		if err != nil {
+			continue // repacked differently in the checkout; nothing to compare
+		}
+		cached, err := os.Stat(filepath.Join(cacheObjects, rel))
+		if err != nil {
+			t.Fatalf("stat cache object %s: %v", rel, err)
+		}
+		if os.SameFile(cached, cloned) {
+			t.Errorf("object %s is hard-linked to the shared cache", rel)
+		}
+		compared++
+	}
+	if compared == 0 {
+		t.Fatal("no cache object was found in the checkout; assertion would pass vacuously")
+	}
+}
+
+// objectFiles lists regular files under a Git objects directory, relative to
+// it, skipping the bookkeeping subdirectory that never holds object data.
+func objectFiles(t *testing.T, objectsDir string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(objectsDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == "info" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(objectsDir, path)
+		if err != nil {
+			return err
+		}
+		found = append(found, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", objectsDir, err)
+	}
+	return found
 }
 
 func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
@@ -1689,5 +1817,96 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 	got := getRemoteDefaultBranch(barePath)
 	if got != "" {
 		t.Fatalf("getRemoteDefaultBranch = %q, want \"\" (ambiguous origin/* must not guess)", got)
+	}
+}
+
+// TestLastUsedMissingIsUnknownNotAncient pins the distinction the GC's
+// upgrade safety depends on: a cache created before the stamp existed must
+// report "unknown", never a zero time that reads as infinitely idle.
+func TestLastUsedMissingIsUnknownNotAncient(t *testing.T) {
+	t.Parallel()
+	if _, ok := LastUsed(t.TempDir()); ok {
+		t.Fatal("LastUsed on a repo with no stamp must report ok=false")
+	}
+}
+
+// TestMarkUsedRoundTrip covers the stamp write/read pair on its own.
+func TestMarkUsedRoundTrip(t *testing.T) {
+	t.Parallel()
+	barePath := t.TempDir()
+
+	before := time.Now().Add(-time.Second)
+	MarkUsed(barePath, testLogger())
+
+	stamp, ok := LastUsed(barePath)
+	if !ok {
+		t.Fatal("expected a stamp after MarkUsed")
+	}
+	if stamp.Before(before) {
+		t.Errorf("stamp %s is older than the call that wrote it (%s)", stamp, before)
+	}
+	if time.Since(stamp) > time.Hour {
+		t.Errorf("stamp %s is implausibly old", stamp)
+	}
+}
+
+// TestMarkUsedIgnoresUnwritableRepo keeps the stamp best-effort: a failure to
+// record use must not break the checkout that triggered it.
+func TestMarkUsedIgnoresUnwritableRepo(t *testing.T) {
+	t.Parallel()
+	MarkUsed(filepath.Join(t.TempDir(), "does-not-exist"), testLogger())
+	MarkUsed("", testLogger())
+}
+
+// TestCreateWorktreeStampsLastUsed is the one that matters for eviction: the
+// stamp has to be written where "a task really used this repo" happens, since
+// directory mtime cannot distinguish that from a routine fetch.
+func TestCreateWorktreeStampsLastUsed(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("expected cached repo")
+	}
+	// Sync alone must not look like use — only a checkout counts.
+	if _, ok := LastUsed(barePath); ok {
+		t.Fatal("Sync must not stamp last-used; only CreateWorktree does")
+	}
+
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "Code Reviewer",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+	}); err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if _, ok := LastUsed(barePath); !ok {
+		t.Error("CreateWorktree must stamp last-used on the bare repo")
+	}
+}
+
+// TestBarePathIsIndependentOfExistence separates the two questions Lookup used
+// to answer at once: Lookup means "is it cached?", BarePath means "where would
+// it live?" — the GC needs the second to map live repo URLs onto directories.
+func TestBarePathIsIndependentOfExistence(t *testing.T) {
+	t.Parallel()
+	cache := New(t.TempDir(), testLogger())
+
+	path := cache.BarePath("ws-1", "https://example.com/acme/widgets.git")
+	if path == "" {
+		t.Fatal("BarePath must return a path even when nothing is cached")
+	}
+	if cache.Lookup("ws-1", "https://example.com/acme/widgets.git") != "" {
+		t.Error("Lookup must still report an uncached repo as absent")
 	}
 }

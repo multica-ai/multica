@@ -28,10 +28,6 @@ const hang: FreezeBreadcrumb = {
       path: "/:slug/issues",
       reportedAt: "2026-07-27T00:00:00.000Z",
     },
-    stack: [
-      { functionName: "parseMarkdownChunked", url: "assets/index-abc.js", lineNumber: 412, columnNumber: 17 },
-      { functionName: "setContent", url: "assets/index-abc.js", lineNumber: 90, columnNumber: 4 },
-    ],
   },
 };
 
@@ -117,21 +113,13 @@ describe("ack is not delivery", () => {
 });
 
 describe("telemetry props carry no raw identifiers", () => {
-  it("ships the bucketed route and the stack", () => {
+  it("ships the bucketed route and nothing else", () => {
     expect(buildFreezeEventProps(hang)).toEqual({
       source: "main-unresponsive",
-      recovered: false,
       breadcrumb_ts: hang.ts,
       crashed_version: "0.4.11",
       path: "/:slug/issues",
       surface: "tab",
-      stack: hang.context.stack,
-      stack_depth: 2,
-      // Top frame flattened so a hang groups by the blocking function without
-      // unpacking the array.
-      stack_function: "parseMarkdownChunked",
-      stack_url: "assets/index-abc.js",
-      stack_line: 412,
     });
   });
 
@@ -161,22 +149,22 @@ describe("telemetry props carry no raw identifiers", () => {
     expect(props).not.toHaveProperty("windowUrl");
   });
 
-  // Review finding (MUL-5345): the flush side used to forward `context.stack`
-  // wholesale. That array crosses an on-disk breadcrumb which is barely
-  // validated on read, so an older build, a corrupt file or a future writer
-  // could put a live handle in it and this would ship it.
-  it("rebuilds stack frames instead of forwarding whatever the file held", () => {
+  // MUL-5345: stack capture is gone, but a machine upgrading from v0.4.13–
+  // v0.4.18 can still have a pending breadcrumb whose context holds a captured
+  // stack — including the live handles the old capture path never shipped but
+  // the on-disk file could carry. The whitelist is what keeps that off the
+  // wire now that nothing sanitizes frames anymore.
+  it("drops a stack left in a breadcrumb written by an older build", () => {
     const props = buildFreezeEventProps({
       ...hang,
       context: {
+        ...hang.context,
         stack: [
           {
             functionName: "blockMainThread",
             url: "file:///Users/someone/Applications/Multica.app/out/renderer/main.js",
             location: { lineNumber: 12, columnNumber: 3 },
             scopeChain: [{ type: "local", object: { objectId: "{secret-scope}" } }],
-            this: { objectId: "{secret-this}" },
-            returnValue: "raw-value",
           },
         ],
       },
@@ -184,29 +172,11 @@ describe("telemetry props carry no raw identifiers", () => {
 
     const serialized = JSON.stringify(props);
     expect(serialized).not.toContain("secret");
-    expect(serialized).not.toContain("raw-value");
-    // The absolute install path carries the OS username; only the tail ships.
     expect(serialized).not.toContain("someone");
-    expect(props.stack).toEqual([
-      {
-        functionName: "blockMainThread",
-        url: "renderer/main.js",
-        lineNumber: 12,
-        columnNumber: 3,
-      },
-    ]);
-    expect(props.stack_function).toBe("blockMainThread");
-    expect(props.stack_url).toBe("renderer/main.js");
-    expect(props.stack_line).toBe(12);
-  });
-
-  it("omits the stack fields when the file held nothing usable", () => {
-    for (const stack of [undefined, [], "not-an-array", [null]]) {
-      const props = buildFreezeEventProps({ ...hang, context: { stack } });
-      expect(props).not.toHaveProperty("stack");
-      expect(props).not.toHaveProperty("stack_depth");
-      expect(props).not.toHaveProperty("stack_function");
-    }
+    expect(serialized).not.toContain("blockMainThread");
+    expect(props).not.toHaveProperty("stack");
+    expect(props).not.toHaveProperty("stack_depth");
+    expect(props).not.toHaveProperty("stack_function");
   });
 
   it("drops an unknown context key rather than forwarding it", () => {
@@ -221,11 +191,11 @@ describe("telemetry props carry no raw identifiers", () => {
   it("cannot have its own fields overridden by the context", () => {
     const props = buildFreezeEventProps({
       ...hang,
-      context: { ...hang.context, source: "spoofed", recovered: true },
+      context: { ...hang.context, source: "spoofed", breadcrumb_ts: 1 },
     });
 
     expect(props.source).toBe("main-unresponsive");
-    expect(props.recovered).toBe(false);
+    expect(props.breadcrumb_ts).toBe(hang.ts);
   });
 
   it("keeps the crash reason as two scalars", () => {
@@ -247,7 +217,6 @@ describe("telemetry props carry no raw identifiers", () => {
 
     expect(props).toEqual({
       source: "main-unresponsive",
-      recovered: false,
       breadcrumb_ts: hang.ts,
       crashed_version: "0.4.11",
     });

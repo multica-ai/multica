@@ -40,6 +40,34 @@ func TestProbeAgentCLIs_QoderResolvesViaLoginShell(t *testing.T) {
 	}
 }
 
+func TestProbeAgentCLIs_QoderCNResolvesIndependently(t *testing.T) {
+	orig := resolveAgentsViaLoginShell
+	t.Cleanup(func() { resolveAgentsViaLoginShell = orig })
+	resolveAgentsViaLoginShell = func([]string) map[string]string {
+		return map[string]string{
+			"qodercli":   "/fake/bin/qodercli",
+			"qoderclicn": "/fake/bin/qoderclicn",
+		}
+	}
+	resetShellResolveCacheForTest(t)
+	t.Setenv("PATH", "")
+
+	agents := probeAgentCLIs()
+	entry, ok := agents["qoderclicn"]
+	if !ok {
+		t.Fatal("qoderclicn was not discovered via the login-shell fallback")
+	}
+	if entry.Path != "/fake/bin/qoderclicn" {
+		t.Errorf("qoderclicn path = %q, want /fake/bin/qoderclicn", entry.Path)
+	}
+	if entry.Command != "qoderclicn" {
+		t.Errorf("qoderclicn command = %q, want qoderclicn", entry.Command)
+	}
+	if _, ok := agents["qoder"]; !ok {
+		t.Fatal("qodercli and qoderclicn must be registered independently when both are installed")
+	}
+}
+
 // TestProbeAgentCLIs_QoderPinnedPathStaysHardMiss keeps the fallback from
 // rescuing an operator-pinned MULTICA_QODER_PATH. A pinned absolute path that
 // no longer exists must stay a miss rather than silently resolve a different
@@ -65,11 +93,14 @@ func TestProbeAgentCLIs_QoderPinnedPathStaysHardMiss(t *testing.T) {
 // defaultAgentCommandNames, so omitting "qodercli" would leave the fallback
 // permanently blind to Qoder even once the probe consults it.
 func TestDefaultAgentCommandNamesIncludesQoder(t *testing.T) {
+	found := map[string]bool{}
 	for _, name := range defaultAgentCommandNames {
-		if name == "qodercli" {
-			return
+		found[name] = true
+	}
+	for _, name := range []string{"qodercli", "qoderclicn"} {
+		if !found[name] {
+			t.Fatalf("defaultAgentCommandNames is missing %q; the login-shell resolver "+
+				"only pre-fetches names in that list, so Qoder stays undetectable on a GUI-launched daemon", name)
 		}
 	}
-	t.Fatal(`defaultAgentCommandNames is missing "qodercli"; the login-shell resolver ` +
-		"only pre-fetches names in that list, so Qoder stays undetectable on a GUI-launched daemon")
 }

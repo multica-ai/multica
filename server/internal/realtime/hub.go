@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -194,6 +195,15 @@ const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
+
+	// inboundReadLimit caps a single inbound message. Every frame a client
+	// legitimately sends is tiny — the largest is the token auth frame, well
+	// under 1 KiB — but gorilla buffers a whole message in memory before
+	// handing it over, and a fragmented message keeps the read deadline alive
+	// through interleaved pongs. Without a limit one connection can therefore
+	// grow that buffer without bound and OOM the process. Matches the daemon
+	// hub limit so both WebSocket surfaces answer this question the same way.
+	inboundReadLimit = 64 * 1024
 )
 
 var upgrader = websocket.Upgrader{
@@ -701,13 +711,25 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 }
 
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
-func firstMessageAuth(conn *websocket.Conn) (string, string) {
+// A non-empty errMsg is for the caller to write back before closing the
+// connection. closed=true means the connection is already torn down and the
+// caller must return without writing anything further.
+func firstMessageAuth(conn *websocket.Conn) (token, errMsg string, closed bool) {
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	defer conn.SetReadDeadline(time.Time{})
 
 	_, raw, err := conn.ReadMessage()
 	if err != nil {
-		return "", `{"error":"auth timeout or read error"}`
+		if errors.Is(err, websocket.ErrReadLimit) {
+			// gorilla has already replied CloseMessageTooBig (1009), so an
+			// auth_error frame here would be data sent after a close frame.
+			// Counted separately to keep the breach out of ordinary churn.
+			M.InboundTooLargeTotal.Add(1)
+			slog.Warn("ws: pre-auth frame exceeded read limit", "limit_bytes", inboundReadLimit)
+			conn.Close()
+			return "", "", true
+		}
+		return "", `{"error":"auth timeout or read error"}`, false
 	}
 
 	var msg struct {
@@ -717,10 +739,10 @@ func firstMessageAuth(conn *websocket.Conn) (string, string) {
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != "auth" || msg.Payload.Token == "" {
-		return "", `{"error":"expected auth message as first frame"}`
+		return "", `{"error":"expected auth message as first frame"}`, false
 	}
 
-	return msg.Payload.Token, ""
+	return msg.Payload.Token, "", false
 }
 
 type wsMessageWriter interface {
@@ -780,8 +802,16 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		return
 	}
 
+	// Bound inbound messages here rather than in readPump: the token auth
+	// path below reads its first frame before the caller is authenticated, so
+	// a limit installed any later leaves that read unbounded.
+	conn.SetReadLimit(inboundReadLimit)
+
 	if userID == "" {
-		tokenStr, errMsg := firstMessageAuth(conn)
+		tokenStr, errMsg, closed := firstMessageAuth(conn)
+		if closed {
+			return
+		}
 		if errMsg != "" {
 			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
 			return
@@ -869,7 +899,17 @@ func (c *Client) readPump() {
 	for {
 		_, raw, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			switch {
+			case errors.Is(err, websocket.ErrReadLimit):
+				// Counted separately so an over-limit close stays visible
+				// instead of blending into ordinary connection churn.
+				M.InboundTooLargeTotal.Add(1)
+				slog.Warn("ws: inbound frame exceeded read limit",
+					"limit_bytes", inboundReadLimit,
+					"user_id", c.userID,
+					"workspace_id", c.workspaceID,
+				)
+			case websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure):
 				slog.Debug("websocket read error", "error", err, "user_id", c.userID, "workspace_id", c.workspaceID)
 			}
 			break

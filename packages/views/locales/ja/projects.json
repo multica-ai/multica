@@ -25,7 +25,7 @@
     "progress": "進捗",
     "lead": "リード",
     "created": "作成日",
-    "issues": "Issue 数"
+    "issues": "タスク数"
   },
   "status": {
     "planned": "計画中",
@@ -69,16 +69,17 @@
     "section_description": "説明",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
-    "clear_date": "日付をクリア",
+    "no_start_date": "開始日なし",
+    "no_due_date": "期限なし",
     "description_placeholder": "説明を追加...",
-    "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
-    "empty_issues_title": "リンクされたイシューはありません",
-    "empty_issues_hint": "新しいイシューを作成するか、既存のイシューをこのプロジェクトに割り当ててください。",
-    "empty_issues_new_button": "新規イシュー",
-    "no_issues_yet": "イシューはまだありません",
+    "description_hint": "このプロジェクトのすべての作業で、コンテキストとしてエージェントに共有されます。",
+    "empty_issues_title": "リンクされたタスクはありません",
+    "empty_issues_hint": "新しいタスクを作成するか、既存のタスクをこのプロジェクトに割り当ててください。",
+    "empty_issues_new_button": "新規タスク",
+    "no_issues_yet": "タスクはまだありません",
     "toast_link_copied": "リンクをコピーしました",
     "toast_project_deleted": "プロジェクトを削除しました",
-    "toast_move_issue_failed": "イシューを移動できませんでした"
+    "toast_move_issue_failed": "タスクを移動できませんでした"
   },
   "resources": {
     "section_header": "リソース",
@@ -119,13 +120,12 @@
   },
   "delete_dialog": {
     "title": "プロジェクトを削除",
-    "description": "プロジェクトが削除されます。イシューは削除されませんが、リンクが解除されます。",
+    "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",
     "confirm": "削除",
     "cancel": "キャンセル"
   },
   "picker": {
     "no_project": "プロジェクトなし",
-    "remove": "プロジェクトから削除",
     "empty": "プロジェクトはまだありません",
     "search_placeholder": "プロジェクトを検索..."
   },
