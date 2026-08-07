@@ -1,29 +1,25 @@
 package wecom
 
-// outbound.go — the WeCom EventChatDone subscriber. After an agent finishes
-// producing a chat reply on the bus, this subscriber looks up the wecom
-// chat_session binding, resolves the live wsSender through the shared
-// registry, and pushes the reply back as aibot_send_msg. Mirrors
-// slack.Outbound; sessions with no wecom binding are ignored so it
-// coexists with Slack / Lark subscribers on the shared bus.
+// outbound.go — the WeCom EventChatDone / EventInboxNew subscriber. It runs on
+// whichever replica published the event and does not try to write to WeCom at
+// all: it enqueues onto channel_outbound_queue and nudges the local consumer.
+// The replica holding the bot's WebSocket lease drains the row (see
+// outbox_sender.go).
 //
-// Kept lean: aibot has no threading, no per-bot outbound REST, and no
-// mrkdwn conversion — the reply text goes through sendMsgTextBody the
-// same way OutboundReplier's messages do (markdown msgtype, which
-// renders plaintext without escaping).
+// That indirection is the whole point. aibot has no outbound REST path, so a
+// reply can only leave the process that holds the socket — but the bus is
+// in-process, so the publishing replica is frequently not that one. Pushing
+// straight to the sendersRegistry from here therefore dropped every reply
+// produced off-lease, which is why this adapter previously carried a
+// single-replica constraint. Enqueueing instead makes the handoff durable and
+// replica-agnostic.
 //
-// SINGLE-REPLICA CONSTRAINT: WeCom's only outbound path is the in-process
-// WebSocket held in the sendersRegistry, but EventChatDone / EventInboxNew are
-// dispatched on the in-process events.Bus. On a multi-replica deployment the
-// replica that publishes the event is not necessarily the one holding the
-// bot's WS lease, so senders.get() returns nil and the reply cannot be
-// delivered from here (Slack/Lark are immune — their outbound is stateless
-// HTTP any replica can perform). Until outbound is routed to the lease holder,
-// a WeCom-enabled backend must run as a single replica; boot emits a warning
-// when a multi-replica setup (REDIS_URL) is detected. See router.go.
+// Sessions with no wecom binding are ignored so this coexists with the Slack /
+// Lark subscribers on the shared bus.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -51,51 +48,57 @@ type outboundQueries interface {
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 }
 
-// Outbound delivers an agent's chat reply back to WeCom over the same
-// aibot WebSocket the inbound loop owns. Registered against the shared
-// event bus; sessions with no wecom binding are silently ignored.
+// Outbound enqueues agent replies and inbox notifications for delivery to
+// WeCom. Registered against the shared event bus.
 type Outbound struct {
-	q       outboundQueries
-	senders *sendersRegistry
-	logger  *slog.Logger
+	q        outboundQueries
+	producer *outbox.Producer
+	logger   *slog.Logger
 }
 
-// NewOutbound builds the WeCom outbound subscriber. senders is the same
-// process-wide registry the wecom.ChannelDeps and OutboundReplier were
-// built with — reply delivery goes through the live wsSender for the
-// binding's installation, so a session whose Supervisor lost the lease
-// mid-flight silently drops rather than opening a second connection.
-func NewOutbound(q outboundQueries, senders *sendersRegistry, logger *slog.Logger) *Outbound {
+// NewOutbound builds the WeCom outbound subscriber over the shared outbound
+// queue producer.
+func NewOutbound(q outboundQueries, producer *outbox.Producer, logger *slog.Logger) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Outbound{q: q, senders: senders, logger: logger}
+	return &Outbound{q: q, producer: producer, logger: logger}
 }
 
-// Register subscribes to the chat-done event on the bus.
+// Register subscribes to the chat-done and inbox events on the bus.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
-	// Inbox notifications delivered through the smart bot: when the
-	// recipient member has a WeCom binding with a live connection, their
-	// inbox:new items are pushed to the aibot as a markdown card.
+	// Inbox notifications delivered through the smart bot: when the recipient
+	// member has a WeCom binding, their inbox:new items are enqueued as a
+	// markdown card addressed to their 1:1 chat with the bot.
 	bus.Subscribe(protocol.EventInboxNew, o.handleInboxNew)
 }
 
 func (o *Outbound) handleEvent(e events.Event) {
-	// Bus delivery is synchronous — a stuck WS write must not wedge the
-	// publish call site. Fresh ctx with a tight timeout, same as Slack.
+	// Bus delivery is synchronous — a slow INSERT must not wedge the publish
+	// call site. Fresh ctx with a tight timeout, same as Slack.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := o.processEvent(ctx, e); err != nil {
-		o.logger.WarnContext(ctx, "wecom outbound: reply delivery failed",
+		o.logger.WarnContext(ctx, "wecom outbound: enqueue reply failed",
 			"error", err, "chat_session_id", e.ChatSessionID)
 	}
 }
 
 func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
+	if o.producer == nil {
+		return errors.New("wecom: outbound producer not configured")
+	}
 	sessionID, err := util.ParseUUID(e.ChatSessionID)
 	if err != nil || !sessionID.Valid {
 		// Issue / autopilot tasks carry no chat_session.
+		return nil
+	}
+	taskID, ok := chatDoneTaskID(e)
+	if !ok {
+		// Without a task id there is no stable business key, and enqueueing under
+		// a synthetic one would let a redelivered event send the same reply
+		// twice. The reconciler covers the task-derived case anyway.
 		return nil
 	}
 	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
@@ -125,11 +128,8 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// Everything above this point is a read. Keep it that way: the gate has to
 	// stay ahead of anything that consumes or mutates WeCom-side state for the
 	// turn, because an answer that must not reach the room must not take over
-	// the room's message either.
-	taskID, ok := chatDoneTaskID(e)
-	if !ok {
-		return nil
-	}
+	// the room's message either. Enqueueing counts — a row is a durable promise
+	// to deliver, so the gate stays ahead of the producer too.
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -155,24 +155,23 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if inst.Status != string(InstallationActive) {
 		return nil // revoked between trigger and reply
 	}
-	if o.senders == nil {
-		return errors.New("wecom: sender registry not configured")
+
+	payload, err := json.Marshal(outboundPayload{Content: content})
+	if err != nil {
+		return fmt.Errorf("wecom: marshal chat_done payload: %w", err)
 	}
-	sender := o.senders.get(inst.ID)
-	if sender == nil {
-		// No live WS for this installation on this replica. Two causes:
-		// (1) the Supervisor lost the lease or is mid-reconnect — transient,
-		// and the user's next inbound message reaches the reconnected loop;
-		// (2) on a multi-replica deployment the lease is held by a DIFFERENT
-		// replica than the one that published this event, so it can never be
-		// delivered from here (see the single-replica constraint in this
-		// file's header). Either way, buffering is wrong — the reply is stale
-		// by the time a socket returns — so we surface it to the caller's WARN
-		// rather than drop it silently.
-		return errors.New("wecom: connection not ready on this replica")
-	}
-	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
-	return sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
+	_, err = o.producer.Enqueue(ctx, outbox.Request{
+		InstallationID: inst.ID,
+		WorkspaceID:    inst.WorkspaceID,
+		ChatSessionID:  binding.ChatSessionID,
+		SourceKind:     sourceKindChatDone,
+		SourceID:       util.UUIDToString(taskID),
+		TargetChatID:   binding.ChannelChatID,
+		TargetChatType: int16(aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))),
+		MsgType:        msgTypeMarkdown,
+		Payload:        payload,
+	}, outbox.EnqueuePathRealtime)
+	return err
 }
 
 // chatDoneTaskID recovers the task id an EventChatDone belongs to. The
@@ -207,12 +206,11 @@ func chatDoneContent(payload any) string {
 	return ""
 }
 
-// handleInboxNew is the inbox:new subscriber that delivers a member
-// notification via the smart bot. When the recipient member has a WeCom
-// binding with a live connection, the notification is pushed to the aibot.
-// On any miss — non-member recipient, no wecom binding, no live sender,
-// send failure — the handler is a no-op and the member simply receives the
-// notification through the in-app inbox as usual.
+// handleInboxNew is the inbox:new subscriber that enqueues a member
+// notification for delivery via the smart bot. On any miss — non-member
+// recipient, no wecom binding, nothing renderable — the handler is a no-op and
+// the member simply receives the notification through the in-app inbox as
+// usual.
 func (o *Outbound) handleInboxNew(e events.Event) {
 	payload, ok := e.Payload.(map[string]any)
 	if !ok {
@@ -228,19 +226,22 @@ func (o *Outbound) handleInboxNew(e events.Event) {
 	}
 	recipientIDStr, _ := item["recipient_id"].(string)
 	workspaceIDStr, _ := item["workspace_id"].(string)
-	if recipientIDStr == "" || workspaceIDStr == "" {
+	itemIDStr, _ := item["id"].(string)
+	if recipientIDStr == "" || workspaceIDStr == "" || itemIDStr == "" {
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	o.tryDeliverInbox(ctx, item, recipientIDStr, workspaceIDStr)
+	o.tryEnqueueInbox(ctx, item, itemIDStr, recipientIDStr, workspaceIDStr)
 }
 
-// tryDeliverInbox is the delivery core. Returns true iff the bot pushed
-// the notification.
-func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, recipientIDStr, workspaceIDStr string) bool {
+// tryEnqueueInbox is the enqueue core. Returns true iff a row was written.
+func (o *Outbound) tryEnqueueInbox(ctx context.Context, item map[string]any, itemIDStr, recipientIDStr, workspaceIDStr string) bool {
+	if o.producer == nil {
+		return false
+	}
 	recipientID, err := util.ParseUUID(recipientIDStr)
 	if err != nil || !recipientID.Valid {
 		return false
@@ -261,13 +262,6 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 		}
 		return false // no binding → nothing to deliver via bot
 	}
-	if o.senders == nil {
-		return false
-	}
-	sender := o.senders.get(binding.InstallationID)
-	if sender == nil {
-		return false // supervisor down or reconnecting — no live connection
-	}
 
 	// Resolve slug for the link. Best-effort — a missing slug just falls
 	// back to the workspace UUID in the URL.
@@ -279,24 +273,38 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if content == "" {
 		return false
 	}
+	payload, err := json.Marshal(outboundPayload{Content: content})
+	if err != nil {
+		return false
+	}
+
 	// Smart-bot inbox notifications are 1:1 pushes to the bound user. The
 	// binding row's channel_user_id is the bot-scoped T-* userid — WeCom
 	// treats that as the chatid for a single (chat_type=1) send.
-	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
-		o.logger.WarnContext(ctx, "wecom outbound: inbox push failed",
-			"error", err, "installation_id", uuidStringPub(binding.InstallationID),
+	//
+	// The business key is the inbox item id, so a redelivered inbox:new event
+	// cannot notify the same member about the same item twice.
+	inserted, err := o.producer.Enqueue(ctx, outbox.Request{
+		InstallationID: binding.InstallationID,
+		WorkspaceID:    workspaceID,
+		SourceKind:     sourceKindInboxNotify,
+		SourceID:       itemIDStr,
+		TargetChatID:   binding.ChannelUserID,
+		TargetChatType: int16(chatTypeSingleInt),
+		MsgType:        msgTypeMarkdown,
+		Payload:        payload,
+	}, outbox.EnqueuePathRealtime)
+	if err != nil {
+		o.logger.WarnContext(ctx, "wecom outbound: enqueue inbox push failed",
+			"error", err, "installation_id", util.UUIDToString(binding.InstallationID),
 			"recipient_id", recipientIDStr)
-		return false // send failed → no bot delivery
+		return false
 	}
-	o.logger.DebugContext(ctx, "wecom outbound: inbox delivered via bot",
-		"installation_id", uuidStringPub(binding.InstallationID),
-		"recipient_id", recipientIDStr,
-		"inbox_type", item["type"])
-	return true
-}
-
-// uuidStringPub renders a pgtype.UUID for a log line without depending on
-// engine.uuidString (a different package).
-func uuidStringPub(u pgtype.UUID) string {
-	return util.UUIDToString(u)
+	if inserted {
+		o.logger.DebugContext(ctx, "wecom outbound: inbox notification enqueued",
+			"installation_id", util.UUIDToString(binding.InstallationID),
+			"recipient_id", recipientIDStr,
+			"inbox_type", item["type"])
+	}
+	return inserted
 }

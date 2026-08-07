@@ -32,6 +32,9 @@ type Registry struct {
 	Business     *BusinessMetrics
 	ChannelMedia *ChannelMediaReconcilerMetrics
 	Wecom        *WecomMetrics
+	// ChannelOutbox is the sink the per-channel outbound queue workers push
+	// to. It is always non-nil so an adapter can wire it unconditionally.
+	ChannelOutbox *ChannelOutboxMetrics
 	// Sampler is non-nil only when RegistryOptions.BusinessSampler was
 	// supplied with a valid Pool. Exposed so the cmd/server entrypoint
 	// can plumb the same instance into health checks if it ever wants to.
@@ -62,6 +65,9 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	wecomMetrics := NewWecomMetrics()
 	reg.MustRegister(wecomMetrics.Collectors()...)
 
+	channelOutbox := NewChannelOutboxMetrics()
+	reg.MustRegister(channelOutbox.Collectors()...)
+
 	if opts.Pool != nil {
 		reg.MustRegister(NewDBCollector(opts.Pool))
 	}
@@ -78,12 +84,13 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	}
 
 	return &Registry{
-		Gatherer:     reg,
-		HTTP:         httpMetrics,
-		Business:     businessMetrics,
-		ChannelMedia: channelMedia,
-		Wecom:        wecomMetrics,
-		Sampler:      sampler,
+		Gatherer:      reg,
+		HTTP:          httpMetrics,
+		Business:      businessMetrics,
+		ChannelMedia:  channelMedia,
+		Wecom:         wecomMetrics,
+		ChannelOutbox: channelOutbox,
+		Sampler:       sampler,
 	}
 }
 
