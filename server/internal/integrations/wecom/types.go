@@ -28,11 +28,13 @@
 // shared channel engine? Keep this adapter building — and loop in the code
 // owners for anything that changes WeCom-visible behavior.
 //
-// Known limits of the first version, both deliberate: inbound handling is
-// text-only (other message types get a short "text only" receipt), and outbound
-// delivery requires a SINGLE backend replica, because the only send path is the
-// in-process WebSocket in sendersRegistry while EventChatDone dispatches on the
-// in-process events.Bus. See SELF_HOSTING.md.
+// Known limit of the first version, deliberate: inbound handling is text-only —
+// other message types get a short "text only" receipt.
+//
+// Outbound no longer requires a single backend replica. The send path is still
+// the in-process WebSocket in sendersRegistry, but replies reach it through
+// channel_outbound_queue: any replica enqueues, and the one holding the bot's
+// connection lease drains. See channel/outbox.
 package wecom
 
 import (

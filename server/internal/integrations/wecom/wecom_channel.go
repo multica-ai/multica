@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -77,6 +78,9 @@ type wecomChannel struct {
 	// itself on entry and clear on exit. nil in tests that don't exercise
 	// the OutboundReplier path.
 	senders *sendersRegistry
+	// outbox wires the durable outbound queue consumer Connect runs for the
+	// life of the connection. Zero value disables it.
+	outbox OutboxDeps
 }
 
 var _ channel.Channel = (*wecomChannel)(nil)
@@ -170,6 +174,15 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 		defer c.senders.clear(c.installationID)
 	}
 
+	// Outbound queue consumer. Started only now — after subscribe succeeded and
+	// the sender is discoverable — because a claimed row can only be delivered
+	// over a live authenticated socket, and claiming one earlier would just
+	// push it into backoff. Torn down with the connection so the next lease
+	// holder's consumer picks the queue up.
+	if stopOutbox := c.startOutboxConsumer(ctx, log); stopOutbox != nil {
+		defer stopOutbox()
+	}
+
 	// Heartbeat — WeCom kills silent sockets past ~90s. We ping every 30s
 	// via the shared writer mutex so it interleaves cleanly with other
 	// outbound frames.
@@ -217,6 +230,60 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 		}
 		if err := c.dispatchFrame(ctx, env, sender, log); err != nil {
 			return err
+		}
+	}
+}
+
+// startOutboxConsumer launches the outbound queue consumer for this
+// installation and returns a stop function that waits for it to exit, or nil
+// when no outbox is wired.
+//
+// The wake channel is registered per connection and unregistered on exit: a
+// producer nudging an installation whose socket just died should find no
+// listener rather than a channel nobody drains.
+func (c *wecomChannel) startOutboxConsumer(ctx context.Context, log *slog.Logger) func() {
+	if c.outbox.Queries == nil || !c.installationID.Valid {
+		return nil
+	}
+	installationID := util.UUIDToString(c.installationID)
+
+	var wake <-chan struct{}
+	if c.outbox.Wake != nil {
+		wake = c.outbox.Wake.Register(installationID)
+	}
+
+	consumer, err := outbox.NewConsumer(outbox.ConsumerConfig{
+		InstallationID: installationID,
+		ChannelType:    channelTypeWecom,
+		Queries:        c.outbox.Queries,
+		Sender:         newQueueSender(c.senders),
+		Rate:           c.outbox.Rate,
+		Wake:           wake,
+		Logger:         log,
+		Metrics:        c.outbox.Metrics,
+	})
+	if err != nil {
+		// A misconfigured consumer must not take the inbound loop down with
+		// it: inbound still works, and replies fall to the reconciler once the
+		// wiring is fixed.
+		log.Warn("wecom: outbound queue consumer not started", "error", err)
+		if c.outbox.Wake != nil {
+			c.outbox.Wake.Unregister(installationID)
+		}
+		return nil
+	}
+
+	consumerCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		consumer.Run(consumerCtx)
+	}()
+	return func() {
+		cancel()
+		<-done
+		if c.outbox.Wake != nil {
+			c.outbox.Wake.Unregister(installationID)
 		}
 	}
 }
@@ -418,6 +485,29 @@ type ChannelDeps struct {
 
 	// WSURL overrides DefaultWSURL. Same test-only intent as Dialer.
 	WSURL string
+
+	// Outbox wires the durable outbound queue consumer each Connect starts.
+	// The zero value disables it, which is what inbound-only tests want.
+	Outbox OutboxDeps
+}
+
+// OutboxDeps bundles what a wecomChannel needs to drain
+// channel_outbound_queue while it holds the connection.
+//
+// The consumer's lifetime is deliberately the connection's, not the process's:
+// a row can only be written over a live socket, so a consumer without one has
+// nothing to do but burn claim attempts and push rows into backoff.
+type OutboxDeps struct {
+	// Queries is the generated-query surface. Nil disables the consumer.
+	Queries outbox.ConsumerStore
+
+	// Wake is the shared registry producers nudge. Nil falls back to polling.
+	Wake *outbox.WakeRegistry
+
+	// Rate is the optional per-target admission gate. Nil admits every row.
+	Rate outbox.RateGate
+
+	Metrics outbox.Metrics
 }
 
 // RegisterWecom registers the per-installation wecom smart-bot Factory so
@@ -461,6 +551,7 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 			wsURL:          deps.WSURL,
 			logger:         logger,
 			senders:        deps.Senders,
+			outbox:         deps.Outbox,
 		}, nil
 	}
 }

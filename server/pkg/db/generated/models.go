@@ -359,6 +359,38 @@ type ChannelOutboundCardMessage struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChannelOutboundQueue struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ChannelType    string             `json:"channel_type"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	SourceKind     string             `json:"source_kind"`
+	SourceID       string             `json:"source_id"`
+	TargetChatID   string             `json:"target_chat_id"`
+	TargetChatType int16              `json:"target_chat_type"`
+	MsgType        string             `json:"msg_type"`
+	PayloadVersion int16              `json:"payload_version"`
+	Payload        []byte             `json:"payload"`
+	Status         string             `json:"status"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseToken     pgtype.Text        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	SentAt         pgtype.Timestamptz `json:"sent_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelOutboundReconcileState struct {
+	ChannelType    string             `json:"channel_type"`
+	CursorAt       pgtype.Timestamptz `json:"cursor_at"`
+	LeaseToken     pgtype.Text        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChannelUserBinding struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

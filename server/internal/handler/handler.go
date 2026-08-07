@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
@@ -248,6 +249,16 @@ type Handler struct {
 	// where the storage backend exists; main.go starts it as an independent
 	// worker goroutine. Nil when no storage backend is configured.
 	ChannelMediaReconciler *service.ChannelMediaReconciler
+	// ChannelOutboxReconcilers rescue outbound replies whose producing replica
+	// died before enqueueing them, one per channel that adopts the durable
+	// outbound queue. Built in cmd/server/router.go alongside each adapter;
+	// main.go starts them as independent workers. Empty when no channel on the
+	// queue is configured.
+	ChannelOutboxReconcilers []*outbox.Reconciler
+	// ChannelOutboxMetrics is the swappable sink the outbound queue workers
+	// push to. Built during routing, pointed at the Prometheus collector by
+	// main.go once the registry exists.
+	ChannelOutboxMetrics *outbox.MetricsRef
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.

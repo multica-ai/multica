@@ -252,6 +252,11 @@ func subscribeBody(botID, secret string) map[string]any {
 // content. aibot_send_msg's supported msgtypes are markdown and
 // template_card only — text is NOT accepted on this cmd (contrast
 // aibot_respond_msg, which does accept text). We therefore ship as
+// msgTypeMarkdown is the only aibot msgtype the adapter writes. It is also
+// what lands in channel_outbound_queue.msg_type, so the queue records what
+// wire form a row was enqueued as rather than assuming one at send time.
+const msgTypeMarkdown = "markdown"
+
 // markdown; the WeCom client renders plain text through the markdown
 // path without any special escaping. chatType is 1 for single, 2 for
 // group.
@@ -265,7 +270,7 @@ func sendMsgTextBody(chatID string, chatType int, content string) (map[string]an
 	return map[string]any{
 		"chatid":    chatID,
 		"chat_type": chatType,
-		"msgtype":   "markdown",
+		"msgtype":   msgTypeMarkdown,
 		"markdown":  map[string]string{"content": content},
 	}, nil
 }

@@ -366,6 +366,9 @@ deleted_channel_user_bindings AS (
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
 ),
+deleted_channel_outbound_queue AS (
+    DELETE FROM channel_outbound_queue WHERE workspace_id = $1
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)

@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/outbox"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
@@ -282,6 +283,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// connection of its own outside the per-installation supervisor. The Router
 	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
+	// Shared metrics sink for every channel's outbound queue workers. A ref
+	// rather than the concrete sink because the Prometheus registry is built
+	// after this wiring runs; main.go points it at the real collector once it
+	// exists. See outbox.MetricsRef.
+	channelOutboxMetrics := outbox.NewMetricsRef()
+	h.ChannelOutboxMetrics = channelOutboxMetrics
 	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{Logger: slog.Default()})
 	// Debounce the per-session run trigger so a burst of messages collapses
 	// into one agent run instead of one per message (MUL-2968).
@@ -675,6 +682,28 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// entry and clears on exit.
 				wecomSenders := wecom.NewSendersRegistry()
 
+				// Durable outbound queue. WeCom is the first channel on it,
+				// and the reason it exists: aibot has no outbound REST path,
+				// so a reply can only be written by the replica holding the
+				// bot's socket, while the reply itself is produced wherever
+				// the agent task ran. The queue is the handoff — producers
+				// insert from any replica, the lease holder drains.
+				//
+				// Wake is a latency optimization on top: a producer that
+				// happens to be co-located with the socket nudges the local
+				// consumer instead of waiting for its poll tick.
+				wecomOutboxWake := outbox.NewWakeRegistry()
+				wecomProducer, producerErr := outbox.NewProducer(
+					string(wecom.TypeWecom), queries, wecomOutboxWake, channelOutboxMetrics,
+				)
+				if producerErr != nil {
+					// Only a programming error can land here (empty channel
+					// type, nil queries), so fail loudly rather than silently
+					// starting an adapter whose replies go nowhere.
+					slog.Error("wecom: outbound queue producer init failed; wecom outbound disabled", "error", producerErr)
+					wecomProducer = nil
+				}
+
 				wecomReplier := wecom.NewOutboundReplier(wecom.OutboundReplierConfig{
 					Binding: wecomBinding,
 					Senders: wecomSenders,
@@ -696,31 +725,47 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Credentials: credsResolver,
 					Senders:     wecomSenders,
 					Logger:      slog.Default(),
+					// Each Connect starts a consumer for its installation and
+					// stops it when the socket goes. The consumer is what makes
+					// the queue a delivery path rather than just a log.
+					Outbox: wecom.OutboxDeps{
+						Queries: queries,
+						Wake:    wecomOutboxWake,
+						Metrics: channelOutboxMetrics,
+					},
 				})
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
 					wecomStore, wecomSession, wecomReplier,
 				))
 
-				// EventChatDone subscriber: pushes the agent's chat reply
-				// back over the same aibot WebSocket the inbound loop owns.
-				// Mirrors slack.NewOutbound(...).Register(bus). Without it
-				// the agent's reply lands only in Multica's web UI — the
-				// user in WeCom sees no response.
-				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
+				// EventChatDone / EventInboxNew subscriber: enqueues the
+				// agent's reply onto the outbound queue from whichever replica
+				// published the event. Without it the agent's reply lands only
+				// in Multica's web UI — the user in WeCom sees no response.
+				if wecomProducer != nil {
+					wecom.NewOutbound(queries, wecomProducer, slog.Default()).Register(bus)
+
+					// Reconciler: the safety net for a replica that died
+					// between finishing a task and enqueueing its reply. One
+					// runs per deployment — the cursor's lease elects it — and
+					// it also owns the retention purge. Started from main.go as
+					// its own worker.
+					reconciler, reconcilerErr := outbox.NewReconciler(outbox.ReconcilerConfig{
+						ChannelType: string(wecom.TypeWecom),
+						Queries:     queries,
+						Producer:    wecomProducer,
+						Builder:     wecom.NewReconcilePayloadBuilder(queries),
+						Metrics:     channelOutboxMetrics,
+						Logger:      slog.Default(),
+					})
+					if reconcilerErr != nil {
+						slog.Error("wecom: outbound reconciler init failed; missed replies will not be rescued", "error", reconcilerErr)
+					} else {
+						h.ChannelOutboxReconcilers = append(h.ChannelOutboxReconcilers, reconciler)
+					}
+				}
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")
-				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
-				// inbox pushes) is delivered only by the replica holding each
-				// bot's in-process WebSocket lease. On a multi-replica
-				// deployment, an EventChatDone/EventInboxNew published on another
-				// replica cannot reach the lease holder, so those replies are
-				// dropped. This is stated conditionally rather than gated on a
-				// replica-count signal: the server has no reliable count here,
-				// and REDIS_URL means "Redis configured" (it also gates rate
-				// limiting), not "more than one replica". See wecom/outbound.go
-				// and SELF_HOSTING.md. Remove once outbound routes to the lease
-				// holder.
-				slog.Warn("wecom integration: WeCom agent replies and inbox pushes are delivered only by the replica holding each bot's WebSocket lease. If you run more than one backend replica, responses produced on a replica that does not hold the lease will be dropped — run the WeCom-enabled backend as a single replica until cross-replica outbound routing is implemented.")
 			}
 		}
 	} else {
