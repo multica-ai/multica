@@ -37,6 +37,24 @@ type fakeOutboundQueries struct {
 	memberErr      error
 	workspace      db.Workspace
 	workspaceErr   error
+
+	// channelIngested is what TaskInputIsChannelIngested resolves to. The
+	// default is false — a task nobody said came from WeCom did not — so a
+	// test that expects delivery has to say so, the same way production has
+	// to prove it before pushing into somebody's chat.
+	channelIngested bool
+	taskErr         error
+}
+
+func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
+	if f.taskErr != nil {
+		return db.AgentTaskQueue{}, f.taskErr
+	}
+	return db.AgentTaskQueue{ChatInputTaskID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true}}, nil
+}
+
+func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(context.Context, pgtype.UUID) (bool, error) {
+	return f.channelIngested, nil
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -64,8 +82,9 @@ func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUI
 func TestProcessEvent_DeliversChatReplyToBoundChat(t *testing.T) {
 	t.Parallel()
 	q := &fakeOutboundQueries{
-		sessionBinding: db.ChannelChatSessionBinding{ChannelChatID: "CHAT_1", ChatType: "group"},
-		installation:   db.ChannelInstallation{Status: string(InstallationActive)},
+		sessionBinding:  db.ChannelChatSessionBinding{ChannelChatID: "CHAT_1", ChatType: "group"},
+		installation:    db.ChannelInstallation{Status: string(InstallationActive)},
+		channelIngested: true, // the question came in over WeCom
 	}
 	o, instID, conn := newOutboundWithConn(t, q)
 	q.sessionBinding.InstallationID = instID
@@ -73,7 +92,10 @@ func TestProcessEvent_DeliversChatReplyToBoundChat(t *testing.T) {
 
 	err := o.processEvent(context.Background(), events.Event{
 		ChatSessionID: "22222222-2222-2222-2222-222222222222",
-		Payload:       protocol.ChatDonePayload{Content: "the agent reply"},
+		Payload: protocol.ChatDonePayload{
+			Content: "the agent reply",
+			TaskID:  "33333333-3333-3333-3333-333333333333",
+		},
 	})
 	if err != nil {
 		t.Fatalf("processEvent: %v", err)
@@ -201,5 +223,68 @@ func TestChatDoneContent(t *testing.T) {
 	}
 	if got := chatDoneContent(json.RawMessage(`{}`)); got != "" {
 		t.Errorf("unknown payload type = %q, want empty", got)
+	}
+}
+
+// TestProcessEvent_DoesNotPushAWebUIAnswerIntoTheRoom is the privacy case. A
+// session that originated in WeCom can be continued from the Multica web UI,
+// and that answer belongs only in Multica. Without the origin gate it is
+// pushed to the bound chat — which in a group means in front of everyone in
+// the room, an answer to a question none of them saw asked.
+func TestProcessEvent_DoesNotPushAWebUIAnswerIntoTheRoom(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		sessionBinding:  db.ChannelChatSessionBinding{ChannelChatID: "CHAT_1", ChatType: "group"},
+		installation:    db.ChannelInstallation{Status: string(InstallationActive)},
+		channelIngested: false, // asked in the web UI, not over WeCom
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	err := o.processEvent(context.Background(), events.Event{
+		ChatSessionID: "22222222-2222-2222-2222-222222222222",
+		Payload: protocol.ChatDonePayload{
+			Content: "something the room was never meant to read",
+			TaskID:  "33333333-3333-3333-3333-333333333333",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	conn.mu.Lock()
+	n := len(conn.frames)
+	conn.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a web-UI answer was pushed into the WeCom chat (%d frame(s) written)", n)
+	}
+}
+
+// An origin that cannot be established must fail closed — silence is
+// recoverable, a leak is not.
+func TestProcessEvent_FailsClosedWhenTheTaskIdIsMissing(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		sessionBinding:  db.ChannelChatSessionBinding{ChannelChatID: "CHAT_1", ChatType: "group"},
+		installation:    db.ChannelInstallation{Status: string(InstallationActive)},
+		channelIngested: true,
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	// No TaskID anywhere: the envelope's is empty and the payload carries none.
+	err := o.processEvent(context.Background(), events.Event{
+		ChatSessionID: "22222222-2222-2222-2222-222222222222",
+		Payload:       protocol.ChatDonePayload{Content: "unattributable"},
+	})
+	if err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	conn.mu.Lock()
+	n := len(conn.frames)
+	conn.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("delivered a completion whose origin could not be established (%d frame(s))", n)
 	}
 }
