@@ -706,12 +706,23 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		b.WriteString("**Delivering files here:** your stdout is text-only. A file that belongs to the new issue goes on the `multica issue create` call itself via `--attachment <path>`; never put its path in the description or in your stdout line.\n")
 	case kindChat:
 		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n\n")
-		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer: any
-		// non-empty channel type means the reply leaves Multica for an external
-		// IM platform, where `attachment upload` has nothing to bind to. The
-		// orthogonal HISTORY layer (which read commands exist) is Slack-only and
-		// lives in the per-turn chat prompt — do not collapse the two.
-		if ctx.ChatChannelType != "" {
+		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer, and
+		// it has three answers. `attachment upload` binds a file to the Multica
+		// chat reply whatever the surface; the question is whether anything
+		// carries it the last hop. Web/mobile renders it as a card. WeCom's
+		// adapter fetches it and sends it into the room as a separate message.
+		// Slack and Lark do neither, so there the upload reaches nobody and the
+		// agent is told to describe the file instead. ChannelCarriesFiles owns
+		// that per-adapter answer. The orthogonal HISTORY layer (which read
+		// commands exist) is Slack-only and lives in the per-turn chat prompt —
+		// do not collapse the two.
+		if ChannelCarriesFiles(ctx.ChatChannelType) {
+			// The "separate message" is worth stating: an agent told only that
+			// files work here writes "see the chart below" and then nothing
+			// appears below, because a picture cannot be embedded in an IM
+			// reply the way it can in the web chat.
+			fmt.Fprintf(b, "**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and Multica then sends it into the %s conversation as a separate message right after your text. That command is the ONLY way a file reaches the user; a path written into your reply text is not. Write your reply so it reads correctly with the file arriving after it, not inline.\n", ChannelDisplayName(ctx.ChatChannelType))
+		} else if ctx.ChatChannelType != "" {
 			fmt.Fprintf(b, "**Delivering files here:** this %s conversation is text-only — Multica cannot push a file you produced back into it. `multica attachment upload` does NOT apply: it binds to a Multica chat reply, which this is not. Say in words what you produced and where it can be obtained; never upload and then write as though the file arrived, and never link its local path.\n", ChannelDisplayName(ctx.ChatChannelType))
 		} else {
 			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
