@@ -377,16 +377,26 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			log.Warn("wecom: bad aibot_msg_callback body", "error", err)
 			return nil
 		}
-		traceInbound(log, mc, mc.Text.Content)
+		// Trace the body the adapter will actually route, not the typed
+		// field: a voice note carries its words in voice.content, and an
+		// operator who turned tracing on to follow one would otherwise read
+		// len=0 next to a bot that answered.
+		body, routable := mc.bodyText()
+		traceInbound(log, mc, body)
 		msg := channelMessageFromCallback(c.botID, c.botDisplayName, mc, env.Headers.ReqID)
-		if mc.MsgType != "text" {
-			// Iteration 1 routes only text. Rather than drop other types
-			// (voice / image / file) silently — which reads as a broken bot —
+		// A voice note is a sentence that happened to be spoken: WeCom does
+		// the recognition and hands over the transcript, so it needs no
+		// download, no media key and no storage. Answering it with "I only
+		// handle text" was refusing content we already had in hand.
+		if !routable {
+			// Kinds that carry a downloadable payload (image / file / video /
+			// mixed), and a voice note whose recognition came back empty.
+			// Rather than drop them silently — which reads as a broken bot —
 			// answer the same chat with a one-line "text only" receipt, then
 			// stop. Media routing, and dedup'd receipts that never double-answer
 			// a WeCom delivery retry, are a follow-up. Best-effort: a send
 			// failure degrades to the prior silent drop.
-			log.Debug("wecom: non-text message, replying text-only", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
+			log.Debug("wecom: unroutable message, replying text-only", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
 			if err := sender.sendText(msg.Source.ChatID, aibotChatTypeFromChannel(msg.Source.ChatType), "抱歉，我目前只能处理文字消息。"); err != nil {
 				log.Debug("wecom: text-only receipt send failed", "error", err, "msg_id", mc.MsgID)
 			}

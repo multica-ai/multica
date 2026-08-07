@@ -28,8 +28,10 @@
 // shared channel engine? Keep this adapter building — and loop in the code
 // owners for anything that changes WeCom-visible behavior.
 //
-// Known limits of the first version, both deliberate: inbound handling is
-// text-only (other message types get a short "text only" receipt), and outbound
+// Known limits of the first version, both deliberate: inbound handling takes
+// only what arrives as words — typed text, and the transcript WeCom returns
+// for a voice note — while the kinds carrying a downloadable payload get a
+// short "text only" receipt; and outbound
 // delivery requires a SINGLE backend replica, because the only send path is the
 // in-process WebSocket in sendersRegistry while EventChatDone dispatches on the
 // in-process events.Bus. See SELF_HOSTING.md.

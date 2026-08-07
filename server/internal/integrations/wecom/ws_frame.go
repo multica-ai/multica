@@ -83,8 +83,32 @@ type aibotMsgCallback struct {
 	Text    struct {
 		Content string `json:"content"`
 	} `json:"text"`
-	// Image / voice / file / video / mixed have their own fields; we do
-	// not surface them yet — MsgType=="text" is the only case we route.
+	// Voice carries the TRANSCRIPT, not audio. WeCom runs the speech
+	// recognition on its side and delivers only the result, so a voice note
+	// needs no download, no media key and no storage — it is a sentence that
+	// happened to be spoken. Not gated on chat type: whatever chat a voice
+	// note arrives from, the transcript is read the same way.
+	Voice struct {
+		Content string `json:"content"`
+	} `json:"voice"`
+	// Image / file / video / mixed have their own fields and carry a
+	// downloadable payload; they are not surfaced yet.
+}
+
+// bodyText is the message's text, whether it was typed or spoken. Recognition
+// comes back empty on background noise or a half-second press, and an empty
+// body would reach the agent as a turn with nothing in it — so an empty
+// transcript reports false and takes the receipt path instead.
+func (mc aibotMsgCallback) bodyText() (string, bool) {
+	switch strings.ToLower(mc.MsgType) {
+	case "text":
+		return mc.Text.Content, true
+	case "voice":
+		transcript := strings.TrimSpace(mc.Voice.Content)
+		return transcript, transcript != ""
+	default:
+		return "", false
+	}
 }
 
 // aibotEventCallback is the body of an aibot_event_callback frame. We only
@@ -127,9 +151,10 @@ type InboundMessage struct {
 	// SenderUserID is the userid of the person who typed the message.
 	SenderUserID string `json:"sender_user_id,omitempty"`
 
-	// Content is the human-readable text body when MsgType == "text";
-	// empty for media / events. The cross-platform envelope's Text field
-	// is populated from this.
+	// Content is the human-readable body of the message — what was typed
+	// for MsgType == "text", what WeCom's recognition returned for
+	// MsgType == "voice". Empty for the downloadable kinds and for events.
+	// The cross-platform envelope's Text field is populated from this.
 	Content string `json:"content,omitempty"`
 
 	// ReqID is the frame req_id the server sent this message with. We
@@ -155,6 +180,7 @@ type InboundMessage struct {
 // is used for one thing: recognising where the sender's @-mention ends. Empty
 // is fine and falls back to a whitespace heuristic; see stripLeadingMentions.
 func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallback, reqID string) channel.InboundMessage {
+	body, _ := mc.bodyText()
 	chatType := channel.ChatTypeP2P
 	if strings.EqualFold(mc.ChatType, "group") {
 		chatType = channel.ChatTypeGroup
@@ -177,9 +203,14 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 	// issue nobody asked for plus, via SkipAgentRun below, no answer at all.
 	// Passing the raw content through keeps p2p exactly where it was before
 	// CommandText was set here.
-	command := mc.Text.Content
+	//
+	// Read off bodyText, not Text.Content: a spoken "/issue …" carries the
+	// words in voice.content, and sourcing the command from the typed field
+	// would leave it empty — the engine would then fall back to Text, file the
+	// issue and, with SkipAgentRun false, run the agent over it as well.
+	command := body
 	if chatType == channel.ChatTypeGroup {
-		command = stripLeadingMentions(mc.Text.Content, botDisplayName)
+		command = stripLeadingMentions(body, botDisplayName)
 	}
 
 	wm := InboundMessage{
@@ -189,7 +220,7 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		ChatType:     mc.ChatType,
 		ChatID:       chatID,
 		SenderUserID: senderID,
-		Content:      mc.Text.Content,
+		Content:      body,
 		ReqID:        reqID,
 	}
 	raw, _ := json.Marshal(wm)
@@ -198,7 +229,7 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		EventID:        mc.MsgID,
 		MessageID:      mc.MsgID,
 		Type:           channelMsgType(mc.MsgType),
-		Text:           mc.Text.Content,
+		Text:           body,
 		AddressedToBot: true,
 		// The sender's own words, with a group's addressing removed. Command
 		// classification is shared (channel/message.go) and falls back to Text
@@ -315,11 +346,12 @@ func channelMsgType(wecomType string) channel.MsgType {
 	case "video":
 		return channel.MsgTypeVideo
 	default:
-		// Includes "mixed" (text + media): dispatchFrame only routes msgtype
-		// == "text", so anything else is answered with the text-only receipt
-		// and never reaches this normalization. Kept as Unknown rather than
-		// mapping "mixed" → Text, which was dead and implied mixed messages
-		// were routed as text when they are not.
+		// Includes "mixed" (text + media): dispatchFrame routes the kinds
+		// bodyText answers for — "text", and "voice" with a non-empty
+		// transcript — so anything else is answered with the text-only
+		// receipt and never reaches this normalization. Kept as Unknown
+		// rather than mapping "mixed" → Text, which was dead and implied
+		// mixed messages were routed as text when they are not.
 		return channel.MsgTypeUnknown
 	}
 }
