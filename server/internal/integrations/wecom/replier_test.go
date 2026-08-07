@@ -375,10 +375,27 @@ func TestIssueConfirmationDoesNotRenderReporterLinks(t *testing.T) {
 		IssueTitle:      "安全升级：请点击 [重置密码](https://evil.example) 完成验证",
 	}
 	got := issueCreatedText(res)
-	if strings.Contains(got, "](https://evil.example)") {
+	if strings.Contains(got, "](") {
 		t.Fatalf("a reporter-authored link rendered in a bot-authored group message: %q", got)
 	}
 	if !strings.Contains(got, "重置密码") {
-		t.Errorf("escaping ate the visible text: %q", got)
+		t.Errorf("the visible text was eaten: %q", got)
+	}
+	if strings.Contains(got, `\`) {
+		t.Fatalf("a backslash reached the reply: %q — WeCom shows it raw in the list preview and reads it as a math delimiter in the bubble", got)
+	}
+}
+
+// TestIssueConfirmationKeepsAnOrdinaryTitleVerbatim: the confirmation echoes
+// what the reporter typed straight back at them in the same chat, so anything
+// added to it is immediately visible as a mistake. Only a title that actually
+// contains "](" is edited at all.
+func TestIssueConfirmationKeepsAnOrdinaryTitleVerbatim(t *testing.T) {
+	res := engine.Result{
+		IssueIdentifier: "MUL-1",
+		IssueTitle:      "[Bug] 登录失败 (P0)!",
+	}
+	if got, want := issueCreatedText(res), "✅ 已创建 MUL-1 — [Bug] 登录失败 (P0)!"; got != want {
+		t.Fatalf("the reporter's own title came back altered:\n got %q\nwant %q", got, want)
 	}
 }

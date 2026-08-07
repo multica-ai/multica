@@ -3,8 +3,8 @@ package wecom
 import (
 	"os"
 	"strings"
-	"unicode/utf8"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestBuildInboxMarkdown_TitleBodyLink(t *testing.T) {
@@ -148,7 +148,7 @@ func TestInboxCardDoesNotRenderMemberAuthoredLinks(t *testing.T) {
 		t.Fatalf("member-authored link syntax rendered as a link in a bot-authored card: %q", out)
 	}
 	if !strings.Contains(out, "click here") {
-		t.Errorf("escaping ate the visible text: %q", out)
+		t.Errorf("the visible text was eaten: %q", out)
 	}
 }
 
@@ -166,4 +166,136 @@ func TestInboxCardFitsTheCapEvenWithAHugeTitle(t *testing.T) {
 	if !strings.Contains(out, "查看详情") {
 		t.Errorf("the view-detail affordance was dropped: %q", out[:120])
 	}
+}
+
+// TestInboxCardKeepsAnOrdinaryBracketedTitleVerbatim pins the reason the
+// mechanism changed. A live tenant showed backslash escaping is unusable here:
+// "\[Bug\]" came back as an italic serif "Bug" with the brackets consumed —
+// the client reads "\[...\]" as a display-math delimiter — and the
+// conversation-list preview, which renders no markdown at all, showed the
+// backslashes raw. "[Bug] ..." and "[WIP] ..." are everyday title forms, so
+// the card must carry them through untouched.
+func TestInboxCardKeepsAnOrdinaryBracketedTitleVerbatim(t *testing.T) {
+	t.Setenv("WECOM_APP_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	item := map[string]any{
+		"type":  "status_changed",
+		"title": "[Bug] 登录失败",
+		"body":  "从 (todo) 到 (in_review)!",
+	}
+	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	want := "**[状态变更] [Bug] 登录失败**\n从 (todo) 到 (in_review)!"
+	if out != want {
+		t.Fatalf("member text did not survive verbatim:\n got %q\nwant %q", out, want)
+	}
+	if strings.Contains(out, `\`) {
+		t.Fatalf("a backslash reached the card: %q — WeCom either shows it raw in the list preview or reads it as a math delimiter in the bubble", out)
+	}
+}
+
+// TestInboxCardNeverPutsCloseBracketNextToOpenParen pins the property the
+// card's safety rests on: "](" never comes out adjacent. An inline link needs
+// that adjacency under CommonMark ("immediately followed by") and under a
+// naive `\[([^\]]+)\]\(([^)]+)\)` rewriter alike, and "![" needs it too, so
+// neither a link nor an image can form.
+//
+// The app URL is cleared so the builder emits no link of its own; any "]("
+// in the output would then be member-authored.
+func TestInboxCardNeverPutsCloseBracketNextToOpenParen(t *testing.T) {
+	t.Setenv("WECOM_APP_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	cases := []struct {
+		name  string
+		title string
+		body  string
+	}{
+		{"link in title", "[click here](http://evil.example)", "body"},
+		{"link in body", "title", "and the body [too](http://evil.example)"},
+		{"image", "![img](http://evil.example/x.png)", "body"},
+		{"nested brackets", "[a[b]](http://evil.example)", "body"},
+		// A member putting a backslash in front of the pair, betting the
+		// separator lands somewhere it can be undone.
+		{"member-written backslash", `x\](http://evil.example)`, `y\](http://evil.example)`},
+		// Both truncation branches: the cut must not fuse a "]" and a "("
+		// that were separated.
+		{"body truncated at the seam", "t", strings.Repeat("a", 3900) + strings.Repeat("](x)", 100)},
+		{"title truncated at the seam", strings.Repeat("标题](x)", 2000), "body"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := buildInboxMarkdown(map[string]any{
+				"type": "mentioned", "title": tc.title, "body": tc.body,
+			}, "ws-uuid", "acme")
+			if i := strings.Index(out, "]("); i >= 0 {
+				t.Fatalf("\"](\" came out adjacent at byte %d — that is a working link in a card the bot signs: %q",
+					i, window(out, i))
+			}
+		})
+	}
+}
+
+// TestInboxCardSeamSurvivesEveryCutOffset sweeps the truncation point across a
+// dense run of "](" so some iteration cuts at every offset inside the pattern.
+// The two fixed seam cases above happen to land on one offset each; this is
+// the same property without the luck.
+func TestInboxCardSeamSurvivesEveryCutOffset(t *testing.T) {
+	t.Setenv("WECOM_APP_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	for pad := 0; pad < 12; pad++ {
+		body := strings.Repeat("a", 3900+pad) + strings.Repeat("](x)", 60)
+		title := strings.Repeat("标", 3900+pad) + strings.Repeat("](x)", 60)
+		for _, tc := range []struct {
+			name string
+			item map[string]any
+		}{
+			{"body", map[string]any{"type": "mentioned", "title": "t", "body": body}},
+			{"title", map[string]any{"type": "mentioned", "title": title, "body": "b"}},
+		} {
+			out := buildInboxMarkdown(tc.item, "ws-uuid", "acme")
+			if i := strings.Index(out, "]("); i >= 0 {
+				t.Fatalf("%s cut at pad=%d fused a \"]\" onto a \"(\" at byte %d: %q", tc.name, pad, i, window(out, i))
+			}
+			if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
+				t.Fatalf("%s cut at pad=%d: card is %d runes, cap is %d — WeCom refuses the frame and the push is lost",
+					tc.name, pad, n, inboxMarkdownMaxLen)
+			}
+		}
+	}
+}
+
+// TestInboxCardBudgetsTheSpacesItInserts: breaking the adjacency inserts a
+// visible character, so a body dense in "](" is longer going out than it was
+// coming in — 1.5x in the limit. The budget has to be computed on the grown
+// text. Measured after truncation, the card would ship over the cap and WeCom
+// would refuse the whole frame while the send path reports success.
+func TestInboxCardBudgetsTheSpacesItInserts(t *testing.T) {
+	t.Setenv("MULTICA_APP_URL", "https://multica.example")
+	item := map[string]any{
+		"type":  "mentioned",
+		"title": "t",
+		"body":  strings.Repeat("](", 4000), // 8000 runes in, 12000 if broken
+	}
+	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
+		t.Fatalf("card is %d runes, cap is %d — the inserted spaces were not budgeted, so WeCom refuses the frame and the push is lost",
+			n, inboxMarkdownMaxLen)
+	}
+}
+
+// window returns a short readable slice around i for a failure message.
+func window(s string, i int) string {
+	lo, hi := i-10, i+10
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(s) {
+		hi = len(s)
+	}
+	return s[lo:hi]
 }

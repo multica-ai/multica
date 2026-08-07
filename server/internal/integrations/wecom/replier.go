@@ -236,7 +236,7 @@ func issueCreatedText(res engine.Result) string {
 	// issue titled "安全升级：请点击 [重置密码](https://evil.example) 完成验证"
 	// otherwise comes back from the bot as a working link, with the bot's
 	// authority behind it.
-	title := escapeInboxMarkdown(strings.TrimSpace(res.IssueTitle))
+	title := breakLinkAdjacency(strings.TrimSpace(res.IssueTitle))
 	if title == "" {
 		return "✅ 已创建 " + id
 	}
