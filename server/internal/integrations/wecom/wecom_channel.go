@@ -102,7 +102,7 @@ func (c *wecomChannel) Disconnect(ctx context.Context) error { return nil }
 // goroutine to observe it, so a transient failure tears the live connection
 // down before the Supervisor reconnects — no leaked socket goroutine
 // consuming events into an unread channel.
-func (c *wecomChannel) Connect(ctx context.Context) error {
+func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 	if c.handler == nil {
 		return errors.New("wecom: inbound handler not configured")
 	}
@@ -190,6 +190,43 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 		<-pingDone
 	}()
 
+	// Inbound callbacks run on their own worker, not on the read loop. The
+	// read loop is the sole deliverer of server verdicts, so anything that
+	// handles a callback inline cannot also wait for the ack of a frame it
+	// writes — it would be waiting on itself. DingTalk's adapter is already
+	// shaped this way.
+	//
+	// ONE worker, not a pool: WeCom delivers a chat's messages in order, and
+	// the engine's dedup and turn batching assume that order survives.
+	//
+	// A full queue BLOCKS the read loop rather than dropping. Backpressure
+	// costs a reconnect; dropping costs a user's message with nothing to say
+	// so.
+	callbacks := make(chan frameEnvelope, callbackQueueDepth)
+	cbDone := make(chan struct{})
+	var cbErr error
+	go func() {
+		defer close(cbDone)
+		for env := range callbacks {
+			if e := c.dispatchFrame(ctx, env, sender, log); e != nil {
+				cbErr = e
+				// Wake the read loop; it is parked in ReadMessage and a
+				// cancelled context alone will not move it.
+				_ = conn.Close()
+				return
+			}
+		}
+	}()
+	defer func() {
+		close(callbacks)
+		<-cbDone
+		// The worker's error is the real cause; the read error that followed
+		// it is just the socket we closed to get here.
+		if cbErr != nil {
+			err = cbErr
+		}
+	}()
+
 	// Read loop. Every frame comes back through the same decode → dispatch
 	// → (maybe) reply path. A single bad frame does NOT tear the socket
 	// down — only transport / handler errors escalate.
@@ -215,11 +252,29 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 			log.Warn("wecom: bad frame envelope", "error", err, "size", len(payload))
 			continue
 		}
-		if err := c.dispatchFrame(ctx, env, sender, log); err != nil {
-			return err
+		switch env.Cmd {
+		case cmdMsgCallback, cmdEventCallback:
+			select {
+			case callbacks <- env:
+			case <-ctx.Done():
+				return nil
+			}
+		default:
+			// Acks, pings and pongs stay on the read loop: they are the
+			// frames the worker's own writes are waiting for.
+			if err := c.dispatchFrame(ctx, env, sender, log); err != nil {
+				return err
+			}
 		}
 	}
 }
+
+// callbackQueueDepth is how far the callback worker may fall behind the read
+// loop before the read loop blocks. Past this the socket stops being drained,
+// WeCom notices, and the connection is replaced — which is the correct
+// outcome: a replica that cannot keep up should hand the bot to one that can,
+// not quietly discard the messages it could not reach.
+const callbackQueueDepth = 64
 
 // subscribe sends the aibot_subscribe frame and waits (up to
 // subscribeTimeout) for the server's ack. The ack shape is a frame with
@@ -330,6 +385,12 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 		// (e.g. wrong msgtype, rate limit, chat not writable). Log the
 		// error so a failed outbound is visible without having to
 		// packet-capture the socket.
+		// Hand it to whoever wrote the frame, if anybody is waiting. An
+		// unclaimed ack is not an error — the pushes that do not wait for a
+		// verdict share this connection.
+		if sender.routeResponse(env) {
+			return nil
+		}
 		if env.ErrCode != 0 {
 			log.Warn("wecom: server ack error",
 				"errcode", env.ErrCode,
