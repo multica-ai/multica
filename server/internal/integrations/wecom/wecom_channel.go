@@ -167,7 +167,7 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 	// on exit so a stale sender for a dead connection is never dispatched to.
 	if c.senders != nil && c.installationID.Valid {
 		c.senders.set(c.installationID, sender)
-		defer c.senders.clear(c.installationID)
+		defer c.senders.clear(c.installationID, sender)
 	}
 
 	// Heartbeat — WeCom kills silent sockets past ~90s. We ping every 30s
