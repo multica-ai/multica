@@ -34,7 +34,7 @@ const (
 	agentOfflineText  = "⚠️ The agent is offline, so this message won't be processed automatically."
 	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
 	freshPendingText  = "✅ Fresh start ready. Your next chat message will run without previous context."
-	issueUsageText    = "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)"
+	issueUsageText    = "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"
 	// Refusals for dropped /issue commands, carried over from the deleted
 	// pre-engine IssueCommandProcessor: without them the user's command
 	// vanishes with no signal that it will never be handled.

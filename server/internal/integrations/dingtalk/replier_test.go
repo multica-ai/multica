@@ -35,7 +35,7 @@ func TestCommandOutcomeText(t *testing.T) {
 		want    string
 	}{
 		{engine.OutcomeFreshPending, freshPendingText},
-		{engine.OutcomeIssueUsage, issueUsageText},
+		{engine.OutcomeIssueUsage, "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"},
 		{engine.OutcomeIngested, ""},
 	} {
 		if got := commandOutcomeText(engine.Result{Outcome: tc.outcome}); got != tc.want {
