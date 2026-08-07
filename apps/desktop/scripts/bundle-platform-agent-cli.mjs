@@ -20,7 +20,7 @@ const ARCH_TO_ARTIFACT = {
 };
 
 function normalizeTargetPlatform(targetPlatform) {
-  if (targetPlatform in PLATFORM_TO_ARTIFACT) return targetPlatform;
+  if (Object.hasOwn(PLATFORM_TO_ARTIFACT, targetPlatform)) return targetPlatform;
   throw new Error(
     `[bundle-platform-agent-cli] unsupported target platform: ${targetPlatform}. ` +
       "Use darwin, linux, or win32.",
@@ -28,7 +28,7 @@ function normalizeTargetPlatform(targetPlatform) {
 }
 
 function normalizeTargetArch(targetArch) {
-  if (targetArch in ARCH_TO_ARTIFACT) return targetArch;
+  if (Object.hasOwn(ARCH_TO_ARTIFACT, targetArch)) return targetArch;
   throw new Error(
     `[bundle-platform-agent-cli] unsupported target architecture: ${targetArch}. ` +
       "Use x64 or arm64.",

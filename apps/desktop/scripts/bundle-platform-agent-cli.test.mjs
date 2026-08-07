@@ -65,6 +65,24 @@ describe("platform-agent artifact contract", () => {
       /unsupported target architecture/i,
     );
   });
+
+  it.each(["toString", "constructor", "__proto__"])(
+    "rejects inherited Object.prototype platform name %s",
+    (platform) => {
+      expect(() => platformAgentArtifactName("0.1.0", platform, "x64")).toThrow(
+        /unsupported target platform/i,
+      );
+    },
+  );
+
+  it.each(["toString", "constructor", "__proto__"])(
+    "rejects inherited Object.prototype architecture name %s",
+    (arch) => {
+      expect(() => platformAgentArtifactName("0.1.0", "linux", arch)).toThrow(
+        /unsupported target architecture/i,
+      );
+    },
+  );
 });
 
 describe("parseChecksumManifest", () => {
