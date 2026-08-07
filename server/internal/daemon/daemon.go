@@ -976,6 +976,8 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
+	// CEREBRO-PATCH(register-capability-snapshot): MUL-4634 widened from
+	// map[string]string so the entry can carry the capabilities object.
 	var runtimes []map[string]any
 	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
@@ -1081,6 +1083,8 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // treat that as "unknown, do not overwrite a previously-stored signature"
 // (otherwise a transient 5xx would silently flip the daemon into thinking the
 // workspace has zero profiles).
+// CEREBRO-PATCH(register-capability-snapshot): MUL-4634 runtimes widened from
+// map[string]string so a custom profile can carry its capabilities object too.
 func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]any, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
