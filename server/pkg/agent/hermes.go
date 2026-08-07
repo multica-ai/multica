@@ -641,6 +641,17 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			sessionID = ""
 			resumeRejected = true
 		}
+		// A poisoned session history (400 "assistant must not be empty") is
+		// unresumable: every resume replays the identical body and reproduces
+		// the same 400. Signal the daemon to drop the old session so it can
+		// retry fresh via the tools==0 gate instead of re-submitting the broken
+		// transcript indefinitely. Guard on ResumeSessionID so a fresh run that
+		// somehow sees the same fingerprint is not misflagged. This is the
+		// positive backend signal; taskfailure.UnresumableHistory keys off the
+		// surfaced Result.Error string as the backend-agnostic path (#6083).
+		if finalStatus == "failed" && opts.ResumeSessionID != "" && providerErr.isPoisonedHistory() {
+			resumeRejected = true
+		}
 
 		// Build usage map.
 		u := c.accumulatedUsage()
@@ -2189,12 +2200,21 @@ type acpProviderErrorSniffer struct {
 // acpErrorHeaderRe matches the first line of an API-error block.
 // ACP agents typically prefix these with ⚠️ / ❌ and include an HTTP
 // status code or a non-retryable-error tag.
-var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)`)
+// The trailing alternative covers provider.api_error lines that kimi emits
+// without an emoji prefix, e.g.:
+//
+//	error: failed to run prompt: provider.api_error: 400 the message at position …
+var acpErrorHeaderRe = regexp.MustCompile(
+	`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)` +
+		`|provider\.api_error`)
 
 // acpErrorDetailRe pulls the most useful single-line messages out of
 // the subsequent lines of the error block (the one whose "Error:" or
 // "Details:" tag actually spells out what happened).
-var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
+// The "provider.api_error: NNN " branch lets kimi's status-prefixed detail
+// line be captured too. The existing branches keep \s* so "detail:value" (no
+// space) is captured as well as "Error: message" (with space).
+var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.api_error: [0-9]+)\s*(.+)`)
 
 // acpTerminalErrorRe matches markers that only appear when the
 // adapter has *given up* on the upstream call — either after
@@ -2202,7 +2222,18 @@ var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
 // classified as non-retryable up front (Non-retryable, BadRequest /
 // Authentication errors, ❌ / [ERROR] log levels). Per-attempt
 // warnings ("(attempt 1/3)") deliberately do NOT match this pattern.
-var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError)`)
+// "provider.api_error: (?:400|401|403)" covers kimi-style client errors that
+// are never resolved by retrying the same request. 429 (rate-limit) and 408
+// (timeout) are intentionally excluded: the kimi adapter retries those
+// internally, and a run that eventually succeeds must stay status=completed.
+var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError|provider\.api_error: (?:400|401|403))`)
+
+// providerApiErrorStatusRe extracts the numeric status code from a kimi
+// "provider.api_error: NNN" error line so messageLocked can forward it into
+// the formatted detail string, letting the backend-agnostic classifier
+// (taskfailure.UnresumableHistory) detect the 400 fingerprint even when the
+// human-readable detail text lives on a separate stderr line.
+var providerApiErrorStatusRe = regexp.MustCompile(`provider\.api_error: (\d+)`)
 
 // acpAgentOutputTerminalRe matches the synthetic agent-text turn that
 // hermes-style ACP adapters inject when they exhaust retries against
@@ -2401,16 +2432,84 @@ func (s *acpProviderErrorSniffer) terminalMessage() string {
 	return s.messageLocked()
 }
 
+// isPoisonedHistory reports whether the terminal error indicates a
+// permanently poisoned Kimi session history — the provider rejected the
+// conversation with a 400 because a message content field is empty. Resuming
+// the same session replays the identical body and reproduces the same 400, so
+// the daemon must drop the session pointer and start fresh.
+//
+// Detection requires two signals that may arrive on separate stderr lines:
+//
+//   - "provider.api_error: 400" — the HTTP 400 from Moonshot AI, signalling a
+//     bad request that retrying will not fix.
+//   - "must not be empty" — the error detail indicating which part of the
+//     conversation history is malformed.
+//
+// Checking across all captured lines (not on a single line) handles Kimi's
+// two-line format where the status appears on the error header line and the
+// detail text on the following "detail:" line.
+func (s *acpProviderErrorSniffer) isPoisonedHistory() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.terminal {
+		return false
+	}
+	var hasBadRequest, hasEmptyContent bool
+	for _, line := range s.lines {
+		lowered := strings.ToLower(line)
+		if strings.Contains(lowered, "provider.api_error: 400") {
+			hasBadRequest = true
+		}
+		if strings.Contains(lowered, "must not be empty") {
+			hasEmptyContent = true
+		}
+		if hasBadRequest && hasEmptyContent {
+			return true
+		}
+	}
+	return false
+}
+
 // messageLocked is the lock-held implementation shared by message()
 // and terminalMessage(). Caller must hold s.mu.
 func (s *acpProviderErrorSniffer) messageLocked() string {
 	prefix := s.provider + " provider error: "
-	for _, line := range s.lines {
+
+	// When the terminal failure came from a provider.api_error line, extract
+	// and forward the status code into the detail string. Without this, Kimi's
+	// two-line stderr format (status on the header line, human-readable text on
+	// the next "detail:" line) loses the "400" token after extraction, so the
+	// backend-agnostic classifier (taskfailure.UnresumableHistory) cannot see
+	// the permanently-poisoned-history fingerprint.
+	var apiErrTag string
+	apiErrLineIdx := -1
+	for i, line := range s.lines {
+		if acpTerminalErrorRe.MatchString(line) {
+			if m := providerApiErrorStatusRe.FindStringSubmatch(line); m != nil {
+				apiErrTag = "provider.api_error: " + m[1] + " "
+				apiErrLineIdx = i
+				break
+			}
+		}
+	}
+
+	for i, line := range s.lines {
 		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
-			if detail != "" {
-				return acpTruncateError(prefix + detail)
+			if detail == "" {
+				continue
 			}
+			// acpErrorDetailRe's `provider\.api_error: [0-9]+` branch can
+			// backtrack one digit into `(.+)` when the status code is the last
+			// token on the line (two-line stderr format). Skip that artefact: a
+			// real detail is never pure digits. In the single-line format the
+			// status and detail text are on the same line, so `(.+)` captures
+			// the full text (non-digits) and the check passes correctly.
+			if i == apiErrLineIdx && isOnlyASCIIDigits(detail) {
+				continue
+			}
+			return acpTruncateError(prefix + apiErrTag + detail)
 		}
 	}
 	for _, line := range s.lines {
@@ -2430,6 +2529,22 @@ func acpTruncateError(msg string) string {
 		return msg
 	}
 	return strings.ToValidUTF8(msg[:acpMaxErrorLineLen], "") + "…(truncated)"
+}
+
+// isOnlyASCIIDigits reports whether s is non-empty and consists entirely of
+// ASCII digit characters. Used to detect the regex backtracking artefact in
+// messageLocked where the "detail" captured is just the trailing digit(s) of a
+// status code.
+func isOnlyASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // promoteACPResultOnProviderError flips finalStatus to "failed" if
