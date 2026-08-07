@@ -222,6 +222,10 @@ func (s *wsSender) write(frame map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("wecom: marshal frame: %w", err)
 	}
+	// Before the writer mutex: the trace is of what we decided to send, and
+	// holding the socket lock while formatting a log line would let tracing
+	// change the serialization order it is meant to observe.
+	traceOut(s.log, frame)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.conn.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {

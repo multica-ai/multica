@@ -708,6 +708,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// user in WeCom sees no response.
 				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
 
+				// Frame tracing: off unless an operator asks for it. It
+				// records a bounded prefix of message text, so the fact that
+				// it is on has to be visible in the log it is writing into —
+				// otherwise a session gets left switched on and nobody
+				// notices message content accumulating.
+				if wecom.SetTrace(os.Getenv("MULTICA_WECOM_TRACE") == "1") {
+					slog.Warn("wecom: frame tracing ON — records message text; unset MULTICA_WECOM_TRACE when done")
+				}
+
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
 				// inbox pushes) is delivered only by the replica holding each
