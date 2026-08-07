@@ -34,6 +34,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -43,6 +44,8 @@ import (
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
+	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
@@ -109,6 +112,39 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if content == "" {
 		return nil // nothing to say (empty completion)
 	}
+	// Only bound, non-empty completions reach here, so classify the task
+	// origin before loading credentials or sending. A question asked in the
+	// Multica web UI can reuse a session that originated in WeCom — and its
+	// answer belongs only in Multica. Without this gate that answer is pushed
+	// into the WeCom chat, which in a group means in front of everyone in the
+	// room. slack/outbound.go:118 and the lark and dingtalk equivalents all
+	// gate here; WeCom was the one that did not.
+	//
+	// Fails closed: an origin we cannot establish is not delivered.
+	//
+	// Everything above this point is a read. Keep it that way: the gate has to
+	// stay ahead of anything that consumes or mutates WeCom-side state for the
+	// turn, because an answer that must not reach the room must not take over
+	// the room's message either.
+	taskID, ok := chatDoneTaskID(e)
+	if !ok {
+		return nil
+	}
+	task, err := o.q.GetAgentTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Cancelled and deleted while its completion was in flight.
+			return nil
+		}
+		return fmt.Errorf("wecom: load agent task: %w", err)
+	}
+	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
+	if err != nil {
+		return fmt.Errorf("wecom: classify task input origin: %w", err)
+	}
+	if !deliver {
+		return nil
+	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: channelTypeWecom,
@@ -137,6 +173,24 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	}
 	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
 	return sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content)
+}
+
+// chatDoneTaskID recovers the task id an EventChatDone belongs to. The
+// envelope's TaskID is preferred, with the payload as the fallback —
+// service.broadcastChatDone sets ChatDonePayload.TaskID and leaves the
+// envelope's empty, so in practice the fallback is the live path.
+func chatDoneTaskID(e events.Event) (pgtype.UUID, bool) {
+	raw := e.TaskID
+	if raw == "" {
+		switch p := e.Payload.(type) {
+		case protocol.ChatDonePayload:
+			raw = p.TaskID
+		case map[string]any:
+			raw, _ = p["task_id"].(string)
+		}
+	}
+	id, err := util.ParseUUID(raw)
+	return id, err == nil && id.Valid
 }
 
 // chatDoneContent extracts the reply text from an EventChatDone payload
