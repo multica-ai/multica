@@ -695,11 +695,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Fallback: "企业微信会话",
 				})
 
+				// Welcome/Binding/AppURL are the enter_chat greeting: WeCom
+				// pushes that event the moment somebody opens the bot's chat
+				// and gives us about five seconds to answer, so the greeting
+				// is written by the connection itself rather than by the
+				// OutboundReplier (which only ever runs after a message).
+				// Same binding service and app URL the replier gets, so both
+				// hand out the same bind link.
 				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
 					Credentials: credsResolver,
 					Senders:     wecomSenders,
 					Metrics:     wecomMetricsOrNil(opts.WecomMetrics),
 					Logger:      slog.Default(),
+					Welcome:     queries,
+					Binding:     wecomBinding,
+					AppURL:      appURLFromEnv(),
 				})
 				// Inbound media: a callback carries a pre-signed COS url and
 				// a per-url key, so the resolver needs no WeCom credential —
