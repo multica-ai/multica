@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,20 +183,79 @@ func TestMergeRuntimeAndAgentMcpConfigNullKeepsNativeInheritance(t *testing.T) {
 	}
 }
 
-// CodeBuddy is a Claude Code fork but keeps its own config file and plugin
-// root. Reading ~/.claude.json for it leaked Claude's servers into CodeBuddy
-// launches while dropping CodeBuddy's own (MUL-5846).
+// CodeBuddy resolves its own config: `$CODEBUDDY_CONFIG_DIR` (default
+// `~/.codebuddy`), user-scope MCP from the first existing of
+// `<configDir>/.mcp.json` -> `<configDir>/mcp.json` -> `~/.codebuddy.json`,
+// parsed as JSONC. `~/.claude.json` is never consulted (MUL-5846).
+func TestCodebuddyUserMcpConfigPathPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
+	configDir := filepath.Join(home, ".codebuddy")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path string) {
+		if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Nothing on disk: the caller must still get a stable path so the read
+	// fails with ErrNotExist rather than the provider looking unsupported.
+	if got, want := codebuddyUserMcpConfigPath(home), filepath.Join(configDir, ".mcp.json"); got != want {
+		t.Fatalf("no files: got %q, want %q", got, want)
+	}
+
+	legacy := filepath.Join(home, ".codebuddy.json")
+	write(legacy)
+	if got := codebuddyUserMcpConfigPath(home); got != legacy {
+		t.Fatalf("legacy only: got %q, want %q", got, legacy)
+	}
+
+	plain := filepath.Join(configDir, "mcp.json")
+	write(plain)
+	if got := codebuddyUserMcpConfigPath(home); got != plain {
+		t.Fatalf("mcp.json must win over ~/.codebuddy.json: got %q", got)
+	}
+
+	dotted := filepath.Join(configDir, ".mcp.json")
+	write(dotted)
+	if got := codebuddyUserMcpConfigPath(home); got != dotted {
+		t.Fatalf(".mcp.json must win over mcp.json: got %q", got)
+	}
+}
+
+func TestCodebuddyUserMcpConfigPathHonorsConfigDirEnv(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("CODEBUDDY_CONFIG_DIR", configDir)
+	want := filepath.Join(configDir, ".mcp.json")
+	if err := os.WriteFile(want, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := codebuddyUserMcpConfigPath(home); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
+	configDir := filepath.Join(home, ".codebuddy")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"claude-only":{"command":"claude-cmd"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".codebuddy.json"), []byte(`{"mcpServers":{"buddy":{"command":"buddy-cmd"}}}`), 0o600); err != nil {
+	// JSONC: a comment and a trailing comma must not lose the server.
+	jsonc := "{\n  // user scope\n  \"mcpServers\": {\n    \"buddy\": { \"command\": \"buddy-cmd\", },\n  },\n}\n"
+	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(jsonc), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// A Claude plugin server must not be attributed to CodeBuddy either:
-	// CodeBuddy plugins live under ~/.workbuddy, not ~/.claude/plugins.
+	// CodeBuddy plugins live under <configDir>/plugins, not ~/.claude/plugins.
 	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
 	if err := os.WriteFile(filepath.Join(installPath, "mcp.json"), []byte(`{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -210,17 +270,25 @@ func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
 	}
 }
 
-func TestMergeRuntimeAndAgentMcpConfigCodebuddyReadsItsOwnConfig(t *testing.T) {
+func TestMergeRuntimeAndAgentMcpConfigCodebuddyMergesLocalAndManaged(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
+	configDir := filepath.Join(home, ".codebuddy")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"claude-only":{"command":"claude-cmd"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".codebuddy.json"), []byte(`{"mcpServers":{"buddy":{"command":"buddy-cmd"}}}`), 0o600); err != nil {
+	local := `{"mcpServers":{"local-only":{"command":"local-cmd"},"shared":{"command":"local-shared"}}}`
+	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(local), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`))
+	// Adding one managed server must not disable the user's local ones: strict
+	// mode makes this merged document the whole world CodeBuddy sees.
+	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`{"mcpServers":{"shared":{"command":"agent-shared"},"agent-only":{"command":"agent-cmd"}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,14 +298,105 @@ func TestMergeRuntimeAndAgentMcpConfigCodebuddyReadsItsOwnConfig(t *testing.T) {
 	if err := json.Unmarshal(merged, &document); err != nil {
 		t.Fatal(err)
 	}
-	if len(document.McpServers) != 2 {
+	if len(document.McpServers) != 3 {
 		t.Fatalf("merged servers = %#v", document.McpServers)
 	}
 	if _, ok := document.McpServers["claude-only"]; ok {
 		t.Fatalf("Claude's servers must not leak into a CodeBuddy launch: %#v", document.McpServers)
 	}
-	if got := document.McpServers["buddy"]["command"]; got != "buddy-cmd" {
-		t.Fatalf("buddy command = %#v", got)
+	if got := document.McpServers["local-only"]["command"]; got != "local-cmd" {
+		t.Fatalf("local-only command = %#v", got)
+	}
+	if got := document.McpServers["shared"]["command"]; got != "agent-shared" {
+		t.Fatalf("agent must win on a same-name collision, got %#v", got)
+	}
+}
+
+// An explicitly empty managed object still opts into the merged, task-local
+// config — it means "no servers of my own", not "no MCP at all", so the
+// runtime's servers survive.
+func TestMergeRuntimeAndAgentMcpConfigCodebuddyExplicitEmptySet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
+	configDir := filepath.Join(home, ".codebuddy")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(`{"mcpServers":{"local-only":{"command":"local-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		McpServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(merged, &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.McpServers) != 1 || document.McpServers["local-only"]["command"] != "local-cmd" {
+		t.Fatalf("merged servers = %#v", document.McpServers)
+	}
+}
+
+// A JSON null keeps the provider's native inheritance path: no managed config
+// means codebuddy.go omits --strict-mcp-config and CodeBuddy resolves its own.
+func TestMergeRuntimeAndAgentMcpConfigCodebuddyNullIsPassthrough(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`null`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(merged) != "null" {
+		t.Fatalf("got %s, want null", merged)
+	}
+}
+
+func TestStripJSONC(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want map[string]any
+	}{
+		{"line comment", "{\n// hi\n\"a\":1\n}", map[string]any{"a": float64(1)}},
+		{"block comment", "{/* hi */\"a\":1}", map[string]any{"a": float64(1)}},
+		{"trailing comma object", `{"a":1,}`, map[string]any{"a": float64(1)}},
+		{"trailing comma nested", `{"a":{"b":1,},}`, map[string]any{"a": map[string]any{"b": float64(1)}}},
+		{
+			"comment-like text inside a string is preserved",
+			`{"a":"http://x//y, /* not a comment */"}`,
+			map[string]any{"a": "http://x//y, /* not a comment */"},
+		},
+		{"escaped quote in string", `{"a":"say \"//\" ok"}`, map[string]any{"a": `say "//" ok`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			if err := json.Unmarshal(stripJSONC([]byte(tc.in)), &got); err != nil {
+				t.Fatalf("unmarshal %q -> %q: %v", tc.in, stripJSONC([]byte(tc.in)), err)
+			}
+			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tc.want) {
+				t.Fatalf("got %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A trailing comma that is NOT trailing must survive: blanking it would merge
+// two array elements into one.
+func TestStripJSONCKeepsSeparatorCommas(t *testing.T) {
+	var got []any
+	if err := json.Unmarshal(stripJSONC([]byte(`["a","b",]`)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("got %#v, want [a b]", got)
 	}
 }
 

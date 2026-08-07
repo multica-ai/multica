@@ -370,6 +370,57 @@ func TestKimiResumeIncludesMcpServers(t *testing.T) {
 	}
 }
 
+// TestKimiFreshSessionIncludesMcpServers is the session/new counterpart to the
+// resume test above: a fresh Kimi task must carry the managed MCP set too.
+// Kimi takes MCP over ACP rather than as a CLI flag, so a bare `kimi acp`
+// launch line is not evidence that the servers were dropped (MUL-5846) — this
+// pins the payload that actually carries them.
+func TestKimiFreshSessionIncludesMcpServers(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{}`)))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:   5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/new")
+	params := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("session/new.mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(servers) != 1 {
+		t.Fatalf("session/new.mcpServers: got %d entries, want 1", len(servers))
+	}
+	entry := servers[0].(map[string]any)
+	if entry["name"] != "fetch" || entry["command"] != "uvx" {
+		t.Fatalf("session/new.mcpServers[0]: got %v, want {name:fetch,command:uvx,...}", entry)
+	}
+}
+
 // TestKimiDrainsNotificationsAfterPromptResponse pins the trailing-notification
 // drain. kimi ACP can emit a final session update just after the
 // session/prompt response returns; closing stdin and cancelling the context at

@@ -65,7 +65,8 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// pins CodeBuddy to it. With no managed config the flag MUST stay off —
 		// `--strict-mcp-config` means "only use servers from --mcp-config", so
 		// passing it without a config launched every CodeBuddy agent with zero
-		// MCP servers and silently ignored the user's own ~/.codebuddy.json.
+		// MCP servers and silently ignored the user's own CodeBuddy MCP
+		// config (see codebuddyUserMcpConfigPath for where that lives).
 		args = append(args, "--strict-mcp-config")
 	}
 	if opts.Model != "" {
