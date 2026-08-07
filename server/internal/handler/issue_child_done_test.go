@@ -188,26 +188,45 @@ func TestChildReopenAndDoneFiresAgain(t *testing.T) {
 	}
 }
 
-// TestChildDoneSkippedWhenParentDone — when the parent is already at a
-// terminal status, there is nothing for the parent assignee to advance to,
-// so the notification must NOT fire.
+// TestChildDoneSkippedWhenParentDone preserves the notification guard for a
+// historic or non-HTTP inconsistent tree. The parent-state constraint now
+// rejects this relationship before a user can create it, so exercise the
+// notification helper directly instead of constructing an impossible API
+// fixture.
 func TestChildDoneSkippedWhenParentDone(t *testing.T) {
-	fx := newChildDoneFixture(t, "done")
+	parent := createParentStateIssue(t, "child-done completed parent", "done", "")
+	parentRow, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(parent.ID))
+	if err != nil {
+		t.Fatalf("load completed parent: %v", err)
+	}
+	prev := parentRow
+	prev.Status = "in_progress"
+	child := parentRow
+	child.Status = "done"
+	child.ParentIssueID = parentRow.ID
+	testHandler.notifyParentOfChildDone(context.Background(), prev, child)
 
-	updateChildStatus(t, fx.child.ID, "done")
-
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+	if got := countSystemCommentsOn(t, parent.ID); got != 0 {
 		t.Errorf("parent at 'done' should not receive notification, got %d comments", got)
 	}
 }
 
-// TestChildDoneSkippedWhenParentCancelled — same as above for cancelled.
+// TestChildDoneSkippedWhenParentCancelled is the cancelled-parent counterpart
+// of the historic-data guard above.
 func TestChildDoneSkippedWhenParentCancelled(t *testing.T) {
-	fx := newChildDoneFixture(t, "cancelled")
+	parent := createParentStateIssue(t, "child-done cancelled parent", "cancelled", "")
+	parentRow, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(parent.ID))
+	if err != nil {
+		t.Fatalf("load cancelled parent: %v", err)
+	}
+	prev := parentRow
+	prev.Status = "in_progress"
+	child := parentRow
+	child.Status = "done"
+	child.ParentIssueID = parentRow.ID
+	testHandler.notifyParentOfChildDone(context.Background(), prev, child)
 
-	updateChildStatus(t, fx.child.ID, "done")
-
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+	if got := countSystemCommentsOn(t, parent.ID); got != 0 {
 		t.Errorf("parent at 'cancelled' should not receive notification, got %d comments", got)
 	}
 }
