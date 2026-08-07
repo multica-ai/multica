@@ -221,6 +221,12 @@ type Supervisor struct {
 	wg            sync.WaitGroup
 	stopped       bool
 	stopChan      chan struct{}
+
+	// notify coalesces wake requests from Notify into Run's select loop.
+	// Buffered at 1 so a Notify racing an in-progress sweep is not lost: the
+	// pending value guarantees at least one more sweep runs after the current
+	// one finishes, instead of blocking the caller.
+	notify chan struct{}
 }
 
 // supervisorEntry is the per-installation state the Supervisor holds on
@@ -252,6 +258,7 @@ func NewSupervisor(store InstallationStore, registry *channel.Registry, handler 
 		nodeID:      newNodeID(),
 		supervisors: make(map[string]supervisorEntry),
 		stopChan:    make(chan struct{}),
+		notify:      make(chan struct{}, 1),
 	}
 }
 
@@ -280,7 +287,23 @@ func (s *Supervisor) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			s.sweep(ctx)
+		case <-s.notify:
+			s.sweep(ctx)
 		}
+	}
+}
+
+// Notify wakes the Run loop for an immediate sweep, ahead of the next
+// PollInterval tick (30s by default). It never blocks and is safe to call
+// concurrently: a wake already queued coalesces with this one, since one sweep
+// picks up whatever prompted every Notify since the last sweep ran.
+//
+// The install paths use it so a bot that was just created connects now rather
+// than up to a poll interval after the admin was told it succeeded.
+func (s *Supervisor) Notify() {
+	select {
+	case s.notify <- struct{}{}:
+	default:
 	}
 }
 

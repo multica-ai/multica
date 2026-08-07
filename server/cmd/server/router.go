@@ -733,6 +733,42 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					wecomRateGate = nil
 				}
 
+				// Scan-code install. The provider is what talks to WeCom's QR
+				// endpoints; without a source id the scan flow stays off and the
+				// endpoints return 503, but the worker still runs so any
+				// in-flight session reaches a terminal state instead of
+				// spinning forever in the admin's dialog.
+				var wecomProvider wecom.Provider
+				wecomSourceID := strings.TrimSpace(os.Getenv("MULTICA_WECOM_SOURCE_ID"))
+				if wecomSourceID == "" {
+					wecomSourceID = wecom.DefaultSourceID
+				}
+				if provider, provErr := wecom.NewHTTPProvider(wecom.HTTPProviderConfig{
+					SourceID: wecomSourceID,
+					Logger:   slog.Default(),
+				}); provErr != nil {
+					slog.Error("wecom: QR provider init failed; scan install disabled", "error", provErr)
+				} else {
+					wecomProvider = provider
+				}
+
+				// Assigned through the interface only when non-nil: a nil
+				// *InstallationService stored in botBinder would be a non-nil
+				// interface holding a typed nil, defeating InstallService's
+				// Configured() guard and panicking at finalize.
+				var wecomBotBinder wecom.BotBinder
+				if svc, instErr := wecom.NewInstallationService(queries, pool, box); instErr != nil {
+					slog.Error("wecom: InstallationService init failed; scan install disabled", "error", instErr)
+				} else {
+					wecomBotBinder = svc
+				}
+				wecomInstall := wecom.NewInstallService(queries, pool, wecomBotBinder, wecom.InstallServiceConfig{
+					Provider: wecomProvider,
+					Box:      box,
+					Logger:   slog.Default(),
+				}, nil)
+				h.WecomInstall = wecomInstall
+
 				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
 					Credentials: credsResolver,
 					Senders:     wecomSenders,
@@ -777,6 +813,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						h.ChannelOutboxReconcilers = append(h.ChannelOutboxReconcilers, reconciler)
 					}
 				}
+
+				// Worker: drives generate + poll, and nudges the supervisor when a
+				// bot lands so its connection comes up immediately.
+				wecomInstallWorker := wecom.NewInstallWorker(wecomInstall, wecom.InstallWorkerConfig{
+					Bus:        bus,
+					Supervisor: h.ChannelSupervisor,
+				})
+				// Wired after construction because the service is built before the
+				// worker that consumes it; a begin then wakes the worker instead of
+				// waiting a full poll tick.
+				wecomInstall.SetNotify(wecomInstallWorker.Notify)
+				h.WecomInstallWorker = wecomInstallWorker
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 			}
@@ -1226,6 +1274,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
 					r.Get("/wecom/installations", h.ListWecomInstallations)
+					// Scan-code install. Member-level here on purpose: both
+					// handlers apply a narrower check themselves (canManageAgent
+					// for begin, initiator-or-admin for status), so an agent's
+					// owner can create its bot without being a workspace admin.
+					r.Post("/wecom/install/begin", h.BeginWecomInstall)
+					r.Get("/wecom/install/{sessionId}", h.GetWecomInstallStatus)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))

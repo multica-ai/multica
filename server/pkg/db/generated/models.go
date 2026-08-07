@@ -1228,6 +1228,26 @@ type WebhookDelivery struct {
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
 }
 
+type WecomInstallSession struct {
+	ID                 pgtype.UUID        `json:"id"`
+	RequestKeyHash     string             `json:"request_key_hash"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	InitiatorUserID    pgtype.UUID        `json:"initiator_user_id"`
+	ScodeEncrypted     pgtype.Text        `json:"scode_encrypted"`
+	QrCodeUrlEncrypted pgtype.Text        `json:"qr_code_url_encrypted"`
+	Status             string             `json:"status"`
+	PollAfter          pgtype.Timestamptz `json:"poll_after"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	LeaseToken         pgtype.Text        `json:"lease_token"`
+	LeaseExpiresAt     pgtype.Timestamptz `json:"lease_expires_at"`
+	InstallationID     pgtype.UUID        `json:"installation_id"`
+	ErrorReason        pgtype.Text        `json:"error_reason"`
+	ErrorMessage       pgtype.Text        `json:"error_message"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Workspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`

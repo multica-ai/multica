@@ -461,6 +461,14 @@ func main() {
 		go h.ChannelMediaReconciler.Run(sweepCtx)
 	}
 
+	// WeCom scan-code install worker: drives QR generate + poll out of band, so
+	// no HTTP request waits on WeCom. Started even when the scan flow is
+	// unconfigured, so any session already in flight reaches a terminal state
+	// instead of spinning forever in the admin's dialog.
+	if h.WecomInstallWorker != nil {
+		go h.WecomInstallWorker.Run(sweepCtx)
+	}
+
 	// Outbound queue reconcilers: one per channel on the durable outbound
 	// queue. Each rescues replies whose producing replica died before
 	// enqueueing them, and owns the queue's retention purge. Independent
