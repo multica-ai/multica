@@ -1,5 +1,7 @@
 package agent
 
+import "strings"
+
 type appServerPolicy struct {
 	provider                  string
 	defaultExecutable         string
@@ -35,6 +37,26 @@ func (p appServerPolicy) execOptions(opts ExecOptions) ExecOptions {
 		opts.ServiceTier = ""
 	}
 	return opts
+}
+
+func (p appServerPolicy) childEnv(extra map[string]string) []string {
+	env := buildEnv(extra)
+	if p.manageCodexConfig {
+		return env
+	}
+	return withoutEnvKeyFold(env, "CODEX_HOME")
+}
+
+func withoutEnvKeyFold(env []string, excludedKey string) []string {
+	filtered := env[:0]
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, excludedKey) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 func appServerRetryReason(policy appServerPolicy, result Result) string {

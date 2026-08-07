@@ -118,6 +118,111 @@ func TestNewPlatformAgentBackendOwnsEnvironmentCopy(t *testing.T) {
 	}
 }
 
+func TestPlatformAgentChildEnvironmentExcludesAmbientCodexHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	t.Setenv("CODEX_HOME", "/ambient/codex-home")
+	t.Setenv("cOdEx_HoMe", "/mixed-case/codex-home")
+	capturedEnv := filepath.Join(t.TempDir(), "child.env")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`env > "$CAPTURE_ENV"`+"\n"+
+		`if [ "${CODEX_HOME+x}" = x ]; then echo 'CODEX_HOME leaked' >&2; exit 2; fi`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-platform-env"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-platform-env","turn":{"id":"turn-env","status":"completed"}}}'`+"\n")
+	backend, err := New("platform-agent-cli", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"CAPTURE_ENV": capturedEnv},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("Platform Agent inherited ambient CODEX_HOME: %+v", result)
+	}
+	childEnv, err := os.ReadFile(capturedEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range strings.Split(string(childEnv), "\n") {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, "CODEX_HOME") {
+			t.Fatalf("Platform Agent child environment retained %q", entry)
+		}
+	}
+}
+
+func TestWithoutEnvKeyFoldRemovesWindowsCaseVariants(t *testing.T) {
+	got := withoutEnvKeyFold([]string{
+		"CODEX_HOME=/upper",
+		"cOdEx_HoMe=/mixed",
+		"KEEP=value",
+	}, "CODEX_HOME")
+	want := []string{"KEEP=value"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("withoutEnvKeyFold() = %v, want %v", got, want)
+	}
+}
+
+func TestPlatformAgentTransportDoesNotScanCodexSessions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	tempDir := t.TempDir()
+	sessionsDir := filepath.Join(tempDir, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rolloutPath := filepath.Join(sessionsDir, "rollout-test-thr-platform-usage.jsonl")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-platform-usage"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":777,"output_tokens":33},"model":"codex-model"}}}' > "$SESSION_FILE"`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-platform-usage","turn":{"id":"turn-usage","status":"completed"}}}'`+"\n")
+	backend := &codexBackend{
+		cfg: Config{
+			ExecutablePath: fakePath,
+			Env: map[string]string{
+				"CODEX_HOME":   tempDir,
+				"SESSION_FILE": rolloutPath,
+			},
+			Logger: slog.Default(),
+		},
+		policy: &platformAgentAppServerPolicy,
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Usage != nil {
+		t.Fatalf("Platform Agent imported Codex session usage: %+v", result.Usage)
+	}
+}
+
 func TestPlatformAgentTransportPolicyDisablesCodexBehavior(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -244,6 +349,50 @@ func TestPlatformAgentTransportPolicyBrandsHandshakeError(t *testing.T) {
 	want := "platform-agent-cli app-server handshake timeout: initialize did not respond after 5s"
 	if err != want {
 		t.Fatalf("handshake error = %q, want %q", err, want)
+	}
+}
+
+func TestPlatformAgentTimeoutDiagnosticsContainNoCodexBranding(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	fakePath := filepath.Join(t.TempDir(), "platform-agent-cli")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\n"+
+		`if [ "$1" = "--version" ]; then echo "platform-agent-cli 0.1.0"; exit 0; fi`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-platform-timeout"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-platform-timeout","turn":{"id":"turn-timeout"}}}'`+"\n"+
+		`echo 'failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n"))
+	backend, err := New("platform-agent-cli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "timeout" {
+		t.Fatalf("result = %+v, want timeout", result)
+	}
+	if strings.Contains(strings.ToLower(result.Error), "codex") {
+		t.Fatalf("Platform Agent timeout retained Codex branding: %q", result.Error)
+	}
+	if !strings.Contains(result.Error, `runtime_version="platform-agent-cli 0.1.0"`) {
+		t.Fatalf("Platform Agent timeout lacks provider-neutral runtime version: %q", result.Error)
 	}
 }
 

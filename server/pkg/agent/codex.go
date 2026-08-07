@@ -59,7 +59,7 @@ const (
 	// while keeping the fast-fail value (MUL-5542).
 	defaultCodexFirstTurnNoProgressTimeout = 60 * time.Second
 	defaultCodexHandshakeTimeout           = 30 * time.Second
-	codexVersionDiagnosticTimeout          = 2 * time.Second
+	appServerVersionDiagnosticTimeout      = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -221,14 +221,14 @@ const (
 )
 
 type codexTimeoutDiagnostic struct {
-	Kind         codexTimeoutKind
-	Timeout      time.Duration
-	LastActivity string
-	ThreadID     string
-	TurnID       string
-	Model        string
-	Provider     string
-	CodexVersion string
+	Kind           codexTimeoutKind
+	Timeout        time.Duration
+	LastActivity   string
+	ThreadID       string
+	TurnID         string
+	Model          string
+	Provider       string
+	RuntimeVersion string
 }
 
 // codexFirstItemWaitObservation records the interval from turn/started to the
@@ -1035,7 +1035,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd.Env = policy.childEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1624,7 +1624,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
 			timeoutDiagnostic.Provider = provider
-			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
+			timeoutDiagnostic.RuntimeVersion = detectAppServerVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrTail)
 		}
 
@@ -1709,7 +1709,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
 		// scan this backend's per-task CODEX_HOME, since sessions are isolated
 		// there rather than in the shared ~/.codex/sessions (MUL-4424).
-		if u.InputTokens == 0 && u.OutputTokens == 0 {
+		if policy.manageCodexConfig && u.InputTokens == 0 && u.OutputTokens == 0 {
 			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
 			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
 				u = scanned.usage
@@ -1979,7 +1979,7 @@ func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail st
 		msg = fmt.Sprintf("%s after %s: received turn start but no item, message, tool, turn/completed, or error event (%s)",
 			marker,
 			diag.Timeout,
-			formatCodexDiagnosticFields(diag),
+			formatAppServerDiagnosticFields(diag),
 		)
 	case codexTimeoutSemanticInactivity:
 		marker := CodexSemanticInactivityMarker
@@ -1990,18 +1990,20 @@ func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail st
 			marker,
 			diag.Timeout,
 			nonEmptyCodexDiagnosticValue(diag.LastActivity),
-			formatCodexDiagnosticFields(diag),
+			formatAppServerDiagnosticFields(diag),
 		)
 	default:
 		msg = provider + " timed out"
 	}
-	msg = appendCodexKnownStderrHint(msg, stderrTail)
+	if provider == codexAppServerPolicy.provider {
+		msg = appendCodexKnownStderrHint(msg, stderrTail)
+	}
 	return withAgentStderr(msg, provider, stderrTail)
 }
 
-func formatCodexDiagnosticFields(diag codexTimeoutDiagnostic) string {
-	return fmt.Sprintf("codex_version=%q thread_id=%q turn_id=%q model=%q",
-		nonEmptyCodexDiagnosticValue(diag.CodexVersion),
+func formatAppServerDiagnosticFields(diag codexTimeoutDiagnostic) string {
+	return fmt.Sprintf("runtime_version=%q thread_id=%q turn_id=%q model=%q",
+		nonEmptyCodexDiagnosticValue(diag.RuntimeVersion),
 		nonEmptyCodexDiagnosticValue(diag.ThreadID),
 		nonEmptyCodexDiagnosticValue(diag.TurnID),
 		formatCodexDiagnosticModel(diag.Model),
@@ -2029,8 +2031,8 @@ func appendCodexKnownStderrHint(msg, stderrTail string) string {
 	return msg
 }
 
-func detectCodexVersionForDiagnostics(ctx context.Context, execPath string, env []string, logger *slog.Logger) string {
-	versionCtx, cancel := context.WithTimeout(ctx, codexVersionDiagnosticTimeout)
+func detectAppServerVersionForDiagnostics(ctx context.Context, execPath string, env []string, logger *slog.Logger) string {
+	versionCtx, cancel := context.WithTimeout(ctx, appServerVersionDiagnosticTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(versionCtx, execPath, "--version")
@@ -2038,7 +2040,7 @@ func detectCodexVersionForDiagnostics(ctx context.Context, execPath string, env 
 	data, err := cmd.Output()
 	if err != nil {
 		if logger != nil {
-			logger.Debug("codex version diagnostic failed", "error", err)
+			logger.Debug("app-server version diagnostic failed", "error", err)
 		}
 		return "unknown"
 	}

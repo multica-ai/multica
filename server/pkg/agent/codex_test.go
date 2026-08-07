@@ -2973,7 +2973,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		"thr-stuck",
 		"turn-stuck",
 		`model="default(empty)"`,
-		`codex_version="codex-cli 0.0.0-test"`,
+		`runtime_version="codex-cli 0.0.0-test"`,
 		"Codex could not load its model catalog",
 		"codex stderr:",
 		codexModelCatalogRefreshFailureSignal,

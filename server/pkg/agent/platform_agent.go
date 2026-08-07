@@ -1,6 +1,9 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type platformAgentBackend struct {
 	transport *codexBackend
@@ -9,7 +12,11 @@ type platformAgentBackend struct {
 func newPlatformAgentBackend(cfg Config) *platformAgentBackend {
 	cfg.CodexVersion = ""
 	cfg.Env = cloneStringMap(cfg.Env)
-	delete(cfg.Env, "CODEX_HOME")
+	for key := range cfg.Env {
+		if strings.EqualFold(key, "CODEX_HOME") {
+			delete(cfg.Env, key)
+		}
+	}
 	return &platformAgentBackend{
 		transport: &codexBackend{cfg: cfg, policy: &platformAgentAppServerPolicy},
 	}
