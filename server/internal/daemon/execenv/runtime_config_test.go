@@ -990,6 +990,15 @@ func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
 	}
 }
 
+func TestPlatformAgentRuntimeConfigPath(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	if got, want := runtimeConfigPath(workDir, "platform-agent-cli"), filepath.Join(workDir, "AGENTS.md"); got != want {
+		t.Fatalf("runtimeConfigPath(platform-agent-cli) = %q, want %q", got, want)
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

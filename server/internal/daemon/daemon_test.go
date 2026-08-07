@@ -633,6 +633,7 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
+		{provider: "platform-agent-cli", want: false},
 	}
 
 	for _, tc := range cases {
@@ -642,6 +643,14 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPlatformAgentDisplayName(t *testing.T) {
+	t.Parallel()
+
+	if got := providerDisplayName("platform-agent-cli"); got != "Platform Agent CLI" {
+		t.Fatalf("providerDisplayName(platform-agent-cli) = %q, want Platform Agent CLI", got)
 	}
 }
 

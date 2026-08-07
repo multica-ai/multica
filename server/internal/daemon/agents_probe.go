@@ -235,5 +235,8 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	if e, ok := probe("MULTICA_PLATFORM_AGENT_CLI_PATH", "platform-agent-cli", ""); ok {
+		agents["platform-agent-cli"] = e
+	}
 	return agents
 }

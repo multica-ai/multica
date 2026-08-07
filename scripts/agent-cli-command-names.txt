@@ -12,6 +12,7 @@ kiro-cli
 openclaw
 opencode
 pi
+platform-agent-cli
 qwen
 qodercli
 qoderclicn
