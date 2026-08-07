@@ -391,6 +391,17 @@ type ChannelOutboundReconcileState struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelOutboundSendAttempt struct {
+	ID             pgtype.UUID        `json:"id"`
+	QueueID        pgtype.UUID        `json:"queue_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	TargetChatID   string             `json:"target_chat_id"`
+	TargetChatType int16              `json:"target_chat_type"`
+	AttemptedAt    pgtype.Timestamptz `json:"attempted_at"`
+}
+
 type ChannelUserBinding struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

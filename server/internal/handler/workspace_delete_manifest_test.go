@@ -46,6 +46,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	// workspace_id. Deleting a workspace must not rewind another workspace's
 	// reconcile window, so the row outlives every workspace.
 	"channel_outbound_reconcile_state": workspaceDeleteKeep,
+	"channel_outbound_send_attempt":    workspaceDelete,
 	"channel_user_binding":             workspaceDelete,
 	"chat_draft_restore":               workspaceDelete,
 	"chat_message":                     workspaceDelete,

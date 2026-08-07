@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -721,6 +722,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Fallback: "企业微信会话",
 				})
 
+				wecomRateGate, rateGateErr := wecom.NewRateGate(
+					func(tx pgx.Tx) outbox.RateGateQueries { return queries.WithTx(tx) },
+					pool,
+				)
+				if rateGateErr != nil {
+					// Without the gate the adapter still delivers, it just does
+					// so ungated — better than refusing to start, but say so.
+					slog.Error("wecom: outbound rate gate init failed; sends will not be quota-gated", "error", rateGateErr)
+					wecomRateGate = nil
+				}
+
 				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
 					Credentials: credsResolver,
 					Senders:     wecomSenders,
@@ -731,6 +743,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Outbox: wecom.OutboxDeps{
 						Queries: queries,
 						Wake:    wecomOutboxWake,
+						Rate:    wecomRateGate,
 						Metrics: channelOutboxMetrics,
 					},
 				})
