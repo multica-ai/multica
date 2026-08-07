@@ -125,8 +125,9 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 	if err != nil {
 		if errors.Is(err, slack.ErrNoSlackSession) {
 			writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
-				Messages: []channel.HistoryMessage{},
-				Note:     "This conversation is not connected to a chat channel, so there is no channel history to read.",
+				ChannelType: h.sessionChannelType(r.Context(), sessionID),
+				Messages:    []channel.HistoryMessage{},
+				Note:        h.noHistoryNote(r.Context(), sessionID),
 			})
 			return
 		}
@@ -173,4 +174,36 @@ func parseHistoryLimit(raw string) int {
 		return 0
 	}
 	return n
+}
+
+// noHistoryNote explains an empty read in terms the agent can act on.
+//
+// The reader is Slack-only, so every other platform lands here — and the note
+// said "this conversation is not connected to a chat channel", which for a
+// WeCom, Lark or DingTalk session is simply false. An agent told it is in a
+// web-only conversation reasons differently about who can see its answer than
+// one told it is in a group whose backlog it cannot read, and that is a
+// difference worth not lying about.
+func (h *Handler) noHistoryNote(ctx context.Context, sessionID pgtype.UUID) string {
+	switch ct := h.sessionChannelType(ctx, sessionID); ct {
+	case "":
+		return "This conversation is not connected to a chat channel, so there is no channel history to read."
+	default:
+		return "This conversation is on " + ct + ", whose backlog this server cannot read. You can see the messages addressed to you in this session, but not the rest of the room."
+	}
+}
+
+// sessionChannelType names the platform behind a session, or "" when there is
+// none. Channel-agnostic on purpose: a per-platform lookup here would go blind
+// the next time a channel is added, which is exactly how the note above came
+// to be wrong.
+func (h *Handler) sessionChannelType(ctx context.Context, sessionID pgtype.UUID) string {
+	if h.Queries == nil || !sessionID.Valid {
+		return ""
+	}
+	binding, err := h.Queries.GetChannelChatSessionBindingBySessionAny(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return binding.ChannelType
 }
