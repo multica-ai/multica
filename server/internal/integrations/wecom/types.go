@@ -85,6 +85,18 @@ type Installation struct {
 	// distinct from the token/EncodingAESKey used by callback-mode bots
 	// (which we do not use). Rotated via re-install.
 	SecretEncrypted []byte
+
+	// PrincipalUserID names the Multica user this bot is operated on behalf
+	// of, for the case where an admin installs it for a colleague. Empty —
+	// which is every row that exists today — means the installer, and
+	// InstallerUserID above is what callers should read.
+	//
+	// Nothing in this package reads it yet. The run-progress code that will
+	// is not upstream, so this is inert until that lands; it goes in now
+	// because the field and the re-install carry-forward in installation.go
+	// are one change, and a setting that a secret rotation silently drops is
+	// worse than no setting at all.
+	PrincipalUserID string
 }
 
 // InstallationCredentials is the plaintext-bearing view the WebSocket
@@ -103,6 +115,13 @@ type installConfig struct {
 	AppID           string `json:"app_id"`
 	BotID           string `json:"bot_id"`
 	SecretEncrypted []byte `json:"secret_encrypted"`
+
+	// PrincipalUserID is optional, and absent on every row written before
+	// this field existed; absent means the installer. omitempty keeps it a
+	// key that only appears once somebody sets it, so an installation that
+	// never does encodes byte-for-byte the config it encoded before — no
+	// migration, and no rewrite of rows already in the table.
+	PrincipalUserID string `json:"principal_user_id,omitempty"`
 }
 
 // encodeInstallConfig marshals an Installation's config-bearing fields into
@@ -115,6 +134,7 @@ func encodeInstallConfig(inst Installation) ([]byte, error) {
 		AppID:           inst.BotID,
 		BotID:           inst.BotID,
 		SecretEncrypted: inst.SecretEncrypted,
+		PrincipalUserID: inst.PrincipalUserID,
 	})
 }
 
@@ -136,5 +156,6 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		Status:          InstallationStatus(row.Status),
 		BotID:           cfg.BotID,
 		SecretEncrypted: cfg.SecretEncrypted,
+		PrincipalUserID: cfg.PrincipalUserID,
 	}, nil
 }
