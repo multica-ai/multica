@@ -43,6 +43,7 @@ import {
   isAuthStatusError,
   type AuthProbeResult,
 } from "./daemon-auth-probe";
+import { withBundledPlatformAgentPath } from "./platform-agent-runtime";
 
 const POLL_INTERVAL_MS = 5_000;
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
@@ -888,7 +889,12 @@ async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  return withBundledPlatformAgentPath(
+    { ...process.env, MULTICA_LAUNCHED_BY: "desktop" },
+    app.getAppPath(),
+    process.platform,
+    existsSync,
+  );
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
