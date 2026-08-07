@@ -41,13 +41,24 @@ EOF
 
 output="$tmp_dir/output"
 : >"$docker_log"
-if printf 'n\n' | PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
-  bash "$root_dir/scripts/drop-database.sh" "$local_env" >"$output" 2>&1; then
-  fail "db-drop must fail when confirmation is declined"
+cancel_status=0
+printf 'n\n' | PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  bash "$root_dir/scripts/drop-database.sh" "$local_env" >"$output" 2>&1 || cancel_status=$?
+if [ "$cancel_status" -ne 2 ]; then
+  fail "db-drop cancellation status = $cancel_status, want 2"
 fi
 require_contains "$output" "Drop this database permanently? [y/N] Cancelled."
 if [ -s "$docker_log" ]; then
   fail "db-drop invoked Docker after confirmation was declined"
+fi
+
+if ! printf 'n\n' | PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  make --no-print-directory -C "$root_dir" db-drop ENV_FILE="$local_env" >"$output" 2>&1; then
+  fail "make db-drop must treat an intentional cancellation as success"
+fi
+require_contains "$output" "Cancelled."
+if grep -Fq "Error" "$output"; then
+  fail "make db-drop printed a Make error after cancellation"
 fi
 
 : >"$docker_log"
@@ -95,9 +106,11 @@ fi
 require_contains "$output" "Refusing to drop the default main database"
 
 : >"$docker_log"
-if PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
-  bash "$root_dir/scripts/drop-database.sh" "$local_env" </dev/null >"$output" 2>&1; then
-  fail "db-drop must cancel when confirmation input is unavailable"
+cancel_status=0
+PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  bash "$root_dir/scripts/drop-database.sh" "$local_env" </dev/null >"$output" 2>&1 || cancel_status=$?
+if [ "$cancel_status" -ne 2 ]; then
+  fail "db-drop EOF cancellation status = $cancel_status, want 2"
 fi
 require_contains "$output" "Cancelled."
 if [ -s "$docker_log" ]; then
@@ -121,12 +134,16 @@ DATABASE_URL=postgres://multica:multica@localhost:5432/multica_worktree_456?sslm
 EOF
 
 : >"$docker_log"
-if printf 'n\n' | (cd "$repo" && PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+if ! printf 'n\n' | (cd "$repo" && PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
   bash "$root_dir/scripts/remove-worktree.sh" "$worktree") >"$output" 2>&1; then
-  fail "remove-worktree must abort when database deletion is declined"
+  fail "remove-worktree must treat an intentional cancellation as success"
 fi
 if [ ! -d "$worktree" ]; then
   fail "remove-worktree removed the worktree after database deletion was declined"
+fi
+require_contains "$output" "Worktree was not removed."
+if grep -Fq "Error" "$output"; then
+  fail "remove-worktree printed an error after cancellation"
 fi
 
 printf 'y\n' | (cd "$repo" && PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \

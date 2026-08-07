@@ -63,7 +63,8 @@ case "$answer" in
   y | Y) ;;
   *)
     echo "Cancelled."
-    exit 1
+    # Callers distinguish an intentional cancellation from an execution error.
+    exit 2
     ;;
 esac
 

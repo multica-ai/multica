@@ -673,6 +673,8 @@ The command prints the selected database and environment file, then requires a
 `y/N` confirmation. It only operates on the local Docker PostgreSQL service,
 protects PostgreSQL system databases, and refuses to drop the default main
 database `multica` unless `ALLOW_MAIN_DB_DROP=1` is explicitly supplied.
+Declining the confirmation is a successful no-op; when called by
+`make remove-worktree`, it also leaves the worktree in place.
 
 If you want to wipe all local PostgreSQL data for this repo:
 

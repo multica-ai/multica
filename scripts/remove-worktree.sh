@@ -76,7 +76,16 @@ fi
 
 worktree_env="$target/.env.worktree"
 if [ -f "$worktree_env" ]; then
-  make --no-print-directory -C "$script_dir/.." db-drop ENV_FILE="$worktree_env"
+  db_drop_status=0
+  bash "$script_dir/drop-database.sh" "$worktree_env" || db_drop_status=$?
+  case "$db_drop_status" in
+    0) ;;
+    2)
+      echo "Worktree was not removed."
+      exit 0
+      ;;
+    *) exit "$db_drop_status" ;;
+  esac
 else
   echo "No .env.worktree found; skipping database cleanup."
 fi

@@ -195,7 +195,9 @@ db-down: ## Stop the shared PostgreSQL container without removing its Docker vol
 
 db-drop: ## Permanently drop the current env's local database after confirmation
 	$(REQUIRE_ENV)
-	@bash scripts/drop-database.sh "$(ENV_FILE)"
+	@status=0; bash scripts/drop-database.sh "$(ENV_FILE)" || status=$$?; \
+		if [ "$$status" -eq 2 ]; then exit 0; fi; \
+		exit "$$status"
 
 # Drop + recreate the current env's database, then run all migrations.
 # Use for a clean slate in local dev. Only affects the DB named in
