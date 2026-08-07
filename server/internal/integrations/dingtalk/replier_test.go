@@ -29,6 +29,21 @@ func TestIssueDuplicateText(t *testing.T) {
 	}
 }
 
+func TestCommandOutcomeText(t *testing.T) {
+	for _, tc := range []struct {
+		outcome engine.Outcome
+		want    string
+	}{
+		{engine.OutcomeFreshPending, freshPendingText},
+		{engine.OutcomeIssueUsage, "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"},
+		{engine.OutcomeIngested, ""},
+	} {
+		if got := commandOutcomeText(engine.Result{Outcome: tc.outcome}); got != tc.want {
+			t.Errorf("outcome %s: got %q, want %q", tc.outcome, got, tc.want)
+		}
+	}
+}
+
 func TestDroppedReplyText(t *testing.T) {
 	issueMsg := channel.InboundMessage{Text: "[Image]", CommandText: "/issue login is broken", AddressedToBot: true}
 	cases := []struct {

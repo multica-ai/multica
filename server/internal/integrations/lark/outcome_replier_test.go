@@ -240,6 +240,32 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 	}
 }
 
+func TestLarkOutcomeReplierCommandOutcomesSendGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		outcome Outcome
+		want    string
+	}{
+		{OutcomeFreshPending, "下一条聊天消息"},
+		{OutcomeIssueUsage, "请填写任务标题"},
+	} {
+		t.Run(string(tc.outcome), func(t *testing.T) {
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			stub := &stubAPIClientWithRecorder{configured: true}
+			rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+				APIClient: stub, BindingSvc: &BindingTokenService{}, Credentials: stubCredentialsResolver{secret: "s"},
+				Queries: stubReplierQueries{}, AppURL: "https://multica.test", Logger: log,
+			})
+			rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat"}, DispatchResult{Outcome: tc.outcome})
+			if len(stub.interactiveOut) != 1 {
+				t.Fatalf("expected one guidance card, got %d", len(stub.interactiveOut))
+			}
+			if !contains(stub.interactiveOut[0].CardJSON, tc.want) {
+				t.Fatalf("guidance card %q does not contain %q", stub.interactiveOut[0].CardJSON, tc.want)
+			}
+		})
+	}
+}
+
 // TestLarkOutcomeReplierIngestedAndDroppedAreSilent asserts that the
 // replier does NOT call the APIClient on outcomes owned elsewhere
 // (Patcher handles Ingested; Dropped is informational only).

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -28,9 +29,69 @@ func seedChannelCommandSession(t *testing.T, pool *pgxpool.Pool, workspaceID, ag
 		cleanupCtx := context.Background()
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM chat_message WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
 	})
 	return chatSessionID
+}
+
+func TestEnqueueChatTaskConsumesPendingFreshOnlyOnSuccess(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	chatSessionID := seedChannelCommandSession(t, pool, workspaceID, agentID, userID)
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load agent runtime: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding (
+			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, pending_fresh
+		) VALUES ($1, gen_random_uuid(), 'dingtalk', 'chat-fresh', 'p2p', TRUE)`, chatSessionID); err != nil {
+		t.Fatalf("seed channel binding: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'start the new topic')`, chatSessionID); err != nil {
+		t.Fatalf("seed chat message: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	session := db.ChatSession{ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID)}
+	initiator := util.MustParseUUID(userID)
+
+	if _, err := pool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("disable agent runtime: %v", err)
+	}
+	if _, err := svc.EnqueueChatTask(ctx, session, initiator, false); !errors.Is(err, ErrChatTaskAgentNoRuntime) {
+		t.Fatalf("offline enqueue error = %v, want ErrChatTaskAgentNoRuntime", err)
+	}
+	var pending bool
+	if err := pool.QueryRow(ctx, `SELECT pending_fresh FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID).Scan(&pending); err != nil {
+		t.Fatalf("load pending fresh after failure: %v", err)
+	}
+	if !pending {
+		t.Fatal("failed enqueue consumed the pending fresh intent")
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE agent SET runtime_id = $2 WHERE id = $1`, agentID, runtimeID); err != nil {
+		t.Fatalf("restore agent runtime: %v", err)
+	}
+	task, err := svc.EnqueueChatTask(ctx, session, initiator, false)
+	if err != nil {
+		t.Fatalf("EnqueueChatTask: %v", err)
+	}
+	if !task.ForceFreshSession {
+		t.Fatal("task force_fresh_session = false, want true")
+	}
+	if err := pool.QueryRow(ctx, `SELECT pending_fresh FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID).Scan(&pending); err != nil {
+		t.Fatalf("load pending fresh after success: %v", err)
+	}
+	if pending {
+		t.Fatal("successful enqueue did not consume the pending fresh intent")
+	}
 }
 
 // TestEnqueueChatTaskIgnoresHandledCommandMedia is the counterpart of
