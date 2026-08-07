@@ -65,9 +65,10 @@ func NewResolverSet(
 		OriginType:   originWecomChat,
 		// Assigned straight through: media is already an interface, so a nil
 		// argument lands as a nil interface and the Router's `set.Media !=
-		// nil` guard holds. (DingTalk wraps its equivalent in an if, but its
-		// nil-check is there for *ackNotifier, a concrete pointer that would
-		// otherwise become a non-nil typed nil.)
+		// nil` guard holds. (DingTalk guards the same assignment with an if,
+		// which is redundant for that same reason — its media parameter is an
+		// engine.MediaResolver too. The typed-nil hazard there is on the if
+		// above it, where ack is a concrete *ackNotifier.)
 		Media: media,
 	}
 	if replier != nil {

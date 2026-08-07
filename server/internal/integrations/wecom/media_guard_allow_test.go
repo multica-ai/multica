@@ -14,7 +14,10 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 func withAllowed(t *testing.T, cidrs ...string) {
@@ -130,6 +133,109 @@ func TestAWideOpenAllowListStillCannotReachLoopback(t *testing.T) {
 		}
 		if reached {
 			t.Errorf("resolving to %s under a 0.0.0.0/0 allow-list opened a socket to loopback — the guard's core promise is broken", resolved)
+		}
+	}
+}
+
+// classifyMediaFailure has to tell the guard's refusal apart from an ordinary
+// failed download, because those two put an operator in completely different
+// places: one is a URL that should not have been sent (or a proxy range that
+// needs declaring in MULTICA_WECOM_MEDIA_ALLOW_CIDRS), the other is WeCom or
+// the network.
+//
+// Driven from real errors rather than hand-built ones. The refusal travels
+// from the dialer through http.Client (which wraps it in a *url.Error) and
+// through stripURL before anything classifies it, so a test that constructs
+// ErrMediaAddrBlocked directly would pass even if that chain stopped
+// preserving errors.Is — which is exactly how this went unnoticed.
+func TestAGuardRefusalIsClassifiedApartFromAnOrdinaryFailure(t *testing.T) {
+	withAllowed(t) // the guard as it ships
+
+	// Blocked: the production policy, pointed inward.
+	_, err := downloadMedia(context.Background(), newMediaHTTPClient(mediaGuard{}), "http://127.0.0.1:9/object")
+	if !errors.Is(err, ErrMediaAddrBlocked) {
+		t.Fatalf("err = %v, want the guard's refusal — this test is not exercising the blocked path", err)
+	}
+	if got := classifyMediaFailure(err); got != mediaFailureBlocked {
+		t.Errorf("classifyMediaFailure(guard refusal) = %d, want mediaFailureBlocked (%d)", got, mediaFailureBlocked)
+	}
+
+	// Too large: still its own kind, not swallowed by the new branch.
+	oversize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "209715200")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer oversize.Close()
+	_, err = downloadMedia(context.Background(), testMediaClient(), oversize.URL)
+	if !errors.Is(err, errMediaTooLarge) {
+		t.Fatalf("err = %v, want the size refusal", err)
+	}
+	if got := classifyMediaFailure(err); got != mediaFailureTooLarge {
+		t.Errorf("classifyMediaFailure(oversize) = %d, want mediaFailureTooLarge (%d)", got, mediaFailureTooLarge)
+	}
+
+	// An expired link is neither.
+	expired := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer expired.Close()
+	_, err = downloadMedia(context.Background(), testMediaClient(), expired.URL)
+	if got := classifyMediaFailure(err); got != mediaFailureUnreadable {
+		t.Errorf("classifyMediaFailure(http 403) = %d, want mediaFailureUnreadable (%d)", got, mediaFailureUnreadable)
+	}
+}
+
+// The refusal reaches an operator through the log and stops there. Whatever
+// the sender is told must not name the address the host resolved to, or the
+// signed url — a chat message is the one place neither belongs.
+//
+// The message carries one attachment the guard refuses and one it never tries
+// (an unfetchable scheme, rejected before any client is involved). Those are
+// two different mediaFailure kinds that deliberately render to the SAME
+// sentence, because neither is anything the sender can act on. So the sender
+// must still hear it once: two lines here would be the adapter repeating
+// itself at the one person who can do nothing about either.
+func TestAGuardRefusalNeverPutsAnAddressOrUrlInTheChat(t *testing.T) {
+	withAllowed(t)
+
+	// A real server on loopback, so the refusal is about a genuine address
+	// the guard declined rather than a name that failed to resolve.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("should never be fetched"))
+	}))
+	defer srv.Close()
+
+	storage := &fakeMediaStorage{}
+	senders, conn := notifierWithLiveSocket(uuidOf(1))
+	// NOT newTestResolver: that one swaps in a client which permits loopback,
+	// which is the very thing under test here. This keeps the production
+	// guard.
+	r := NewMediaResolver(storage, newFakeMediaLedger(storage), senders, testLogger()).(*wecomMediaResolver)
+
+	msg := mediaMessage(t, "mixed", map[string]any{"mixed": map[string]any{"msg_item": []any{
+		map[string]any{"msgtype": "image", "image": map[string]any{"url": srv.URL, "aeskey": testAESKey}},
+		map[string]any{"msgtype": "image", "image": map[string]any{"url": "ftp://cos.example.com/object", "aeskey": testAESKey}},
+	}}})
+	out := r.ResolveMedia(context.Background(), mediaInstallation(), engine.ResolvedIdentity{}, uuidOf(6), uuidOf(5), msg)
+
+	if len(out.MediaRefs) != 0 {
+		t.Fatalf("MediaRefs = %d, want 0 — the guard was supposed to refuse this fetch", len(out.MediaRefs))
+	}
+	if len(storage.stored()) != 0 {
+		t.Fatal("an object was stored from an address the guard refuses")
+	}
+	if len(conn.frames) != 1 {
+		t.Fatalf("notices = %d, want exactly 1", len(conn.frames))
+	}
+	body := conn.sendBody(t, 0)
+	md, _ := body["markdown"].(map[string]any)
+	content, _ := md["content"].(string)
+	if content != mediaUnreadableNotice {
+		t.Errorf("notice = %q, want the plain did-not-arrive wording exactly once", content)
+	}
+	for _, secret := range []string{"127.0.0.1", "::1", srv.URL, testAESKey} {
+		if strings.Contains(content, secret) {
+			t.Errorf("the chat notice leaks %q: %q", secret, content)
 		}
 	}
 }

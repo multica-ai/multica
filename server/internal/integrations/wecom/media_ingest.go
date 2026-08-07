@@ -28,6 +28,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -126,10 +127,22 @@ func (r *wecomMediaResolver) ResolveMedia(ctx context.Context, inst engine.Resol
 	for i, m := range wm.Media {
 		ref, err := r.ingestOne(ctx, inst, chatMessageID, wm, i, m)
 		if err != nil {
-			failures = appendFailure(failures, classifyMediaFailure(err))
+			failure := classifyMediaFailure(err)
+			failures = appendFailure(failures, failure)
+			// A refused address gets its own line because the operator's next
+			// move is different from every other failure here: the attachment
+			// is fine and the deployment declined to dial where its host
+			// resolved, so the fix is configuration, not a retry. Saying only
+			// "ingest failed" for this sends them looking at WeCom.
+			logLine := "wecom media ingest failed"
+			if failure == mediaFailureBlocked {
+				logLine = "wecom media ingest refused by the media address guard: the host resolved to a non-public address and was not dialed. If this deployment sits behind a fake-IP proxy, declare its range in MULTICA_WECOM_MEDIA_ALLOW_CIDRS; otherwise this is a URL that should not have been sent."
+			}
 			// The url and the key never reach the log: one is a signed
-			// address anyone could then fetch, the other unlocks it.
-			r.logger.Warn("wecom media ingest failed",
+			// address anyone could then fetch, the other unlocks it. stripURL
+			// has already taken the url out of err, and the guard's refusal
+			// carries no address of its own, so err is safe to log whole.
+			r.logger.Warn(logLine,
 				"installation_id", util.UUIDToString(inst.ID),
 				"msg_id", wm.MsgID,
 				"attachment", i,
@@ -320,11 +333,20 @@ type mediaFailure int
 const (
 	mediaFailureUnreadable mediaFailure = iota
 	mediaFailureTooLarge
+	// mediaFailureBlocked is the guard refusing the address the media host
+	// resolved to. It is separated from mediaFailureUnreadable for the
+	// OPERATOR, not the sender: nothing is wrong with the attachment, and no
+	// number of retries will help until the deployment's own configuration
+	// changes. See the log branch in ResolveMedia.
+	mediaFailureBlocked
 )
 
 func classifyMediaFailure(err error) mediaFailure {
 	if errors.Is(err, errMediaTooLarge) {
 		return mediaFailureTooLarge
+	}
+	if errors.Is(err, ErrMediaAddrBlocked) {
+		return mediaFailureBlocked
 	}
 	return mediaFailureUnreadable
 }
@@ -374,11 +396,22 @@ func (r *wecomMediaResolver) tellTheSender(inst engine.ResolvedInstallation, wm 
 	}
 	lines := make([]string, 0, len(failures))
 	for _, f := range failures {
-		switch f {
-		case mediaFailureTooLarge:
-			lines = append(lines, mediaTooLargeNotice)
-		default:
-			lines = append(lines, mediaUnreadableNotice)
+		notice := mediaUnreadableNotice
+		if f == mediaFailureTooLarge {
+			notice = mediaTooLargeNotice
+		}
+		// mediaFailureBlocked lands on the unreadable wording deliberately.
+		// From the sender's side a refused address and a download that fell
+		// over are the same event — the attachment did not arrive — and the
+		// thing that separates them is what the operator must change, which
+		// belongs in the log. Neither the resolved address nor the signed url
+		// goes into a chat message.
+		//
+		// Two kinds sharing one wording is why the dedupe moved here from
+		// appendFailure: a message with one blocked and one unreadable
+		// attachment is still one piece of news.
+		if !slices.Contains(lines, notice) {
+			lines = append(lines, notice)
 		}
 	}
 	if err := sender.sendText(chatID, chatType, strings.Join(lines, "\n")); err != nil {
