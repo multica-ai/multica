@@ -48,4 +48,14 @@ describe("ProviderLogo", () => {
     expect(logo?.querySelector("path")).not.toBeNull();
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
+
+  it("renders the dedicated Platform Agent CLI mark", () => {
+    const { container } = render(
+      <ProviderLogo provider="platform-agent-cli" className="runtime-logo" />,
+    );
+
+    expect(
+      container.querySelector('svg[data-provider-logo="platform-agent-cli"]'),
+    ).not.toBeNull();
+  });
 });

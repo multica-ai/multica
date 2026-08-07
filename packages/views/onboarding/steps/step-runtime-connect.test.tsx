@@ -37,6 +37,13 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   } as AgentRuntime;
 }
 
+const platformRuntime = makeRuntime({
+  id: "rt_platform",
+  name: "Platform Agent CLI",
+  provider: "platform-agent-cli",
+  status: "online",
+});
+
 function renderStep(props: { runtimesPending?: boolean } = {}) {
   const onNext = vi.fn();
   const qc = new QueryClient({
@@ -132,6 +139,19 @@ describe("StepRuntimeConnect", () => {
     expect(
       screen.getByRole("button", { name: /start with mika/i }),
     ).toBeInTheDocument();
+  });
+
+  it("presents Platform Agent CLI when the real picker returns it", () => {
+    mocks.pickerState.runtimes = [platformRuntime];
+    mocks.pickerState.selected = platformRuntime;
+    mocks.pickerState.selectedId = platformRuntime.id;
+    mocks.pickerState.hasRuntimes = true;
+
+    renderStep();
+
+    expect(screen.getByText("Platform Agent CLI")).toBeInTheDocument();
+    expect(screen.getByText(/1 agent runtime/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start with mika/i })).toBeEnabled();
   });
 
   it("shows a single Skip affordance in the empty state (no duplicate footer button)", () => {

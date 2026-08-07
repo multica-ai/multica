@@ -311,6 +311,27 @@ function QwenPawLogo({ className }: { className: string }) {
   );
 }
 
+// Platform Agent CLI — a neutral, inline runtime mark. The platform supplies
+// no external brand asset, so this keeps the mark semantic and theme-aware.
+function PlatformAgentLogo({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      data-provider-logo="platform-agent-cli"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="18" height="18" rx="5" fill="currentColor" opacity="0.18" />
+      <path
+        d="M7.5 8.5h5.25a3.75 3.75 0 1 1 0 7.5H10v2.25H7.5V8.5Zm2.5 2.25v3h2.75a1.5 1.5 0 0 0 0-3H10Z"
+        fill="currentColor"
+      />
+      <path d="M16.5 7.5v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -358,6 +379,8 @@ export function ProviderLogo({
       return <QwenLogo className={className} />;
     case "qwenpaw":
       return <QwenPawLogo className={className} />;
+    case "platform-agent-cli":
+      return <PlatformAgentLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
