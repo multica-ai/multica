@@ -67,6 +67,19 @@ func (s *PushoverService) Enabled() bool {
 }
 
 func (s *PushoverService) SendLoginCode(ctx context.Context, userKey, code string) error {
+	return s.sendNotification(ctx, userKey, "Multica Login Code", code)
+}
+
+func (s *PushoverService) SendTestNotification(ctx context.Context, userKey string) error {
+	return s.sendNotification(
+		ctx,
+		userKey,
+		"Multica Test Notification",
+		"You are now setup to receive Pushover notifications via Multica.",
+	)
+}
+
+func (s *PushoverService) sendNotification(ctx context.Context, userKey, title, message string) error {
 	if !s.Enabled() {
 		return errors.New("pushover is not configured")
 	}
@@ -78,8 +91,8 @@ func (s *PushoverService) SendLoginCode(ctx context.Context, userKey, code strin
 	form := url.Values{
 		"token":   {s.applicationToken},
 		"user":    {userKey},
-		"title":   {"Multica Login Code"},
-		"message": {code},
+		"title":   {title},
+		"message": {message},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.messagesURL, strings.NewReader(form.Encode()))
 	if err != nil {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { configStore } from "@multica/core/config";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -18,6 +18,7 @@ const refs = vi.hoisted(() => ({
   },
   setUser: vi.fn(),
   updatePushoverSettings: vi.fn(),
+  sendPushoverTestNotification: vi.fn(),
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -28,6 +29,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updatePushoverSettings: refs.updatePushoverSettings,
+    sendPushoverTestNotification: refs.sendPushoverTestNotification,
   },
 }));
 
@@ -51,6 +53,7 @@ describe("PushoverProfileSection", () => {
   beforeEach(() => {
     refs.setUser.mockReset();
     refs.updatePushoverSettings.mockReset();
+    refs.sendPushoverTestNotification.mockReset();
     refs.user.pushover_user_key_configured = false;
     refs.user.pushover_login_codes_enabled = false;
     configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: false });
@@ -61,7 +64,7 @@ describe("PushoverProfileSection", () => {
     expect(screen.queryByText("User Key")).toBeNull();
   });
 
-  it("saves a User Key and login-code preference", async () => {
+  it("autosaves a valid User Key and enables all notification preferences", async () => {
     const user = userEvent.setup();
     configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
     refs.updatePushoverSettings.mockResolvedValue({
@@ -71,21 +74,47 @@ describe("PushoverProfileSection", () => {
     });
     renderSection();
 
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     await user.type(
       screen.getByLabelText("User Key"),
       "ZYXWVUTSRQPONMLKJIHGFEDCBA4321",
     );
-    await user.click(screen.getByRole("switch", { name: "Login codes" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.tab();
 
-    expect(refs.updatePushoverSettings).toHaveBeenCalledWith({
-      user_key: "ZYXWVUTSRQPONMLKJIHGFEDCBA4321",
-      login_codes_enabled: true,
+    await waitFor(() => {
+      expect(refs.updatePushoverSettings).toHaveBeenCalledWith({
+        user_key: "ZYXWVUTSRQPONMLKJIHGFEDCBA4321",
+        login_codes_enabled: true,
+      });
     });
     expect(refs.setUser).toHaveBeenCalledOnce();
   });
 
-  it("removes a configured User Key and disables login codes", async () => {
+  it("shows connected actions instead of the User Key field", () => {
+    configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
+    refs.user.pushover_user_key_configured = true;
+    refs.user.pushover_login_codes_enabled = true;
+
+    renderSection();
+
+    expect(screen.queryByLabelText("User Key")).toBeNull();
+    expect(screen.getByRole("button", { name: "Disconnect Pushover" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send Test Notification" })).toBeInTheDocument();
+  });
+
+  it("sends a test notification for a connected account", async () => {
+    const user = userEvent.setup();
+    configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
+    refs.user.pushover_user_key_configured = true;
+    refs.sendPushoverTestNotification.mockResolvedValue(undefined);
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Send Test Notification" }));
+
+    expect(refs.sendPushoverTestNotification).toHaveBeenCalledOnce();
+  });
+
+  it("disconnects Pushover and disables login codes", async () => {
     const user = userEvent.setup();
     configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
     refs.user.pushover_user_key_configured = true;
@@ -97,10 +126,28 @@ describe("PushoverProfileSection", () => {
     });
     renderSection();
 
-    await user.click(screen.getByRole("button", { name: "Remove User Key" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect Pushover" }));
 
     expect(refs.updatePushoverSettings).toHaveBeenCalledWith({
       user_key: "",
+      login_codes_enabled: false,
+    });
+  });
+
+  it("saves the login-code toggle immediately", async () => {
+    const user = userEvent.setup();
+    configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
+    refs.user.pushover_user_key_configured = true;
+    refs.user.pushover_login_codes_enabled = true;
+    refs.updatePushoverSettings.mockResolvedValue({
+      ...refs.user,
+      pushover_login_codes_enabled: false,
+    });
+    renderSection();
+
+    await user.click(screen.getByRole("switch", { name: "Login codes" }));
+
+    expect(refs.updatePushoverSettings).toHaveBeenCalledWith({
       login_codes_enabled: false,
     });
   });

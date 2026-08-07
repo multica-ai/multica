@@ -69,6 +69,36 @@ func TestPushoverServiceSendLoginCode(t *testing.T) {
 	}
 }
 
+func TestPushoverServiceSendTestNotification(t *testing.T) {
+	var received url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		received = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":1,"request":"request-id"}`))
+	}))
+	defer server.Close()
+
+	svc := newPushoverService(testPushoverApplicationToken, server.URL, server.Client())
+	if err := svc.SendTestNotification(context.Background(), testPushoverUserKey); err != nil {
+		t.Fatalf("SendTestNotification: %v", err)
+	}
+
+	want := map[string]string{
+		"token":   testPushoverApplicationToken,
+		"user":    testPushoverUserKey,
+		"title":   "Multica Test Notification",
+		"message": "You are now setup to receive Pushover notifications via Multica.",
+	}
+	for key, value := range want {
+		if got := received.Get(key); got != value {
+			t.Errorf("%s = %q, want %q", key, got, value)
+		}
+	}
+}
+
 func TestPushoverServiceReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

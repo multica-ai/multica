@@ -872,28 +872,30 @@
   "pushover": {
     "integration": {
       "section_title": "Pushover",
-      "application_label": "Application API Token",
-      "application_description": "Pushover에서 \"Multica\"라는 애플리케이션을 만들어 Application API Token을 생성한 다음 백엔드의 PUSHOVER_APPLICATION_TOKEN으로 설정하세요.",
-      "configured": "이 Multica 인스턴스에 구성됨",
-      "create_application": "Pushover 애플리케이션 만들기"
+      "section_description": "Multica를 Pushover에 연결하여 워크스페이스 멤버가 선택적으로 푸시 알림을 받을 수 있게 하세요.",
+      "enabled_label": "Pushover 연동 활성화됨",
+      "not_enabled_label": "Pushover 연동 활성화되지 않음",
+      "application_description": "서버에 PUSHOVER_APPLICATION_TOKEN을 설정하여 Pushover 연동을 활성화하세요. 셀프 호스팅 사용자는 프로젝트 README에서 자세한 내용을 확인하세요."
     },
     "profile": {
       "section_title": "Pushover",
-      "section_description": "Multica가 Pushover로도 보낼 계정 알림을 선택하세요.",
+      "section_description": "Pushover로 푸시 알림을 받으세요.",
       "user_key_label": "User Key",
-      "user_key_description": "Pushover 대시보드에 로그인하여 User Key를 확인하세요.",
-      "dashboard_link": "Pushover 대시보드 열기",
-      "user_key_configured": "User Key가 구성됨",
+      "user_key_description_before": "",
+      "dashboard_link": "Pushover 대시보드",
+      "user_key_description_after": "에서 User Key를 확인하세요.",
       "user_key_placeholder": "Pushover User Key 입력",
       "login_codes_label": "로그인 코드",
-      "login_codes_description": "요청한 로그인 코드를 Pushover로도 보냅니다.",
-      "save": "저장",
-      "saving": "저장 중...",
-      "remove_key": "User Key 제거",
-      "saved": "Pushover 설정을 저장했어요",
+      "login_codes_description": "Pushover로 로그인 코드를 받으세요",
+      "disconnect": "Pushover 연결 해제",
+      "send_test": "테스트 알림 보내기",
+      "connected": "Pushover에 연결했어요",
+      "connect_failed": "Pushover에 연결하지 못했어요",
       "save_failed": "Pushover 설정을 저장하지 못했어요",
-      "removed": "Pushover User Key를 제거했어요",
-      "remove_failed": "Pushover User Key를 제거하지 못했어요"
+      "disconnected": "Pushover 연결을 해제했어요",
+      "disconnect_failed": "Pushover 연결을 해제하지 못했어요",
+      "test_sent": "테스트 알림을 보냈어요",
+      "test_failed": "테스트 알림을 보내지 못했어요"
     }
   }
 }

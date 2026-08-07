@@ -18,7 +18,7 @@ import { SettingsSection, SettingsTab } from "./settings-layout";
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
 // — currently Lark, Composio, Slack, the self-hosted Git providers (Forgejo /
-// Gitea / GitLab), WeCom smart-bot, and instance-enabled Pushover, with Linear
+// Gitea / GitLab), WeCom smart-bot, and Pushover, with Linear
 // etc. to follow —
 // lives in here under its own section heading so additional integrations slot
 // in without changing the IA. IntegrationsTab is just the host; each
@@ -38,7 +38,6 @@ export function IntegrationsTab() {
   // omitted from /api/config), so the whole section — header included — is
   // hidden there rather than showing an operator-only "missing key" message.
   const vcsAvailable = useConfigStore((s) => s.vcsIntegrationAvailable);
-  const pushoverAvailable = useConfigStore((s) => s.pushoverAvailable);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
@@ -64,11 +63,9 @@ export function IntegrationsTab() {
       <SettingsSection title={t(($) => $.wecom.section_title)}>
         <WecomTab />
       </SettingsSection>
-      {pushoverAvailable && (
-        <SettingsSection title={t(($) => $.pushover.integration.section_title)}>
-          <PushoverTab />
-        </SettingsSection>
-      )}
+      <SettingsSection title={t(($) => $.pushover.integration.section_title)}>
+        <PushoverTab />
+      </SettingsSection>
     </SettingsTab>
   );
 }

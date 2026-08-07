@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -10,11 +12,12 @@ import (
 )
 
 type fakeLoginCodePusher struct {
-	enabled bool
-	err     error
-	calls   int
-	userKey string
-	code    string
+	enabled   bool
+	err       error
+	calls     int
+	userKey   string
+	code      string
+	testCalls int
 }
 
 func (p *fakeLoginCodePusher) Enabled() bool { return p.enabled }
@@ -23,6 +26,12 @@ func (p *fakeLoginCodePusher) SendLoginCode(_ context.Context, userKey, code str
 	p.calls++
 	p.userKey = userKey
 	p.code = code
+	return p.err
+}
+
+func (p *fakeLoginCodePusher) SendTestNotification(_ context.Context, userKey string) error {
+	p.testCalls++
+	p.userKey = userKey
 	return p.err
 }
 
@@ -110,5 +119,42 @@ func TestDeliverLoginCodeSkipsPushoverWithoutOptIn(t *testing.T) {
 	}
 	if pusher.calls != 0 {
 		t.Fatalf("Pushover calls = %d, want 0", pusher.calls)
+	}
+}
+
+func TestSendMyPushoverTestNotification(t *testing.T) {
+	const userKey = "ZYXWVUTSRQPONMLKJIHGFEDCBA4321"
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE "user" SET pushover_user_key = $1 WHERE id = $2`,
+		userKey,
+		testUserID,
+	); err != nil {
+		t.Fatalf("configure Pushover user key: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(),
+			`UPDATE "user" SET pushover_user_key = NULL, pushover_login_codes_enabled = FALSE WHERE id = $1`,
+			testUserID,
+		)
+	})
+
+	original := testHandler.PushoverService
+	pusher := &fakeLoginCodePusher{enabled: true}
+	testHandler.PushoverService = pusher
+	t.Cleanup(func() { testHandler.PushoverService = original })
+
+	recorder := httptest.NewRecorder()
+	testHandler.SendMyPushoverTestNotification(
+		recorder,
+		newRequestAs(testUserID, http.MethodPost, "/api/me/pushover/test", nil),
+	)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if pusher.testCalls != 1 || pusher.userKey != userKey {
+		t.Fatalf("test notification calls = %d, user key = %q", pusher.testCalls, pusher.userKey)
 	}
 }

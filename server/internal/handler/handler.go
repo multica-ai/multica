@@ -146,6 +146,7 @@ type WorkspaceSetRefreshNotifier interface {
 type LoginCodePusher interface {
 	Enabled() bool
 	SendLoginCode(ctx context.Context, userKey, code string) error
+	SendTestNotification(ctx context.Context, userKey string) error
 }
 
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the

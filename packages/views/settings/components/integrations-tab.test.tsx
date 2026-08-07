@@ -122,23 +122,19 @@ describe("Settings IntegrationsTab", () => {
     expect(screen.getByTestId("vcs-tab")).toBeInTheDocument();
   });
 
-  it("hides Pushover when the instance has no application token", () => {
+  it("shows Pushover setup instructions when the instance has no application token", () => {
     renderTab();
 
-    expect(screen.queryByText("Application API Token")).toBeNull();
-    expect(screen.queryByRole("link", { name: /create Pushover application/i })).toBeNull();
+    expect(screen.getByText("Pushover integration not enabled")).toBeInTheDocument();
+    expect(screen.getByText(/Set PUSHOVER_APPLICATION_TOKEN on the server/i)).toBeInTheDocument();
   });
 
-  it("shows Pushover setup instructions when configured for the instance", () => {
+  it("shows Pushover enabled state when configured for the instance", () => {
     configStore.getState().setAuthConfig({ allowSignup: true, pushoverAvailable: true });
 
     renderTab();
 
-    expect(screen.getByText("Application API Token")).toBeInTheDocument();
-    expect(screen.getByText(/configured for this Multica instance/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /create Pushover application/i })).toHaveAttribute(
-      "href",
-      "https://pushover.net/apps/build",
-    );
+    expect(screen.getByText("Pushover integration enabled")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /create Pushover application/i })).toBeNull();
   });
 });

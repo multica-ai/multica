@@ -696,6 +696,12 @@ export class ApiClient {
     });
   }
 
+  async sendPushoverTestNotification(): Promise<void> {
+    await this.fetch<void>("/api/me/pushover/test", {
+      method: "POST",
+    });
+  }
+
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();

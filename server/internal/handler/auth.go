@@ -828,3 +828,35 @@ func (h *Handler) UpdateMyPushoverSettings(w http.ResponseWriter, r *http.Reques
 
 	writeJSON(w, http.StatusOK, h.userToResponse(updatedUser))
 }
+
+func (h *Handler) SendMyPushoverTestNotification(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if h.PushoverService == nil || !h.PushoverService.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "Pushover is not configured")
+		return
+	}
+
+	currentUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if !currentUser.PushoverUserKey.Valid {
+		writeError(w, http.StatusBadRequest, "connect Pushover before sending a test notification")
+		return
+	}
+
+	if err := h.PushoverService.SendTestNotification(
+		r.Context(),
+		currentUser.PushoverUserKey.String,
+	); err != nil {
+		slog.Error("failed to send Pushover test notification", "user_id", userID, "error", err)
+		writeError(w, http.StatusBadGateway, "failed to send Pushover test notification")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
