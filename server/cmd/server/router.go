@@ -706,7 +706,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Mirrors slack.NewOutbound(...).Register(bus). Without it
 				// the agent's reply lands only in Multica's web UI — the
 				// user in WeCom sees no response.
-				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
+				//
+				// WithAttachments adds the second hop: the files the agent
+				// bound to that reply are read back out of object storage and
+				// sent into the chat behind it. Passed only when this
+				// deployment configured storage — with none there is nothing
+				// to read an attachment out of, and the option is what the
+				// delivery path checks for.
+				wecomOutboundOpts := []wecom.OutboundOption{}
+				if store != nil {
+					wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithAttachments(store))
+				}
+				wecom.NewOutbound(queries, wecomSenders, slog.Default(), wecomOutboundOpts...).Register(bus)
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
