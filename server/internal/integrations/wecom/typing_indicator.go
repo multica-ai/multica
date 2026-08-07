@@ -145,6 +145,45 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 	}
 }
 
+// TypingIndicatorWiring reports which of the four dependencies a manager holds.
+//
+// Every one of them is optional and every one of them narrows the manager
+// silently when it is missing: nothing panics, nothing logs, Register still
+// subscribes, and the events still arrive — the closing frame just never gets
+// written, which the user sees as a bubble that spins until the guard replaces
+// it with a promise nobody keeps. That makes "is it wired" unfalsifiable from
+// the outside, and a boot path that drops one looks exactly like a healthy
+// one. This is the inspection point that makes it falsifiable.
+type TypingIndicatorWiring struct {
+	// Senders is the live WebSocket registry. Without it no closing frame and
+	// no plain-message fallback can be written at all.
+	Senders bool
+	// Streams is the round store shared with the outbound subscriber. Without
+	// it every handler returns on its first line, so no bubble is ever closed
+	// by any ending.
+	Streams bool
+	// Tasks resolves a task id to its chat session. Without it the sweepers'
+	// task:failed — which names a task and no session — resolves to nothing
+	// and the bubble behind a swept run is never closed.
+	Tasks bool
+	// Bindings finds the chat behind a session when no round is on file.
+	// Without it a run that fails after its bubble is gone (guard closed it at
+	// five minutes, or the process restarted mid-run) tells the user nothing,
+	// and the guard's "I'll reply separately" is never answered.
+	Bindings bool
+}
+
+// Wiring reports the dependencies this manager was built with. For boot-wiring
+// guards; it copies four booleans and hands out no references.
+func (m *TypingIndicatorManager) Wiring() TypingIndicatorWiring {
+	return TypingIndicatorWiring{
+		Senders:  m.senders != nil,
+		Streams:  m.streams != nil,
+		Tasks:    m.tasks != nil,
+		Bindings: m.bindings != nil,
+	}
+}
+
 // OnIngested paints a "working on it" bubble for the run this message belongs
 // to and records what it takes to come back and fill it in. Which run that is
 // comes from batch — the engine debouncer's own verdict, decided under the

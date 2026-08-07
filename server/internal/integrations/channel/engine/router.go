@@ -139,6 +139,23 @@ func (r *Router) Register(t channel.Type, set ResolverSet) {
 	r.sets[t] = set
 }
 
+// RegisteredSet returns the ResolverSet a platform is serving inbound messages
+// with, and whether one is registered at all.
+//
+// It exists for boot-wiring guards. Register drops an incomplete set with a
+// log line and returns, so a platform can boot, log "integration enabled" and
+// answer nothing — and every resolver on a registered set is likewise optional
+// and silently narrows behaviour when it is nil. Neither shows up in a request
+// path a test can drive, so what got registered has to be readable from
+// outside. Read-only: the returned struct is a copy of the resolver
+// references, not a handle on the router.
+func (r *Router) RegisteredSet(t channel.Type) (ResolverSet, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	set, ok := r.sets[t]
+	return set, ok
+}
+
 // EnableRunBatching installs the debouncer in front of the per-session run
 // trigger. Call once at boot. A non-positive window uses
 // DefaultChatRunBatchWindow. Without it, runs fire inline (used by tests).
