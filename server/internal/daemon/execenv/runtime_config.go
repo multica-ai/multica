@@ -242,13 +242,18 @@ func writeRuntimeConfigFile(path, brief string) error {
 		if info, lerr := os.Lstat(path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("runtime config %s is a dangling symlink", path)
 		}
-		return writeRuntimeConfigFileAtomic(path, []byte(block), 0o644)
+		// CreateTemp starts at 0600, and keeping that private mode avoids
+		// bypassing a restrictive process umask with a later chmod to 0644.
+		return writeRuntimeConfigFileAtomic(path, []byte(block), 0o600)
 	}
 	if err != nil {
 		return fmt.Errorf("read existing runtime config %s: %w", path, err)
 	}
 	writePath, perm, err := existingRuntimeConfigWriteTarget(path)
 	if err != nil {
+		return err
+	}
+	if err := requireRuntimeConfigWritable(writePath); err != nil {
 		return err
 	}
 
@@ -291,15 +296,36 @@ func existingRuntimeConfigWriteTarget(path string) (string, fs.FileMode, error) 
 			return "", 0, fmt.Errorf("resolve runtime config symlink %s: %w", path, err)
 		}
 	}
-	return writePath, info.Mode().Perm(), nil
+	if !info.Mode().IsRegular() {
+		return "", 0, fmt.Errorf("runtime config %s resolves to non-regular file type %s", path, info.Mode().Type())
+	}
+	if err := validateRuntimeConfigReplacementTarget(writePath, info); err != nil {
+		return "", 0, err
+	}
+	return writePath, info.Mode(), nil
+}
+
+// requireRuntimeConfigWritable preserves the permission gate of the previous
+// os.WriteFile path without truncating the target. Checking mode bits alone is
+// insufficient because ACLs and the effective user also participate in the
+// operating system's access decision.
+func requireRuntimeConfigWritable(path string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open existing runtime config %s for writing: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close writable runtime config %s: %w", path, err)
+	}
+	return nil
 }
 
 // writeRuntimeConfigFileAtomic stages data in the destination directory and
-// renames it into place only after the complete payload has been written,
-// chmodded, synced, and closed. A direct os.WriteFile opens an existing target
-// with O_TRUNC, so a disk-full or short-write error can return after destroying
-// the user's CLAUDE.md / AGENTS.md. With same-directory staging, every failure
-// before Rename leaves the original file byte-identical.
+// commits it with the platform's atomic replacement only after the complete
+// payload has been written, its metadata prepared, synced, and closed. A direct
+// os.WriteFile opens an existing target with O_TRUNC, so a disk-full or
+// short-write error can return after destroying the user's CLAUDE.md /
+// AGENTS.md. Every pre-commit failure leaves the original byte-identical.
 func writeRuntimeConfigFileAtomic(path string, data []byte, perm fs.FileMode) error {
 	return writeRuntimeConfigFileAtomicWith(path, data, perm, func(file *os.File, payload []byte) error {
 		_, err := file.Write(payload)
@@ -311,6 +337,13 @@ func writeRuntimeConfigFileAtomic(path string, data []byte, perm fs.FileMode) er
 // tests can inject a deterministic partial-write failure on every platform.
 // Production always enters through writeRuntimeConfigFileAtomic above.
 func writeRuntimeConfigFileAtomicWith(path string, data []byte, perm fs.FileMode, write func(*os.File, []byte) error) error {
+	metadataSource := ""
+	if _, err := os.Lstat(path); err == nil {
+		metadataSource = path
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect runtime config metadata source %s: %w", path, err)
+	}
+
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".multica-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp runtime config for %s: %w", path, err)
@@ -330,8 +363,8 @@ func writeRuntimeConfigFileAtomicWith(path string, data []byte, perm fs.FileMode
 	if err := write(tmp, data); err != nil {
 		return fmt.Errorf("write temp runtime config for %s: %w", path, err)
 	}
-	if err := tmp.Chmod(perm); err != nil {
-		return fmt.Errorf("chmod temp runtime config for %s: %w", path, err)
+	if err := preserveRuntimeConfigFileMetadata(tmp, metadataSource, perm); err != nil {
+		return fmt.Errorf("preserve runtime config metadata for %s: %w", path, err)
 	}
 	if err := tmp.Sync(); err != nil {
 		return fmt.Errorf("sync temp runtime config for %s: %w", path, err)
@@ -469,6 +502,9 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 	// so the file's existence is preserved.
 	writePath, perm, err := existingRuntimeConfigWriteTarget(path)
 	if err != nil {
+		return err
+	}
+	if err := requireRuntimeConfigWritable(writePath); err != nil {
 		return err
 	}
 	return writeRuntimeConfigFileAtomic(writePath, []byte(remainder), perm)

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -13,6 +14,20 @@ import (
 )
 
 var replaceFileW = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReplaceFileW")
+
+func validateRuntimeConfigReplacementTarget(string, fs.FileInfo) error {
+	return nil
+}
+
+// preserveRuntimeConfigFileMetadata leaves existing-file metadata to
+// ReplaceFileW, which transfers the target's ACL and filesystem attributes to
+// the staged inode. Missing files retain the deliberately private 0600 mode.
+func preserveRuntimeConfigFileMetadata(staged *os.File, sourcePath string, mode fs.FileMode) error {
+	if sourcePath == "" {
+		return staged.Chmod(mode)
+	}
+	return nil
+}
 
 // replaceRuntimeConfigFile uses ReplaceFileW for an existing target instead
 // of Go's MoveFileEx-based os.Rename. ReplaceFileW carries the replaced file's
@@ -40,15 +55,28 @@ func replaceRuntimeConfigFile(stagedPath, targetPath string) error {
 		return fmt.Errorf("release replacement backup reservation: %w", err)
 	}
 
-	targetPtr, err := windows.UTF16PtrFromString(targetPath)
+	extendedTargetPath, err := extendedLengthWindowsPath(targetPath)
+	if err != nil {
+		return fmt.Errorf("normalize replace target: %w", err)
+	}
+	extendedStagedPath, err := extendedLengthWindowsPath(stagedPath)
+	if err != nil {
+		return fmt.Errorf("normalize staged replacement: %w", err)
+	}
+	extendedBackupPath, err := extendedLengthWindowsPath(backupPath)
+	if err != nil {
+		return fmt.Errorf("normalize replacement backup: %w", err)
+	}
+
+	targetPtr, err := windows.UTF16PtrFromString(extendedTargetPath)
 	if err != nil {
 		return fmt.Errorf("encode replace target: %w", err)
 	}
-	stagedPtr, err := windows.UTF16PtrFromString(stagedPath)
+	stagedPtr, err := windows.UTF16PtrFromString(extendedStagedPath)
 	if err != nil {
 		return fmt.Errorf("encode staged replacement: %w", err)
 	}
-	backupPtr, err := windows.UTF16PtrFromString(backupPath)
+	backupPtr, err := windows.UTF16PtrFromString(extendedBackupPath)
 	if err != nil {
 		return fmt.Errorf("encode replacement backup: %w", err)
 	}
@@ -80,4 +108,23 @@ func replaceRuntimeConfigFile(stagedPath, targetPath string) error {
 		return fmt.Errorf("remove committed replacement backup %s: %w", backupPath, err)
 	}
 	return nil
+}
+
+// extendedLengthWindowsPath gives raw Win32 APIs the same long-path support
+// that Go's os package applies internally. ReplaceFileW otherwise receives an
+// ordinary absolute path and can fail once the existing target exceeds
+// MAX_PATH in a process without a long-path-aware manifest.
+func extendedLengthWindowsPath(path string) (string, error) {
+	if strings.HasPrefix(path, `\\?\`) {
+		return path, nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	if strings.HasPrefix(abs, `\\`) {
+		return `\\?\UNC\` + strings.TrimPrefix(abs, `\\`), nil
+	}
+	return `\\?\` + abs, nil
 }

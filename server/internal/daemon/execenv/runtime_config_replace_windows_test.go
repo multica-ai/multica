@@ -3,6 +3,7 @@ package execenv
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -50,6 +51,38 @@ func TestWriteRuntimeConfigFilePreservesWindowsDACL(t *testing.T) {
 	}
 	if after := runtimeConfigDACLString(t, path); after != before {
 		t.Fatalf("Windows DACL changed during atomic replacement\nbefore: %s\n after: %s", before, after)
+	}
+}
+
+func TestRuntimeConfigRoundTripSupportsExistingWindowsLongPath(t *testing.T) {
+	dir := t.TempDir()
+	for len(filepath.Join(dir, "AGENTS.md")) <= 280 {
+		dir = filepath.Join(dir, strings.Repeat("nested", 6))
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create long-path directory: %v", err)
+	}
+	path := filepath.Join(dir, "AGENTS.md")
+	if len(path) <= 260 {
+		t.Fatalf("test path length = %d, want > 260: %s", len(path), path)
+	}
+	original := []byte("user instructions at a long Windows path\n")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatalf("seed long-path runtime config: %v", err)
+	}
+
+	if err := writeRuntimeConfigFile(path, "runtime brief"); err != nil {
+		t.Fatalf("inject at long path: %v", err)
+	}
+	if err := CleanupRuntimeConfig(dir, "codex"); err != nil {
+		t.Fatalf("cleanup at long path: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read long-path target after round trip: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("long-path round trip changed user content\n got: %q\nwant: %q", got, original)
 	}
 }
 
