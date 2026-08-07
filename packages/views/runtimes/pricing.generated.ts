@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-08-04
+// Snapshot: 2026-08-07
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -80,6 +80,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "github-copilot/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
   "github-copilot/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
   "github-copilot/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
+  "github-copilot/kimi-k3": { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0.95 },
   "glm-4.5": { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0 },
   "glm-4.5-air": { input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite: 0 },
   "glm-4.5-flash": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -169,8 +170,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "openai/gpt-4o-2024-05-13": { input: 5, output: 15, cacheRead: 5, cacheWrite: 5 },
   "openai/gpt-5.2-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "openai/gpt-5.3-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
-  "openai/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
-  "openai/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
+  "opencode-go/deepseek-v4-flash": { input: 0.07, output: 0.14, cacheRead: 0.0014, cacheWrite: 0.07 },
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
