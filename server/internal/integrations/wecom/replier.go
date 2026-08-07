@@ -71,17 +71,12 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	bindingPath := cfg.BindingPath
-	if bindingPath == "" {
-		bindingPath = "/wecom/bind"
-	}
-	if !strings.HasPrefix(bindingPath, "/") {
-		bindingPath = "/" + bindingPath
-	}
 	r := &OutboundReplier{
-		senders:     cfg.Senders,
-		appURL:      strings.TrimRight(cfg.AppURL, "/"),
-		bindingPath: bindingPath,
+		senders: cfg.Senders,
+		appURL:  strings.TrimRight(cfg.AppURL, "/"),
+		// Shared with the enter_chat greeting (welcome.go) so the two cannot
+		// drift onto different bind pages.
+		bindingPath: normalizeBindingPath(cfg.BindingPath),
 		logger:      logger,
 	}
 	// Assign through the interface only when non-nil: a nil *BindingTokenService
