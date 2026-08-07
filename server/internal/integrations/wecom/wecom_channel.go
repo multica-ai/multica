@@ -369,7 +369,11 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			return nil
 		}
 		msg := channelMessageFromCallback(c.botID, mc, env.Headers.ReqID)
-		if mc.MsgType != "text" {
+		// A voice note is a sentence that happened to be spoken: WeCom does
+		// the recognition and hands over the transcript, so it needs no
+		// download, no media key and no storage. Answering it with "I only
+		// handle text" was refusing content we already had in hand.
+		if _, ok := mc.bodyText(); !ok {
 			// Iteration 1 routes only text. Rather than drop other types
 			// (voice / image / file) silently — which reads as a broken bot —
 			// answer the same chat with a one-line "text only" receipt, then

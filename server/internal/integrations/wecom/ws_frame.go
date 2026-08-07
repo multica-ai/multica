@@ -81,8 +81,32 @@ type aibotMsgCallback struct {
 	Text    struct {
 		Content string `json:"content"`
 	} `json:"text"`
-	// Image / voice / file / video / mixed have their own fields; we do
-	// not surface them yet — MsgType=="text" is the only case we route.
+	// Voice carries the TRANSCRIPT, not audio. WeCom runs the speech
+	// recognition on its side and delivers only the result, so a voice note
+	// needs no download, no media key and no storage — it is a sentence that
+	// happened to be spoken. Single chats only (WeCom errcode 100719 covers
+	// the group case).
+	Voice struct {
+		Content string `json:"content"`
+	} `json:"voice"`
+	// Image / file / video / mixed have their own fields and carry a
+	// downloadable payload; they are not surfaced yet.
+}
+
+// bodyText is the message's text, whether it was typed or spoken. Recognition
+// comes back empty on background noise or a half-second press, and an empty
+// body would reach the agent as a turn with nothing in it — so an empty
+// transcript reports false and takes the receipt path instead.
+func (mc aibotMsgCallback) bodyText() (string, bool) {
+	switch strings.ToLower(mc.MsgType) {
+	case "text":
+		return mc.Text.Content, true
+	case "voice":
+		transcript := strings.TrimSpace(mc.Voice.Content)
+		return transcript, transcript != ""
+	default:
+		return "", false
+	}
 }
 
 // aibotEventCallback is the body of an aibot_event_callback frame. We only
@@ -149,6 +173,7 @@ type InboundMessage struct {
 // group message on the wire — WeCom only forwards to the bot when it was
 // addressed, so any received group message counts as addressed.
 func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string) channel.InboundMessage {
+	body, _ := mc.bodyText()
 	chatType := channel.ChatTypeP2P
 	if strings.EqualFold(mc.ChatType, "group") {
 		chatType = channel.ChatTypeGroup
@@ -167,7 +192,7 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		ChatType:     mc.ChatType,
 		ChatID:       chatID,
 		SenderUserID: senderID,
-		Content:      mc.Text.Content,
+		Content:      body,
 		ReqID:        reqID,
 	}
 	raw, _ := json.Marshal(wm)
@@ -176,7 +201,7 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		EventID:        mc.MsgID,
 		MessageID:      mc.MsgID,
 		Type:           channelMsgType(mc.MsgType),
-		Text:           mc.Text.Content,
+		Text:           body,
 		AddressedToBot: true,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
@@ -185,7 +210,7 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		// command" reply that just clutters the conversation. wecom is
 		// alone on this — Slack/Lark keep the historical "let the agent
 		// see /issue and respond too" behaviour.
-		SkipAgentRun: isIssueCommand(mc.Text.Content),
+		SkipAgentRun: isIssueCommand(body),
 		Source: channel.Source{
 			ChannelType: TypeWecom,
 			ChatID:      chatID,
