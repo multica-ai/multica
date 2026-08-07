@@ -81,8 +81,169 @@ type aibotMsgCallback struct {
 	Text    struct {
 		Content string `json:"content"`
 	} `json:"text"`
-	// Image / voice / file / video / mixed have their own fields; we do
-	// not surface them yet — MsgType=="text" is the only case we route.
+	// Image / File / Video are the downloadable kinds. Each carries only a
+	// pre-signed COS url and the key its bytes are encrypted with — no name,
+	// no size, no MIME type (see media_download.go for where those come from
+	// instead).
+	Image mediaBody `json:"image"`
+	File  mediaBody `json:"file"`
+	Video mediaBody `json:"video"`
+	// Mixed carries 图文混排 — a message the user composed with text runs
+	// and attachments interleaved. Each item is itself typed and carries the
+	// same bodies a standalone message of that type would.
+	Mixed struct {
+		MsgItem []mixedItem `json:"msg_item"`
+	} `json:"mixed"`
+	// There is deliberately no Voice field here. A standalone voice message
+	// is #6599's subject; this adapter still answers it with the
+	// unsupported-kind receipt. mixedItem does carry one, because a voice
+	// run inside a 图文混排 would otherwise drop a spoken sentence out of
+	// the middle of a message whose other runs are read.
+}
+
+// mediaBody is the {url, aeskey} pair every downloadable kind carries. In
+// long-connection mode the key is minted per url, so it lives on the message
+// rather than in configuration.
+type mediaBody struct {
+	URL    string `json:"url"`
+	AESKey string `json:"aeskey"`
+}
+
+// mixedItem is one run of a 图文混排 message: a sentence, a spoken sentence,
+// or an attachment, in the order the user composed them.
+type mixedItem struct {
+	MsgType string `json:"msgtype"`
+	Text    struct {
+		Content string `json:"content"`
+	} `json:"text"`
+	Voice struct {
+		Content string `json:"content"`
+	} `json:"voice"`
+	Image mediaBody `json:"image"`
+	File  mediaBody `json:"file"`
+	Video mediaBody `json:"video"`
+}
+
+// render turns one 图文混排 run into the line it contributes to the message
+// body. An item of a kind this adapter does not know contributes nothing
+// rather than a stray placeholder.
+func (item mixedItem) render() string {
+	switch strings.ToLower(item.MsgType) {
+	case "text":
+		return strings.TrimSpace(item.Text.Content)
+	case "voice":
+		// WeCom runs the speech recognition on its side and delivers only
+		// the result, so a voice run is a sentence that happened to be
+		// spoken — no download, no key.
+		return strings.TrimSpace(item.Voice.Content)
+	default:
+		body, kind, ok := mediaFor(item.MsgType, item.Image, item.File, item.Video)
+		if !ok || strings.TrimSpace(body.URL) == "" {
+			return ""
+		}
+		return mediaPlaceholder(kind)
+	}
+}
+
+// mediaPlaceholder is the marker that stands in for an attachment in the
+// stored message body, so the agent can see that something was attached
+// before (or instead of) the bytes arriving on the detached media path.
+//
+// The exact strings are Lark's and DingTalk's, byte for byte:
+// lark/content_flatten.go flattenContent returns "[Image]" / "[File]" /
+// "[Video]", and dingtalk/inbound.go:95 pins dingtalkImagePlaceholder =
+// "[Image]" with "[File]" at inbound.go:205. An agent reads every channel
+// through the same prompt; a wecom-only spelling would be one more thing
+// for it to learn for no reason.
+func mediaPlaceholder(kind channel.MsgType) string {
+	switch kind {
+	case channel.MsgTypeImage:
+		return "[Image]"
+	case channel.MsgTypeVideo:
+		return "[Video]"
+	default:
+		return "[File]"
+	}
+}
+
+// mediaFor returns the body and normalized kind for a raw wecom msgtype, and
+// whether that type is one we download at all.
+func mediaFor(msgType string, image, file, video mediaBody) (mediaBody, channel.MsgType, bool) {
+	switch strings.ToLower(msgType) {
+	case "image":
+		return image, channel.MsgTypeImage, true
+	case "file":
+		return file, channel.MsgTypeFile, true
+	case "video":
+		return video, channel.MsgTypeVideo, true
+	default:
+		return mediaBody{}, channel.MsgTypeUnknown, false
+	}
+}
+
+// attachments lists the downloadable media on this callback, in the order the
+// user sent it. A body with no url is skipped: there is nothing to fetch, and
+// carrying it forward would only produce an intent-ledger row for an object
+// that can never exist.
+func (mc aibotMsgCallback) attachments() []InboundMedia {
+	var out []InboundMedia
+	add := func(body mediaBody, kind channel.MsgType) {
+		if strings.TrimSpace(body.URL) == "" {
+			return
+		}
+		out = append(out, InboundMedia{Kind: kind, URL: body.URL, AESKey: body.AESKey})
+	}
+	if body, kind, ok := mediaFor(mc.MsgType, mc.Image, mc.File, mc.Video); ok {
+		add(body, kind)
+		return out
+	}
+	if !strings.EqualFold(mc.MsgType, "mixed") {
+		return nil
+	}
+	for _, item := range mc.Mixed.MsgItem {
+		if body, kind, ok := mediaFor(item.MsgType, item.Image, item.File, item.Video); ok {
+			add(body, kind)
+		}
+	}
+	return out
+}
+
+// ownText is the agent-readable body of this callback, and whether there is
+// one at all.
+//
+// Plain text answers with its body; a photo, file or video answers with a
+// bracketed placeholder, because the bytes arrive later on a detached path
+// and the message has to say something in the meantime (the placeholder is
+// also what survives if the download never succeeds); 图文混排 answers with
+// its runs rendered in the order they were composed, so "look at this" still
+// reads above the picture it was written about.
+//
+// Everything else — a standalone voice note, a location card, a kind WeCom
+// adds next year — answers false and takes the receipt path.
+func (mc aibotMsgCallback) ownText() (string, bool) {
+	switch strings.ToLower(mc.MsgType) {
+	case "text":
+		return mc.Text.Content, true
+	case "image", "file", "video":
+		body, kind, _ := mediaFor(mc.MsgType, mc.Image, mc.File, mc.Video)
+		if strings.TrimSpace(body.URL) == "" {
+			return "", false
+		}
+		return mediaPlaceholder(kind), true
+	case "mixed":
+		var runs []string
+		for _, item := range mc.Mixed.MsgItem {
+			if s := item.render(); s != "" {
+				runs = append(runs, s)
+			}
+		}
+		if len(runs) == 0 {
+			return "", false
+		}
+		return strings.Join(runs, "\n"), true
+	default:
+		return "", false
+	}
 }
 
 // aibotEventCallback is the body of an aibot_event_callback frame. We only
@@ -125,15 +286,34 @@ type InboundMessage struct {
 	// SenderUserID is the userid of the person who typed the message.
 	SenderUserID string `json:"sender_user_id,omitempty"`
 
-	// Content is the human-readable text body when MsgType == "text";
-	// empty for media / events. The cross-platform envelope's Text field
-	// is populated from this.
+	// Content is the human-readable body: the user's words and the
+	// placeholders standing in for their attachments. The cross-platform
+	// envelope's Text field is populated from this.
 	Content string `json:"content,omitempty"`
 
 	// ReqID is the frame req_id the server sent this message with. We
 	// keep it so a future aibot_respond_msg (5s window) can echo it back;
 	// iteration 1 uses aibot_send_msg unconditionally and does not need it.
 	ReqID string `json:"req_id,omitempty"`
+
+	// Media lists the attachments to fetch, in the order the user sent them.
+	// It is the MediaResolver's input and travels only in
+	// channel.InboundMessage.Raw, which the engine passes along in memory and
+	// never persists — the urls lapse after five minutes and the keys are
+	// single-use, so neither belongs in a table or a log line.
+	Media []InboundMedia `json:"media,omitempty"`
+}
+
+// InboundMedia is one downloadable attachment on a callback.
+type InboundMedia struct {
+	// Kind is the normalized media type the attachment row is labelled with.
+	Kind channel.MsgType `json:"kind"`
+	// URL is the pre-signed COS address, good for five minutes, needing no
+	// access token.
+	URL string `json:"url"`
+	// AESKey unlocks what comes back from URL. Long-connection mode mints one
+	// per url; see media_crypt.go.
+	AESKey string `json:"aeskey"`
 }
 
 // channelMessageFromCallback converts a wecom-side aibot_msg_callback into
@@ -148,7 +328,11 @@ type InboundMessage struct {
 // A user @-mentioning the bot in a group is not distinguishable from a raw
 // group message on the wire — WeCom only forwards to the bot when it was
 // addressed, so any received group message counts as addressed.
-func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string) channel.InboundMessage {
+//
+// text is the agent-readable body the caller already resolved via ownText.
+// It is passed in rather than recomputed because the caller has to know
+// whether the message is routable at all before it gets here.
+func channelMessageFromCallback(botID string, mc aibotMsgCallback, text, reqID string) channel.InboundMessage {
 	chatType := channel.ChatTypeP2P
 	if strings.EqualFold(mc.ChatType, "group") {
 		chatType = channel.ChatTypeGroup
@@ -167,8 +351,9 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		ChatType:     mc.ChatType,
 		ChatID:       chatID,
 		SenderUserID: senderID,
-		Content:      mc.Text.Content,
+		Content:      text,
 		ReqID:        reqID,
+		Media:        mc.attachments(),
 	}
 	raw, _ := json.Marshal(wm)
 
@@ -176,7 +361,7 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		EventID:        mc.MsgID,
 		MessageID:      mc.MsgID,
 		Type:           channelMsgType(mc.MsgType),
-		Text:           mc.Text.Content,
+		Text:           text,
 		AddressedToBot: true,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
@@ -185,7 +370,13 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		// command" reply that just clutters the conversation. wecom is
 		// alone on this — Slack/Lark keep the historical "let the agent
 		// see /issue and respond too" behaviour.
-		SkipAgentRun: isIssueCommand(mc.Text.Content),
+		//
+		// Read off the resolved body rather than mc.Text.Content: a 图文混排
+		// whose first run is "/issue 登录坏了" and whose second is a
+		// screenshot is one issue-filing message, and the raw text field is
+		// empty on that callback. Identical for a plain text message, where
+		// the resolved body IS mc.Text.Content.
+		SkipAgentRun: isIssueCommand(text),
 		Source: channel.Source{
 			ChannelType: TypeWecom,
 			ChatID:      chatID,
@@ -230,12 +421,24 @@ func channelMsgType(wecomType string) channel.MsgType {
 		return channel.MsgTypeAudio
 	case "video":
 		return channel.MsgTypeVideo
+	case "mixed":
+		// 图文混排: text runs and attachments interleaved. It maps to Text
+		// because the message IS text once ownText has rendered it — runs in
+		// composition order, each attachment standing in as its placeholder —
+		// and the attachments travel separately as MediaRefs, exactly as they
+		// do for Lark's `post`, the same shape under another name:
+		// lark/feishu_channel.go:167 maps post → MsgTypeText while
+		// lark/media_ingest.go:272 pulls that same post's img/media spans.
+		//
+		// This line previously read Unknown, and the comment there was right
+		// for the code that existed: dispatchFrame routed only msgtype ==
+		// "text", so a mixed message never reached normalization and calling
+		// it Text would have claimed a routing that did not happen. That
+		// claim is what this change makes true. The two must land together —
+		// mapping to Text without the routing is the dead, misleading
+		// mapping the old comment warned about.
+		return channel.MsgTypeText
 	default:
-		// Includes "mixed" (text + media): dispatchFrame only routes msgtype
-		// == "text", so anything else is answered with the text-only receipt
-		// and never reaches this normalization. Kept as Unknown rather than
-		// mapping "mixed" → Text, which was dead and implied mixed messages
-		// were routed as text when they are not.
 		return channel.MsgTypeUnknown
 	}
 }

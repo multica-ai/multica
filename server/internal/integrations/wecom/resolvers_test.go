@@ -87,12 +87,30 @@ func TestSessionBinder_BindMediaIsNoop(t *testing.T) {
 
 func TestNewResolverSet_WiresAllResolvers(t *testing.T) {
 	t.Parallel()
-	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil)
+	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("NewResolverSet left a required resolver nil")
 	}
 	if set.OriginType != originWecomChat {
 		t.Errorf("OriginType = %q, want %q", set.OriginType, originWecomChat)
+	}
+	// A deployment with no object store passes nil and must degrade to
+	// placeholder text, which the Router only does when Media is nil.
+	if set.Media != nil {
+		t.Error("nil media argument produced a non-nil Media resolver")
+	}
+	// And a configured one must actually reach the Router — this is the
+	// whole wiring, and a resolver built at boot and dropped here would look
+	// exactly like media ingestion never having been written.
+	media := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
+	withMedia := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, media)
+	if withMedia.Media == nil {
+		t.Fatal("a media resolver was passed and dropped")
+	}
+	if !withMedia.Media.HasMedia(mediaMessage(t, "image", map[string]any{
+		"image": map[string]any{"url": "https://cos.invalid/a", "aeskey": testAESKey},
+	})) {
+		t.Error("the wired resolver does not recognize a media message")
 	}
 }
 

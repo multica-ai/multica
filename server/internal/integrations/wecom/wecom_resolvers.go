@@ -48,10 +48,13 @@ func wecomMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // Typing as a no-op.
 //
 // The replier is optional: pass nil to disable outbound binding prompts.
+// Media is optional too: pass nil when no object-storage backend is
+// configured, and inbound attachments degrade to their placeholder text.
 func NewResolverSet(
 	store *Store,
 	session engineSessionBinder,
 	replier engine.OutboundReplier,
+	media engine.MediaResolver,
 ) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &installationResolver{store: store},
@@ -60,6 +63,12 @@ func NewResolverSet(
 		Session:      &sessionBinder{session: session},
 		Audit:        &auditor{store: store},
 		OriginType:   originWecomChat,
+		// Assigned straight through: media is already an interface, so a nil
+		// argument lands as a nil interface and the Router's `set.Media !=
+		// nil` guard holds. (DingTalk wraps its equivalent in an if, but its
+		// nil-check is there for *ackNotifier, a concrete pointer that would
+		// otherwise become a non-nil typed nil.)
+		Media: media,
 	}
 	if replier != nil {
 		set.Replier = replier
