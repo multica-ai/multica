@@ -280,6 +280,11 @@ type Handler struct {
 	// see wecom/binding.go). Nil disables the redeem endpoint (returns 503)
 	// and the OutboundReplier's binding-prompt path.
 	WecomBindingTokens WecomBindingRedeemer
+
+	// WecomCredentialProbe overrides the install-time control check. Nil in
+	// production, which gets the real handshake probe; tests inject a fake so
+	// the install path runs without a socket.
+	WecomCredentialProbe wecom.CredentialProbe
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in

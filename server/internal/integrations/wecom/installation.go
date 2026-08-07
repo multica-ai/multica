@@ -46,17 +46,36 @@ type InstallationService struct {
 	store *Store
 	tx    engine.TxStarter
 	box   *secretbox.Box
+
+	// probe proves the caller holds the bot's live credentials before the
+	// reclaim below acts on them. Nil disables the check — a deployment that
+	// cannot reach WeCom at install time keeps the old behaviour rather than
+	// being unable to install at all.
+	probe CredentialProbe
+}
+
+// InstallationOption configures the service at construction.
+type InstallationOption func(*InstallationService)
+
+// WithCredentialProbe installs the control check. Production passes
+// NewHandshakeProbe(nil, ""); tests pass a fake.
+func WithCredentialProbe(p CredentialProbe) InstallationOption {
+	return func(s *InstallationService) { s.probe = p }
 }
 
 // NewInstallationService binds the service to a queries handle, a transaction
 // starter (so the reclaim-then-upsert runs atomically), and a secretbox keyed
 // for at-rest encryption. Returns an error when the box is nil; callers should
 // surface it (do not fall back to plaintext).
-func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secretbox.Box) (*InstallationService, error) {
+func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secretbox.Box, opts ...InstallationOption) (*InstallationService, error) {
 	if box == nil {
 		return nil, errors.New("wecom: InstallationService requires a non-nil secretbox.Box")
 	}
-	return &InstallationService{store: NewStore(queries), tx: tx, box: box}, nil
+	svc := &InstallationService{store: NewStore(queries), tx: tx, box: box}
+	for _, o := range opts {
+		o(svc)
+	}
+	return svc, nil
 }
 
 // Upsert creates or refreshes an installation row. The conflict key on
@@ -67,6 +86,29 @@ func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secre
 func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) (Installation, error) {
 	if err := validateInstallationParams(p); err != nil {
 		return Installation{}, err
+	}
+	// Prove control before the reclaim below acts on somebody else's row.
+	//
+	// idx_channel_installation_type_appid is UNIQUE on
+	// (channel_type, config->>'app_id') with NO workspace in it, so the
+	// routing slot for a bot id is global. ReclaimDeadChannelInstallationByAppID
+	// then hard-deletes the row holding that slot along with every user
+	// binding, chat-session binding and pending token beneath it.
+	//
+	// The query's own comment states the premise this restores: "workspace B,
+	// which proves control by holding the same app credentials, rebinds."
+	// Nothing checked that. Bot ids are not secret — they are visible to every
+	// member of the workspace using the bot — so before this, an admin of ANY
+	// workspace could type a known bot id with a junk secret and destroy a
+	// revoked owner's installation and all of its bindings.
+	//
+	// Never probe a bot that is already connected: WeCom allows one live
+	// subscriber, and a second subscribe displaces the first. The caller only
+	// reaches Upsert for a bot it is about to (re)bind.
+	if s.probe != nil {
+		if err := s.probe.Probe(ctx, p.BotID, p.Secret); err != nil {
+			return Installation{}, err
+		}
 	}
 	sealed, err := s.box.Seal([]byte(p.Secret))
 	if err != nil {

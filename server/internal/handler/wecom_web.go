@@ -186,6 +186,19 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "this bot is connected to an archived agent in this workspace — restore that agent, or disconnect its bot, before connecting it here")
 		case errors.Is(err, wecom.ErrBotOwnedByAnotherWorkspace):
 			writeError(w, http.StatusConflict, "this bot is already connected to a different Multica workspace — disconnect it there before connecting it here")
+		case errors.Is(err, wecom.ErrCredentialsRejected):
+			// WeCom itself refused the pair. This is the one branch entitled
+			// to blame the credentials, and the only one the admin can act on
+			// by going back to the console.
+			writeError(w, http.StatusBadRequest, "WeCom rejected this Bot ID and secret — check both on the WeCom admin console, and that the bot is a smart bot with the long connection enabled")
+		case errors.Is(err, wecom.ErrCredentialsUnverifiable):
+			// The deployment could not reach WeCom. Reporting this as a bad
+			// credential sends the admin to rotate a secret that was fine —
+			// and a rotated WeCom secret cannot be recovered. 503: nothing is
+			// wrong with the input, the check could not be made.
+			slog.Warn("wecom install could not verify the bot",
+				"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
+			writeError(w, http.StatusServiceUnavailable, "could not reach WeCom to verify this bot — the credentials were not changed; try again in a moment")
 		default:
 			slog.Warn("wecom install failed",
 				"error", err, "workspace_id", uuidToString(wsUUID), "agent_id", uuidToString(agentUUID))
@@ -257,7 +270,15 @@ func (h *Handler) wecomInstallService() *wecom.InstallationService {
 	if !ok || res == nil || res.Box == nil {
 		return nil
 	}
-	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box)
+	// The probe is what makes the reclaim inside Upsert safe to run against a
+	// row this caller may not own. h.WecomCredentialProbe is a test seam;
+	// production leaves it nil and gets the real handshake.
+	probe := h.WecomCredentialProbe
+	if probe == nil {
+		probe = wecom.NewHandshakeProbe(nil, "")
+	}
+	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box,
+		wecom.WithCredentialProbe(probe))
 	if err != nil {
 		return nil
 	}
