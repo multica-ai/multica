@@ -463,6 +463,32 @@ A missing policy callback, unparseable params, or an options list with no usable
 answer all deny (an ACP `cancelled` outcome where no rejection option is on
 offer).
 
+**The seam is partial on hermes, measured 2026-08-07 (hermes 0.16.0, two live
+`hermes acp` runs).** Hermes asks only for file edits and for shell commands it
+judges dangerous; `terminal` with a harmless command, `read_file`,
+`search_files`, `todo` and MCP tool calls all executed with no
+`session/request_permission` at all. Read-only built-ins are therefore ungated on
+this seam today. Kimi and Kiro are unmeasured and the note in `hermes.go` implies
+the same selective shape. The adapter rows stay because removing them makes the
+daemon refuse to start these runtimes, which is worse than a partial gate;
+closing the gap needs either a hermes-side ask-for-everything setting or a Firtal
+harness like Pi's.
+
+Neither does the request carry a tool name. Hermes sends prose in `title`
+("Approve edit: /tmp/x.txt", "delete in root path: rm -rf ."), so `acpToolName`
+reads `rawInput` first — `rawInput.tool` for an edit approval, and
+`{"command","description"}` with kind `execute` for a dangerous command, which is
+hermes' `terminal` tool. Resolving from the title alone asked the policy about
+"Approve edit", which matches no capability row and denied every edit.
+
+Hermes' inventory is measured by `probeHermesTools`, which reads the Multica MCP
+channel and re-spells each name the way hermes calls it — `mcp_multica_<tool>`,
+with every character outside `[A-Za-z0-9_]` replaced by `_`. Its own built-ins
+never cross the MCP wire and no hermes command lists them, so the names measured
+executing in the live runs (`terminal`, `read_file`, `write_file`, `patch`,
+`search_files`, `todo`) are carried as `Native`, the same blind-spot union Pi
+uses.
+
 ### OpenCode plugin adapter
 
 OpenCode exposes no provider-native hook file, but it loads plugins from

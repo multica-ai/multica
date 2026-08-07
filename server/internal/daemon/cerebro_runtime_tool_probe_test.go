@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -92,23 +93,63 @@ func TestProbeMulticaMCPToolsMeasuresPiSurface(t *testing.T) {
 	}
 }
 
-func TestParseHermesToolsets(t *testing.T) {
-	output := strings.Join([]string{
-		"Built-in toolsets (cli):",
-		"  ✓ enabled  web  🔍 Web Search & Scraping",
-		"  ✓ enabled  terminal  💻 Terminal & Processes",
-		"  ✗ disabled  video  🎬 Video Analysis",
-		"",
-	}, "\n")
-
-	got := parseHermesToolsets(output)
-	want := []string{"web", "terminal"}
-	if len(got) != len(want) {
-		t.Fatalf("parsed %v, want %v", got, want)
+// TestHermesInventoryIsMeasured is the regression guard for #4634: hermes with
+// no probe reported discovery_method "not measured" with zero tools, and every
+// task claim on a hermes runtime failed with a 500 for a full day.
+func TestHermesInventoryIsMeasured(t *testing.T) {
+	entry, ok := providerInventories["hermes"]
+	if !ok || entry.Probe == nil {
+		t.Fatal("hermes has no probe; its runtimes report not-measured and every claim fails")
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("parsed %v, want %v", got, want)
+	// The MCP channel cannot see hermes' own built-ins, so the names measured in
+	// the live ACP run are carried as Native. Losing them denies every file and
+	// terminal call the agent makes.
+	for _, want := range []string{"terminal", "read_file", "write_file", "patch"} {
+		if !slices.Contains(entry.Native, want) {
+			t.Errorf("hermes Native is missing %q, a built-in measured executing in a live acp run", want)
+		}
+	}
+}
+
+// TestProbeHermesToolsMeasuresACallableSurface is the integration proof: the
+// probe must answer with a non-empty list in which every MCP name is spelled the
+// way hermes calls it, and the built-ins are present. Skipped when no multica
+// binary is reachable.
+func TestProbeHermesToolsMeasuresACallableSurface(t *testing.T) {
+	if _, err := exec.LookPath("multica"); err != nil {
+		t.Skip("multica binary not on PATH; skipping the live MCP channel probe")
+	}
+	t.Setenv("MULTICA_PI_HARNESS_COMMAND", "multica")
+
+	tools, ok := probeProviderTools("hermes", "")
+	if !ok || len(tools) == 0 {
+		t.Fatal("hermes probe answered with nothing; the runtime would still report not-measured and every claim would fail")
+	}
+	if !slices.Contains(tools, "terminal") {
+		t.Error("hermes inventory lost its built-ins")
+	}
+	mcpNames := 0
+	for _, name := range tools {
+		if strings.HasPrefix(name, hermesMCPToolPrefix) {
+			mcpNames++
+		}
+	}
+	if mcpNames == 0 {
+		t.Errorf("no MCP tool is spelled %s*; hermes would be denied every Multica tool", hermesMCPToolPrefix)
+	}
+}
+
+// TestHermesSpellsMCPToolsTheWayItCallsThem pins the spelling measured on
+// 2026-08-07: hermes calls an MCP tool as mcp_<server>_<tool> and replaces every
+// character outside [A-Za-z0-9_]. A row spelled any other way matches no call.
+func TestHermesSpellsMCPToolsTheWayItCallsThem(t *testing.T) {
+	for raw, want := range map[string]string{
+		"get_me": "mcp_multica_get_me",
+		"firtal-data-sources-registry__discover_access": "mcp_multica_firtal_data_sources_registry__discover_access",
+	} {
+		got := hermesMCPToolPrefix + hermesUnsafeToolChar.ReplaceAllString(raw, "_")
+		if got != want {
+			t.Errorf("hermes spelling of %q = %q, want %q", raw, got, want)
 		}
 	}
 }

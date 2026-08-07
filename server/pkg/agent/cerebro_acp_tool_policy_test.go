@@ -125,3 +125,26 @@ func TestACPToolNameFallsBackToExplicitName(t *testing.T) {
 		t.Fatalf("acpToolName = %q, want multica__get_me", got)
 	}
 }
+
+// The two permission shapes measured in a live hermes run on 2026-08-07. Both
+// carry a title that is prose, not a tool name — resolving from the title alone
+// asks the policy about "Approve edit" and "delete in root path", which match no
+// inventory row, so every edit and every dangerous command would be denied.
+func TestACPToolNameFromMeasuredHermesShapes(t *testing.T) {
+	for name, params := range map[string]string{
+		"write_file": `{"toolCall":{"title":"Approve edit: /tmp/x.txt","kind":"edit",
+			"rawInput":{"tool":"write_file","arguments":{"path":"/tmp/x.txt"}}}}`,
+		"patch": `{"toolCall":{"title":"Approve edit: /tmp/x.txt","kind":"edit",
+			"rawInput":{"tool":"patch","arguments":{"path":"/tmp/x.txt"}}}}`,
+		"terminal": `{"toolCall":{"title":"delete in root path: rm -rf .","kind":"execute",
+			"rawInput":{"command":"rm -rf .","description":"delete in root path"}}}`,
+	} {
+		var req acpPermissionRequest
+		if err := json.Unmarshal([]byte(params), &req); err != nil {
+			t.Fatal(err)
+		}
+		if got := acpToolName(req); got != name {
+			t.Errorf("acpToolName = %q, want %q", got, name)
+		}
+	}
+}

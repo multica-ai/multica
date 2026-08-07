@@ -196,16 +196,24 @@ func TestPostJSONWithRetry_PermanentBailsImmediately(t *testing.T) {
 func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
 	// Use the real sleeper here so we can observe a cancel preempting it.
 	var calls atomic.Int32
+	// served fires once the first attempt has actually been answered. Cancelling
+	// on a 50ms timer instead made this test read 0 calls on a loaded runner,
+	// because the request had not left the client yet (same failure shape as
+	// #2936). The cancel is now ordered against the attempt, not against a clock.
+	served := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusBadGateway)
+		select {
+		case served <- struct{}{}:
+		default:
+		}
 	}))
 	defer srv.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		// Cancel quickly so the first sleep is aborted long before its 1s.
-		time.Sleep(50 * time.Millisecond)
+		<-served
 		cancel()
 	}()
 

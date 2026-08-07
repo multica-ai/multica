@@ -44,18 +44,22 @@ var providerAdapters = map[string]ProviderAdapter{
 	// approvals, so every call is resolved rather than pre-approved for the
 	// session, and it denies when no policy callback is wired.
 	//
-	// CompleteBeforeCall here rests on the ACP contract, not yet on a measured
-	// run: the protocol defines the permission request as the thing an agent
-	// sends before running a tool, and the auto-approve modes that suppressed
-	// it (HERMES_YOLO_MODE, --trust-all-tools) are gone. What is NOT yet proven
-	// on a Firtal host is that a given CLI build asks for EVERY tool rather
-	// than only the mutating ones — the pre-existing note in hermes.go says
-	// kimi asks "on every Shell / file-mutating tool call", which would leave
-	// read-only tools ungated. Confirm with one live run per CLI (drive a
-	// read-only tool with a Deny in place and assert it does not execute)
-	// before treating this row as measured. If a build turns out to ask
-	// selectively, that CLI must move back out of this map rather than keep a
-	// contract it does not satisfy.
+	// MEASURED 2026-08-07, hermes 0.16.0, two live `hermes acp` runs: hermes
+	// asks SELECTIVELY, not for every tool. It sent a permission request for a
+	// file edit (title "Approve edit: <path>", rawInput.tool) and for a
+	// dangerous shell command (title "<reason>: <cmd>", kind execute), but ran
+	// terminal `echo`, read_file, search_files, todo and an MCP tool with no
+	// request at all. So CompleteBeforeCall is true for the mutating and
+	// dangerous calls only — read-only built-ins are ungated on this seam.
+	// Kimi and Kiro are unmeasured; the pre-existing note in hermes.go says
+	// kimi asks "on every Shell / file-mutating tool call", i.e. the same
+	// selective shape.
+	//
+	// The row stays because removing it makes the daemon refuse to start
+	// hermes at all, which is strictly worse than a partial gate. Closing the
+	// gap needs a decision (a hermes-side ask-for-everything setting, or a
+	// Firtal harness like Pi's) — do not silently widen this comment into a
+	// claim of completeness without one.
 	// OpenCode has no provider-native hook file either, but it loads plugins
 	// from .opencode/plugin and fires tool.execute.before ahead of every tool
 	// it runs; throwing from that hook aborts the call. The Firtal plugin

@@ -123,15 +123,18 @@ func TestReportLocalSkillResult_AbortsOnContextCancel(t *testing.T) {
 	runtimeReportBackoffs = []time.Duration{0, 200 * time.Millisecond}
 	t.Cleanup(func() { runtimeReportBackoffs = prev })
 
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Cancel from inside the handler, not from a wall-clock timer: the first
+	// attempt is already counted by the time we get here, so the cancel is
+	// guaranteed to land in the 200ms backoff before attempt two. A timer
+	// races the request on a loaded CI runner and fires at 0 attempts.
 	d, calls := localSkillReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		cancel()
 		http.Error(w, "{}", http.StatusInternalServerError)
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		cancel()
-	}()
 	d.reportLocalSkillListResult(ctx, Runtime{ID: "rt-1"}, "req-1", map[string]any{"status": "completed"})
 
 	// Exactly the first attempt should have hit the server; the cancel
