@@ -115,6 +115,47 @@ JOIN agent a ON a.id = ci.agent_id
 WHERE ci.channel_type = sqlc.arg('channel_type')
   AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text;
 
+-- name: LockChannelInstallationAppIDSlot :exec
+-- Serializes everything an install does to one (channel_type, config->>'app_id')
+-- routing slot: read the current owner, decide, reclaim, upsert. Taken as the
+-- first statement of the install transaction and released by COMMIT/ROLLBACK,
+-- so the owner read below cannot go stale under a concurrent install or
+-- reconnect — a plain read-then-write leaves a TOCTOU window in which two
+-- callers both see "no live owner" and both go on to touch the slot.
+--
+-- Two-key form: the first key namespaces by channel so a feishu app_id and a
+-- wecom bot id that hash alike do not serialize against each other. hashtext
+-- collisions inside one channel only cost extra serialization, never
+-- correctness. pg_advisory_xact_lock (not pg_try_) so a second caller waits
+-- its turn rather than failing.
+SELECT pg_advisory_xact_lock(
+    hashtext(sqlc.arg('channel_type')::text),
+    hashtext(sqlc.arg('app_id')::text)
+);
+
+-- name: GetChannelInstallationSlotOwnerByAppID :one
+-- Everything the install path needs to classify the current holder of a
+-- (channel_type, config->>'app_id') slot BEFORE it acts on it, in one read.
+-- Distinct from GetChannelInstallationOwnerByAppID, which is the after-the-fact
+-- "name the conflict" read and INNER JOINs the agent away.
+--
+-- Here the joins are LEFT so an ORPHAN row survives the read: with no FKs
+-- (MUL-3515 §4) an installation outlives a deleted workspace or agent, and the
+-- caller has to tell "orphan, reclaimable" apart from "live owner, refuse".
+-- workspace_exists / agent_exists carry that; status and agent_archived_at
+-- carry the rest of ReclaimDeadChannelInstallationByAppID's own definition of
+-- dead, so the caller can predict what the reclaim would do without running it.
+-- pgx.ErrNoRows means the slot is free.
+SELECT ci.id, ci.workspace_id, ci.agent_id, ci.status,
+       a.archived_at AS agent_archived_at,
+       (a.id IS NOT NULL)::boolean AS agent_exists,
+       (w.id IS NOT NULL)::boolean AS workspace_exists
+FROM channel_installation ci
+LEFT JOIN agent a ON a.id = ci.agent_id
+LEFT JOIN workspace w ON w.id = ci.workspace_id
+WHERE ci.channel_type = sqlc.arg('channel_type')
+  AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text;
+
 -- name: ReclaimDeadChannelInstallationByAppID :one
 -- Rebind cleanup gate. Frees the (channel_type, config->>'app_id') routing slot
 -- so a valid new agent can (re)bind a bot whose previous owner is DEAD, and, in

@@ -1011,6 +1011,60 @@ func (q *Queries) GetChannelInstallationOwnerByAppID(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getChannelInstallationSlotOwnerByAppID = `-- name: GetChannelInstallationSlotOwnerByAppID :one
+SELECT ci.id, ci.workspace_id, ci.agent_id, ci.status,
+       a.archived_at AS agent_archived_at,
+       (a.id IS NOT NULL)::boolean AS agent_exists,
+       (w.id IS NOT NULL)::boolean AS workspace_exists
+FROM channel_installation ci
+LEFT JOIN agent a ON a.id = ci.agent_id
+LEFT JOIN workspace w ON w.id = ci.workspace_id
+WHERE ci.channel_type = $1
+  AND ci.config ->> 'app_id' = $2::text
+`
+
+type GetChannelInstallationSlotOwnerByAppIDParams struct {
+	ChannelType string `json:"channel_type"`
+	AppID       string `json:"app_id"`
+}
+
+type GetChannelInstallationSlotOwnerByAppIDRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	Status          string             `json:"status"`
+	AgentArchivedAt pgtype.Timestamptz `json:"agent_archived_at"`
+	AgentExists     bool               `json:"agent_exists"`
+	WorkspaceExists bool               `json:"workspace_exists"`
+}
+
+// Everything the install path needs to classify the current holder of a
+// (channel_type, config->>'app_id') slot BEFORE it acts on it, in one read.
+// Distinct from GetChannelInstallationOwnerByAppID, which is the after-the-fact
+// "name the conflict" read and INNER JOINs the agent away.
+//
+// Here the joins are LEFT so an ORPHAN row survives the read: with no FKs
+// (MUL-3515 §4) an installation outlives a deleted workspace or agent, and the
+// caller has to tell "orphan, reclaimable" apart from "live owner, refuse".
+// workspace_exists / agent_exists carry that; status and agent_archived_at
+// carry the rest of ReclaimDeadChannelInstallationByAppID's own definition of
+// dead, so the caller can predict what the reclaim would do without running it.
+// pgx.ErrNoRows means the slot is free.
+func (q *Queries) GetChannelInstallationSlotOwnerByAppID(ctx context.Context, arg GetChannelInstallationSlotOwnerByAppIDParams) (GetChannelInstallationSlotOwnerByAppIDRow, error) {
+	row := q.db.QueryRow(ctx, getChannelInstallationSlotOwnerByAppID, arg.ChannelType, arg.AppID)
+	var i GetChannelInstallationSlotOwnerByAppIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.Status,
+		&i.AgentArchivedAt,
+		&i.AgentExists,
+		&i.WorkspaceExists,
+	)
+	return i, err
+}
+
 const getChannelOutboundCardByTask = `-- name: GetChannelOutboundCardByTask :one
 SELECT id, chat_session_id, task_id, channel_type, channel_chat_id, channel_card_message_id, status, last_patched_at, created_at FROM channel_outbound_card_message
 WHERE task_id = $1
@@ -1264,6 +1318,35 @@ func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, arg L
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockChannelInstallationAppIDSlot = `-- name: LockChannelInstallationAppIDSlot :exec
+SELECT pg_advisory_xact_lock(
+    hashtext($1::text),
+    hashtext($2::text)
+)
+`
+
+type LockChannelInstallationAppIDSlotParams struct {
+	ChannelType string `json:"channel_type"`
+	AppID       string `json:"app_id"`
+}
+
+// Serializes everything an install does to one (channel_type, config->>'app_id')
+// routing slot: read the current owner, decide, reclaim, upsert. Taken as the
+// first statement of the install transaction and released by COMMIT/ROLLBACK,
+// so the owner read below cannot go stale under a concurrent install or
+// reconnect — a plain read-then-write leaves a TOCTOU window in which two
+// callers both see "no live owner" and both go on to touch the slot.
+//
+// Two-key form: the first key namespaces by channel so a feishu app_id and a
+// wecom bot id that hash alike do not serialize against each other. hashtext
+// collisions inside one channel only cost extra serialization, never
+// correctness. pg_advisory_xact_lock (not pg_try_) so a second caller waits
+// its turn rather than failing.
+func (q *Queries) LockChannelInstallationAppIDSlot(ctx context.Context, arg LockChannelInstallationAppIDSlotParams) error {
+	_, err := q.db.Exec(ctx, lockChannelInstallationAppIDSlot, arg.ChannelType, arg.AppID)
+	return err
 }
 
 const markChannelInboundDedupProcessed = `-- name: MarkChannelInboundDedupProcessed :execrows

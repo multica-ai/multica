@@ -29,19 +29,23 @@ package wecom
 // hang up. A wrong secret is refused with a non-zero errcode, which is
 // exactly the signal.
 //
-// The probe never runs against a bot somebody is actively connected to.
+// The probe never runs against a bot somebody else is actively connected to.
 // WeCom allows one live subscriber per bot, so a probe against a live slot
 // would displace the rightful owner's connection, whose supervisor would
-// reconnect and displace the probe in turn. The caller checks for a live
-// owner first and lets the unique index produce the accurate conflict
-// instead; the case the probe exists for — a revoked row about to be
-// reclaimed — has nothing connected by definition.
+// reconnect and displace the probe in turn — and if the request is then
+// refused, a rejected install has knocked a live bot offline for nothing.
+// InstallationService.Upsert enforces this: it takes the slot's advisory lock,
+// reads the current owner, and returns the conflict without probing for any
+// live owner other than the caller's own row (see botSlotConflictErr). What
+// reaches the probe is a free slot, a revoked row, an orphan, or a re-install
+// of the caller's own bot — nothing anybody else is connected to.
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 )
 
 // ErrCredentialsRejected is WeCom saying the pair is not valid: a wrong
@@ -55,6 +59,26 @@ var ErrCredentialsRejected = errors.New("wecom: WeCom rejected this bot id and s
 // simply could not reach WeCom sends them to rotate a secret that was fine.
 var ErrCredentialsUnverifiable = errors.New("wecom: could not reach WeCom to verify this bot")
 
+// rejectionErrCodes are the WeCom global error codes (document/path/90313)
+// documented as a refusal of the credential pair itself — the only answers
+// entitled to tell an admin their Bot ID or secret is wrong.
+//
+// Everything else non-zero is ErrCredentialsUnverifiable, deliberately. WeCom
+// only guarantees that 0 means success; the subscribe path is also under
+// frequency and concurrency protection (45009, 45033), and the platform can
+// fail on its own account. Reading any non-zero code as "wrong secret" pushes
+// an admin to rotate a long-connection secret that was fine, and a rotated one
+// cannot be recovered — the exact damage this file exists to prevent. So the
+// list is a whitelist and the default is fail-closed: refuse the install, keep
+// the stored credentials untouched, and say we could not verify.
+//
+// Codes only, never errmsg text: the message is human-facing Chinese prose
+// that WeCom is free to reword.
+var rejectionErrCodes = map[int]struct{}{
+	40001: {}, // 不合法的secret参数 — the secret does not match this bot
+	40013: {}, // 不合法的CorpID — the identity half of the pair is not valid
+}
+
 // credentialProbeTimeout bounds the whole probe. It has to cover a dial and
 // one round trip and nothing else, and it is spent with the admin watching a
 // spinner, so it is short. Sized off the connection's own two constants
@@ -67,9 +91,6 @@ const credentialProbeTimeout = handshakeTimeout + subscribeTimeout
 type CredentialProbe interface {
 	Probe(ctx context.Context, botID, secret string) error
 }
-
-// credentialProbe is the unexported alias the service field uses.
-type credentialProbe = CredentialProbe
 
 // handshakeProbe is the production probe: one connection, one subscribe, no
 // read loop, no registration, no sender published. Nothing else in the
@@ -141,9 +162,19 @@ func (p *handshakeProbe) Probe(ctx context.Context, botID, secret string) error 
 			continue
 		}
 		if env.ErrCode != 0 {
-			// The one answer the admin can act on, and the only branch that
-			// blames their credentials.
-			return fmt.Errorf("%w (errcode %d: %s)", ErrCredentialsRejected, env.ErrCode, env.ErrMsg)
+			if _, rejected := rejectionErrCodes[env.ErrCode]; rejected {
+				// The one answer the admin can act on, and the only branch
+				// that blames their credentials.
+				return fmt.Errorf("%w (errcode %d: %s)", ErrCredentialsRejected, env.ErrCode, env.ErrMsg)
+			}
+			// Unknown non-zero: throttling, a platform-side failure, or a code
+			// WeCom added since. Fail closed rather than blame the secret. The
+			// raw pair is logged here so an operator can see it even if the
+			// caller only surfaces the sentinel, and carried on the error so
+			// the handler's own log line has it too.
+			slog.Warn("wecom credential probe: unrecognized subscribe errcode, treating as unverifiable",
+				"errcode", env.ErrCode, "errmsg", env.ErrMsg)
+			return fmt.Errorf("%w (subscribe returned errcode %d: %s)", ErrCredentialsUnverifiable, env.ErrCode, env.ErrMsg)
 		}
 		return nil
 	}

@@ -272,13 +272,14 @@ func (h *Handler) wecomInstallService() *wecom.InstallationService {
 	}
 	// The probe is what makes the reclaim inside Upsert safe to run against a
 	// row this caller may not own. h.WecomCredentialProbe is a test seam;
-	// production leaves it nil and gets the real handshake.
-	probe := h.WecomCredentialProbe
-	if probe == nil {
-		probe = wecom.NewHandshakeProbe(nil, "")
+	// production leaves it nil and NewInstallationService supplies the real
+	// handshake. There is no wiring that leaves the check off — a nil probe is
+	// a construction error there, not a fail-open mode.
+	var opts []wecom.InstallationOption
+	if h.WecomCredentialProbe != nil {
+		opts = append(opts, wecom.WithCredentialProbe(h.WecomCredentialProbe))
 	}
-	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box,
-		wecom.WithCredentialProbe(probe))
+	svc, err := wecom.NewInstallationService(h.Queries, h.TxStarter, res.Box, opts...)
 	if err != nil {
 		return nil
 	}

@@ -48,32 +48,56 @@ type InstallationService struct {
 	box   *secretbox.Box
 
 	// probe proves the caller holds the bot's live credentials before the
-	// reclaim below acts on them. Nil disables the check — a deployment that
-	// cannot reach WeCom at install time keeps the old behaviour rather than
-	// being unable to install at all.
+	// reclaim below acts on them. Never nil: NewInstallationService defaults it
+	// to the real handshake probe and refuses an explicit nil, and Upsert
+	// refuses to run without one. Proof of control is a security invariant, so
+	// there is no fail-open setting for it — a deployment that cannot reach
+	// WeCom at install time gets a 503 and retries, it does not get to install
+	// unverified credentials over somebody else's row.
 	probe CredentialProbe
 }
 
 // InstallationOption configures the service at construction.
 type InstallationOption func(*InstallationService)
 
-// WithCredentialProbe installs the control check. Production passes
-// NewHandshakeProbe(nil, ""); tests pass a fake.
+// WithCredentialProbe overrides the control check. Production omits it and
+// gets NewHandshakeProbe(nil, ""); tests pass a fake. Passing nil is an error
+// at construction, not a way to turn the check off.
 func WithCredentialProbe(p CredentialProbe) InstallationOption {
 	return func(s *InstallationService) { s.probe = p }
 }
 
+// ErrProbeRequired is returned when a service would otherwise be built — or
+// run — without a credential probe. Proof of control gates a statement that
+// hard-deletes another workspace's installation and every binding under it, so
+// a nil probe is a wiring bug, not a deployment mode. Fail closed at
+// construction so the mistake surfaces at boot rather than on the first
+// install.
+var ErrProbeRequired = errors.New("wecom: InstallationService requires a non-nil CredentialProbe")
+
 // NewInstallationService binds the service to a queries handle, a transaction
-// starter (so the reclaim-then-upsert runs atomically), and a secretbox keyed
-// for at-rest encryption. Returns an error when the box is nil; callers should
-// surface it (do not fall back to plaintext).
+// starter (so the lock-read-probe-reclaim-upsert sequence runs atomically), and
+// a secretbox keyed for at-rest encryption. Returns an error when the box is
+// nil; callers should surface it (do not fall back to plaintext).
+//
+// The credential probe defaults to the real handshake against WeCom. Callers
+// that must not open a socket (tests) pass WithCredentialProbe with a fake;
+// there is no option that leaves the check off.
 func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secretbox.Box, opts ...InstallationOption) (*InstallationService, error) {
 	if box == nil {
 		return nil, errors.New("wecom: InstallationService requires a non-nil secretbox.Box")
 	}
-	svc := &InstallationService{store: NewStore(queries), tx: tx, box: box}
+	svc := &InstallationService{
+		store: NewStore(queries),
+		tx:    tx,
+		box:   box,
+		probe: NewHandshakeProbe(nil, ""),
+	}
 	for _, o := range opts {
 		o(svc)
+	}
+	if svc.probe == nil {
+		return nil, ErrProbeRequired
 	}
 	return svc, nil
 }
@@ -83,33 +107,76 @@ func NewInstallationService(queries *db.Queries, tx engine.TxStarter, box *secre
 // re-running Upsert against an existing (workspace, agent, wecom) triple
 // rotates every field on the row and flips status back to 'active'. The
 // returned Installation reflects the post-write DB state.
+//
+// The whole sequence — lock the bot's routing slot, read its current owner,
+// refuse or probe, reclaim, write — runs inside one transaction. Order is the
+// point:
+//
+//   - idx_channel_installation_type_appid is UNIQUE on
+//     (channel_type, config->>'app_id') with NO workspace in it, so a bot id's
+//     routing slot is global across the deployment, and
+//     ReclaimDeadChannelInstallationByAppID hard-deletes whoever holds it along
+//     with every user binding, chat-session binding and pending token beneath.
+//     Bot ids are not secret — every member talking to the bot can read one —
+//     so the reclaim has to be gated on proof that the caller controls the bot.
+//     That is the probe.
+//
+//   - But the probe is itself a side effect on the live platform: it subscribes,
+//     and WeCom allows exactly one live subscriber per bot, so subscribing
+//     displaces whoever is connected. Running it before knowing who owns the
+//     slot means a request that is about to be REFUSED still knocks the rightful
+//     owner offline — repeat it and it is a denial of service against a bot the
+//     caller was never permitted to touch. So the owner read comes first, and a
+//     request that cannot succeed returns its conflict having touched nothing,
+//     locally or at WeCom.
+//
+//   - Both steps read state that a concurrent install or reconnect can change
+//     underneath them, so they are serialized on the slot itself
+//     (LockChannelInstallationAppIDSlot, a transaction-level advisory lock). A
+//     pre-read outside the transaction would leave the TOCTOU window open.
 func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) (Installation, error) {
 	if err := validateInstallationParams(p); err != nil {
 		return Installation{}, err
 	}
-	// Prove control before the reclaim below acts on somebody else's row.
-	//
-	// idx_channel_installation_type_appid is UNIQUE on
-	// (channel_type, config->>'app_id') with NO workspace in it, so the
-	// routing slot for a bot id is global. ReclaimDeadChannelInstallationByAppID
-	// then hard-deletes the row holding that slot along with every user
-	// binding, chat-session binding and pending token beneath it.
-	//
-	// The query's own comment states the premise this restores: "workspace B,
-	// which proves control by holding the same app credentials, rebinds."
-	// Nothing checked that. Bot ids are not secret — they are visible to every
-	// member of the workspace using the bot — so before this, an admin of ANY
-	// workspace could type a known bot id with a junk secret and destroy a
-	// revoked owner's installation and all of its bindings.
-	//
-	// Never probe a bot that is already connected: WeCom allows one live
-	// subscriber, and a second subscribe displaces the first. The caller only
-	// reaches Upsert for a bot it is about to (re)bind.
-	if s.probe != nil {
-		if err := s.probe.Probe(ctx, p.BotID, p.Secret); err != nil {
-			return Installation{}, err
-		}
+	if s.probe == nil {
+		// Belt and braces for a service built by struct literal rather than
+		// NewInstallationService. Nothing may reach the reclaim unproven, so
+		// this is checked before anything else that could fail first and hide
+		// it.
+		return Installation{}, ErrProbeRequired
 	}
+	if s.tx == nil {
+		return Installation{}, errors.New("wecom: InstallationService requires a transaction starter")
+	}
+
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return Installation{}, fmt.Errorf("wecom: begin install tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.store.WithTx(tx)
+
+	// The serialization boundary. Held until commit/rollback, so every step
+	// below sees one consistent answer for who owns this bot.
+	if err := qtx.Queries.LockChannelInstallationAppIDSlot(ctx, db.LockChannelInstallationAppIDSlotParams{
+		ChannelType: channelTypeWecom,
+		AppID:       p.BotID,
+	}); err != nil {
+		return Installation{}, fmt.Errorf("wecom: lock bot routing slot: %w", err)
+	}
+
+	// Who holds the slot right now — read inside the lock, before anything
+	// external happens.
+	if err := botSlotConflictErr(ctx, qtx, p); err != nil {
+		return Installation{}, err
+	}
+
+	// Nothing live is at stake now: the slot is free, revoked, orphaned, or
+	// already this caller's own. Prove control before the reclaim acts on it.
+	if err := s.probe.Probe(ctx, p.BotID, p.Secret); err != nil {
+		return Installation{}, err
+	}
+
 	sealed, err := s.box.Seal([]byte(p.Secret))
 	if err != nil {
 		return Installation{}, fmt.Errorf("wecom: encrypt secret: %w", err)
@@ -122,7 +189,7 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		return Installation{}, err
 	}
 
-	// Reclaim-then-upsert, atomically. UpsertChannelInstallation conflicts on
+	// Reclaim-then-upsert. UpsertChannelInstallation conflicts on
 	// (workspace_id, agent_id, channel_type), but the (channel_type, app_id)
 	// slot is guarded by idx_channel_installation_type_appid. Disconnect only
 	// flips status to 'revoked' — it does not free the row — so without a
@@ -134,18 +201,11 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	// by a DIFFERENT (workspace, agent), or an orphan whose workspace/agent was
 	// deleted) and clears its dependent rows in the same statement, while
 	// leaving a LIVE owner (active or archived agent) in place to trip the
-	// index below — which botOwnerConflictErr turns into an accurate 409.
-	// Mirrors slack/install.go's persistInstall.
-	if s.tx == nil {
-		return Installation{}, errors.New("wecom: InstallationService requires a transaction starter")
-	}
-	tx, err := s.tx.Begin(ctx)
-	if err != nil {
-		return Installation{}, fmt.Errorf("wecom: begin install tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := s.store.WithTx(tx)
-
+	// index below. botSlotConflictErr has already refused every live owner
+	// above, so reaching that unique violation now means the slot changed hands
+	// despite the lock; botOwnerConflictErr still turns it into an accurate 409
+	// rather than a raw Postgres string. Mirrors slack/install.go's
+	// persistInstall.
 	if _, err := qtx.Queries.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
 		ChannelType: channelTypeWecom,
 		AppID:       p.BotID,
@@ -205,6 +265,60 @@ var (
 
 // pgUniqueViolation is Postgres' unique_violation SQLSTATE.
 const pgUniqueViolation = "23505"
+
+// botSlotConflictErr answers one question: may this install act on the
+// (wecom, bot_id) routing slot at all? It returns the sentinel to refuse with,
+// or nil to proceed. MUST be called inside the transaction holding
+// LockChannelInstallationAppIDSlot — outside it the answer is a guess that a
+// concurrent install or reconnect can invalidate before it is used.
+//
+// It is the gate in front of BOTH side effects Upsert can produce: the probe's
+// subscribe (which displaces whoever is connected to this bot at WeCom) and the
+// reclaim's hard delete (which takes the row and its bindings). A refusal here
+// costs the caller nothing and the current owner nothing.
+//
+// The classification mirrors ReclaimDeadChannelInstallationByAppID's own
+// definition of "dead", so the two cannot drift into disagreeing about which
+// rows are takeable:
+//
+//	no row            → the slot is free.
+//	orphan            → the workspace or agent row is gone; the reclaim frees
+//	                    it and nothing is connected to it.
+//	revoked           → the owner's explicit "I'm done with this bot"; the
+//	                    reclaim takes it (or, if it is this caller's own row,
+//	                    the upsert reactivates it in place).
+//	active, ours      → a re-install or secret rotation of a bot this
+//	                    (workspace, agent) already holds. Not a conflict:
+//	                    the upsert refreshes it in place and the reclaim
+//	                    spares it.
+//	active, somebody  → refused. This is the case the whole gate exists for.
+//	          else's
+func botSlotConflictErr(ctx context.Context, qtx *Store, p InstallationParams) error {
+	owner, err := qtx.Queries.GetChannelInstallationSlotOwnerByAppID(ctx, db.GetChannelInstallationSlotOwnerByAppIDParams{
+		ChannelType: channelTypeWecom,
+		AppID:       p.BotID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("wecom: read bot routing slot owner: %w", err)
+	}
+	switch {
+	case !owner.WorkspaceExists || !owner.AgentExists:
+		return nil
+	case owner.Status == string(InstallationRevoked):
+		return nil
+	case owner.WorkspaceID == p.WorkspaceID && owner.AgentID == p.AgentID:
+		return nil
+	case owner.WorkspaceID != p.WorkspaceID:
+		return ErrBotOwnedByAnotherWorkspace
+	case owner.AgentArchivedAt.Valid:
+		return ErrBotOwnedByArchivedAgent
+	default:
+		return ErrBotOwnedBySameWorkspace
+	}
+}
 
 // botOwnerConflictErr names who holds the (wecom, bot_id) routing slot so the
 // handler can tell the admin where to go, mirroring slack's owner-conflict
