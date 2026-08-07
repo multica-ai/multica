@@ -134,15 +134,24 @@ func unmarshalRuntimeMcpConfig(raw []byte, format string) (map[string]any, error
 }
 
 // stripJSONC rewrites JSONC into strict JSON: `//` and `/* */` comments become
-// spaces and trailing commas before `}` / `]` are dropped. String literals are
-// copied verbatim, so a `//` or a comma inside a command argument survives.
-// Comments are blanked rather than deleted so byte offsets in any parse error
-// still line up with the file the user wrote.
+// spaces and a single trailing comma before `}` / `]` is dropped. String
+// literals are copied verbatim, so a `//` or a comma inside a command argument
+// survives.
+//
+// Output is always the same length as the input — comments and the dropped
+// comma are blanked, never deleted — so a parse-error offset still points at
+// the byte the user actually wrote.
+//
+// Only the LAST comma before a closer is blanked, so genuinely malformed input
+// stays malformed: `[1,,,]` does not silently become `[1]`. This is a
+// pragmatic subset of JSONC covering what CodeBuddy's MCP files use in
+// practice; anything it cannot repair is reported as a parse error rather than
+// guessed at.
 func stripJSONC(raw []byte) []byte {
 	out := make([]byte, 0, len(raw))
-	// Offsets into out of commas that are still candidates for removal. Reset
-	// whenever a value follows, so only a genuinely trailing comma is dropped.
-	var pendingCommas []int
+	// Offset into out of the one comma still eligible for removal, or -1.
+	// Reset by any value token, so only a genuinely trailing comma is dropped.
+	lastComma := -1
 	inString := false
 	escaped := false
 
@@ -165,9 +174,10 @@ func stripJSONC(raw []byte) []byte {
 		switch {
 		case c == '"':
 			inString = true
-			pendingCommas = pendingCommas[:0]
+			lastComma = -1
 			out = append(out, c)
 		case c == '/' && i+1 < len(raw) && raw[i+1] == '/':
+			// Blank through end of line, preserving the newline itself.
 			for i < len(raw) && raw[i] != '\n' {
 				out = append(out, ' ')
 				i++
@@ -176,9 +186,15 @@ func stripJSONC(raw []byte) []byte {
 				out = append(out, raw[i])
 			}
 		case c == '/' && i+1 < len(raw) && raw[i+1] == '*':
-			out = append(out, ' ', ' ')
-			i += 2
-			for i < len(raw) && !(raw[i] == '*' && i+1 < len(raw) && raw[i+1] == '/') {
+			// Blank the whole comment, newlines included, so line numbers and
+			// the total byte count both survive. An unterminated comment
+			// blanks to EOF and the caller reports the resulting parse error.
+			for i < len(raw) {
+				if raw[i] == '*' && i+1 < len(raw) && raw[i+1] == '/' {
+					out = append(out, ' ', ' ')
+					i++ // consume '*'; the loop's i++ consumes '/'
+					break
+				}
 				if raw[i] == '\n' {
 					out = append(out, '\n')
 				} else {
@@ -186,23 +202,19 @@ func stripJSONC(raw []byte) []byte {
 				}
 				i++
 			}
-			if i < len(raw) {
-				out = append(out, ' ')
-				i++ // consume '*'; the loop's i++ consumes '/'
-			}
 		case c == ',':
-			pendingCommas = append(pendingCommas, len(out))
+			lastComma = len(out)
 			out = append(out, c)
 		case c == '}' || c == ']':
-			for _, at := range pendingCommas {
-				out[at] = ' '
+			if lastComma >= 0 {
+				out[lastComma] = ' '
 			}
-			pendingCommas = pendingCommas[:0]
+			lastComma = -1
 			out = append(out, c)
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			out = append(out, c)
 		default:
-			pendingCommas = pendingCommas[:0]
+			lastComma = -1
 			out = append(out, c)
 		}
 	}
@@ -223,8 +235,12 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 	switch provider {
 	case "claude":
 		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
-	case "codebuddy":
-		path, key, format = codebuddyUserMcpConfigPath(home), "mcpServers", "jsonc"
+	// codebuddy is deliberately absent. CodeBuddy loads its own user, project
+	// and local scopes on every launch (codebuddy.go never passes
+	// --strict-mcp-config), and a managed entry already wins a same-name
+	// collision, so the daemon pre-merging them would only duplicate what the
+	// CLI does natively — while losing the scope precedence and the approval
+	// gate that protects project-scope servers.
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {

@@ -43,39 +43,25 @@ func TestBuildCodebuddyArgs_Basic(t *testing.T) {
 	}
 }
 
-// `--strict-mcp-config` means "only use servers from --mcp-config". Passing it
-// unconditionally launched every CodeBuddy agent without a Multica-managed
-// config with zero MCP servers, silently ignoring the user's own
-// ~/.codebuddy.json (MUL-5846).
-func TestBuildCodebuddyArgsOmitsStrictMCPWithoutManagedConfig(t *testing.T) {
+// --strict-mcp-config must never be passed, with or without a managed config.
+// It means "only use servers from --mcp-config" and drops CodeBuddy's user,
+// project and local scopes; measured against the real CLI, strict + a managed
+// config loaded ONLY the managed server, and strict alone loaded nothing at
+// all. The union is what mergeRuntimeAndAgentMcpConfig promises (MUL-5846).
+func TestBuildCodebuddyArgsNeverPassesStrictMCP(t *testing.T) {
 	t.Parallel()
 
-	for _, mcpConfig := range []json.RawMessage{nil, json.RawMessage("null"), json.RawMessage("  \n")} {
+	for _, mcpConfig := range []json.RawMessage{
+		nil,
+		json.RawMessage("null"),
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{"paper":{"command":"paper"}}}`),
+	} {
 		args := buildCodebuddyArgs(ExecOptions{McpConfig: mcpConfig}, slog.Default())
 		for _, arg := range args {
 			if arg == "--strict-mcp-config" {
-				t.Fatalf("mcp_config %q must inherit runtime MCP servers, got %v", string(mcpConfig), args)
+				t.Fatalf("mcp_config %q must not disable CodeBuddy's own MCP scopes, got %v", string(mcpConfig), args)
 			}
-		}
-	}
-}
-
-func TestBuildCodebuddyArgsUsesStrictMCPForManagedConfig(t *testing.T) {
-	t.Parallel()
-
-	// An explicitly empty object is still a managed set: the agent asked for
-	// "no MCP servers", which strict mode is what enforces.
-	for _, mcpConfig := range []string{`{}`, `{"mcpServers":{"paper":{"command":"paper"}}}`} {
-		args := buildCodebuddyArgs(ExecOptions{McpConfig: json.RawMessage(mcpConfig)}, slog.Default())
-		found := false
-		for _, arg := range args {
-			if arg == "--strict-mcp-config" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("managed MCP config %q must enable strict mode, got %v", mcpConfig, args)
 		}
 	}
 }

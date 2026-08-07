@@ -270,52 +270,10 @@ func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
 	}
 }
 
-func TestMergeRuntimeAndAgentMcpConfigCodebuddyMergesLocalAndManaged(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
-	configDir := filepath.Join(home, ".codebuddy")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"claude-only":{"command":"claude-cmd"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	local := `{"mcpServers":{"local-only":{"command":"local-cmd"},"shared":{"command":"local-shared"}}}`
-	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(local), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Adding one managed server must not disable the user's local ones: strict
-	// mode makes this merged document the whole world CodeBuddy sees.
-	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`{"mcpServers":{"shared":{"command":"agent-shared"},"agent-only":{"command":"agent-cmd"}}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document struct {
-		McpServers map[string]map[string]any `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(merged, &document); err != nil {
-		t.Fatal(err)
-	}
-	if len(document.McpServers) != 3 {
-		t.Fatalf("merged servers = %#v", document.McpServers)
-	}
-	if _, ok := document.McpServers["claude-only"]; ok {
-		t.Fatalf("Claude's servers must not leak into a CodeBuddy launch: %#v", document.McpServers)
-	}
-	if got := document.McpServers["local-only"]["command"]; got != "local-cmd" {
-		t.Fatalf("local-only command = %#v", got)
-	}
-	if got := document.McpServers["shared"]["command"]; got != "agent-shared" {
-		t.Fatalf("agent must win on a same-name collision, got %#v", got)
-	}
-}
-
-// An explicitly empty managed object still opts into the merged, task-local
-// config — it means "no servers of my own", not "no MCP at all", so the
-// runtime's servers survive.
-func TestMergeRuntimeAndAgentMcpConfigCodebuddyExplicitEmptySet(t *testing.T) {
+// CodeBuddy loads its own user/project/local scopes on every launch, so the
+// daemon must NOT pre-merge them: doing so would duplicate the CLI's own work
+// while losing scope precedence and the project-scope approval gate.
+func TestMergeRuntimeAndAgentMcpConfigCodebuddyIsPassthrough(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
@@ -327,34 +285,13 @@ func TestMergeRuntimeAndAgentMcpConfigCodebuddyExplicitEmptySet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`{}`))
+	agentConfig := json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`)
+	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", agentConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var document struct {
-		McpServers map[string]map[string]any `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(merged, &document); err != nil {
-		t.Fatal(err)
-	}
-	if len(document.McpServers) != 1 || document.McpServers["local-only"]["command"] != "local-cmd" {
-		t.Fatalf("merged servers = %#v", document.McpServers)
-	}
-}
-
-// A JSON null keeps the provider's native inheritance path: no managed config
-// means codebuddy.go omits --strict-mcp-config and CodeBuddy resolves its own.
-func TestMergeRuntimeAndAgentMcpConfigCodebuddyNullIsPassthrough(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
-
-	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", json.RawMessage(`null`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(merged) != "null" {
-		t.Fatalf("got %s, want null", merged)
+	if string(merged) != string(agentConfig) {
+		t.Fatalf("codebuddy merge must be a passthrough, got %s", merged)
 	}
 }
 
@@ -397,6 +334,33 @@ func TestStripJSONCKeepsSeparatorCommas(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("got %#v, want [a b]", got)
+	}
+}
+
+// Repairing only a genuine trailing comma keeps malformed input malformed —
+// a config the CLI would reject must not be silently accepted here.
+func TestStripJSONCLeavesMalformedInputInvalid(t *testing.T) {
+	for _, in := range []string{`[1,,,]`, `{"a":1,,}`, `[1,,2]`} {
+		var got any
+		if err := json.Unmarshal(stripJSONC([]byte(in)), &got); err == nil {
+			t.Fatalf("%q must stay invalid, got %#v", in, got)
+		}
+	}
+}
+
+// Comments and the dropped comma are blanked, never deleted, so a parse-error
+// offset still points at the byte the user wrote.
+func TestStripJSONCPreservesByteLength(t *testing.T) {
+	for _, in := range []string{
+		"{\n  // c\n  \"a\": 1,\n}\n",
+		`{/* block */"a":1,}`,
+		`{"a":"// not a comment"}`,
+		`{/* unterminated "a":1`,
+		"{}",
+	} {
+		if got, want := len(stripJSONC([]byte(in))), len(in); got != want {
+			t.Fatalf("%q: length %d, want %d (%q)", in, got, want, stripJSONC([]byte(in)))
+		}
 	}
 }
 

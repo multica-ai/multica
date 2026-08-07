@@ -59,16 +59,20 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// would match nothing despite what the CLI's own help text claims.
 		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 	}
-	if hasManagedMcpConfig(opts.McpConfig) {
-		// Same contract as claude.go: a saved agent-level config is
-		// authoritative (including an explicitly empty object) and strict mode
-		// pins CodeBuddy to it. With no managed config the flag MUST stay off —
-		// `--strict-mcp-config` means "only use servers from --mcp-config", so
-		// passing it without a config launched every CodeBuddy agent with zero
-		// MCP servers and silently ignored the user's own CodeBuddy MCP
-		// config (see codebuddyUserMcpConfigPath for where that lives).
-		args = append(args, "--strict-mcp-config")
-	}
+	// NOTE: --strict-mcp-config is deliberately never passed. It means "only
+	// use servers from --mcp-config", which drops CodeBuddy's user, project
+	// AND local scopes. Measured against CodeBuddy 2.x with one real MCP
+	// server registered per scope, using process spawns as the oracle:
+	//
+	//	--mcp-config only ....... managed + user + local  <- what we want
+	//	--mcp-config + strict ... managed only
+	//	strict only ............. nothing at all
+	//
+	// The union is also what mergeRuntimeAndAgentMcpConfig promises: adding
+	// one managed server must not disable the user's own. CodeBuddy applies
+	// it natively, and a managed entry already wins a same-name collision
+	// (verified), so the daemon does not pre-merge — see the codebuddy note
+	// in loadRuntimeMcpServerConfigs.
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
