@@ -3,10 +3,12 @@
 import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 
+// Visible wherever the nav is not a permanent column: a sheet below the
+// compact breakpoint, auto-collapsed from there up to `xl`.
 function MobileSidebarTrigger() {
   const sidebar = useSidebarSafe();
   if (!sidebar) return null;
-  return <SidebarTrigger className="mr-2 md:hidden" />;
+  return <SidebarTrigger className="mr-2 xl:hidden" />;
 }
 
 interface PageHeaderProps {
