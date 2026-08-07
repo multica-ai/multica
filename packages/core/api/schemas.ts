@@ -28,6 +28,9 @@ import type {
   DingTalkInstallation,
   ListDingTalkInstallationsResponse,
   RedeemDingTalkBindingTokenResponse,
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RedeemWecomBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   GitHubPullRequest,
@@ -2195,4 +2198,52 @@ export const EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE: RedeemDingTalkBinding
   workspace_id: "",
   installation_id: "",
   dingtalk_user_id: "",
+};
+
+// WeCom smart-bot ("智能机器人" / aibot) installation responses. `.loose()` so a
+// newer backend field never fails the parse on an older desktop build (see
+// CLAUDE.md → API Compatibility). Defaults are chosen so a malformed response
+// degrades safely: `configured` defaults false (renders the "ask your operator"
+// state rather than a Connect dialog whose submit is guaranteed to fail), and a
+// missing `status` defaults to "revoked" rather than "active" so a broken read
+// never shows a bot as connected when it may not be.
+export const WecomInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  bot_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+}).loose();
+
+export const EMPTY_WECOM_INSTALLATION: WecomInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  bot_id: "",
+  installer_user_id: "",
+  status: "revoked",
+};
+
+export const ListWecomInstallationsResponseSchema = z.object({
+  installations: z.array(WecomInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const RedeemWecomBindingTokenResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  wecom_user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenResponse = {
+  workspace_id: "",
+  installation_id: "",
+  wecom_user_id: "",
 };

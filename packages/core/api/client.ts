@@ -290,6 +290,12 @@ import {
   EMPTY_DINGTALK_INSTALLATION,
   EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
+  WecomInstallationSchema,
+  ListWecomInstallationsResponseSchema,
+  RedeemWecomBindingTokenResponseSchema,
+  EMPTY_WECOM_INSTALLATION,
+  EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -3532,7 +3538,13 @@ export class ApiClient {
   // These three methods drive the Settings-page BYO Connect dialog + list +
   // disconnect only — the inbound WebSocket loop runs entirely server-side.
   async listWecomInstallations(workspaceId: string): Promise<ListWecomInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/wecom/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/wecom/installations`);
+    return parseWithFallback(
+      raw,
+      ListWecomInstallationsResponseSchema,
+      EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/wecom/installations" },
+    );
   }
 
   // registerWecomBYO performs a bring-your-own-app install: the admin pastes
@@ -3545,9 +3557,15 @@ export class ApiClient {
     body: RegisterWecomBYORequest,
   ): Promise<WecomInstallation> {
     const search = new URLSearchParams({ agent_id: agentId });
-    return this.fetch(`/api/workspaces/${workspaceId}/wecom/install/byo?${search.toString()}`, {
-      method: "POST",
-      body: JSON.stringify(body),
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/byo?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, WecomInstallationSchema, EMPTY_WECOM_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/wecom/install/byo",
     });
   }
 
@@ -3565,9 +3583,15 @@ export class ApiClient {
   //   409 Conflict  → the WeCom user is already bound to a different user
   //   403 Forbidden → the logged-in user is not a workspace member
   async redeemWecomBindingToken(token: string): Promise<RedeemWecomBindingTokenResponse> {
-    return this.fetch(`/api/wecom/binding/redeem`, {
+    const raw = await this.fetch<unknown>(`/api/wecom/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
     });
+    return parseWithFallback(
+      raw,
+      RedeemWecomBindingTokenResponseSchema,
+      EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/wecom/binding/redeem" },
+    );
   }
 }
