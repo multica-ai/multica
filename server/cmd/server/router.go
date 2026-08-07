@@ -697,16 +697,45 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Senders:     wecomSenders,
 					Logger:      slog.Default(),
 				})
+				// Streaming replies: WeCom's smart-bot protocol has no
+				// typing indicator, no reaction and no read receipt, so the
+				// only way to say "working on it" is to open the reply early.
+				// The typing indicator paints a stream bubble the moment a
+				// message is ingested and the outbound subscriber replaces
+				// that same bubble with the answer. The store is the seam
+				// between them — it carries the inbound frame's req_id, which
+				// only the read loop ever sees and every stream frame must
+				// echo — so both sides are built with the one instance.
+				wecomStreams := wecom.NewStreamStore()
+				wecomTyping := wecom.NewTypingIndicator(wecom.TypingIndicatorConfig{
+					Senders: wecomSenders,
+					Streams: wecomStreams,
+					// A sweeper's task:failed names a task and not a chat
+					// session, so the session is read back off the task row.
+					Tasks: queries,
+					// A run that fails after its bubble is gone — the guard
+					// closed it at five minutes, or the process restarted
+					// mid-run — still owes the user the news, and the binding
+					// row is where the chat is found when no handle is left.
+					Bindings: queries,
+					Logger:   slog.Default(),
+				})
+				// Subscribes task:failed: a failed run publishes no chat:done,
+				// so this is the sole path that stops the bubble spinning
+				// after a failure.
+				wecomTyping.Register(bus)
+
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
-					wecomStore, wecomSession, wecomReplier,
+					wecomStore, wecomSession, wecomReplier, wecomTyping,
 				))
 
 				// EventChatDone subscriber: pushes the agent's chat reply
-				// back over the same aibot WebSocket the inbound loop owns.
-				// Mirrors slack.NewOutbound(...).Register(bus). Without it
-				// the agent's reply lands only in Multica's web UI — the
-				// user in WeCom sees no response.
-				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
+				// back over the same aibot WebSocket the inbound loop owns —
+				// into the open bubble when there is one, as a new message
+				// when there is not. Mirrors slack.NewOutbound(...).Register(bus).
+				// Without it the agent's reply lands only in Multica's web UI
+				// — the user in WeCom sees no response.
+				wecom.NewOutbound(queries, wecomSenders, wecomStreams, slog.Default()).Register(bus)
 
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 				// SINGLE-REPLICA CONSTRAINT: WeCom outbound (agent replies +
