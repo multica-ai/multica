@@ -1,9 +1,11 @@
 package wecom
 
-// trace_test.go — guards for the MULTICA_WECOM_TRACE operator switch. Three
+// trace_test.go — guards for the MULTICA_WECOM_TRACE operator switch. Five
 // things have to hold or the switch is not shippable: it records nothing at
-// all when off, it records enough to be worth turning on, and what it records
-// is never a credential.
+// all when off, it records enough to be worth turning on, what it records is
+// never a credential, the order it records outbound frames in is the order
+// they reached the socket, and a frame that failed to go out does not read
+// like one that went.
 //
 // These tests do NOT call t.Parallel: `tracing` is a package-level atomic and
 // the assertions are about whether a log line exists. `go test` runs top-level
@@ -17,8 +19,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -81,7 +85,7 @@ func productionShapedToken(t *testing.T) string {
 
 // callbackConn acks the subscribe frame, then delivers one aibot_msg_callback,
 // then drops the socket so Connect returns. It is the smallest script that
-// exercises every trace point: the subscribe write (traceOut), the subscribe
+// exercises every trace point: the subscribe write (the dir=out pair), the subscribe
 // ack (traceIn in the handshake loop), the callback frame (traceIn in the read
 // loop), and the decoded message (traceInbound).
 type callbackConn struct {
@@ -208,7 +212,7 @@ func TestTraceOnRecordsBothDirections(t *testing.T) {
 	}
 }
 
-// TestTraceNeverLogsTheSmartBotSecret pins the reason traceOut reads named
+// TestTraceNeverLogsTheSmartBotSecret pins the reason traceOutFields reads named
 // fields instead of dumping the frame: the aibot_subscribe body carries the
 // installation's decrypted smart-bot secret. Replacing the field-by-field
 // walk with a body dump fails here.
@@ -365,5 +369,403 @@ func TestRedactBearerTokensCoversTheTokenShapes(t *testing.T) {
 				t.Errorf("redactBearerTokens(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// ---- outbound ordering + outcome ----
+//
+// wsSender.write is the single writer for one connection, and the ping loop,
+// agent replies and inbox pushes all reach it concurrently. What follows pins
+// the two properties that gives the trace: the recorded order of outbound
+// frames is the order they reached WriteMessage, and every recorded attempt
+// carries a recorded outcome saying whether the socket took it.
+
+// traceLine is one "wecom trace" record with its attributes pulled apart, so a
+// test can ask for a field by name instead of matching a formatted line —
+// "dir=out" is a prefix of "dir=out.done" and substring checks confuse them.
+type traceLine struct {
+	fields map[string]string
+	raw    string
+}
+
+// hookHandler collects trace records and can run a hook after each one, with
+// its own lock already released.
+//
+// The released lock is the point of it. slog's stock handlers hold a mutex
+// across the whole of Handle, including the write to the sink, so two
+// goroutines emitting a trace line serialize inside the handler — which is
+// the very ordering under test. A handler that imposes an order of its own
+// would let these tests pass whether or not wsSender imposes one.
+type hookHandler struct {
+	mu    sync.Mutex
+	lines []traceLine
+	after func(traceLine) // set before any goroutine runs; never reassigned
+}
+
+func (h *hookHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *hookHandler) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *hookHandler) WithGroup(string) slog.Handler            { return h }
+
+func (h *hookHandler) Handle(_ context.Context, r slog.Record) error {
+	if r.Message != "wecom trace" {
+		return nil
+	}
+	l := traceLine{fields: make(map[string]string)}
+	var b strings.Builder
+	b.WriteString(r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		l.fields[a.Key] = a.Value.String()
+		fmt.Fprintf(&b, " %s=%s", a.Key, a.Value.String())
+		return true
+	})
+	l.raw = b.String()
+
+	h.mu.Lock()
+	h.lines = append(h.lines, l)
+	h.mu.Unlock()
+
+	if h.after != nil {
+		h.after(l)
+	}
+	return nil
+}
+
+func (h *hookHandler) snapshot() []traceLine {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.lines)
+}
+
+// withDir returns the recorded lines for one direction, in the order they were
+// recorded.
+func withDir(lines []traceLine, dir string) []traceLine {
+	var out []traceLine
+	for _, l := range lines {
+		if l.fields["dir"] == dir {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// reqIDsOf is the recorded order of one direction, named by req_id.
+func reqIDsOf(lines []traceLine, dir string) []string {
+	var out []string
+	for _, l := range withDir(lines, dir) {
+		out = append(out, l.fields["req_id"])
+	}
+	return out
+}
+
+// wireConn records the order frames actually reached WriteMessage — by the
+// req_id each test frame carries — and can fail either half of the write.
+// deadlineErr, writeErr and onWrite are set before any goroutine starts and
+// never change afterwards.
+type wireConn struct {
+	mu      sync.Mutex
+	written []string
+
+	deadlineErr error
+	writeErr    error
+	onWrite     func()
+}
+
+func (c *wireConn) WriteMessage(_ int, data []byte) error {
+	var env frameEnvelope
+	_ = json.Unmarshal(data, &env)
+	if c.onWrite != nil {
+		c.onWrite()
+	}
+	c.mu.Lock()
+	c.written = append(c.written, env.Headers.ReqID)
+	c.mu.Unlock()
+	return c.writeErr
+}
+
+func (c *wireConn) order() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.written)
+}
+
+func (c *wireConn) ReadMessage() (int, []byte, error) {
+	return 0, nil, errors.New("wireConn is write-only")
+}
+func (c *wireConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *wireConn) SetWriteDeadline(time.Time) error { return c.deadlineErr }
+func (c *wireConn) Close() error                     { return nil }
+
+// pingFrame is the smallest frame wsSender.write accepts, tagged with a req_id
+// the test can follow from the log onto the socket.
+func pingFrame(reqID string) map[string]any {
+	return map[string]any{"cmd": cmdPing, "headers": frameHeaders{ReqID: reqID}}
+}
+
+// traceParkBudget bounds how long the ordering test holds one writer inside
+// its trace emission. It is only ever paid in full when the recording happens
+// under the writer mutex — that is the case where the second writer is parked
+// on the mutex and can never signal, so the budget is what releases the first.
+// When the recording happens outside the mutex the second writer completes in
+// microseconds and the budget is not reached.
+const traceParkBudget = 750 * time.Millisecond
+
+// TestTraceOutOrderIsTheWireOrder is the deterministic guard for the ordering
+// property: the outbound trace has to name frames in the order the socket took
+// them, or an operator reading it draws the wrong conclusion about which of
+// two frames the server saw first — the question the switch exists to answer.
+//
+// The mechanism, rather than a race that may or may not show up: writer A is
+// held inside its own trace emission until writer B has run a whole write(),
+// and then both orders are compared.
+//
+//   - Recording under the writer mutex (correct): A holds the mutex while it
+//     is parked, B blocks on the mutex before recording anything, and the park
+//     ends on the budget. A is recorded first and reaches the socket first.
+//
+//   - Recording before the mutex (the reviewed defect): A holds nothing while
+//     it is parked. B records, takes the mutex, writes, and finishes — so A is
+//     recorded first but reaches the socket second, and the trace is a lie
+//     about the wire.
+func TestTraceOutOrderIsTheWireOrder(t *testing.T) {
+	withTrace(t, true)
+
+	startB := make(chan struct{})
+	bDone := make(chan struct{})
+
+	h := &hookHandler{}
+	h.after = func(l traceLine) {
+		if l.fields["dir"] != "out" || l.fields["req_id"] != "A" {
+			return
+		}
+		// A has just recorded its send attempt and has not written yet.
+		// Give B a whole write() and hold A here while it runs.
+		close(startB)
+		select {
+		case <-bDone:
+		case <-time.After(traceParkBudget):
+		}
+	}
+
+	conn := &wireConn{}
+	s := newWSSender(conn, slog.New(h))
+
+	go func() {
+		<-startB
+		if err := s.write(pingFrame("B")); err != nil {
+			t.Errorf("write B: %v", err)
+		}
+		close(bDone)
+	}()
+
+	if err := s.write(pingFrame("A")); err != nil {
+		t.Fatalf("write A: %v", err)
+	}
+	select {
+	case <-bDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("B's write never finished")
+	}
+
+	traced := reqIDsOf(h.snapshot(), "out")
+	wire := conn.order()
+	if len(wire) != 2 {
+		t.Fatalf("wire order = %v, want both frames written", wire)
+	}
+	if !slices.Equal(traced, wire) {
+		t.Errorf("trace order %v != wire order %v: the trace records a frame as "+
+			"sent before one that reached WriteMessage earlier, so it cannot be "+
+			"read as the order the server saw", traced, wire)
+	}
+}
+
+// TestTraceOutOrderUnderConcurrentWriters is the same property under the shape
+// it actually takes in production: many senders on one connection at once (the
+// ping loop, agent replies, inbox pushes). It also pins the two things that
+// make the record readable afterwards — seq counts the wire positions in
+// order, and every attempt is paired with an outcome under the same seq.
+func TestTraceOutOrderUnderConcurrentWriters(t *testing.T) {
+	withTrace(t, true)
+
+	const writers = 16
+
+	h := &hookHandler{}
+	// Hold the mutex for a moment on each write so the other writers pile up
+	// behind it; without contention nothing is being tested.
+	conn := &wireConn{onWrite: func() { time.Sleep(200 * time.Microsecond) }}
+	s := newWSSender(conn, slog.New(h))
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if err := s.write(pingFrame(fmt.Sprintf("W%02d", i))); err != nil {
+				t.Errorf("write W%02d: %v", i, err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	lines := h.snapshot()
+	traced := reqIDsOf(lines, "out")
+	wire := conn.order()
+
+	if len(wire) != writers {
+		t.Fatalf("%d frames reached the socket, want %d", len(wire), writers)
+	}
+	if !slices.Equal(traced, wire) {
+		t.Errorf("trace order != wire order under %d concurrent writers\n trace: %v\n  wire: %v",
+			writers, traced, wire)
+	}
+
+	// seq has to be the wire position, so a reader can recover the order from
+	// the field rather than from how the lines happen to sit in the file.
+	attempts := withDir(lines, "out")
+	for i, l := range attempts {
+		if want := fmt.Sprint(i + 1); l.fields["seq"] != want {
+			t.Errorf("attempt %d has seq=%q, want %q", i, l.fields["seq"], want)
+		}
+	}
+
+	// Every attempt is answered. An attempt with no outcome is a real signal
+	// (a write that hung, a process killed mid-write) and must not be one the
+	// tracing produces on its own.
+	outcomes := map[string]traceLine{}
+	for _, l := range withDir(lines, "out.done") {
+		outcomes[l.fields["seq"]] = l
+	}
+	if len(outcomes) != writers {
+		t.Fatalf("%d outcomes recorded for %d attempts", len(outcomes), writers)
+	}
+	for _, a := range attempts {
+		o, ok := outcomes[a.fields["seq"]]
+		if !ok {
+			t.Errorf("attempt seq=%s has no outcome", a.fields["seq"])
+			continue
+		}
+		if o.fields["req_id"] != a.fields["req_id"] {
+			t.Errorf("outcome seq=%s is for req_id %q, attempt was %q",
+				a.fields["seq"], o.fields["req_id"], a.fields["req_id"])
+		}
+		if o.fields["ok"] != "true" {
+			t.Errorf("outcome seq=%s reports %q for a write that succeeded", a.fields["seq"], o.fields["ok"])
+		}
+	}
+}
+
+// onlyOutcome returns the single "dir=out.done" line, and fails the test if
+// the attempt or the outcome is missing — an assertion about a line that was
+// never written proves nothing.
+func onlyOutcome(t *testing.T, lines []traceLine) traceLine {
+	t.Helper()
+	if n := len(withDir(lines, "out")); n != 1 {
+		t.Fatalf("%d send attempts recorded, want exactly 1", n)
+	}
+	got := withDir(lines, "out.done")
+	if len(got) != 1 {
+		t.Fatalf("%d outcomes recorded, want exactly 1 — a send with no recorded "+
+			"outcome is indistinguishable from a successful one", len(got))
+	}
+	return got[0]
+}
+
+// TestTraceOutRecordsAFailedWrite is the second half of the blocking review
+// point. "Did this frame actually reach the wire?" is what an operator turns
+// the switch on to ask, and a rejected WriteMessage used to leave a log
+// identical to a delivered frame's.
+func TestTraceOutRecordsAFailedWrite(t *testing.T) {
+	withTrace(t, true)
+
+	h := &hookHandler{}
+	conn := &wireConn{writeErr: errors.New("websocket: close sent")}
+	s := newWSSender(conn, slog.New(h))
+
+	if err := s.write(pingFrame("R1")); err == nil {
+		t.Fatal("write returned nil for a socket that rejected the frame")
+	}
+
+	o := onlyOutcome(t, h.snapshot())
+	if o.fields["ok"] != "false" {
+		t.Errorf("outcome reports ok=%q for a failed write; got %s", o.fields["ok"], o.raw)
+	}
+	if o.fields["req_id"] != "R1" {
+		t.Errorf("outcome req_id = %q, want R1 so it pairs with the attempt", o.fields["req_id"])
+	}
+	if o.fields["stage"] != traceStageWrite {
+		t.Errorf("outcome stage = %q, want %q", o.fields["stage"], traceStageWrite)
+	}
+	if !strings.Contains(o.fields["error"], "close sent") {
+		t.Errorf("outcome does not carry the socket's error; got %s", o.raw)
+	}
+}
+
+// TestTraceOutRecordsAFailedWriteDeadline covers the other early return. It
+// matters on its own because nothing reaches the socket at all here: the trace
+// must say so rather than show a send that never happened.
+func TestTraceOutRecordsAFailedWriteDeadline(t *testing.T) {
+	withTrace(t, true)
+
+	h := &hookHandler{}
+	conn := &wireConn{deadlineErr: errors.New("set tcp: use of closed network connection")}
+	s := newWSSender(conn, slog.New(h))
+
+	if err := s.write(pingFrame("R2")); err == nil {
+		t.Fatal("write returned nil when the write deadline could not be set")
+	}
+	if n := len(conn.order()); n != 0 {
+		t.Fatalf("%d frames reached WriteMessage, want 0 — the deadline failed first", n)
+	}
+
+	o := onlyOutcome(t, h.snapshot())
+	if o.fields["ok"] != "false" {
+		t.Errorf("outcome reports ok=%q though no frame was written; got %s", o.fields["ok"], o.raw)
+	}
+	if o.fields["stage"] != traceStageDeadline {
+		t.Errorf("outcome stage = %q, want %q", o.fields["stage"], traceStageDeadline)
+	}
+}
+
+// TestTraceOutRecordsASuccessfulWrite is the control for the two above: the
+// outcome of a frame that did go out says so, and says nothing about a stage.
+func TestTraceOutRecordsASuccessfulWrite(t *testing.T) {
+	withTrace(t, true)
+
+	h := &hookHandler{}
+	conn := &wireConn{}
+	s := newWSSender(conn, slog.New(h))
+
+	if err := s.write(pingFrame("R3")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	o := onlyOutcome(t, h.snapshot())
+	if o.fields["ok"] != "true" {
+		t.Errorf("outcome reports ok=%q for a delivered frame; got %s", o.fields["ok"], o.raw)
+	}
+	if o.fields["stage"] != "" {
+		t.Errorf("outcome names stage=%q on success; a stage is only meaningful on a failure", o.fields["stage"])
+	}
+	if o.fields["error"] != "" {
+		t.Errorf("outcome carries error=%q on success", o.fields["error"])
+	}
+}
+
+// TestTraceOffRecordsNoOutcomeEither keeps the outcome line on the same switch
+// as everything else. It is a second line per outbound frame, so a deployment
+// that never asked for tracing must not get it.
+func TestTraceOffRecordsNoOutcomeEither(t *testing.T) {
+	withTrace(t, false)
+
+	h := &hookHandler{}
+	conn := &wireConn{writeErr: errors.New("websocket: close sent")}
+	s := newWSSender(conn, slog.New(h))
+
+	_ = s.write(pingFrame("R4"))
+
+	if lines := h.snapshot(); len(lines) != 0 {
+		t.Errorf("tracing is off but %d trace lines were written: %v", len(lines), lines)
 	}
 }

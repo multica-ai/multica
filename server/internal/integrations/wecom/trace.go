@@ -27,7 +27,7 @@ package wecom
 // prefix is capped rather than full, the cap counts runes so a Chinese
 // message is not cut mid-character, bearer tokens are redacted out of it, and
 // nothing here reads a credential field: the bot secret rides in the
-// aibot_subscribe body, which traceOut never descends into.
+// aibot_subscribe body, which traceOutFields never descends into.
 
 import (
 	"log/slog"
@@ -94,37 +94,117 @@ func tracePreview(s string) string {
 	return string(out)
 }
 
-// traceOut records a frame on its way to WeCom. Called from wsSender.write,
-// the one place that writes the socket, so nothing can be sent without
-// appearing here.
+// An outbound frame is recorded twice, as an attempt and an outcome sharing a
+// seq: "dir=out" when it is about to go on the wire, "dir=out.done" with
+// ok=true/false once SetWriteDeadline and WriteMessage have had their say.
+//
+// One line would not do. The trace exists to answer "did this frame actually
+// reach the wire?", and a single line written before the write cannot answer
+// it — a rejected frame and a delivered one look identical. A single line
+// written after the write answers it only for writes that return: a write
+// that hangs or a process killed mid-write leaves nothing at all, which is
+// the silent failure the switch exists to remove. Two lines let a reader pair
+// them by seq and see an attempt with no outcome for what it is.
+//
+// The pair is also why the seq exists rather than pairing on req_id alone: a
+// pong echoes the server's req_id, which may be empty or repeated, so req_id
+// is not a key. seq is assigned under the writer mutex and never goes on the
+// wire; it is the frame's position in the wire order.
+
+// Stages of one write, named on a failed outcome so a rejected frame is
+// distinguishable from one whose deadline could not even be set.
+const (
+	traceStageDeadline = "set_write_deadline"
+	traceStageWrite    = "write_message"
+)
+
+// outTrace is what tracing keeps about one outbound frame between extracting
+// its fields and emitting its two lines. A nil outTrace means this frame is
+// not being traced; both lines are governed by that single decision, so the
+// log can never hold an attempt whose outcome was suppressed by the switch
+// flipping halfway through a write.
+type outTrace struct {
+	attrs []any
+	cmd   string
+	reqID string
+}
+
+// traceOutFields extracts what tracing records about a frame on its way to
+// WeCom. wsSender.write calls it BEFORE taking the writer mutex: this is the
+// expensive half — a regexp redaction pass and a rune-by-rune cut over the
+// message body — and none of it needs to be serialized with the socket. Only
+// the emit does, and that is traceOutAttempt's job.
 //
 // It reads named fields rather than dumping the frame: the aibot_subscribe
 // body carries the smart-bot secret, and a wholesale dump would put it in the
 // log. Add a field here only after checking what every cmd puts under it.
-func traceOut(log *slog.Logger, frame map[string]any) {
+func traceOutFields(log *slog.Logger, frame map[string]any) *outTrace {
 	if !tracingOn() || log == nil {
-		return
+		return nil
 	}
-	attrs := []any{"dir", "out"}
+	t := &outTrace{}
 	if cmd, ok := frame["cmd"].(string); ok {
-		attrs = append(attrs, "cmd", cmd)
+		t.cmd = cmd
+		t.attrs = append(t.attrs, "cmd", cmd)
 	}
 	if h, ok := frame["headers"].(frameHeaders); ok && h.ReqID != "" {
-		attrs = append(attrs, "req_id", h.ReqID)
+		t.reqID = h.ReqID
+		t.attrs = append(t.attrs, "req_id", h.ReqID)
 	}
 	if body, ok := frame["body"].(map[string]any); ok {
 		if v, ok := body["chatid"].(string); ok {
-			attrs = append(attrs, "chatid", v)
+			t.attrs = append(t.attrs, "chatid", v)
 		}
 		if v, ok := body["chat_type"].(int); ok {
-			attrs = append(attrs, "chat_type", v)
+			t.attrs = append(t.attrs, "chat_type", v)
 		}
 		if v, ok := body["msgtype"].(string); ok {
-			attrs = append(attrs, "msgtype", v)
+			t.attrs = append(t.attrs, "msgtype", v)
 		}
 		if md, ok := body["markdown"].(map[string]string); ok {
-			attrs = append(attrs, "len", len(md["content"]), "text", tracePreview(md["content"]))
+			t.attrs = append(t.attrs, "len", len(md["content"]), "text", tracePreview(md["content"]))
 		}
+	}
+	return t
+}
+
+// traceOutAttempt records a frame at the moment it is about to be written.
+// wsSender.write calls it under the writer mutex, which is the point at which
+// concurrent senders — the ping loop, agent replies, inbox pushes — become
+// ordered. So the order of these lines is the order the frames reach
+// WriteMessage, by construction rather than by correlation.
+func traceOutAttempt(log *slog.Logger, seq uint64, t *outTrace) {
+	if t == nil {
+		return
+	}
+	attrs := make([]any, 0, len(t.attrs)+4)
+	attrs = append(attrs, "dir", "out", "seq", seq)
+	attrs = append(attrs, t.attrs...)
+	log.Info("wecom trace", attrs...)
+}
+
+// traceOutResult records what became of the attempt carrying the same seq.
+// Also under the writer mutex, so an attempt and its outcome are never split
+// by another goroutine's frame.
+//
+// The error text goes through tracePreview: it is the socket's words, not
+// ours, and everything else this file writes is bounded and redacted.
+func traceOutResult(log *slog.Logger, seq uint64, t *outTrace, stage string, err error) {
+	if t == nil {
+		return
+	}
+	attrs := make([]any, 0, 12)
+	attrs = append(attrs, "dir", "out.done", "seq", seq)
+	if t.cmd != "" {
+		attrs = append(attrs, "cmd", t.cmd)
+	}
+	if t.reqID != "" {
+		attrs = append(attrs, "req_id", t.reqID)
+	}
+	if err != nil {
+		attrs = append(attrs, "ok", false, "stage", stage, "error", tracePreview(err.Error()))
+	} else {
+		attrs = append(attrs, "ok", true)
 	}
 	log.Info("wecom trace", attrs...)
 }

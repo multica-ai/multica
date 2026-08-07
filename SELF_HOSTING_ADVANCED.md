@@ -162,6 +162,25 @@ rewrite configuration. Its backend fallback therefore accepts
 `BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `8080`, while an explicit
 `REMOTE_API_URL` or `NEXT_PUBLIC_API_URL` still takes priority.
 
+### WeCom frame tracing
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MULTICA_WECOM_TRACE` | empty (off) | `1` records every WeCom frame the backend reads and writes, including the first 120 runes of each message body. Anything else is off. |
+
+Turn it on for a debugging session and unset it when the session ends. Before
+you do:
+
+- **It is read at boot, so changing it needs a backend restart** — `docker compose -f docker-compose.selfhost.yml up -d backend`. There is no runtime toggle. While it is on, the backend logs a warning on every startup saying so.
+- **Anyone who can read the backend's logs can read the traced message text.** That is a wider audience than the WeCom chat it came from: your `docker logs` / journald / log shipper, and whoever administers them. Binding tokens and other `token=…` parameters are redacted and the smart-bot secret is never read, but user message content is not.
+- **Retention is your log stack's, not the application's.** The backend writes to stderr and keeps nothing itself, so how long the traced text survives is whatever your Docker logging driver or shipper is set to. If that is "forever", decide about it before enabling rather than after.
+
+Each outbound frame produces two lines that share a `seq`: `dir=out` when it is
+about to be written, and `dir=out.done` with `ok=true` / `ok=false` once the
+socket has answered. `seq` is the frame's position in the write order, so the
+pair tells you what the server saw and in which order; an attempt with no
+matching outcome is a write that never returned.
+
 ### CLI / Daemon
 
 These are configured on each user's machine, not on the server:

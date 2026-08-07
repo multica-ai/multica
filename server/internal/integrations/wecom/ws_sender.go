@@ -76,6 +76,13 @@ type wsSender struct {
 	// inbound callbacks must not run on it — see the note on sendTextCtx.
 	ackMu   sync.Mutex
 	replies map[string]*replyWaiter
+
+	// seq numbers outbound frames in the order they reach the socket.
+	// Guarded by mu, so it is the wire order by construction, and it is what
+	// pairs a traced send attempt with its outcome — req_id cannot do that
+	// job, because a pong echoes the server's req_id and that may be empty
+	// or repeated. It never goes on the wire.
+	seq uint64
 }
 
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
@@ -222,16 +229,31 @@ func (s *wsSender) write(frame map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("wecom: marshal frame: %w", err)
 	}
-	// Before the writer mutex: the trace is of what we decided to send, and
-	// holding the socket lock while formatting a log line would let tracing
-	// change the serialization order it is meant to observe.
-	traceOut(s.log, frame)
+	// Extract the trace fields out here, emit them in there. This mutex is
+	// the point at which the ping loop, agent replies and inbox pushes become
+	// ordered, so a record taken inside it matches the wire by construction,
+	// while one taken outside is only correlated with it — a goroutine can
+	// emit its line and be descheduled before it takes the mutex, and the log
+	// then names the wrong frame as first. Extraction is the expensive half
+	// (a regexp redaction pass and a rune-wise cut over the message body) and
+	// needs no such guarantee, so it stays out here; what runs under the
+	// mutex is a nil check when tracing is off, and two log lines when it is
+	// on, against a socket write that is already in the same section.
+	t := traceOutFields(s.log, frame)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.conn.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {
-		return err
+	s.seq++
+	traceOutAttempt(s.log, s.seq, t)
+
+	stage := traceStageDeadline
+	err = s.conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+	if err == nil {
+		stage = traceStageWrite
+		err = s.conn.WriteMessage(websocket.TextMessage, payload)
 	}
-	return s.conn.WriteMessage(websocket.TextMessage, payload)
+	traceOutResult(s.log, s.seq, t, stage, err)
+	return err
 }
 
 // sendText pushes an aibot_send_msg (proactive push) with plain text to a
