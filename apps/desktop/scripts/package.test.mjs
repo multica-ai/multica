@@ -11,6 +11,7 @@ import {
   normalizeGitVersion,
   parsePackageArgs,
   resolveBuildMatrix,
+  stageReleasePlatformAgentForTarget,
   stripLeadingSeparator,
 } from "./package.mjs";
 
@@ -397,6 +398,40 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "never",
     ]);
+  });
+});
+
+describe("stageReleasePlatformAgentForTarget", () => {
+  it("invokes strict Platform staging exactly once for every release target", () => {
+    const calls = [];
+    const exec = (...args) => calls.push(args);
+    const targets = [
+      { platform: "mac", arch: "arm64", runtimePlatform: "darwin" },
+      { platform: "mac", arch: "x64", runtimePlatform: "darwin" },
+      { platform: "win", arch: "x64", runtimePlatform: "win32" },
+      { platform: "win", arch: "arm64", runtimePlatform: "win32" },
+      { platform: "linux", arch: "x64", runtimePlatform: "linux" },
+      { platform: "linux", arch: "arm64", runtimePlatform: "linux" },
+    ];
+
+    for (const { platform, arch } of targets) {
+      stageReleasePlatformAgentForTarget({ platform, arch }, exec);
+    }
+
+    expect(calls).toHaveLength(targets.length);
+    for (const [index, [command, args, options]] of calls.entries()) {
+      expect(command).toBe(process.execPath);
+      expect(args[0]).toMatch(/bundle-platform-agent-cli\.mjs$/);
+      expect(args.slice(1)).toEqual([
+        "--release",
+        "--target-platform",
+        targets[index].runtimePlatform,
+        "--target-arch",
+        targets[index].arch,
+      ]);
+      expect(options).toMatchObject({ stdio: "inherit" });
+      expect(options.cwd).toMatch(/apps\/desktop$/);
+    }
   });
 });
 

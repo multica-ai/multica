@@ -34,6 +34,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
 const bundleCliScript = resolve(here, "bundle-cli.mjs");
+const bundlePlatformAgentScript = resolve(
+  here,
+  "bundle-platform-agent-cli.mjs",
+);
 
 const PLATFORM_CONFIG = {
   mac: {
@@ -306,6 +310,24 @@ function formatTarget(target) {
   return `${PLATFORM_CONFIG[target.platform].label} ${target.arch}`;
 }
 
+export function stageReleasePlatformAgentForTarget(
+  target,
+  exec = execFileSync,
+) {
+  exec(
+    process.execPath,
+    [
+      bundlePlatformAgentScript,
+      "--release",
+      "--target-platform",
+      PLATFORM_CONFIG[target.platform].runtimePlatform,
+      "--target-arch",
+      target.arch,
+    ],
+    { stdio: "inherit", cwd: desktopRoot },
+  );
+}
+
 export function builderArgsForTarget(
   target,
   parsed,
@@ -446,6 +468,7 @@ function main() {
         cwd: desktopRoot,
       },
     );
+    stageReleasePlatformAgentForTarget(target);
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
       disableMacNotarize,

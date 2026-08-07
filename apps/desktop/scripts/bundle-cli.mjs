@@ -151,12 +151,18 @@ if (!(await exists(srcBinary))) {
     `[bundle-cli] ${srcBinary} not present — Desktop will fall back to ` +
       `auto-installing the latest release at runtime.`,
   );
-  await rm(destDir, { recursive: true, force: true });
+  await Promise.all([
+    rm(join(destDir, "multica"), { force: true }),
+    rm(join(destDir, "multica.exe"), { force: true }),
+  ]);
   process.exit(0);
 }
 
-await rm(destDir, { recursive: true, force: true });
 await mkdir(destDir, { recursive: true });
+await Promise.all([
+  rm(join(destDir, "multica"), { force: true }),
+  rm(join(destDir, "multica.exe"), { force: true }),
+]);
 await copyFile(srcBinary, destBinary);
 await chmod(destBinary, 0o755);
 

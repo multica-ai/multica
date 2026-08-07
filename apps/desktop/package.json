@@ -18,10 +18,11 @@
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
+    "bundle-platform-agent-cli": "node scripts/bundle-platform-agent-cli.mjs",
     "brand-dev-electron": "node scripts/brand-dev-electron.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:staging": "node scripts/dev.mjs --mode staging",
-    "build": "pnpm run bundle-cli && electron-vite build",
+    "build": "pnpm run bundle-cli && pnpm run bundle-platform-agent-cli && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
