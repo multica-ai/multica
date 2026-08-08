@@ -32,6 +32,11 @@ const { newTabPreferred } = vi.hoisted(() => ({ newTabPreferred: { value: false 
 vi.mock("@multica/core/issues/stores", () => ({
   useIssueLinkStore: (selector: (s: { openInNewTab: boolean }) => unknown) =>
     selector({ openInNewTab: newTabPreferred.value }),
+  // These tests only exercise modifier-click behavior, which is independent
+  // of display mode; pin "full". Every mode wraps the anchor in the real
+  // hover card, so the modifier-click path is traversed through that nesting.
+  useIssueMentionDisplayStore: (selector: (s: { mode: string }) => unknown) =>
+    selector({ mode: "full" }),
 }));
 
 vi.mock("../../issues/components/issue-chip", () => ({

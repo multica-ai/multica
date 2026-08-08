@@ -81,6 +81,13 @@
     "issue_link_new_tab": {
       "title": "Open issue links in new tab",
       "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
+    },
+    "issue_mention_style": {
+      "title": "Issue mention style",
+      "hint": "How issue references render in descriptions, comments, and chat. Narrower styles reveal the title on hover.",
+      "plain": "Plain",
+      "compact": "Compact",
+      "full": "Full"
     }
   },
   "shortcuts": {

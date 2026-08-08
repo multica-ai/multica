@@ -12,23 +12,41 @@
  * `vertical-align: middle` rule on `[data-node-view-wrapper]` in CSS handles
  * line-box alignment; setting it on the inner <a> has no effect because the
  * wrapper is the outermost inline element.
+ * `plain` display mode renders bare inherited-size text instead of the card,
+ * which is shorter than the line box and needs no separate accommodation. It
+ * does need the alignment back: prose-sized text belongs on the sentence
+ * baseline, so the wrapper carries `.issue-mention-plain`, whose rule in
+ * shell.css outranks the `vertical-align: middle` default above.
+ *
+ * Issue mentions get a hover card in every display mode. The card carries a
+ * description snippet, the assignee and sub-issue progress — detail no inline
+ * chip shows at any density — so `full` benefits from it just as the
+ * title-hiding modes do.
  */
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useIssueLinkStore } from "@multica/core/issues/stores";
+import { useIssueLinkStore, useIssueMentionDisplayStore } from "@multica/core/issues/stores";
+import type { IssueMentionMode } from "@multica/core/issues/stores";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
+import { IssueHoverCard } from "../../issues/components/issue-hover-card";
 import { ProjectChip } from "../../projects/components/project-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
+  // Read here rather than inside IssueMention: the wrapper is the outermost
+  // inline element, so it is the only place vertical alignment can be chosen.
+  const mode = useIssueMentionDisplayStore((s) => s.mode);
 
   if (type === "issue") {
     return (
-      <NodeViewWrapper as="span" className="inline">
-        <IssueMention issueId={id} fallbackLabel={label} />
+      <NodeViewWrapper
+        as="span"
+        className={mode === "plain" ? "inline issue-mention-plain" : "inline"}
+      >
+        <IssueMention issueId={id} fallbackLabel={label} mode={mode} />
       </NodeViewWrapper>
     );
   }
@@ -89,9 +107,11 @@ function ProjectMention({
 function IssueMention({
   issueId,
   fallbackLabel,
+  mode,
 }: {
   issueId: string;
   fallbackLabel?: string;
+  mode: IssueMentionMode;
 }) {
   const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
@@ -120,7 +140,7 @@ function IssueMention({
     push(issuePath);
   };
 
-  return (
+  const anchor = (
     <a
       href={issuePath}
       target={newTabPreferred ? "_blank" : undefined}
@@ -131,8 +151,15 @@ function IssueMention({
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}
-        className="cursor-pointer hover:bg-accent transition-colors"
+        variant={mode}
+        className={
+          mode === "plain"
+            ? "cursor-pointer"
+            : "cursor-pointer hover:bg-accent transition-colors"
+        }
       />
     </a>
   );
+
+  return <IssueHoverCard issueId={issueId}>{anchor}</IssueHoverCard>;
 }
