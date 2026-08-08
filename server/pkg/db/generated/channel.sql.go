@@ -733,26 +733,32 @@ WHERE installation_id = $1
   AND channel_user_id = $3
   AND consumed_at IS NULL
   AND expires_at > now()
-  AND created_at >= $4::timestamptz
+  AND created_at >= now() - $4::interval
 ORDER BY created_at DESC
 LIMIT 1
 `
 
 type FindLiveChannelBindingTokenParams struct {
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	ChannelType    string             `json:"channel_type"`
-	ChannelUserID  string             `json:"channel_user_id"`
-	CreatedAfter   pgtype.Timestamptz `json:"created_after"`
+	InstallationID pgtype.UUID     `json:"installation_id"`
+	ChannelType    string          `json:"channel_type"`
+	ChannelUserID  string          `json:"channel_user_id"`
+	MintInterval   pgtype.Interval `json:"mint_interval"`
 }
 
 // Mint guard: the newest token for this platform user that is still
 // unconsumed, unexpired, and recent enough that the link already sitting in
 // their chat is the one to point back at. Without it every message from an
 // unbound user mints another row, so a user who keeps typing at a bot they
-// have not linked yet writes one row per message.
+// have not linked yet writes one row per message. This narrows that to
+// roughly one row per window; it is not a hard guarantee, since the caller
+// runs this and the insert as two statements.
 //
-// `created_after` is the caller's throttle window (see
-// wecom.BindingTokenMintInterval). The consumed_at / expires_at predicates
+// `mint_interval` is the caller's throttle window (see
+// wecom.BindingTokenMintInterval). It is subtracted from now() rather than
+// passed in as an absolute cutoff so the whole window is measured on the
+// database clock: created_at is stamped by the column default, and comparing
+// it against an application-side timestamp would let clock skew between the
+// two stretch or shrink the window. The consumed_at / expires_at predicates
 // keep an already-redeemed or stale token from suppressing a mint the user
 // actually needs.
 //
@@ -764,7 +770,7 @@ func (q *Queries) FindLiveChannelBindingToken(ctx context.Context, arg FindLiveC
 		arg.InstallationID,
 		arg.ChannelType,
 		arg.ChannelUserID,
-		arg.CreatedAfter,
+		arg.MintInterval,
 	)
 	var i ChannelBindingToken
 	err := row.Scan(

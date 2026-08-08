@@ -55,7 +55,11 @@ func (f *fakeMintQueries) FindLiveChannelBindingToken(_ context.Context, arg db.
 		if !r.ExpiresAt.Time.After(f.now()) {
 			continue
 		}
-		if r.CreatedAt.Time.Before(arg.CreatedAfter.Time) {
+		// The query derives its cutoff from now() on the database side, so
+		// the fake resolves the window against the same clock it stamps
+		// created_at with rather than against a caller-supplied timestamp.
+		cutoff := f.now().Add(-time.Duration(arg.MintInterval.Microseconds) * time.Microsecond)
+		if r.CreatedAt.Time.Before(cutoff) {
 			continue
 		}
 		if !found || r.CreatedAt.Time.After(best.CreatedAt.Time) {
@@ -133,6 +137,32 @@ func TestMintIssuesAFreshLinkAfterTheWindow(t *testing.T) {
 	}
 	if fake.creates != 2 {
 		t.Fatalf("%d rows written, want 2", fake.creates)
+	}
+}
+
+// TestMintStillReusesPartWayThroughTheWindow pins the width of the window
+// itself. The two tests above only exercise its edges — same instant, and
+// past it — which a zero-length interval satisfies just as well, so neither
+// would notice if Mint stopped passing a real one. Halfway through, a zero
+// interval reads as expired and mints again.
+func TestMintStillReusesPartWayThroughTheWindow(t *testing.T) {
+	svc, fake, clock := newThrottledService()
+	ws, inst := bindingUUID(1), bindingUUID(2)
+
+	if _, err := svc.Mint(context.Background(), ws, inst, "T-alex"); err != nil {
+		t.Fatalf("first mint: %v", err)
+	}
+	*clock = clock.Add(BindingTokenMintInterval / 2)
+
+	again, err := svc.Mint(context.Background(), ws, inst, "T-alex")
+	if err != nil {
+		t.Fatalf("second mint: %v", err)
+	}
+	if !again.Reused {
+		t.Fatal("a link half a window old is still the one to point back at")
+	}
+	if fake.creates != 1 {
+		t.Fatalf("%d rows written, want 1", fake.creates)
 	}
 }
 

@@ -646,10 +646,16 @@ RETURNING *;
 -- unconsumed, unexpired, and recent enough that the link already sitting in
 -- their chat is the one to point back at. Without it every message from an
 -- unbound user mints another row, so a user who keeps typing at a bot they
--- have not linked yet writes one row per message.
+-- have not linked yet writes one row per message. This narrows that to
+-- roughly one row per window; it is not a hard guarantee, since the caller
+-- runs this and the insert as two statements.
 --
--- `created_after` is the caller's throttle window (see
--- wecom.BindingTokenMintInterval). The consumed_at / expires_at predicates
+-- `mint_interval` is the caller's throttle window (see
+-- wecom.BindingTokenMintInterval). It is subtracted from now() rather than
+-- passed in as an absolute cutoff so the whole window is measured on the
+-- database clock: created_at is stamped by the column default, and comparing
+-- it against an application-side timestamp would let clock skew between the
+-- two stretch or shrink the window. The consumed_at / expires_at predicates
 -- keep an already-redeemed or stale token from suppressing a mint the user
 -- actually needs.
 --
@@ -662,7 +668,7 @@ WHERE installation_id = $1
   AND channel_user_id = $3
   AND consumed_at IS NULL
   AND expires_at > now()
-  AND created_at >= sqlc.arg('created_after')::timestamptz
+  AND created_at >= now() - sqlc.arg('mint_interval')::interval
 ORDER BY created_at DESC
 LIMIT 1;
 

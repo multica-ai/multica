@@ -48,6 +48,13 @@ const BindingTokenTTL = 15 * time.Minute
 // with "tap the link I sent you", pointing at something that never arrived,
 // and the user cannot link their account until the window passes.
 //
+// That covers the send we never hear back about, and equally the send we know
+// failed: the row is written before delivery is attempted, so a prompt the
+// transport refused outright (no live connection mid-reconnect or lease flip)
+// still suppresses the next minute of mints. Nothing here reacts to that
+// error — the window itself, not a delivery receipt, is what bounds the
+// damage, which is the other reason to keep it short.
+//
 // Sixty seconds does the job the throttle was written for: six lines typed in
 // one breath still write one row, at a cost of at most one row a minute for a
 // user who keeps going, against rows that expire in fifteen. The price of
@@ -81,8 +88,8 @@ type BindingToken struct {
 	// already sitting in the user's chat. Raw is empty in that case and there
 	// is no way to recover it — the table only ever held the hash — so the
 	// caller must point the user back at the earlier message rather than
-	// building a URL. ExpiresAt is the live token's, so the caller can say how
-	// much time is left on it.
+	// building a URL. ExpiresAt carries the live token's expiry, not a fresh
+	// one's.
 	Reused bool
 }
 
@@ -129,6 +136,15 @@ func NewBindingTokenService(q *db.Queries, tx engine.TxStarter) *BindingTokenSer
 // nothing to hand back. Callers point the user at the link already in their
 // chat instead. This is what keeps an unbound user's message stream from
 // writing a token row per message.
+//
+// Best-effort, not a guarantee: the lookup and the insert are two statements,
+// so two replies racing on the same user can both miss and both mint. In
+// practice they are serialised by a wide margin — the inbound read loop
+// dispatches one frame at a time and the second reply is a whole dispatch
+// behind — and losing the race costs one extra row and one extra link, both
+// private to that same user and both expiring on the usual TTL. Tightening it
+// further would mean holding a lock across the inbound hot path, which is not
+// worth it for a cosmetic throttle.
 func (s *BindingTokenService) Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, wecomUserID string) (BindingToken, error) {
 	if s.mint == nil {
 		return BindingToken{}, errors.New("wecom: BindingTokenService missing queries")
@@ -137,7 +153,7 @@ func (s *BindingTokenService) Mint(ctx context.Context, workspaceID, installatio
 		InstallationID: installationID,
 		ChannelType:    channelTypeWecom,
 		ChannelUserID:  wecomUserID,
-		CreatedAfter:   pgtype.Timestamptz{Time: s.now().Add(-BindingTokenMintInterval), Valid: true},
+		MintInterval:   pgtype.Interval{Microseconds: BindingTokenMintInterval.Microseconds(), Valid: true},
 	})
 	switch {
 	case err == nil:

@@ -149,7 +149,14 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	// Only its hash was ever stored, so there is no URL to rebuild — point
 	// them at the message they already have. The throttle window is far
 	// shorter than the TTL, so that link still has most of its life left.
-	text := "👋 绑定链接刚才已私发给你，请在与我的单聊里点击完成绑定。"
+	//
+	// This text is delivered by postPrivate below, which always lands in the
+	// 1:1 — the same conversation the earlier link is sitting in, whichever
+	// room triggered this. So it points up the current thread rather than
+	// telling the reader to go to a chat they are already reading. Only the
+	// group ack further down runs in the room, and it is the one that names
+	// the 1:1.
+	text := "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。"
 	if !token.Reused {
 		bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
 		text = "👋 请先绑定你的 Multica 账号，才能与我对话：\n" + bindURL + "\n（链接 15 分钟内有效）"
