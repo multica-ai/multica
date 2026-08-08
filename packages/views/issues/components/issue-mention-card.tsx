@@ -20,9 +20,10 @@ interface IssueMentionCardProps {
  * Plain click honors the "open issue links in new tab" preference
  * (Settings → Preferences): new browser tab on web, new app tab on desktop.
  *
- * Density follows the reader's "issue mention style" preference. The narrower
- * modes hide the title, so those get a hover card that brings it back; `full`
- * already shows it and stays exactly as it was.
+ * Density follows the reader's "issue mention style" preference, and every mode
+ * gets the hover card. The card carries a description snippet, the assignee and
+ * sub-issue progress — detail no inline chip shows at any density — so `full`
+ * benefits from it just as the title-hiding modes do.
  *
  * Two details are mode-dependent because `plain` renders bare prose, not a box:
  *   - `align-middle` centers the boxed chip in the line box. Bare text of the
@@ -55,8 +56,6 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
       />
     </AppLink>
   );
-
-  if (mode === "full") return link;
 
   return <IssueHoverCard issueId={issueId}>{link}</IssueHoverCard>;
 }

@@ -132,14 +132,14 @@ describe("IssueMentionCard", () => {
   // AppLink requires NavigationProvider (it calls useNavigation() internally),
   // so these renders are wrapped the same way renderCard() wraps the others,
   // even though the brief's snippet renders IssueMentionCard bare.
-  it("renders the full chip without a hover card by default", () => {
+  it("wraps the mention in a hover card in full mode", () => {
     render(
       <NavigationProvider value={makeAdapter()}>
         <IssueMentionCard issueId="issue-1" fallbackLabel="MUL-3405" />
       </NavigationProvider>,
     );
 
-    expect(document.querySelector(HOVER_CARD_TRIGGER)).toBeNull();
+    expect(document.querySelector(HOVER_CARD_TRIGGER)).not.toBeNull();
   });
 
   it("wraps the mention in a hover card in compact mode", () => {
@@ -164,14 +164,14 @@ describe("IssueMentionCard", () => {
     expect(document.querySelector(HOVER_CARD_TRIGGER)).not.toBeNull();
   });
 
-  // The narrow modes nest the AppLink inside a real HoverCardTrigger, and
+  // Every mode nests the AppLink inside a real HoverCardTrigger, and
   // HoverCardContent stops click/auxclick/dblclick from bubbling through the
   // React tree. Both navigation paths have to survive that nesting, so the
-  // cases cover the new-tab preference on AND off — the new-tab path is the
-  // one most exposed to event suppression, and the earlier full-mode tests
-  // never reach it because full mode renders no hover card at all.
+  // cases cover the new-tab preference on AND off across all three modes —
+  // the new-tab path is the one most exposed to event suppression.
   it.each([
-    { mode: "compact", newTab: true },
+    { mode: "full", newTab: true },
+    { mode: "compact", newTab: false },
     { mode: "plain", newTab: false },
   ] as const)(
     "with the real hover card mounted, a plain click in $mode mode navigates (new tab: $newTab)",

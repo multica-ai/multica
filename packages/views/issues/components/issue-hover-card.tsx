@@ -29,11 +29,12 @@ interface IssueHoverCardProps {
 }
 
 /**
- * Reveals what the narrower issue-mention variants hide.
+ * Detail for an issue mention, on hover.
  *
- * `compact` and `plain` drop the issue title to keep prose readable; this card
- * brings it back on hover. `full` already shows the title and deliberately does
- * not use this.
+ * Every mention display mode uses this. `compact` and `plain` drop the issue
+ * title to keep prose readable and the card brings it back; on top of that, all
+ * modes get the description snippet, assignee and sub-issue progress, which no
+ * inline chip shows.
  *
  * Every query lives in IssueHoverCardBody rather than here on purpose: Base UI
  * mounts the popup only while the card is open, so this component adds no

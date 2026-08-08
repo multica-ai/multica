@@ -17,6 +17,11 @@
  * does need the alignment back: prose-sized text belongs on the sentence
  * baseline, so the wrapper carries `.issue-mention-plain`, whose rule in
  * shell.css outranks the `vertical-align: middle` default above.
+ *
+ * Issue mentions get a hover card in every display mode. The card carries a
+ * description snippet, the assignee and sub-issue progress — detail no inline
+ * chip shows at any density — so `full` benefits from it just as the
+ * title-hiding modes do.
  */
 
 import { NodeViewWrapper } from "@tiptap/react";
@@ -155,8 +160,6 @@ function IssueMention({
       />
     </a>
   );
-
-  if (mode === "full") return anchor;
 
   return <IssueHoverCard issueId={issueId}>{anchor}</IssueHoverCard>;
 }
