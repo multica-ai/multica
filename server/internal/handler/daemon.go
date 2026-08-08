@@ -1716,9 +1716,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 		}
 		if useSkillRefs {
-			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
-			agentSkillCount = len(skillRefs)
-			resp.Agent.SkillRefs = skillRefs
+			if runtime.Provider == platformExtensionProvider {
+				skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+				agentSkillCount = len(skills)
+				_, resp.Agent.SkillRefs = service.BuildAgentSkillBundles(skills)
+			} else {
+				_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+				agentSkillCount = len(skillRefs)
+				resp.Agent.SkillRefs = skillRefs
+			}
 		} else {
 			skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 			agentSkillCount = len(skills)
