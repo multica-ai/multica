@@ -236,12 +236,12 @@ function ExtensionsPageContent({ wsId }: { wsId: string }) {
           description={t(($) => $.states.empty_description)}
         />
       ) : (
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
-          <Card className="h-fit" size="sm">
+        <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
+          <Card className="h-fit min-w-0 max-w-full" size="sm">
             <CardHeader>
               <CardTitle>{t(($) => $.detail.release)}</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-1">
+            <CardContent className="flex min-w-0 max-w-full flex-col gap-1">
               {releases.map((item) => {
                 const active = item.release.id === activeReleaseId;
                 return (
@@ -254,7 +254,7 @@ function ExtensionsPageContent({ wsId }: { wsId: string }) {
                       if (item.release.id !== imported?.release.id) setImported(null);
                     }}
                     className={cn(
-                      "rounded-lg border px-3 py-2 text-left transition-colors",
+                      "min-w-0 max-w-full rounded-lg border px-3 py-2 text-left transition-colors",
                       active
                         ? "border-brand bg-brand/8"
                         : "border-transparent hover:bg-muted",
@@ -263,7 +263,7 @@ function ExtensionsPageContent({ wsId }: { wsId: string }) {
                     <span className="block truncate font-medium">
                       {item.release.extension_key}
                     </span>
-                    <span className="block text-caption text-muted-foreground">
+                    <span className="block min-w-0 break-words text-caption text-muted-foreground [overflow-wrap:anywhere]">
                       {t(($) => $.detail.version, {
                         version: item.release.version,
                       })}
@@ -345,11 +345,11 @@ function ExtensionDetail({ mapping }: { mapping: PlatformExtensionMapping }) {
   const paths = useWorkspacePaths();
 
   return (
-    <div className="grid content-start gap-4 md:grid-cols-2">
-      <Card>
+    <div className="grid min-w-0 max-w-full content-start gap-4 md:grid-cols-2">
+      <Card className="min-w-0 max-w-full">
         <CardHeader>
           <CardTitle>{t(($) => $.detail.release)}</CardTitle>
-          <CardDescription>
+          <CardDescription className="min-w-0 break-words [overflow-wrap:anywhere]">
             {t(($) => $.detail.version, { version: mapping.release.version })}
           </CardDescription>
         </CardHeader>
@@ -370,7 +370,7 @@ function ExtensionDetail({ mapping }: { mapping: PlatformExtensionMapping }) {
       <ResourceCard icon={Users} title={t(($) => $.detail.squad)}>
         <AppLink
           href={paths.squadDetail(mapping.squad.id)}
-          className="font-medium hover:underline"
+          className="block min-w-0 max-w-full break-words font-medium [overflow-wrap:anywhere] hover:underline"
         >
           {mapping.squad.name}
         </AppLink>
@@ -382,10 +382,10 @@ function ExtensionDetail({ mapping }: { mapping: PlatformExtensionMapping }) {
         ) : (
           <ul className="space-y-2">
             {mapping.agents.map((agent) => (
-              <li key={agent.id} className="flex items-center gap-2">
+              <li key={agent.id} className="flex min-w-0 max-w-full items-center gap-2">
                 <AppLink
                   href={paths.agentDetail(agent.id)}
-                  className="font-medium hover:underline"
+                  className="block min-w-0 max-w-full break-words font-medium [overflow-wrap:anywhere] hover:underline"
                 >
                   {agent.name}
                   {agent.leader ? ` — ${t(($) => $.detail.leader)}` : ""}
@@ -404,9 +404,19 @@ function ExtensionDetail({ mapping }: { mapping: PlatformExtensionMapping }) {
         {mapping.skills.length === 0 ? (
           <span className="text-muted-foreground">{t(($) => $.detail.no_skills)}</span>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-0 max-w-full flex-wrap gap-2">
             {mapping.skills.map((skill) => (
-              <Badge key={skill.id} variant="outline" render={<AppLink href={paths.skillDetail(skill.id)} />}>
+              <Badge
+                key={skill.id}
+                variant="outline"
+                className="min-w-0 max-w-full truncate"
+                render={
+                  <AppLink
+                    href={paths.skillDetail(skill.id)}
+                    title={skill.name}
+                  />
+                }
+              >
                 {skill.name}
               </Badge>
             ))}
@@ -429,14 +439,14 @@ function ResourceCard({
   className?: string;
 }) {
   return (
-    <Card className={className}>
+    <Card className={cn("min-w-0 max-w-full", className)}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Icon className="size-4 text-muted-foreground" />
           {title}
         </CardTitle>
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent className="min-w-0 max-w-full">{children}</CardContent>
     </Card>
   );
 }

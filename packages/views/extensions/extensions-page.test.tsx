@@ -2,20 +2,26 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, setApiInstance } from "@multica/core/api";
-import { I18nProvider } from "@multica/core/i18n/react";
+import {
+  I18nProvider,
+  type I18nProviderProps,
+} from "@multica/core/i18n/react";
 import {
   PLATFORM_EXTENSION_MAX_IMPORT_BYTES,
   type PlatformExtensionDetail,
   type PlatformExtensionImportResult,
   type PlatformExtensionMapping,
 } from "@multica/core/extensions";
+import zhHansExtensions from "../locales/zh-Hans/extensions.json";
 import { ExtensionsPage } from "./extensions-page";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 
 vi.mock("../navigation", () => ({
-  AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  AppLink: ({ children, href, ...props }: React.ComponentProps<"a">) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
   ),
   useNavigation: () => navigation,
 }));
@@ -123,7 +129,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderPage() {
+function renderPage({
+  locale = "en",
+  i18nResources = resources,
+}: {
+  locale?: I18nProviderProps["locale"];
+  i18nResources?: I18nProviderProps["resources"];
+} = {}) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -132,7 +144,7 @@ function renderPage() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <I18nProvider locale="en" resources={resources}>
+      <I18nProvider locale={locale} resources={i18nResources}>
         <ExtensionsPage wsId="ws-1" />
       </I18nProvider>
     </QueryClientProvider>,
@@ -197,6 +209,78 @@ describe("ExtensionsPage", () => {
       "href",
       "/acme/skills/skill-1",
     );
+  });
+
+  it("keeps long release and resource names readable without overflowing cards", async () => {
+    const longVersion = `v${"v".repeat(299)}`;
+    const longSquad = `q${"q".repeat(299)}`;
+    const longAgent = `a${"a".repeat(299)}`;
+    const longSkill = `k${"k".repeat(299)}`;
+    const longMapping: PlatformExtensionMapping = {
+      ...mapping,
+      release: { ...mapping.release, version: longVersion },
+      squad: { ...mapping.squad, name: longSquad },
+      agents: [{ ...mapping.agents[0]!, name: longAgent }],
+      skills: [{ ...mapping.skills[0]!, name: longSkill }],
+    };
+    vi.mocked(apiClient.listPlatformExtensions).mockResolvedValue([longMapping]);
+    vi.mocked(apiClient.getPlatformExtension).mockResolvedValue({
+      ...longMapping,
+      manifest: { name: "Long names" },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(`Version ${longVersion}`)).toHaveLength(2);
+    });
+    const versionLabels = screen.getAllByText(`Version ${longVersion}`);
+    for (const label of versionLabels) {
+      expect(label).toHaveClass("min-w-0", "break-words", "[overflow-wrap:anywhere]");
+    }
+    expect(versionLabels[0]?.closest("button")).toHaveClass(
+      "min-w-0",
+      "max-w-full",
+    );
+
+    const squadLink = screen.getByRole("link", { name: longSquad });
+    expect(squadLink).toHaveClass(
+      "min-w-0",
+      "max-w-full",
+      "break-words",
+      "[overflow-wrap:anywhere]",
+    );
+    expect(squadLink.closest('[data-slot="card"]')).toHaveClass(
+      "min-w-0",
+      "max-w-full",
+    );
+
+    const agentLink = screen.getByRole("link", {
+      name: `${longAgent} — Leader`,
+    });
+    expect(agentLink).toHaveClass(
+      "min-w-0",
+      "max-w-full",
+      "break-words",
+      "[overflow-wrap:anywhere]",
+    );
+
+    const skillLink = screen.getByRole("link", { name: longSkill });
+    expect(skillLink).toHaveAttribute("title", longSkill);
+    expect(skillLink).toHaveClass("min-w-0", "max-w-full", "truncate");
+    expect(skillLink.closest('[data-slot="card"]')).toHaveClass(
+      "min-w-0",
+      "max-w-full",
+    );
+  });
+
+  it("uses the product term skill in zh-Hans extension details", async () => {
+    renderPage({
+      locale: "zh-Hans",
+      i18nResources: { "zh-Hans": { extensions: zhHansExtensions } },
+    });
+
+    expect(await screen.findByText("Skills")).toBeInTheDocument();
   });
 
   it("shows the empty state", async () => {

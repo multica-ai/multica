@@ -2,5 +2,5 @@
   "page": { "title": "扩展", "description": "导入并查看平台扩展版本。", "import": "导入扩展" },
   "states": { "loading": "正在加载扩展", "empty_title": "暂无扩展", "empty_description": "导入 JSON 扩展文档即可开始。", "list_error_title": "无法加载扩展", "list_error_description": "请稍后重试。", "detail_loading": "正在加载版本详情", "detail_error_title": "无法加载版本详情", "detail_error_description": "请重新选择该版本或稍后重试。" },
   "import": { "file_label": "扩展 JSON 文件", "pending": "正在导入扩展", "success": "扩展导入成功", "idempotent": "此版本已导入，现有资源已被复用。", "invalid_file": "请选择 .json 文件。", "invalid_json": "所选文件不是有效的 JSON。", "invalid_utf8": "所选文件必须使用有效的 UTF-8 编码。", "too_large": "所选文件超过 5 MiB 限制。", "generic_error": "无法导入该扩展。", "runtime_unavailable_title": "Platform Agent CLI 运行时不可用", "runtime_unavailable_description": "请为此工作区启动或重新连接 Platform Agent CLI，然后再次导入扩展。" },
-  "detail": { "release": "版本", "runtime": "运行时", "squad": "小队", "agents": "智能体", "skills": "技能", "version": "版本 {{version}}", "digest": "摘要 {{digest}}", "leader": "负责人", "no_agents": "无智能体", "no_skills": "无技能", "platform_runtime": "Platform Agent CLI" }
+  "detail": { "release": "版本", "runtime": "运行时", "squad": "小队", "agents": "智能体", "skills": "Skills", "version": "版本 {{version}}", "digest": "摘要 {{digest}}", "leader": "负责人", "no_agents": "无智能体", "no_skills": "无 skill", "platform_runtime": "Platform Agent CLI" }
 }
