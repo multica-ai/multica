@@ -50,9 +50,15 @@ type APIClient struct {
 	BaseURL     string
 	WorkspaceID string
 	Token       string
-	AgentID     string // When set, requests are attributed to this agent instead of the user.
-	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
-	HTTPClient  *http.Client
+	// AgentID/TaskID, when set, are sent as X-Agent-ID / X-Task-ID
+	// execution-context headers. These do NOT grant agent authorship on
+	// their own: the server strips client-supplied values at the auth
+	// boundary and only trusts agent identity re-stamped from the
+	// server-issued mat_ task-token row. A normal member/PAT request
+	// cannot opt into agent authorship by setting these fields.
+	AgentID    string
+	TaskID     string
+	HTTPClient *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.

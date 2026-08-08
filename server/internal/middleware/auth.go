@@ -46,6 +46,18 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
 
+			// X-Agent-ID / X-Task-ID are likewise server-set only — the
+			// mat_ branch below re-stamps them from the task-token row.
+			// Strip any client-supplied values here so a member cannot
+			// forge an agent identity by replaying an observable
+			// (agent_id, task_id) pair: BOTH ids are returned by
+			// member-readable endpoints (GET /api/issues/{id}/task-runs,
+			// GET /api/agents/{id}/tasks), so requiring "both headers
+			// present" never closed the impersonation path. See
+			// resolveActor.
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)
