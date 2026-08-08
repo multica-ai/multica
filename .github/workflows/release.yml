@@ -48,14 +48,31 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: server/go.mod
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # releases follow the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
+
+      - name: Record Go toolchain
+        run: go version
 
       - name: Verify Go test wrapper
         run: bash scripts/test-go.test.sh
 
       - name: Run tests
         run: bash scripts/test-go.sh --race
+
+      - name: Scan Go vulnerabilities
+        # Fail closed unless an administrator scopes the documented emergency
+        # override to this exact tag. See .github/RELEASING.md.
+        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG != github.ref_name }}
+        working-directory: server
+        run: go tool govulncheck ./...
+
+      - name: Record emergency vulnerability-scan bypass
+        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG == github.ref_name }}
+        run: echo "::warning::govulncheck was explicitly skipped for ${GITHUB_REF_NAME}; see .github/RELEASING.md"
 
   release:
     needs: verify
@@ -75,8 +92,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: server/go.mod
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # releases follow the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
+
+      - name: Record Go toolchain
+        run: go version
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -395,8 +418,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: server/go.mod
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # releases follow the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
+
+      - name: Record Go toolchain
+        run: go version
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
