@@ -82,14 +82,23 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 	// markdown card the recipient has every reason to trust — it comes from
 	// the bot, not from the author — so link syntax in them must not render.
 	// An issue titled "[click here](http://evil.example)" arrived as a
-	// working link.
+	// working link, and a body carrying "[重置密码]: https://evil.example"
+	// plus "[重置密码]" arrived as one too.
 	//
-	// Done here, before anything below measures a length: breaking the
-	// adjacency inserts a space, and a body that is dense in "](" grows by
-	// half. Budget the grown text or the card goes out over the cap, which
-	// WeCom refuses whole while telling the sender it was delivered.
-	title = breakLinkAdjacency(title)
-	body = breakLinkAdjacency(body)
+	// Per field rather than over the finished card, which is what the length
+	// budget below needs — and it costs no coverage. Every line of member
+	// text begins where the card's own line begins, bar the title's first,
+	// and there the bot's "**[" prefix keeps the member out of the block
+	// position a definition has to start in. The scan reads each field's
+	// start as a line start anyway, so that one is guarded twice over rather
+	// than not at all.
+	//
+	// Done here, before anything below measures a length: each break inserts
+	// a space, and a body dense in "](" grows by half. Budget the grown text
+	// or the card goes out over the cap, which WeCom refuses whole while
+	// telling the sender it was delivered.
+	title = breakMemberLinks(title)
+	body = breakMemberLinks(body)
 
 	var b strings.Builder
 	b.WriteString("**[")
@@ -117,11 +126,14 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 	if link != "" {
 		suffix = "\n[查看详情](" + link + ")"
 	}
-	// Neither cut below can put a "]" back next to a "(". truncateRunes only
-	// drops a suffix, so it cannot recreate an adjacency breakLinkAdjacency
-	// already separated, and every literal spliced in after member text here
-	// starts with ".", "*" or "\n" — never "(". Pinned by the two seam cases
-	// in TestInboxCardNeverPutsCloseBracketNextToOpenParen.
+	// Neither cut below can put a "]" back next to a "(" or a ":".
+	// truncateRunes only drops a suffix, so it cannot recreate a pair
+	// breakMemberLinks already separated, and every literal spliced in after
+	// member text here starts with ".", "*" or "\n" — never "(" or ":".
+	// Nor can dropping a suffix complete a reference definition: it can only
+	// cut the destination off one. Pinned by the seam cases in
+	// TestInboxCardNeverPutsCloseBracketNextToOpenParen and
+	// TestInboxCardDefinesNoResolvableLinkReference.
 	room := inboxMarkdownMaxLen - utf8.RuneCountInString(prefix) - utf8.RuneCountInString(suffix) - 4 // "\n...\n"
 	if room > 0 {
 		return prefix + "\n" + truncateRunes(body, room) + "..." + suffix

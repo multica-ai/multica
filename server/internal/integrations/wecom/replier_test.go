@@ -386,16 +386,36 @@ func TestIssueConfirmationDoesNotRenderReporterLinks(t *testing.T) {
 	}
 }
 
+// TestIssueConfirmationDefinesNoLinkReference: a title carrying a line break
+// can define the link instead of writing it inline, which reaches the same
+// working link with no "](" anywhere in it.
+func TestIssueConfirmationDefinesNoLinkReference(t *testing.T) {
+	res := engine.Result{
+		IssueIdentifier: "MUL-1",
+		IssueTitle:      "安全升级\n\n[重置密码]: https://evil.example\n\n[重置密码]",
+	}
+	got := issueCreatedText(res)
+	if dests := markdownDestinations(got); hasDestinationTo(dests, "evil.example") {
+		t.Fatalf("a reporter-defined link resolved in a bot-authored group message: %q resolves %v", got, dests)
+	}
+	if !strings.Contains(got, "重置密码") {
+		t.Errorf("the visible text was eaten: %q", got)
+	}
+}
+
 // TestIssueConfirmationKeepsAnOrdinaryTitleVerbatim: the confirmation echoes
 // what the reporter typed straight back at them in the same chat, so anything
 // added to it is immediately visible as a mistake. Only a title that actually
-// contains "](" is edited at all.
+// contains "](", or a definition with a real destination behind it, is edited
+// at all — "[Bug]: 登录失败" is not.
 func TestIssueConfirmationKeepsAnOrdinaryTitleVerbatim(t *testing.T) {
-	res := engine.Result{
-		IssueIdentifier: "MUL-1",
-		IssueTitle:      "[Bug] 登录失败 (P0)!",
-	}
-	if got, want := issueCreatedText(res), "✅ 已创建 MUL-1 — [Bug] 登录失败 (P0)!"; got != want {
-		t.Fatalf("the reporter's own title came back altered:\n got %q\nwant %q", got, want)
+	for _, title := range []string{
+		"[Bug] 登录失败 (P0)!",
+		"[Bug]: 登录失败",
+	} {
+		res := engine.Result{IssueIdentifier: "MUL-1", IssueTitle: title}
+		if got, want := issueCreatedText(res), "✅ 已创建 MUL-1 — "+title; got != want {
+			t.Fatalf("the reporter's own title came back altered:\n got %q\nwant %q", got, want)
+		}
 	}
 }

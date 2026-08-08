@@ -288,6 +288,130 @@ func TestInboxCardBudgetsTheSpacesItInserts(t *testing.T) {
 	}
 }
 
+// TestInboxCardDefinesNoResolvableLinkReference is the card-level half of the
+// reference-definition guard: it proves the builder actually runs it, on both
+// fields, and that neither truncation branch hands the definition back.
+//
+// The card is the whole document — one buildInboxMarkdown result becomes the
+// "markdown.content" of exactly one aibot_send_msg frame, and nothing batches
+// two items into one frame — so the definition and the label that uses it both
+// have to be inside a single member's title or body for the attack to work.
+// Which is what the live tenant showed: one comment body carried both.
+//
+// The app URL is cleared so the builder emits no link of its own; any link in
+// the parsed output is then member-authored.
+func TestInboxCardDefinesNoResolvableLinkReference(t *testing.T) {
+	t.Setenv("WECOM_APP_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	for _, tc := range linkReferenceAttacks {
+		t.Run(tc.name, func(t *testing.T) {
+			// A definition cannot begin mid-paragraph, so put a blank line
+			// between the title's line and the attack — the shape a comment
+			// with a second paragraph has anyway.
+			body := "看这里\n\n" + tc.body
+
+			// The same card without the guard, composed the way
+			// buildInboxMarkdown composes it. Asserting it resolves keeps
+			// this case from quietly becoming a test of nothing.
+			unguarded := "**[提及你] t**\n" + body
+			if !hasDestinationTo(markdownDestinations(unguarded), "evil.example") {
+				t.Fatalf("unguarded card %q resolves no link to evil.example — this case proves nothing", unguarded)
+			}
+
+			out := buildInboxMarkdown(map[string]any{
+				"type": "mentioned", "title": "t", "body": body,
+			}, "ws-uuid", "acme")
+			if dests := markdownDestinations(out); hasDestinationTo(dests, "evil.example") {
+				t.Fatalf("body: a member-defined link survived into the card: %q resolves %v", out, dests)
+			}
+
+			// Same through the title. A title with a line break can carry a
+			// definition too, and it goes through a different length branch.
+			out = buildInboxMarkdown(map[string]any{
+				"type": "mentioned", "title": body, "body": "b",
+			}, "ws-uuid", "acme")
+			if dests := markdownDestinations(out); hasDestinationTo(dests, "evil.example") {
+				t.Fatalf("title: a member-defined link survived into the card: %q resolves %v", out, dests)
+			}
+		})
+	}
+}
+
+// TestInboxCardKeepsAReferenceLikeTitleVerbatim is the constraint that shaped
+// the rule. "[Bug]: 登录失败" is an everyday title, and a guard that broke every
+// "]:" would trade it away to close an attack that needs a real destination —
+// the same trade the backslash escaping already lost on this renderer. Byte
+// for byte, or the guard is too blunt.
+func TestInboxCardKeepsAReferenceLikeTitleVerbatim(t *testing.T) {
+	t.Setenv("WECOM_APP_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	item := map[string]any{
+		"type":  "status_changed",
+		"title": "[Bug]: 登录失败",
+		"body":  "[WIP]: 明天再看\n\n[复现步骤]: 见 (todo) 到 (in_review)!",
+	}
+	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	want := "**[状态变更] [Bug]: 登录失败**\n[WIP]: 明天再看\n\n[复现步骤]: 见 (todo) 到 (in_review)!"
+	if out != want {
+		t.Fatalf("member text did not survive verbatim:\n got %q\nwant %q", out, want)
+	}
+}
+
+// TestInboxCardSeamKeepsDefinitionsBrokenAtEveryCutOffset sweeps the
+// truncation point across a dense run of definitions. Cutting drops a suffix,
+// so it cannot fuse a "]" back onto the ":" the guard separated — this is that
+// claim under test rather than in a comment, at every offset inside the
+// pattern, and it holds the card inside the cap while it is at it.
+func TestInboxCardSeamKeepsDefinitionsBrokenAtEveryCutOffset(t *testing.T) {
+	t.Setenv("WECOM_APP_URL", "")
+	t.Setenv("MULTICA_APP_URL", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	for pad := 0; pad < 12; pad++ {
+		filler := strings.Repeat("a", 3900+pad)
+		dense := strings.Repeat("[x]: https://evil.example\n\n[x]\n\n", 40)
+		for _, tc := range []struct {
+			name string
+			item map[string]any
+		}{
+			{"body", map[string]any{"type": "mentioned", "title": "t", "body": filler + "\n\n" + dense}},
+			{"title", map[string]any{"type": "mentioned", "title": filler + "\n\n" + dense, "body": "b"}},
+		} {
+			out := buildInboxMarkdown(tc.item, "ws-uuid", "acme")
+			if dests := markdownDestinations(out); hasDestinationTo(dests, "evil.example") {
+				t.Fatalf("%s cut at pad=%d let a member-defined link through: resolves %v", tc.name, pad, dests)
+			}
+			if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
+				t.Fatalf("%s cut at pad=%d: card is %d runes, cap is %d — WeCom refuses the frame and the push is lost",
+					tc.name, pad, n, inboxMarkdownMaxLen)
+			}
+		}
+	}
+}
+
+// TestInboxCardBudgetsTheSpacesTheDefinitionBreakInserts is the "](" budget
+// case for the other break: a body that is nothing but definitions grows by
+// one rune per line, and the budget has to be computed on the grown text or
+// the card ships over the cap and WeCom drops the whole frame while the send
+// path reports success.
+func TestInboxCardBudgetsTheSpacesTheDefinitionBreakInserts(t *testing.T) {
+	t.Setenv("MULTICA_APP_URL", "https://multica.example")
+	item := map[string]any{
+		"type":  "mentioned",
+		"title": "t",
+		"body":  strings.Repeat("[a]: https://evil.example\n", 500),
+	}
+	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
+		t.Fatalf("card is %d runes, cap is %d — the inserted spaces were not budgeted, so WeCom refuses the frame and the push is lost",
+			n, inboxMarkdownMaxLen)
+	}
+}
+
 // window returns a short readable slice around i for a failure message.
 func window(s string, i int) string {
 	lo, hi := i-10, i+10
