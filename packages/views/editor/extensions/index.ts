@@ -51,6 +51,16 @@ import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
+// CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 — Backspace-outdent, ⌥↑/⌥↓ move,
+// and multi-line-paste-into-list list behaviour (packages/views/editor/cerebro-list-behaviour.ts).
+// Gated on `cerebro_editor_toolbar` (default off) via isListEditingEnabled().
+import {
+  CerebroListBehaviour,
+  isListEditingEnabled,
+} from "../cerebro-list-behaviour";
+// CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slice 12 — block-menu commands
+// (Duplicate, Delete, Move) behind the hover drag handle (cerebro-block-actions.ts).
+import { CerebroBlockActions } from "../cerebro-block-actions";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
@@ -188,6 +198,12 @@ export function createEditorExtensions(
       listItem: false,
     }),
     PatchedListItem,
+    // CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 list behaviour + block-menu
+    // commands, gated on `cerebro_editor_toolbar` (default off) so they ship
+    // dark until Phase 9.
+    ...(isListEditingEnabled()
+      ? [CerebroListBehaviour, CerebroBlockActions]
+      : []),
     // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
     // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
     // and a checkbox NodeView. The taskList tokenizer is consulted before

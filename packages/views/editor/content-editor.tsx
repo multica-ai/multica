@@ -59,6 +59,13 @@ import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
+// CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slices 12-13 — hover drag handle
+// + block menu, task-list progress summary, and touch swipe-to-indent, all gated
+// on `cerebro_editor_toolbar` (default off).
+import { CerebroBlockHandle } from "./cerebro-block-handle";
+import { CerebroTaskProgress } from "./cerebro-task-progress";
+import { useCerebroListSwipe } from "./cerebro-list-touch";
+import { isListEditingEnabled } from "./cerebro-list-behaviour";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
@@ -484,6 +491,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const wrapperRef = useRef<HTMLDivElement>(null);
     const hoverDisabled = !editor?.state.selection.empty;
     const hover = useLinkHover(wrapperRef, hoverDisabled);
+    // CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slice 13 — touch swipe to
+    // indent/outdent a list item; no-op off-flag and on non-touch pointers.
+    useCerebroListSwipe(editor);
 
     const handleContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
       if (!editor) return;
@@ -504,6 +514,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         className="relative flex min-h-full flex-col"
         onMouseDown={handleContainerMouseDown}
       >
+        {/* CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slice 13 — task-list
+            progress summary + "Hide N completed", on rich surfaces, gated. */}
+        {showBubbleMenu && isListEditingEnabled() && (
+          <CerebroTaskProgress editor={editor} />
+        )}
         <EditorContent className="flex-1 min-h-full" editor={editor} />
         {/* CEREBRO-PATCH(content-editor-dictation-skeleton): FIR-1637 — Forslag B: skeleton lines while transcribing. */}
         {!hideDictationMic && dictationTranscribing && <TranscribingSkeleton />}
@@ -520,6 +535,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             editor={editor}
             currentIssueId={currentIssueId}
             onCommentOnSelection={onCommentOnSelection} // CEREBRO-PATCH(content-editor-comment-on-selection): TECH-3637.
+          />
+        )}
+        {/* CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slice 12 — block handle
+            on rich surfaces only, gated on `cerebro_editor_toolbar` (default off). */}
+        {showBubbleMenu && isListEditingEnabled() && (
+          <CerebroBlockHandle
+            editor={editor}
+            currentIssueId={currentIssueId}
+            onCommentOnSelection={onCommentOnSelection}
           />
         )}
         <LinkHoverCard {...hover} />

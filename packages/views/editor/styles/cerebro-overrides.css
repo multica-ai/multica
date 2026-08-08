@@ -400,3 +400,50 @@
   margin: 0;
   text-align: left;
 }
+
+/* CEREBRO-PATCH(list-editing): FIR-4707 Phase 6 slice 13 — list-editing polish.
+   Depth-dependent bullet/number markers (• ◦ ▪ and 1. a. i.) already ship in
+   prose.css; this block adds only what is still missing: the nesting guide line,
+   touch-sized checkbox hit targets, and the "Hide N completed" collapse. */
+
+/* Nesting guide line: a faint vertical rule down each nested list so depth is
+   visible at a glance. Top-level lists keep their normal indent (no line). */
+.rich-text-editor ul ul,
+.rich-text-editor ul ol,
+.rich-text-editor ol ol,
+.rich-text-editor ol ul {
+  border-inline-start: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+  margin-inline-start: 0.25rem;
+  padding-inline-start: 1rem;
+}
+/* Nested checkbox lists carry the same guide even though the task <ul> zeroes
+   its own inline padding for the checkbox layout. */
+.rich-text-editor ul[data-type="taskList"] ul[data-type="taskList"],
+.rich-text-editor ul ul[data-type="taskList"],
+.rich-text-editor ol ul[data-type="taskList"] {
+  border-inline-start: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+  margin-inline-start: 0.25rem;
+  padding-inline-start: 0.75rem;
+}
+
+/* "Hide N completed": the toggle sets .cerebro-hide-completed on the editor and
+   this collapses checked items visually — no content is removed from the doc. */
+.rich-text-editor.cerebro-hide-completed ul[data-type="taskList"] > li[data-checked="true"] {
+  display: none;
+}
+
+/* Touch: a 40px hit target around each checkbox while the drawn box grows to
+   24px — the label wraps only the checkbox (text is a sibling), so the larger
+   tap zone stays on the checkbox and never turns the whole row into a toggle. */
+@media (pointer: coarse) {
+  .rich-text-editor ul[data-type="taskList"] > li > label {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+  .rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"],
+  .rich-text-editor li.task-list-item > input[type="checkbox"] {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+}
