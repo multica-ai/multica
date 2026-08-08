@@ -40,6 +40,8 @@ import type {
   WorkspaceWorkingAgentMineRelation,
   WorkspaceWorkingAgentType,
   AgentRuntime,
+  RuntimeModelConnection,
+  UpdateRuntimeModelConnectionRequest,
   RuntimeProfile,
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
@@ -344,6 +346,7 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeModelConnectionSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -469,6 +472,17 @@ function subscriberTarget(
   if (userId) body.user_id = userId;
   if (userType) body.user_type = userType;
   return body;
+}
+
+function emptyRuntimeModelConnection(
+  runtimeId: string,
+): RuntimeModelConnection {
+  return {
+    runtime_id: runtimeId,
+    config: {},
+    has_api_key: false,
+    configured: false,
+  };
 }
 
 /**
@@ -1630,6 +1644,51 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+  }
+
+  async getRuntimeModelConnection(
+    runtimeId: string,
+  ): Promise<RuntimeModelConnection> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/model-connection`,
+    );
+    return parseWithFallback(
+      raw,
+      RuntimeModelConnectionSchema,
+      emptyRuntimeModelConnection(runtimeId),
+      { endpoint: "GET /api/runtimes/:id/model-connection" },
+    );
+  }
+
+  async updateRuntimeModelConnection(
+    runtimeId: string,
+    data: UpdateRuntimeModelConnectionRequest,
+  ): Promise<RuntimeModelConnection> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/model-connection`,
+      { method: "PUT", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      RuntimeModelConnectionSchema,
+      emptyRuntimeModelConnection(runtimeId),
+      { endpoint: "PUT /api/runtimes/:id/model-connection" },
+    );
+  }
+
+  async deleteRuntimeModelConnection(
+    runtimeId: string,
+  ): Promise<RuntimeModelConnection> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/model-connection`,
+      { method: "DELETE" },
+    );
+    return parseWithFallback(
+      raw,
+      RuntimeModelConnectionSchema,
+      emptyRuntimeModelConnection(runtimeId),
+      { endpoint: "DELETE /api/runtimes/:id/model-connection" },
+    );
   }
 
   // ---------------------------------------------------------------------

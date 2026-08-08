@@ -37,6 +37,7 @@ import {
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   RuntimeModelListRequestSchema,
+  RuntimeModelConnectionSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -73,6 +74,38 @@ const baseIssue = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+describe("RuntimeModelConnectionSchema", () => {
+  it("parses non-secret model connection state", () => {
+    const parsed = RuntimeModelConnectionSchema.parse({
+      runtime_id: "runtime-1",
+      config: {
+        provider: "deepseek",
+        api: "openai-completions",
+        base_url: "https://api.deepseek.com",
+        model: "deepseek-v4-flash",
+        api_key: "must-not-reach-client-state",
+      },
+      has_api_key: true,
+      configured: true,
+    });
+
+    expect(parsed.config.model).toBe("deepseek-v4-flash");
+    expect(parsed.config).not.toHaveProperty("api_key");
+  });
+
+  it("defaults additive state fields from an older response", () => {
+    const parsed = RuntimeModelConnectionSchema.parse({
+      runtime_id: "runtime-1",
+    });
+    expect(parsed).toEqual({
+      runtime_id: "runtime-1",
+      config: {},
+      has_api_key: false,
+      configured: false,
+    });
+  });
+});
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
   it("accepts a primitive metadata KV map", () => {

@@ -29,6 +29,7 @@ export function RuntimeDetailPage() {
       localMachineActions={<DaemonRuntimeActions />}
       hasLocalMachine
       bootstrapping={context.bootstrapping}
+      managedRuntimeSetup={context.managedRuntimeSetup}
     />
   );
 }

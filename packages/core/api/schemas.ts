@@ -975,6 +975,18 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   updated_at: "",
 };
 
+export const RuntimeModelConnectionSchema = z.object({
+  runtime_id: z.string(),
+  config: z.object({
+    provider: z.string().optional(),
+    api: z.string().optional(),
+    base_url: z.string().optional(),
+    model: z.string().optional(),
+  }).default({}),
+  has_api_key: z.boolean().default(false),
+  configured: z.boolean().default(false),
+}).loose();
+
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //

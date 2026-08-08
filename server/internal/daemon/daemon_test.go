@@ -22,6 +22,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/piagent"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -162,6 +163,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
 		{key: "ANTHROPIC_API_KEY", want: false},
+		{key: piagent.APIKeyEnv, want: false},
 		{key: "CURSOR_AGENT", want: false},
 		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
 		// must be able to honor a user-set profile/home, and when skills are
