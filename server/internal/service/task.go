@@ -166,6 +166,11 @@ const (
 	// stretching this global crash-recovery window.
 	claimResponseRecoveryWindow = 90 * time.Second
 	prepareLeaseDuration        = 45 * time.Second
+	// quickCreateHandoffWait bounds the soft ordering between a quick-create
+	// origin and the first task of the issue it creates. While the origin is
+	// active, the queued issue task is skipped and retried by the daemon's normal
+	// poll loop; after this window it becomes claimable and safely starts fresh.
+	quickCreateHandoffWait = 2 * time.Minute
 )
 
 // buildCommentTriggerSummary fetches the comment content and truncates
@@ -2803,8 +2808,9 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 		t0 = time.Now()
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
-			AgentID:          agentID,
-			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+			AgentID:                    agentID,
+			PrepareLeaseSecs:           prepareLeaseDuration.Seconds(),
+			QuickCreateHandoffWaitSecs: quickCreateHandoffWait.Seconds(),
 		})
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {

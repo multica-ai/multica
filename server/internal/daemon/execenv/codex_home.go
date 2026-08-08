@@ -56,7 +56,7 @@ type CodexHomeOptions struct {
 	// both macOS and Linux paths deterministically.
 	GOOS string
 	// ResumeSessionID is the Codex thread/session ID this run intends to
-	// resume, when any. It is consulted when populating the per-issue session
+	// resume, when any. It is consulted when populating the scoped session
 	// store (local_directory tasks) or migrating a legacy per-task home whose
 	// sessions/ still symlinks the shared ~/.codex/sessions: the single rollout
 	// for this ID is exposed so thread/resume can find it without pulling the
@@ -66,11 +66,12 @@ type CodexHomeOptions struct {
 	// IsLocalDirectory marks a local_directory task — one running in the user's
 	// own project directory. These tasks get a fresh codex-home per task ID (the
 	// daemon never reuses their workdir), so their sessions/ is pointed at the
-	// per-issue store (SessionStoreKey) that survives across task IDs and holds
-	// ONLY this issue's rollouts — never the machine's whole ~/.codex/sessions.
+	// stable store (SessionStoreKey) that survives across task IDs and holds
+	// ONLY this conversation scope's rollouts — never the machine's whole
+	// ~/.codex/sessions.
 	// See prepareCodexSessionsDir (MUL-4424).
 	IsLocalDirectory bool
-	// SessionStoreKey is a stable, per-(agent, issue) relative path segment that
+	// SessionStoreKey is a stable, per-(agent, scope) relative path segment that
 	// identifies this task's persistent Codex sessions store. It survives across
 	// task IDs (unlike the task-scoped envRoot the GC reclaims) so a follow-up
 	// run resumes the same thread. Empty when no stable key is available (e.g. a
@@ -388,21 +389,44 @@ func codexSessionStoreNamespace(profile string) string {
 	return "p_" + hex.EncodeToString(sum[:])
 }
 
-// codexSessionStoreKey builds the per-(profile, agent, issue) key for a task's
-// persistent Codex sessions store. The agent/issue IDs are server-issued UUIDs;
+// ResolveCodexSessionStoreScope chooses the server-provided stable scope when
+// it is a safe single directory segment, otherwise preserving the legacy
+// issue-id scope. Both the active-store GC guard and mount preparation call
+// this resolver so they cannot disagree about which store is in use.
+//
+// A quick-created issue intentionally keeps qc_<origin_task_id> as its on-disk
+// scope instead of being renamed to the issue id: that stable name avoids
+// moving potentially large rollouts. Operators can map it back through
+// issue.origin_id.
+func ResolveCodexSessionStoreScope(explicitScope, issueID string) string {
+	if ValidCodexSessionStoreScope(explicitScope) {
+		return explicitScope
+	}
+	return issueID
+}
+
+// ValidCodexSessionStoreScope reports whether scope is already one safe path
+// segment. The daemon rejects malformed wire values instead of silently
+// normalizing two distinct scopes into the same directory.
+func ValidCodexSessionStoreScope(scope string) bool {
+	return scope != "" && len(scope) <= 255 && sanitizeCodexPathSegment(scope) == scope
+}
+
+// codexSessionStoreKey builds the per-(profile, agent, scope) key for a task's
+// persistent Codex sessions store. The agent/scope values are server-issued;
 // all three segments are sanitized to bare path segments defensively so a
 // malformed value can never escape the store root. Returns "" when there is no
-// issue to key on (the store is issue-scoped), leaving sessions/ task-local.
-func codexSessionStoreKey(profile, agentID, issueID string) string {
-	issue := sanitizeCodexPathSegment(issueID)
-	if issue == "" {
+// stable scope, leaving sessions/ task-local.
+func codexSessionStoreKey(profile, agentID, scopeID string) string {
+	scope := sanitizeCodexPathSegment(scopeID)
+	if scope == "" {
 		return ""
 	}
 	agent := sanitizeCodexPathSegment(agentID)
 	if agent == "" {
 		agent = "_"
 	}
-	return filepath.Join(codexSessionStoreNamespace(profile), agent, issue)
+	return filepath.Join(codexSessionStoreNamespace(profile), agent, scope)
 }
 
 // sanitizeCodexPathSegment reduces s to the characters a UUID uses (hex plus
@@ -419,19 +443,20 @@ func sanitizeCodexPathSegment(s string) string {
 	return b.String()
 }
 
-// PruneCodexSessionStores reclaims per-issue Codex session stores under the
+// PruneCodexSessionStores reclaims scoped Codex session stores under the
 // shared home's multica-sessions root that have not been touched within
 // retention, bounding the lifetime of the conversation history each one holds.
 //
 // The stores deliberately live outside the task-scoped envRoot the task GC
 // reclaims (so resume survives across task IDs), which means without this they
-// would accumulate forever — a done or abandoned issue's prompts and full
+// would accumulate forever — a done or abandoned conversation's prompts and full
 // rollouts (one reporter saw a single 1.5 GiB rollout) would never be freed, and
 // deleting the issue/agent/workspace would not remove them. A store's newest
 // mtime is its last activity: Codex writes/extends a rollout as the thread
 // advances, so an active or recently-resumed task keeps its store fresh and is
 // never reclaimed; a store idle past retention is removed, giving deleted issues
-// an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
+// and orphaned quick-create scopes an eventual-reclamation guarantee. retention
+// <= 0 disables pruning entirely.
 //
 // It scans ONLY the caller profile's namespace, so a daemon never reclaims a
 // store owned by another profile-daemon sharing the same ~/.codex — the
@@ -665,13 +690,13 @@ func touchCodexSessionStore(storeDir string, logger *slog.Logger) {
 	}
 }
 
-// CodexSessionStorePath returns the per-issue Codex session store directory for
-// (profile, agentID, issueID) on the shared home, or "" when there is no stable
+// CodexSessionStorePath returns the Codex session store directory for
+// (profile, agentID, scopeID) on the shared home, or "" when there is no stable
 // key. The daemon marks this path in-use for the duration of a task so
 // PruneCodexSessionStores never reclaims a store mid-mount, closing the
 // stat→remove race the mtime refresh alone cannot (MUL-4424).
-func CodexSessionStorePath(profile, agentID, issueID string) string {
-	key := codexSessionStoreKey(profile, agentID, issueID)
+func CodexSessionStorePath(profile, agentID, scopeID string) string {
+	key := codexSessionStoreKey(profile, agentID, scopeID)
 	if key == "" {
 		return ""
 	}

@@ -3146,8 +3146,10 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 }
 
 type claimRuntimeGuardTask struct {
+	ID                       string   `json:"id"`
 	PriorSessionID           string   `json:"prior_session_id"`
 	PriorWorkDir             string   `json:"prior_work_dir"`
+	SessionStoreScope        string   `json:"session_store_scope"`
 	ChatMessage              string   `json:"chat_message"`
 	ThreadName               string   `json:"thread_name"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
@@ -3920,10 +3922,12 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 		"attachment_ids": []string{attachmentID},
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	var sourceTaskID string
+	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
 		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext); err != nil {
+		RETURNING id
+	`, agentID, runtimeID, quickContext).Scan(&sourceTaskID); err != nil {
 		t.Fatalf("setup: create quick-create task: %v", err)
 	}
 
@@ -3936,6 +3940,178 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 	}
 	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
 		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)
+	}
+	if task.SessionStoreScope != "qc_"+sourceTaskID {
+		t.Fatalf("quick-create source session_store_scope = %q, want %q", task.SessionStoreScope, "qc_"+sourceTaskID)
+	}
+}
+
+type quickCreateHandoffFixture struct {
+	agentID     string
+	runtimeID   string
+	daemonID    string
+	originID    string
+	issueID     string
+	issueTaskID string
+}
+
+func createQuickCreateHandoffFixture(t *testing.T, ctx context.Context, originStatus string) quickCreateHandoffFixture {
+	t.Helper()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       "create the handoff issue",
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+	})
+
+	var originID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, context, started_at
+		)
+		VALUES ($1, $2, $3, 2, $4, CASE WHEN $3 = 'running' THEN now() ELSE NULL END)
+		RETURNING id
+	`, agentID, runtimeID, originStatus, quickContext).Scan(&originID); err != nil {
+		t.Fatalf("setup: create quick-create origin: %v", err)
+	}
+	if originStatus == "completed" {
+		if _, err := testPool.Exec(ctx, `
+			UPDATE agent_task_queue
+			SET started_at = now(), completed_at = now(),
+			    session_id = 'quick-create-session', work_dir = '/tmp/quick-create-origin'
+			WHERE id = $1
+		`, originID); err != nil {
+			t.Fatalf("setup: complete quick-create origin: %v", err)
+		}
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, creator_type, creator_id,
+			assignee_type, assignee_id, priority, number, origin_type, origin_id
+		)
+		VALUES (
+			$1, 'Quick-create handoff fixture', 'agent', $2,
+			'agent', $2, 'medium',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+			'quick_create', $3
+		)
+		RETURNING id
+	`, testWorkspaceID, agentID, originID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create quick-created issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var issueTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 2)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&issueTaskID); err != nil {
+		t.Fatalf("setup: create first issue task: %v", err)
+	}
+
+	return quickCreateHandoffFixture{
+		agentID: agentID, runtimeID: runtimeID, daemonID: daemonID,
+		originID: originID, issueID: issueID, issueTaskID: issueTaskID,
+	}
+}
+
+// The quick-create completion transaction writes the terminal task before it
+// links that task to the newly created issue. The issue's immutable origin id
+// must bridge this tiny window so the first issue claim still resumes both the
+// provider session and the local_directory rollout store.
+func TestClaimTask_QuickCreateHandoffUsesOriginBeforeIssueLink(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	fixture := createQuickCreateHandoffFixture(t, ctx, "completed")
+	task := claimTaskForRuntimeGuard(t, fixture.runtimeID, fixture.daemonID)
+
+	if task.ID != fixture.issueTaskID {
+		t.Fatalf("claimed task = %q, want issue task %q", task.ID, fixture.issueTaskID)
+	}
+	if task.SessionStoreScope != "qc_"+fixture.originID {
+		t.Fatalf("session_store_scope = %q, want %q", task.SessionStoreScope, "qc_"+fixture.originID)
+	}
+	if task.PriorSessionID != "quick-create-session" {
+		t.Fatalf("prior_session_id = %q, want quick-create-session", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/quick-create-origin" {
+		t.Fatalf("prior_work_dir = %q, want /tmp/quick-create-origin", task.PriorWorkDir)
+	}
+}
+
+// Active origins are soft-ordered ahead of their first issue task. The bound
+// is deliberate: if an origin wedges, the issue becomes claimable after the
+// handoff window and starts cold rather than remaining blocked forever.
+func TestClaimTask_QuickCreateHandoffWaitIsBounded(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	fixture := createQuickCreateHandoffFixture(t, ctx, "running")
+	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(fixture.runtimeID))
+	if err != nil {
+		t.Fatalf("claim during active handoff: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("active handoff claimed task %s before wait bound", uuidToString(claimed.ID))
+	}
+
+	// The delayed handoff is filtered before ORDER BY/LIMIT, so a lower-priority
+	// unrelated task for the same agent must still run instead of sitting behind
+	// the handoff at the head of the queue.
+	var unrelatedIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, creator_type, creator_id,
+			assignee_type, assignee_id, priority, number
+		)
+		VALUES (
+			$1, 'Unrelated task behind quick-create handoff', 'agent', $2,
+			'agent', $2, 'low',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
+		)
+		RETURNING id
+	`, testWorkspaceID, fixture.agentID).Scan(&unrelatedIssueID); err != nil {
+		t.Fatalf("setup: create unrelated issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, unrelatedIssueID) })
+
+	var unrelatedTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, fixture.agentID, fixture.runtimeID, unrelatedIssueID).Scan(&unrelatedTaskID); err != nil {
+		t.Fatalf("setup: create unrelated queued task: %v", err)
+	}
+	unrelated := claimTaskForRuntimeGuard(t, fixture.runtimeID, fixture.daemonID)
+	if unrelated.ID != unrelatedTaskID {
+		t.Fatalf("claimed task = %q, want unrelated task %q while handoff waits", unrelated.ID, unrelatedTaskID)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET created_at = now() - interval '10 minutes' WHERE id = $1
+	`, fixture.issueTaskID); err != nil {
+		t.Fatalf("age issue task past handoff bound: %v", err)
+	}
+	task := claimTaskForRuntimeGuard(t, fixture.runtimeID, fixture.daemonID)
+	if task.ID != fixture.issueTaskID {
+		t.Fatalf("claimed task = %q, want aged issue task %q", task.ID, fixture.issueTaskID)
+	}
+	if task.SessionStoreScope != "qc_"+fixture.originID {
+		t.Fatalf("session_store_scope = %q, want %q", task.SessionStoreScope, "qc_"+fixture.originID)
+	}
+	if task.PriorSessionID != "" || task.PriorWorkDir != "" {
+		t.Fatalf("timed-out active origin must fall back cold, got session=%q workdir=%q", task.PriorSessionID, task.PriorWorkDir)
 	}
 }
 

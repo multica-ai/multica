@@ -612,6 +612,22 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      -- Soft-order the first task of a quick-created issue behind its exact
+      -- origin task. The age bound prevents an orphaned/stuck origin from
+      -- blocking the issue forever; after it expires the task claims cold.
+      AND (
+          atq.created_at <= now() - make_interval(secs => @quick_create_handoff_wait_secs::double precision)
+          OR NOT EXISTS (
+              SELECT 1
+              FROM issue handoff_issue
+              JOIN agent_task_queue origin ON origin.id = handoff_issue.origin_id
+              WHERE handoff_issue.id = atq.issue_id
+                AND handoff_issue.origin_type = 'quick_create'
+                AND origin.agent_id = atq.agent_id
+                AND origin.runtime_id = atq.runtime_id
+                AND origin.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+          )
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
