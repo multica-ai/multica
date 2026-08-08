@@ -1174,21 +1174,43 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 // `configOptions` (MUL-5239); the shared parser still accepts both, so the
 // discovery path stays identical. See parseACPConfigOptionModels.
 //
-// Support is decided per model and nothing else: a model that provider-list
-// does not list, or lists without efforts, keeps Thinking nil, which hides the
-// control for that model alone. Kimi versions predating supportEfforts degrade
-// to the same "no control" state without any extra probing.
+// Effort selection is gated on the CLI build, because provider-list alone
+// cannot tell whether the runtime can act on what it advertises. Verified
+// against real binaries: 0.28.1 reports supportEfforts [low high max] for K3
+// exactly like 0.33.0 does, but its ACP only implements the on/off toggle, so
+// set_config_option("max") returns success while confirming "on". Gating on the
+// session's `thinking` config id cannot separate the two — 0.28.1 advertises
+// that id too. The version is the only honest signal, and the initialize
+// response already carries it, so this costs no extra process.
+//
+// Above that, support is decided per model and nothing else: a model that
+// provider-list does not list, or lists without efforts, keeps Thinking nil,
+// which hides the control for that model alone.
 //
 // Failure modes (kimi missing, not logged in, config error) return an empty
 // list so the UI falls back to manual entry.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
+	var acpVersion string
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+		inspectInit: func(initResult json.RawMessage) {
+			acpVersion = acpAgentInfoVersion(initResult)
+		},
 	})
 	if err != nil || len(models) == 0 {
 		return models, err
+	}
+	if !kimiSupportsThinkingEfforts(acpVersion) {
+		// Not an error and not worth a Warn: an older CLI still lists models and
+		// runs tasks, it just cannot be told which effort to use. Model discovery
+		// re-runs on every cache miss, so a Warn here would repeat forever.
+		slog.Debug("kimi CLI predates ACP effort selection; hiding thinking controls",
+			"detected_version", acpVersion,
+			"required_version", kimiMinThinkingEffortVersion,
+		)
+		return models, nil
 	}
 
 	perModel, err := discoverKimiProviderThinking(ctx, executablePath)
@@ -1208,6 +1230,52 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 		}
 	}
 	return models, nil
+}
+
+// kimiMinThinkingEffortVersion is the first Kimi Code CLI whose ACP surface
+// applies an effort level instead of a plain on/off toggle (upstream 0.29.0,
+// released 2026-07-22). Below it, `session/set_config_option` accepts
+// "low"/"high"/"max" without error and leaves the session on "on", so
+// advertising those levels would promise something the runtime cannot deliver.
+const kimiMinThinkingEffortVersion = "0.29.0"
+
+// kimiSupportsThinkingEfforts reports whether an ACP-reported Kimi version can
+// act on an effort level. An empty or unparsable version answers no: a build we
+// cannot identify (a fork, a wrapper, a future format) is not one we can
+// promise effort selection for, and hiding the picker only costs that build a
+// control it may not honour anyway. Tasks still run either way.
+func kimiSupportsThinkingEfforts(version string) bool {
+	detected, err := parseSemver(strings.TrimSpace(version))
+	if err != nil {
+		return false
+	}
+	minimum, err := parseSemver(kimiMinThinkingEffortVersion)
+	if err != nil {
+		return false
+	}
+	return !detected.lessThan(minimum)
+}
+
+// acpAgentInfoVersion pulls `agentInfo.version` out of an ACP initialize
+// result. ACP agents report their own build here (Kimi sends
+// {"name":"Kimi Code CLI","version":"0.33.0"}); an agent that omits it yields
+// "", which every caller must treat as "unknown", never as "new enough".
+func acpAgentInfoVersion(raw json.RawMessage) string {
+	var response struct {
+		AgentInfo struct {
+			Version string `json:"version"`
+		} `json:"agentInfo"`
+		AgentInfoSnake struct {
+			Version string `json:"version"`
+		} `json:"agent_info"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return ""
+	}
+	if version := strings.TrimSpace(response.AgentInfo.Version); version != "" {
+		return version
+	}
+	return strings.TrimSpace(response.AgentInfoSnake.Version)
 }
 
 func discoverKimiProviderThinking(ctx context.Context, executablePath string) (map[string]*ModelThinking, error) {
@@ -1445,6 +1513,13 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// inspectInit receives the raw initialize result before any session is
+	// created. It is for reading capability facts the handshake already
+	// carries — Kimi reads `agentInfo.version` to gate a feature on the CLI
+	// build — so a provider does not have to spend a second process asking the
+	// binary what it is. It cannot fail discovery: a provider that learns
+	// nothing useful here must degrade, not abort.
+	inspectInit func(json.RawMessage)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -1583,6 +1658,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	})
 	if err != nil {
 		return fail("initialize", err)
+	}
+	if p.inspectInit != nil {
+		p.inspectInit(initResult)
 	}
 
 	// session/new requires a valid cwd — use a temp directory we

@@ -167,7 +167,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"},{"value":"kimi-code/k3-256k","name":"K3-256k"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}\n' "$id"
@@ -228,7 +228,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/kimi-for-coding","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}}\n' "$id"
@@ -269,7 +269,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]},{"id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}}\n' "$id"
@@ -313,7 +313,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/kimi-for-coding","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]}]}}\n' "$id"
@@ -339,6 +339,119 @@ done
 	}
 	if thinking := byID["kimi-code/kimi-for-coding"].Thinking; thinking != nil {
 		t.Errorf("kimi-for-coding has no efforts in the provider catalog: %+v", thinking)
+	}
+}
+
+// TestDiscoverKimiModelsHidesThinkingBelowTheEffortCapableCLI covers the case
+// provider-list cannot detect on its own. Checked against the real binaries:
+// Kimi 0.28.1 reports K3's supportEfforts exactly like 0.33.0 does, but its ACP
+// only implements the on/off toggle — set_config_option("max") answers success
+// while confirming "on". Advertising Low/High/Max there would let a user save a
+// level the runtime silently ignores, so the version decides.
+func TestDiscoverKimiModelsHidesThinkingBelowTheEffortCapableCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	// The `thinking` config id is present here on purpose: 0.28.1 advertises it
+	// too, which is exactly why it cannot stand in for the capability check.
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/k3":{"supportEfforts":["low","high","max"],"defaultEffort":"high"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"VERSION"}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/k3","name":"K3"}]},{"id":"thinking","category":"thought_level","currentValue":"on","options":[{"value":"off","name":"Off"},{"value":"on","name":"On"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	tests := []struct {
+		name         string
+		version      string
+		wantThinking bool
+	}{
+		{name: "0.28.1 applies on/off only", version: "0.28.1", wantThinking: false},
+		{name: "0.29.0 is the first effort-capable build", version: "0.29.0", wantThinking: true},
+		{name: "unidentifiable build stays hidden", version: "", wantThinking: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fake := filepath.Join(t.TempDir(), "kimi")
+			writeTestExecutable(t, fake, []byte(strings.Replace(script, "VERSION", tt.version, 1)))
+
+			models, err := discoverKimiModels(context.Background(), fake)
+			if err != nil {
+				t.Fatalf("discoverKimiModels: %v", err)
+			}
+			if len(models) == 0 {
+				t.Fatal("model discovery must keep working on every CLI build")
+			}
+			var k3 *ModelThinking
+			for _, model := range models {
+				if model.ID == "kimi-code/k3" {
+					k3 = model.Thinking
+				}
+			}
+			if got := k3 != nil; got != tt.wantThinking {
+				t.Errorf("k3 thinking present = %v, want %v (version %q): %+v", got, tt.wantThinking, tt.version, k3)
+			}
+		})
+	}
+}
+
+func TestACPAgentInfoVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "kimi shape", raw: `{"protocolVersion":1,"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}`, want: "0.33.0"},
+		{name: "snake_case", raw: `{"agent_info":{"version":"0.29.0"}}`, want: "0.29.0"},
+		{name: "padded", raw: `{"agentInfo":{"version":"  0.30.1  "}}`, want: "0.30.1"},
+		{name: "absent", raw: `{"protocolVersion":1,"agentCapabilities":{}}`, want: ""},
+		{name: "malformed json", raw: `not json`, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpAgentInfoVersion([]byte(tt.raw)); got != tt.want {
+				t.Errorf("acpAgentInfoVersion(%s) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKimiSupportsThinkingEfforts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: "0.29.0", want: true},  // first effort-capable build
+		{version: "0.28.1", want: false}, // confirms "on" for any effort
+		{version: "0.33.0", want: true},
+		{version: "1.0.0", want: true},
+		{version: "0.9.0", want: false}, // minor is compared numerically, not lexically
+		{version: "", want: false},      // agent reported no version
+		{version: "not-a-version", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			t.Parallel()
+			if got := kimiSupportsThinkingEfforts(tt.version); got != tt.want {
+				t.Errorf("kimiSupportsThinkingEfforts(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
 	}
 }
 
