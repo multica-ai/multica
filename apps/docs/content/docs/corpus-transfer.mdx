@@ -1,0 +1,137 @@
+---
+title: Corpus package transfer
+description: Package, stream, verify, receive, and acknowledge large corpus ZIPs without browser automation.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Corpus transfer moves a private ZIP through the authenticated API of one workspace. It is intended for large Codex exports and locally collected corpus files that cannot reliably leave a computer through browser automation, attachments, or an inbound SSH connection.
+
+The P0 flow is:
+
+```text
+source files -> canonical manifest -> ZIP + SHA-256 -> authenticated upload
+  -> server readback verification -> confirmed transfer -> verified extraction -> ACK
+```
+
+<Callout type="warning">
+P0 accepts one fixed-length ZIP of at most 2 GiB. It does not support multipart upload, resume, an offline queue, Windows source discovery, or cross-workspace delivery. An interrupted body upload must restart with a new transfer.
+</Callout>
+
+## Before you start
+
+Install and sign in to the [Multica CLI](/cli), then select the destination workspace:
+
+```bash
+multica auth status
+multica workspace switch <workspace-slug>
+```
+
+Both the sender and receiver need access to that workspace. The API uses the current workspace identity and never trusts a workspace, actor, or object key supplied by the manifest.
+
+## Pack source directories on macOS
+
+`pack` scans explicit source roots, preserves every regular file, hashes exact duplicates, and records duplicate provenance without deleting either copy. It does not perform semantic or destructive filtering.
+
+```bash
+multica corpus pack ./codex-export-alice-30d.zip \
+  --source codex=desktop:"/Users/alice/Library/Application Support/Codex" \
+  --source multica=workspace:"/Users/alice/Exports/multica" \
+  --source automation=jobs:"/Users/alice/Automation" \
+  --cutoff 2026-08-01T00:00:00Z
+```
+
+The command creates:
+
+- `codex-export-alice-30d.zip`, including `manifest.json`;
+- `codex-export-alice-30d.zip.manifest.json`, the canonical sidecar;
+- JSON output containing the archive and manifest hashes, archive size, entry count, and `missing_sources`.
+
+A missing source root is reported as missing evidence; it is not interpreted as a person's willingness to collaborate. Symlinks, special files, changing inputs, unsafe paths, and macOS Unicode or case collisions are rejected.
+
+Secure source packing is not available on Windows in P0. Windows can send an existing ZIP as shown below.
+
+## Send and inspect a transfer
+
+Send a package created by `pack`:
+
+```bash
+multica corpus send ./codex-export-alice-30d.zip \
+  --idempotency-key alice-2026-08-05
+```
+
+The adjacent sidecar is selected automatically. If no sidecar or embedded manifest exists, `send` inspects and hashes the ZIP and creates a retry-stable manifest. Reuse an explicit `--idempotency-key` only for controlled retries of the same archive and metadata.
+
+The successful JSON receipt includes `transfer_id`, `state`, `last_success_at`, `late`, `missing`, and `retry_reason`. Save the `transfer_id`, then inspect the durable ledger at any time:
+
+```bash
+multica corpus status <transfer-id>
+```
+
+### Send the existing Windows export
+
+Run this copy-ready PowerShell command on the computer that already holds the ZIP:
+
+```powershell
+multica corpus send "C:\Users\EDY\Desktop\codex-export-皮皮-30d.zip" --source-type codex-export
+```
+
+This path does not use Chrome remote debugging, browser automation, Tailscale, SSH, or a browser upload form.
+
+## Receive, verify, and ACK
+
+Receive into a directory owned by the local corpus consumer:
+
+```bash
+multica corpus receive <transfer-id> \
+  --output-dir ./received-corpus \
+  --sink-id corpus-indexer-production
+```
+
+The CLI streams into a mode-0600 temporary file and stops at the size declared by the receipt. Before publishing `<output-dir>/<package_id>`, it verifies the archive size and SHA-256, the manifest SHA-256, every entry hash and size, path safety, expansion bounds, and filesystem collisions. Publication is an atomic directory rename.
+
+ACK happens only after the installed package passes verification. It proves that one stable sink applied the confirmed bytes; server confirmation alone proves only that the server stored and re-read those bytes. Replaying the same ACK is idempotent. If installation succeeded but the ACK request or response failed, rerun the same `receive` command: the CLI re-verifies the existing package and retries the ACK without downloading or overwriting it.
+
+## Retention and privacy
+
+- Routes are authenticated and workspace-scoped. Every database lookup also includes the workspace ID.
+- Uploads use fixed-length streaming. The server hashes a fresh read from object storage before exposing the content as confirmed.
+- Local staging directories are mode 0700; archive, sidecar, and download temporary files are mode 0600.
+- On local storage, corpus objects and metadata are mode 0600 and their namespace is excluded from the generic `/uploads/*` route. The authenticated, workspace-scoped transfer API is the only content read path. Other backends use the deployment's configured private storage and encryption-at-rest controls. Corpus transfer does not create a public or presigned URL.
+- Content is available for at most 24 hours from transfer creation. At expiry, confirmed or acknowledged bytes become API-unavailable and the row becomes `purged` while physical cleanup is scheduled or in progress. Deletion can lag and retry; `cleanup_pending` clears only after cleanup is confirmed.
+- Confirmation and ACK evidence, including hashes and timestamps, remains in the ledger after content is purged.
+
+Do not treat the transfer object as a corpus archive of record. Move verified content into the approved corpus sink before it expires.
+
+## States and failure semantics
+
+| State | Meaning |
+| --- | --- |
+| `created` / `uploading` | An intent exists; content is absent or still streaming. |
+| `uploaded` / `verifying` | Bytes exist but are not downloadable until server readback verification succeeds. |
+| `confirmed` | Stored size and SHA-256 match; the package can be received. |
+| `acked` | At least one named sink verified and applied the confirmed package. |
+| `failed` | Upload, storage readback, size, or hash verification failed. Check `retry_reason`. |
+| `expired` | An abandoned, unconfirmed transfer passed its 24-hour deadline. |
+| `purged` | Confirmed or acknowledged bytes are API-unavailable after retention. Physical deletion may still be pending or retrying; the evidence row remains. |
+
+`missing: true` means that delivery evidence or retained content is missing. It must never be used as a measure of employee participation or collaboration.
+
+## Why authenticated streaming
+
+| Path | P0 decision |
+| --- | --- |
+| Authenticated API streaming | Selected: works through an existing outbound HTTPS connection, keeps workspace authorization in one model, bounds memory, verifies stored bytes, and records an ACK. |
+| Tailscale or raw SSH pull | Rejected: requires inbound reachability, host credentials, and per-machine network setup; these were the blocked dependencies this path removes. |
+| Feishu files | Rejected: introduces another permission and retention domain and does not provide the same server readback and sink ACK ledger. |
+| Browser automation | Rejected: Chrome remote-debugging and Windows sandbox paths are unavailable or fragile, and browser upload flows are not suitable for unattended 1.55 GB transfers. |
+| Attachment upload | Rejected: the attachment path is limited to 100 MiB and buffers request data rather than providing this fixed-length large-object protocol. |
+| Presigned object URL | Deferred: efficient, but adds a second bearer-capability auth model plus provider-specific signing and checksum behavior. It belongs with later direct-upload and cross-tenant hardening. |
+
+## Troubleshooting
+
+- **Archive exceeds 2 GiB:** split it outside this protocol or wait for multipart/resume support. The CLI rejects the local file before ZIP inspection.
+- **Upload was interrupted:** P0 cannot resume a body. Retry with a new idempotency key. A controlled retry is appropriate only when the create, upload, or completion response was ambiguous.
+- **`verification_mismatch`:** the uploaded bytes differ from the declared size or SHA-256. Create a new transfer from the unchanged local ZIP.
+- **Receive reports an unsafe or mismatched entry:** do not bypass the check. Rebuild or re-export the ZIP from trusted source files.
+- **Content expired or state is `purged`:** the bytes are no longer downloadable. Send the local archive again as a new transfer.

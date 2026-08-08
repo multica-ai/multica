@@ -26,10 +26,15 @@ type LocalStorage struct {
 // to the storage-key basename for the download filename.
 const metaSuffix = ".meta.json"
 
-// tempSuffix is the on-disk extension of the staging file writeAtomic renames
-// into place. Deterministic per key so a crash leftover stays reclaimable —
-// see tempPath.
+// tempSuffix is the on-disk extension of the staging file
+// writeAtomicWithMode renames into place. Deterministic per key so a crash
+// leftover stays reclaimable — see tempPath.
 const tempSuffix = ".tmp"
+
+const (
+	publicLocalObjectMode  os.FileMode = 0o644
+	privateLocalObjectMode os.FileMode = 0o600
+)
 
 type localMeta struct {
 	Filename    string `json:"filename"`
@@ -127,7 +132,7 @@ func (s *LocalStorage) DeleteObject(_ context.Context, key string) error {
 		return nil
 	}
 	filePath := filepath.Join(s.uploadDir, key)
-	for _, p := range []string{filePath, filePath + metaSuffix, tempPath(filePath)} {
+	for _, p := range []string{filePath, filePath + metaSuffix, tempPath(filePath), tempPath(filePath + metaSuffix)} {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -153,7 +158,8 @@ func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
 
 func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := writeAtomic(dest, bytes.NewReader(data)); err != nil {
+	mode := localObjectMode(key)
+	if err := writeAtomicWithMode(dest, bytes.NewReader(data), mode); err != nil {
 		return "", err
 	}
 	// Best-effort sidecar so ServeFile can restore the original filename in
@@ -164,7 +170,7 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 	// that field.
 	if filename != "" {
 		body, _ := json.Marshal(localMeta{Filename: filename, ContentType: contentType})
-		if err := os.WriteFile(dest+metaSuffix, body, 0644); err != nil {
+		if err := writeAtomicWithMode(dest+metaSuffix, bytes.NewReader(body), mode); err != nil {
 			slog.Error("local storage meta write failed", "key", key, "error", err)
 		}
 	}
@@ -177,12 +183,13 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 
 func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := writeAtomic(dest, data); err != nil {
+	mode := localObjectMode(key)
+	if err := writeAtomicWithMode(dest, data, mode); err != nil {
 		return "", err
 	}
 	if filename != "" {
 		body, _ := json.Marshal(localMeta{Filename: filename, ContentType: contentType})
-		if err := os.WriteFile(dest+metaSuffix, body, 0644); err != nil {
+		if err := writeAtomicWithMode(dest+metaSuffix, bytes.NewReader(body), mode); err != nil {
 			slog.Error("local storage meta write failed", "key", key, "error", err)
 		}
 	}
@@ -193,24 +200,30 @@ func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Rea
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
 
-// writeAtomic writes src through a temp file in the destination directory and
-// renames it into place. Writing straight to dest would truncate an existing
-// object up front, so a write that fails mid-copy would destroy a
+// writeAtomicWithMode writes src through a temp file in the destination
+// directory and renames it into place. Writing straight to dest would truncate
+// an existing object up front, so a write that fails mid-copy would destroy a
 // previously-successful upload of the same key (and the old cleanup even
 // removed it outright) — an attachment row could then point at a file that no
 // longer exists. With rename-into-place a failed write only discards its own
 // temp file and the existing object survives untouched. Both upload paths go
 // through here so neither can reintroduce the destructive shape.
-func writeAtomic(dest string, src io.Reader) error {
+func writeAtomicWithMode(dest string, src io.Reader, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("local storage MkdirAll: %w", err)
 	}
 	tmp := tempPath(dest)
-	// 0644 at open, matching the mode the direct write used (os.CreateTemp
-	// would make it 0600 and need a chmod that some mounts refuse).
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return fmt.Errorf("local storage create temp: %w", err)
+	}
+	// OpenFile does not change the mode of a crash-leftover temp file. Enforce
+	// the requested mode before writing so a pre-hardening 0644 corpus temp can
+	// never be renamed into place with public permissions.
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("local storage Chmod: %w", err)
 	}
 	if _, err := io.Copy(f, src); err != nil {
 		_ = f.Close()
@@ -228,8 +241,8 @@ func writeAtomic(dest string, src io.Reader) error {
 	return nil
 }
 
-// tempPath is the staging file writeAtomic renames into place. It is derived
-// from the object key rather than randomized (os.CreateTemp) so a crash
+// tempPath is the staging file writeAtomicWithMode renames into place. It is
+// derived from the object key rather than randomized (os.CreateTemp) so a crash
 // between the write and the rename leaves a file the delete path can still
 // find: DeleteObject removes it alongside the object, which means the media
 // intent ledger reclaims it too — the ledger row is written before the upload,
@@ -259,6 +272,33 @@ func isInternalLocalPath(key string) bool {
 	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, tempSuffix)
 }
 
+// isPrivateCorpusObjectKey identifies the server-generated namespace used by
+// corpus transfers. Local deployments also expose /uploads/* for ordinary
+// public media, so corpus bytes must be excluded from that generic route even
+// though authenticated handlers can still read them through GetReader.
+func isPrivateCorpusObjectKey(key string) bool {
+	clean := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(key)), "/")
+	parts := strings.Split(clean, "/")
+	return len(parts) >= 3 && localPathSegmentMayAlias(parts[0], "workspaces") && parts[1] != "" && localPathSegmentMayAlias(parts[2], "corpus-transfers")
+}
+
+// localPathSegmentMayAlias folds aliases accepted by common case-insensitive
+// filesystems. Windows also ignores trailing dots/spaces and may resolve an
+// NTFS 8.3 short name containing '~' to a long directory name. Object-key
+// namespace segments are server-generated and never contain '~', so treating
+// it as an alias in these two reserved positions safely closes that route.
+func localPathSegmentMayAlias(segment, reserved string) bool {
+	segment = strings.TrimRight(segment, ". ")
+	return strings.EqualFold(segment, reserved) || strings.ContainsRune(segment, '~')
+}
+
+func localObjectMode(key string) os.FileMode {
+	if isPrivateCorpusObjectKey(key) {
+		return privateLocalObjectMode
+	}
+	return publicLocalObjectMode
+}
+
 func (s *LocalStorage) GetFilePath(key string) string {
 	return filepath.Join(s.uploadDir, key)
 }
@@ -269,7 +309,7 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 	// half-written .<key>.tmp) doesn't become a stable read API. Comes before
 	// any disk work so a path-traversal attempt at a sibling can't trigger an
 	// out-of-tree read.
-	if isInternalLocalPath(filename) {
+	if isInternalLocalPath(filename) || isPrivateCorpusObjectKey(filename) {
 		http.NotFound(w, r)
 		return
 	}

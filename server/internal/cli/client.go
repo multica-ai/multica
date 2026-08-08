@@ -387,6 +387,98 @@ func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any)
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// PutStream sends a fixed-length request body without buffering it in memory.
+// Cross-origin redirects are returned as errors so authenticated workspace
+// headers can never be replayed to another host.
+func (c *APIClient) PutStream(ctx context.Context, path string, body io.Reader, size int64, out any) error {
+	if body == nil || size < 0 {
+		return fmt.Errorf("stream body and non-negative size are required")
+	}
+	// Present only io.Reader so net/http closes its wrapper rather than a
+	// caller-owned io.ReadCloser such as *os.File.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+path, struct{ io.Reader }{Reader: body})
+	if err != nil {
+		return err
+	}
+	req.ContentLength = size
+	req.Header.Set("Content-Type", "application/zip")
+	c.setHeaders(req)
+
+	resp, err := c.redirectSafeHTTPClient(ctx).Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return newHTTPError(http.MethodPut, path, resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// DownloadStream copies a successful response directly into dst. It does not
+// impose the attachment helper's 100 MiB buffer/limit and is therefore safe
+// for corpus archives up to the server-declared transfer bound.
+func (c *APIClient) DownloadStream(ctx context.Context, path string, dst io.Writer) error {
+	if dst == nil {
+		return fmt.Errorf("download destination is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+	resp, err := c.redirectSafeHTTPClient(ctx).Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		return newHTTPError(http.MethodGet, path, resp)
+	}
+	_, copyErr := io.Copy(dst, resp.Body)
+	closeErr := resp.Body.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func (c *APIClient) redirectSafeHTTPClient(ctx context.Context) *http.Client {
+	base := c.HTTPClient
+	if base == nil {
+		base = http.DefaultClient
+	}
+	client := *base
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > client.Timeout {
+			client.Timeout = remaining
+		}
+	}
+	prior := base.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) > 0 {
+			first := via[0].URL
+			if !strings.EqualFold(first.Scheme, req.URL.Scheme) || !strings.EqualFold(first.Host, req.URL.Host) {
+				return http.ErrUseLastResponse
+			}
+		}
+		if prior != nil {
+			return prior(req, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &client
+}
+
 // PatchJSON performs a PATCH request with a JSON body.
 func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out any) error {
 	data, err := json.Marshal(body)
