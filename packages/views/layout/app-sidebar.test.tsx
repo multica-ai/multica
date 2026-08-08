@@ -133,6 +133,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
     usage: () => "/acme/usage",
     runtimes: () => "/acme/runtimes",
     skills: () => "/acme/skills",
+    extensions: () => "/acme/extensions",
     settings: () => "/acme/settings",
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
@@ -233,6 +234,15 @@ describe("PinRow", () => {
       "true",
     );
     expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+});
+
+describe("configure navigation", () => {
+  it("links to the workspace extensions page", () => {
+    const { container } = render(<AppSidebar />);
+    expect(
+      container.querySelector('button[data-href="/acme/extensions"]'),
+    ).not.toBeNull();
   });
 });
 

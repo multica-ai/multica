@@ -4,6 +4,7 @@ import { RESERVED_SLUGS, isReservedSlug } from "./reserved-slugs";
 describe("reserved slugs", () => {
   it("returns true for a known reserved slug", () => {
     expect(isReservedSlug("login")).toBe(true);
+    expect(isReservedSlug("extensions")).toBe(true);
   });
 
   it("returns false for an unreserved slug", () => {

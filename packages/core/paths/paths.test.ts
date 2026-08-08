@@ -30,6 +30,7 @@ describe("paths.workspace(slug)", () => {
       "/acme/runtimes/machine%2Fruntime/runtime/runtime%20one",
     );
     expect(ws.skills()).toBe("/acme/skills");
+    expect(ws.extensions()).toBe("/acme/extensions");
     expect(ws.skillDetail("skl_123")).toBe("/acme/skills/skl_123");
     expect(ws.squads()).toBe("/acme/squads");
     expect(ws.squadDetail("sq_1")).toBe("/acme/squads/sq_1");

@@ -106,6 +106,11 @@ describe("openLink", () => {
     expect(navigatedPaths()).toEqual(["/acme/issues/MUL-1"]);
   });
 
+  it("prefixes the current slug on the extensions page", () => {
+    openLink("/extensions", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/acme/extensions"]);
+  });
+
   it("leaves a path that already carries a slug alone", () => {
     openLink("/other/issues/MUL-1", "acme", APP_ORIGIN);
     expect(navigatedPaths()).toEqual(["/other/issues/MUL-1"]);
