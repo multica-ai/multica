@@ -46,6 +46,13 @@ type TaskCompletionContext struct {
 	SessionID   string
 	TaskAttempt int
 	StartedAt   time.Time
+	// SilentRun is true when the run reported execution messages, none of them
+	// was a tool call, and the agent left no comment on the issue while it ran.
+	// Such a run wrote nothing — no comment, no wakeup, no dispatch, no
+	// handoff, no status change — so it has nothing to continue. A run whose
+	// runtime reported no messages at all is unknown rather than silent and
+	// stays gated.
+	SilentRun bool
 }
 
 type TaskCompletionContextStore interface {
@@ -90,6 +97,13 @@ func (g *TaskCompletionGate) BeforeComplete(ctx context.Context, taskID pgtype.U
 		return result, fmt.Errorf("%w: %v", ErrTaskCompletionContextUnavailable, err)
 	}
 	if completion.IssueID == "" || isTerminalIssueStatus(completion.IssueStatus) {
+		return result, nil
+	}
+	// A run that called no tool left nothing behind to continue. Demanding a
+	// wakeup or a dispatch from it turns "there was nothing to do" into a
+	// failed task whose error text replaces the agent's answer in the human's
+	// thread (FIR-4643). The gate exists to catch abandoned work, not silence.
+	if completion.SilentRun {
 		return result, nil
 	}
 	continuation, err := g.store.ResolveContinuation(ctx, completion)

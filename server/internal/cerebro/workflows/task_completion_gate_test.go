@@ -146,6 +146,41 @@ func TestTaskCompletionGateNeverTurnsFailedRemediationIntoCompletion(t *testing.
 	}
 }
 
+// FIR-4643: a run that called no tool wrote nothing to the issue, so there is
+// nothing for it to continue. It must stop without the gate turning it into a
+// failed task.
+func TestTaskCompletionGateAllowsSilentRunWithoutEvaluation(t *testing.T) {
+	completion := nonTerminalCompletionContext()
+	completion.SilentRun = true
+	store := &fakeCompletionContextStore{context: completion}
+	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookRequire, Requirements: []string{"Create a wakeup or handoff"}}}
+	gate := NewTaskCompletionGate(store, evaluator)
+
+	got, err := gate.BeforeComplete(context.Background(), pgtype.UUID{Bytes: [16]byte{7}, Valid: true}, []byte(`{"output":"nothing to report"}`))
+	if err != nil {
+		t.Fatalf("silent run blocked: %v", err)
+	}
+	if evaluator.calls != 0 {
+		t.Fatalf("silent run evaluated %d hooks", evaluator.calls)
+	}
+	if string(got) != `{"output":"nothing to report"}` {
+		t.Fatalf("result = %s", got)
+	}
+}
+
+// The same run still blocks when the runtime reported a tool call, so the
+// exemption cannot be reached by a run that actually did something.
+func TestTaskCompletionGateStillBlocksRunThatUsedTools(t *testing.T) {
+	store := &fakeCompletionContextStore{context: nonTerminalCompletionContext()}
+	evaluator := &fakeHookEvaluator{result: HookResult{Decision: HookRequire, Requirements: []string{"Create a wakeup or handoff"}}}
+	gate := NewTaskCompletionGate(store, evaluator)
+
+	_, err := gate.BeforeComplete(context.Background(), pgtype.UUID{Bytes: [16]byte{8}, Valid: true}, []byte(`{"output":"nothing to report"}`))
+	if !errors.Is(err, ErrTaskContinuationRequired) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 type fakeCompletionContextStore struct {
 	context         TaskCompletionContext
 	continuation    *TaskContinuation

@@ -23,7 +23,9 @@ import { WakeupLimitsSettings } from "@multica/cerebro-wakeup";
 import { AgentStartSettings } from "@multica/cerebro-issue-datetime/views";
 import {
   CEREBRO_FLAGS,
+  CEREBRO_FLAG_DEFAULTS,
   CEREBRO_FLAG_GROUPS,
+  flagIsWorkspaceOnly,
   flagsForGroup,
   subgroupsForGroup,
   flagsForSubgroup,
@@ -107,6 +109,10 @@ export function FlagRow({
   const workspaceValue = useWorkspaceFlagValue(flagKey);
   const personalMutation = useSetFeatureFlagMutation();
   const workspaceMutation = useSetWorkspaceFeatureFlagMutation();
+  // A workspace-only flag has no working per-member switch: the server reads
+  // the workspace row and nothing else, so showing one would offer a control
+  // that silently does nothing (FIR-4643).
+  const workspaceOnly = flagIsWorkspaceOnly(flagKey);
 
   // The owner's workspace-level setting, as a 3-way mode:
   //   "default" — no workspace override; members fall back to personal/default.
@@ -119,7 +125,13 @@ export function FlagRow({
       ? "off"
       : "on";
 
-  const state = flagEffectiveState({ enabled, locked, workspaceValue });
+  const state = flagEffectiveState({
+    enabled,
+    locked,
+    workspaceValue,
+    workspaceOnly,
+    defaultValue: CEREBRO_FLAG_DEFAULTS[flagKey],
+  });
 
   // Optional inline settings for this feature, shown only while it's enabled.
   const SettingsComponent = FLAG_SETTINGS[flagKey];
@@ -169,13 +181,21 @@ export function FlagRow({
                   : "Turned on for the whole workspace by an owner — you can't change this."}
               </p>
             )}
+            {workspaceOnly && !locked && !isAdmin && (
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                This one applies to the whole workspace — only an owner can change it.
+              </p>
+            )}
           </div>
-          <Switch
-            checked={enabled}
-            disabled={personalMutation.isPending || locked}
-            onCheckedChange={handlePersonalChange}
-            aria-label={label}
-          />
+          {!workspaceOnly && (
+            <Switch
+              checked={enabled}
+              disabled={personalMutation.isPending || locked}
+              onCheckedChange={handlePersonalChange}
+              aria-label={label}
+            />
+          )}
         </div>
 
         {isAdmin && (
@@ -192,7 +212,9 @@ export function FlagRow({
               }
               aria-label={`${label} — who this applies to`}
             >
-              <NativeSelectOption value="default">Members choose</NativeSelectOption>
+              <NativeSelectOption value="default">
+                {workspaceOnly ? "Workspace default" : "Members choose"}
+              </NativeSelectOption>
               <NativeSelectOption value="on">Forced on for everyone</NativeSelectOption>
               <NativeSelectOption value="off">Forced off for everyone</NativeSelectOption>
             </NativeSelect>
@@ -222,6 +244,8 @@ function useFlagStates(): Record<CerebroFlagKey, FlagEffectiveState> {
         enabled: resolveFlag(flag.key, overrides, workspaceOverrides, locked),
         locked: !!locked[flag.key],
         workspaceValue: workspaceOverrides[flag.key],
+        workspaceOnly: flag.workspaceOnly,
+        defaultValue: CEREBRO_FLAG_DEFAULTS[flag.key],
       });
     }
     return out;

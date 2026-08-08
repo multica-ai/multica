@@ -9,18 +9,35 @@
  * The effective, human-facing state of a flag for the current user:
  *   - "forced_on"  — owner locked it on for everyone.
  *   - "forced_off" — owner locked it off for everyone (the org-wide kill switch).
+ *   - "workspace_on" / "workspace_off" — a workspace-only flag (the server
+ *     ignores personal overrides); this is the value everyone in the workspace
+ *     gets, whether or not an owner has set it explicitly.
  *   - "on" / "off" — not locked; members choose, and this is the resolved value.
  */
-export type FlagEffectiveState = "on" | "off" | "forced_on" | "forced_off";
+export type FlagEffectiveState =
+  | "on"
+  | "off"
+  | "forced_on"
+  | "forced_off"
+  | "workspace_on"
+  | "workspace_off";
 
 export function flagEffectiveState(args: {
   enabled: boolean;
   locked: boolean;
   workspaceValue: boolean | undefined;
+  /** The flag is enforced from the workspace row only — see flagIsWorkspaceOnly. */
+  workspaceOnly?: boolean;
+  /** Registry default, used when a workspace-only flag has no override yet. */
+  defaultValue?: boolean;
 }): FlagEffectiveState {
-  const { enabled, locked, workspaceValue } = args;
+  const { enabled, locked, workspaceValue, workspaceOnly, defaultValue } = args;
   if (locked && workspaceValue === true) return "forced_on";
   if (locked && workspaceValue === false) return "forced_off";
+  if (workspaceOnly === true) {
+    // The personal value is deliberately ignored: the server never reads it.
+    return (workspaceValue ?? defaultValue ?? false) ? "workspace_on" : "workspace_off";
+  }
   return enabled ? "on" : "off";
 }
 
@@ -39,6 +56,10 @@ export function flagStatusCopy(state: FlagEffectiveState): FlagStatusCopy {
       return { tone: "forced", text: "Forced on for everyone" };
     case "forced_off":
       return { tone: "off", text: "Forced off for everyone" };
+    case "workspace_on":
+      return { tone: "on", text: "On for the whole workspace" };
+    case "workspace_off":
+      return { tone: "off", text: "Off for the whole workspace" };
     case "on":
       return { tone: "on", text: "On — members choose" };
     case "off":
@@ -57,9 +78,9 @@ export function matchesFilter(state: FlagEffectiveState, filter: FlagFilter): bo
     case "all":
       return true;
     case "on":
-      return state === "on" || state === "forced_on";
+      return state === "on" || state === "forced_on" || state === "workspace_on";
     case "off":
-      return state === "off" || state === "forced_off";
+      return state === "off" || state === "forced_off" || state === "workspace_off";
     case "forced":
       return state === "forced_on" || state === "forced_off";
     default:

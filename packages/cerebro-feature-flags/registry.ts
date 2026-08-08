@@ -985,6 +985,14 @@ export interface CerebroFlagDefinition {
   label: string;
   description: string;
   group: CerebroFlagGroupKey;
+  /**
+   * The server reads ONLY this flag's workspace-level row; a personal override
+   * changes nothing. Marking it here removes the per-member switch from the
+   * settings row, so the control a member can reach is the control that
+   * actually takes effect. FIR-4643 — an owner turned Workflow hooks off with
+   * the personal switch and the gates kept running for two more days.
+   */
+  workspaceOnly?: boolean;
 }
 
 /**
@@ -1413,6 +1421,9 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     key: "cerebro_workflow_hooks",
     label: "Workflow hooks",
     group: "workspace",
+    // Enforced from the workspace row only — see workflowHooksFlagForWorkspace
+    // in server/internal/cerebro/workflows/hook_workspace_flag.go.
+    workspaceOnly: true,
     description:
       "Let the Workflow engine own the agent loop's code gates: handoff, task completion, task failure, tool failure, and issue status change. ON by default. Turn it off for this workspace to run the loop with no Workflow decision. The server-wide emergency stop is CEREBRO_WORKFLOW_HOOKS_ENABLED.",
   },
@@ -2044,6 +2055,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Write the resolved Connections & MCP tools list into every agent's runtime brief. On by default — that is the section agents get today. Turning it off removes the section and roughly 7,500 tokens from every single run; agents keep every tool, because a tool is callable through the runtime's own tool schemas and the live `multica_connection_tools_status` lookup, never through this prose list. Per-agent `tools_brief_mode` still applies when the flag is on: `summary` folds each connection to one line. FIR-4500.",
   },
 ];
+
+/**
+ * True when the server enforces this flag from the workspace row alone, so a
+ * personal override would be a switch that does nothing. FIR-4643.
+ */
+export function flagIsWorkspaceOnly(key: CerebroFlagKey): boolean {
+  return CEREBRO_FLAGS.find((flag) => flag.key === key)?.workspaceOnly === true;
+}
 
 /** Flags belonging to a group, in their CEREBRO_FLAGS display order. */
 export function flagsForGroup(group: CerebroFlagGroupKey): CerebroFlagDefinition[] {

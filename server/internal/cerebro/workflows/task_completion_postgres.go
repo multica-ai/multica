@@ -31,17 +31,33 @@ func (s *PostgresTaskCompletionStore) LoadTaskCompletionContext(ctx context.Cont
 	var sessionID pgtype.Text
 	var attempt int32
 	var started pgtype.Timestamptz
+	var silentRun bool
+	// silent_run: the runtime reported messages for this task, not one of them
+	// was a tool call, and the agent left no comment on the issue during the
+	// run. Zero reported messages means the runtime tells us nothing, which is
+	// not the same as a run that did nothing — that case stays gated.
+	//
+	// The comment check is load-bearing, not belt-and-braces: antigravity and
+	// firtal-gateway stream plain assistant text and never emit a tool_use
+	// message even when the agent ran tools (see antigravityBackend in
+	// server/pkg/agent/antigravity.go). Without it, every run on those
+	// providers would look silent. See TaskCompletionContext.SilentRun.
 	err := s.db.QueryRow(ctx, `
 SELECT t.id, COALESCE(i.workspace_id, a.workspace_id), t.issue_id, t.agent_id,
        COALESCE(t.context->>'project_id',''), COALESCE(t.context->>'workflow_id',''),
        COALESCE(i.status, ''), COALESCE(t.model_override, a.model, ''), t.session_id,
-       t.attempt, COALESCE(t.started_at, t.created_at)
+       t.attempt, COALESCE(t.started_at, t.created_at),
+       EXISTS (SELECT 1 FROM task_message m WHERE m.task_id=t.id)
+         AND NOT EXISTS (SELECT 1 FROM task_message m WHERE m.task_id=t.id AND m.type='tool_use')
+         AND NOT EXISTS (SELECT 1 FROM comment c WHERE c.issue_id=t.issue_id
+             AND c.author_type='agent' AND c.author_id=t.agent_id
+             AND c.created_at >= COALESCE(t.started_at, t.created_at))
 FROM agent_task_queue t
 JOIN agent a ON a.id=t.agent_id
 LEFT JOIN issue i ON i.id=t.issue_id
 WHERE t.id=$1`, taskID).Scan(
 		&task, &workspace, &issue, &agent, &projectID, &workflowID,
-		&issueStatus, &model, &sessionID, &attempt, &started,
+		&issueStatus, &model, &sessionID, &attempt, &started, &silentRun,
 	)
 	if err != nil {
 		return TaskCompletionContext{}, err
@@ -51,6 +67,7 @@ WHERE t.id=$1`, taskID).Scan(
 		ProjectID: projectID, WorkflowID: workflowID, IssueID: util.UUIDToString(issue),
 		IssueStatus: issueStatus, AgentID: util.UUIDToString(agent), Model: model,
 		SessionID: sessionID.String, TaskAttempt: int(attempt), StartedAt: started.Time,
+		SilentRun: silentRun,
 	}, nil
 }
 

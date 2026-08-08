@@ -4,6 +4,7 @@ import {
   CEREBRO_FLAG_GROUPS,
   CEREBRO_FLAG_DEFAULTS,
   CEREBRO_FLAG_SUBGROUP_OF,
+  flagIsWorkspaceOnly,
   flagsForGroup,
 } from "./registry";
 
@@ -95,5 +96,16 @@ describe("cerebro feature flag grouping", () => {
 
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
+  });
+
+  // FIR-4643: the server resolves cerebro_workflow_hooks from the workspace
+  // row alone (workflowHooksFlagForWorkspace), so the settings row must not
+  // offer a per-member switch that does nothing.
+  it("marks cerebro_workflow_hooks as workspace-only", () => {
+    expect(flagIsWorkspaceOnly("cerebro_workflow_hooks")).toBe(true);
+  });
+
+  it("leaves ordinary per-member flags alone", () => {
+    expect(flagIsWorkspaceOnly("cerebro_chat_page")).toBe(false);
   });
 });

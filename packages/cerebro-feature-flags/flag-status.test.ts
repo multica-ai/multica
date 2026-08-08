@@ -81,3 +81,55 @@ describe("matchesQuery", () => {
     expect(matchesQuery(flag, "voice")).toBe(false);
   });
 });
+
+// FIR-4643: cerebro_workflow_hooks is enforced from the workspace row only.
+// Reporting the personal value for such a flag is what let an owner believe a
+// switch had taken effect when the server never read it.
+describe("flagEffectiveState — workspace-only flags", () => {
+  it("ignores the personal value and reports the registry default", () => {
+    expect(
+      flagEffectiveState({
+        enabled: false,
+        locked: false,
+        workspaceValue: undefined,
+        workspaceOnly: true,
+        defaultValue: true,
+      }),
+    ).toBe("workspace_on");
+  });
+
+  it("reports the workspace override when one exists", () => {
+    expect(
+      flagEffectiveState({
+        enabled: true,
+        locked: false,
+        workspaceValue: false,
+        workspaceOnly: true,
+        defaultValue: true,
+      }),
+    ).toBe("workspace_off");
+  });
+
+  it("still reports a locked workspace value as forced", () => {
+    expect(
+      flagEffectiveState({
+        enabled: true,
+        locked: true,
+        workspaceValue: false,
+        workspaceOnly: true,
+        defaultValue: true,
+      }),
+    ).toBe("forced_off");
+  });
+
+  it("names the scope in the status line", () => {
+    expect(flagStatusCopy("workspace_on").text).toBe("On for the whole workspace");
+    expect(flagStatusCopy("workspace_off").text).toBe("Off for the whole workspace");
+  });
+
+  it("stays reachable through the on/off filter chips", () => {
+    expect(matchesFilter("workspace_on", "on")).toBe(true);
+    expect(matchesFilter("workspace_off", "off")).toBe(true);
+    expect(matchesFilter("workspace_on", "off")).toBe(false);
+  });
+});

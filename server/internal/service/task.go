@@ -1985,7 +1985,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — when this
 	// run already posted a visible agent comment, the BLOCKED timeout
 	// fallback is just noise stacked on top of the real answer.
-	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused && s.shouldPostTimeoutFailureComment(ctx, task) { // CEREBRO-PATCH(auto-pause-on-failure)
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused && !IsWorkflowGateFailure(errMsg) && s.shouldPostTimeoutFailureComment(ctx, task) { // CEREBRO-PATCH(auto-pause-on-failure) // CEREBRO-PATCH(suppress-workflow-gate-failure-comment): FIR-4643 — a gate rejection is not the agent's answer.
 		if failureReason == "timeout" {
 			// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — skip BLOCKED for an unstarted serverside dispatch-timeout; see isUnstartedServersideTimeout.
 			if !isUnstartedServersideTimeout(task, errMsg) {
