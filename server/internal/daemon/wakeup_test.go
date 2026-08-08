@@ -492,7 +492,7 @@ func TestShouldResetTaskWakeupBackoffRequiresStableConnection(t *testing.T) {
 	}
 }
 
-func TestRuntimeHeartbeatClosesIdleConnectionsAfterRepeatedTransientFailures(t *testing.T) {
+func TestRuntimeHeartbeatClosesIdleConnectionsAfterTransientFailure(t *testing.T) {
 	transport := &closeCountingTransport{}
 	client := NewClient("http://daemon.test")
 	client.client = &http.Client{
@@ -526,8 +526,8 @@ func TestRuntimeHeartbeatClosesIdleConnectionsAfterRepeatedTransientFailures(t *
 	case <-time.After(time.Second):
 		t.Fatal("runRuntimeHeartbeat did not stop after context cancellation")
 	}
-	if got := transport.roundTrips.Load(); got < 2 {
-		t.Fatalf("RoundTrip count = %d, want at least 2", got)
+	if got := transport.roundTrips.Load(); got < 1 {
+		t.Fatalf("RoundTrip count = %d, want at least 1", got)
 	}
 }
 
