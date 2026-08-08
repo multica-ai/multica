@@ -46,6 +46,7 @@ import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
+import { PiModelConnectionCard } from "./pi-model-connection-card";
 import { useT, useTimeAgo } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -202,6 +203,11 @@ export function RuntimeDetail({
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
+            />
+            <PiModelConnectionCard
+              runtime={runtime}
+              wsId={wsId}
+              canEdit={!!canEditRuntime}
             />
             <DiagnosticsCard
               runtime={runtime}

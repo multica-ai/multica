@@ -73,6 +73,15 @@ export interface RuntimeDevice {
   status: "online" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
+  /**
+   * Non-secret default model routing for runtimes such as Pi. New backends
+   * return an empty object when no default connection exists; older backends
+   * omit both this field and has_default_model_api_key.
+   */
+  default_model_config?: Record<string, unknown>;
+  /** Whether the runtime has a saved default model API key. The key itself is
+   * never included in an AgentRuntime response. */
+  has_default_model_api_key?: boolean;
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
@@ -90,6 +99,27 @@ export interface RuntimeDevice {
 }
 
 export type AgentRuntime = RuntimeDevice;
+
+export interface RuntimeModelConnection {
+  runtime_id: string;
+  config: {
+    provider?: string;
+    api?: string;
+    base_url?: string;
+    model?: string;
+  };
+  has_api_key: boolean;
+  configured: boolean;
+}
+
+export interface UpdateRuntimeModelConnectionRequest {
+  provider: string;
+  api: string;
+  base_url: string;
+  model: string;
+  /** Omit to preserve the existing secret. */
+  api_key?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Custom runtime profiles (MUL-3284)

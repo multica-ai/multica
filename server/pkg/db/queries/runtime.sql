@@ -138,6 +138,25 @@ WHERE workspace_id = @workspace_id
   AND (@owner_id::uuid IS NULL OR owner_id = @owner_id)
 RETURNING *;
 
+-- name: UpdateAgentRuntimeDefaultModelConnection :one
+-- Saves the non-secret default model configuration and optionally rotates its
+-- API key. A NULL key means preserve the current secret; clearing the complete
+-- connection uses ClearAgentRuntimeDefaultModelConnection instead.
+UPDATE agent_runtime
+SET default_model_config = @default_model_config,
+    default_model_api_key = COALESCE(sqlc.narg('default_model_api_key'), default_model_api_key),
+    updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: ClearAgentRuntimeDefaultModelConnection :one
+UPDATE agent_runtime
+SET default_model_config = '{}'::jsonb,
+    default_model_api_key = NULL,
+    updated_at = now()
+WHERE id = @id
+RETURNING *;
+
 -- name: ListDaemonCustomNames :many
 -- Lists the custom_name of every OTHER runtime on (workspace_id, daemon_id)
 -- (MUL-4217). @exclude_id drops the just-registered row. The caller derives

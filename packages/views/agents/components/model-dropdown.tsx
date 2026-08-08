@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
-import type { RuntimeModel } from "@multica/core/types";
+import {
+  runtimeDisplayLabel,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
+import type { RuntimeDevice, RuntimeModel } from "@multica/core/types";
 import {
   Popover,
   PopoverTrigger,
@@ -13,6 +16,11 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import { runtimeDefaultModelDisplay } from "./model-display";
+import {
+  isPiModelDiscoveryNoise,
+  visibleRuntimeModels,
+} from "./model-options";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -23,12 +31,14 @@ import { useT } from "../../i18n";
 // today — Antigravity gained `--model` in agy 1.0.6 — but the path stays for
 // any future model-less runtime.
 export function ModelDropdown({
+  runtime,
   runtimeId,
   runtimeOnline,
   value,
   onChange,
   disabled,
 }: {
+  runtime?: RuntimeDevice | null;
   runtimeId: string | null;
   runtimeOnline: boolean;
   value: string;
@@ -38,17 +48,25 @@ export function ModelDropdown({
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const resolvedRuntimeId = runtime?.id ?? runtimeId;
+  const resolvedRuntimeOnline = runtime
+    ? runtime.status === "online"
+    : runtimeOnline;
+  const runtimeDefault = useMemo(
+    () => runtimeDefaultModelDisplay(runtime),
+    [runtime],
+  );
 
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(resolvedRuntimeOnline ? resolvedRuntimeId : null),
   );
 
   const supported = modelsQuery.data?.supported ?? true;
   // Stable reference for the model list — `?? []` would mint a fresh
   // array each render and force every downstream useMemo to invalidate.
   const models = useMemo(
-    () => modelsQuery.data?.models ?? [],
-    [modelsQuery.data],
+    () => visibleRuntimeModels(modelsQuery.data?.models ?? [], runtime),
+    [modelsQuery.data, runtime],
   );
   const grouped = useMemo(() => groupByProvider(models), [models]);
 
@@ -79,8 +97,17 @@ export function ModelDropdown({
   const trimmedSearch = search.trim();
   const exactMatch = models.some(
     (m) => m.id === trimmedSearch || m.label === trimmedSearch,
+  ) || Boolean(
+    runtimeDefault &&
+      (runtimeDefault.model === trimmedSearch ||
+        (runtimeDefault.provider
+          ? `${runtimeDefault.provider}/${runtimeDefault.model}`
+          : runtimeDefault.model) === trimmedSearch),
   );
-  const canCreate = trimmedSearch.length > 0 && !exactMatch;
+  const canCreate =
+    trimmedSearch.length > 0 &&
+    !exactMatch &&
+    !(runtime?.provider === "pi" && isPiModelDiscoveryNoise(trimmedSearch));
 
   const select = (id: string) => {
     onChange(id);
@@ -90,11 +117,26 @@ export function ModelDropdown({
 
   const triggerLabel =
     value ||
-    (disabled
-      ? t(($) => $.model_dropdown.select_runtime_first)
-      : runtimeOnline
-        ? t(($) => $.model_dropdown.default_provider)
-        : t(($) => $.model_dropdown.runtime_offline_manual));
+    (runtimeDefault
+      ? t(($) => $.model_dropdown.runtime_default_value, {
+          model: runtimeDefault.model,
+        })
+      : disabled
+        ? t(($) => $.model_dropdown.select_runtime_first)
+        : resolvedRuntimeOnline
+          ? t(($) => $.model_dropdown.default_provider)
+          : t(($) => $.model_dropdown.runtime_offline_manual));
+  const runtimeDefaultSubtitle =
+    runtimeDefault && runtime
+      ? runtimeDefault.provider
+        ? t(($) => $.model_dropdown.runtime_default_subtitle, {
+            provider: runtimeDefault.provider,
+            runtime: runtimeDisplayLabel(runtime),
+          })
+        : t(($) => $.model_dropdown.runtime_default_subtitle_no_provider, {
+            runtime: runtimeDisplayLabel(runtime),
+          })
+      : "";
 
   if (!supported && !modelsQuery.isLoading) {
     return (
@@ -136,9 +178,9 @@ export function ModelDropdown({
             <div className="flex items-center gap-2">
               <span className="truncate font-medium">{triggerLabel}</span>
             </div>
-            {value && (
+            {(value || runtimeDefaultSubtitle) && (
               <div className="truncate text-caption text-muted-foreground">
-                {modelLabel(models, value)}
+                {value ? modelLabel(models, value) : runtimeDefaultSubtitle}
               </div>
             )}
           </div>
@@ -165,6 +207,30 @@ export function ModelDropdown({
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t(($) => $.pickers.model_discovering)}
               </div>
+            )}
+
+            {runtimeDefault && (
+              <button
+                type="button"
+                onClick={() => select("")}
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body transition-colors ${
+                  value === "" ? "bg-accent" : "hover:bg-accent/50"
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">
+                    {t(($) => $.model_dropdown.runtime_default_option)}
+                  </div>
+                  <div className="truncate text-caption text-muted-foreground">
+                    {runtimeDefault.provider
+                      ? `${runtimeDefault.model} · ${runtimeDefault.provider}`
+                      : runtimeDefault.model}
+                  </div>
+                </div>
+                {value === "" && (
+                  <Check className="h-4 w-4 shrink-0 text-primary" />
+                )}
+              </button>
             )}
 
             {!modelsQuery.isLoading &&
@@ -202,7 +268,8 @@ export function ModelDropdown({
 
             {!modelsQuery.isLoading &&
               Object.keys(filtered).length === 0 &&
-              !canCreate && (
+              !canCreate &&
+              !runtimeDefault && (
                 <div className="px-3 py-6 text-center text-body text-muted-foreground">
                   {t(($) => $.pickers.model_empty_with_dot)}
                 </div>
@@ -227,7 +294,9 @@ export function ModelDropdown({
                 onClick={() => select("")}
                 className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
               >
-                {t(($) => $.model_dropdown.clear_full)}
+                {runtimeDefault
+                  ? t(($) => $.model_dropdown.clear_runtime_default)
+                  : t(($) => $.model_dropdown.clear_full)}
               </button>
             )}
           </div>

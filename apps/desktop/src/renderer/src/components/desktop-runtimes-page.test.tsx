@@ -21,6 +21,7 @@ describe("DesktopRuntimesPage", () => {
       localDaemonId: "daemon-local",
       localMachineName: "Jiayuan's MacBook",
       bootstrapping: false,
+      managedRuntimeSetup: null,
     });
   });
 

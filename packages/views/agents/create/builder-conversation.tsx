@@ -94,6 +94,7 @@ export function BuilderSetup({
             }}
           />
           <ModelDropdown
+            runtime={selectedRuntime}
             runtimeId={selectedRuntime?.id ?? null}
             runtimeOnline={selectedRuntime?.status === "online"}
             value={draft.model}

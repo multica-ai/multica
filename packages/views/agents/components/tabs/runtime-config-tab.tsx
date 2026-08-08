@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   OPENCLAW_GATEWAY_TOKEN_MASK,
   type OpenclawRoutingMode,
@@ -17,6 +17,7 @@ import { Label } from "@multica/ui/components/ui/label";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { PiRuntimeConfigTab } from "./pi-runtime-config-tab";
 
 // Form state mirrors OpenclawRuntimeConfig, but always carries a defined
 // mode value so the radio group is fully controlled. Empty-string mode
@@ -77,6 +78,26 @@ function formToConfig(state: FormState): OpenclawRuntimeConfig {
 }
 
 export function RuntimeConfigTab({
+  provider,
+  ...props
+}: {
+  provider: string;
+  agent: Agent;
+  runtime?: AgentRuntime | null;
+  onSave: (updates: { runtime_config: Record<string, unknown> }) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  if (provider === "pi") return <PiRuntimeConfigTab {...props} />;
+  return (
+    <OpenclawRuntimeConfigTab
+      agent={props.agent}
+      onSave={props.onSave}
+      onDirtyChange={props.onDirtyChange}
+    />
+  );
+}
+
+function OpenclawRuntimeConfigTab({
   agent,
   onSave,
   onDirtyChange,

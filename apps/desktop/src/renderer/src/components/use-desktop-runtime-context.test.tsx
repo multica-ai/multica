@@ -41,4 +41,33 @@ describe("useDesktopRuntimeContext", () => {
     );
     expect(secondRoute.result.current.localDaemonId).toBe("daemon-local");
   });
+
+  it("exposes managed Pi setup state to desktop runtime routes", async () => {
+    const daemonAPI = {
+      getStatus: vi.fn<() => Promise<DaemonStatus>>().mockResolvedValue({
+        state: "installing_runtime",
+        managedRuntimeSetup: {
+          provider: "pi",
+          phase: "installing",
+          startedAt: "2026-08-04T00:00:00Z",
+        },
+      }),
+      getHostName: vi.fn().mockResolvedValue("host.local"),
+      onStatusChange: vi.fn(() => () => {}),
+    };
+    Object.defineProperty(window, "daemonAPI", {
+      configurable: true,
+      value: daemonAPI,
+    });
+
+    const { useDesktopRuntimeContext } = await import(
+      "./use-desktop-runtime-context"
+    );
+    const { result } = renderHook(() => useDesktopRuntimeContext());
+
+    await waitFor(() =>
+      expect(result.current.managedRuntimeSetup?.phase).toBe("installing"),
+    );
+    expect(result.current.managedRuntimeSetup?.provider).toBe("pi");
+  });
 });
