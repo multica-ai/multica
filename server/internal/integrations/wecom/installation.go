@@ -403,16 +403,18 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 	return installationFromRow(row)
 }
 
-// validateInstallationParams is a lightweight pre-write check for
-// required fields. It does NOT verify anything against WeCom.
 // ErrInvalidInstallationParams marks a request the caller can fix by filling
 // something in, as opposed to a failure of ours. It exists so the HTTP layer
-// can tell the two apart: everything that is NOT one of these belongs on a
-// 500, because telling an admin their credentials are wrong when Postgres
-// briefly went away sends them to rotate a secret that was fine — and a WeCom
-// secret, once rotated, cannot be recovered.
+// can tell them apart: a missing field is the caller's 400, ErrCredentialsRejected
+// and ErrCredentialsUnverifiable carry the two outcomes of actually asking WeCom
+// (400 and 503), and everything left over is a 500 — because telling an admin
+// their credentials are wrong when Postgres briefly went away sends them to
+// rotate a secret that was fine, and a WeCom secret, once rotated, cannot be
+// recovered. writeWecomInstallError holds the full matrix.
 var ErrInvalidInstallationParams = errors.New("wecom: invalid installation parameters")
 
+// validateInstallationParams is a lightweight pre-write check for
+// required fields. It does NOT verify anything against WeCom.
 func validateInstallationParams(p InstallationParams) error {
 	missing := ""
 	switch {
