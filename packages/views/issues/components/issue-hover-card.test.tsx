@@ -39,7 +39,7 @@ describe("IssueHoverCard", () => {
 
   it("does not fetch issue detail until the card opens", () => {
     render(
-      <IssueHoverCard issueId="issue-1">
+      <IssueHoverCard issueId="issue-1" delay={0}>
         <span>MUL-3405</span>
       </IssueHoverCard>,
     );
@@ -54,7 +54,7 @@ describe("IssueHoverCard", () => {
   it("reveals the full title on hover", async () => {
     const user = userEvent.setup();
     render(
-      <IssueHoverCard issueId="issue-1">
+      <IssueHoverCard issueId="issue-1" delay={0}>
         <span>MUL-3405</span>
       </IssueHoverCard>,
     );

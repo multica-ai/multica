@@ -14,6 +14,13 @@ import { StatusIcon } from "./status-icon";
 interface IssueHoverCardProps {
   issueId: string;
   children: ReactNode;
+  /**
+   * Open delay override, in milliseconds. Exists for tests only — production
+   * leaves this undefined so the card uses Base UI's library default (600ms),
+   * matching `mention-hover-card.tsx`. Tests pass 0 so hover assertions don't
+   * need to wait out the real delay.
+   */
+  delay?: number;
 }
 
 /**
@@ -29,10 +36,10 @@ interface IssueHoverCardProps {
  * Moving the query up into IssueHoverCard would fire one request per mention on
  * render.
  */
-export function IssueHoverCard({ issueId, children }: IssueHoverCardProps) {
+export function IssueHoverCard({ issueId, children, delay }: IssueHoverCardProps) {
   return (
     <HoverCard>
-      <HoverCardTrigger delay={0} render={<span />}>
+      <HoverCardTrigger delay={delay} render={<span />}>
         {children}
       </HoverCardTrigger>
       <HoverCardContent align="start" className="w-auto min-w-56 max-w-80">
