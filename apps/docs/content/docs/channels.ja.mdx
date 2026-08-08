@@ -51,6 +51,7 @@ Bot を @メンションしていないチャンネルメッセージは、エ�
 - Slack は DM をチャンネルごとに分けます。チャンネル内では、スレッドごとに独立したセッションが保持されます。
 - DingTalk は conversation ごとにセッションを分けます。DM とグループはそれぞれのセッションを継続します。
 - WeCom はチャットごとにセッションを分けます。DM とグループチャットはそれぞれのセッションを継続します。
+- 個人Weixinは、QRコードを読み取ったアカウントのDMを独立したセッションとして扱います。初期版はそのアカウントからのDMだけを受信します。
 
 チャンネルで追加の依頼を送る場合も、Bot を再度 @メンションする必要があります。エージェントが受け取るのは自分宛てのメッセージだけで、チャンネルの履歴全体を自動的に読み取ることはありません。
 
@@ -79,11 +80,14 @@ MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 これらのキーは、保存された Bot の認証情報を暗号化します。生成、保管、ローテーションの方法は[環境変数](/environment-variables)を参照してください。Multica Cloud ではすでに設定済みです。
 
 WeCom はさらにバックエンドを**単一レプリカ**で運用する必要があります。送信経路が 1 つのプロセスが保持する WebSocket だけのため、他のレプリカで生成された返信は破棄されます。レプリカ間の送信ルーティングが実装されるまで、WeCom を有効にしたバックエンドは多重化しないでください。
+
+個人WeixinはTencent iLink Bot APIを使用します。Agentの連携ページでQRコードを読み取り、Weixin側で確認してください。初期版は読み取った本人のDMとテキストメッセージに対応し、グループとメディアは無視します。返信に必要な会話コンテキストを長時間ポーリング中のプロセスが保持するため、現在はバックエンドを単一レプリカで運用してください。
 
 ## 次のステップ
 

@@ -51,6 +51,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 - Slack 私聊按频道区分；频道中的每个 thread 分别保存一段会话。
 - 钉钉按 conversation 区分会话；每个单聊或群聊分别延续自己的会话。
 - 企业微信按聊天区分会话；每个单聊或群聊分别延续自己的会话。
+- 个人微信按扫码者的私聊区分会话；当前版本只接收扫码者本人的私聊消息。
 
 在频道中继续追问时仍需再次 @ Bot。智能体只收到发给自己的消息，不会自动读取整个频道的历史。
 
@@ -79,11 +80,16 @@ MULTICA_LARK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_WEIXIN_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
 
 这些密钥用于加密保存 Bot 凭据。生成、保存和轮换方法见[环境变量](/environment-variables)。Multica Cloud 已完成这项配置。
 
 企业微信还要求后端**只部署单个副本**：它的出站只有一条路径，即某个进程持有的 WebSocket，因此在其他副本上产生的回复会被丢弃。在跨副本出站路由实现之前，请不要对启用企业微信的后端做多副本部署。
+
+个人微信使用腾讯 iLink Bot API。工作区管理员在 Agent 的“集成”页面点击“连接个人微信”，再用个人微信扫码确认。二维码确认返回的 Bot Token 会加密保存。当前版本仅支持扫码者本人私聊和文本消息，群聊与媒体消息会被忽略。
+
+个人微信当前也要求后端只部署单个副本。接收长轮询和回复所需的会话上下文保存在持有连接的进程中；多副本可能使 Agent 的回复落到其他进程而无法发送。
 
 ## 接下来
 

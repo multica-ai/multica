@@ -146,6 +146,9 @@ services:
       # subscribe credentials at connection time, and to seal the secret when
       # an installation is created from the WeCom settings tab.
       MULTICA_WECOM_SECRET_KEY: ${MULTICA_WECOM_SECRET_KEY:-}
+      # Personal Weixin iLink Bot integration. Encrypts QR-login bot tokens at
+      # rest; unset keeps the personal-Weixin connector disabled.
+      MULTICA_WEIXIN_SECRET_KEY: ${MULTICA_WEIXIN_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:

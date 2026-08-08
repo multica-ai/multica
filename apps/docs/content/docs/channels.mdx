@@ -51,6 +51,7 @@ Ordinary messages follow this flow. `/issue` is a command, not a chat turn: Mult
 - Slack separates DMs by channel; in a channel, each thread holds its own session.
 - DingTalk separates sessions by conversation; each DM or group continues its own session.
 - WeCom separates sessions by chat; each DM or group chat continues its own session.
+- Personal Weixin isolates the scanner's direct chat. The initial release accepts only direct messages from the account that scanned the QR code.
 
 Follow-ups in a channel still need a fresh @-mention. The agent only receives messages addressed to it — it never reads the whole channel history automatically.
 
@@ -79,11 +80,16 @@ MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 These keys encrypt stored Bot credentials. See [Environment variables](/environment-variables) for how to generate, store, and rotate them. Multica Cloud already has this configured.
 
 WeCom additionally requires a **single backend replica**: its only outbound path is the WebSocket held by one process, so replies produced on another replica are dropped. Run the WeCom-enabled backend unreplicated until cross-replica outbound routing lands.
+
+Personal Weixin uses Tencent's iLink Bot API. A workspace admin selects **Connect personal Weixin** on the Agent's Integrations tab and confirms the QR code in Weixin. The returned Bot Token is encrypted at rest. The initial release supports text-only direct messages from the scanning account; group and media messages are ignored.
+
+Personal Weixin currently also requires a single backend replica. The long-poll holder keeps the conversation context token needed for replies in process, so a completion published on another replica cannot deliver the response.
 
 ## Next steps
 

@@ -194,6 +194,8 @@ const (
 	// channel_type) means at most one row per agent); `revoked` flips
 	// status without deleting the row. Front-ends invalidate the wecom
 	// installations query on either.
-	EventWecomInstallationCreated = "wecom_installation:created"
-	EventWecomInstallationRevoked = "wecom_installation:revoked"
+	EventWecomInstallationCreated  = "wecom_installation:created"
+	EventWecomInstallationRevoked  = "wecom_installation:revoked"
+	EventWeixinInstallationCreated = "weixin_installation:created"
+	EventWeixinInstallationRevoked = "weixin_installation:revoked"
 )

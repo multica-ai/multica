@@ -68,6 +68,13 @@ vi.mock("@multica/core/wecom", () => ({
   }),
 }));
 
+vi.mock("@multica/core/weixin", () => ({
+  weixinInstallationsOptions: () => ({
+    queryKey: ["weixin", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
 vi.mock("@multica/core/auth", () => {
   const useAuthStore = Object.assign(
     (sel?: (s: { user: { id: string } }) => unknown) =>
@@ -106,6 +113,12 @@ vi.mock("../../../settings/components/slack-tab", () => ({
 vi.mock("../../../settings/components/wecom-tab", () => ({
   WecomAgentBindButton: ({ agentId }: { agentId: string }) => (
     <div data-testid="wecom-bind-button" data-agent-id={agentId} />
+  ),
+}));
+
+vi.mock("../../../settings/components/weixin-tab", () => ({
+  WeixinAgentBindButton: ({ agentId }: { agentId: string }) => (
+    <div data-testid="weixin-bind-button" data-agent-id={agentId} />
   ),
 }));
 
@@ -204,13 +217,15 @@ describe("IntegrationsTab", () => {
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
     expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
+    expect(screen.queryByTestId("weixin-bind-button")).toBeNull();
   });
 
   it("lets a non-admin agent owner bind Lark but keeps Slack admin-only", () => {
     // The agent's owner (user-1) is only a plain workspace member. Lark
     // authorizes the agent owner (canManageAgent), so the Lark bind entry
-    // renders and receives owner_id; Slack, DingTalk and WeCom routes stay
-    // admin-only, so each shows the read-only note instead of a CTA (MUL-4213).
+    // renders and receives owner_id; Slack, DingTalk, WeCom and personal
+    // Weixin routes stay admin-only, so each shows the read-only note instead
+    // of a CTA (MUL-4213).
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={agent} />);
     const larkButton = screen.getByTestId("lark-bind-button");
@@ -218,11 +233,12 @@ describe("IntegrationsTab", () => {
     expect(larkButton.getAttribute("data-agent-owner-id")).toBe("user-1");
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
     expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
-    // The Slack, DingTalk and WeCom sections each fall back to the shared
-    // members note.
+    expect(screen.queryByTestId("weixin-bind-button")).toBeNull();
+    // The Slack, DingTalk, WeCom and personal Weixin sections each fall back
+    // to the shared members note.
     expect(
       screen.getAllByText(/Only workspace owners and admins can connect an agent/i),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {

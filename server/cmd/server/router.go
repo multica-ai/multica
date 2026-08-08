@@ -31,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -727,6 +728,39 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
 	}
 
+	// Personal Weixin integration. The admin scans an iLink QR code; the bot
+	// token returned by Tencent is encrypted and one long-poll worker is run per
+	// active installation by the shared channel Supervisor.
+	if weixinKey, err := secretbox.LoadKey("MULTICA_WEIXIN_SECRET_KEY"); err == nil {
+		box, boxErr := secretbox.New(weixinKey)
+		if boxErr != nil {
+			slog.Error("weixin: secretbox init failed; integration disabled", "error", boxErr)
+		} else if installSvc, installErr := weixin.NewInstallationService(queries, pool, box); installErr != nil {
+			slog.Error("weixin: installation service init failed; integration disabled", "error", installErr)
+		} else if credentials, credentialsErr := weixin.NewSecretboxCredentialsResolver(box); credentialsErr != nil {
+			slog.Error("weixin: credentials init failed; integration disabled", "error", credentialsErr)
+		} else {
+			client := weixin.NewClient(nil)
+			senders := weixin.NewSendersRegistry()
+			store := weixin.NewStore(queries)
+			h.WeixinInstall = installSvc
+			h.WeixinLogin = weixin.NewLoginService(client, installSvc)
+			replier := weixin.NewOutboundReplier(senders, slog.Default())
+			session := engine.NewChatSession(queries, pool, weixin.TypeWeixin, engine.SessionTitles{
+				Direct: "微信私聊", Group: "微信群聊", Fallback: "微信会话",
+			})
+			weixin.RegisterWeixin(channelRegistry, weixin.ChannelDeps{
+				Credentials: credentials, Client: client, Senders: senders, Logger: slog.Default(),
+			})
+			channelRouter.Register(weixin.TypeWeixin, weixin.NewResolverSet(store, session, replier))
+			weixin.NewOutbound(queries, senders, slog.Default()).Register(bus)
+			slog.Info("weixin integration enabled (personal iLink bot, QR login)")
+			slog.Warn("weixin integration: run a single backend replica until context-token-aware outbound routing is shared across replicas")
+		}
+	} else {
+		slog.Info("weixin integration disabled (MULTICA_WEIXIN_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1168,6 +1202,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
 					r.Get("/wecom/installations", h.ListWecomInstallations)
+					r.Get("/weixin/installations", h.ListWeixinInstallations)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
@@ -1175,6 +1210,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
 					r.Delete("/wecom/installations/{installationId}", h.RevokeWecomInstallation)
 					r.Post("/wecom/install/byo", h.RegisterWecomBYO)
+					r.Delete("/weixin/installations/{installationId}", h.RevokeWeixinInstallation)
+					r.Post("/weixin/install/begin", h.BeginWeixinInstall)
+					r.Get("/weixin/install/{sessionId}/status", h.GetWeixinInstallStatus)
 				})
 
 				r.Group(func(r chi.Router) {

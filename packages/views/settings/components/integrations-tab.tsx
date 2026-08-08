@@ -7,6 +7,7 @@ import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
+import { WeixinTab } from "./weixin-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -60,6 +61,9 @@ export function IntegrationsTab() {
       )}
       <SettingsSection title={t(($) => $.wecom.section_title)}>
         <WecomTab />
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.weixin.section_title)}>
+        <WeixinTab />
       </SettingsSection>
     </SettingsTab>
   );

@@ -169,6 +169,9 @@ import type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  ListWeixinInstallationsResponse,
+  BeginWeixinInstallResponse,
+  WeixinInstallStatusResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -297,6 +300,12 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  ListWeixinInstallationsResponseSchema,
+  BeginWeixinInstallResponseSchema,
+  WeixinInstallStatusResponseSchema,
+  EMPTY_LIST_WEIXIN_INSTALLATIONS_RESPONSE,
+  EMPTY_BEGIN_WEIXIN_INSTALL_RESPONSE,
+  EMPTY_WEIXIN_INSTALL_STATUS_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -3597,6 +3606,62 @@ export class ApiClient {
       RedeemWecomBindingTokenResponseSchema,
       EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/wecom/binding/redeem" },
+    );
+  }
+
+  async listWeixinInstallations(
+    workspaceId: string,
+  ): Promise<ListWeixinInstallationsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/weixin/installations`,
+    );
+    return parseWithFallback(
+      raw,
+      ListWeixinInstallationsResponseSchema,
+      EMPTY_LIST_WEIXIN_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/weixin/installations" },
+    );
+  }
+
+  async beginWeixinInstall(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<BeginWeixinInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/weixin/install/begin?${search.toString()}`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      BeginWeixinInstallResponseSchema,
+      EMPTY_BEGIN_WEIXIN_INSTALL_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/weixin/install/begin" },
+    );
+  }
+
+  async getWeixinInstallStatus(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<WeixinInstallStatusResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/weixin/install/${sessionId}/status`,
+    );
+    return parseWithFallback(
+      raw,
+      WeixinInstallStatusResponseSchema,
+      EMPTY_WEIXIN_INSTALL_STATUS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/weixin/install/:sessionId/status" },
+    );
+  }
+
+  async deleteWeixinInstallation(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/weixin/installations/${installationId}`,
+      { method: "DELETE" },
     );
   }
 }

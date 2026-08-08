@@ -126,7 +126,7 @@ type TaskContextForEnv struct {
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
-	// "feishu", "wecom"); empty for a web/mobile chat. Any non-empty value
+	// "feishu", "wecom", "weixin"); empty for a web/mobile chat. Any non-empty value
 	// means the reply leaves Multica for an external channel, so `multica
 	// attachment upload` cannot deliver a file and the Output section says
 	// text-only instead (MUL-4899). The orthogonal audience and history policies

@@ -56,6 +56,10 @@ vi.mock("./wecom-tab", () => ({
   WecomTab: () => <div data-testid="wecom-tab" />,
 }));
 
+vi.mock("./weixin-tab", () => ({
+  WeixinTab: () => <div data-testid="weixin-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 afterEach(cleanup);

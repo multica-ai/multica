@@ -209,6 +209,12 @@ export type {
   RedeemWecomBindingTokenResponse,
 } from "./wecom";
 export type {
+  WeixinInstallation,
+  ListWeixinInstallationsResponse,
+  BeginWeixinInstallResponse,
+  WeixinInstallStatusResponse,
+} from "./weixin";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

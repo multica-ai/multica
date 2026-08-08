@@ -51,6 +51,7 @@ Bot을 @멘션하지 않은 채널 메시지는 에이전트를 트리거하지 
 - Slack DM은 채널별로 구분하고, 채널 안에서는 각 thread가 별도 대화를 저장합니다.
 - DingTalk는 conversation별로 대화를 구분하며 각 DM 또는 그룹이 자체 대화를 이어갑니다.
 - WeCom은 채팅별로 대화를 구분하며 각 DM 또는 그룹 채팅이 자체 대화를 이어갑니다.
+- 개인 Weixin은 QR 코드를 스캔한 계정의 DM을 별도 대화로 유지합니다. 초기 버전은 해당 계정의 DM만 받습니다.
 
 채널에서 후속 질문을 할 때도 Bot을 다시 @멘션해야 합니다. 에이전트는 자신에게 보낸 메시지만 받으며 전체 채널 기록을 자동으로 읽지 않습니다.
 
@@ -79,11 +80,14 @@ MULTICA_LARK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_SLACK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_DINGTALK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_WECOM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
+MULTICA_WEIXIN_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 ```
 
 이 키는 Bot 자격 증명을 암호화해 저장하는 데 사용됩니다. 생성, 보관, 교체 방법은 [환경 변수](/environment-variables)를 참고하세요. Multica Cloud에는 이미 설정되어 있습니다.
 
 WeCom은 추가로 백엔드를 **단일 레플리카**로 운영해야 합니다. 발신 경로가 한 프로세스가 보유한 WebSocket뿐이어서 다른 레플리카에서 생성된 응답은 폐기됩니다. 레플리카 간 발신 라우팅이 구현되기 전까지 WeCom을 켠 백엔드는 다중화하지 마세요.
+
+개인 Weixin은 Tencent iLink Bot API를 사용합니다. Agent 연동 페이지에서 QR 코드를 스캔하고 Weixin에서 확인하세요. 초기 버전은 스캔한 본인의 DM과 텍스트 메시지를 지원하며 그룹과 미디어 메시지는 무시합니다. 응답에 필요한 대화 컨텍스트를 long-poll 프로세스가 보유하므로 현재는 백엔드를 단일 레플리카로 운영해야 합니다.
 
 ## 다음 단계
 

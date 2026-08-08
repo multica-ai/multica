@@ -111,6 +111,8 @@
     "./dingtalk/queries": "./dingtalk/queries.ts",
     "./wecom": "./wecom/index.ts",
     "./wecom/queries": "./wecom/queries.ts",
+    "./weixin": "./weixin/index.ts",
+    "./weixin/queries": "./weixin/queries.ts",
     "./feedback": "./feedback/index.ts",
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",

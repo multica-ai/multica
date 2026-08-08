@@ -32,6 +32,10 @@ import type {
   WecomInstallation,
   ListWecomInstallationsResponse,
   RedeemWecomBindingTokenResponse,
+  WeixinInstallation,
+  ListWeixinInstallationsResponse,
+  BeginWeixinInstallResponse,
+  WeixinInstallStatusResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   GitHubPullRequest,
@@ -2256,4 +2260,54 @@ export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenR
   workspace_id: "",
   installation_id: "",
   wecom_user_id: "",
+};
+
+export const WeixinInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  bot_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+}).loose();
+
+export const EMPTY_WEIXIN_INSTALLATION: WeixinInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  bot_id: "",
+  installer_user_id: "",
+  status: "revoked",
+};
+
+export const ListWeixinInstallationsResponseSchema = z.object({
+  installations: z.array(WeixinInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_WEIXIN_INSTALLATIONS_RESPONSE: ListWeixinInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const BeginWeixinInstallResponseSchema = z.object({
+  session_id: z.string(),
+  qr_code_url: z.string(),
+  expires_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_BEGIN_WEIXIN_INSTALL_RESPONSE: BeginWeixinInstallResponse = {
+  session_id: "",
+  qr_code_url: "",
+  expires_at: "",
+};
+
+export const WeixinInstallStatusResponseSchema = z.object({
+  status: z.string().default("waiting"),
+  installation: WeixinInstallationSchema.optional(),
+}).loose();
+
+export const EMPTY_WEIXIN_INSTALL_STATUS_RESPONSE: WeixinInstallStatusResponse = {
+  status: "waiting",
 };

@@ -16,6 +16,7 @@ const (
 	ChannelTypeSlack  = "slack"
 	ChannelTypeFeishu = "feishu"
 	ChannelTypeWecom  = "wecom"
+	ChannelTypeWeixin = "weixin"
 )
 
 // Room-shape discriminators, mirroring channel_chat_session_binding.chat_type
@@ -75,6 +76,8 @@ func ChannelDisplayName(channelType string) string {
 		return "Feishu/Lark"
 	case ChannelTypeWecom:
 		return "WeCom"
+	case ChannelTypeWeixin:
+		return "Weixin"
 	default:
 		return channelType
 	}

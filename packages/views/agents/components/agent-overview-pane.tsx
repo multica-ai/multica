@@ -15,6 +15,7 @@ import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { weixinInstallationsOptions } from "@multica/core/weixin";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -180,12 +181,17 @@ export function AgentOverviewPane({
     ...wecomInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: weixinListing } = useQuery({
+    ...weixinInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
 
   const integrationsConfigured =
     larkListing?.configured === true ||
     slackListing?.configured === true ||
     dingtalkListing?.configured === true ||
-    wecomListing?.configured === true;
+    wecomListing?.configured === true ||
+    weixinListing?.configured === true;
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime

@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -280,6 +281,10 @@ type Handler struct {
 	// see wecom/binding.go). Nil disables the redeem endpoint (returns 503)
 	// and the OutboundReplier's binding-prompt path.
 	WecomBindingTokens *wecom.BindingTokenService
+	// WeixinInstall and WeixinLogin expose personal-Weixin QR installation
+	// management. Both are nil unless MULTICA_WEIXIN_SECRET_KEY is configured.
+	WeixinInstall *weixin.InstallationService
+	WeixinLogin   *weixin.LoginService
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in

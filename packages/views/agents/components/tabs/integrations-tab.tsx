@@ -9,11 +9,13 @@ import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { weixinInstallationsOptions } from "@multica/core/weixin";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
 import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
 import { WecomAgentBindButton } from "../../../settings/components/wecom-tab";
+import { WeixinAgentBindButton } from "../../../settings/components/weixin-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -54,6 +56,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...wecomInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: weixinListing } = useQuery({
+    ...weixinInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -74,6 +80,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const canManageLark = isWorkspaceAdmin || isAgentOwner;
   const canManageSlack = isWorkspaceAdmin;
   const canManageWecom = isWorkspaceAdmin;
+  const canManageWeixin = isWorkspaceAdmin;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -102,7 +109,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   // agent's owner) gets the read-only note instead of the sections.
   // Members can still view connected bots in the (member-visible)
   // Settings → Integrations listing.
-  if (!canManageLark && !canManageSlack && !canManageDingtalk && !canManageWecom) {
+  if (!canManageLark && !canManageSlack && !canManageDingtalk && !canManageWecom && !canManageWeixin) {
     return (
       <div className="space-y-6">
         <p className="text-caption text-muted-foreground">
@@ -268,6 +275,33 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <WecomAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <MessagesSquare className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-body font-medium">{ts(($) => $.weixin.section_title)}</h3>
+            <p className="text-caption leading-relaxed text-muted-foreground">
+              {ts(($) => $.weixin.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!canManageWeixin ? (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : !weixinListing?.configured ? (
+            <p className="text-caption text-muted-foreground">
+              {ts(($) => $.weixin.not_enabled_title)}
+            </p>
+          ) : (
+            <WeixinAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>
