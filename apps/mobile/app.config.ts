@@ -31,7 +31,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // iOS icon size from this single PNG.
     icon: "./assets/icon.png",
     ios: {
-      supportsTablet: false,
+      // Keep the existing iPhone portrait policy while letting Expo generate
+      // the iPad-specific orientation declarations and device family. iPad
+      // then remains free to rotate between its native portrait and landscape
+      // layouts without widening the phone form factor's behavior.
+      supportsTablet: true,
       // Per-variant bundle id overrides exist for one reason: an Apple ID
       // can only sign bundle prefixes it owns, so contributors not on the
       // Multica Apple Developer team (and external users self-building a
