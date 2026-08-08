@@ -137,15 +137,23 @@ export interface DashboardOverview {
   recent_tasks: RecentTask[];
 }
 
+export interface ExactBounds {
+  start: string;
+  end: string;
+}
+
 export async function fetchDashboardOverview(
   range: TimeRange,
   scope: ActorScope,
   actorId: string | null,
+  bounds?: ExactBounds | null,
 ): Promise<DashboardOverview> {
   const actorType = scopeToActorType(scope);
   return api.getCerebroDashboardOverview<DashboardOverview>(range, {
     actor_type: actorType,
     actor_id: actorType ? actorId : null,
+    start: bounds?.start ?? null,
+    end: bounds?.end ?? null,
   });
 }
 
@@ -160,11 +168,14 @@ export async function fetchAllMessages(
   range: TimeRange,
   scope?: ActorScope,
   actorId?: string | null,
+  bounds?: ExactBounds | null,
 ): Promise<AllMessagesResponse> {
   const actorType = scope ? scopeToActorType(scope) : undefined;
   return api.getCerebroDashboardAllMessages<AllMessagesResponse>(range, {
     actor_type: actorType,
     actor_id: actorType ? actorId : null,
+    start: bounds?.start ?? null,
+    end: bounds?.end ?? null,
   });
 }
 

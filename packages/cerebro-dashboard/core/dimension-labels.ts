@@ -17,6 +17,7 @@ const DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   cost_kind: "Cost data",
   quality_type: "Signal source",
   quality_category: "Signal category",
+  quality_verdict: "Judge gate outcome",
   context: "Context",
   run: "Run",
   issue: "Issue",
@@ -97,5 +98,6 @@ export const ENUMERABLE_DIMENSIONS: AnalyticsDimension[] = [
   "cost_kind",
   "quality_type",
   "quality_category",
+  "quality_verdict",
   "issue",
 ];

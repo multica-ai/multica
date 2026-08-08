@@ -180,7 +180,10 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	spec := parseRange(rangeStr, time.Now())
+	spec, ok := applyExactBounds(w, r, parseRange(rangeStr, time.Now()))
+	if !ok {
+		return
+	}
 
 	out := overviewResponse{
 		Range:       rangeOrDefault(rangeStr),
@@ -712,6 +715,29 @@ func buildTimeline(spec rangeSpec) timeline {
 	return tl
 }
 
+// applyExactBounds overrides the preset window with exact RFC3339 start/end
+// query params, so a clicked timeline day scopes every aggregate. The prior
+// window keeps the same length for like-for-like KPI deltas. Returns ok=false
+// (after writing a 400) when bounds are present but malformed or unordered.
+func applyExactBounds(w http.ResponseWriter, r *http.Request, spec rangeSpec) (rangeSpec, bool) {
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+	if startStr == "" && endStr == "" {
+		return spec, true
+	}
+	start, errStart := time.Parse(time.RFC3339, startStr)
+	end, errEnd := time.Parse(time.RFC3339, endStr)
+	if errStart != nil || errEnd != nil || !start.Before(end) {
+		writeError(w, http.StatusBadRequest, "start and end must be RFC3339 with start before end")
+		return spec, false
+	}
+	dur := end.Sub(start)
+	spec.periodStart, spec.periodEnd = start, end
+	spec.priorStart, spec.priorEnd = start.Add(-dur), start
+	spec.bucketsByDay = dur >= 24*time.Hour
+	return spec, true
+}
+
 func ts(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }
@@ -884,7 +910,10 @@ func (h *Handler) AllMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rangeStr := r.URL.Query().Get("range")
-	spec := parseRange(rangeStr, time.Now())
+	spec, ok := applyExactBounds(w, r, parseRange(rangeStr, time.Now()))
+	if !ok {
+		return
+	}
 	// CEREBRO-PATCH(cerebro-dashboard-all-messages-filter): TECH-3093 actor filter
 	actorType, actorID, ok := parseActorFilter(w, r)
 	if !ok {

@@ -74,6 +74,75 @@ func TestBuildSQLSupportsTimeFiltersAndMissingCostMetric(t *testing.T) {
 	}
 }
 
+func TestBuildSQLFiltersStoredQualityVerdicts(t *testing.T) {
+	query := Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricRuns, MetricCostCents},
+		Filters: []Filter{
+			{Dimension: DimensionQualityType, Operator: OperatorIn, Values: []string{"judge_gate"}},
+			{Dimension: DimensionQualityVerdict, Operator: OperatorIn, Values: []string{"pass", "success"}},
+		},
+		Page: Page{Limit: 10},
+	}
+	plan, err := BuildSQL(query, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"EXISTS (SELECT 1 FROM cerebro_analytics_quality_measurement q_filter WHERE q_filter.analytics_run_id=r.id",
+		"COALESCE(q_filter.measurement_type,'') = ANY($2::text[])",
+		"COALESCE(q_filter.verdict,'') = ANY($3::text[])",
+	} {
+		if !strings.Contains(plan.SQL, fragment) {
+			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
+		}
+	}
+	if strings.Contains(plan.SQL, "LEFT JOIN cerebro_analytics_quality_measurement q ") {
+		t.Fatalf("verdict-only filter must not multiply run metrics with a quality join:\n%s", plan.SQL)
+	}
+
+	excluded, err := BuildSQL(Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricRuns},
+		Filters: []Filter{
+			{Dimension: DimensionQualityVerdict, Operator: OperatorNotIn, Values: []string{"fail"}},
+		},
+		Page: Page{Limit: 10},
+	}, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(excluded.SQL, "EXISTS (SELECT 1 FROM cerebro_analytics_quality_measurement q_filter") ||
+		!strings.Contains(excluded.SQL, "NOT (COALESCE(q_filter.verdict,'') = ANY($2::text[]))") {
+		t.Fatalf("excluded verdicts must stay on the correlated quality row:\n%s", excluded.SQL)
+	}
+
+	metric, err := BuildSQL(Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricQualityPassRate},
+		Filters: []Filter{
+			{Dimension: DimensionQualityType, Operator: OperatorIn, Values: []string{"judge_gate"}},
+			{Dimension: DimensionQualityVerdict, Operator: OperatorIn, Values: []string{"pass"}},
+		},
+		Page: Page{Limit: 1},
+	}, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"LEFT JOIN cerebro_analytics_quality_measurement q ON q.analytics_run_id=r.id",
+		"COALESCE(q.measurement_type,'') = ANY($2::text[])",
+		"COALESCE(q.verdict,'') = ANY($3::text[])",
+	} {
+		if !strings.Contains(metric.SQL, fragment) {
+			t.Errorf("quality metric SQL missing %q:\n%s", fragment, metric.SQL)
+		}
+	}
+	if strings.Contains(metric.SQL, "q_filter") {
+		t.Fatalf("quality metric filters must constrain the same joined row:\n%s", metric.SQL)
+	}
+}
+
 func TestBuildSQLRejectsMissingWorkspace(t *testing.T) {
 	if _, err := BuildSQL(Query{Population: PopulationAgent}, ""); err == nil {
 		t.Fatal("BuildSQL() error = nil")

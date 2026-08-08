@@ -42,9 +42,12 @@ describe("dashboard analytics model", () => {
     const filters = [
       { dimension: "provider" as const, operator: "in" as const, values: ["openai"] },
       { dimension: "status" as const, operator: "not_in" as const, values: ["failed"] },
+      { dimension: "quality_verdict" as const, operator: "in" as const, values: ["pass", "success"] },
     ];
     const params = filtersToSearchParams(filters, new URLSearchParams("tab=runs"));
-    expect(params.toString()).toBe("tab=runs&provider=openai&exclude.status=failed");
+    expect(params.toString()).toBe(
+      "tab=runs&provider=openai&exclude.status=failed&quality_verdict=pass&quality_verdict=success",
+    );
     expect(filtersFromSearchParams(params)).toEqual(filters);
   });
 

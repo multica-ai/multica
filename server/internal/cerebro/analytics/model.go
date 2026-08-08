@@ -40,6 +40,7 @@ const (
 	DimensionCostKind        Dimension = "cost_kind"
 	DimensionQualityType     Dimension = "quality_type"
 	DimensionQualityCategory Dimension = "quality_category"
+	DimensionQualityVerdict  Dimension = "quality_verdict"
 	DimensionContext         Dimension = "context"
 	DimensionRun             Dimension = "run"
 	DimensionIssue           Dimension = "issue"
@@ -126,6 +127,6 @@ func ContractCatalog() Catalog {
 
 var allPopulations = []Population{PopulationAgent, PopulationGateway, PopulationAll}
 var allMetrics = []Metric{MetricRuns, MetricInputTokens, MetricOutputTokens, MetricCostCents, MetricMissingCostRuns, MetricSavedCents, MetricDurationSeconds, MetricQualityPassRate, MetricSkillInvocations}
-var allDimensions = []Dimension{DimensionTime, DimensionPerson, DimensionAgent, DimensionProject, DimensionFunction, DimensionOperatingLoop, DimensionRuntime, DimensionSource, DimensionProvider, DimensionModel, DimensionSkill, DimensionStatus, DimensionCostKind, DimensionQualityType, DimensionQualityCategory, DimensionContext, DimensionRun, DimensionIssue, DimensionSourceID, DimensionReference, DimensionReferenceLabel, DimensionDebugLink, DimensionTrace}
+var allDimensions = []Dimension{DimensionTime, DimensionPerson, DimensionAgent, DimensionProject, DimensionFunction, DimensionOperatingLoop, DimensionRuntime, DimensionSource, DimensionProvider, DimensionModel, DimensionSkill, DimensionStatus, DimensionCostKind, DimensionQualityType, DimensionQualityCategory, DimensionQualityVerdict, DimensionContext, DimensionRun, DimensionIssue, DimensionSourceID, DimensionReference, DimensionReferenceLabel, DimensionDebugLink, DimensionTrace}
 var allGrains = []Grain{GrainNone, GrainHour, GrainDay, GrainWeek, GrainMonth}
 var allOperators = []Operator{OperatorIn, OperatorNotIn, OperatorEqual, OperatorGreaterEqual, OperatorLessEqual, OperatorContains, OperatorNotContains}
