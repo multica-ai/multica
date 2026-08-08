@@ -169,15 +169,25 @@ func (m *TypingIndicatorManager) Clear(ctx context.Context, sessionID pgtype.UUI
 	}
 }
 
-// Register subscribes the manager to the task-lifecycle events that end a run so
-// the reaction is cleared on both success and failure. The outbound reply
+// Register subscribes the manager to every task-lifecycle event that ends a run,
+// so the reaction comes off however the run finished. The outbound reply
 // subscriber only handles EventChatDone, so this is the only path that removes
-// the reaction when a run fails. Call once at boot against a fresh bus; register
-// it before the outbound subscriber so the reaction clears ahead of the reply on
-// EventChatDone (bus delivery is synchronous, in subscription order).
+// the reaction on the other two endings.
+//
+// EventTaskCancelled has to be here or a cancelled run leaves the 👀 on the
+// user's message for good: a cancellation publishes no chat-done and no
+// task-failed, so nothing else would ever take the reaction off. Every cancel
+// path lands here — CancelTask for a running or queued task, the queued
+// follow-up cancel behind it, and the agent- and issue-level bulk cancels all
+// broadcast task:cancelled per row.
+//
+// Call once at boot against a fresh bus; register it before the outbound
+// subscriber so the reaction clears ahead of the reply on EventChatDone (bus
+// delivery is synchronous, in subscription order).
 func (m *TypingIndicatorManager) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, m.handleEvent)
 	bus.Subscribe(protocol.EventTaskFailed, m.handleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, m.handleEvent)
 }
 
 func (m *TypingIndicatorManager) handleEvent(e events.Event) {
@@ -196,6 +206,7 @@ func (m *TypingIndicatorManager) handleEvent(e events.Event) {
 // chatSessionIDFromEvent recovers the chat session id from a task-lifecycle
 // event. EventChatDone sets it on the envelope; EventTaskFailed carries it only
 // in the broadcast payload map (chat tasks only), so both are checked.
+// EventTaskCancelled goes through broadcastTaskEvent, which sets both.
 func chatSessionIDFromEvent(e events.Event) (pgtype.UUID, bool) {
 	if e.ChatSessionID != "" {
 		if id, err := util.ParseUUID(e.ChatSessionID); err == nil && id.Valid {
