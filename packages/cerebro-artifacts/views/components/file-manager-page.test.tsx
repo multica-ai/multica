@@ -183,20 +183,27 @@ const artifacts: Artifact[] = [
   },
 ];
 
+// FIR-4624: record the search params so a test can assert the folder scope is
+// sent to the server rather than applied after the fact.
+const searchParams = vi.hoisted(() => [] as Record<string, unknown>[]);
+
 vi.mock("@multica/cerebro-artifacts/core/queries", () => ({
   artifactFoldersOptions: () => ({
     queryKey: ["artifact-folders"],
     queryFn: () => Promise.resolve(folders),
   }),
-  artifactSearchOptions: () => ({
-    queryKey: ["artifacts", "search"],
-    queryFn: () => Promise.resolve(artifacts),
-  }),
+  artifactSearchOptions: (_wsId: string, params: Record<string, unknown>) => {
+    searchParams.push(params);
+    return {
+      queryKey: ["artifacts", "search"],
+      queryFn: () => Promise.resolve(artifacts),
+    };
+  },
 }));
 
 import { FileManagerPage } from "./file-manager-page";
 
-function renderPage() {
+function renderPage(initialFolderId: string | null = null) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -205,7 +212,7 @@ function renderPage() {
   qc.setQueryData(["artifacts", "search"], artifacts);
   return render(
     <QueryClientProvider client={qc}>
-      <FileManagerPage initialFolderId={null} />
+      <FileManagerPage initialFolderId={initialFolderId} />
     </QueryClientProvider>,
   );
 }
@@ -504,5 +511,32 @@ describe("FileManagerPage folder visibility, search scope and columns", () => {
     cleanup();
     renderPage();
     expect(screen.queryByText("Location")).toBeNull();
+  });
+});
+
+// FIR-4624: folders rendered as "This folder is empty" whenever their documents
+// fell outside the newest-N workspace-wide window the list fetched. The fix is
+// to ask the server for the folder, so these assert the request, not the render.
+describe("FileManagerPage folder scope (FIR-4624)", () => {
+  beforeEach(() => {
+    searchParams.length = 0;
+  });
+
+  it("asks the server for the open folder", () => {
+    renderPage("folder-a");
+    expect(searchParams.at(-1)?.folder).toBe("folder-a");
+  });
+
+  it("asks the server for unfiled documents at the root", () => {
+    renderPage(null);
+    expect(searchParams.at(-1)?.folder).toBe("root");
+  });
+
+  it("drops the folder scope while searching, so results span the workspace", () => {
+    renderPage("folder-a");
+    fireEvent.change(screen.getByPlaceholderText("Search names…"), {
+      target: { value: "sales" },
+    });
+    expect(searchParams.at(-1)?.folder).toBeUndefined();
   });
 });

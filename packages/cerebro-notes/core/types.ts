@@ -78,6 +78,10 @@ export interface CreateNoteInput {
 
 export interface ListNotesParams {
   q?: string;
+  // FIR-4624: server-side folder scope (a folder id). Omitted = every folder.
+  // The Notes root is intentionally not expressible here — root also lists notes
+  // whose folder sits outside the note folder tree, which the server cannot know.
+  folder?: string;
   limit?: number;
   offset?: number;
 }

@@ -246,6 +246,15 @@ WHERE a.workspace_id = $1
     -- additively on its own — folders drive permissions.
     OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
+  -- FIR-4624: scope to one folder server-side. NULL = every folder; 'root' =
+  -- unfiled only; a uuid = that folder. Without it the list fetches the newest N
+  -- workspace-wide and narrows client-side, so a folder whose notes fall outside
+  -- that window renders as empty.
+  AND (
+        sqlc.narg('folder')::text IS NULL
+     OR (sqlc.narg('folder')::text = 'root' AND a.folder_id IS NULL)
+     OR a.folder_id = NULLIF(sqlc.narg('folder')::text, 'root')::uuid
+  )
 ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3 OFFSET $4;
 

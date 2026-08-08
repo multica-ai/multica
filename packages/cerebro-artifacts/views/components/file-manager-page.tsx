@@ -652,10 +652,16 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     artifactSearchOptions(wsId, {
       q: trimmedQuery || undefined,
       author_type: authorFilter === "all" ? undefined : authorFilter,
-      // The server matches title OR body, so a broad word can fill the page
-      // with body-only hits and push name matches past the cap. A larger cap
-      // while searching keeps name matches reachable in "names" scope.
-      limit: isSearching ? 500 : 200,
+      // FIR-4624: browsing asks the server for exactly this folder ("root" =
+      // unfiled). Filtering client-side meant a folder whose documents fell
+      // outside the newest-N workspace window rendered as empty. Searching stays
+      // workspace-wide on purpose — see the artifacts memo below.
+      folder: isSearching ? undefined : (folderId ?? "root"),
+      // 200 is the server's hard maximum — SearchArtifacts 400s on anything
+      // larger, so the 500 this used to send while searching made every search
+      // return nothing. The server matches title OR body, so a broad word can
+      // still push name matches past the cap in "names" scope.
+      limit: 200,
     }),
   );
 
@@ -707,8 +713,11 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     return find(tree)?.children ?? [];
   }, [tree, folderId, isSearching, folderChoices, needle]);
 
-  // Artifacts in the current folder. The server search endpoint has no folder
-  // filter, so scoping happens here. While searching we deliberately span the
+  // Artifacts in the current folder. FIR-4624 moved the scoping to the server,
+  // so this filter is now a compatibility net rather than the mechanism: a server
+  // that predates the `folder` param ignores it and returns the newest N
+  // workspace-wide, and this keeps that case correct (today's behaviour) instead
+  // of showing another folder's files. While searching we deliberately span the
   // whole workspace — a document you are looking for is usually in a folder you
   // are not standing in, and the Location column tells you where it lives.
   const artifacts = React.useMemo(() => {

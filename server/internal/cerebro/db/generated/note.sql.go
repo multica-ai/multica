@@ -366,6 +366,15 @@ WHERE a.workspace_id = $1
     -- additively on its own — folders drive permissions.
     OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
+  -- FIR-4624: scope to one folder server-side. NULL = every folder; 'root' =
+  -- unfiled only; a uuid = that folder. Without it the list fetches the newest N
+  -- workspace-wide and narrows client-side, so a folder whose notes fall outside
+  -- that window renders as empty.
+  AND (
+        $5::text IS NULL
+     OR ($5::text = 'root' AND a.folder_id IS NULL)
+     OR a.folder_id = NULLIF($5::text, 'root')::uuid
+  )
 ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3 OFFSET $4
 `
@@ -375,6 +384,7 @@ type ListNotesForUserParams struct {
 	OwnerID     pgtype.UUID `json:"owner_id"`
 	Limit       int32       `json:"limit"`
 	Offset      int32       `json:"offset"`
+	Folder      pgtype.Text `json:"folder"`
 }
 
 type ListNotesForUserRow struct {
@@ -401,6 +411,7 @@ func (q *Queries) ListNotesForUser(ctx context.Context, arg ListNotesForUserPara
 		arg.OwnerID,
 		arg.Limit,
 		arg.Offset,
+		arg.Folder,
 	)
 	if err != nil {
 		return nil, err

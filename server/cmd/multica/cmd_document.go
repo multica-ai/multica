@@ -63,7 +63,8 @@ func init() {
 	documentCmd.AddCommand(documentUpdateCmd)
 	documentCmd.AddCommand(documentDeleteCmd)
 
-	documentListCmd.Flags().String("folder", "", "Filter by folder ID (filtered client-side)")
+	// CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — filtered server-side now.
+	documentListCmd.Flags().String("folder", "", "Only documents in this folder ID, or \"root\" for unfiled ones")
 	documentListCmd.Flags().Int("limit", 50, "Maximum number of documents to return")
 	documentListCmd.Flags().Int("offset", 0, "Pagination offset")
 	documentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -133,22 +134,19 @@ func runDocumentList(cmd *cobra.Command, _ []string) error {
 	offset, _ := cmd.Flags().GetInt("offset")
 	folderFilter, _ := cmd.Flags().GetString("folder")
 
-	// The /api/artifacts search endpoint has no folder filter, so when one is
-	// requested we fetch a generous page and post-filter — same approach the
-	// web file manager takes (see file-manager-page.tsx).
-	fetchLimit := limit
-	fetchOffset := offset
-	if folderFilter != "" {
-		fetchLimit = 200
-		fetchOffset = 0
-	}
-
+	// CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — the search endpoint
+	// filters by folder server-side, so a folder's documents come back in full
+	// instead of being post-filtered out of the newest page, which used to hide
+	// every document older than that page.
 	params := url.Values{}
-	if fetchLimit > 0 {
-		params.Set("limit", fmt.Sprintf("%d", fetchLimit))
+	if folderFilter != "" {
+		params.Set("folder", folderFilter)
 	}
-	if fetchOffset > 0 {
-		params.Set("offset", fmt.Sprintf("%d", fetchOffset))
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if offset > 0 {
+		params.Set("offset", fmt.Sprintf("%d", offset))
 	}
 	path := "/api/artifacts"
 	if encoded := params.Encode(); encoded != "" {
@@ -163,27 +161,9 @@ func runDocumentList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("list documents: %w", err)
 	}
 
-	// Client-side folder filter and pagination when requested.
-	if folderFilter != "" {
-		filtered := make([]map[string]any, 0, len(artifacts))
-		for _, a := range artifacts {
-			if strVal(a, "folder_id") == folderFilter {
-				filtered = append(filtered, a)
-			}
-		}
-		artifacts = filtered
-		if offset > 0 {
-			if offset >= len(artifacts) {
-				artifacts = artifacts[:0]
-			} else {
-				artifacts = artifacts[offset:]
-			}
-		}
-		if limit > 0 && len(artifacts) > limit {
-			artifacts = artifacts[:limit]
-		}
-	}
-
+	// CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — the client-side
+	// folder filter and re-pagination that used to sit here are gone; the server
+	// applies both now.
 	views := make([]documentView, len(artifacts))
 	for i, a := range artifacts {
 		views[i] = toDocumentView(a)

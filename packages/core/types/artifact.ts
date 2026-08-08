@@ -67,6 +67,9 @@ export interface ListArtifactsParams {
   author_id?: string;
   origin_issue_id?: string;
   q?: string;
+  // CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — server-side folder
+  // scope. Omitted = every folder; "root" = unfiled only; a folder id = that folder.
+  folder?: string;
   limit?: number;
   offset?: number;
 }

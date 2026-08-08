@@ -529,9 +529,22 @@ func (h *Handler) ListNotes(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, searchRowToResponse(n))
 		}
 	} else {
+		// FIR-4624: scope to one folder server-side so a folder's notes are never
+		// truncated by the workspace-wide limit. Callers send a folder id; the
+		// Notes root is deliberately NOT scoped, because root there also shows
+		// notes whose folder sits outside the note folder tree.
+		var folder pgtype.Text
+		if v := r.URL.Query().Get("folder"); v != "" {
+			if _, perr := util.ParseUUID(v); perr != nil {
+				writeError(w, http.StatusBadRequest, "invalid folder; expected a uuid")
+				return
+			}
+			folder = pgtype.Text{String: v, Valid: true}
+		}
 		res, err := h.Cerebro.ListNotesForUser(r.Context(), cerebrodb.ListNotesForUserParams{
 			WorkspaceID: wsUUID,
 			OwnerID:     ownerUUID,
+			Folder:      folder,
 			Limit:       limit,
 			Offset:      offset,
 		})

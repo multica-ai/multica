@@ -559,6 +559,18 @@ func (h *Handler) SearchArtifacts(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("q"); v != "" {
 		params.Q = pgtype.Text{String: v, Valid: true}
 	}
+	// CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — scope server-side
+	// to one folder ("root" = unfiled) so a folder's contents are never truncated
+	// by the workspace-wide limit.
+	if v := q.Get("folder"); v != "" {
+		if v != "root" {
+			if _, perr := util.ParseUUID(v); perr != nil {
+				writeError(w, http.StatusBadRequest, "invalid folder; expected root or a uuid")
+				return
+			}
+		}
+		params.Folder = pgtype.Text{String: v, Valid: true}
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 200 {

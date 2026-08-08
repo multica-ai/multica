@@ -4323,6 +4323,8 @@ export class ApiClient {
     if (params?.origin_issue_id)
       search.set("origin_issue_id", params.origin_issue_id);
     if (params?.q) search.set("q", params.q);
+    // CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — scope to one folder.
+    if (params?.folder) search.set("folder", params.folder);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));
     const qs = search.toString();
@@ -4699,11 +4701,14 @@ export class ApiClient {
   // + a cerebro_note row (owner/visibility/pin); see /api/notes.
   async listNotes<T = unknown>(params?: {
     q?: string;
+    folder?: string;
     limit?: number;
     offset?: number;
   }): Promise<T> {
     const s = new URLSearchParams();
     if (params?.q) s.set("q", params.q);
+    // CEREBRO-PATCH(folder-scoped-note-list): FIR-4624 — scope to one folder.
+    if (params?.folder) s.set("folder", params.folder);
     if (params?.limit != null) s.set("limit", String(params.limit));
     if (params?.offset != null) s.set("offset", String(params.offset));
     const qs = s.toString();

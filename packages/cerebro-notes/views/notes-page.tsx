@@ -174,8 +174,16 @@ export function NotesPage({
   const setNoteFolder = useSetNoteFolder();
   const createFolder = useCreateArtifactFolder();
 
+  // FIR-4624: browsing a folder asks the server for that folder, so its notes
+  // are never truncated by the workspace-wide limit. Root and search stay
+  // workspace-wide (root also lists notes filed outside the note folder tree),
+  // so they take the largest window the server allows instead.
   const { data: notes = [] } = useQuery(
-    notesListOptions(wsId, { q: search.trim() || undefined }),
+    notesListOptions(wsId, {
+      q: search.trim() || undefined,
+      folder: !search.trim() && folderId ? folderId : undefined,
+      limit: 200,
+    }),
   );
   // Owner display (FIR-1460): resolve owner_id → name for the list + editor.
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -184,10 +192,20 @@ export function NotesPage({
 
   const createNote = useCreateNote();
 
-  const selected = React.useMemo(
+  // FIR-4624: the list is scoped to the open folder, so the note you are
+  // editing leaves it the moment you open another folder or move the note out.
+  // Reading the open note from the list alone would collapse the editor to
+  // "Select a note" while the URL still points at it, so fall back to the
+  // note's own read when the list no longer carries it.
+  const selectedFromList = React.useMemo(
     () => notes.find((n) => n.id === selectedId) ?? null,
     [notes, selectedId],
   );
+  const { data: selectedDetail } = useQuery(
+    noteDetailOptions(wsId, selectedId ?? ""),
+  );
+  const selected =
+    selectedFromList ?? (selectedDetail?.id === selectedId ? selectedDetail : null);
   const urlNoteId = navigation.searchParams.get("note");
   const urlCommentId = navigation.searchParams.get("comment");
   const initialCommentForSelected =

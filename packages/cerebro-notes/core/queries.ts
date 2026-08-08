@@ -11,6 +11,9 @@ export const noteKeys = {
       ...noteKeys.all(wsId),
       "list",
       params.q ?? "",
+      // FIR-4624: the folder scope is part of the request, so it must key the
+      // cache — otherwise two folders share one cache entry.
+      params.folder ?? "",
       params.limit ?? 50,
       params.offset ?? 0,
     ] as const,

@@ -433,6 +433,15 @@ WHERE workspace_id = $1
         $10::uuid IS NULL
      OR cerebro_artifact_folder_visible(folder_id, $10::uuid)
   )
+  -- CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — scope to one folder
+  -- server-side. NULL = every folder; 'root' = unfiled only; a uuid = that folder.
+  -- Without this the caller must fetch the newest N workspace-wide and filter
+  -- client-side, so a folder whose documents fall outside that window looks empty.
+  AND (
+        $11::text IS NULL
+     OR ($11::text = 'root' AND folder_id IS NULL)
+     OR folder_id = NULLIF($11::text, 'root')::uuid
+  )
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -448,6 +457,7 @@ type SearchArtifactsInWorkspaceParams struct {
 	OriginIssueID pgtype.UUID `json:"origin_issue_id"`
 	Q             pgtype.Text `json:"q"`
 	ViewerID      pgtype.UUID `json:"viewer_id"`
+	Folder        pgtype.Text `json:"folder"`
 }
 
 // Cross-scope search across the entire workspace. All filter parameters are
@@ -467,6 +477,7 @@ func (q *Queries) SearchArtifactsInWorkspace(ctx context.Context, arg SearchArti
 		arg.OriginIssueID,
 		arg.Q,
 		arg.ViewerID,
+		arg.Folder,
 	)
 	if err != nil {
 		return nil, err

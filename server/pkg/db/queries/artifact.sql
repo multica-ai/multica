@@ -100,6 +100,15 @@ WHERE workspace_id = $1
         sqlc.narg('viewer_id')::uuid IS NULL
      OR cerebro_artifact_folder_visible(folder_id, sqlc.narg('viewer_id')::uuid)
   )
+  -- CEREBRO-PATCH(folder-scoped-artifact-search): FIR-4624 — scope to one folder
+  -- server-side. NULL = every folder; 'root' = unfiled only; a uuid = that folder.
+  -- Without this the caller must fetch the newest N workspace-wide and filter
+  -- client-side, so a folder whose documents fall outside that window looks empty.
+  AND (
+        sqlc.narg('folder')::text IS NULL
+     OR (sqlc.narg('folder')::text = 'root' AND folder_id IS NULL)
+     OR folder_id = NULLIF(sqlc.narg('folder')::text, 'root')::uuid
+  )
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
