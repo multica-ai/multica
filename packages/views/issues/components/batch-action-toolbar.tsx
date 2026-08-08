@@ -111,9 +111,10 @@ export function BatchActionToolbar({
   };
 
   // Batch status changes apply directly — no run-confirm modal (MUL-4155).
-  // done/cancelled can never start a run, and a backlog → active promotion now
-  // starts its run the same way a single-issue status change or the CLI does,
-  // without an extra confirmation step (product decision on MUL-4155). The
+  // moving TO done/cancelled can never start a run, and the moves that do
+  // (backlog → active, in_review/done/cancelled → todo) start their run the
+  // same way a single-issue status change or the CLI does, without an extra
+  // confirmation step (product decision on MUL-4155). The
   // status change was previously routed through the pre-trigger modal, which for
   // the common done/cancelled case only rendered a misleading "现在开始处理？ →
   // 不会开始处理" box. Agent/squad assignment still confirms via
