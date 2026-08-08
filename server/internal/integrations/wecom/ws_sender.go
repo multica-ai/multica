@@ -181,10 +181,16 @@ func (s *wsSender) deliverReply(env frameEnvelope) bool {
 // answer. A non-nil error is either a *wecomAPIError carrying the server's
 // errcode, errAckTimeout, or a transport failure.
 func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any) (json.RawMessage, error) {
+	return s.requestWithID(ctx, newReqID(), cmd, body)
+}
+
+// requestWithID is request() for a frame whose req_id is not ours to choose —
+// a reply, which must echo the req_id of the frame that opened the turn or the
+// server refuses it. The enter_chat greeting is the caller today.
+func (s *wsSender) requestWithID(ctx context.Context, reqID, cmd string, body map[string]any) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	reqID := newReqID()
 	w, ok := s.awaitReply(reqID)
 	if !ok {
 		return nil, fmt.Errorf("wecom: %s req_id %s is already awaiting a response", cmd, reqID)

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"time"
 
 	cryptorand "crypto/rand"
@@ -77,6 +78,15 @@ type wecomChannel struct {
 	// itself on entry and clear on exit. nil in tests that don't exercise
 	// the OutboundReplier path.
 	senders *sendersRegistry
+
+	// welcome + binding + appURL + bindPath are the enter_chat greeting
+	// (welcome.go). Any of them nil or empty degrades to the greeting without
+	// a bind link rather than to silence — a deployment with no binding
+	// surface still wants the bot to say what it is.
+	welcome  welcomeLookup
+	binding  binder
+	appURL   string
+	bindPath string
 }
 
 var _ channel.Channel = (*wecomChannel)(nil)
@@ -204,6 +214,32 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 	// so. That only holds while somebody is still receiving, so the read
 	// loop's send also watches cbDone — see the send site below.
 	callbacks := make(chan frameEnvelope, callbackQueueDepth)
+
+	// enter_chat gets its OWN worker, separate from the callback worker above.
+	// WeCom gives the greeting about five seconds, and a single message
+	// callback ahead of it in one queue can take longer than that on its own —
+	// sharing would reliably turn a greeting into nothing at all. It is also
+	// the one inbound frame whose handling has no error worth escalating, so
+	// this worker never reports failure.
+	//
+	// welcomeCtx is cancelled before the queue is drained, so a connection on
+	// its way out discards the greetings it can no longer address rather than
+	// holding Connect open waiting for acks that will never arrive.
+	welcomeCtx, welcomeCancel := context.WithCancel(ctx)
+	welcomes := make(chan frameEnvelope, welcomeQueueDepth)
+	welcomeDone := make(chan struct{})
+	go func() {
+		defer close(welcomeDone)
+		for env := range welcomes {
+			c.handleEnterChat(welcomeCtx, env, sender, log)
+		}
+	}()
+	defer func() {
+		welcomeCancel()
+		close(welcomes)
+		<-welcomeDone
+	}()
+
 	cbDone := make(chan struct{})
 	var cbErr error
 	go func() {
@@ -273,6 +309,27 @@ func (c *wecomChannel) Connect(ctx context.Context) (err error) {
 		var env frameEnvelope
 		if err := json.Unmarshal(payload, &env); err != nil {
 			log.Warn("wecom: bad frame envelope", "error", err, "size", len(payload))
+			continue
+		}
+		if isWelcomeFrame(env) {
+			// A full welcome queue DROPS. This is the OPPOSITE of the
+			// callback queue ten lines below, which blocks, and both are
+			// right for opposite reasons:
+			//
+			//   - A dropped callback is a question the user asked that nobody
+			//     ever answers, with nothing to say so. Blocking is
+			//     backpressure; at worst WeCom ends the connection and the
+			//     Supervisor reconnects, which is recoverable.
+			//   - A greeting has about five seconds. One that arrives after
+			//     that lands in a chat the user has already started typing in,
+			//     which is worse than no greeting — and while it waited it
+			//     would be holding the read loop that carries the acks every
+			//     other write is parked on. A late welcome is void, not late.
+			select {
+			case welcomes <- env:
+			default:
+				log.Warn("wecom: welcome queue full, greeting skipped")
+			}
 			continue
 		}
 		switch env.Cmd {
@@ -399,6 +456,11 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			// one — the last writer wins).
 			return errors.New("wecom: received disconnected_event (superseded)")
 		default:
+			// enter_chat does not reach here: the read loop diverts it to the
+			// welcome worker (welcome.go) before dispatch, because it is the
+			// only inbound frame with a seconds-long deadline. What is left is
+			// template_card_event and feedback_event, neither of which we act
+			// on yet.
 			log.Debug("wecom: event", "type", ec.Event.EventType)
 			return nil
 		}
@@ -514,6 +576,16 @@ type ChannelDeps struct {
 
 	// WSURL overrides DefaultWSURL. Same test-only intent as Dialer.
 	WSURL string
+
+	// Welcome + Binding + AppURL + BindingPath drive the enter_chat greeting
+	// (welcome.go). Boot passes the same binding service and app URL the
+	// OutboundReplier already gets, so the greeting's bind link and the
+	// needs_binding prompt's are the same link. All optional: without them the
+	// bot still greets, just without offering a link it cannot mint.
+	Welcome     welcomeLookup
+	Binding     *BindingTokenService
+	AppURL      string
+	BindingPath string
 }
 
 // RegisterWecom registers the per-installation wecom smart-bot Factory so
@@ -548,7 +620,7 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 		if err != nil {
 			return nil, fmt.Errorf("wecom: decrypt secret: %w", err)
 		}
-		return &wecomChannel{
+		ch := &wecomChannel{
 			installationID: cfg.ID,
 			botID:          creds.BotID,
 			secret:         creds.Secret,
@@ -557,7 +629,19 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 			wsURL:          deps.WSURL,
 			logger:         logger,
 			senders:        deps.Senders,
-		}, nil
+			welcome:        deps.Welcome,
+			appURL:         strings.TrimRight(deps.AppURL, "/"),
+			bindPath:       normalizeBindingPath(deps.BindingPath),
+		}
+		// Assigned through the interface only when non-nil: a nil
+		// *BindingTokenService stored in a binder would be a non-nil interface
+		// holding a typed nil, defeating the `c.binding == nil` guard in
+		// welcomeText and panicking on Mint. Same trap NewOutboundReplier
+		// documents.
+		if deps.Binding != nil {
+			ch.binding = deps.Binding
+		}
+		return ch, nil
 	}
 }
 
