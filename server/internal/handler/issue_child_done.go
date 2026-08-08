@@ -14,7 +14,8 @@ import (
 )
 
 // notifyParentOfChildDone posts a top-level system comment on the parent
-// issue when a child issue transitions from non-done into done. This replaces
+// issue when a child issue transitions from a non-terminal status into a
+// delivered terminal status. This replaces
 // the agent-prompt rule that previously made child agents post the
 // notification themselves (PR #2918 user feedback — the agent rule caused
 // self-mention loops, planner ping-pong, and accidental `MUL-` prefix
@@ -22,9 +23,10 @@ import (
 //
 // Guards on whether the comment fires at all:
 //   - the child must transition from a non-terminal status INTO a terminal one
-//     (done or cancelled). Repeat saves of an already-terminal child do not
-//     re-fire; only the entering transition does. Cancelled counts because a
-//     cancelled sibling never finishes and so closes its stage (see the entry
+//     (in_review, done, or cancelled). Repeat saves of an already-terminal
+//     child do not re-fire; only the entering transition does. In_review counts
+//     as delivered work awaiting parent review, while cancelled counts because
+//     a cancelled sibling never finishes and so closes its stage (see the entry
 //     guard and isTerminalChildStatus).
 //   - issue.ParentIssueID must be set
 //   - parent must not be "done" or "cancelled" — the parent is already
@@ -69,13 +71,13 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if !issue.ParentIssueID.Valid {
 		return
 	}
-	// Fire on a transition INTO a terminal status (done OR cancelled), not only
-	// `done`. A cancelled child can close a stage too: isTerminalChildStatus
-	// treats cancelled as terminal (a cancelled sibling never finishes, so it
-	// must not hold the stage open), so the barrier has to be evaluated when the
-	// last open child of a stage is cancelled. Keying on the transition also
-	// makes a later cancelled -> done edit a no-op (terminal -> terminal), which
-	// avoids a lagging duplicate wake.
+	// Fire on a transition INTO a terminal status (in_review, done, OR
+	// cancelled), not only `done`. A delivered child can close a stage too:
+	// isTerminalChildStatus treats delivered and cancelled children as terminal,
+	// so the barrier has to be evaluated when the last open child of a stage is
+	// delivered or cancelled. Keying on the transition also makes a later
+	// in_review -> done edit a no-op (terminal -> terminal), which avoids a
+	// lagging duplicate wake.
 	if isTerminalChildStatus(prev.Status) || !isTerminalChildStatus(issue.Status) {
 		return
 	}
@@ -112,7 +114,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// sub-issue finishes" instead of the old fire-on-every-child behavior that
 	// caused the surprise cascade. A completion that does not close a stage is
 	// silent: no comment, no wake. ListChildIssues already reflects this child's
-	// committed `done` status (the status update commits before this runs).
+	// committed terminal status (the status update commits before this runs).
 	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
 	if err != nil {
 		slog.Warn("child done: failed to list siblings for stage barrier",
@@ -335,10 +337,11 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
-// "finished" for stage-barrier purposes. Cancelled counts as terminal: a
-// cancelled sibling will never complete, so it must not hold a stage open.
+// delivered for stage-barrier purposes. In_review means the child delivered
+// its work and is waiting for parent review; cancelled counts as terminal
+// because a cancelled sibling will never complete.
 func isTerminalChildStatus(status string) bool {
-	return status == "done" || status == "cancelled"
+	return status == "in_review" || status == "done" || status == "cancelled"
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit

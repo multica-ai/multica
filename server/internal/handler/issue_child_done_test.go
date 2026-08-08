@@ -404,6 +404,60 @@ func TestChildDoneMentionsParentAssignee_Squad(t *testing.T) {
 	}
 }
 
+// TestChildInReviewWakesParentSquadForDirectAgentChild verifies that a direct
+// agent child hands its delivered result back to a squad-owned parent without
+// requiring an explicit @mention. Re-saving in_review and moving it to done
+// are both terminal-to-terminal transitions and must not duplicate the wake.
+func TestChildInReviewWakesParentSquadForDirectAgentChild(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	var childAgentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent").Scan(&childAgentID); err != nil {
+		t.Fatalf("locate child agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
+	setIssueAssigneeDirect(t, fx.child.ID, "agent", childAgentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`,
+			fx.parent.ID, fx.child.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://squad/"+sq.SquadID) {
+		t.Fatalf("expected parent-squad mention in system comment, got: %s", content)
+	}
+	var isLeaderTask bool
+	var queuedSquadID, triggerCommentID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT is_leader_task, squad_id::text, trigger_comment_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, fx.parent.ID, sq.LeaderID).Scan(&isLeaderTask, &queuedSquadID, &triggerCommentID); err != nil {
+		t.Fatalf("load parent leader wake: %v", err)
+	}
+	if !isLeaderTask || queuedSquadID != sq.SquadID || triggerCommentID == "" {
+		t.Fatalf("leader wake provenance = leader:%v squad:%q trigger:%q", isLeaderTask, queuedSquadID, triggerCommentID)
+	}
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("terminal child re-saves must not duplicate the comment, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Fatalf("terminal child re-saves must not duplicate the leader wake, got %d", got)
+	}
+}
+
 // TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild — when the parent
 // agent assignee is the SAME agent that owns the just-finished child, the
 // parent agent must still be triggered (MUL-2808). A child finishing and

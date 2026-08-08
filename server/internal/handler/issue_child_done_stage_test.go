@@ -44,6 +44,11 @@ func TestStageBarrierClosed_Unstaged(t *testing.T) {
 			children: []db.Issue{child(0, "done"), child(0, "cancelled")},
 			want:     true,
 		},
+		{
+			name:     "in_review counts as delivered terminal",
+			children: []db.Issue{child(0, "done"), child(0, "in_review")},
+			want:     true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,6 +85,16 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 		}
 	})
 
+	t.Run("one in_review child does not close the stage", func(t *testing.T) {
+		children := []db.Issue{
+			child(1, "in_review"), child(1, "in_progress"),
+			child(2, "backlog"),
+		}
+		if stageBarrierClosed(children, child(1, "in_review")) {
+			t.Fatal("expected barrier to stay open while a stage sibling is still active")
+		}
+	})
+
 	t.Run("closing stage 2 fires when stages 1 and 2 are terminal", func(t *testing.T) {
 		children := []db.Issue{
 			child(1, "done"), child(1, "done"),
@@ -88,6 +103,16 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 		}
 		if !stageBarrierClosed(children, child(2, "done")) {
 			t.Fatal("expected stage 2 barrier to close")
+		}
+	})
+
+	t.Run("in_review closes a stage", func(t *testing.T) {
+		children := []db.Issue{
+			child(1, "in_review"), child(1, "in_review"),
+			child(2, "backlog"),
+		}
+		if !stageBarrierClosed(children, child(1, "in_review")) {
+			t.Fatal("expected stage 1 barrier to close when children are delivered for review")
 		}
 	})
 

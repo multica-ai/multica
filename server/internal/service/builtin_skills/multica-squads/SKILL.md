@@ -174,6 +174,11 @@ Current behavior:
   `in_review` only when a later re-trigger confirms the overall goal is met.
   Completing a leader `task` (including the first dispatch) does not itself
   change issue status;
+- when a child assigned directly to an agent enters `in_review` (or reaches
+  `done`/`cancelled`) and closes the current stage barrier, the server posts a
+  system handoff comment on the parent and wakes this squad's leader once;
+  repeated `in_review` saves and the later `in_review` → `done` transition do
+  not duplicate that handoff;
 - that status authority is granted only when the issue's `assignee_type` /
   `assignee_id` point at THIS squad. The leader briefing is injected on every
   leader path, including an `@squad` mention on an issue owned by a plain agent
@@ -264,8 +269,9 @@ authorizes them.
 - Backlog assignment does not immediately start work.
 - First leader dispatch is not parent completion — parent stays `in_progress`
   until the leader later confirms the overall goal and moves it to `in_review`.
-- The server does not auto-flip parent status when child issues finish; it only
-  wakes the leader with an explicit ask (including `in_review` when wrapping up).
+- The server does not auto-flip parent status when child issues finish or enter
+  `in_review`; it only wakes the leader with an explicit ask (including
+  `in_review` when wrapping up).
 - Getting the leader briefing does NOT imply status authority. A squad
   `@`-mentioned into an issue assigned to someone else is a guest: roster and
   delegation rules yes, `multica issue status` no.

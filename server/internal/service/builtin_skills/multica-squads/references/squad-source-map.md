@@ -205,14 +205,19 @@ Contracts:
 Source:
 
 ```text
-server/internal/handler/issue_child_done.go       # dispatchParentAssigneeTrigger ~246, triggerChildDoneSquad ~304
+server/internal/handler/issue_child_done.go       # notifyParentOfChildDone ~70, dispatchParentAssigneeTrigger ~590, triggerChildDoneSquad ~668
 ```
 
 Contracts:
 
-- when a child issue closes a stage barrier and the parent is assigned to a
-  squad, the parent squad leader is triggered (triggerChildDoneSquad in
-  issue_child_done.go);
+- when a child issue enters `in_review`, `done`, or `cancelled` from a
+  non-terminal status, closes the current stage barrier, and the parent is
+  assigned to a squad, the parent squad leader is triggered
+  (`notifyParentOfChildDone` → `triggerChildDoneSquad` in
+  `issue_child_done.go`); a direct-agent child does not need an @mention;
+- repeated saves of a terminal child, including `in_review` → `done`, do not
+  create a second system comment or leader task because the transition guard
+  treats all three statuses as terminal;
 - routing is leader-only — one `EnqueueTaskForSquadLeader` on the leader, no
   member fan-out (triggerChildDoneSquad / dispatchParentAssigneeTrigger);
 - no self-trigger guard: a same-squad or shared-leader child still wakes the
