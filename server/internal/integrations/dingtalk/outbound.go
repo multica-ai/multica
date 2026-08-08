@@ -26,12 +26,12 @@ type outboundQueries interface {
 }
 
 // Outbound delivers an agent's chat reply back to DingTalk — the outbound half
-// of the round trip. On EventChatDone / EventTaskFailed
+// of the round trip. On EventChatDone / EventTaskFailed / EventTaskCancelled
 // it finds the DingTalk chat binding for the task's session and posts the reply
-// (or failure notice) into the originating conversation. Sessions with no
-// DingTalk binding are ignored, so it coexists with the Feishu and Slack
-// subscribers on the shared event bus. Registered only when DingTalk is
-// configured.
+// (or failure / cancellation notice) into the originating conversation.
+// Sessions with no DingTalk binding are ignored, so it coexists with the Feishu
+// and Slack subscribers on the shared event bus. Registered only when DingTalk
+// is configured.
 type Outbound struct {
 	q       outboundQueries
 	decrypt Decrypter
@@ -51,12 +51,22 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, client *Client, logger *s
 	return &Outbound{q: q, decrypt: decrypt, client: client, logger: logger}
 }
 
-// Register subscribes to chat-done and task-failed. Task-failed keeps the DingTalk
-// conversation consistent with the web transcript — without it a failed run
-// leaves the user staring at the "👀 On it" ack forever.
+// Register subscribes to the three events that end a run. Task-failed and
+// task-cancelled keep the DingTalk conversation consistent with the web
+// transcript — without them the run ends in silence and the user is left
+// staring at the "👀 On it" ack forever.
+//
+// DingTalk is the odd one out among the channel adapters. Slack and Lark put a
+// reaction on the user's own message and take it off again; the classic robot
+// API this adapter sends through exposes no reaction, so ack.go's indicator is
+// a real, non-retractable message that promised a reply. Closing it can only
+// mean posting a second message withdrawing that promise — which is why the
+// cancel path stays behind processEvent's channel-provenance gate. A badge we
+// remove was ours to remove; a message we post is not.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
 	bus.Subscribe(protocol.EventTaskFailed, o.handleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, o.handleEvent)
 }
 
 func (o *Outbound) handleEvent(e events.Event) {
@@ -122,15 +132,31 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	return nil
 }
 
+// cancelledNoticeText withdraws the processing ack when a run is cancelled.
+// ack.go posts a real, non-retractable message promising a reply ("👀 On it —
+// I'll reply here when it's ready"), and a cancellation is the one ending that
+// produces nothing at all, so the promise has to be withdrawn in the same place
+// it was made. Kept short and in the ack's own language for the same reason the
+// ack is: it is a message in the user's conversation, not a status badge.
+const cancelledNoticeText = "⚠️ That run was cancelled — no reply is coming for it."
+
 // eventContent extracts the deliverable text from an EventChatDone payload
-// (typed, or its map form after a serialization round trip) or an
-// EventTaskFailed payload. Empty means stay silent.
+// (typed, or its map form after a serialization round trip), an
+// EventTaskFailed payload, or an EventTaskCancelled event. Empty means stay
+// silent.
 //
 // For task-failed the text mirrors the web transcript's failure chat_message:
 // the broadcast's `error` field carries the same redacted failure text and is
 // omitted while an auto-retry is pending (the retry attempt reports its own
 // outcome), so error-present means deliverable.
+//
+// Task-cancelled carries no text of its own — broadcastTaskEvent publishes the
+// task row's ids and status and nothing else — so the notice is fixed and read
+// off the event type rather than the payload.
 func eventContent(e events.Event) string {
+	if e.Type == protocol.EventTaskCancelled {
+		return cancelledNoticeText
+	}
 	switch p := e.Payload.(type) {
 	case protocol.ChatDonePayload:
 		return p.Content
