@@ -12,6 +12,10 @@ import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
 } from "@/config/runtime-urls";
+import {
+  PUBLIC_DEFAULT_TITLE,
+  PUBLIC_TITLE_TEMPLATE,
+} from "@/lib/public-page-title";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -74,8 +78,8 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.multica.ai"),
   title: {
-    default: "Project workspace",
-    template: "%s",
+    default: PUBLIC_DEFAULT_TITLE,
+    template: PUBLIC_TITLE_TEMPLATE,
   },
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",

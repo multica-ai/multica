@@ -10,3 +10,8 @@ export {
 export type {
   SettingsSaveStatus,
 } from "./components/settings-layout";
+export {
+  DEFAULT_SETTINGS_TAB,
+  LEGACY_SETTINGS_TAB_REDIRECTS,
+  resolveSettingsTab,
+} from "./settings-tab";
