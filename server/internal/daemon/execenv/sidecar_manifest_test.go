@@ -133,7 +133,7 @@ func runPrepareLikeCycle(t *testing.T, workDir, envRoot, provider string, ctx Ta
 	if err := CleanupRuntimeConfig(workDir, provider); err != nil {
 		t.Fatalf("CleanupRuntimeConfig(%s): %v", provider, err)
 	}
-	if err := CleanupSidecars(envRoot); err != nil {
+	if err := CleanupSidecarsAt(envRoot, workDir); err != nil {
 		t.Fatalf("CleanupSidecars(%s): %v", provider, err)
 	}
 }
@@ -417,6 +417,45 @@ func TestCleanupSidecarsNoOpWhenManifestMissing(t *testing.T) {
 	}
 	if err := CleanupSidecars(""); err != nil {
 		t.Errorf("CleanupSidecars with empty envRoot returned error: %v", err)
+	}
+}
+
+func TestSidecarManifestConsumersRejectDuplicateObjectKeysAtAnyDepth(t *testing.T) {
+	manifests := map[string]string{
+		"root":   `{"files":[],"files":[]}`,
+		"nested": `{"files":[],"metadata":{"owner":"first","owner":"second"}}`,
+	}
+	consumers := map[string]func(envRoot, workDir string) error{
+		"cleanup": func(envRoot, workDir string) error {
+			return CleanupSidecarsAt(envRoot, workDir)
+		},
+		"reuse skill rollback": func(envRoot, workDir string) error {
+			return removeReusedManagedSkillDirsAt(envRoot, workDir, filepath.Join(workDir, ".platform-agent", "skills"))
+		},
+	}
+
+	for manifestName, raw := range manifests {
+		for consumerName, consume := range consumers {
+			t.Run(manifestName+"/"+consumerName, func(t *testing.T) {
+				envRoot := t.TempDir()
+				workDir := filepath.Join(envRoot, "workdir")
+				if err := os.MkdirAll(workDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				manifestPath := filepath.Join(envRoot, sidecarManifestFile)
+				if err := os.WriteFile(manifestPath, []byte(raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				err := consume(envRoot, workDir)
+				if err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+					t.Fatalf("consumer error = %v, want duplicate-key rejection", err)
+				}
+				if _, statErr := os.Lstat(manifestPath); statErr != nil {
+					t.Fatalf("rejected manifest was removed: %v", statErr)
+				}
+			})
+		}
 	}
 }
 

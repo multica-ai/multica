@@ -5,6 +5,7 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -321,6 +322,11 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// local_directory detection logic ever drifts.
 	manifest := &sidecarManifest{}
 	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
+		if params.Provider == "platform-agent-cli" {
+			if rollbackErr := rollbackSidecarManifest(manifest); rollbackErr != nil {
+				err = errors.Join(err, fmt.Errorf("roll back platform sidecars: %w", rollbackErr))
+			}
+		}
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
@@ -397,8 +403,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CursorDataDir = cursorDataDir
 	}
 
-	if err := writeSidecarManifest(envRoot, manifest); err != nil {
-		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
+	if err := finalizeSidecarManifest(params.Provider, envRoot, workDir, manifest, logger); err != nil {
+		return nil, fmt.Errorf("execenv: finalize platform sidecars: %w", err)
 	}
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to
@@ -541,11 +547,27 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// No-op when RootDir is empty (legacy local_directory reuse, which the
 	// daemon skips anyway) or when no prior manifest exists (older build).
 	if env.RootDir != "" {
-		if err := removeReusedManagedSkillDirs(env.RootDir, skillsDirPath(params.WorkDir, params.Provider)); err != nil {
-			logger.Warn("execenv: reclaim managed skill dirs on reuse failed", "error", err)
+		removeManagedSkillDirs := removeReusedManagedSkillDirs
+		cleanupSidecars := CleanupSidecars
+		if params.Provider == "platform-agent-cli" {
+			removeManagedSkillDirs = func(envRoot, skillsParent string) error {
+				return removeReusedManagedSkillDirsAt(envRoot, params.WorkDir, skillsParent)
+			}
+			cleanupSidecars = func(envRoot string) error {
+				return CleanupSidecarsAt(envRoot, params.WorkDir)
+			}
 		}
-		if err := CleanupSidecars(env.RootDir); err != nil {
+		if err := removeManagedSkillDirs(env.RootDir, skillsDirPath(params.WorkDir, params.Provider)); err != nil {
+			logger.Warn("execenv: reclaim managed skill dirs on reuse failed", "error", err)
+			if params.Provider == "platform-agent-cli" {
+				return nil
+			}
+		}
+		if err := cleanupSidecars(env.RootDir); err != nil {
 			logger.Warn("execenv: roll back prior sidecars on reuse failed", "error", err)
+			if params.Provider == "platform-agent-cli" {
+				return nil
+			}
 		}
 	}
 
@@ -563,6 +585,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
 		if params.Provider == "platform-agent-cli" {
 			logger.Warn("execenv: refresh platform agent context failed; forcing fresh prepare", "error", err)
+			if rollbackErr := rollbackSidecarManifest(manifest); rollbackErr != nil {
+				logger.Warn("execenv: roll back failed platform refresh", "error", rollbackErr)
+			}
 			return nil
 		}
 		logger.Warn("execenv: refresh context files failed", "error", err)
@@ -642,8 +667,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 
 	if env.RootDir != "" {
-		if err := writeSidecarManifest(env.RootDir, manifest); err != nil {
-			logger.Warn("execenv: refresh sidecar manifest failed", "error", err)
+		if err := finalizeSidecarManifest(params.Provider, env.RootDir, params.WorkDir, manifest, logger); err != nil {
+			return nil
 		}
 	}
 
@@ -669,6 +694,27 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+func finalizeSidecarManifest(provider, envRoot, workDir string, manifest *sidecarManifest, logger *slog.Logger) error {
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: write sidecar manifest failed", "error", err)
+		}
+		if provider != "platform-agent-cli" {
+			return nil
+		}
+		if rollbackErr := rollbackSidecarManifest(manifest); rollbackErr != nil {
+			return errors.Join(err, fmt.Errorf("roll back untracked platform sidecars under %s: %w", workDir, rollbackErr))
+		}
+		return err
+	}
+	if manifest != nil {
+		if err := manifest.closeRoot(); err != nil && provider == "platform-agent-cli" {
+			return fmt.Errorf("close platform sidecar root: %w", err)
+		}
+	}
+	return nil
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with

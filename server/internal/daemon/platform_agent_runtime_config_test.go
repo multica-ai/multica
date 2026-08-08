@@ -53,6 +53,8 @@ func TestDecodePlatformAgentRuntimeConfigFailsClosed(t *testing.T) {
 		{name: "unknown context field", raw: `{"platform_agent":` + strings.TrimSuffix(validPlatformAgentPayload(), `}`) + `,"unknown":true}}`, want: "unknown field"},
 		{name: "missing extension identity", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{},"agent":{"source_key":"lead"},"commands":[]}}`, want: "extension identity"},
 		{name: "missing agent identity", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{},"commands":[]}}`, want: "source_key"},
+		{name: "missing commands", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"}}}`, want: "commands"},
+		{name: "null commands", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":null}}`, want: "commands"},
 		{name: "duplicate command", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[{"name":"same","metadata":{}},{"name":"same","metadata":{}}]}}`, want: "duplicate command"},
 		{name: "missing metadata", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[{"name":"same"}]}}`, want: "metadata"},
 		{name: "unknown command field", raw: `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[{"name":"same","metadata":{},"tool":true}]}}`, want: "unknown field"},
@@ -68,6 +70,60 @@ func TestDecodePlatformAgentRuntimeConfigFailsClosed(t *testing.T) {
 				t.Fatalf("error = %q, want substring %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestDecodePlatformAgentRuntimeConfigPreservesRequiredEmptyCommandsArray(t *testing.T) {
+	raw := json.RawMessage(`{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[]}}`)
+	got, err := decodePlatformAgentRuntimeConfig(raw)
+	if err != nil {
+		t.Fatalf("decodePlatformAgentRuntimeConfig() error = %v", err)
+	}
+	if got.Commands == nil || len(got.Commands) != 0 {
+		t.Fatalf("commands = %#v, want a present empty slice", got.Commands)
+	}
+	materialized, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(materialized), `"commands":[]`) {
+		t.Fatalf("materialized context = %s, want commands:[]", materialized)
+	}
+}
+
+func TestDecodePlatformAgentRuntimeConfigRejectsDuplicateObjectKeysAtAnyDepth(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "outer wrapper",
+			raw:  `{"platform_agent":` + validPlatformAgentPayload() + `,"platform_agent":` + validPlatformAgentPayload() + `}`,
+		},
+		{
+			name: "extension identity",
+			raw:  `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","key":"y","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[]}}`,
+		},
+		{
+			name: "command metadata",
+			raw:  `{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[{"name":"run","metadata":{"owner":"a","owner":"b"}}]}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodePlatformAgentRuntimeConfig(json.RawMessage(tt.raw))
+			if err == nil || !strings.Contains(err.Error(), "duplicate object key") {
+				t.Fatalf("decodePlatformAgentRuntimeConfig() = %#v, %v; want duplicate object key error", got, err)
+			}
+		})
+	}
+}
+
+func TestDecodePlatformAgentRuntimeConfigAllowsArbitraryPrecisionMetadataNumbers(t *testing.T) {
+	raw := json.RawMessage(`{"platform_agent":{"schema_version":"platform-agent.runtime-context/v1","extension":{"key":"x","version":"1","release_id":"r","digest":"d"},"agent":{"source_key":"lead"},"commands":[{"name":"run","metadata":{"large":1e1000}}]}}`)
+	if _, err := decodePlatformAgentRuntimeConfig(raw); err != nil {
+		t.Fatalf("decodePlatformAgentRuntimeConfig() rejected valid JSON number: %v", err)
 	}
 }
 

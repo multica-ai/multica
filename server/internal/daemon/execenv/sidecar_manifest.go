@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // sidecarManifestFile is the on-disk JSON Prepare writes into envRoot to
@@ -42,14 +44,15 @@ var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing pat
 // manifest is the second half of the contract that makes local_directory
 // runs byte-exactly reversible:
 //
-//   - Files lists absolute paths of regular files we created. Files are
-//     recorded only after recordWriteFile has verified the target did
-//     NOT pre-exist; recordWriteFile refuses to overwrite a pre-existing
-//     path, so the manifest's existence rule and the write side's
-//     refuse-to-clobber rule are the same invariant viewed from two
-//     sides.
-//   - Dirs lists absolute paths of directories we created, in root-first
-//     creation order. Cleanup walks the list in reverse so deepest dirs
+//   - Files lists regular files we created. Legacy manifests use absolute
+//     paths; Platform manifests set Rooted and use names relative to the
+//     trusted WorkDir. Files are recorded only after recordWriteFile has
+//     verified the target did NOT pre-exist, so the manifest's existence
+//     rule and the write side's refuse-to-clobber rule are the same invariant
+//     viewed from two sides.
+//   - Dirs follows the same legacy-absolute/root-confined-relative convention
+//     and records directories in root-first creation order. Cleanup walks the
+//     list in reverse so deepest dirs
 //     get tried first; rmdir of a directory the user has populated since
 //     (e.g. .claude/skills/my-own-skill alongside our .claude/skills/
 //     issue-review) fails ENOTEMPTY and is skipped silently — the
@@ -64,8 +67,66 @@ var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing pat
 // is appended to user-owned content rather than written into a new sidecar
 // directory).
 type sidecarManifest struct {
-	Files []string `json:"files,omitempty"`
-	Dirs  []string `json:"dirs,omitempty"`
+	Rooted bool     `json:"rooted,omitempty"`
+	Files  []string `json:"files,omitempty"`
+	Dirs   []string `json:"dirs,omitempty"`
+
+	rootPath string
+	root     *os.Root
+}
+
+func (m *sidecarManifest) bindRoot(rootPath string) error {
+	if m == nil {
+		return errors.New("root-confined sidecar manifest is required")
+	}
+	cleanRoot := filepath.Clean(rootPath)
+	if m.root != nil {
+		if m.rootPath != cleanRoot {
+			return fmt.Errorf("sidecar manifest already bound to %s", m.rootPath)
+		}
+		return nil
+	}
+	root, err := openFixedSidecarRoot(cleanRoot)
+	if err != nil {
+		return fmt.Errorf("open sidecar root %s: %w", cleanRoot, err)
+	}
+	m.Rooted = true
+	m.rootPath = cleanRoot
+	m.root = root
+	return nil
+}
+
+func openFixedSidecarRoot(rootPath string) (*os.Root, error) {
+	expected, err := os.Lstat(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	if expected.Mode()&os.ModeSymlink != 0 || !expected.IsDir() {
+		return nil, fmt.Errorf("sidecar root must be a real directory: %s", rootPath)
+	}
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := root.Stat(".")
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	if !os.SameFile(expected, opened) {
+		_ = root.Close()
+		return nil, fmt.Errorf("sidecar root changed while opening: %s", rootPath)
+	}
+	return root, nil
+}
+
+func (m *sidecarManifest) closeRoot() error {
+	if m == nil || m.root == nil {
+		return nil
+	}
+	err := m.root.Close()
+	m.root = nil
+	return err
 }
 
 // recordMkdirAll behaves like os.MkdirAll(path, perm) but additionally
@@ -84,6 +145,47 @@ func recordMkdirAll(path string, perm os.FileMode, m *sidecarManifest) error {
 	}
 	if m == nil {
 		return os.MkdirAll(path, perm)
+	}
+	if m.Rooted {
+		if m.root == nil {
+			return errors.New("root-confined sidecar manifest is not bound")
+		}
+		rel, err := pathRelativeToRoot(m.rootPath, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+		prefix := ""
+		for _, part := range parts {
+			if prefix == "" {
+				prefix = part
+			} else {
+				prefix = filepath.Join(prefix, part)
+			}
+			info, statErr := m.root.Lstat(prefix)
+			switch {
+			case statErr == nil:
+				if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+					return fmt.Errorf("sidecar directory must be a real directory: %s", prefix)
+				}
+			case errors.Is(statErr, fs.ErrNotExist):
+				if err := m.root.Mkdir(prefix, perm); err != nil {
+					// Another writer may have created the directory after our
+					// Lstat. Accept that race only when the winner created the
+					// same real directory shape we require; symlinks and files
+					// remain hard failures.
+					info, statErr = m.root.Lstat(prefix)
+					if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+						return err
+					}
+					continue
+				}
+				m.Dirs = append(m.Dirs, prefix)
+			default:
+				return fmt.Errorf("stat sidecar directory %s: %w", prefix, statErr)
+			}
+		}
+		return nil
 	}
 	// Walk leaf-first, collecting ancestors that don't currently exist.
 	// We stop at the first existing ancestor (or the filesystem root) so
@@ -138,6 +240,38 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 	if m == nil {
 		return os.WriteFile(path, data, perm)
 	}
+	if m.Rooted {
+		if m.root == nil {
+			return errors.New("root-confined sidecar manifest is not bound")
+		}
+		rel, err := pathRelativeToRoot(m.rootPath, path)
+		if err != nil {
+			return err
+		}
+		file, err := m.root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+		if err != nil {
+			if _, statErr := m.root.Lstat(rel); statErr == nil {
+				return fmt.Errorf("%w: %s", errPathPreExists, path)
+			}
+			return err
+		}
+		ok := false
+		defer func() {
+			_ = file.Close()
+			if !ok {
+				_ = m.root.Remove(rel)
+			}
+		}()
+		if _, err := file.Write(data); err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		ok = true
+		m.Files = append(m.Files, rel)
+		return nil
+	}
 	_, statErr := os.Lstat(path)
 	if statErr == nil {
 		// Any existing entry — regular file, symlink, directory —
@@ -151,6 +285,72 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 		return err
 	}
 	m.Files = append(m.Files, path)
+	return nil
+}
+
+func readExistingSidecarFile(path string, m *sidecarManifest) ([]byte, error) {
+	if m == nil || !m.Rooted {
+		return os.ReadFile(path)
+	}
+	if m.root == nil {
+		return nil, errors.New("root-confined sidecar manifest is not bound")
+	}
+	rel, err := pathRelativeToRoot(m.rootPath, path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := m.root.Lstat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("existing sidecar is not a real file: %s", rel)
+	}
+	return m.root.ReadFile(rel)
+}
+
+func overwriteExistingSidecarFile(path string, data []byte, perm os.FileMode, m *sidecarManifest) error {
+	if m == nil || !m.Rooted {
+		return os.WriteFile(path, data, perm)
+	}
+	if m.root == nil {
+		return errors.New("root-confined sidecar manifest is not bound")
+	}
+	rel, err := pathRelativeToRoot(m.rootPath, path)
+	if err != nil {
+		return err
+	}
+	info, err := m.root.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("existing sidecar is not a real file: %s", rel)
+	}
+	file, err := m.root.OpenFile(rel, os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func recordExistingSidecarOwnership(path string, m *sidecarManifest) error {
+	if m == nil {
+		return nil
+	}
+	if !m.Rooted {
+		m.Files = append(m.Files, path)
+		return nil
+	}
+	rel, err := pathRelativeToRoot(m.rootPath, path)
+	if err != nil {
+		return err
+	}
+	m.Files = append(m.Files, rel)
 	return nil
 }
 
@@ -209,10 +409,10 @@ func skillSlugCandidate(baseSlug string, attempt int) string {
 // writeSidecarManifest persists m to {envRoot}/{sidecarManifestFile}.
 // Empty manifests are still written so a later Cleanup that finds the
 // file knows tracking was attempted (vs. an old build that predates this
-// mechanism, where the file is absent and Cleanup must no-op). Failures
-// are returned to the caller; the caller treats them as non-fatal because
-// a missed manifest only degrades local_directory cleanup, not task
-// execution.
+// mechanism, where the file is absent and Cleanup must no-op). Failures are
+// returned to the caller. Existing providers preserve their warning-only
+// behavior; Platform treats persistence as transactional and rolls back the
+// in-memory manifest before failing closed.
 func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 	if envRoot == "" {
 		return nil
@@ -225,6 +425,62 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 		return fmt.Errorf("marshal sidecar manifest: %w", err)
 	}
 	return os.WriteFile(filepath.Join(envRoot, sidecarManifestFile), data, 0o644)
+}
+
+func decodeSidecarManifest(data []byte, m *sidecarManifest) error {
+	if err := ValidateNoDuplicateJSONKeys(data); err != nil {
+		return fmt.Errorf("validate sidecar manifest JSON: %w", err)
+	}
+	return json.Unmarshal(data, m)
+}
+
+func rollbackSidecarManifest(m *sidecarManifest) error {
+	if m == nil {
+		return nil
+	}
+	defer m.closeRoot()
+	var firstErr error
+	removePath := func(path string) error {
+		if !m.Rooted {
+			return os.Remove(path)
+		}
+		if m.root == nil {
+			return errors.New("root-confined sidecar manifest is not bound")
+		}
+		rel, err := pathRelativeToRoot(m.rootPath, path)
+		if err != nil {
+			return err
+		}
+		return m.root.Remove(rel)
+	}
+	directoryHasEntries := func(path string) (bool, bool) {
+		if !m.Rooted || m.root == nil {
+			return dirHasEntries(path)
+		}
+		rel, err := pathRelativeToRoot(m.rootPath, path)
+		if err != nil {
+			return false, false
+		}
+		return rootDirHasEntries(m.root, rel)
+	}
+	for _, path := range m.Files {
+		if err := removePath(path); err != nil && !errors.Is(err, fs.ErrNotExist) && firstErr == nil {
+			firstErr = fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	for i := len(m.Dirs) - 1; i >= 0; i-- {
+		path := m.Dirs[i]
+		if err := removePath(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			hasEntries, ok := directoryHasEntries(path)
+			if hasEntries && ok {
+				continue
+			}
+			if firstErr == nil {
+				firstErr = fmt.Errorf("rmdir %s: %w", path, err)
+			}
+		}
+	}
+	return firstErr
 }
 
 // CleanupSidecars rolls the user's workdir back to its pre-Prepare
@@ -268,6 +524,18 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 // .agent_context/skills/). The two together restore the workdir to
 // byte-exact pre-task state.
 func CleanupSidecars(envRoot string) error {
+	return cleanupSidecars(envRoot, "")
+}
+
+// CleanupSidecarsAt is the root-confined variant used when the caller has the
+// trusted task WorkDir. Legacy absolute manifest entries are translated to
+// names beneath a fixed os.Root handle, so a swapped parent symlink cannot
+// redirect deletion outside the workdir.
+func CleanupSidecarsAt(envRoot, workDir string) error {
+	return cleanupSidecars(envRoot, workDir)
+}
+
+func cleanupSidecars(envRoot, workDir string) error {
 	if envRoot == "" {
 		return nil
 	}
@@ -280,8 +548,11 @@ func CleanupSidecars(envRoot string) error {
 		return fmt.Errorf("read sidecar manifest %s: %w", manifestPath, err)
 	}
 	var m sidecarManifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := decodeSidecarManifest(data, &m); err != nil {
 		return fmt.Errorf("parse sidecar manifest %s: %w", manifestPath, err)
+	}
+	if m.Rooted && workDir == "" {
+		return errors.New("root-confined sidecar manifest requires trusted workdir")
 	}
 
 	var firstErr error
@@ -290,9 +561,37 @@ func CleanupSidecars(envRoot string) error {
 			firstErr = err
 		}
 	}
+	var workRoot *os.Root
+	if workDir != "" {
+		workRoot, err = openFixedSidecarRoot(workDir)
+		if err != nil {
+			return fmt.Errorf("open sidecar cleanup root %s: %w", workDir, err)
+		}
+		defer workRoot.Close()
+	}
+	removePath := func(path string) error {
+		if workRoot == nil {
+			return os.Remove(path)
+		}
+		rel, err := pathRelativeToRoot(workDir, path)
+		if err != nil {
+			return err
+		}
+		return workRoot.Remove(rel)
+	}
+	directoryHasEntries := func(path string) (bool, bool) {
+		if workRoot == nil {
+			return dirHasEntries(path)
+		}
+		rel, err := pathRelativeToRoot(workDir, path)
+		if err != nil {
+			return false, false
+		}
+		return rootDirHasEntries(workRoot, rel)
+	}
 
 	for _, f := range m.Files {
-		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removePath(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			captureErr(fmt.Errorf("remove %s: %w", f, err))
 		}
 	}
@@ -303,11 +602,11 @@ func CleanupSidecars(envRoot string) error {
 	// (permission denied, busy, etc. — capture and surface).
 	for i := len(m.Dirs) - 1; i >= 0; i-- {
 		d := m.Dirs[i]
-		err := os.Remove(d)
+		err := removePath(d)
 		if err == nil || errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		hasEntries, ok := dirHasEntries(d)
+		hasEntries, ok := directoryHasEntries(d)
 		switch {
 		case !ok:
 			// ReadDir also failed — we can't tell ENOTEMPTY apart
@@ -334,11 +633,52 @@ func CleanupSidecars(envRoot string) error {
 		}
 	}
 
+	if workRoot != nil && firstErr != nil {
+		// Root-confined cleanup is fail closed: retain the manifest so the
+		// failed rollback cannot be mistaken for a completed cleanup and can be
+		// retried after the swapped/blocked path is repaired.
+		return firstErr
+	}
 	if err := os.Remove(manifestPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		captureErr(fmt.Errorf("remove manifest %s: %w", manifestPath, err))
 	}
 
 	return firstErr
+}
+
+func pathRelativeToRoot(rootPath, path string) (string, error) {
+	if rootPath == "" {
+		return "", errors.New("sidecar root is required")
+	}
+	rel := path
+	var err error
+	if filepath.IsAbs(path) {
+		rel, err = filepath.Rel(rootPath, path)
+		if err != nil {
+			return "", fmt.Errorf("relativize sidecar path %s: %w", path, err)
+		}
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("sidecar path %s escapes root %s", path, rootPath)
+	}
+	return rel, nil
+}
+
+func rootDirHasEntries(root *os.Root, path string) (hasEntries bool, ok bool) {
+	dir, err := root.Open(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, true
+		}
+		return false, false
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, false
+	}
+	return len(entries) > 0, true
 }
 
 // removeReusedManagedSkillDirs force-removes the skill directories the prior
@@ -366,10 +706,15 @@ func CleanupSidecars(envRoot string) error {
 // workdirs (the daemon skips Reuse for local_directory tasks), so there is no
 // user-owned skills tree to protect here in the first place.
 //
-// envRoot or skillsParent empty, a missing manifest, or a parse failure are
-// all no-ops — the refresh simply proceeds. The manifest file is left in
-// place; CleanupSidecars, which runs next, owns deleting it.
+// envRoot or skillsParent empty and a missing manifest are no-ops. Read,
+// parse, validation, and deletion failures are returned to the caller. The
+// manifest file is left in place; CleanupSidecars, which runs next, owns
+// deleting it.
 func removeReusedManagedSkillDirs(envRoot, skillsParent string) error {
+	return removeReusedManagedSkillDirsAt(envRoot, "", skillsParent)
+}
+
+func removeReusedManagedSkillDirsAt(envRoot, workDir, skillsParent string) error {
 	if envRoot == "" || skillsParent == "" {
 		return nil
 	}
@@ -381,17 +726,47 @@ func removeReusedManagedSkillDirs(envRoot, skillsParent string) error {
 		return fmt.Errorf("read sidecar manifest for reuse skill rollback: %w", err)
 	}
 	var m sidecarManifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := decodeSidecarManifest(data, &m); err != nil {
 		return fmt.Errorf("parse sidecar manifest for reuse skill rollback: %w", err)
+	}
+	if m.Rooted && workDir == "" {
+		return errors.New("root-confined reuse manifest requires trusted workdir")
 	}
 
 	cleanParent := filepath.Clean(skillsParent)
+	var workRoot *os.Root
+	if workDir != "" {
+		workRoot, err = openFixedSidecarRoot(workDir)
+		if err != nil {
+			return fmt.Errorf("open reuse sidecar root %s: %w", workDir, err)
+		}
+		defer workRoot.Close()
+		cleanParent, err = pathRelativeToRoot(workDir, skillsParent)
+		if err != nil {
+			return err
+		}
+	}
 	var firstErr error
 	for _, d := range m.Dirs {
-		if filepath.Dir(filepath.Clean(d)) != cleanParent {
+		candidate := filepath.Clean(d)
+		if workRoot != nil {
+			candidate, err = pathRelativeToRoot(workDir, d)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+		}
+		if filepath.Dir(candidate) != cleanParent {
 			continue
 		}
-		if err := os.RemoveAll(d); err != nil && firstErr == nil {
+		if workRoot != nil {
+			err = workRoot.RemoveAll(candidate)
+		} else {
+			err = os.RemoveAll(d)
+		}
+		if err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("remove managed skill dir %s: %w", d, err)
 		}
 	}

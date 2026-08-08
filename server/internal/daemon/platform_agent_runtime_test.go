@@ -123,3 +123,43 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"
 		}
 	}
 }
+
+func TestTaskIdentityEnvironmentScopesRuntimeIDToPlatformProvider(t *testing.T) {
+	task := Task{
+		ID:          "task-identity",
+		WorkspaceID: "workspace-identity",
+		AgentID:     "agent-identity",
+		RuntimeID:   "runtime-identity",
+	}
+
+	platform := taskIdentityEnvironment(task, "platform-agent-cli")
+	if got := platform["MULTICA_RUNTIME_ID"]; got != "runtime-identity" {
+		t.Fatalf("platform MULTICA_RUNTIME_ID = %q, want runtime-identity", got)
+	}
+	for key, want := range map[string]string{
+		"MULTICA_WORKSPACE_ID": "workspace-identity",
+		"MULTICA_AGENT_ID":     "agent-identity",
+		"MULTICA_TASK_ID":      "task-identity",
+	} {
+		if got := platform[key]; got != want {
+			t.Fatalf("platform %s = %q, want %q", key, got, want)
+		}
+	}
+
+	other := taskIdentityEnvironment(task, "claude")
+	if len(other) != 3 {
+		t.Fatalf("non-platform identity environment = %#v, want exactly three existing identity keys", other)
+	}
+	if _, ok := other["MULTICA_RUNTIME_ID"]; ok {
+		t.Fatalf("non-platform environment leaked MULTICA_RUNTIME_ID: %#v", other)
+	}
+	for key, want := range map[string]string{
+		"MULTICA_WORKSPACE_ID": "workspace-identity",
+		"MULTICA_AGENT_ID":     "agent-identity",
+		"MULTICA_TASK_ID":      "task-identity",
+	} {
+		if got := other[key]; got != want {
+			t.Fatalf("non-platform %s = %q, want %q", key, got, want)
+		}
+	}
+}

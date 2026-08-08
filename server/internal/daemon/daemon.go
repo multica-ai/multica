@@ -114,6 +114,18 @@ func taskScopedAuthToken(task Task) (string, error) {
 	return token, nil
 }
 
+func taskIdentityEnvironment(task Task, provider string) map[string]string {
+	env := map[string]string{
+		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
+		"MULTICA_AGENT_ID":     task.AgentID,
+		"MULTICA_TASK_ID":      task.ID,
+	}
+	if provider == "platform-agent-cli" {
+		env["MULTICA_RUNTIME_ID"] = task.RuntimeID
+	}
+	return env
+}
+
 // taskRunner executes a single agent task and returns the result.
 // Extracted as an interface so tests can inject a fake without spawning real
 // agent processes, while keeping test scaffolding out of the production struct.
@@ -5961,7 +5973,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
 			// every other file Prepare placed under WorkDir. Together
 			// they round-trip the workdir to its exact pre-task bytes.
-			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
+			cleanupSidecars := execenv.CleanupSidecars
+			if provider == "platform-agent-cli" {
+				cleanupSidecars = func(envRoot string) error {
+					return execenv.CleanupSidecarsAt(envRoot, env.WorkDir)
+				}
+			}
+			if cerr := cleanupSidecars(env.RootDir); cerr != nil {
 				d.logger.Warn("execenv: cleanup sidecars failed (non-fatal)", "error", cerr)
 			}
 		}()
@@ -5983,18 +6001,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_RUNTIME_ID":   task.RuntimeID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
-		"TMPDIR":               taskTempDir,
-		"TMP":                  taskTempDir,
-		"TEMP":                 taskTempDir,
+		"MULTICA_TOKEN":       agentToken,
+		"MULTICA_SERVER_URL":  d.cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT": fmt.Sprintf("%d", d.cfg.HealthPort),
+		"MULTICA_AGENT_NAME":  agentName,
+		"MULTICA_TASK_SLOT":   strconv.Itoa(slot),
+		"TMPDIR":              taskTempDir,
+		"TMP":                 taskTempDir,
+		"TEMP":                taskTempDir,
+	}
+	for key, value := range taskIdentityEnvironment(task, provider) {
+		agentEnv[key] = value
 	}
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode

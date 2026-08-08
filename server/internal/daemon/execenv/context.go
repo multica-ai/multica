@@ -226,7 +226,7 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 	if err := recordWriteFile(filepath.Join(workDir, TaskContextMarkerRelPath), data, 0o644, manifest); err != nil {
 		if errors.Is(err, errPathPreExists) {
 			path := filepath.Join(workDir, TaskContextMarkerRelPath)
-			existing, readErr := os.ReadFile(path)
+			existing, readErr := readExistingSidecarFile(path, manifest)
 			if readErr != nil {
 				return fmt.Errorf("read existing task context marker: %w", readErr)
 			}
@@ -234,11 +234,11 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 			if json.Unmarshal(existing, &marker) != nil || marker.ManagedBy != TaskContextMarkerManagedBy {
 				return fmt.Errorf("write task context marker: %w", err)
 			}
-			if writeErr := os.WriteFile(path, data, 0o644); writeErr != nil {
+			if writeErr := overwriteExistingSidecarFile(path, data, 0o644, manifest); writeErr != nil {
 				return fmt.Errorf("refresh task context marker: %w", writeErr)
 			}
-			if manifest != nil {
-				manifest.Files = append(manifest.Files, path)
+			if err := recordExistingSidecarOwnership(path, manifest); err != nil {
+				return fmt.Errorf("record refreshed task context marker: %w", err)
 			}
 			return nil
 		}

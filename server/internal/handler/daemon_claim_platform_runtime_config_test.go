@@ -39,19 +39,35 @@ func TestClaimTaskByRuntimeForwardsPlatformRuntimeConfigRaw(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
 	}
-	var response struct {
-		Task *struct {
-			Agent *TaskAgentData `json:"agent"`
-		} `json:"task"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if response.Task == nil || response.Task.Agent == nil {
-		t.Fatalf("missing task agent: %s", w.Body.String())
+	var taskWire map[string]json.RawMessage
+	if err := json.Unmarshal(envelope["task"], &taskWire); err != nil {
+		t.Fatalf("decode task map: %v: %s", err, w.Body.String())
+	}
+	var agentWire map[string]json.RawMessage
+	if err := json.Unmarshal(taskWire["agent"], &agentWire); err != nil {
+		t.Fatalf("decode agent map: %v: %s", err, w.Body.String())
+	}
+	allowedAgentKeys := map[string]struct{}{
+		"id": {}, "name": {}, "instructions": {}, "skills": {}, "skill_refs": {},
+		"custom_env": {}, "custom_args": {}, "mcp_config": {}, "model": {},
+		"thinking_level": {}, "service_tier": {}, "disabled_runtime_skills": {},
+		"runtime_config": {},
+	}
+	for key := range agentWire {
+		if _, ok := allowedAgentKeys[key]; !ok {
+			t.Fatalf("claim introduced platform runtime sibling %q beside runtime_config: %s", key, w.Body.String())
+		}
+	}
+	runtimeConfigRaw, ok := agentWire["runtime_config"]
+	if !ok {
+		t.Fatalf("claim omitted existing agent.runtime_config wire: %s", w.Body.String())
 	}
 	var got, want any
-	if err := json.Unmarshal(response.Task.Agent.RuntimeConfig, &got); err != nil {
+	if err := json.Unmarshal(runtimeConfigRaw, &got); err != nil {
 		t.Fatalf("claim runtime_config is invalid: %v", err)
 	}
 	if err := json.Unmarshal(wantRaw, &want); err != nil {

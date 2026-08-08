@@ -10,7 +10,14 @@ import (
 )
 
 type platformAgentRuntimeConfig struct {
-	PlatformAgent *execenv.PlatformAgentContextForEnv `json:"platform_agent"`
+	PlatformAgent *json.RawMessage `json:"platform_agent"`
+}
+
+type platformAgentContextWire struct {
+	SchemaVersion string                                `json:"schema_version"`
+	Extension     execenv.PlatformAgentExtensionForEnv  `json:"extension"`
+	Agent         execenv.PlatformAgentIdentityForEnv   `json:"agent"`
+	Commands      *[]execenv.PlatformAgentCommandForEnv `json:"commands"`
 }
 
 // decodePlatformAgentRuntimeConfig strictly extracts the platform-owned
@@ -25,6 +32,9 @@ func decodePlatformAgentRuntimeConfig(raw json.RawMessage) (*execenv.PlatformAge
 	if trimmed[0] != '{' {
 		return nil, fmt.Errorf("platform agent runtime_config must be an object")
 	}
+	if err := execenv.ValidateNoDuplicateJSONKeys(trimmed); err != nil {
+		return nil, fmt.Errorf("decode platform agent runtime_config: %w", err)
+	}
 	var config platformAgentRuntimeConfig
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
@@ -38,8 +48,33 @@ func decodePlatformAgentRuntimeConfig(raw json.RawMessage) (*execenv.PlatformAge
 	if config.PlatformAgent == nil {
 		return nil, fmt.Errorf("platform agent runtime_config.platform_agent is required")
 	}
-	if err := execenv.ValidatePlatformAgentContext(config.PlatformAgent); err != nil {
+	platformRaw := bytes.TrimSpace(*config.PlatformAgent)
+	if len(platformRaw) == 0 || bytes.Equal(platformRaw, []byte("null")) {
+		return nil, fmt.Errorf("platform agent runtime_config.platform_agent is required")
+	}
+	if platformRaw[0] != '{' {
+		return nil, fmt.Errorf("platform agent runtime_config.platform_agent must be an object")
+	}
+	var wire platformAgentContextWire
+	platformDecoder := json.NewDecoder(bytes.NewReader(platformRaw))
+	platformDecoder.DisallowUnknownFields()
+	if err := platformDecoder.Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode platform agent runtime_config.platform_agent: %w", err)
+	}
+	if err := platformDecoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("platform agent runtime_config.platform_agent must contain one JSON value")
+	}
+	if wire.Commands == nil {
+		return nil, fmt.Errorf("platform agent runtime_config.platform_agent.commands must be an array")
+	}
+	platformContext := &execenv.PlatformAgentContextForEnv{
+		SchemaVersion: wire.SchemaVersion,
+		Extension:     wire.Extension,
+		Agent:         wire.Agent,
+		Commands:      *wire.Commands,
+	}
+	if err := execenv.ValidatePlatformAgentContext(platformContext); err != nil {
 		return nil, fmt.Errorf("invalid platform agent runtime_config.platform_agent: %w", err)
 	}
-	return config.PlatformAgent, nil
+	return platformContext, nil
 }
