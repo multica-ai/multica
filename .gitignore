@@ -78,3 +78,6 @@ data/
 # Python (agent tooling)
 __pycache__/
 *.pyc
+
+# local deployment secrets (never commit)
+docker-compose.selfhost.secrets.yml

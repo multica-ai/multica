@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -63,7 +64,15 @@ func (h *Handler) ReportCodeMRSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row, err := h.Queries.GetExternalPullRequestByID(r.Context(), prID)
-	if err != nil || uuidToString(row.WorkspaceID) != uuidToString(runtime.WorkspaceID) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "external pull request not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load external pull request")
+		return
+	}
+	if uuidToString(row.WorkspaceID) != uuidToString(runtime.WorkspaceID) {
 		writeError(w, http.StatusNotFound, "external pull request not found")
 		return
 	}

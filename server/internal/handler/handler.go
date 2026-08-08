@@ -336,9 +336,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 	var daemonProfileRefresh RuntimeProfileRefreshNotifier
 	var daemonWorkspaceRefresh WorkspaceSetRefreshNotifier
+	var codeMRSync CodeMRSyncNotifier
 	if daemonHub != nil {
 		daemonProfileRefresh = daemonHub
 		daemonWorkspaceRefresh = daemonHub
+		codeMRSync = daemonHub
 	}
 
 	llmClient := llm.New(llm.Config{
@@ -361,7 +363,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
-		CodeMRSync:                   daemonHub,
+		CodeMRSync:                   codeMRSync,
 		Bus:                          bus,
 		TaskService:                  taskSvc,
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),

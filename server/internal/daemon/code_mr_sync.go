@@ -22,6 +22,9 @@ const (
 	codeMRA1CommandTimeout = 20 * time.Second
 	codeMRA1OutputLimit    = 2 << 20
 	codeMRA1ErrorLimit     = 1024
+	// Headroom on top of the three a1 command budgets so the final snapshot
+	// report still has time to land when the commands run slow.
+	codeMRSnapshotReportHeadroom = 30 * time.Second
 )
 
 var codeMRRepositoryPathRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)+$`)
@@ -29,15 +32,18 @@ var codeMRRepositoryPathRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/
 type boundedBuffer struct {
 	buf       bytes.Buffer
 	remaining int
+	truncated bool
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	original := len(p)
 	if b.remaining <= 0 {
+		b.truncated = true
 		return original, nil
 	}
 	if len(p) > b.remaining {
 		p = p[:b.remaining]
+		b.truncated = true
 	}
 	_, _ = b.buf.Write(p)
 	b.remaining -= len(p)
@@ -83,7 +89,7 @@ func runA1JSON(ctx context.Context, a1Path string, args ...string) ([]byte, erro
 		}
 		return nil, fmt.Errorf("a1 failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	if stdout.remaining == 0 {
+	if stdout.truncated {
 		return nil, errors.New("a1 output exceeded limit")
 	}
 	return append([]byte(nil), stdout.Bytes()...), nil
@@ -184,7 +190,7 @@ func (d *Daemon) handleCodeMRSync(req protocol.CodeMRSyncPayload) {
 	if err := validateCodeMRSyncRequest(req); err != nil || d.findRuntime(req.RuntimeID) == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(d.recoveryContext(), 3*codeMRA1CommandTimeout)
+	ctx, cancel := context.WithTimeout(d.recoveryContext(), 3*codeMRA1CommandTimeout+codeMRSnapshotReportHeadroom)
 	defer cancel()
 
 	result := protocol.CodeMRSnapshotResult{}

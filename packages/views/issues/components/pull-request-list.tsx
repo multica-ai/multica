@@ -120,7 +120,10 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
         <p className="text-micro text-muted-foreground truncate">
           {pr.repo_owner}/{pr.repo_name}
           {pr.provider === "code" ? "!" : "#"}
-          {pr.number} · {pr.provider === "code" && pr.snapshot_available !== true ? "Code" : stateLabel}
+          {pr.number} ·{" "}
+          {pr.provider === "code" && pr.snapshot_available !== true
+            ? t(($) => $.detail.pull_request_provider_code)
+            : stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
         <PullRequestRowDetails pr={pr} />
@@ -138,16 +141,16 @@ function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
       const commentCount = pr.comment_count ?? 0;
       const unresolvedCount = pr.unresolved_comment_count ?? 0;
       const isTerminal = pr.state === "merged" || pr.state === "closed";
-      const mergeBadge = isTerminal
-        ? null
-        : getMergeBadge(
-            pr.ready_to_merge === true
-              ? { kind: "ready" }
-              : pr.ready_to_merge === false
-                ? { kind: "blocked" }
-                : { kind: "none" },
-            t,
-          );
+      let mergeStatus: PullRequestMergeStatus = { kind: "none" };
+      if (pr.ready_to_merge === true) {
+        mergeStatus = { kind: "ready" };
+      } else if (pr.ready_to_merge === false) {
+        mergeStatus = { kind: "blocked" };
+      }
+      const mergeBadge = isTerminal ? null : getMergeBadge(mergeStatus, t);
+      if (commentCount === 0 && !pr.sync_error && !mergeBadge) {
+        return null;
+      }
       return (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground">
           {commentCount > 0 ? (

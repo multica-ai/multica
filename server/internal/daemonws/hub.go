@@ -403,7 +403,12 @@ func (h *Hub) notifyCodeMRSync(payload protocol.CodeMRSyncPayload, eventID strin
 	if err != nil {
 		return
 	}
-	h.notifyFrame(payload.RuntimeID, data, eventID)
+	delivered, deduped := h.notifyFrame(payload.RuntimeID, data, eventID)
+	if delivered {
+		M.WakeupDeliveredHit.Add(1)
+	} else if !deduped {
+		M.WakeupDeliveredMiss.Add(1)
+	}
 }
 
 func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {

@@ -259,6 +259,7 @@
     "pull_requests_loading": "読み込み中...",
     "pull_requests_empty": "まだリンクされた Pull request がありません。PR のブランチ名、タイトル、または本文にこのタスクの識別子を入れると GitHub PR が自動的にリンクされます。issue 内の Code platform MR リンクも自動的にリンクされます。",
     "pull_request_external_status_unknown": "外部 MR · ステータス未同期",
+    "pull_request_provider_code": "Code",
     "pull_request_external_sync_failed": "外部 MR · 同期に失敗しました",
     "pull_request_comments_summary_other": "コメント {{count}} 件 · 未解決 {{unresolved}} 件",
     "pull_request_state_unknown": "不明",
