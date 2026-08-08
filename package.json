@@ -48,5 +48,8 @@
     "pg": "^8.20.0",
     "turbo": "^2.5.4",
     "typescript": "catalog:"
+  },
+  "dependencies": {
+    "fast-uri": "3.1.1"
   }
 }
