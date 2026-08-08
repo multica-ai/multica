@@ -48,6 +48,45 @@ updates itself, and production still requires the separate release-issue step.
 4. The push to `origin/production` makes Sliplane rebuild and roll out the
    production containers behind `Multica.firtal.com`.
 
+## Default path vs selective release
+
+**Default path (preferred):** merge `main` into `production` via the release-issue
+above. That is a normal three-way merge. Files that exist only on `production`
+stay on `production`; only changes that landed on `main` since the branches
+diverged move forward. Do **not** reset `production` to the `main` tree, and do
+**not** treat `git diff production..main` as the merge result — a plain diff
+lists production-only files as deletions even though a real merge keeps them.
+
+**Selective path (allowed):** ship a subset of `main` by opening a `release/*`
+branch from `production`, cherry-picking the chosen commits, and merging that
+branch into `production` through the same release-issue approval. Use this when
+staging holds work that must not go live yet.
+
+### Branch hygiene after a selective release
+
+Cherry-picks create commits that live on `production` but not on `main` (hotfixes,
+renumbered migrations, incident docs, diagnostics). That is fine short-term.
+Before the next full `main → production` wave, those production-only commits
+must already be on `main` — merge `production` back into `main` (or port the
+files) so both branches carry the same production-critical content.
+
+Check before every full release wave:
+
+```bash
+git fetch origin main production
+# Content only on production (must be empty, or explained):
+git diff --name-status origin/main..origin/production --diff-filter=A
+# Migration files must match by path on both branches when already applied live:
+git diff --name-status origin/main origin/production -- server/migrations/
+```
+
+Migration version strings are the full filename stem (for example
+`9161_cerebro_drop_persona_sandbox`), not the numeric prefix alone. A migration
+already applied in production must exist on `main` under that same stem so a
+fresh database and production stay aligned. Idempotent SQL (`IF EXISTS` /
+`IF NOT EXISTS`) is required when the same change also exists under an older
+stem.
+
 ## Who approves
 
 | Change | Reviewer | Approves the merge |
