@@ -52,6 +52,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"contact_sales_inquiry":           workspaceDeleteKeep,
 	"daemon_connection":               workspaceDelete,
 	"daemon_token":                    workspaceDelete,
+	"external_pull_request":           workspaceDelete,
 	"feedback":                        workspaceDeleteDetach,
 	"github_installation":             workspaceDelete,
 	"github_pending_check_suite":      workspaceDelete,

@@ -64,17 +64,13 @@ func (h *Handler) ReportCodeMRSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	row, err := h.Queries.GetExternalPullRequestByID(r.Context(), prID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if _, err := h.Queries.GetExternalPullRequestByID(r.Context(), db.GetExternalPullRequestByIDParams{
+		ID: prID, WorkspaceID: runtime.WorkspaceID,
+	}); errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "external pull request not found")
 		return
-	}
-	if err != nil {
+	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load external pull request")
-		return
-	}
-	if uuidToString(row.WorkspaceID) != uuidToString(runtime.WorkspaceID) {
-		writeError(w, http.StatusNotFound, "external pull request not found")
 		return
 	}
 

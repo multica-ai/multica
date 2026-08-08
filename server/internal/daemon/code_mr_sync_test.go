@@ -62,13 +62,38 @@ func TestParseA1CodeMRSnapshotRejectsMalformedOrMismatchedOutput(t *testing.T) {
 		{name: "malformed view", view: `{`, status: validStatus},
 		{name: "missing merge request", view: `{}`, status: validStatus},
 		{name: "unsupported state", view: `{"mergeRequest":{"id":7,"title":"x","state":"deleted"}}`, status: validStatus},
-		{name: "mismatched status", view: `{"mergeRequest":{"id":8,"title":"x","state":"opened"}}`, status: validStatus},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parseA1CodeMRSnapshot([]byte(tc.view), tc.status, validComments)
 			if err == nil {
 				t.Fatal("expected parse failure")
+			}
+		})
+	}
+}
+
+func TestParseA1CodeMRSnapshotDropsUnusableStatusBestEffort(t *testing.T) {
+	view := []byte(`{"mergeRequest":{"id":7,"title":"x","state":"opened"}}`)
+	comments := []byte(`[]`)
+	tests := []struct {
+		name   string
+		status []byte
+	}{
+		{name: "malformed status", status: []byte(`{`)},
+		{name: "mismatched status", status: []byte(`{"mrId":8,"readyToMerge":false}`)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseA1CodeMRSnapshot(view, tc.status, comments)
+			if err != nil {
+				t.Fatalf("status-only problems must not fail the snapshot: %v", err)
+			}
+			if result.ReadyToMerge != nil {
+				t.Fatal("expected ReadyToMerge to be dropped")
+			}
+			if result.Title != "x" || result.State != "open" {
+				t.Fatalf("snapshot lost core data: %+v", result)
 			}
 		})
 	}

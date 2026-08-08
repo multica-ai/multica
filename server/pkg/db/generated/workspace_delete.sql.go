@@ -413,8 +413,11 @@ const deleteWorkspacePullRequests = `-- name: DeleteWorkspacePullRequests :exec
 WITH deleted_github_prs AS (
     DELETE FROM github_pull_request
     WHERE github_pull_request.workspace_id = $1
+),
+deleted_vcs_prs AS (
+    DELETE FROM vcs_pull_request WHERE vcs_pull_request.workspace_id = $1
 )
-DELETE FROM vcs_pull_request WHERE vcs_pull_request.workspace_id = $1
+DELETE FROM external_pull_request WHERE external_pull_request.workspace_id = $1
 `
 
 func (q *Queries) DeleteWorkspacePullRequests(ctx context.Context, workspaceID pgtype.UUID) error {

@@ -307,7 +307,7 @@ ORDER BY created_at DESC;
 
 -- name: GetExternalPullRequestByID :one
 SELECT * FROM external_pull_request
-WHERE id = $1;
+WHERE id = $1 AND workspace_id = $2;
 
 -- name: MarkExternalPullRequestSyncRequested :one
 UPDATE external_pull_request

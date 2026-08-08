@@ -516,7 +516,7 @@ type ExternalPullRequest struct {
 	ReviewNumber           int32              `json:"review_number"`
 	Title                  string             `json:"title"`
 	HtmlUrl                string             `json:"html_url"`
-	CreatedByType          pgtype.Text        `json:"created_by_type"`
+	CreatedByType          string             `json:"created_by_type"`
 	CreatedByID            pgtype.UUID        `json:"created_by_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`

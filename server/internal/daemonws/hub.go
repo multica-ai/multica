@@ -471,7 +471,7 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		}
 	case protocol.EventDaemonCodeMRSync:
 		var payload protocol.CodeMRSyncPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || payload.ExternalPullRequestID == "" {
 			slog.Debug("daemon websocket relay: invalid code_mr_sync payload", "error", err, "scope_id", scopeID, "event_id", eventID)
 			M.WakeupDeliveredMiss.Add(1)
 			return

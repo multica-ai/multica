@@ -127,11 +127,13 @@ func parseA1CodeMRSnapshot(viewJSON, statusJSON, commentsJSON []byte) (protocol.
 		ReadyToMerge *bool `json:"readyToMerge"`
 	}
 	if len(bytes.TrimSpace(statusJSON)) > 0 {
+		// The mergeability check is optional enrichment, so malformed or
+		// mismatched status output is dropped with the same best-effort
+		// stance as a failed `mr status` command — the snapshot still lands.
 		if err := json.Unmarshal(statusJSON, &status); err != nil {
-			return protocol.CodeMRSnapshotResult{}, errors.New("invalid a1 mr status response")
-		}
-		if status.MRID != 0 && status.MRID != view.MergeRequest.ID {
-			return protocol.CodeMRSnapshotResult{}, errors.New("a1 MR responses refer to different merge requests")
+			status.ReadyToMerge = nil
+		} else if status.MRID != 0 && status.MRID != view.MergeRequest.ID {
+			status.ReadyToMerge = nil
 		}
 	}
 
@@ -186,7 +188,14 @@ func formatA1CommandError(operation, detail string) string {
 }
 
 func (d *Daemon) handleCodeMRSync(req protocol.CodeMRSyncPayload) {
-	if err := validateCodeMRSyncRequest(req); err != nil || d.findRuntime(req.RuntimeID) == nil {
+	if err := validateCodeMRSyncRequest(req); err != nil {
+		d.logger.Debug("code MR sync request dropped: invalid payload", "error", err)
+		return
+	}
+	if d.findRuntime(req.RuntimeID) == nil {
+		// The runtime may have re-registered on another daemon (or this frame
+		// was relayed to the wrong node). Log it so a stuck sync is traceable.
+		d.logger.Debug("code MR sync request dropped: unknown runtime", "runtime_id", req.RuntimeID, "external_pull_request_id", req.ExternalPullRequestID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(d.recoveryContext(), 3*codeMRA1CommandTimeout+codeMRSnapshotReportHeadroom)

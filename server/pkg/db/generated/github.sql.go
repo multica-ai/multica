@@ -283,11 +283,16 @@ func (q *Queries) FailExternalPullRequestSync(ctx context.Context, arg FailExter
 
 const getExternalPullRequestByID = `-- name: GetExternalPullRequestByID :one
 SELECT id, workspace_id, issue_id, provider, repository_path, review_number, title, html_url, created_by_type, created_by_id, created_at, updated_at, state, source_branch, target_branch, author_login, pr_created_at, pr_updated_at, ready_to_merge, comment_count, unresolved_comment_count, sync_requested_at, last_sync_at, sync_error FROM external_pull_request
-WHERE id = $1
+WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) GetExternalPullRequestByID(ctx context.Context, id pgtype.UUID) (ExternalPullRequest, error) {
-	row := q.db.QueryRow(ctx, getExternalPullRequestByID, id)
+type GetExternalPullRequestByIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetExternalPullRequestByID(ctx context.Context, arg GetExternalPullRequestByIDParams) (ExternalPullRequest, error) {
+	row := q.db.QueryRow(ctx, getExternalPullRequestByID, arg.ID, arg.WorkspaceID)
 	var i ExternalPullRequest
 	err := row.Scan(
 		&i.ID,

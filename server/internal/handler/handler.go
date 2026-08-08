@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -187,6 +188,11 @@ type Handler struct {
 	// correct delivery scope for a single-node deployment.
 	DaemonPendingWork DaemonPendingWorkNotifier
 	CodeMRSync        CodeMRSyncNotifier
+	// codeDiscovery* throttle the expensive Code-link backfill scan in
+	// ListPullRequestsForIssue to at most one run per issue per cooldown;
+	// fresh links arrive through the comment/metadata write paths instead.
+	codeDiscoveryMu  sync.Mutex
+	codeDiscoveryAt  map[string]time.Time
 	// ModelCatalogCache serves the last known good model list for a runtime so
 	// the picker can render without waiting for a daemon round trip
 	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
