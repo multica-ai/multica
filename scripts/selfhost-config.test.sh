@@ -46,6 +46,15 @@ require_config "$config" 'published: "9100"'
 require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
+# LocalStorage env vars must reach the backend container — .env.example
+# documents them and NewLocalStorageFromEnv reads them, so the compose file
+# must forward them or a self-hoster's LOCAL_UPLOAD_* settings are silently
+# ignored (regression for #6324, same class as the SMTP_FROM_EMAIL fix in
+# #5322). Assert the keys are present in the rendered config rather than a
+# specific value: LOCAL_UPLOAD_DIR comes from .env.example and
+# LOCAL_UPLOAD_BASE_URL is empty by default, and compose may quote either.
+require_config "$config" 'LOCAL_UPLOAD_DIR'
+require_config "$config" 'LOCAL_UPLOAD_BASE_URL'
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
