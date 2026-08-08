@@ -212,6 +212,90 @@ describe("SkillsTab", () => {
     expect(screen.getByText("Host-level review workflow")).toBeInTheDocument();
   });
 
+  it("shows a normalized duplicate inherited skill as overridden", async () => {
+    mockRuntimeCapabilities.mockResolvedValue({
+      skills: [
+        {
+          key: "review_changes",
+          name: "review_changes",
+          source_path: "~/.codex/skills/review_changes",
+          provider: "codex",
+          root: "provider",
+          can_disable: true,
+          file_count: 1,
+        },
+      ],
+      supported: true,
+      mcpServers: [],
+      mcpSupported: true,
+    });
+
+    renderSkillsTab(
+      {
+        skills: [
+          {
+            id: "skill-1",
+            name: " Review changes ",
+            description: "Workspace review workflow",
+            enabled: true,
+          },
+        ],
+      },
+      onlineRuntime,
+    );
+
+    const inheritedSwitch = await screen.findByRole("switch", {
+      name: /Toggle inherited review_changes/i,
+    });
+    expect(inheritedSwitch).not.toBeChecked();
+    expect(inheritedSwitch).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getByText("Overridden by assigned skill"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a matching inherited skill enabled when the assignment is off", async () => {
+    mockRuntimeCapabilities.mockResolvedValue({
+      skills: [
+        {
+          key: "local-review",
+          name: "Local review",
+          source_path: "~/.codex/skills/local-review",
+          provider: "codex",
+          root: "provider",
+          can_disable: true,
+          file_count: 1,
+        },
+      ],
+      supported: true,
+      mcpServers: [],
+      mcpSupported: true,
+    });
+
+    renderSkillsTab(
+      {
+        skills: [
+          {
+            id: "skill-1",
+            name: "Local review",
+            description: "Workspace review workflow",
+            enabled: false,
+          },
+        ],
+      },
+      onlineRuntime,
+    );
+
+    expect(
+      await screen.findByRole("switch", {
+        name: /Toggle inherited Local review/i,
+      }),
+    ).toBeChecked();
+    expect(
+      screen.queryByText("Overridden by assigned skill"),
+    ).not.toBeInTheDocument();
+  });
+
   it("turns a controllable inherited skill off for this agent", async () => {
     const user = userEvent.setup();
     mockRuntimeCapabilities.mockResolvedValue({
