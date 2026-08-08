@@ -401,6 +401,20 @@ export class ApiError extends Error {
   }
 }
 
+// errorCode extracts the stable `code` a handler attaches to a failure
+// (writeErrorCode), so a caller can render its own localized sentence instead
+// of toasting the server's English one. Returns undefined for a non-ApiError,
+// or a server that did not send one — the caller then falls back to
+// err.message, which is what every endpoint that has not adopted this yet
+// produces.
+export function errorCode(err: unknown): string | undefined {
+  if (err instanceof ApiError && err.body && typeof err.body === "object") {
+    const code = (err.body as { code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+  }
+  return undefined;
+}
+
 // dispatchReasonCode extracts the stable, machine-readable admission reason
 // (MUL-4525) from a blocked-trigger error's structured body, when present. UI
 // callers localize a blocked/partial trigger from this code instead of pattern

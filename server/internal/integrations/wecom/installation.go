@@ -405,21 +405,29 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 
 // validateInstallationParams is a lightweight pre-write check for
 // required fields. It does NOT verify anything against WeCom.
+// ErrInvalidInstallationParams marks a request the caller can fix by filling
+// something in, as opposed to a failure of ours. It exists so the HTTP layer
+// can tell the two apart: everything that is NOT one of these belongs on a
+// 500, because telling an admin their credentials are wrong when Postgres
+// briefly went away sends them to rotate a secret that was fine — and a WeCom
+// secret, once rotated, cannot be recovered.
+var ErrInvalidInstallationParams = errors.New("wecom: invalid installation parameters")
+
 func validateInstallationParams(p InstallationParams) error {
-	if !p.WorkspaceID.Valid {
-		return errors.New("wecom: workspace_id is required")
+	missing := ""
+	switch {
+	case !p.WorkspaceID.Valid:
+		missing = "workspace_id"
+	case !p.AgentID.Valid:
+		missing = "agent_id"
+	case !p.InstallerUserID.Valid:
+		missing = "installer_user_id"
+	case p.BotID == "":
+		missing = "bot_id"
+	case p.Secret == "":
+		missing = "secret"
+	default:
+		return nil
 	}
-	if !p.AgentID.Valid {
-		return errors.New("wecom: agent_id is required")
-	}
-	if !p.InstallerUserID.Valid {
-		return errors.New("wecom: installer_user_id is required")
-	}
-	if p.BotID == "" {
-		return errors.New("wecom: bot_id is required")
-	}
-	if p.Secret == "" {
-		return errors.New("wecom: secret is required")
-	}
-	return nil
+	return fmt.Errorf("%w: %s is required", ErrInvalidInstallationParams, missing)
 }

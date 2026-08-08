@@ -763,6 +763,13 @@
     "byo_submitting": "Connecting…",
     "byo_cancel": "Cancel",
     "byo_success_toast": "WeCom bot connected",
+    "byo_conflict_same_workspace": "This bot is already connected to another Agent in this workspace. Disconnect it there first, then connect it here.",
+    "byo_conflict_archived_agent": "This bot is connected to an archived Agent in this workspace. Restore that Agent, or disconnect its bot, before connecting it here.",
+    "byo_conflict_other_workspace": "This bot is already connected to a different Multica workspace. Disconnect it there before connecting it here.",
+    "byo_rejected": "Could not connect the bot. Check the Bot ID and secret from the WeCom admin console, and that it is a smart bot with the long connection enabled.",
+    "byo_credentials_rejected": "WeCom rejected this Bot ID and secret. Check both on the WeCom admin console, and that it is a smart bot with the long connection enabled.",
+    "byo_credentials_unverifiable": "Couldn't reach WeCom to verify this bot. Your credentials were not changed — try again in a moment.",
+    "byo_install_failed": "Couldn't save this bot — something went wrong on our side. Your credentials were not changed; try again, and contact support if it keeps failing.",
     "byo_failed_toast": "Could not connect the WeCom bot"
   },
   "repositories": {
