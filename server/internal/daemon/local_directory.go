@@ -26,6 +26,12 @@ type localDirectoryRef struct {
 	LocalPath string `json:"local_path"`
 	DaemonID  string `json:"daemon_id"`
 	Label     string `json:"label,omitempty"`
+	// Isolate (VWO-367): when true, run each task in its own per-task git
+	// worktree cut from this directory's repo (own working tree + index) instead
+	// of editing the directory in place under the whole-task path mutex. Mirrors
+	// handler.localDirectoryRef; keep both in sync or the server's re-marshal
+	// drops the field. See execenv.PrepareIsolatedLocalWorktree.
+	Isolate bool `json:"isolate,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
