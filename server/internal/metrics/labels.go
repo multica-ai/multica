@@ -90,13 +90,19 @@ var businessMetricLabels = map[string][]string{
 
 var forbiddenMetricLabels = map[string]struct{}{
 	"workspace_id": {},
-	"user_id":      {},
-	"agent_id":     {},
-	"task_id":      {},
-	"issue_id":     {},
-	"runtime_id":   {},
-	"session_id":   {},
-	"ip":           {},
+	// installation_id is the same class as the rest: one series per channel
+	// installation, growing with tenants rather than with the deployment. It
+	// is also the natural thing to reach for in any channel metric — every
+	// adapter call site already carries one — which is what makes leaving it
+	// off this list a matter of time rather than of luck.
+	"installation_id": {},
+	"user_id":         {},
+	"agent_id":        {},
+	"task_id":         {},
+	"issue_id":        {},
+	"runtime_id":      {},
+	"session_id":      {},
+	"ip":              {},
 }
 
 var (
