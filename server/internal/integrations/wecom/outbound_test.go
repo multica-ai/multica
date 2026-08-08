@@ -40,18 +40,37 @@ type fakeOutboundQueries struct {
 	workspaceErr   error
 	// tasks answers the retry-clone lookup: the round is bound under the turn
 	// that owns the input batch, and a clone reaches it through
-	// chat_input_task_id.
+	// chat_input_task_id. A task with no row here reads as pgx.ErrNoRows —
+	// cancelled and reaped while its ending was in flight.
 	tasks    map[string]db.AgentTaskQueue
 	taskErr  error
 	taskGets int
-	// askedInTheBrowser flips the channel_ingested stamp on the input batch:
-	// false (the zero value) is a question typed in WeCom, which is what every
-	// rig here models. originAskedFor records which id the stamp was read for,
-	// which is the whole of the retry-clone question. See failure_origin_test.go.
-	askedInTheBrowser bool
-	originErr         error
-	originAskedFor    []string
+	// channelIngested is the channel_ingested stamp on the input batch the
+	// task owns: askedOverWecom for a question typed in the room,
+	// askedInTheWebUI for one typed in Multica.
+	//
+	// It is a pointer, and it has no default on purpose. Two gates read this
+	// one stamp in opposite directions — the answer path delivers only when it
+	// is set, the failure path delivers unless it is — so either zero value
+	// would let one of them pass a test that never said where the question
+	// came from. Left unset the fake ends the test naming the omission.
+	//
+	// originAskedFor records which id the stamp was read for, which is the
+	// whole of the retry-clone question. See failure_origin_test.go.
+	channelIngested *bool
+	originErr       error
+	originAskedFor  []string
+	// t is who an unset stamp is reported to. fileTask sets it, and a filed
+	// row is the only route to the origin gate, so it is always there by the
+	// time the gate reads.
+	t testing.TB
 }
+
+// askedOverWecom and askedInTheWebUI are the two answers to "where was this
+// question asked". One of them belongs in every rig whose run reaches the
+// origin gate; there is no third answer and no default.
+func askedOverWecom() *bool  { asked := true; return &asked }
+func askedInTheWebUI() *bool { asked := false; return &asked }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
 	return f.sessionBinding, f.sessionErr
@@ -81,7 +100,63 @@ func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, 
 	if f.originErr != nil {
 		return false, f.originErr
 	}
-	return !f.askedInTheBrowser, nil
+	if f.channelIngested == nil {
+		f.failStampNotSet(util.UUIDToString(taskID))
+		return false, nil // unreachable: failStampNotSet ends the test
+	}
+	return *f.channelIngested, nil
+}
+
+// failStampNotSet ends the test naming what the rig left out, instead of
+// letting a zero value answer for it three layers away.
+//
+// It has to be t.Fatalf rather than a panic: the failure path arrives here
+// through events.Bus.Publish, which recovers panics in listeners and logs
+// them, so a panic would be swallowed and the test would fail on an assertion
+// that says nothing about what was missing. Fatalf's runtime.Goexit is not
+// recoverable, so it survives the bus.
+func (f *fakeOutboundQueries) failStampNotSet(taskID string) {
+	msg := "fakeOutboundQueries: the origin gate read the channel_ingested stamp for task " +
+		taskID + ", but this rig never set channelIngested. Say where the question was asked: " +
+		"channelIngested: askedOverWecom() for one typed in the room, askedInTheWebUI() for one " +
+		"typed in Multica. There is no default — the answer path delivers only when the stamp is " +
+		"set and the failure path delivers unless it is, so either zero value would let one of " +
+		"those two pass a test that never stated what it meant."
+	if f.t == nil {
+		panic(msg)
+	}
+	f.t.Fatalf("%s", msg)
+}
+
+// fileTask records the agent_task_queue row GetAgentTask answers with, for a
+// task that owns its own input batch — which every chat round's task has done
+// since MUL-4351. id is the task id the ending event carries.
+func (f *fakeOutboundQueries) fileTask(t testing.TB, id string) {
+	t.Helper()
+	f.fileRetryClone(t, id, id)
+}
+
+// fileRetryClone files FailTask's retry child: a fresh task id inheriting the
+// parent's input batch, its own id owning nothing. This is the row that makes
+// the batch owner the only id worth asking the stamp about.
+func (f *fakeOutboundQueries) fileRetryClone(t testing.TB, id, owner string) {
+	t.Helper()
+	f.t = t
+	taskID := mustParseTaskUUID(t, id)
+	ownerID := mustParseTaskUUID(t, owner)
+	if f.tasks == nil {
+		f.tasks = map[string]db.AgentTaskQueue{}
+	}
+	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID, ChatInputTaskID: ownerID}
+}
+
+func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
+	t.Helper()
+	parsed, err := util.ParseUUID(id)
+	if err != nil || !parsed.Valid {
+		t.Fatalf("parse task id %q: %v", id, err)
+	}
+	return parsed
 }
 
 // originAsked is the ids the provenance stamp was read for, in order.

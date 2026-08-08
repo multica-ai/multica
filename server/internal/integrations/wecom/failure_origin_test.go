@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -53,16 +52,18 @@ func newBoundRoomRig(t *testing.T) *bubbleRig {
 // and the messages in that batch carry no channel_ingested stamp.
 func (r *bubbleRig) askedInTheBrowser(t *testing.T, taskName string) {
 	t.Helper()
-	id := mustParseTestUUID(t, taskName)
-	r.q.tasks[taskUUID(t, taskName)] = db.AgentTaskQueue{ID: id, ChatInputTaskID: id}
-	r.q.askedInTheBrowser = true
+	r.q.fileTask(t, taskUUID(t, taskName))
+	r.q.channelIngested = askedInTheWebUI()
 }
 
-// askedInTheRoom files the same row for a question typed in WeCom.
+// askedInTheRoom files the same row for a question typed in WeCom. The stamp
+// is stated here rather than left to the fake: this is the control the first
+// test is read against, and a control that only holds because of a default is
+// not one.
 func (r *bubbleRig) askedInTheRoom(t *testing.T, taskName string) {
 	t.Helper()
-	id := mustParseTestUUID(t, taskName)
-	r.q.tasks[taskUUID(t, taskName)] = db.AgentTaskQueue{ID: id, ChatInputTaskID: id}
+	r.q.fileTask(t, taskUUID(t, taskName))
+	r.q.channelIngested = askedOverWecom()
 }
 
 // pushedTexts is what the room actually read: the markdown of every
@@ -176,7 +177,7 @@ func TestAWebUIRunsFailureLeavesTheRoomsOwnBubbleAlone(t *testing.T) {
 func TestAFailureWithNoTaskIDIsStillDelivered(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
-	rig.q.askedInTheBrowser = true // would refuse, if it were ever asked
+	rig.q.channelIngested = askedInTheWebUI() // would refuse, if it were ever asked
 
 	rig.bus.Publish(events.Event{
 		Type:          protocol.EventTaskFailed,
@@ -196,7 +197,7 @@ func TestAFailureWithNoTaskIDIsStillDelivered(t *testing.T) {
 func TestAVanishedTaskRowStillDeliversTheFailure(t *testing.T) {
 	t.Parallel()
 	rig := newBoundRoomRig(t)
-	rig.q.askedInTheBrowser = true // no row to ask about, so this never applies
+	rig.q.channelIngested = askedInTheWebUI() // no row to ask about, so this never applies
 
 	rig.failed(t, "task-1", false) // rig.q.tasks holds no row for it
 
@@ -231,10 +232,7 @@ func TestTheOriginOfARetryCloneIsItsParentsBatch(t *testing.T) {
 	rig := newBoundRoomRig(t)
 	rig.askedInTheRoom(t, "task-1")
 	// FailTask's retry child: fresh id, inheriting the parent's input batch.
-	rig.q.tasks[taskUUID(t, "retry")] = db.AgentTaskQueue{
-		ID:              mustParseTestUUID(t, "retry"),
-		ChatInputTaskID: mustParseTestUUID(t, "task-1"),
-	}
+	rig.q.fileRetryClone(t, taskUUID(t, "retry"), taskUUID(t, "task-1"))
 
 	rig.failed(t, "retry", false)
 
