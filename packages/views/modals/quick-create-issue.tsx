@@ -663,7 +663,7 @@ export function AgentCreatePanel({
                 />
               }
               align="start"
-              open={fieldPickerOpen === "project" ? true : undefined}
+              open={fieldPickerOpen === "project"}
               onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
             />
           )}
@@ -680,7 +680,7 @@ export function AgentCreatePanel({
               }}
               triggerRender={<PillButton />}
               align="start"
-              open={fieldPickerOpen === "priority" ? true : undefined}
+              open={fieldPickerOpen === "priority"}
               onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
             />
           )}
@@ -696,7 +696,7 @@ export function AgentCreatePanel({
               }}
               triggerRender={<PillButton />}
               align="start"
-              open={fieldPickerOpen === "due_date" ? true : undefined}
+              open={fieldPickerOpen === "due_date"}
               onOpenChange={(open) => setFieldPickerOpen(open ? "due_date" : null)}
             />
           )}
