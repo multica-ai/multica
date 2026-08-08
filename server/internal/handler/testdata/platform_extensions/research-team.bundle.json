@@ -7,7 +7,7 @@
     "description": "Research and summarize a topic.",
     "instructions": "Return an evidence-backed answer."
   },
-  "digest": "62065ee9dbde82e0e9dd0d729ad34ae2c4d5754c53840f4d00e73f17fbdb8e7c",
+  "digest": "sha256:62065ee9dbde82e0e9dd0d729ad34ae2c4d5754c53840f4d00e73f17fbdb8e7c",
   "leader": "lead-researcher",
   "agents": [
     {

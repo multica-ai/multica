@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,227 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestCompilePlatformExtension_RejectsUntrustedCommandSuffixDeclarations(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*PlatformExtensionSource)
+	}{
+		{"empty declaration", func(source *PlatformExtensionSource) { source.CommandSuffixes = PlatformExtensionCommandSuffixes{} }},
+		{"changed flow suffix", func(source *PlatformExtensionSource) { source.CommandSuffixes.Flow = []string{".workflow"} }},
+		{"tool bypass", func(source *PlatformExtensionSource) {
+			source.CommandSuffixes.Tool = nil
+			source.Commands = append(source.Commands, PlatformExtensionCommand{Name: "shell.tool", Metadata: json.RawMessage(`{}`)})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := readPlatformExtensionSource(t)
+			tc.change(&source)
+			_, err := CompilePlatformExtension(source)
+			assertPlatformExtensionCode(t, err, "COMMAND_SUFFIX_POLICY_MISMATCH")
+		})
+	}
+}
+
+func TestCompilePlatformExtensionWithPolicy_UsesExplicitTrustedSuffixes(t *testing.T) {
+	policy := PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{
+		Flow: []string{".workflow"},
+		Tool: []string{".action"},
+	}}
+	source := readPlatformExtensionSource(t)
+	source.CommandSuffixes = policy.CommandSuffixes
+	source.Commands[0].Name = "delegate.workflow"
+
+	bundle, err := CompilePlatformExtensionWithPolicy(source, policy)
+	if err != nil {
+		t.Fatalf("CompilePlatformExtensionWithPolicy() error = %v", err)
+	}
+	if got, want := platformExtensionCommandNames(bundle.FlowCommands), []string{"delegate.workflow"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("flow commands = %#v, want %#v", got, want)
+	}
+	if err := ValidatePlatformExtensionBundleWithPolicy(bundle, policy); err != nil {
+		t.Fatalf("ValidatePlatformExtensionBundleWithPolicy() error = %v", err)
+	}
+	assertPlatformExtensionCode(t, ValidatePlatformExtensionBundle(bundle), "COMMAND_SUFFIX_POLICY_MISMATCH")
+
+	source.Commands = append(source.Commands, PlatformExtensionCommand{Name: "shell.action", Metadata: json.RawMessage(`{}`)})
+	_, err = CompilePlatformExtensionWithPolicy(source, policy)
+	assertPlatformExtensionCode(t, err, "TOOL_COMMAND_UNSUPPORTED")
+}
+
+func TestCompilePlatformExtensionWithPolicy_RequiresStableDeclarationOrder(t *testing.T) {
+	policy := PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{
+		Flow: []string{".flow", ".route"},
+		Tool: []string{".tool", ".action"},
+	}}
+	source := readPlatformExtensionSource(t)
+	source.CommandSuffixes = PlatformExtensionCommandSuffixes{
+		Flow: []string{".route", ".flow"},
+		Tool: []string{".tool", ".action"},
+	}
+	_, err := CompilePlatformExtensionWithPolicy(source, policy)
+	assertPlatformExtensionCode(t, err, "COMMAND_SUFFIX_POLICY_MISMATCH")
+}
+
+func TestCompilePlatformExtensionWithPolicy_RejectsInvalidTrustedPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy PlatformExtensionPolicy
+	}{
+		{"missing tool suffix", PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{Flow: []string{".flow"}}}},
+		{"empty suffix", PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{Flow: []string{""}, Tool: []string{".tool"}}}},
+		{"duplicate suffix", PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{Flow: []string{".flow", ".flow"}, Tool: []string{".tool"}}}},
+		{"overlapping classifications", PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{Flow: []string{".workflow"}, Tool: []string{"flow"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := readPlatformExtensionSource(t)
+			source.CommandSuffixes = tc.policy.CommandSuffixes
+			_, err := CompilePlatformExtensionWithPolicy(source, tc.policy)
+			assertPlatformExtensionCode(t, err, "COMMAND_SUFFIX_POLICY_INVALID")
+		})
+	}
+}
+
+func TestValidatePlatformExtensionBundleWithPolicy_RejectsMissingTrustedToolSuffix(t *testing.T) {
+	bundle, err := CompilePlatformExtension(readPlatformExtensionSource(t))
+	if err != nil {
+		t.Fatalf("CompilePlatformExtension() error = %v", err)
+	}
+	bundle.CommandSuffixes = PlatformExtensionCommandSuffixes{Flow: []string{".flow"}}
+	bundle.Digest = rawPlatformExtensionBundleDigest(t, bundle)
+	policy := PlatformExtensionPolicy{CommandSuffixes: bundle.CommandSuffixes}
+	assertPlatformExtensionCode(t, ValidatePlatformExtensionBundleWithPolicy(bundle, policy), "COMMAND_SUFFIX_POLICY_INVALID")
+}
+
+func TestValidatePlatformExtensionBundle_RejectsUntrustedCommandSuffixDeclaration(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*PlatformExtensionBundle)
+	}{
+		{"empty declaration", func(bundle *PlatformExtensionBundle) { bundle.CommandSuffixes = PlatformExtensionCommandSuffixes{} }},
+		{"changed flow suffix", func(bundle *PlatformExtensionBundle) { bundle.CommandSuffixes.Flow = []string{".workflow"} }},
+		{"tool bypass", func(bundle *PlatformExtensionBundle) {
+			bundle.CommandSuffixes.Tool = nil
+			bundle.RuntimeCommands = append(bundle.RuntimeCommands, PlatformExtensionCommand{Name: "shell.tool", Metadata: json.RawMessage(`{}`)})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, err := CompilePlatformExtension(readPlatformExtensionSource(t))
+			if err != nil {
+				t.Fatalf("CompilePlatformExtension() error = %v", err)
+			}
+			tc.change(&bundle)
+			bundle.Digest = rawPlatformExtensionBundleDigest(t, bundle)
+			assertPlatformExtensionCode(t, ValidatePlatformExtensionBundle(bundle), "COMMAND_SUFFIX_POLICY_MISMATCH")
+		})
+	}
+}
+
+func TestDecodePlatformExtension_RejectsDuplicateObjectKeysThroughoutDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		decode func([]byte) error
+		input  string
+	}{
+		{
+			name:   "source top level",
+			decode: func(data []byte) error { _, err := DecodePlatformExtensionSource(data); return err },
+			input: strings.Replace(string(readPlatformExtensionFixture(t, "research-team.source.json")),
+				`"schema_version": "platform.extension/v1",`, `"schema_version": "platform.extension/v1", "schema_version": "platform.extension/v1",`, 1),
+		},
+		{
+			name:   "source nested object",
+			decode: func(data []byte) error { _, err := DecodePlatformExtensionSource(data); return err },
+			input: strings.Replace(string(readPlatformExtensionFixture(t, "research-team.source.json")),
+				`"key": "source-review",`, `"key": "source-review", "key": "shadow",`, 1),
+		},
+		{
+			name:   "source metadata",
+			decode: func(data []byte) error { _, err := DecodePlatformExtensionSource(data); return err },
+			input: strings.Replace(string(readPlatformExtensionFixture(t, "research-team.source.json")),
+				`"priority": 2,`, `"priority": 2, "priority": 3,`, 1),
+		},
+		{
+			name:   "bundle metadata",
+			decode: func(data []byte) error { _, err := DecodePlatformExtensionBundle(data); return err },
+			input: strings.Replace(string(readPlatformExtensionFixture(t, "research-team.bundle.json")),
+				`"priority": 1,`, `"priority": 1, "priority": 3,`, 1),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.decode([]byte(tc.input))
+			assertPlatformExtensionCode(t, err, "EXTENSION_INVALID")
+			if !strings.Contains(err.Error(), "duplicate object key") {
+				t.Fatalf("decode error = %v, want duplicate object key", err)
+			}
+		})
+	}
+}
+
+func TestCompilePlatformExtension_RejectsDuplicateCommandMetadataKeys(t *testing.T) {
+	source := readPlatformExtensionSource(t)
+	source.Commands[0].Metadata = json.RawMessage(`{"priority":1,"priority":2}`)
+	_, err := CompilePlatformExtension(source)
+	assertPlatformExtensionCode(t, err, "COMMAND_METADATA_INVALID")
+}
+
+func TestValidatePlatformExtensionBundle_UsesCanonicalMetadataForDigestAndPersistence(t *testing.T) {
+	bundle, err := CompilePlatformExtension(readPlatformExtensionSource(t))
+	if err != nil {
+		t.Fatalf("CompilePlatformExtension() error = %v", err)
+	}
+	wantDigest := bundle.Digest
+	bundle.RuntimeCommands[0].Metadata = json.RawMessage(`{ "scope": "team", "priority": 1 }`)
+
+	if err := ValidatePlatformExtensionBundle(bundle); err != nil {
+		t.Fatalf("ValidatePlatformExtensionBundle() with semantic metadata reorder error = %v", err)
+	}
+	got, err := CanonicalPlatformExtensionBundleJSON(bundle)
+	if err != nil {
+		t.Fatalf("CanonicalPlatformExtensionBundleJSON() error = %v", err)
+	}
+	want := readPlatformExtensionFixture(t, "research-team.bundle.json")
+	if string(got) != string(want) {
+		t.Fatalf("canonicalized bundle differs from golden\ngot: %s\nwant: %s", got, want)
+	}
+
+	bundle.Digest = rawPlatformExtensionBundleDigest(t, bundle)
+	if bundle.Digest == wantDigest {
+		t.Fatal("test setup produced the canonical digest from non-canonical metadata")
+	}
+	assertPlatformExtensionCode(t, ValidatePlatformExtensionBundle(bundle), "BUNDLE_DIGEST_INVALID")
+}
+
+func TestCompilePlatformExtension_RejectsPortableSkillPathCollisions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		paths []string
+	}{
+		{"case fold", []string{"references/A.md", "references/a.md"}},
+		{"windows trailing dot", []string{"references/note", "references/note."}},
+		{"windows trailing space component", []string{"references/group/note.md", "references/group /note.md"}},
+		{"unicode NFC", []string{"references/caf\u00e9.md", "references/cafe\u0301.md"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := readPlatformExtensionSource(t)
+			for _, filePath := range tc.paths {
+				source.Skills[0].Files = append(source.Skills[0].Files, PlatformExtensionSkillFile{Path: filePath, Content: "collision"})
+			}
+			_, err := CompilePlatformExtension(source)
+			assertPlatformExtensionCode(t, err, "DUPLICATE_SKILL_FILE_PATH")
+		})
+	}
+}
+
+func TestCompilePlatformExtension_DigestUsesSha256Prefix(t *testing.T) {
+	bundle, err := CompilePlatformExtension(readPlatformExtensionSource(t))
+	if err != nil {
+		t.Fatalf("CompilePlatformExtension() error = %v", err)
+	}
+	if !strings.HasPrefix(bundle.Digest, "sha256:") || len(bundle.Digest) != len("sha256:")+64 {
+		t.Fatalf("digest = %q, want sha256:<64 lowercase hex>", bundle.Digest)
+	}
+}
 
 func TestCompilePlatformExtension_GoldenParity(t *testing.T) {
 	source := readPlatformExtensionSource(t)
@@ -89,7 +312,9 @@ func TestCompilePlatformExtension_RejectsInvalidSource(t *testing.T) {
 			s.Skills[0].Files = append(s.Skills[0].Files, PlatformExtensionSkillFile{Path: ".platform-agent/context.json"})
 		}, "RESERVED_SKILL_PATH"},
 		{"required extension key", func(s *PlatformExtensionSource) { s.Extension.Key = "" }, "REQUIRED_FIELD"},
-		{"tool suffix precedes flow suffix", func(s *PlatformExtensionSource) { s.CommandSuffixes.Tool = []string{".flow"} }, "TOOL_COMMAND_UNSUPPORTED"},
+		{"trusted tool suffix", func(s *PlatformExtensionSource) {
+			s.Commands = append(s.Commands, PlatformExtensionCommand{Name: "shell.tool", Metadata: json.RawMessage(`{}`)})
+		}, "TOOL_COMMAND_UNSUPPORTED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := readPlatformExtensionSource(t)
@@ -155,10 +380,10 @@ func TestValidatePlatformExtensionBundle_RevalidatesStructureDigestAndInstructio
 			b.FlowCommands = nil
 			redigestPlatformExtension(t, b)
 		}, "RUNTIME_COMMAND_CLASSIFICATION_INVALID"},
-		{"tool command", func(b *PlatformExtensionBundle) {
+		{"untrusted suffix declaration", func(b *PlatformExtensionBundle) {
 			b.CommandSuffixes.Tool = []string{".flow"}
 			redigestPlatformExtension(t, b)
-		}, "TOOL_COMMAND_UNSUPPORTED"},
+		}, "COMMAND_SUFFIX_POLICY_MISMATCH"},
 		{"instructions", func(b *PlatformExtensionBundle) { b.SquadInstructions = "untrusted"; redigestPlatformExtension(t, b) }, "SQUAD_INSTRUCTIONS_INVALID"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -267,4 +492,16 @@ func redigestPlatformExtension(t *testing.T, bundle *PlatformExtensionBundle) {
 		t.Fatalf("platformExtensionBundleDigest() error = %v", err)
 	}
 	bundle.Digest = digest
+}
+
+func rawPlatformExtensionBundleDigest(t *testing.T, bundle PlatformExtensionBundle) string {
+	t.Helper()
+	bundle.Digest = ""
+	data, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal raw bundle: %v", err)
+	}
+	data = append(data, '\n')
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

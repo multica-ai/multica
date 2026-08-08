@@ -25,6 +25,7 @@ func TestPlatformExtensionReleaseMigrationsPreserveReleaseAndConcurrentIndexCont
 		"manifest JSONB NOT NULL",
 		"runtime_id UUID NULL",
 		"squad_id UUID NULL",
+		"CHECK ((runtime_id IS NULL AND squad_id IS NULL) OR\n        (runtime_id IS NOT NULL AND squad_id IS NOT NULL))",
 		"resources JSONB NOT NULL DEFAULT '{}'::jsonb",
 		"created_by UUID NOT NULL",
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",

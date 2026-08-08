@@ -29,6 +29,8 @@ SET runtime_id = @runtime_id,
     resources = @resources
 WHERE id = @id
   AND workspace_id = @workspace_id
+  AND runtime_id IS NULL
+  AND squad_id IS NULL
 RETURNING *;
 
 -- name: GetPlatformExtensionReleaseByIdentity :one

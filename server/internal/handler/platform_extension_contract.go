@@ -9,7 +9,11 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -30,6 +34,21 @@ var platformExtensionWindowsDeviceName = regexp.MustCompile(`(?i)^(con|prn|aux|n
 type PlatformExtensionContractError struct {
 	Code    string
 	Message string
+}
+
+// PlatformExtensionPolicy supplies trusted platform classification rules.
+// Document-declared suffixes must match this policy before classification.
+type PlatformExtensionPolicy struct {
+	CommandSuffixes PlatformExtensionCommandSuffixes
+}
+
+// DefaultPlatformExtensionV1Policy returns the mock V1 policy used by the
+// compatibility wrappers.
+func DefaultPlatformExtensionV1Policy() PlatformExtensionPolicy {
+	return PlatformExtensionPolicy{CommandSuffixes: PlatformExtensionCommandSuffixes{
+		Flow: []string{".flow"},
+		Tool: []string{".tool"},
+	}}
 }
 
 func (e *PlatformExtensionContractError) Error() string {
@@ -122,6 +141,9 @@ func DecodePlatformExtensionBundle(data []byte) (PlatformExtensionBundle, error)
 }
 
 func decodePlatformExtensionJSON(data []byte, target any) error {
+	if err := rejectPlatformExtensionDuplicateObjectKeys(data); err != nil {
+		return platformExtensionCode("EXTENSION_INVALID", err.Error())
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -136,9 +158,80 @@ func decodePlatformExtensionJSON(data []byte, target any) error {
 	return nil
 }
 
+func rejectPlatformExtensionDuplicateObjectKeys(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := scanPlatformExtensionJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("extension must contain one JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func scanPlatformExtensionJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("object key is not a string")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("duplicate object key %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := scanPlatformExtensionJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	case '[':
+		for decoder.More() {
+			if err := scanPlatformExtensionJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delim)
+	}
+}
+
 // CompilePlatformExtension validates a source and produces a deterministic,
 // immutable bundle suitable for persistence.
 func CompilePlatformExtension(source PlatformExtensionSource) (PlatformExtensionBundle, error) {
+	return CompilePlatformExtensionWithPolicy(source, DefaultPlatformExtensionV1Policy())
+}
+
+// CompilePlatformExtensionWithPolicy compiles a Source against caller-supplied
+// trusted classification rules.
+func CompilePlatformExtensionWithPolicy(source PlatformExtensionSource, policy PlatformExtensionPolicy) (PlatformExtensionBundle, error) {
+	if err := validatePlatformExtensionPolicy(policy); err != nil {
+		return PlatformExtensionBundle{}, err
+	}
+	if err := validatePlatformExtensionCommandSuffixDeclaration(source.CommandSuffixes, policy.CommandSuffixes); err != nil {
+		return PlatformExtensionBundle{}, err
+	}
 	if err := validatePlatformExtensionSource(source); err != nil {
 		return PlatformExtensionBundle{}, err
 	}
@@ -151,7 +244,7 @@ func CompilePlatformExtension(source PlatformExtensionSource) (PlatformExtension
 		}
 		commands[i] = normalized
 	}
-	flowCommands, runtimeCommands, err := classifyPlatformExtensionCommands(commands, source.CommandSuffixes)
+	flowCommands, runtimeCommands, err := classifyPlatformExtensionCommands(commands, policy.CommandSuffixes)
 	if err != nil {
 		return PlatformExtensionBundle{}, err
 	}
@@ -164,7 +257,7 @@ func CompilePlatformExtension(source PlatformExtensionSource) (PlatformExtension
 		Skills:            source.Skills,
 		FlowCommands:      flowCommands,
 		RuntimeCommands:   runtimeCommands,
-		CommandSuffixes:   source.CommandSuffixes,
+		CommandSuffixes:   clonePlatformExtensionCommandSuffixes(policy.CommandSuffixes),
 		SquadInstructions: platformExtensionSquadInstructions(source, flowCommands),
 	}
 	digest, err := platformExtensionBundleDigest(bundle)
@@ -178,29 +271,50 @@ func CompilePlatformExtension(source PlatformExtensionSource) (PlatformExtension
 // ValidatePlatformExtensionBundle confirms its structure, digest, command
 // classifications, and generated squad instructions before import.
 func ValidatePlatformExtensionBundle(bundle PlatformExtensionBundle) error {
+	return ValidatePlatformExtensionBundleWithPolicy(bundle, DefaultPlatformExtensionV1Policy())
+}
+
+// ValidatePlatformExtensionBundleWithPolicy validates a Bundle against
+// caller-supplied trusted rules. CanonicalPlatformExtensionBundleJSON returns
+// normalized bytes suitable for persistence.
+func ValidatePlatformExtensionBundleWithPolicy(bundle PlatformExtensionBundle, policy PlatformExtensionPolicy) error {
+	if err := validatePlatformExtensionPolicy(policy); err != nil {
+		return err
+	}
 	if bundle.SchemaVersion != PlatformExtensionBundleSchemaVersion {
 		return platformExtensionCode("BUNDLE_SCHEMA_VERSION_INVALID", bundle.SchemaVersion)
 	}
-	if err := validatePlatformExtensionBundleStructure(bundle); err != nil {
+	if err := validatePlatformExtensionCommandSuffixDeclaration(bundle.CommandSuffixes, policy.CommandSuffixes); err != nil {
 		return err
 	}
-	if strings.TrimSpace(bundle.Digest) == "" {
-		return platformExtensionCode("BUNDLE_DIGEST_INVALID", "digest is required")
-	}
-	digest, err := platformExtensionBundleDigest(bundle)
+	canonical, err := canonicalizePlatformExtensionBundleMetadata(bundle)
 	if err != nil {
 		return err
 	}
-	if bundle.Digest != digest {
+	if err := validatePlatformExtensionBundleStructure(canonical, policy.CommandSuffixes); err != nil {
+		return err
+	}
+	if strings.TrimSpace(canonical.Digest) == "" {
+		return platformExtensionCode("BUNDLE_DIGEST_INVALID", "digest is required")
+	}
+	digest, err := platformExtensionBundleDigest(canonical)
+	if err != nil {
+		return err
+	}
+	if canonical.Digest != digest {
 		return platformExtensionCode("BUNDLE_DIGEST_INVALID", "digest does not match bundle content")
 	}
-	return validatePlatformExtensionSquadInstructions(bundle)
+	return validatePlatformExtensionSquadInstructions(canonical)
 }
 
 // CanonicalPlatformExtensionBundleJSON returns stable indented JSON matching
 // the platform-agent-cli bundle representation byte for byte.
 func CanonicalPlatformExtensionBundleJSON(bundle PlatformExtensionBundle) ([]byte, error) {
-	data, err := json.MarshalIndent(bundle, "", "  ")
+	canonical, err := canonicalizePlatformExtensionBundleMetadata(bundle)
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.MarshalIndent(canonical, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal extension bundle: %w", err)
 	}
@@ -285,6 +399,7 @@ func validatePlatformExtensionSkillFiles(files []PlatformExtensionSkillFile) err
 	}
 	rootFiles := 0
 	paths := make(map[string]struct{}, len(files))
+	portablePaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if len(file.Content) > PlatformExtensionMaxSkillFileBytes {
 			return platformExtensionCode("SKILL_FILE_SIZE_EXCEEDED", fmt.Sprintf("maximum is %d bytes", PlatformExtensionMaxSkillFileBytes))
@@ -301,6 +416,9 @@ func validatePlatformExtensionSkillFiles(files []PlatformExtensionSkillFile) err
 		if !safePlatformExtensionSkillPath(file.Path) {
 			return platformExtensionCode("UNSAFE_SKILL_PATH", file.Path)
 		}
+		if platformExtensionDuplicate(portablePaths, portablePlatformExtensionSkillPathKey(file.Path)) {
+			return platformExtensionCode("DUPLICATE_SKILL_FILE_PATH", file.Path)
+		}
 		if file.Path == "SKILL.md" {
 			rootFiles++
 		}
@@ -309,6 +427,17 @@ func validatePlatformExtensionSkillFiles(files []PlatformExtensionSkillFile) err
 		return platformExtensionCode("SKILL_ROOT_INVALID", "each skill must contain exactly one root SKILL.md")
 	}
 	return nil
+}
+
+func portablePlatformExtensionSkillPathKey(value string) string {
+	components := strings.Split(value, "/")
+	for i, component := range components {
+		component = norm.NFC.String(component)
+		component = cases.Fold().String(component)
+		component = norm.NFC.String(component)
+		components[i] = strings.TrimRight(component, " .")
+	}
+	return strings.Join(components, "/")
 }
 
 func safePlatformExtensionSkillPath(value string) bool {
@@ -372,7 +501,7 @@ func classifyPlatformExtensionCommands(commands []PlatformExtensionCommand, suff
 	return flowCommands, runtimeCommands, nil
 }
 
-func validatePlatformExtensionBundleStructure(bundle PlatformExtensionBundle) error {
+func validatePlatformExtensionBundleStructure(bundle PlatformExtensionBundle, trustedSuffixes PlatformExtensionCommandSuffixes) error {
 	commands := make([]PlatformExtensionCommand, 0, len(bundle.FlowCommands)+len(bundle.RuntimeCommands))
 	commands = append(commands, bundle.FlowCommands...)
 	commands = append(commands, bundle.RuntimeCommands...)
@@ -388,18 +517,18 @@ func validatePlatformExtensionBundleStructure(bundle PlatformExtensionBundle) er
 		return err
 	}
 	for _, command := range bundle.FlowCommands {
-		if platformExtensionMatchesSuffix(command.Name, bundle.CommandSuffixes.Tool) {
+		if platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Tool) {
 			return platformExtensionCode("TOOL_COMMAND_UNSUPPORTED", command.Name)
 		}
-		if !platformExtensionMatchesSuffix(command.Name, bundle.CommandSuffixes.Flow) {
+		if !platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Flow) {
 			return platformExtensionCode("FLOW_COMMAND_CLASSIFICATION_INVALID", command.Name)
 		}
 	}
 	for _, command := range bundle.RuntimeCommands {
-		if platformExtensionMatchesSuffix(command.Name, bundle.CommandSuffixes.Tool) {
+		if platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Tool) {
 			return platformExtensionCode("TOOL_COMMAND_UNSUPPORTED", command.Name)
 		}
-		if platformExtensionMatchesSuffix(command.Name, bundle.CommandSuffixes.Flow) {
+		if platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Flow) {
 			return platformExtensionCode("RUNTIME_COMMAND_CLASSIFICATION_INVALID", command.Name)
 		}
 	}
@@ -429,6 +558,9 @@ func normalizePlatformExtensionCommand(command PlatformExtensionCommand) (Platfo
 	if len(command.Metadata) == 0 {
 		return command, nil
 	}
+	if err := rejectPlatformExtensionDuplicateObjectKeys(command.Metadata); err != nil {
+		return PlatformExtensionCommand{}, platformExtensionCode("COMMAND_METADATA_INVALID", err.Error())
+	}
 	decoder := json.NewDecoder(bytes.NewReader(command.Metadata))
 	decoder.UseNumber()
 	var metadata any
@@ -446,6 +578,31 @@ func normalizePlatformExtensionCommand(command PlatformExtensionCommand) (Platfo
 	return command, nil
 }
 
+func canonicalizePlatformExtensionBundleMetadata(bundle PlatformExtensionBundle) (PlatformExtensionBundle, error) {
+	var err error
+	bundle.FlowCommands, err = normalizePlatformExtensionCommands(bundle.FlowCommands)
+	if err != nil {
+		return PlatformExtensionBundle{}, err
+	}
+	bundle.RuntimeCommands, err = normalizePlatformExtensionCommands(bundle.RuntimeCommands)
+	if err != nil {
+		return PlatformExtensionBundle{}, err
+	}
+	return bundle, nil
+}
+
+func normalizePlatformExtensionCommands(commands []PlatformExtensionCommand) ([]PlatformExtensionCommand, error) {
+	normalized := make([]PlatformExtensionCommand, len(commands))
+	for i, command := range commands {
+		var err error
+		normalized[i], err = normalizePlatformExtensionCommand(command)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
 func platformExtensionBundleDigest(bundle PlatformExtensionBundle) (string, error) {
 	bundle.Digest = ""
 	data, err := CanonicalPlatformExtensionBundleJSON(bundle)
@@ -453,7 +610,47 @@ func platformExtensionBundleDigest(bundle PlatformExtensionBundle) (string, erro
 		return "", err
 	}
 	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func validatePlatformExtensionCommandSuffixDeclaration(got, trusted PlatformExtensionCommandSuffixes) error {
+	if !slices.Equal(got.Flow, trusted.Flow) || !slices.Equal(got.Tool, trusted.Tool) {
+		return platformExtensionCode("COMMAND_SUFFIX_POLICY_MISMATCH", "command_suffixes do not match trusted policy")
+	}
+	return nil
+}
+
+func validatePlatformExtensionPolicy(policy PlatformExtensionPolicy) error {
+	if len(policy.CommandSuffixes.Tool) == 0 {
+		return platformExtensionCode("COMMAND_SUFFIX_POLICY_INVALID", "trusted policy must include a tool suffix")
+	}
+	seen := make(map[string]struct{}, len(policy.CommandSuffixes.Flow)+len(policy.CommandSuffixes.Tool))
+	for _, suffixes := range [][]string{policy.CommandSuffixes.Flow, policy.CommandSuffixes.Tool} {
+		for _, suffix := range suffixes {
+			if strings.TrimSpace(suffix) == "" {
+				return platformExtensionCode("COMMAND_SUFFIX_POLICY_INVALID", "trusted suffixes must be non-empty")
+			}
+			if _, exists := seen[suffix]; exists {
+				return platformExtensionCode("COMMAND_SUFFIX_POLICY_INVALID", "trusted suffixes must be unique across classifications")
+			}
+			seen[suffix] = struct{}{}
+		}
+	}
+	for _, flowSuffix := range policy.CommandSuffixes.Flow {
+		for _, toolSuffix := range policy.CommandSuffixes.Tool {
+			if strings.HasSuffix(flowSuffix, toolSuffix) || strings.HasSuffix(toolSuffix, flowSuffix) {
+				return platformExtensionCode("COMMAND_SUFFIX_POLICY_INVALID", "flow and tool suffixes must not overlap")
+			}
+		}
+	}
+	return nil
+}
+
+func clonePlatformExtensionCommandSuffixes(value PlatformExtensionCommandSuffixes) PlatformExtensionCommandSuffixes {
+	return PlatformExtensionCommandSuffixes{
+		Flow: append([]string(nil), value.Flow...),
+		Tool: append([]string(nil), value.Tool...),
+	}
 }
 
 func platformExtensionSquadInstructions(source PlatformExtensionSource, flowCommands []PlatformExtensionCommand) string {

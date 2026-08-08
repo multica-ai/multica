@@ -159,19 +159,21 @@ flowchart LR
 }
 ```
 
-`command_suffixes` 是导出契约对平台已有命名规则的声明，不是 Command 自身的新字段或新标准。生产环境必须将示例后缀替换为平台已定义的真实后缀。
+`command_suffixes` 是导出契约对平台已有命名规则的声明，不是 Command 自身的新字段或新标准。它不是可信输入：编译和导入时必须与调用方注入的可信 Policy 完全一致（包括稳定顺序），不允许文档通过清空或改写 suffix 绕过 tool Command 阻断。Mock V1 默认 Policy 固定为 `flow=[".flow"]`、`tool=[".tool"]`；生产适配层通过显式 Policy API 从可信配置注入真实后缀，深层编译器不读取环境变量。可信 Policy 至少包含一个 tool suffix，每个 suffix 非空且唯一，flow/tool suffix 不得产生重叠匹配。
 
 ### 4.2 编译规则
 
 1. Extension 至少包含一个 Agent。
 2. `leader` 必须唯一对应 Extension 内的 Agent key。
 3. Agent、Skill 和 Command key/name 在各自命名空间中唯一。
-4. 每个 Skill 必须包含且只能包含一个根 `SKILL.md`，路径必须是相对路径，不得包含路径穿越。
-5. 先按 tool suffix 匹配，再按 flow suffix 匹配，其余为普通 Command。
-6. 匹配 tool suffix 的 Command 返回 `TOOL_COMMAND_UNSUPPORTED`，整个 Release 不导入。
-7. 流程 Command 按 Source 中的显式顺序进入 Squad Instructions；名称和内容不改写。
-8. 普通 Command 原样进入 Runtime Command Bundle。
-9. 编译结果使用稳定 JSON 字段顺序和 SHA-256 生成 digest。
+4. 每个 Skill 必须包含且只能包含一个根 `SKILL.md`，路径必须是相对路径，不得包含路径穿越；路径碰撞键按每级组件执行 Unicode NFC、Unicode case-fold 和 Windows 尾随点/空格归一化，碰撞即拒绝。
+5. Source、Bundle 及任意嵌套 metadata 中的 JSON object 重复 key 必须在 typed decode 前拒绝；未知字段和 trailing JSON 同样拒绝。
+6. 校验文档声明的 `command_suffixes` 与可信 Policy 一致后，分类只使用可信 Policy；先按 tool suffix 匹配，再按 flow suffix 匹配，其余为普通 Command。
+7. 匹配 tool suffix 的 Command 返回 `TOOL_COMMAND_UNSUPPORTED`，整个 Release 不导入。
+8. 流程 Command 按 Source 中的显式顺序进入 Squad Instructions；名称和内容不改写。
+9. 普通 Command 原样进入 Runtime Command Bundle。
+10. Command metadata 在编译、Bundle 校验和持久化前规范化为相同 JSON 表示；对象 key 顺序和无意义空白不得改变 digest。
+11. 编译结果使用稳定 JSON 字段顺序生成 `sha256:<64 lowercase hex>` digest。Bundle validator 仅接受基于规范 metadata 的 digest；校验成功后持久化规范 Bundle JSON。
 
 ### 4.3 确定性 Squad Instructions
 
@@ -196,7 +198,7 @@ Squad Instructions 由以下内容组成：
 - runtime commands；
 - 确定性 Squad Instructions。
 
-Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-bundle/v1`。前者由服务端使用同一规则编译，后者验证 digest 后导入。CLI 与服务端使用共享契约 fixture 做交叉测试，防止两种语言实现漂移。
+Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-bundle/v1`。前者由服务端使用同一规则编译，后者按可信 Policy 验证声明、规范 metadata 并验证 digest 后导入；Release `manifest` 保存规范 Bundle JSON。CLI 与服务端使用共享契约 fixture 做交叉测试，防止两种语言实现漂移。
 
 ## 5. Multica 导入设计
 
@@ -251,7 +253,7 @@ Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-b
 | `extension_key` | 平台 Extension 稳定 key |
 | `name` | Extension 名称 |
 | `version` | 不可变版本 |
-| `digest` | 编译 Bundle SHA-256 |
+| `digest` | 编译 Bundle 的 `sha256:<64 lowercase hex>` digest |
 | `manifest` | 编译后快照 JSONB |
 | `runtime_id` | 导入时分配的 Runtime UUID，不新增 DB FK |
 | `squad_id` | 创建的 Squad UUID，不新增 DB FK |
@@ -259,7 +261,7 @@ Multica 导入 API 同时接受 `platform.extension/v1` 和 `multica.extension-b
 | `created_by` | 导入者 UUID |
 | `created_at` | 创建时间 |
 
-迁移分两步：先创建表，再用单语句 `CREATE UNIQUE INDEX CONCURRENTLY` 创建 `(workspace_id, extension_key, version)` 唯一索引。
+迁移分两步：先创建表，再用单语句 `CREATE UNIQUE INDEX CONCURRENTLY` 创建 `(workspace_id, extension_key, version)` 唯一索引。Reservation 阶段 `runtime_id` 与 `squad_id` 同时为 NULL；完成阶段必须在一次 guarded UPDATE 中同时写入，两列不得出现一空一非空，也不得重复完成同一 Reservation。
 
 ### 5.3 幂等与不可变性
 
@@ -496,7 +498,9 @@ React Query 保存 Extension 服务端状态；不新增 Zustand 服务端缓存
 ### 9.1 安全
 
 - Extension 文件上限 5 MiB，Agent/Skill/Command 数量和单文件大小均设上限。
-- 所有 Skill 文件路径使用清洗后的相对路径，拒绝绝对路径、`..`、NUL 和保留路径。
+- 所有 Skill 文件路径使用清洗后的相对路径，拒绝绝对路径、`..`、NUL、保留路径以及 Unicode/case-fold/Windows 归一后的碰撞路径。
+- Source、Bundle 和 metadata 的任意 JSON object 重复 key 均拒绝，避免后写值覆盖安全字段。
+- Command 分类仅使用调用方注入并验证过的可信 Policy；文档中的 suffix 只能声明且必须精确匹配。
 - Runtime 权限复用 `canUseRuntimeForAgent`。
 - API token 不写入 DB、Release、AGENTS.md、Skill、Command 或侧车。
 - CLI 日志脱敏 `Authorization`、token 和常见 secret 字段。
@@ -509,6 +513,8 @@ React Query 保存 Extension 服务端状态；不新增 Zustand 服务端缓存
 | --- | --- | --- | --- |
 | `EXTENSION_INVALID` | 400 | Extension 契约无效 | 否 |
 | `EXTENSION_DIGEST_MISMATCH` | 400 | Bundle digest 不匹配 | 否 |
+| `COMMAND_SUFFIX_POLICY_MISMATCH` | 400 | 文档 suffix 声明与可信 Policy 不一致 | 否 |
+| `COMMAND_SUFFIX_POLICY_INVALID` | 500 / CLI error | 服务端或 CLI 注入的可信 Policy 无效 | 否 |
 | `EXTENSION_VERSION_IMMUTABLE` | 409 | 同版本内容被改写 | 否 |
 | `TOOL_COMMAND_UNSUPPORTED` | 422 | 包含工具执行 Command | 否 |
 | `COMMAND_CONFLICT` | 422 / -32002 | 普通 Command 重名 | 否 |
@@ -532,9 +538,12 @@ React Query 保存 Extension 服务端状态；不新增 Zustand 服务端缓存
 ### 11.1 CLI
 
 - Source 到 Bundle 的 golden test。
-- flow/runtime/tool Command 后缀分类。
+- 默认与显式可信 Policy、声明不匹配和无效 Policy。
+- flow/runtime/tool Command 后缀分类与清空 tool suffix 绕过阻断。
 - tool Command 阻断。
-- Skill 路径穿越、缺失 `SKILL.md`、重名 Command。
+- Source/Bundle/metadata 重复 JSON key、unknown field 和 trailing JSON。
+- metadata 规范 digest 与 `sha256:` 格式。
+- Skill 路径穿越、缺失 `SKILL.md`、重名 Command及可移植路径碰撞。
 - Bootstrap 真实读取 AGENTS.md、Skill 和侧车。
 - initialize/thread start/resume/name/turn start/interrupt 协议契约。
 - 异步 Turn 与 interrupt 竞态。
@@ -545,6 +554,7 @@ React Query 保存 Extension 服务端状态；不新增 Zustand 服务端缓存
 ### 11.2 Multica 服务端
 
 - Source 编译与 CLI golden fixture 一致。
+- 与 CLI 一致的可信 Policy、严格 JSON、metadata 规范化、digest 和路径碰撞测试。
 - 幂等重复导入。
 - 同版本 digest 冲突。
 - 空闲 Runtime 候选过滤、权限、心跳和确定性排序。

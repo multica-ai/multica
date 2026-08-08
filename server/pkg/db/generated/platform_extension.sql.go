@@ -18,6 +18,8 @@ SET runtime_id = $1,
     resources = $3
 WHERE id = $4
   AND workspace_id = $5
+  AND runtime_id IS NULL
+  AND squad_id IS NULL
 RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at
 `
 
