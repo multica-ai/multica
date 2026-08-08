@@ -863,10 +863,20 @@
     "byo_bot_id_placeholder": "예: aibot_xxxxxxxxxxxxxxxx",
     "byo_secret_label": "롱 커넥션 Secret",
     "byo_secret_placeholder": "관리자 콘솔에 한 번만 표시되는 Secret을 붙여넣으세요",
+    "byo_bot_name_label": "채팅에 표시되는 봇 이름 (선택)",
+    "byo_bot_name_placeholder": "예: Multica Bot",
+    "byo_bot_name_hint": "이름에 공백이 있을 때만 필요해요. 봇이 자기 @멘션과 뒤에 입력된 명령어를 구분하는 데 씁니다. 나중에 바꾸려면(WeCom 콘솔에서 이름을 바꾼 경우 포함) 연결을 끊었다가 다시 연결해 주세요.",
     "byo_submit": "연결",
     "byo_submitting": "연결 중…",
     "byo_cancel": "취소",
     "byo_success_toast": "WeCom 봇을 연결했어요",
+    "byo_conflict_same_workspace": "이 봇은 이미 이 워크스페이스의 다른 에이전트에 연결되어 있어요. 거기서 먼저 연결을 해제한 뒤 여기에 연결해 주세요.",
+    "byo_conflict_archived_agent": "이 봇은 이 워크스페이스의 보관된 에이전트에 연결되어 있어요. 그 에이전트를 복원하거나 봇 연결을 해제한 뒤 연결해 주세요.",
+    "byo_conflict_other_workspace": "이 봇은 이미 다른 Multica 워크스페이스에 연결되어 있어요. 거기서 먼저 연결을 해제한 뒤 연결해 주세요.",
+    "byo_rejected": "봇을 연결하지 못했어요. WeCom 관리 콘솔의 Bot ID와 시크릿, 그리고 장기 연결이 켜진 스마트 봇인지 확인해 주세요.",
+    "byo_credentials_rejected": "WeCom이 이 Bot ID와 시크릿을 거부했어요. WeCom 관리 콘솔에서 두 값을 확인하고, 장기 연결이 켜진 스마트 봇인지도 확인해 주세요.",
+    "byo_credentials_unverifiable": "WeCom에 연결하지 못해 이 봇을 확인할 수 없었어요. 인증 정보는 변경되지 않았어요. 잠시 후 다시 시도해 주세요.",
+    "byo_install_failed": "봇을 저장하지 못했어요. 저희 쪽 문제입니다. 인증 정보는 변경되지 않았어요. 다시 시도해 보시고, 계속 실패하면 지원팀에 문의해 주세요.",
     "byo_failed_toast": "WeCom 봇을 연결하지 못했어요"
   }
 }

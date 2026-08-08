@@ -443,6 +443,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeErrorCode is writeError plus a stable machine-readable code, so a UI
+// can translate the failure instead of toasting the English sentence at a
+// user whose console is in another language. The sentence stays as the
+// fallback for anything that has not been given a translation yet.
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+}
+
 // Thin wrappers around util functions.
 //
 // parseUUID is intentionally the panicking variant: any handler call site
